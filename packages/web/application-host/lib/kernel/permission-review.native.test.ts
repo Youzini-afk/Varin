@@ -79,6 +79,13 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const runtime = new AgentRuntimeClient(kernel, async () => {
     let released = false;
     const lease: McpAuthorityLease = {
+      discoverServices: async () => [],
+      prepareService: async () => { throw new Error('fixture has no services'); },
+      preparePrompt: async () => { throw new Error('fixture has no prompts'); },
+      assertService: () => { throw new Error('fixture has no services'); },
+      serviceRevocationSignal: () => { throw new Error('fixture has no services'); },
+      validateServiceRequest: () => { throw new Error('fixture has no services'); },
+      requestService: async () => { throw new Error('fixture has no services'); },
       implementationIdentity:'fixture-implementation',
       binding: { reference: 'fixture-mcp-owner', generation: 1, provenance: { execution_scope: 'global', configuration: { agent_dir: root, config_cwd: root, project_trusted: false }, servers: { 'fixture-server': { definition_version: 'fixture-config', resource_key: 'fixture-server:effect' } } },
         serverSelections: [{ name: 'fixture-server', configurationVersion: 'fixture-config', hiddenTools: [] }],

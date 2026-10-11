@@ -3,6 +3,7 @@ import { toolOperationId, validToolOrigin } from './protocol.generated.js';
  * Calls remain owned by their original lease across Run release and kernel channel replacement.
  */
 import { isDeepStrictEqual } from 'node:util';
+import { HostToolAdmissionError } from './tool-admission.js';
 import { randomUUID } from 'node:crypto';
 import type {
   HostToolCall,
@@ -10,6 +11,7 @@ import type {
   ExecutorOwner,
   ExtensionToolBinding,
   McpBinding,
+  HostToolErrorMarker,
 } from './protocol.generated.js';
 export type HostToolSchema = LaunchTool;
 export interface HostToolBinding {
@@ -71,7 +73,7 @@ export interface PrivateToolResponse {
   ok: boolean;
   completion?: HostToolCompletion;
   executor_stopped?: boolean;
-  error?: { code: string };
+  error?: HostToolErrorMarker;
 }
 interface PrivateToolReceipt {
   v: 1;
@@ -405,6 +407,9 @@ export class ToolBridge {
           Object.entries(mcp.resources).every(
             ([name, resource]) => binding.resources[name] === resource,
           ) &&
+          record(mcp.routes) && record(binding.routes) &&
+          Object.keys(mcp.routes).length === mcp.tools.length &&
+          mcp.tools.every(tool => isDeepStrictEqual(binding.routes[tool.name], mcp.routes[tool.name])) &&
           mcp.tools.every(
             (tool) =>
               binding.tools.some((value) => isDeepStrictEqual(value, tool)) &&
@@ -723,10 +728,12 @@ export class ToolBridge {
         if (revoked.aborted) notify();
         entry.authorized = true;
         await this.#reply(request, { ok: true });
-      } catch {
+      } catch (error) {
         await this.#reply(request, {
           ok: false,
-          error: { code: 'host_tool_authorization_failed' },
+          error: error instanceof HostToolAdmissionError
+            ? { code: error.code, admission: true }
+            : { code: 'host_tool_authorization_failed' },
         });
       }
       return;

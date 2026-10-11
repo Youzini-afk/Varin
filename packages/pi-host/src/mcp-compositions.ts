@@ -3,7 +3,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createMcpToolName } from '@earendil-works/pi-coding-agent';
 import { isDeepStrictEqual } from 'node:util';
-import type { McpProvenance } from '@varin/protocol';
+import type { McpProvenance, McpRoute } from '@varin/protocol';
 import type { McpAuthority, McpAuthorityLease, McpAuthorityScope, McpAuthorityTool, McpChange } from './mcp-authority.js';
 
 interface Generation {
@@ -22,6 +22,12 @@ const release = (generation: Generation) => { if (--generation.references === 0)
 const generation = (lease: McpAuthorityLease): Generation => ({ identity: randomUUID(), lease, references: 1, revoked: new Map() });
 const targetKey = (name: string, version: string) => JSON.stringify([name, version]);
 function revoke(generation: Generation, tools?: readonly string[]): void {
+  if (!tools) for (const server of generation.lease.binding.servers.filter(server => server.selected)) {
+    const key = `server:${server.name}`;
+    let token = generation.revoked.get(key);
+    if (!token) { token = new AbortController(); generation.revoked.set(key, token); }
+    token.abort();
+  }
   for (const tool of generation.lease.binding.tools) {
     if (tools && !tools.includes(tool.tool)) continue;
     let token = generation.revoked.get(tool.name);
@@ -38,6 +44,7 @@ export interface McpCompositionSelection {
   provenance: McpProvenance;
   tools: readonly { name: string; version: string }[];
   resources: Readonly<Record<string, string>>;
+  routes: Readonly<Record<string, McpRoute>>;
 }
 
 class Scope {
@@ -90,7 +97,19 @@ class Scope {
     this.replaceGateway(gateway); this.apply(gateway, false); this.notify();
   }
   private replaceGateway(lease: McpAuthorityLease): void {
-    const previous = this.gateway; this.gateway = generation(lease); release(previous);
+    const previous = this.gateway;
+    // Explicit withdrawal also interrupts new service admissions retained by deferred snapshots.
+    // Ordinary replacement retires the old binding without changing its granted lifetime.
+    if (!lease.binding.readiness.configErrorCount) for (const server of previous.lease.binding.servers) {
+      const next = lease.binding.servers.find(candidate => candidate.name === server.name);
+      if (!next || next.status === 'disabled' || next.exposure === 'hidden') {
+        const key = `server:${server.name}`;
+        let token = previous.revoked.get(key);
+        if (!token) { token = new AbortController(); previous.revoked.set(key, token); }
+        token.abort();
+      }
+    }
+    this.gateway = generation(lease); release(previous);
   }
   private apply(lease: McpAuthorityLease, credentials: boolean, changedTools: ReadonlySet<string> = new Set()): void {
     // Malformed configuration does not establish that an existing dependency was removed.
@@ -152,7 +171,7 @@ class Scope {
         ?? this.gateway.lease.binding.provenance.servers[name];
       if (!isDeepStrictEqual(actual, expected)) throw new Error('mcp_saved_definition_unavailable');
     }
-    const resources = new Set(selection.tools.map(tool => selection.resources[tool.name]).filter(value => typeof value === 'string'));
+    const resources = new Set(selection.tools.filter(tool => selection.routes[tool.name]?.kind === 'direct').map(tool => selection.resources[tool.name]).filter(value => typeof value === 'string'));
     const selected = new Set<string>();
     for (const server of this.gateway.lease.binding.servers) if (resources.delete(server.resourceKey)) selected.add(server.name);
     if (resources.size) throw new Error('mcp_saved_dependency_unavailable');
@@ -194,7 +213,7 @@ class Scope {
     const versions = selection ? new Set(selection.tools.map(tool => tool.version)) : undefined;
     const contributions = [...this.servers].flatMap(([name, slot]) => slot.current && (!required || required.has(name)) ? [retain(slot.current)] : []);
     const targets = new Map<string, { generation: Generation; original: McpAuthorityTool }>();
-    const discovered = new Set<string>();
+    const discovered = new Map<string, Generation>();
     const source = contributions.flatMap(owner => owner.lease.binding.tools.filter(tool => tool.exposure !== 'direct' || !versions || versions.has(tool.schemaVersion)).map(tool => ({ owner, tool })));
     const plain = source.filter(({ tool }) => tool.exposure === 'direct').map(({ tool }) => createMcpToolName(tool.server, tool.tool));
     const counts = new Map<string, number>(); for (const name of plain) counts.set(name, (counts.get(name) ?? 0) + 1);
@@ -213,9 +232,9 @@ class Scope {
     };
     const readiness = inspect();
     const provenance = structuredClone(gateway.lease.binding.provenance);
-    for (const owner of contributions) for (const tool of owner.lease.binding.tools) {
-      const original = owner.lease.binding.provenance.servers[tool.server];
-      if (original) provenance.servers[tool.server] = structuredClone(original);
+    for (const owner of contributions) for (const server of owner.lease.binding.servers.filter(server => server.selected)) {
+      const original = owner.lease.binding.provenance.servers[server.name];
+      if (original) provenance.servers[server.name] = structuredClone(original);
     }
     if (selection) provenance.servers = Object.fromEntries(Object.entries(provenance.servers).filter(([name]) => name in selection.provenance.servers));
     const binding = Object.freeze({ ...gateway.lease.binding, provenance, tools: Object.freeze(tools), readiness, servers: readiness.servers,
@@ -226,10 +245,21 @@ class Scope {
       if (released) throw new Error('mcp_lease_released');
       const selected = targets.get(targetKey(name,version));
       if (!selected && !discovered.has(targetKey(name,version))) throw new Error('mcp_target_unbound');
-      const owner = selected ? selected.generation : gateway;
+      const owner = selected ? selected.generation : discovered.get(targetKey(name,version))!;
       const original = selected ? selected.original.name : name;
       if (owner.revoked.get(original)?.signal.aborted) throw new Error('mcp_tool_revoked');
       return { owner, name: original };
+    };
+    const serverOwner = (server: string) => {
+      if (released) throw new Error('mcp_lease_released');
+      const original = binding.provenance.servers[server];
+      if (!original) throw new Error('mcp_target_unbound');
+      const owner = contributions.find(owner => owner.lease.binding.servers.some(candidate => candidate.name === server && candidate.selected)
+        && isDeepStrictEqual(owner.lease.binding.provenance.servers[server], original))
+        ?? (isDeepStrictEqual(gateway.lease.binding.provenance.servers[server], original) ? gateway : undefined);
+      if (!owner) throw new Error('mcp_saved_definition_unavailable');
+      if (owner.revoked.get(`server:${server}`)?.signal.aborted) throw new Error('mcp_service_revoked');
+      return owner;
     };
     return {
       binding,
@@ -239,16 +269,30 @@ class Scope {
       discover: async (server, signal) => {
         if (released) throw new Error('mcp_lease_released');
         if (selection && !(server in selection.provenance.servers)) throw new Error('mcp_target_unbound');
-        const tools=await gateway.lease.discover(server,signal);
-        for(const tool of tools) discovered.add(targetKey(tool.name,tool.schemaVersion));
+        const owner=serverOwner(server);
+        const tools=await owner.lease.discover(server,signal);
+        for(const tool of tools) discovered.set(targetKey(tool.name,tool.schemaVersion),owner);
         return tools;
       },
       prepareTool: async (server,tool,version,signal) => {
         if (released) throw new Error('mcp_lease_released');
         if (selection && !(server in selection.provenance.servers)) throw new Error('mcp_target_unbound');
-        const selected=await gateway.lease.prepareTool(server,tool,version,signal);
-        discovered.add(targetKey(selected.name,selected.schemaVersion));return selected;
+        const owner=serverOwner(server);
+        const selected=await owner.lease.prepareTool(server,tool,version,signal);
+        discovered.set(targetKey(selected.name,selected.schemaVersion),owner);return selected;
       },
+      discoverServices: (server,signal) => serverOwner(server).lease.discoverServices(server,signal),
+      prepareService: (server,kind,version,signal) => serverOwner(server).lease.prepareService(server,kind,version,signal),
+      preparePrompt: (server,name,version,signal) => serverOwner(server).lease.preparePrompt(server,name,version,signal),
+      assertService: service => serverOwner(service.server).lease.assertService(service),
+      serviceRevocationSignal: service => {
+        const owner = serverOwner(service.server), key = `server:${service.server}`;
+        let token = owner.revoked.get(key);
+        if (!token) { token = new AbortController(); owner.revoked.set(key, token); }
+        return AbortSignal.any([token.signal, owner.lease.serviceRevocationSignal(service)]);
+      },
+      validateServiceRequest: (service,request) => serverOwner(service.server).lease.validateServiceRequest(service,request),
+      requestService: (service,request,options) => serverOwner(service.server).lease.requestService(service,request,options),
       assertCallable: (name,version) => { const selected=target(name,version); selected.owner.lease.assertCallable(selected.name,version); },
       revocationSignal: (name,version) => {
         const selected=target(name,version);

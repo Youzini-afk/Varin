@@ -89,3 +89,34 @@ full argument validation, Pi permissions/codemode projection, manager config wri
 and shutdown. Native bridge/permission suites own durable operation and live policy behavior.
 SDK adaptation is maintained in the existing Pi package patch; refresh both installation and
 production lockfiles when changing its exports or dependency graph.
+
+## Native resources, prompts and protocol bodies
+
+The native lease discovers negotiated resources/prompts on the same original client. Its narrow
+service requests cover resource/template pages, resource reads, prompt pages and prompt retrieval.
+They use the original connection's `requestOnce(callback)` lifecycle and call the callback's exact
+client once; the resource presentation cache and read-only HTTP retry are not execution authority.
+A session-expired error detaches only the failed current client without closing other in-flight calls.
+The current operation is not replayed. A later new operation may reconnect and must recheck current
+capabilities, credentials, prompt declarations and admission before dispatch. Authentication failures
+retain the original connection owner's needs-auth transition. The original transport's branded
+session-expired error supplies RPC-stop evidence, but not evidence of absent remote effects: the Host
+retains an Indeterminate/Unknown result, a local `mcp-session-expired` reason and stopped=true.
+The default policy's Unknown barrier remains in force; reconnecting does not authorize continuation.
+A resource URI is sent only to its selected server,
+including URIs absent from a listing. Pagination cursors, top-level `_meta` and unknown result fields
+are retained. Unsupported negotiated capabilities fail explicitly.
+
+A service version binds capability/protocol, original configuration and opaque credential grant.
+Prompt retrieval additionally binds the exact listed prompt declaration. Current descriptors are
+reused; a cold/restarted binding resolves the exact saved version through explicit pagination.
+A new client or `notifications/prompts/list_changed` invalidates the descriptor cache. A late list
+response cannot repopulate a cache invalidated while it was in flight. Prompt arguments must be
+strings and include declared required arguments; undeclared string arguments remain the server's
+responsibility. Remote roles, annotations and descriptions grant no instruction or execution authority.
+
+`McpCompositions` routes discovery and service requests through the retained contribution whose
+server definition and resource match the frozen snapshot, rather than a newer gateway definition.
+Explicit hidden/disabled service withdrawal interrupts admissions; ordinary replacement retains the
+old contribution for its original callers. Resource subscriptions/updates, server interactions and
+negotiated durable MCP Tasks remain separate work.

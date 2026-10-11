@@ -14,6 +14,9 @@ import {
 import type { McpOwnerConfig, McpOwnerConnectionSnapshot, McpOwnerEntry, McpConfiguration, McpProvenance } from '@varin/protocol';
 import { ConfigTextFileEditor, resolveConfigDocumentPath } from './config-text-file-editor.js';
 import { ConfigWatchManager } from './config-watch-manager.js';
+import { McpSessionExpiredError, type McpClient } from '@earendil-works/pi-mcp';
+import { serviceKind, validateServiceResult, validatePromptArguments, type McpAuthorityService, type McpAuthorityPrompt, type McpPromptDeclaration, type McpServiceKind, type McpServiceRequest, type McpServiceResult } from './mcp-native-protocol.js';
+export type { McpAuthorityService, McpAuthorityPrompt, McpServiceKind, McpServiceRequest, McpServiceResult } from './mcp-native-protocol.js';
 
 export interface McpAuthorityScope {
   agentDir: string;
@@ -95,6 +98,13 @@ export interface McpAuthorityLease {
   discover(server: string, signal: AbortSignal): Promise<readonly McpAuthorityTool[]>;
   /** Rebind a persisted concrete target only when the exact expected declaration is still present. */
   prepareTool(server: string, tool: string, schemaVersion: string, signal: AbortSignal): Promise<McpAuthorityTool>;
+  discoverServices(server: string, signal: AbortSignal): Promise<readonly McpAuthorityService[]>;
+  prepareService(server: string, kind: McpServiceKind, schemaVersion: string, signal: AbortSignal): Promise<McpAuthorityService>;
+  preparePrompt(server: string, name: string, schemaVersion: string, signal: AbortSignal): Promise<McpAuthorityPrompt>;
+  assertService(service: McpAuthorityService): void;
+  serviceRevocationSignal(service: McpAuthorityService): AbortSignal;
+  validateServiceRequest(service: McpAuthorityService, request: McpServiceRequest): void;
+  requestService(service: McpAuthorityService, request: McpServiceRequest, options: { signal: AbortSignal; beforeDispatch?: () => void | Promise<void> }): Promise<McpServiceResult>;
   assertCallable(name: string, schemaVersion: string): void;
   revocationSignal(name: string, schemaVersion: string): AbortSignal;
   validateArguments(name: string, schemaVersion: string, arguments_: unknown): void;
@@ -103,7 +113,8 @@ export interface McpAuthorityLease {
 }
 /** A pre-dispatch rejection is safe to record as no effect; an entered transport is uncertain. */
 export class McpAuthorityError extends Error {
-  constructor(readonly code: string, readonly dispatched = false) { super(code); this.name = 'McpAuthorityError'; }
+  constructor(readonly code: string, readonly dispatched = false,
+    readonly settlement: 'unknown' | 'session_expired' = 'unknown') { super(code); this.name = 'McpAuthorityError'; }
 }
 type ConfigPatch = { enabled?: boolean; exposure?: 'direct' | 'codemode' | 'deferred' | 'hidden' };
 interface SourceWatch { keys: Set<string>; ready: Promise<string> }
@@ -144,6 +155,9 @@ interface ConnectionRecord {
   tokenObservation?: string;
   validators: Map<string, ValidateFunction>;
   declarations?: string;
+  nativeClient?: McpClient;
+  prompts: Map<string, McpPromptDeclaration>;
+  promptRevision: number;
 }
 function fail(code: string): never { throw new McpAuthorityError(code); }
 function stable(value: unknown): string {
@@ -363,7 +377,7 @@ export class McpAuthority {
         const target = assert(name, schemaVersion);
         if (target.validate(args) !== true) fail('mcp-arguments-invalid');
       };
-      const discover = async (server: string, signal: AbortSignal): Promise<readonly McpAuthorityTool[]> => {
+      const prepareServer = async (server: string, signal: AbortSignal): Promise<ConnectionRecord> => {
         if (released || record.released) fail('mcp-lease-released');
         if (signal.aborted) fail('mcp-preparation-cancelled');
         const entry = record.entries.get(server);
@@ -380,7 +394,41 @@ export class McpAuthority {
         const connection = record.connections.get(server);
         if (!connection || connection.connection.state !== 'connected') fail('mcp-connection-unavailable');
         this.#assertConnection(record, connection, undefined, undefined, true);
-        return freeze(project(connection));
+        return connection;
+      };
+      const discover = async (server: string, signal: AbortSignal) => freeze(project(await prepareServer(server, signal)));
+      const discoverServices = async (server: string, signal: AbortSignal) => {
+        const connection = await prepareServer(server, signal);
+        const client = await this.#nativeClient(connection);
+        this.#assertConnection(record, connection);
+        return freeze((['resources', 'prompts'] as const).flatMap(kind => client.serverCapabilities?.[kind]
+          ? [this.#service(record, connection, kind)] : []));
+      };
+      const serviceConnection = (service: McpAuthorityService) => {
+        if (released || record.released) fail('mcp-lease-released');
+        const connection = record.connections.get(service.server);
+        if (!connection || service.resourceKey !== this.#resourceKey(record, connection.entry)) fail('mcp-service-unbound');
+        this.#assertConnection(record, connection);
+        if (this.#service(record, connection, service.kind).schemaVersion !== service.schemaVersion) fail('mcp-schema-generation-mismatch');
+        return connection;
+      };
+      const validateRequest = (service: McpAuthorityService, request: McpServiceRequest) => {
+        const connection = serviceConnection(service);
+        if (serviceKind(request.operation) !== service.kind) fail('mcp-service-operation-invalid');
+        if (request.operation === 'prompts/get') {
+          const prompt = connection.prompts.get(request.prompt.name);
+          if (!prompt || stable(request.prompt.service) !== stable(service)
+            || this.#promptVersion(service, prompt) !== request.prompt.schemaVersion) fail('mcp-schema-generation-mismatch');
+          try { validatePromptArguments(prompt, request.arguments); } catch { fail('mcp-prompt-arguments-invalid'); }
+        } else if (request.operation === 'resources/read') {
+          if (typeof request.uri !== 'string' || !request.uri) fail('mcp-resource-uri-required');
+        } else if (request.cursor !== undefined && typeof request.cursor !== 'string') fail('mcp-cursor-invalid');
+      };
+      const requestService = async (service: McpAuthorityService, request: McpServiceRequest, options: {signal: AbortSignal; beforeDispatch?: () => void | Promise<void>}) => {
+        validateRequest(service, request);
+        const connection = serviceConnection(service);
+        const result = await this.#requestService(record, connection, service, request, options, () => validateRequest(service, request));
+        return result;
       };
       const readiness = this.#inspectScope(record, selected);
       return {
@@ -398,6 +446,47 @@ export class McpAuthority {
             hiddenTools:Object.entries(entry.config.toolExposure ?? {}).filter(([,exposure])=>exposure==='hidden').map(([name])=>name)})) }),
         inspect: () => { if (released || record.released) fail('mcp-lease-released'); return this.#inspectScope(record, selected); },
         discover,
+        discoverServices,
+        prepareService: async (server, kind, version, signal) => {
+          const services = await discoverServices(server, signal);
+          const service = services.find(value => value.kind === kind);
+          if (!service) fail('mcp-service-unsupported');
+          if (service.schemaVersion !== version) fail('mcp-schema-generation-mismatch');
+          serviceConnection(service); return service;
+        },
+        preparePrompt: async (server, name, version, signal) => {
+          const services = await discoverServices(server, signal);
+          const service = services.find(value => value.kind === 'prompts');
+          if (!service) fail('mcp-service-unsupported');
+          const connection = serviceConnection(service);
+          const cached = connection.prompts.get(name);
+          if (cached) {
+            const schemaVersion = this.#promptVersion(service, cached);
+            if (schemaVersion !== version) fail('mcp-schema-generation-mismatch');
+            return freeze({ service, name, schemaVersion, declaration: structuredClone(cached) });
+          }
+          // Restart or list-change invalidation: rebind through current protocol declarations.
+          let cursor: string | undefined;
+          const cursors = new Set<string>();
+          do {
+            const page = await requestService(service, { operation: 'prompts/list', ...(cursor === undefined ? {} : {cursor}) }, { signal });
+            const prompt = (page.result.prompts as McpPromptDeclaration[]).find(value => value.name === name);
+            if (prompt) {
+              const schemaVersion = this.#promptVersion(service, prompt);
+              if (schemaVersion !== version) fail('mcp-schema-generation-mismatch');
+              return freeze({ service, name, schemaVersion, declaration: structuredClone(prompt) });
+            }
+            cursor = page.result.nextCursor as string | undefined;
+            if (cursor !== undefined && cursors.has(cursor)) fail('mcp-pagination-cursor-repeated');
+            if (cursor !== undefined) cursors.add(cursor);
+          } while (cursor !== undefined);
+          connection.prompts.delete(name);
+          return fail('mcp-prompt-unavailable');
+        },
+        assertService: service => { serviceConnection(service); },
+        serviceRevocationSignal: service => serviceConnection(service).shutdown.signal,
+        validateServiceRequest: validateRequest,
+        requestService,
         prepareTool: async (server, tool, schemaVersion, signal) => {
           const declarations = await discover(server, signal);
           const target = declarations.find(candidate => candidate.tool === tool);
@@ -476,7 +565,7 @@ export class McpAuthority {
         });
         record = { handle: randomUUID(), generation: ++this.#generation, key, configIdentity: this.#configurationIdentity(scope, entry), scopeKey: scope.key, scope: scope.scope,
           entry, connection, references: 0, retired: false, revoked: false, shutdown: new AbortController(),
-          credentialRevision: 0, oauthGrant: this.#oauthGrant(scope.scope, connection), provider, providerGrant, validators: new Map() };
+          credentialRevision: 0, oauthGrant: this.#oauthGrant(scope.scope, connection), provider, providerGrant, validators: new Map(), prompts: new Map(), promptRevision: 0 };
         this.#pool.set(key, record);
         const selected = record;
         record.ready = connection.getClient().then(() => {
@@ -541,6 +630,74 @@ export class McpAuthority {
       if (!dispatched && error instanceof McpAuthorityError) throw error;
       throw new McpAuthorityError(signal.aborted || record.shutdown.signal.aborted || scope.shutdown.signal.aborted ? 'mcp-call-interrupted' : 'mcp-call-failed', dispatched);
     }
+    } finally { scope.inflight--; this.#drainScope(scope); }
+  }
+
+  async #nativeClient(record: ConnectionRecord): Promise<McpClient> {
+    let client: McpClient;
+    try { client = await record.connection.getClient(); } catch { return fail('mcp-connection-unavailable'); }
+    this.#observeNativeClient(record, client);
+    return client;
+  }
+  #observeNativeClient(record: ConnectionRecord, client: McpClient): void {
+    if (record.nativeClient === client) return;
+    record.nativeClient = client;
+    record.prompts.clear();
+    record.promptRevision++;
+    client.onNotification('notifications/prompts/list_changed', () => {
+      if (record.nativeClient !== client) return;
+      record.prompts.clear();
+      record.promptRevision++;
+    });
+  }
+  #service(scope: ScopeRecord, record: ConnectionRecord, kind: McpServiceKind): McpAuthorityService {
+    const client = record.nativeClient;
+    if (!client?.serverCapabilities?.[kind]) return fail('mcp-service-unsupported');
+    return { server: record.entry.name, kind, resourceKey: this.#resourceKey(scope, record.entry),
+      schemaVersion: createHash('sha256').update(stable([kind, client.protocolVersion, client.serverCapabilities[kind],
+        record.configIdentity, record.oauthGrant, record.providerGrant ?? null])).digest('hex') };
+  }
+  #promptVersion(service: McpAuthorityService, prompt: McpPromptDeclaration): string {
+    return createHash('sha256').update(stable([service.schemaVersion, prompt])).digest('hex');
+  }
+  async #requestService(scope: ScopeRecord, record: ConnectionRecord, service: McpAuthorityService,
+    request: McpServiceRequest, options: {signal: AbortSignal; beforeDispatch?: () => void | Promise<void>}, assertRequest: () => void): Promise<McpServiceResult> {
+    let dispatched = false;
+    const signal = AbortSignal.any([options.signal, record.shutdown.signal, scope.shutdown.signal]);
+    if (signal.aborted) fail('mcp-call-cancelled');
+    scope.inflight++;
+    try {
+      await this.#assertCredential(record);
+      return await record.connection.requestOnce(async client => {
+        this.#observeNativeClient(record, client);
+        await this.#assertCredential(record);
+        await options.beforeDispatch?.();
+        await this.#assertCredential(record);
+        assertRequest();
+        if (signal.aborted) fail('mcp-call-cancelled');
+        const params = request.operation === 'resources/read' ? { uri: request.uri }
+          : request.operation === 'prompts/get' ? { name: request.prompt.name, arguments: request.arguments }
+          : request.cursor === undefined ? undefined : { cursor: request.cursor };
+        // One entry into the original lifecycle, without transient or expired-session replay.
+        const promptRevision = record.promptRevision;
+        dispatched = true;
+        const result = validateServiceResult(request.operation,
+          await client.request(request.operation, params, { signal, timeoutMs: record.connection.timeoutMs }));
+        if (request.operation === 'prompts/list') {
+          const prompts = result.prompts as McpPromptDeclaration[];
+          if (record.nativeClient === client && record.promptRevision === promptRevision) {
+            for (const prompt of prompts) record.prompts.set(prompt.name, structuredClone(prompt));
+          }
+          return { result, promptVersions: prompts.map(prompt => ({ name: prompt.name, schemaVersion: this.#promptVersion(service, prompt) })) };
+        }
+        return { result };
+      });
+    } catch (error) {
+      if (!dispatched && error instanceof McpAuthorityError) throw error;
+      // This original transport brand proves the request has stopped, not absence of effects.
+      // Do not infer this settlement from an HTTP status, remote result or error message.
+      if (error instanceof McpSessionExpiredError) throw new McpAuthorityError('mcp-session-expired', dispatched, 'session_expired');
+      throw new McpAuthorityError(signal.aborted ? 'mcp-call-interrupted' : 'mcp-call-failed', dispatched);
     } finally { scope.inflight--; this.#drainScope(scope); }
   }
 

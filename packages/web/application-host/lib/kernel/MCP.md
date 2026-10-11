@@ -1,4 +1,4 @@
-# MCP tools
+# MCP capabilities
 
 MCP configuration, OAuth storage, connections and their tool catalogs are owned by the shared
 Application Host `McpAuthority` exported from `@varin/pi-host/mcp-authority`. Existing Pi MCP
@@ -25,8 +25,8 @@ are durable; live clients, OAuth tokens and permission grants are not.
 Direct tools remain directly exposed. `mcp_discover` without a server lists configured metadata
 without connecting; naming a server performs that dependency's preparation as a durable Operation.
 Configured deferred/codemode tools are reached through `mcp_call` with the discovered server, tool and
-exact schema version. This is typed discovery
-and invocation, not a claim that a JavaScript codemode executor has been implemented. The
+exact schema version. Scripts use the same selected tools through their ordinary nested invocation;
+there is no separate MCP-only script registry. The
 concrete target's complete input schema is validated by the retained owner before authorization and
 again before transport dispatch. Hidden tools are absent. Remote annotations do not grant permissions
 or prove independent/read-only effects.
@@ -40,8 +40,8 @@ returned cwd must match the already admitted actor; callers cannot provide a dif
 
 A private framed Host/kernel rendezvous supports only MCP authorize, execute and cancellation messages.
 It is not a generic Host-service forwarding endpoint. Requests are bound to kernel epoch, Run,
-ModelStep, Operation, tool call and retained owner generation. Rust verifies that the call's description
-matches the frozen model request. The Host rejects changed identities and caches dispatched calls so
+actual ModelStep/policy/nested origin, Operation, tool call and retained owner generation. Rust verifies
+that the call's description matches its frozen execution context. The Host rejects changed identities and caches dispatched calls so
 repeated frames cannot duplicate remote effects.
 
 The existing shared permission evaluator remains the rule authority. Unknown tools default to ask;
@@ -54,11 +54,55 @@ Remote calls and selected-server preparation create durable Operations. Metadata
 server selection sends no remote request. Server/environment keys coordinate dispatch admission; they do not assert remote
 transaction isolation or that an ordinary MCP server stopped after a cancellation notification.
 
+## Resources, prompts and explicit output
+
+`kernel/protocol/schema.json` owns the built-in capability declarations. Generated Host descriptions
+and frozen `McpBinding.routes` distinguish direct tools, server-argument requests and discovery;
+Rust interprets these typed routes instead of maintaining another tool-name list. Child narrowing,
+retention, rebinding and restart carry the same routes with the original server resource identities.
+
+Named `mcp_discover` returns the negotiated resources/prompts service versions alongside tools.
+`mcp_list_resources` selects resources or templates and preserves the server's opaque page cursor;
+`mcp_list_prompts` returns the complete page and concrete prompt versions. `mcp_read_resource`
+uses the resources service version; `mcp_get_prompt` uses the selected prompt version and string
+arguments. Each remote request uses the same one-action permission and original server claim.
+A resource URI is sent only to that MCP server. It need not have appeared in a list, and does not
+grant the Host permission to open a local file or fetch a URL.
+
+The original authority uses its negotiated client for these narrow protocol requests. It preserves
+the complete page, including `_meta`, instead of substituting a display cache or a successful empty
+page on failure. Calls enter the client once; the SDK resource wrapper's read-only HTTP retry is not
+used for a native durable operation. Prompt descriptors remain with the original authority, are
+invalidated by a replacement client or `prompts/list_changed`, and are checked again before dispatch.
+Remote role labels, annotations and descriptions are result data, not instructions or permissions.
+
+`mcp-output.ts` projects only the protocol's `tools.content`, `resources.contents` and
+`prompts.messages[*].content` fields into the existing `OutputBody`. Known text/image/audio and
+embedded text/blob payload strings become ordered Text/Media parts. Their original payload fields
+contain `{outputPartIndex}`; surrounding URI, MIME, role, annotations and metadata remain in `data`.
+If a resource has both text and blob, text precedes blob; a missing blob MIME becomes
+`application/octet-stream`. The marker is this adapter's documented projection, not a generic
+JSON-to-media capability. Policies and nested callers resolve payloads through their exact part
+indices; a nested image needs explicit emission to become the outer script's image.
+`structuredContent`, unknown fields/types and resource links remain ordinary data; links are not
+automatically fetched. Original tool identity supplies media provenance when Rust admits the receipt.
+
+Media uses the same ContentStore/publication, model serialization, scoped readers and GC roots as
+other tool results. A selected provider that does not support a media type reports an explicit
+serialization failure; protocol media is not silently discarded. Malformed encoded media follows
+the shared per-part admission diagnostic without changing the original result's effect evidence.
+
 ## Cancellation, results and lifetime
 
 Before transport entry, rejection has a `not_dispatched` receipt. A received successful MCP response
-confirms the tool result. A remote `isError` response is a failed tool result and does not prove rollback.
+confirms the tool result. A remote `isError` response retains its content and the existing
+Indeterminate/Unknown result because it does not prove rollback; a returned response ends that RPC.
 Cancellation, disconnect or failure after dispatch reports an unknown effect and is never retried here.
+For native service requests, the original connection's one-shot lifecycle detaches an expired HTTP
+session without replaying the call or closing another in-flight RPC. Only the original transport's
+session-expired error provides stopped=true and the local `mcp-session-expired` reason; effects remain
+Unknown. The default policy still stops at that barrier. A separately chosen new operation can
+reconnect through the same owner and must pass current schema, credential and permission checks.
 Late owner promises remain observed after cancellation, so rejected late work does not leak unhandled
 promises or reopen a completed call. MCP Tasks recovery is a separate negotiated capability, not
 inferred from ordinary `tools/call`.
@@ -71,3 +115,6 @@ when its expected schema still matches. An unavailable or changed generation is 
 a dispatched unknown effect is never replayed by this rebind. A new Run
 inherits source selection but prepares a fresh MCP catalog, so old lease identities do not silently
 become the successor's capability grants.
+
+Negotiated MCP Tasks, resource subscriptions/updates and server interaction requests still require
+their own lifecycle integration. Ordinary resource/prompt RPCs do not establish those capabilities.

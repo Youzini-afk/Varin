@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { HostToolAdmissionError } from './tool-admission.js';
 import type { KernelClient } from './kernel-client.js';
 import type { Operation } from './protocol.generated.js';
 import type { HostToolCall } from './protocol.generated.js';
@@ -22,7 +23,7 @@ export class PermissionService {
   constructor(private readonly kernel: KernelClient) {}
 
   async authorize(call: HostToolCall, scope: PermissionScope, signal: AbortSignal): Promise<void> {
-    if (signal.aborted || this.pending.has(call.operationId)) throw new Error('permission_not_available');
+    if (signal.aborted || this.pending.has(call.operationId)) throw new HostToolAdmissionError('permission_not_available');
     const permissionId = randomUUID();
     const exactCall = structuredClone(call);
     const exactScope = structuredClone(scope);
@@ -33,15 +34,15 @@ export class PermissionService {
     });
     // A cancellation during the open transaction must not become an unhandled rejection.
     void decision.catch(() => undefined);
-    const abort = () => fail(new Error('permission_cancelled'));
+    const abort = () => fail(new HostToolAdmissionError('permission_cancelled'));
     signal.addEventListener('abort', abort, { once: true });
-    const unsubscribe = this.kernel.subscribeExit(() => fail(new Error('permission_owner_closed')));
+    const unsubscribe = this.kernel.subscribeExit(() => fail(new HostToolAdmissionError('permission_owner_closed')));
     try {
-      if (signal.aborted) throw new Error('permission_cancelled');
+      if (signal.aborted) throw new HostToolAdmissionError('permission_cancelled');
       await this.kernel.agentRuntimeRequest('runtime.permission.open', { operationId: call.operationId, permissionId, call: exactCall, scope: exactScope }, signal);
-      if (await decision !== 'allow_once' || signal.aborted) throw new Error('permission_denied');
+      if (await decision !== 'allow_once' || signal.aborted) throw new HostToolAdmissionError('permission_denied');
       await this.kernel.agentRuntimeRequest('runtime.permission.consume', { operationId: call.operationId, permissionId, call: exactCall, scope: exactScope }, signal);
-      if (signal.aborted) throw new Error('permission_cancelled');
+      if (signal.aborted) throw new HostToolAdmissionError('permission_cancelled');
     } finally {
       if (this.pending.get(call.operationId)?.permissionId === permissionId) this.pending.delete(call.operationId);
       signal.removeEventListener('abort', abort);
@@ -52,7 +53,7 @@ export class PermissionService {
   /** Called only after the authenticated thread route has checked thread/branch ownership. */
   async decide(operationId: string, permissionId: string, decision: 'allow_once' | 'deny'): Promise<Operation> {
     const pending = this.pending.get(operationId);
-    if (!pending || pending.permissionId !== permissionId) throw new Error('permission_expired');
+    if (!pending || pending.permissionId !== permissionId) throw new HostToolAdmissionError('permission_expired');
     const operation = await this.kernel.agentRuntimeRequest<Operation, 'runtime.permission.decide'>('runtime.permission.decide', { operationId, permissionId, decision });
     if (this.pending.get(operationId) === pending) pending.decide(decision);
     return operation;

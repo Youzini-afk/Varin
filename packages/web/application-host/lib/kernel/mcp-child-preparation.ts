@@ -55,6 +55,7 @@ export function createChildMcpPreparer(owners: {
     assertTrust();
     const directResources = new Set(
       selection.tools
+        .filter(tool => selection.routes[tool.name]?.kind === 'direct')
         .map((tool) => selection.resources[tool.name])
         .filter(Boolean),
     );

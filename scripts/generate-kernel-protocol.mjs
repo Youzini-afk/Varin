@@ -21,13 +21,17 @@ const structs = Object.entries(schema.runtimeStructs ?? {}).map(([name, spec]) =
   });
   return `#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]\n#[serde(rename_all = "camelCase", deny_unknown_fields)]\npub struct ${name} {\n${fields.join("\n")}\n}\n`;
 }).join("\n");
-const runtimeTypesGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\nuse serde::{Deserialize, Serialize};\n\n' + Object.entries(schema.runtimeEnums ?? {}).map(([name, variants]) => `#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]\n#[serde(rename_all = "snake_case")]\npub enum ${name} {\n${variants.map(v => `    ${v},`).join('\n')}\n}\n`).join('\n') + '\n' + structs;
+const taggedUnions = Object.entries(schema.dto ?? {}).filter(([, spec]) => spec.taggedUnion);
+const pascal = value => value.split('_').map(part => part[0].toUpperCase() + part.slice(1)).join('');
+const runtimeTaggedUnions = taggedUnions.map(([name, spec]) => `#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]\n#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]\npub enum ${name} {\n${Object.entries(spec.taggedUnion).map(([kind, fields]) => `    ${pascal(kind)}${Object.keys(fields).length ? ` { ${Object.entries(fields).map(([field, type]) => `${field}: ${type === 'string' ? 'String' : type}`).join(', ')} }` : ''},`).join('\n')}\n}\n`).join('\n');
+const runtimeTypesGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\nuse serde::{Deserialize, Serialize};\n\n' + Object.entries(schema.runtimeEnums ?? {}).map(([name, variants]) => `#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]\n#[serde(rename_all = "snake_case")]\npub enum ${name} {\n${variants.map(v => `    ${v},`).join('\n')}\n}\n`).join('\n') + '\n' + structs + '\n' + runtimeTaggedUnions;
 const checkOnly = process.argv.includes('--check');
 const methods = Object.keys(schema.methods).map((method) => `  | ${JSON.stringify(method)}`).join('\n');
 const methodParams = schema.methodParams ?? {};
 const renderType = (type) => type === 'protocolVersion' ? 'typeof KERNEL_PROTOCOL_VERSION' : type;
 const renderDto = (name, spec) => {
-  if (spec.raw) return spec.raw;
+  if (spec.raw) return spec.raw.replaceAll('$protocolVersion', String(schema.protocolVersion));
+  if (spec.taggedUnion) return `export type ${name} = ${Object.entries(spec.taggedUnion).map(([kind, fields]) => `{kind:${JSON.stringify(kind)}${Object.entries(fields).map(([field,type]) => `;${field}:${type}`).join('')}}`).join(' | ')};`;
   const generic = spec.generic ? `<${spec.generic}>` : '';
   const extendsClause = spec.extends?.length ? ` extends ${spec.extends.join(', ')}` : '';
   const fields = Object.entries(spec.fields ?? {}).map(([field, descriptor]) => (
@@ -68,6 +72,9 @@ ${methods};
 
 ${dtoEntries.map(([name, spec]) => renderDto(name, spec)).join('\n\n')}
 
+export type McpBuiltinOperation = ${schema.mcpCapabilities.map(value => JSON.stringify(value.operation)).join(" | ")};
+export const MCP_CAPABILITIES: readonly (LaunchTool & { route: McpRoute; operation: McpBuiltinOperation })[] = ${JSON.stringify(schema.mcpCapabilities, null, 2)};
+
 ${renderMethodParams()}
 
 ${schema.requestUnion ? renderRequestUnion() : ''}
@@ -96,7 +103,7 @@ const rustType = (type) => {
   if (type === 'KernelBranchState') return 'PathState';
   return type;
 };
-const rustDtoNames = new Set(Object.values(methodParams));
+const rustDtoNames = new Set([...Object.values(methodParams), ...(schema.privateDtos ?? [])]);
 for (let changed = true; changed;) {
   changed = false;
   for (const name of [...rustDtoNames]) {

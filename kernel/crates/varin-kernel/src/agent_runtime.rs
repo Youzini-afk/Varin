@@ -2206,6 +2206,7 @@ fn mcp_binding(binding: McpBinding) -> Result<crate::host_tools::McpBinding, Ker
         generation: u64::try_from(binding.generation)
             .map_err(|_| KernelError::Protocol("MCP generation must be nonnegative".into()))?,
         resources: binding.resources,
+        routes: binding.routes,
         provenance: varin_runtime::catalog::launches::McpProvenance {
             execution_scope: binding.provenance.execution_scope,
             configuration: varin_runtime::catalog::launches::McpConfiguration {
@@ -2984,3 +2985,7 @@ mod file_observation_review;
 #[cfg(test)]
 #[path = "managed_script_review.rs"]
 mod managed_script_review;
+
+#[cfg(test)]
+#[path = "mcp_content_review.rs"]
+mod mcp_content_review;

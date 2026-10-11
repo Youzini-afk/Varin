@@ -269,7 +269,7 @@ impl ToolBridge {
                             reply
                                 .error
                                 .as_ref()
-                                .map(|error| error._code.as_str())
+                                .map(|error| error.code.as_str())
                                 .unwrap_or("child_retention_rejected"),
                         ));
                     }
@@ -394,13 +394,7 @@ struct Reply {
     completion: Option<ToolCompletion<varin_runtime::output::IncomingMedia>>,
     #[serde(rename = "executor_stopped")]
     executor_stopped: Option<bool>,
-    error: Option<ErrorMarker>,
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ErrorMarker {
-    #[serde(rename = "code")]
-    _code: String,
+    error: Option<crate::protocol_generated::HostToolErrorMarker>,
 }
 fn failed(code: &str) -> ExecutionError {
     ExecutionError::new(code, code)
@@ -583,39 +577,54 @@ impl HostTools {
                 resources: vec![],
             });
         }
-        let discovery = call.name == "mcp_discover";
-        let target = if call.name == "mcp_call" {
-            format!(
-                "server:{}",
-                call.arguments
-                    .get("server")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| failed("mcp_target_required"))?
-            )
-        } else {
-            call.name.clone()
+        let GenerationBinding::Mcp(binding) = &self.generation.binding else {
+            unreachable!("extension contract returned above")
         };
-        let resources = if discovery {
-            Vec::new()
-        } else {
-            let GenerationBinding::Mcp(binding) = &self.generation.binding else {
-                unreachable!("extension contract returned above")
-            };
-            let key = binding
-                .resources
-                .get(&target)
-                .ok_or_else(|| failed("mcp_target_unbound"))?;
-            vec![ResourceClaim {
-                key: key.clone(),
+        let route = binding
+            .routes
+            .get(&call.name)
+            .ok_or_else(|| failed("mcp_route_unbound"))?;
+        let (target, discovery, local) = match route {
+            varin_runtime::McpRoute::Direct => (Some(call.name.clone()), false, false),
+            varin_runtime::McpRoute::ServerArgument { argument } => {
+                let server = call
+                    .arguments
+                    .get(argument)
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| failed("mcp_target_required"))?;
+                (Some(format!("server:{server}")), false, false)
+            }
+            varin_runtime::McpRoute::Discovery { argument } => {
+                if let Some(server) = call.arguments.get(argument) {
+                    let server = server
+                        .as_str()
+                        .ok_or_else(|| failed("mcp_target_required"))?;
+                    if !binding.resources.contains_key(&format!("server:{server}")) {
+                        return Err(failed("mcp_target_unbound"));
+                    }
+                    (None, true, false)
+                } else {
+                    (None, true, true)
+                }
+            }
+        };
+        let resources = match target {
+            None => Vec::new(),
+            Some(target) => vec![ResourceClaim {
+                key: binding
+                    .resources
+                    .get(&target)
+                    .ok_or_else(|| failed("mcp_target_unbound"))?
+                    .clone(),
                 access: Access::Write,
-            }]
+            }],
         };
         Ok(ToolContract {
             name: call.name.clone(),
             schema_version: call.schema_version.clone(),
             // Selected-server discovery is a durable preparation Operation. A catalog listing
             // without a server is purely local and needs no effectful Operation.
-            read_only: discovery && call.arguments.get("server").is_none(),
+            read_only: discovery && local,
             completion: CompletionKind::Result,
             lifetime: Lifetime::Run,
             resources,
@@ -668,6 +677,21 @@ impl ToolExecutor for HostTools {
                 .bridge
                 .call(&self.generation, "authorize", context, call, cancel)?;
         if !reply.ok || reply.completion.is_some() {
+            if let Some(error) = reply.error.filter(|error| {
+                error.admission == Some(true)
+                    && error
+                        .code
+                        .as_bytes()
+                        .first()
+                        .is_some_and(u8::is_ascii_lowercase)
+                    && error.code.bytes().all(|value| {
+                        value.is_ascii_lowercase()
+                            || value.is_ascii_digit()
+                            || matches!(value, b'_' | b'-')
+                    })
+            }) {
+                return Err(failed(&error.code));
+            }
             return Err(failed("host_tool_authorization_failed"));
         }
         Ok(())
@@ -900,6 +924,7 @@ mod tests {
                 generation: 1,
                 tools: vec![],
                 resources: std::collections::BTreeMap::new(),
+                routes: std::collections::BTreeMap::new(),
                 provenance: varin_runtime::catalog::launches::McpProvenance {
                     execution_scope: varin_runtime::catalog::launches::McpExecutionScope::Global,
                     configuration: varin_runtime::catalog::launches::McpConfiguration {
@@ -1125,6 +1150,7 @@ mod tests {
             generation: 1,
             tools: vec![schema.clone()],
             resources: [("query".into(), "bound-resource".into())].into(),
+            routes: [("query".into(), varin_runtime::McpRoute::Direct)].into(),
             provenance: varin_runtime::catalog::launches::McpProvenance {
                 execution_scope: varin_runtime::catalog::launches::McpExecutionScope::Global,
                 configuration: varin_runtime::catalog::launches::McpConfiguration {

@@ -94,7 +94,7 @@ records typed dependencies in its manifests. Original publication protection spa
 the short identity/epoch/revision-checked commit. GC follows those dependencies from the existing
 history, input, operation, event, policy and request roots. Catalog retains only original metadata;
 byte reads, hash/base64 work and provider serialization stay outside its control lock. Catalog
-format **48**, content domain **4**, manifest **2** and Kernel wire **3** reject older internal
+format **49**, content domain **4**, manifest **2** and Kernel wire **4** reject older internal
 formats directly. These are distinct from policy service **4** and private script worker protocol **2**.
 
 `runtime.output.media.read` uses the original caller Thread/branch plus an actual history, queued
@@ -115,8 +115,9 @@ IDs and completing parallel result groups before separate Chat/Google image turn
 MIME/model combinations fail explicitly. Policy evidence and delivery are labelled external data,
 not fabricated tool exchanges. Frozen requests retain semantic media references and the exact
 serialized wire projection. Summary preparation keeps images typed; image token costs remain
-unmeasured. This contract does not claim native MCP image/audio/resource projection, live provider
-acceptance, physical desktop capture or complete platform/IPC verification.
+unmeasured. The Host MCP adapter now projects explicit protocol tool/resource/prompt content into
+this same body contract. Live provider acceptance, physical desktop capture and complete platform/IPC
+verification remain separate evidence.
 
 ## Instruction and skill checkpoint binding
 
@@ -360,7 +361,7 @@ passive fact interrupts an unrelated observation Wait. Physical release remains 
 Computer owner's evidence, independent of input acceptance and body failure.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version **48**, input domain 6 and collaboration domain 8 store input intents/queue bodies and context-job ownership,
+Catalog version **49**, input domain 6 and collaboration domain 8 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format **4** retains typed request origins and typed output bodies. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
@@ -596,7 +597,7 @@ output does not suppress their next legal request delivery or replay the write a
 
 The private protocol releases only completed-body transfer credit after a nested call belongs to its
 live worker, preserving the pending cancellation/final response. This permits further original
-permission/domain requests at the existing window size. Catalog **48** rejects older internal formats
+permission/domain requests at the existing window size. Catalog **49** rejects older internal formats
 directly. Persistent script environments use the contract below; typed media follows the shared
 output contract above. Arbitrary extension Node I/O is not sandboxed or intercepted.
 

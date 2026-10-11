@@ -591,6 +591,7 @@ fn each_new_run_retargets_only_the_original_mcp_definition_and_its_own_recovery_
         metadata: None,
     };
     let binding = HostToolBinding {
+        routes: [("mcp_tool".into(), varin_runtime::McpRoute::Direct)].into(),
         reference: "parent-owner".into(),
         generation: 1,
         tools: vec![tool],
