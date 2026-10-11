@@ -170,7 +170,7 @@ pub(in crate::catalog) fn run_hold(
 pub(super) fn latest_run(db: &Connection, branch: &str) -> Result<Option<Run>> {
     let raw: Option<String> = db
         .query_row(
-            "SELECT r.body FROM runs r WHERE r.branch_id=?1 AND NOT EXISTS(SELECT 1 FROM context_jobs c WHERE c.run_id=r.id) ORDER BY r.rowid DESC LIMIT 1",
+            "SELECT body FROM runs WHERE branch_id=?1 ORDER BY rowid DESC LIMIT 1",
             [branch],
             |r| r.get(0),
         )

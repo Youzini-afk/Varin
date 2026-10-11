@@ -64,11 +64,16 @@ reading this implementation. Four concrete cross-owner failures were reproduced 
    The same original target now survives, exposing cancellation uncertainty while preserving physical
    release; an actual user retry clears the original pending command.
 
-Joint review also found auxiliary context-job Runs being selected as the latest branch owner.
-Computer eligibility, common activation and delegated publication now share the original branch-owner
-selector excluding actual context-job rows. Real root and child auxiliary-Run regressions preserve
-frozen policy and admit the proper successor. This does not claim a global audit of every older
-history, inheritance or public-view selector.
+A subsequent producer-level check corrected an unsupported auxiliary-Run claim in the initial
+acceptance wording. `ContextJobRequest.branch_id` is the source being summarized; the actual Run is
+created on its own `context-job-branch:<key>` and `context-job-thread:<key>`. The initial root/child
+handback tests created real helpers but did not assert this distinction. They proved coexistence with
+an auxiliary job, not a same-branch latest-Run defect. No such production counterexample was found.
+
+The follow-on correction removes the unnecessary `context_jobs` exclusion from the shared latest-Run
+query and adds explicit source-versus-execution identity assertions to those two existing tests. The
+shared Computer/activation/delegated selector remains; no other selector, producer, format or grant is
+changed. The four independently reproduced Computer service defects above remain valid and repaired.
 
 ## Verification and reproduction
 
@@ -78,7 +83,7 @@ Final same-source verification:
   requests, auxiliary context jobs, delegated/message/passive/follow-up inputs, Goal, policy controls
   and process Wait. This is a targeted combination, not the whole runtime suite.
 - Kernel library: **149 passed, 11 ignored**; all targets compile with the same 14 existing warnings.
-  The actual source-free child Engine regression includes a real same-branch auxiliary job before
+  The actual source-free child Engine regression includes a real separately branched auxiliary job before
   handback and real preparation/admission. After a fresh Linux x64 kernel build, the original
   source-bearing child guardian/tree Stop/fixed-result test passes (**1 passed**). An initial overly
   qualified test filter selected zero cases; it was not counted and was corrected to the actual test.
@@ -146,11 +151,33 @@ The ignored guardian test additionally requires `VARIN_TEST_KERNEL_EXECUTABLE` p
 built kernel with the correct build identity. The complete HTTP/kernel-IPC fixture and real target
 platform checks must be run in an environment that supports their required transport and hardware.
 
+## Follow-on evidence correction
+
+The correction uses the same public creation/admission APIs, without SQL row edits or manufactured
+Run placement. Actual main and auxiliary receipt identities show distinct branches/Threads while the
+job's source branch remains the main branch. Main input without an explicit configuration still
+inherits the main model, source and policy; Thread/family projections and durable reopen remain
+correct. Independent probes likewise preserve captured follow-up source, idle primary Goal creation,
+existing-work Calendar activation, and automatic helper Goal ownership without injecting the main
+objective into its summarizer input. Policy planning ModelJobs are original-Run Operations, not another
+Run producer. Ordinary input rejects internal summary branches through the existing owner contract.
+
+The limited correction is independently accepted: the original public-API probe passes **5/5**,
+including helper discoverability and its own Run history. The original root/child handback tests now
+assert actual distinct execution identities and each passes. Final affected runtime suites pass
+**87/87**; all kernel targets compile, and a fresh **0.9.25** Linux kernel passes the original child
+guardian test (**1/1**). No Host/UI contract changed, so their earlier evidence was not rerun or
+inflated. The corrected 5,248-input non-Markdown source manifest is
+`f9334c1a7f47a3e909768afac15f8d0478a7066d07204c12e0a82ffe4b62279d`; the fresh binary SHA-256 is
+`b60a98bf920df9625764250cb837fcc554206555d8cd6ccb2dded64fa1b90625`.
+This corrects the earlier premise and removes unnecessary filtering; it does not claim a new runtime
+capability or invalidate the four real Computer service defects.
+
 ## Remaining delivery boundary
 
 Persistent Native Computer scripts, remaining environment/Web/material/Bot/MCP and source/context/
-provider capabilities still require implementation and their actual consumers. Broader branch-owner
-selection callers warrant a separate concrete check where auxiliary Runs share a branch; only the
-selectors exercised here are claimed. Full product/platform/external-system and performance acceptance
-remain distinct. Final default runtime switching, Pi removal and asset migration remain the user's
+provider capabilities still require implementation and their actual consumers. The suspected
+auxiliary-Run pollution of older branch selectors was disproved by actual producer identity and
+public-API probes; it is not counted as another missing capability or repaired defect. Full product/
+platform/external-system and performance acceptance remain distinct. Final default runtime switching, Pi removal and asset migration remain the user's
 post-acceptance responsibility.

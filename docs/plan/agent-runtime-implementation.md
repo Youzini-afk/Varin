@@ -19,13 +19,19 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-11 校正：辅助作业来源与实际执行分支
+
+- 真实 producer 与公开 API 核实：ContextJob 的 `request.branch_id` 是摘要来源，actual Run 固定在独立 context-job Thread/branch。上一片“同 branch 辅助 Run 误选已修复”的文字证据不成立；原测试只证明真实 helper 与 handback 共存，未证明同 branch。
+- 不开展据此推测的 selector 大改。只移除 shared latest_run 没有实际触发依据的 context_jobs 排除查询，两原回归明确断言来源与实际执行身份不同；共用读取接口保留，不新增格式/状态/owner。原输入/来源/模型继承、followup/calendar/Goal/公开projection 的真实 API 探针均正常，辅助目的、Goal归属与恢复保原语义。
+- Computer 四条实际 service 红测修复与独审证据保持分列；独立公开API 5项、受影响runtime87、原root/child回归与fresh binary guardian分别通过，详细校正和有限复验见[同一验收记录](../reviews/runtime-computer-control-facts-2026-10-11.md)。继续持久 Computer scripts 与两设计余能力，不把被证伪的疑点算成剩余缺口。
+
 ## 2026-10-11 增量：可信 Computer 控制事实与真实接续
 
 - 原 ComputerService/driver 与 Catalog 各保物理控制和执行输入唯一权威。原 desktop outbox 按稳定 kind/ID 转交 takeover/cancel/handback，正文先锁外持久化；原 actor 与 Catalog 派生 root 输入原子受理，丢 ACK 不重复。Catalog **45**、desktop runtime **4** 直接拒旧，不迁外部资产。
 - takeover/cancel 与 root 通知保持被动 Environment；合法 handback 进入原 active Run 边界，或沿原冻结 launch/context 产生真实 root/child 后继（含无源 child）。自然终态只释放旧权限/assignment，原 handoff provenance 保留；returned 不冒充 human operator 或旧 Run 授权。新真实 controller 更新 generation，观察者不覆盖。
 - Computer Stop 捕获原确切 actor/desktop，短撤销独立于慢正文与物理停止，旧 Stop 重试不扫同 Run 新事实；tree Stop 保已终态 Run 的原命令事实以挡迟到 outbox。Goal/pause/question 与无关 Wait 保原合同。既交付 history/已启动后继不被通知撤销重写。
-- 独审实际复现并修复无关 desktop 坏记录污染 Stop、自然终态删 handoff 断链、远端未知释放误报确认、returned 短撤销失败被 UI 投影遗漏四处接缝；原失败条件复验已通过。原 root/child branch owner 的辅助 Run 误选也沿共同 selector 收口，保冻结 policy。最终runtime受影响266、kernel149/11 ignored后fresh guardian1、Host23+owner86/排除socket1、UI71及独立13组真实owner探针分层通过；完整同源、四条修复及未验边界见[本片验收](../reviews/runtime-computer-control-facts-2026-10-11.md)。
-- 继续核实际 branch-owner 消费与持久 Computer scripts、其余环境/Web/材料/Bot/MCP/source/context/provider 能力。整体两设计与产品/平台验收未完成；用户最后默认切换/Pi 与资产迁移分工不变。
+- 独审实际复现并修复无关 desktop 坏记录污染 Stop、自然终态删 handoff 断链、远端未知释放误报确认、returned 短撤销失败被 UI 投影遗漏四处接缝；原失败条件复验已通过。原 root/child handback保冻结policy；辅助Run的来源/执行分支证据已按上节校正。最终runtime受影响266、kernel149/11 ignored后fresh guardian1、Host23+owner86/排除socket1、UI71及独立13组真实owner探针分层通过；完整同源、四条修复及未验边界见[本片验收](../reviews/runtime-computer-control-facts-2026-10-11.md)。
+- 继续持久 Computer scripts、其余环境/Web/材料/Bot/MCP/source/context/provider 能力。整体两设计与产品/平台验收未完成；用户最后默认切换/Pi 与资产迁移分工不变。
 
 ## 2026-10-11 增量：无文件来源的真实子任务
 

@@ -149,13 +149,11 @@ fn idle_root_handback_uses_original_launch_and_lost_ack_reopen_is_idempotent() {
             serde_json::json!({}),
         )
         .unwrap();
-    assert!(!f
-        .base
-        .db
-        .run(&auxiliary.receipt.run_id)
-        .unwrap()
-        .state
-        .terminal());
+    let auxiliary_run = f.base.db.run(&auxiliary.receipt.run_id).unwrap();
+    assert!(!auxiliary_run.state.terminal());
+    assert_ne!(auxiliary_run.thread_id, parent.thread_id);
+    assert_ne!(auxiliary_run.branch_id, parent.branch_id);
+    assert_eq!(auxiliary.request.branch_id, parent.branch_id);
     finish(&mut f, false);
     let event = command(&f, ComputerEventKind::Handback, false);
     let receipt = accept(&mut f, event.clone());

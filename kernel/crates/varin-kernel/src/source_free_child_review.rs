@@ -164,7 +164,11 @@ fn source_free_handback_prepares_and_admits_a_real_environment_child_run_once() 
             serde_json::json!({}),
         )
         .unwrap();
-    assert!(!db.run(&auxiliary.receipt.run_id).unwrap().state.terminal());
+    let auxiliary_run = db.run(&auxiliary.receipt.run_id).unwrap();
+    assert!(!auxiliary_run.state.terminal());
+    assert_ne!(auxiliary_run.thread_id, f.run.thread_id);
+    assert_ne!(auxiliary_run.branch_id, f.run.branch_id);
+    assert_eq!(auxiliary.request.branch_id, f.run.branch_id);
     let command = ComputerEventCommand {
         fact: ComputerEventFact {
             id: "actual-human-return".into(),
