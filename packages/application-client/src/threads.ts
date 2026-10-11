@@ -255,7 +255,7 @@ export interface ThreadsAPI {
   operation(operationId: string): Promise<Operation>;
   cancelOperation(operationId: string): Promise<OperationCancellationReceipt>;
   decidePermission(input: ThreadIdentity & { operationId: string; permissionId: string; decision: 'allow_once' | 'deny' }): Promise<Operation>;
-  /** Server requests remain on their original Operation, including after its Run ends. */
+  /** Original-owner requests and RPC-error URL choices remain readable after their Run ends. Pages omit original JSON evidence; read/respond return it. */
   listMcpInteractions(input: ThreadIdentity & Omit<McpInteractionListParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<McpInteractionPage>;
   readMcpInteraction(input: ThreadIdentity & McpInteractionReadParams, signal?: AbortSignal): Promise<McpInteractionView>;
   respondMcpInteraction(input: ThreadIdentity & McpInteractionRespondParams, signal?: AbortSignal): Promise<McpInteractionView>;

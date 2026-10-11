@@ -13,11 +13,11 @@ const call:HostToolCall={operationId:'original-operation',runId:'original-run',o
 const tool:McpAuthorityTool={name:'task',server:'peer',tool:'task',schemaVersion:'v1',taskSupport:'required',taskCapable:true,resourceKey:endpoint.resourceKey,configurationScope:'global',executionScope:'global',inputSchema:{type:'object'},description:'',exposure:'direct'};
 const failure=(code:number)=>new McpTaskRequestError('remote-error',true,'protocol',code,{code,message:'Original receiver error'});
 async function until(predicate:()=>boolean){for(let n=0;n<200;n++){if(predicate())return;await new Promise(resolve=>setTimeout(resolve,5));}throw new Error('Expected observation did not arrive');}
-function fixture(options:{acceptFailures?:number;commitFailedAccept?:boolean;get?:(count:number)=>Promise<McpTaskState>;result?:()=>Promise<Record<string,unknown>>;cancel?:()=>Promise<McpTaskState>}={}){
-  let op:HostJobPending|undefined,accepts=0,starts=0,gets=0,results=0,cancels=0,released=0;
+function fixture(options:{acceptFailures?:number;commitFailedAccept?:boolean;get?:(count:number)=>Promise<McpTaskState>;result?:()=>Promise<Record<string,unknown>>;cancel?:()=>Promise<McpTaskState>;afterUpdate?:(change:HostJobTaskUpdateParams)=>Promise<void>}={}){
+  let op:HostJobPending|undefined,accepts=0,starts=0,gets=0,results=0,cancels=0,released=0,accesses=0;
   const updates:HostJobTaskUpdateParams[]=[],errors:Error[]=[];
-  const finishes:string[]=[];
-  let ready:()=>void=()=>{},event:()=>void=()=>{};
+  const finishes:string[]=[],unbinds:Array<string|undefined>=[];
+  let ready:()=>void=()=>{},event:()=>void=()=>{},notify:((id:string)=>void)=()=>{};
   const clone=<T>(v:T):T=>structuredClone(v);
   const accept=()=>{op={...op!,accepted:true,mcpTask:{revision:1,task:clone(initial),observationRef:'acceptance',availability:'available',resultReady:false}};};
   const finish=()=>{finishes.push(op!.mcpTask!.task.status);if(['completed','failed'].includes(op!.mcpTask!.task.status))op={...op!,executorStopped:true};};
@@ -26,21 +26,23 @@ function fixture(options:{acceptFailures?:number;commitFailedAccept?:boolean;get
       case'runtime.host_job.begin':op={binding:params.binding as HostJobPending['binding'],runId:call.runId,accepted:false,cancelRequested:false,executorStopped:false,phase:'running',origin:{kind:'tool',origin:call.origin,call_id:call.callId,tool_name:call.name,schema_version:call.schemaVersion}};return clone(op);
       case'runtime.host_job.accept':accepts++;if(accepts<=(options.acceptFailures??0)){if(options.commitFailedAccept&&!op!.accepted)accept();throw new Error('Acceptance reply interrupted');}if(!op!.accepted)accept();return clone(op);
       case'runtime.host_job.pending':return op?[clone(op)]:[];
+      case'runtime.host_job.access':accesses++;return clone({host_job:{binding:op!.binding,mcpTask:op!.mcpTask}});
+      case'runtime.host_job.task.read':return clone({operation:{host_job:{binding:op!.binding,mcpTask:op!.mcpTask},external_receipt:{executor_stopped:op!.executorStopped},cancel_requested:op!.cancelRequested},observation:updates.at(-1)?.content,result:null});
       case'runtime.host_job.task.update':{
         const change=params as unknown as HostJobTaskUpdateParams;updates.push(clone(change));
         const current=op!.mcpTask!;
         if(current.revision!==change.expectedRevision)return clone(op);
         op={...op!,mcpTask:{revision:current.revision+1,task:clone(change.task),observationRef:'observation',availability:change.availability,...(change.problem?{problem:change.problem}:{}),
           resultReady:current.resultReady||!!change.result,...(change.result?{resultRef:'result',resultKind:change.result.kind,resultOutcome:change.result.outcome,resultEffect:change.result.effect}:current.resultRef?{resultRef:current.resultRef}:{} )}};
-        finish();return clone(op);
+        finish();await options.afterUpdate?.(change);return clone(op);
       }
       case'runtime.host_job.task.finish':finish();return clone(op);
       default:throw new Error(`Unexpected request ${method}`);
     }
   }} as unknown as KernelClient;
-  const lease:McpTaskLease={endpoint,async start(){starts++;return{task:clone(initial),result:{task:clone(initial)}};},async get(){gets++;const task=await(options.get?.(gets)??Promise.resolve(initial));return{task:clone(task),result:{...clone(task)}};},async result(){results++;return options.result?.()??{content:[{type:'text',text:'Final content'}],isError:true};},async cancel(){cancels++;if(!options.cancel)throw new Error('Unexpected cancel');const task=await options.cancel();return{task:clone(task),result:{...clone(task)}};},onChange(){return()=>{};},release(){released++;}};
+  const lease:McpTaskLease={endpoint,bindInteraction(){return reason=>{unbinds.push(reason);};},async start(){starts++;return{task:clone(initial),result:{task:clone(initial)}};},async get(){gets++;const task=await(options.get?.(gets)??Promise.resolve(initial));return{task:clone(task),result:{...clone(task)}};},async result(){results++;return options.result?.()??{content:[{type:'text',text:'Final content'}],isError:true};},async cancel(){cancels++;if(!options.cancel)throw new Error('Unexpected cancel');const task=await options.cancel();return{task:clone(task),result:{...clone(task)}};},onChange(listener){notify=listener;return()=>{};},release(){released++;}};
   const runtime=createMcpTaskRuntime({kernel,runtime:{onReady(listener){ready=listener;return()=>{};},onEvent(listener){event=()=>listener({} as never);return()=>{};},async reconcileObservations(){return [];}},async recover(){throw new Error('Live task lease was lost');},onError(error){errors.push(error);}});
-  return{runtime,updates,errors,finishes,lease,op:()=>op!,counts:()=>({accepts,starts,gets,results,cancels,released}),ready:()=>ready(),event:()=>event(),requestCancel:()=>{op={...op!,cancelRequested:true};event();},submit:()=>runtime.submit({call,owner,lease,tool,args:{},signal:new AbortController().signal})};
+  return{runtime,updates,errors,finishes,unbinds,lease,op:()=>op!,counts:()=>({accepts,starts,gets,results,cancels,released,accesses}),ready:()=>ready(),event:()=>event(),notify:()=>notify('receiver-id'),requestCancel:()=>{op={...op!,cancelRequested:true};event();},submit:()=>runtime.submit({call,owner,lease,tool,args:{},signal:new AbortController().signal}),get:()=>runtime.control({call:{...call,operationId:'control-operation',callId:'control-call'},owner,action:'get',targetOperationId:call.operationId,signal:new AbortController().signal})};
 }
 describe('original MCP Task Host coordination',()=>{
   for(const committed of [false,true])it(`retains the exact accepted identity when accept ACK is lost (${committed?'committed':'uncommitted'})`,async()=>{
@@ -87,12 +89,13 @@ describe('original MCP Task Host coordination',()=>{
       expect(f.op().executorStopped).toBe(false);
     }finally{await f.runtime.dispose();}
   });
-  for(const code of [-32602,-32000])it(`keeps management error ${code} separate from the original task's terminal result`,async()=>{
+  for(const code of [-32602,-32000,-32042])it(`keeps management error ${code} separate from the original task's terminal result`,async()=>{
     const f=fixture({async get(){return{...initial,status:'completed'};},async result(){throw failure(code);}});
     try{await f.submit();f.runtime.start();await until(()=>f.updates.some(update=>update.problem?.stage==='result'));
       expect(f.op().executorStopped).toBe(true);
-      expect(f.op().mcpTask!.resultReady).toBe(code===-32000);
-      if(code===-32000){const result=f.updates.find(update=>update.result)!.result!;expect(result.kind).toBe('protocol_error');expect(result.effect).toBe('unknown');expect(result.content.data).toEqual({taskId:'receiver-id',protocolError:{code,message:'Original receiver error'}});}
+      expect(f.op().mcpTask!.resultReady).toBe(code!==-32602);
+      if(code!==-32602){const result=f.updates.find(update=>update.result)!.result!;expect(result.kind).toBe('protocol_error');expect(result.effect).toBe('unknown');expect(result.content.data).toEqual({taskId:'receiver-id',protocolError:{code,message:'Original receiver error'}});
+        await until(()=>f.counts().released===1);expect(f.unbinds).toEqual(['rpc_closed']);}
     }finally{await f.runtime.dispose();}
   });
   it('does not hide an existing result-read failure behind a later control failure',async()=>{
@@ -111,4 +114,48 @@ describe('original MCP Task Host coordination',()=>{
       if(!error)expect(result.content.data).toMatchObject({isError:true});
     }finally{await f.runtime.dispose();}
   });
+  it('keeps an early nonterminal URL error out of the terminal result and does not poll that result again until new evidence',async()=>{
+    let state:McpTaskState['status']='input_required',attempt=0;
+    const f=fixture({async get(){return{...initial,status:state};},async result(){if(++attempt===1)throw failure(-32042);return{content:[{type:'text',text:'Original eventual result'}]};}});
+    try{await f.submit();f.runtime.start();await until(()=>f.op().mcpTask?.problem?.rpcCode===-32042);
+      await new Promise(resolve=>setTimeout(resolve,40));expect(f.counts().results).toBe(1);expect(f.op().mcpTask!.resultReady).toBe(false);expect(f.op().mcpTask!.task.status).toBe('input_required');
+      state='completed';f.notify();await until(()=>f.op().mcpTask!.resultReady);
+      expect(f.counts().starts).toBe(1);expect(f.counts().results).toBe(2);expect(f.updates.filter(u=>u.result)).toHaveLength(1);
+      expect(f.updates.find(u=>u.result)!.result!.kind).toBe('response');
+    }finally{await f.runtime.dispose();}
+  });
+  it('does not lose an original Task notification that arrives before the URL-error diagnostic commits',async()=>{
+    let state:McpTaskState['status']='input_required',attempt=0;
+    const f=fixture({async get(){return{...initial,status:state};},async result(){if(++attempt===1){f.notify();throw failure(-32042);}state='completed';return{content:[]};}});
+    try{await f.submit();f.runtime.start();await until(()=>f.op().mcpTask!.resultReady);expect(f.counts().results).toBe(2);expect(f.counts().starts).toBe(1);}
+    finally{await f.runtime.dispose();}
+  });
+  it('pauses a URL-blocked tasks/get instead of producing the same card on each poll',async()=>{
+    const f=fixture({async get(count){if(count===1)throw failure(-32042);return{...initial,status:'completed'};}});
+    try{await f.submit();f.runtime.start();await until(()=>f.op().mcpTask?.problem?.rpcCode===-32042);
+      await new Promise(resolve=>setTimeout(resolve,40));expect(f.counts().gets).toBe(1);expect(f.counts().results).toBe(0);
+      f.notify();await until(()=>f.op().mcpTask!.resultReady);expect(f.counts().starts).toBe(1);
+    }finally{await f.runtime.dispose();}
+  });
+  it('joins an ordinary inflight get without implicitly retrying its later URL error',async()=>{
+    let rejectGet!:(error:Error)=>void;
+    const first=new Promise<McpTaskState>((_resolve,reject)=>{rejectGet=reject;});
+    const f=fixture({async get(){return first;}});
+    try{await f.submit();f.runtime.start();await until(()=>f.counts().gets===1);
+      const control=f.get();await until(()=>f.counts().accesses===1);rejectGet(failure(-32042));await control;
+      await new Promise(resolve=>setTimeout(resolve,40));expect(f.counts().gets).toBe(1);expect(f.counts().starts).toBe(1);
+      expect(f.op().mcpTask!.problem?.rpcCode).toBe(-32042);expect(f.op().mcpTask!.resultReady).toBe(false);
+    }finally{rejectGet(failure(-32042));await f.runtime.dispose();}
+  });
+  it('rechecks a Catalog-visible URL error even when the old diagnostic ACK is still pending',async()=>{
+    let releaseAck!:()=>void;
+    const ack=new Promise<void>(resolve=>{releaseAck=resolve;});
+    const f=fixture({async get(count){if(count===1)throw failure(-32042);return{...initial,status:'completed'};},async afterUpdate(change){if(change.problem?.rpcCode===-32042)await ack;}});
+    try{await f.submit();f.runtime.start();await until(()=>f.op().mcpTask?.problem?.rpcCode===-32042);
+      const control=f.get();await until(()=>f.counts().accesses===1);releaseAck();await control;
+      await until(()=>f.op().mcpTask!.resultReady);expect(f.counts().gets).toBe(2);expect(f.counts().starts).toBe(1);
+      expect(f.updates.find(update=>update.problem?.rpcCode===-32042)?.content).toMatchObject({response:{code:-32042,message:'Original receiver error'}});
+    }finally{releaseAck();await f.runtime.dispose();}
+  });
+
 });

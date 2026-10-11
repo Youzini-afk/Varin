@@ -455,6 +455,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
             content: { data: { error: 'mcp_effect_unknown',
               ...(error instanceof McpAuthorityError && error.settlement === 'session_expired' ? { reason: error.code } : {}),
               ...(error instanceof McpAuthorityError && error.protocolError ? { protocolError:error.protocolError } : {}),
+              ...(error instanceof McpAuthorityError && error.interactionProblem ? { interactionProblem:error.interactionProblem } : {}),
             }, parts: [] },
           },
           error instanceof McpAuthorityError && (error.settlement === 'session_expired' || error.settlement === 'rpc_response'),

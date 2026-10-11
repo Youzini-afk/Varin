@@ -223,16 +223,14 @@ impl Host {
                 }
                 if method == "runtime.permission.open" {
                     self.permissions += 1;
-                    assert!(
-                        runtime
-                            .catalog()
-                            .lock()
-                            .unwrap()
-                            .operation(params["operationId"].as_str().unwrap())
-                            .unwrap()
-                            .waiting_on
-                            .is_some()
-                    );
+                    assert!(runtime
+                        .catalog()
+                        .lock()
+                        .unwrap()
+                        .operation(params["operationId"].as_str().unwrap())
+                        .unwrap()
+                        .waiting_on
+                        .is_some());
                     self.send(json!({"kind":"fixture-permission","operationId":params["operationId"],"permissionId":params["permissionId"]}));
                 }
                 None
@@ -294,7 +292,8 @@ impl Host {
             "fixture-prepared"
             | "fixture-finished"
             | "fixture-child-prepared"
-            | "fixture-interaction-consumer-result" => Some(frame),
+            | "fixture-interaction-consumer-result"
+            | "fixture-interaction-completion-emitted" => Some(frame),
             _ => panic!("unexpected Host frame: {frame}"),
         }
     }

@@ -4,6 +4,8 @@ export type McpRequestId = string | number;
 
 export type McpInteractionRelation = { kind: 'rpc_response_stream'; outgoingRequestId: McpRequestId } | { kind: 'task'; taskId: string };
 
+export type McpInteractionSource = { kind: 'server_request'; requestId: McpRequestId; relation: McpInteractionRelation } | { kind: 'rpc_error'; outgoingRequestId: McpRequestId; method: string; elicitationId: string; taskId?: string };
+
 export type McpElicitationResponse = { action: 'accept'; content?: Record<string, string | number | boolean | string[]> } | { action: 'decline' | 'cancel' };
 
 export interface McpElicitationField { name: string; title: string; description?: string; required: boolean; kind: 'string' | 'number' | 'integer' | 'boolean' | 'enum' | 'multi_enum'; options?: { value: string; title: string }[]; default?: string | number | boolean | string[]; minLength?: number; maxLength?: number; minimum?: number; maximum?: number; minItems?: number; maxItems?: number; pattern?: string; format?: 'email' | 'uri' | 'date' | 'date-time'; }
@@ -23,8 +25,7 @@ export interface McpInteractionBinding {
   executionOwner: ExecutorOwner;
   endpoint: McpEndpoint;
   connectionId: string;
-  requestId: McpRequestId;
-  relation: McpInteractionRelation;
+  source: McpInteractionSource;
 }
 
 export interface McpInteractionRecord {
@@ -37,20 +38,23 @@ export interface McpInteractionRecord {
   mode: McpInteractionMode;
   availability: McpInteractionAvailability;
   choice: McpInteractionChoice | null;
-  delivery: McpInteractionDelivery;
+  delivery: McpInteractionDelivery | null;
   completionReported: boolean;
   problem: string | null;
 }
 
-export interface McpInteractionView {
+export interface McpInteractionItem {
   record: McpInteractionRecord;
-  request: Record<string, unknown>;
   presentation: McpElicitationPresentation;
   response: McpElicitationResponse | null;
 }
 
+export interface McpInteractionView extends McpInteractionItem {
+  request: Record<string, unknown>;
+}
+
 export interface McpInteractionPage {
-  items: McpInteractionView[];
+  items: McpInteractionItem[];
   nextCursor: string | null;
 }
 
@@ -60,6 +64,17 @@ export interface McpInteractionOpenParams {
   mode: McpInteractionMode;
   request: Record<string, unknown>;
   presentation: McpElicitationPresentation;
+}
+
+export interface McpInteractionErrorItem {
+  id: string;
+  binding: McpInteractionBinding;
+  presentation: McpElicitationPresentation;
+}
+
+export interface McpInteractionErrorOpenParams {
+  items: McpInteractionErrorItem[];
+  request: Record<string, unknown>;
 }
 
 export interface McpInteractionListParams {
@@ -1167,7 +1182,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 7; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 8; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 

@@ -1,6 +1,6 @@
 # 原生 Agent 运行时实施
 
-状态：实施中，尚未切换生产运行时。更新：2026-10-11（Asia/Singapore）。
+状态：实施中，尚未切换生产运行时。更新：2026-10-12（Asia/Singapore）。
 
 综合结构审阅见[2026-10-09 实现审阅](../reviews/runtime-2026-10-09.md)，后续实现及独立行为验证见[控制路径隔离增量](../reviews/runtime-control-isolation-2026-10-09.md)。前次源码与编译审阅、各阶段行为验证分别记录；历史通过记录不代替当前代码的证据。两份设计的整体交付仍未完成。
 
@@ -18,6 +18,14 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
+
+## 2026-10-12 增量：原 RPC 错误的 MCP URL 要求
+
+- 原 SDK pending-response 位置保完整 `-32042` 与真实 outgoing ID，普通工具、资源/prompt、显式订阅清理、Task 创建/get/result/cancel 同合同；不伪造 inbound request。Catalog **53**、wire **8**直接拒旧，正文仍唯一 ContentStore，共享错误正文一次 stage、多个短记录原子发布；公开分页不重复携带完整错误。
+- 实际 client/认证 route/Adapter/UI 保原 Thread 身份，本地选择、URL 明确打开、远端完成和原错误/Unknown 回执分开。自然失败后可复核，撤权/重开后历史仍可读答但不恢复旧自动关联。非终态 Task 提前 result 错误保诊断，不缓存成未来结果；已知终态原错误仍是最终错误。
+- 四条实际失败链已最小修复并原探针复验：取消/source/Goal/reopen 后迟到完成越过 owner fence；同 client 冲突 ID 被第三 RPC 重绑；自然 Task 终态误撤回已接受 URL completion；已可见错误的显式重查被旧 Host ACK 吞掉。普通在途 get 合法 join 保留，无猜测重放或新权限 owner。
+- 最终原 MCP **14** 条 Rust/Host/SDK/公共消费链、原 Goal/HostJob、SDK/Host/UI/完整类型，以及独审 native/wire/public 原探针分层通过。fresh wire8 二进制、Host/Web 与交付布局沿同冻结源核验；完整证据与复跑见[本片验收](../reviews/runtime-mcp-error-interactions-2026-10-11.md)。完整产品 IPC、真实桌面/浏览器/外部 provider 和平台性能未由受控 peer 证明。
+- 接续 sampling 及其真实 provider/用户 review 合同，再推进环境/Web/材料/PDF/学术/Bot、来源/检索/上下文/provider 余能力。两设计整体未完，最终默认切换/Pi/资产迁移仍交用户验收后负责。
 
 ## 2026-10-11 增量：原 MCP 用户交互
 

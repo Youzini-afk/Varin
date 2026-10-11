@@ -54,7 +54,44 @@ pub(super) fn execute(
             }
             Ok(serde_json::to_value(
                 db!()
-                    .open_mcp_interaction(p.id, p.binding, p.mode, body, &snapshot, &frozen)
+                    .open_mcp_interaction(p.id, p.binding, p.mode, &body, &snapshot, &frozen)
+                    .map_err(domain)?,
+            )?)
+        }
+        "runtime.mcp.interaction.error.open" => {
+            let p: McpInteractionErrorOpenParams = serde_json::from_value(params)?;
+            let first = p
+                .items
+                .first()
+                .ok_or_else(|| KernelError::Protocol("Empty MCP error observation".into()))?;
+            let (read, prep) = {
+                let db = db!();
+                (
+                    invocation(&db, &first.binding.operation_id)?,
+                    db.prepare_result_content(),
+                )
+            };
+            let (snapshot, frozen) = read.load_mcp().map_err(domain)?;
+            let presentations: Vec<_> = p
+                .items
+                .iter()
+                .map(|item| item.presentation.clone())
+                .collect();
+            // One publication/fsync for the complete error and every normalized URL.
+            let body = prep
+                .write_data(&json!({"request":p.request,"presentations":presentations}))
+                .map_err(domain)?;
+            if cancelled.load(Ordering::Acquire) {
+                return Err(KernelError::Cancelled);
+            }
+            let items = p
+                .items
+                .into_iter()
+                .map(|item| (item.id, item.binding))
+                .collect();
+            Ok(serde_json::to_value(
+                db!()
+                    .open_mcp_error_interactions(items, &body, &snapshot, &frozen)
                     .map_err(domain)?,
             )?)
         }

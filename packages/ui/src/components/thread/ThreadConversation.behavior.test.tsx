@@ -2223,13 +2223,13 @@ it('projects original MCP interaction events onto idle Task requests without act
     threadId: identity.threadId, branchId: identity.branchId, mode: 'form', availability: 'live', choice: null,
     delivery: 'not_started', completionReported: false, problem: null,
     binding: { operationId: 'operation:accepted-task', executionOwner: { kind: 'external', identity: 'original-owner', epoch: 'epoch' },
-      connectionId: 'original-connection', requestId: 0, relation: { kind: 'task', taskId: 'original-remote-task' },
+      connectionId: 'original-connection', source: { kind: 'server_request', requestId: 0, relation: { kind: 'task', taskId: 'original-remote-task' } },
       endpoint: { server: 'original-server', resourceKey: 'server-key', configurationVersion: 'configuration', credentialVersion: 'grant' } } },
     request: {}, presentation: { mode: 'form', message: 'The retained task needs your choice.', fields: [
       { name: 'enabled', title: 'Enable task option', kind: 'boolean', required: true, default: false },
     ] }, response: null };
   let visible = false;
-  f.api.listMcpInteractions = vi.fn(async () => ({ items: visible ? [structuredClone(request)] : [], nextCursor: null }));
+  f.api.listMcpInteractions = vi.fn(async () => ({ items: visible ? [structuredClone({ record: request.record, presentation: request.presentation, response: request.response })] : [], nextCursor: null }));
   f.api.respondMcpInteraction = vi.fn(async input => {
     request.response = input.response; request.record.choice = input.response.action; request.record.delivery = 'sending'; request.record.revision += 1;
     return structuredClone(request);
@@ -2250,4 +2250,36 @@ it('projects original MCP interaction events onto idle Task requests without act
   await act(async () => root.render(<ThreadConversation api={f.api} identity={other} />));
   expect(container.querySelector('[aria-label="MCP request request:server"]')).toBeNull();
   expect(f.api.respondMcpInteraction).toHaveBeenCalledOnce();
+});
+
+
+it('keeps original RPC-error choices available after natural Run failure without invoking continuation or operation controls', async () => {
+  const f = fixture(true);
+  const failedRun = { ...f.view.activeRun!, state: 'failed' as const };
+  const request: McpInteractionView = { record: { id: 'error:original', revision: 2, runId: failedRun.id,
+    threadId: identity.threadId, branchId: identity.branchId, mode: 'url', availability: 'owner_unavailable', choice: null,
+    delivery: null, completionReported: false, problem: null,
+    binding: { operationId: 'operation:failed-call', executionOwner: { kind: 'external', identity: 'original-owner', epoch: 'epoch' },
+      connectionId: 'original-connection', source: { kind: 'rpc_error', outgoingRequestId: 'rpc:original', method: 'tools/call', elicitationId: 'remote:url' },
+      endpoint: { server: 'original-server', resourceKey: 'server-key', configurationVersion: 'configuration', credentialVersion: 'grant' } } },
+    request: { code: -32042, message: 'Original error remains', data: { elicitations: [{ mode: 'url', message: 'Review the external step', url: 'https://accounts.example.test/step', elicitationId: 'remote:url' }] } },
+    presentation: { mode: 'url', message: 'Review the external step', url: 'https://accounts.example.test/step', elicitationId: 'remote:url' }, response: null };
+  f.api.listMcpInteractions = vi.fn(async () => ({ items: [{ record: structuredClone(request.record), presentation: request.presentation, response: request.response }], nextCursor: null }));
+  f.api.respondMcpInteraction = vi.fn(async input => {
+    request.response = input.response; request.record.choice = input.response.action; request.record.revision += 1;
+    return structuredClone(request);
+  });
+  f.api.cancelOperation = vi.fn(); f.api.resume = vi.fn(); f.api.retryPreparation = vi.fn();
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  f.view.activeRun = null; f.view.thread.branches[0]!.active_run_id = null; f.view.thread.branches[0]!.latest_run = failedRun;
+  f.view.eventCursor = 1;
+  await act(async () => f.emit({ cursor: 1, subject: failedRun.id, revision: 2, kind: 'run.failed', data: {} }));
+  expect(container.textContent).toContain('ended with error -32042');
+  expect(button('Accept locally').disabled).toBe(false);
+  await submitForm(container.querySelector('[aria-label="Record choice for MCP interaction error:original"]')!);
+  expect(f.api.respondMcpInteraction).toHaveBeenCalledExactlyOnceWith({ ...identity, operationId: 'operation:failed-call', interactionId: 'error:original', expectedRevision: 2, response: { action: 'accept' } });
+  expect(container.textContent).toContain('Local choice: accept · No MCP response applies');
+  expect(f.view.thread.branches[0]!.latest_run?.state).toBe('failed');
+  expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled(); expect(f.cancelRun).not.toHaveBeenCalled();
+  expect(f.api.cancelOperation).not.toHaveBeenCalled(); expect(f.api.resume).not.toHaveBeenCalled(); expect(f.api.retryPreparation).not.toHaveBeenCalled();
 });

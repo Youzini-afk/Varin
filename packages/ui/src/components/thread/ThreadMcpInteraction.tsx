@@ -1,26 +1,29 @@
 import React from 'react';
 import type { ThreadIdentity, ThreadsAPI } from '@varin/application-client';
 import { ThreadRequestError } from '@varin/application-client';
-import type { McpElicitationField, McpElicitationResponse, McpInteractionView } from '@varin/protocol';
+import type { McpElicitationField, McpElicitationResponse, McpInteractionItem } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
 import { openExternalUrl } from '@/lib/url';
 
 type InteractionAPI = Pick<ThreadsAPI, 'listMcpInteractions' | 'readMcpInteraction' | 'respondMcpInteraction'>;
 type Value = string | number | boolean | string[];
 type Draft = Record<string, { included: boolean; value: Value | undefined }>;
-const sameInteraction = (left: McpInteractionView, right: McpInteractionView) => left.record.id === right.record.id && left.record.binding.operationId === right.record.binding.operationId;
-const newerInteraction = (retained: McpInteractionView | undefined, incoming: McpInteractionView) => retained && retained.record.revision >= incoming.record.revision ? retained : incoming;
-const canRespond = ({ record }: McpInteractionView) => record.availability === 'live' && record.choice === null && record.delivery === 'not_started';
-const errorText = (error: unknown): string => {
+const sameInteraction = (left: McpInteractionItem, right: McpInteractionItem) => left.record.id === right.record.id && left.record.binding.operationId === right.record.binding.operationId;
+const newerInteraction = (retained: McpInteractionItem | undefined, incoming: McpInteractionItem) => retained && retained.record.revision >= incoming.record.revision ? retained : incoming;
+const compactInteraction = ({ record, presentation, response }: McpInteractionItem): McpInteractionItem => ({ record, presentation, response });
+const canRespond = ({ record }: McpInteractionItem) => record.choice === null && (record.binding.source.kind === 'rpc_error'
+  ? record.delivery === null : record.availability === 'live' && record.delivery === 'not_started');
+const errorText = (error: unknown, localChoice: boolean): string => {
   if (error instanceof ThreadRequestError) {
-    if (error.code === 'mcp_interaction_response_invalid') return 'Check the requested fields and their limits, then send your response again.';
+    if (error.code === 'mcp_interaction_response_invalid') return localChoice ? 'This local choice was rejected. Refresh and try again.' : 'Check the requested fields and their limits, then send your response again.';
     if (error.status === 409 || error.code === 'mcp_interaction_not_live') return 'This request has changed or closed. Refresh it before taking another action.';
-    if (error.code === 'mcp_interaction_owner_unavailable') return 'The original MCP connection is unavailable. Check that connection, then refresh this request.';
+    if (error.code === 'mcp_interaction_owner_unavailable') return localChoice ? 'This local choice could not be saved. Refresh and try again.' : 'The original MCP connection is unavailable. Check that connection, then refresh this request.';
     if (error.status === 403) return 'This request does not belong to the selected conversation branch.';
   }
-  return 'The response could not be confirmed. Refresh this request or retry the same response.';
+  return localChoice ? 'Your local choice could not be confirmed. Refresh this interaction or retry the same choice.'
+    : 'The response could not be confirmed. Refresh this request or retry the same response.';
 };
-const initialDraft = (view: McpInteractionView): Draft => {
+const initialDraft = (view: McpInteractionItem): Draft => {
   if (view.presentation.mode !== 'form') return {};
   const recorded = view.response?.action === 'accept' ? view.response.content : undefined;
   return Object.fromEntries(view.presentation.fields.map(field => {
@@ -64,7 +67,7 @@ function Field({ field, draft, disabled, change }: { field: McpElicitationField;
 }
 
 export function ThreadMcpInteraction({ api, identity, view, update }: {
-  api: InteractionAPI; identity: ThreadIdentity; view: McpInteractionView; update(view: McpInteractionView): void;
+  api: InteractionAPI; identity: ThreadIdentity; view: McpInteractionItem; update(view: McpInteractionItem): void;
 }) {
   const [draft, setDraft] = React.useState(() => initialDraft(view));
   const [busy, setBusy] = React.useState(false);
@@ -72,18 +75,27 @@ export function ThreadMcpInteraction({ api, identity, view, update }: {
   const [opening, setOpening] = React.useState(false);
   const [openResult, setOpenResult] = React.useState<string>();
   const [uncertain, setUncertain] = React.useState(false);
+  const [evidence, setEvidence] = React.useState<Record<string, unknown>>();
+  const [showEvidence, setShowEvidence] = React.useState(false);
   const sending = React.useRef(false);
   const attempt = React.useRef<Parameters<InteractionAPI['respondMcpInteraction']>[0] | null>(null);
   const alive = React.useRef(true);
   React.useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const { record, presentation } = view;
+  const source = record.binding.source;
+  const errorSource = source.kind === 'rpc_error';
+  const taskId = source.kind === 'rpc_error' ? source.taskId : source.relation.kind === 'task' ? source.relation.taskId : undefined;
   const ready = canRespond(view) && !busy && !uncertain;
-  const refresh = async () => {
+  const refresh = async (inspect = false) => {
     if (sending.current) return;
     sending.current = true; setBusy(true); setError(undefined);
     try {
       const result = await api.readMcpInteraction({ ...identity, operationId: record.binding.operationId, interactionId: record.id });
-      if (alive.current) { update(result); if (!canRespond(result)) setUncertain(false); }
+      if (alive.current) {
+        update(compactInteraction(result));
+        if (inspect || showEvidence) { setEvidence(result.request); setShowEvidence(true); }
+        if (!canRespond(result)) setUncertain(false);
+      }
     } catch { if (alive.current) setError('This request could not be refreshed. Check the original MCP connection and try again.'); }
     finally { sending.current = false; if (alive.current) setBusy(false); }
   };
@@ -93,10 +105,10 @@ export function ThreadMcpInteraction({ api, identity, view, update }: {
     attempt.current = input; sending.current = true; setBusy(true); setError(undefined);
     try {
       const result = await api.respondMcpInteraction(input);
-      if (alive.current) { update(result); setUncertain(false); }
+      if (alive.current) { update(compactInteraction(result)); setUncertain(false); }
     } catch (failure) {
       if (alive.current) {
-        setError(errorText(failure));
+        setError(errorText(failure, errorSource));
         setUncertain(!(failure instanceof ThreadRequestError && failure.code === 'mcp_interaction_response_invalid'));
       }
     } finally { sending.current = false; if (alive.current) setBusy(false); }
@@ -127,41 +139,57 @@ export function ThreadMcpInteraction({ api, identity, view, update }: {
     } catch { if (alive.current) setOpenResult('The browser could not open this URL. Copy the exact URL above to open it yourself.'); }
     finally { if (alive.current) setOpening(false); }
   };
-  const availability = { live: 'Original request is live', cancelled: 'Server cancelled this request', connection_lost: 'Original connection was lost', owner_unavailable: 'Original connection or account unavailable', rpc_closed: 'Original request channel closed' }[record.availability];
-  const delivery = { not_started: 'Response not sent', sending: 'Response delivery started', sent: 'Response transport confirmed', unknown: 'Response delivery unconfirmed', not_sent: 'Response was not sent' }[record.delivery];
+  const availability = errorSource
+    ? record.completionReported ? 'Server completion is recorded' : { live: 'External completion tracking is active', cancelled: 'External completion tracking was cancelled', connection_lost: 'Original connection was lost', owner_unavailable: 'External completion tracking is unavailable', rpc_closed: 'Original request channel closed' }[record.availability]
+    : { live: 'Original request is live', cancelled: 'Server cancelled this request', connection_lost: 'Original connection was lost', owner_unavailable: 'Original connection or account unavailable', rpc_closed: 'Original request channel closed' }[record.availability];
+  const delivery = record.delivery === null ? 'No MCP response applies'
+    : { not_started: 'Response not sent', sending: 'Response delivery started', sent: 'Response transport confirmed', unknown: 'Response delivery unconfirmed', not_sent: 'Response was not sent' }[record.delivery];
   return <article aria-label={`MCP request ${record.id}`} className="space-y-2 rounded border p-3 text-sm">
     <p className="font-medium">MCP server: {record.binding.endpoint.server}</p>
-    <p className="break-all text-xs text-muted-foreground">Operation {record.binding.operationId}{record.binding.relation.kind === 'task' && ` · Remote task ${record.binding.relation.taskId}`}</p>
+    <p className="break-all text-xs text-muted-foreground">Operation {record.binding.operationId}{taskId && ` · Remote task ${taskId}`}</p>
+    {source.kind === 'rpc_error' && <div className="space-y-1 text-xs">
+      <p>The original RPC {source.method} (request {String(source.outgoingRequestId)}) ended with error -32042. Its result remains that error; any external effects are not established by this card.</p>
+      <p>Your choice is saved locally. No MCP response is sent. Opening or completing the website does not retry the call, restart its Run, or grant the Agent permission.</p>
+    </div>}
     <p className="whitespace-pre-wrap">{presentation.message}</p>
-    <p className="text-xs text-muted-foreground">{availability} · {record.choice ? `Your choice: ${record.choice}` : 'No response chosen'} · {delivery}</p>
-    {record.problem && <p role="status" className="text-xs">The original request needs attention. Check its connection and refresh; the request and any response are retained.</p>}
+    <p className="text-xs text-muted-foreground">{availability} · {record.choice ? `${errorSource ? 'Local choice' : 'Your choice'}: ${record.choice}` : errorSource ? 'No local choice recorded' : 'No response chosen'} · {delivery}</p>
+    {record.problem && <p role="status" className="text-xs">{errorSource
+      ? 'External completion tracking needs attention. The original error and any local choice are retained.'
+      : 'The original request needs attention. Check its connection and refresh; the request and any response are retained.'}</p>}
     {/* HTML required/pattern rules differ from JSON Schema (an empty required string can be valid). */}
-    <form noValidate aria-label={`Respond to MCP request ${record.id}`} onSubmit={accept} className="space-y-3">
+    <form noValidate aria-label={`${errorSource ? 'Record choice for MCP interaction' : 'Respond to MCP request'} ${record.id}`} onSubmit={accept} className="space-y-3">
       {presentation.mode === 'form' ? presentation.fields.map(field => <Field key={field.name} field={field} draft={draft[field.name]!} disabled={!ready}
         change={entry => setDraft(current => ({ ...current, [field.name]: entry }))} />)
         : <div className="space-y-2">
           <p className="text-xs">Website host: {new URL(presentation.url).host}</p>
           <p className="break-all whitespace-pre-wrap">{presentation.url}</p>
-          <Button type="button" variant="outline" size="sm" disabled={opening || !(record.choice === 'accept' || record.choice === null && record.availability === 'live')} onClick={() => void open()}>Open website</Button>
+          <Button type="button" variant="outline" size="sm" disabled={opening || !(errorSource || record.choice === 'accept' || record.choice === null && record.availability === 'live')} onClick={() => void open()}>Open website</Button>
           {openResult && <p role="status" className="text-xs">{openResult}</p>}
           <p className="text-xs">{record.completionReported ? 'The server reported this external interaction complete.' : 'The server has not reported external completion.'}</p>
         </div>}
       {record.choice === null && <div className="flex flex-wrap gap-2">
-        <Button type="submit" size="sm" disabled={!ready}>Accept</Button>
-        <Button type="button" variant="outline" size="sm" disabled={!ready} onClick={() => void send({ action: 'decline' })}>Decline</Button>
-        <Button type="button" variant="ghost" size="sm" disabled={!ready} onClick={() => void send({ action: 'cancel' })}>Cancel request</Button>
+        <Button type="submit" size="sm" disabled={!ready}>{errorSource ? 'Accept locally' : 'Accept'}</Button>
+        <Button type="button" variant="outline" size="sm" disabled={!ready} onClick={() => void send({ action: 'decline' })}>{errorSource ? 'Decline locally' : 'Decline'}</Button>
+        <Button type="button" variant="ghost" size="sm" disabled={!ready} onClick={() => void send({ action: 'cancel' })}>{errorSource ? 'Cancel locally' : 'Cancel request'}</Button>
       </div>}
     </form>
-    {view.response && <details><summary>Your recorded response</summary><pre className="whitespace-pre-wrap break-all text-xs">{JSON.stringify(view.response, null, 2)}</pre></details>}
+    {view.response && <details><summary>{errorSource ? 'Your recorded local choice' : 'Your recorded response'}</summary><pre className="whitespace-pre-wrap break-all text-xs">{JSON.stringify(view.response, null, 2)}</pre></details>}
     {error && <p role="alert">{error}</p>}
-    {uncertain && canRespond(view) && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void send()}>Retry same response</Button>}
-    <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => void refresh()}>Refresh request</Button>
+    {uncertain && canRespond(view) && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void send()}>{errorSource ? 'Retry same local choice' : 'Retry same response'}</Button>}
+    <div className="flex flex-wrap gap-2">
+      <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => void refresh()}>Refresh request</Button>
+      <Button type="button" size="sm" variant="ghost" disabled={busy} aria-expanded={showEvidence}
+        onClick={() => showEvidence ? setShowEvidence(false) : evidence ? setShowEvidence(true) : void refresh(true)}>
+        {showEvidence ? 'Hide original evidence' : errorSource ? 'Show original RPC error' : 'Show original server request'}
+      </Button>
+    </div>
+    {showEvidence && evidence && <pre aria-label="Original MCP evidence" className="whitespace-pre-wrap break-all text-xs">{JSON.stringify(evidence, null, 2)}</pre>}
   </article>;
 }
 
 /** A bounded page independent of active Operations. Opening or closing this view never cancels a server request. */
 export function ThreadMcpInteractions({ api, identity, eventCursor }: { api: InteractionAPI; identity: ThreadIdentity; eventCursor: number }) {
-  const [items, setItems] = React.useState<McpInteractionView[]>([]);
+  const [items, setItems] = React.useState<McpInteractionItem[]>([]);
   const [cursor, setCursor] = React.useState<string>();
   const [nextCursor, setNextCursor] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -173,7 +201,7 @@ export function ThreadMcpInteractions({ api, identity, eventCursor }: { api: Int
       if (!controller.signal.aborted) {
         setItems(current => page.items.map(item => {
           const retained = current.find(value => sameInteraction(value, item));
-          return newerInteraction(retained, item);
+          return newerInteraction(retained, compactInteraction(item));
         }));
         setNextCursor(page.nextCursor);
       }
@@ -181,7 +209,7 @@ export function ThreadMcpInteractions({ api, identity, eventCursor }: { api: Int
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [api, identity, cursor, eventCursor, refresh]);
-  const update = (view: McpInteractionView) => setItems(current => current.map(item => sameInteraction(item, view) ? newerInteraction(item, view) : item));
+  const update = (view: McpInteractionItem) => setItems(current => current.map(item => sameInteraction(item, view) ? newerInteraction(item, compactInteraction(view)) : item));
   const waiting = items.filter(canRespond);
   const history = items.filter(item => !canRespond(item));
   return <section aria-label="MCP server requests" className="mx-auto max-w-3xl space-y-2">
@@ -189,7 +217,7 @@ export function ThreadMcpInteractions({ api, identity, eventCursor }: { api: Int
       <Button type="button" variant="ghost" size="sm" disabled={loading} onClick={() => setRefresh(value => value + 1)}>Refresh MCP requests</Button></div>
     {error && <p role="alert">{error}</p>}
     {!loading && !error && items.length === 0 && <p className="text-xs text-muted-foreground">No MCP requests on this page.</p>}
-    {waiting.length > 0 && <p className="text-xs font-medium">Awaiting your response</p>}
+    {waiting.length > 0 && <p className="text-xs font-medium">Awaiting your choice</p>}
     {waiting.map(view => <ThreadMcpInteraction key={`${view.record.binding.operationId}:${view.record.id}`} api={api} identity={identity} view={view} update={update} />)}
     {history.length > 0 && <p className="text-xs font-medium">Answered or closed requests</p>}
     {history.map(view => <ThreadMcpInteraction key={`${view.record.binding.operationId}:${view.record.id}`} api={api} identity={identity} view={view} update={update} />)}

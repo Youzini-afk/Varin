@@ -170,6 +170,13 @@ All three product consumers import contracts and transport primitives directly f
 through `registerRelayTunnelProvider` and `registerRelayTunnelLifecycle`, so this package never imports
 the UI tunnel implementation. Selecting Relay without a registered lifecycle fails explicitly.
 
+`ThreadsAPI.listMcpInteractions` returns compact `McpInteractionItem` pages; exact read/respond adds
+the complete original evidence. A tagged `server_request` retains reviewed response delivery, while
+`rpc_error` URL cards have null delivery and record only local choices. Natural Run failure or a
+closed completion watcher does not remove the user's ability to review that retained error. The
+shared panel fetches full JSON on demand; neither local choice nor explicit external navigation
+retries the old RPC or resumes its Run. Public identity checks remain the original Thread/branch path.
+
 ## URL-auth mint lifetime
 
 `transport/runtime-auth.ts` owns the shared in-flight URL-token mint, including its 10-second

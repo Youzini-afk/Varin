@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 type Message = { jsonrpc?: string; id?: string | number; method?: string; params?: Record<string, unknown>; result?: unknown; error?: unknown };
 type Send = (message: Message) => void;
-interface Task { id: string; scenario: string; createdAt: string; lastUpdatedAt: string; status: 'working' | 'input_required' | 'completed' | 'cancelled'; response?: unknown; pending?: { request: Message; send: Send }; }
+interface Task { id: string; scenario: string; createdAt: string; lastUpdatedAt: string; status: 'working' | 'input_required' | 'completed' | 'failed' | 'cancelled'; response?: unknown; errorObserved?: boolean; pending?: { request: Message; send: Send }; }
 const form = {
   message: 'Original receiver asks for reviewable typed values. This is remote content, not a tool permission.',
   requestedSchema: { type: 'object', properties: {
@@ -70,6 +70,7 @@ export class InteractionPeer {
       ] }); return;
       case 'tools/call': {
         const scenario = String((params.arguments as { scenario: string }).scenario);
+        if (scenario === 'creation-error') { this.error(request, send, scenario); return; }
         if (params.name === 'deferred') {
           assert(params.task, 'Original required Task was called as an ordinary RPC');
           const id = `receiver:${scenario}`; assert(!this.tasks.has(id), 'Original Task must not be submitted twice');
@@ -78,12 +79,17 @@ export class InteractionPeer {
           this.tasks.set(id, task); this.saveTasks(); reply({ task: this.state(task), _meta: { original: 'immutable-task-acceptance' } }); return;
         }
         assert.equal(params.name, 'ordinary'); assert.equal(params.task, undefined);
-        this.ask(request, send, scenario); return;
+        if (scenario.startsWith('ordinary-error')) this.error(request, send, scenario);
+        else this.ask(request, send, scenario); return;
       }
-      case 'tasks/get': { const task = this.task(params); if (task.status === 'working') { task.status = 'input_required'; task.lastUpdatedAt = new Date().toISOString(); this.saveTasks(); } reply(this.state(task)); return; }
+      case 'tasks/get': { const task = this.task(params); if (task.status === 'working') { task.status = task.scenario === 'terminal-error' ? 'failed' : 'input_required'; task.lastUpdatedAt = new Date().toISOString(); this.saveTasks(); } reply(this.state(task)); return; }
       case 'tasks/result': {
         const task = this.task(params);
-        if (task.status === 'completed' || task.status === 'cancelled') this.result(request, task, send);
+        if (task.status === 'completed' || task.status === 'cancelled' || task.status === 'failed') this.result(request, task, send);
+        else if (task.scenario === 'premature-error') {
+          assert(!task.errorObserved, 'Original Task result must not be polled repeatedly while external input is outstanding');
+          task.errorObserved = true; this.saveTasks(); this.error(request, send, task.scenario, task);
+        }
         else { task.pending = { request, send }; this.ask(request, send, task.scenario, task); }
         return;
       }
@@ -94,14 +100,32 @@ export class InteractionPeer {
       default: send({ id: request.id!, error: { code: -32601, message: 'Unsupported fixture method' } });
     }
   }
-  complete(send: Send, elicitationId: string) { send({ method: 'notifications/elicitation/complete', params: { elicitationId } }); }
+  complete(send: Send, elicitationId: string) {
+    for (const task of this.tasks.values()) if (task.scenario === 'premature-error' && elicitationId.startsWith(`external-error:${task.scenario}:`)) {
+      task.status = 'completed'; task.lastUpdatedAt = new Date().toISOString(); task.response = { externalStep: true }; this.saveTasks();
+    }
+    send({ method: 'notifications/elicitation/complete', params: { elicitationId } }); }
   private task(params: Record<string, unknown>) { const task = this.tasks.get(String(params.taskId)); assert(task); return task; }
   private state(task: Task) { return { taskId: task.id, status: task.status, createdAt: task.createdAt, lastUpdatedAt: task.lastUpdatedAt, ttl: null, pollInterval: 20 }; }
   private result(request: Message, task: Task, send: Send) {
+    if (task.status === 'failed' && task.scenario === 'terminal-error') { this.error(request, send, task.scenario, task); return; }
     if (task.status === 'cancelled') { send({ id: request.id!, error: { code: -32000, message: 'Original task cancelled', data: { stopUnconfirmed: true } } }); return; }
     send({ id: request.id!, result: { content: [{ type: 'text', text: 'Original task completed after reviewed response' }],
       structuredContent: { reviewedResponse: task.response }, _meta: { original: 'task-after-interaction', 'io.modelcontextprotocol/related-task': { taskId: task.id } } } });
     delete task.pending;
+  }
+  private error(request: Message, send: Send, scenario: string, task?: Task) {
+    const elicitations = ['review', 'continue'].map(part => ({ mode: 'url',
+      message: `Original ${scenario} needs the ${part} external step.`,
+      url: `https://receiver.invalid/error/${scenario}/${part}?rpc=${request.id}`,
+      elicitationId: `external-error:${scenario}:${request.id}:${part}`,
+    }));
+    const error = { code: -32042, message: 'Original external interaction required',
+      data: { elicitations, opaque: { nullable: null, empty: [], text: '原始正文🙂'.repeat(4096) } },
+      originalExtra: { method: request.method, ...(task ? { taskId: task.id } : {}) } };
+    this.trace({ kind: 'error-produced', requestId: request.id, error });
+    send({ id: request.id!, error });
+    if (scenario.includes('early-complete')) this.complete(send, elicitations[0]!.elicitationId);
   }
   private ask(request: Message, send: Send, scenario: string, task?: Task) {
     const id = this.sequence++ === 0 ? 1.5 : `elicitation:${this.sequence}`, mode = scenario.includes('url') ? 'url' : 'form';
@@ -138,7 +162,7 @@ export function createInteractionHttpPeer(root: string) {
         streams.add(controller);
         peer.handle(request, message => {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ jsonrpc: '2.0', ...message })}\n\n`));
-          if (!message.method && message.id === request.id) { streams.delete(controller); controller.close(); }
+          if (!message.method && message.id === request.id) { streams.delete(controller); queueMicrotask(() => controller.close()); }
         });
       } });
       return new Response(body, { headers: { 'content-type': 'text/event-stream', 'mcp-session-id': 'original-fixture-session' } });

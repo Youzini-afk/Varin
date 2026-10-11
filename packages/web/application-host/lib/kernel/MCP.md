@@ -196,9 +196,43 @@ URL content is plain remote text with the exact URL/host. Opening uses the exist
 only on an explicit user action; no fetch, preview, favicon, embedded access or inferred completion.
 Server completion can precede local consent or arrive after the finite RPC ends, while that actual
 client still owns the matching elicitation ID. Consent/opening does not itself prove completion.
-Dedicated `-32042` error-source interaction cards and sampling remain subsequent work; original RPC
-error bodies are preserved without replay. Subscribe and explicit unsubscribe retain their own real
-invocation association/error body; background observer cleanup cannot impersonate a user-facing call.
+Sampling remains subsequent work. Subscribe and explicit unsubscribe retain their own real invocation
+association/error body; background observer cleanup cannot impersonate a user-facing call.
+
+### Error-source URL requirements
+
+An actual matching `-32042` response can supply URL requirements without creating an inbound server
+request. The installed client's synchronous error observation hook retains exact outgoing method/ID,
+Operation/executor, actual client and endpoint before a following completion notification arrives.
+The same hook covers ordinary stdio, whose outgoing response association is already known, plus
+HTTP tools/services/subscription and original Task creation/get/result/cancel paths. Synthetic transport
+errors cannot use this hook as received-response or stop evidence.
+
+The complete original error, including unknown fields, remains the execution receipt or Task
+observation/result. Local `interactionProblem` diagnostics explain an invalid URL requirement or
+ambiguous active identity without trusting remote diagnostic names or changing the original error.
+The original Catalog stores each error's normalized URL cards against one shared immutable body;
+all card metadata publishes atomically. Paged items omit the full error, while exact read returns it.
+
+Error-card delivery is null. The public response entry records a local choice only, including after
+a natural Run failure or lost completion watcher. No protocol response, old Run resume, task recreation
+or tools/call retry follows. Original source/Goal/cancel/client/grant fences close automatic tracking;
+manual review and explicit navigation of retained evidence do not reacquire execution permission.
+External completion is a separate original-client/elicitation-ID fact. Ambiguous active ID reuse
+invalidates that association instead of guessing which invocation a later notification belongs to.
+
+For accepted Tasks, nonterminal premature `tasks/result` errors remain diagnostic rather than cached
+future terminal results. A fresh known-terminal result error remains the actual underlying error.
+Status/completion or an explicit original Task read can continue observation of the same accepted ID,
+never replay creation. A get normally joins an existing request. If its original Catalog read already
+sees the blocked error, its new recheck waits for any delayed local acknowledgement before issuing
+or joining the next original Task read. It does not silently add retries to ordinary joining.
+
+An accepted server-request URL can retain its exact completion watcher after normal Task result
+retirement, as after an ordinary RPC. Sending ends with `rpc_closed`; the Task is not revived.
+Original cancel/source/Goal/owner-loss fences still withdraw that association, and Catalog rechecks
+them before publishing a delayed completion. The [error-source verification record](../../../../../docs/reviews/runtime-mcp-error-interactions-2026-10-11.md)
+keeps these protocol boundaries and evidence separate.
 
 The [verification record](../../../../../docs/reviews/runtime-mcp-interactions-2026-10-11.md) distinguishes
 original Rust/Host/SDK composition, controlled peer work and outstanding full product/platform checks.

@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 7;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 8;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -115,6 +115,7 @@ pub(crate) const KERNEL_INPUT_ORDER_PARAMS: &[(&str, &str)] = &[
 ];
 pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
     "runtime.mcp.interaction.open",
+    "runtime.mcp.interaction.error.open",
     "runtime.mcp.interaction.list",
     "runtime.mcp.interaction.read",
     "runtime.mcp.interaction.respond",
@@ -135,6 +136,13 @@ pub(crate) struct McpInteractionOpenParams {
     pub(crate) mode: varin_runtime::McpInteractionMode,
     pub(crate) request: std::collections::BTreeMap<String, Value>,
     pub(crate) presentation: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpInteractionErrorOpenParams {
+    pub(crate) items: Vec<McpInteractionErrorItem>,
+    pub(crate) request: std::collections::BTreeMap<String, Value>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2291,6 +2299,14 @@ pub(crate) struct HostToolErrorMarker {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpInteractionErrorItem {
+    pub(crate) id: String,
+    pub(crate) binding: varin_runtime::catalog::mcp_interactions::McpInteractionBinding,
+    pub(crate) presentation: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SubmitLaunch {
     pub(crate) inherit_source: Option<bool>,
     pub(crate) source: RequiredNullable<LaunchSourceParams>,
@@ -2751,6 +2767,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
     match method {
         "runtime.mcp.interaction.open" => {
             serde_json::from_value::<McpInteractionOpenParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.mcp.interaction.error.open" => {
+            serde_json::from_value::<McpInteractionErrorOpenParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

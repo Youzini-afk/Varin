@@ -102,7 +102,7 @@ records typed dependencies in its manifests. Original publication protection spa
 the short identity/epoch/revision-checked commit. GC follows those dependencies from the existing
 history, input, operation, event, policy and request roots. Catalog retains only original metadata;
 byte reads, hash/base64 work and provider serialization stay outside its control lock. Catalog
-format **52**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **7** reject older internal
+format **53**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **8** reject older internal
 formats directly. These are distinct from policy service **4** and private script worker protocol **2**.
 
 `runtime.output.media.read` uses the original caller Thread/branch plus an actual history, queued
@@ -158,8 +158,15 @@ transport completion/uncertainty and URL completion remain separate. Cancellatio
 retirement fence the original sender; accepted global Tasks can outlive their invoking Run.
 Reopen closes old inbound requests without replaying answers or remote tools. Original short facts and
 bodies remain readable through exact Thread/branch authenticated, paged list/read/respond APIs.
-See [MCP](../../../packages/web/application-host/lib/kernel/MCP.md) and the
-[finite verification record](../../../docs/reviews/runtime-mcp-interactions-2026-10-11.md).
+Error-source URL requirements carry the actual outgoing RPC method/ID instead of an inbound request
+ID. Their delivery is null: a local choice sends no JSON-RPC response and remains possible after
+natural Run termination or watcher closure. One original error body is shared by its URL selectors;
+all short records publish atomically, paged items omit the full error, and exact reads retain it.
+Source/Goal/cancel/reopen fence automatic completion, not historical user review. Original execution
+errors and accepted Task results remain independent and are never replayed by a card.
+See [MCP](../../../packages/web/application-host/lib/kernel/MCP.md), the
+[server-request record](../../../docs/reviews/runtime-mcp-interactions-2026-10-11.md), and the
+[error-source record](../../../docs/reviews/runtime-mcp-error-interactions-2026-10-11.md).
 
 ## Instruction and skill checkpoint binding
 

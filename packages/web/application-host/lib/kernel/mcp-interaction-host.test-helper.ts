@@ -27,6 +27,7 @@ export async function createInteractionFixture(options: { root: string; mode: 'h
   const sdkUrl = new URL('../node_modules/@earendil-works/pi-mcp/dist/index.js', import.meta.resolve('@varin/pi-host/mcp-authority'));
   const { StreamableHttpTransport } = await import(sdkUrl.href) as { StreamableHttpTransport: new (options: { url: string; fetch: ReturnType<typeof createInteractionHttpPeer>['fetch'] }) => ReturnType<NonNullable<McpAuthorityOptions['createTransport']>> };
   const authority = new McpAuthority({ interactions: input => interactions.receiver(input),
+    interactionErrors: input => interactions.errorReceiver(input),
     ...(http ? { createTransport: () => new StreamableHttpTransport({ url: 'https://receiver.invalid/mcp', fetch: http.fetch }) } : {}) });
   const compositions = new McpCompositions(authority, code => options.onError(new Error(code)));
   const recovery = createMcpTaskRecovery({ kernel, authority, agentDir, hostId: 'fixture-host',
@@ -60,7 +61,10 @@ export async function createInteractionFixture(options: { root: string; mode: 'h
     },
     async receive(frame: Record<string, unknown>) { assert(nested); const prepared = await nested.receive(frame); interactions.start(); return prepared; },
     consume(frame: Record<string, unknown>) { return consumer.perform(frame); },
-    complete(elicitationId: string) { assert(http); http.complete(elicitationId); },
+    async complete(elicitationId: string) {
+      assert(http); await tasks.reconcile(); http.complete(elicitationId);
+      await new Promise<void>(resolve => setImmediate(resolve));
+    },
     async finish() {
       await tasks.dispose(); await interactions.dispose(); await nested?.close(); consumer.close();
       for (const scope of scopes.splice(0)) scope.release(); firstLease.release(); compositions.close(); await authority.close(); http?.close();
