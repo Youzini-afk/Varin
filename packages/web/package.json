@@ -33,7 +33,7 @@
     "dev": "bun run build:watch",
     "dev:server": "bun run build:application-host && node server/index.js",
     "dev:server:watch": "bun run prepare:application-host && nodemon --exitcrash --watch application-host --ext js,ts --exec \"node scripts/run-application-host-dev.mjs\"",
-    "prepare:application-host": "bun run --cwd ../application-client build && bun run --cwd ../runtime-broker build && bun run --cwd ../extension-host build",
+    "prepare:application-host": "bun run --cwd ../application-client build && bun run --cwd ../runtime-broker build && bun run --cwd ../extension-host build && bun run --cwd ../script-runtime build",
     "build:application-host:raw": "node scripts/build-application-host.mjs",
     "build:application-host:types": "node scripts/build-application-host-types.mjs",
     "build:application-host": "bun run prepare:application-host && bun run build:application-host:raw",
@@ -109,7 +109,8 @@
     "web-tree-sitter": "^0.27.0",
     "ws": "^8.22.0",
     "yaml": "^2.9.1",
-    "yazl": "^3.3.1"
+    "yazl": "^3.3.1",
+    "@varin/script-runtime": "workspace:*"
   },
   "devDependencies": {
     "@huggingface/transformers": "4.3.0",

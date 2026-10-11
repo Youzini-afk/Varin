@@ -306,7 +306,8 @@ mod engines {
             owner_generation: db.epoch(),
             binding: RequestBinding {
                 child_dispatch: None,
-                goal: None, resource_activations: Vec::new(),
+                goal: None,
+                resource_activations: Vec::new(),
                 resource_checkpoint_id: None,
                 connection_identity: "fixture-connection".into(),
                 provider_family: "test".into(),
@@ -315,6 +316,7 @@ mod engines {
                 configuration_generation: 1,
                 tool_schema_generation: 1,
                 tools: vec![ToolSchema {
+                    requirements: None,
                     description: String::new(),
                     output_schema: None,
                     metadata: None,

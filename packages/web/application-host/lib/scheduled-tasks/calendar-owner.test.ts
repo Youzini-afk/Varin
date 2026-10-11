@@ -5,6 +5,7 @@ import path from 'node:path';
 import type { CalendarDefinition, CalendarOccurrence, CalendarPreparation, CalendarProject, CalendarSyncParams, CalendarPending, AgentRuntimeStreamEvent } from '@varin/protocol';
 import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 import { KernelClientError } from '../kernel/kernel-client.js';
+import { KERNEL_PROTOCOL_VERSION } from '../kernel/protocol.generated.js';
 import { CalendarOwner } from './calendar-owner.js';
 import { createScheduledTasksRuntime } from './runtime.js';
 import { createScheduledTaskService, readScheduledProjects } from './service.js';
@@ -88,7 +89,7 @@ it('calculation proceeds beside a held cold preparation, and a resume while its 
   try {
     await owner.recover(); await vi.waitFor(() => expect(prepare).toHaveBeenCalledOnce());
     expect(client.calculatedCalendar).toHaveBeenCalledOnce();
-    event({ v: 1, kind: 'runtime-event', stream: 'durable', kernelEpoch: 'original', cursor: 2 });
+    event({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', stream: 'durable', kernelEpoch: 'original', cursor: 2 });
     await owner.recover(); release();
     await vi.waitFor(() => expect(prepare).toHaveBeenCalledTimes(2));
     expect(fail).not.toHaveBeenCalled(); expect(errors).toEqual([]);

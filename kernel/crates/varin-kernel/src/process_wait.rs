@@ -49,7 +49,7 @@ pub(crate) fn builtin_schemas(
 pub(crate) fn schemas(mut tools: Vec<ToolSchema>) -> Vec<ToolSchema> {
     tools.retain(|tool| tool.name != WAIT_TOOL);
     if tools.iter().any(|tool| tool.name == "process_inspect") {
-        tools.push(ToolSchema { description: "Wait durably for a process started by this Run. Use the processId from process_spawn. This parks model execution until an observed terminal fact; cancelling this observation does not stop the process. Read output separately with process_read.".into(), output_schema: None, metadata: None, name: WAIT_TOOL.into(), version: "1".into(), schema: json!({"type":"object",
+        tools.push(ToolSchema { requirements: None, description: "Wait durably for an original managed process. Use the processId returned by process_spawn or the environmentId returned by script_open. Script environments remain bound to their original Run. This parks model execution until an observed terminal fact; cancelling this observation does not stop the process. Read output separately with process_read.".into(), output_schema: None, metadata: None, name: WAIT_TOOL.into(), version: "1".into(), schema: json!({"type":"object",
             "properties":{"processId":{"type":"string","minLength":1}}, "required":["processId"], "additionalProperties":false
         }) });
     }
@@ -181,6 +181,15 @@ impl ProcessWaitTools {
         }
         let catalog = self.catalog.lock().map_err(error)?;
         let process = catalog.operation(&id).map_err(error)?;
+        if process
+            .managed_process
+            .as_ref()
+            .is_none_or(|p| p.is_environment())
+        {
+            return Err(error(
+                "Script environment input is private to its admitted cell",
+            ));
+        }
         if process.cancel_requested {
             return Err(error("original process cancellation was requested"));
         }
@@ -448,7 +457,9 @@ impl ToolExecutor for ProcessWaitTools {
                 operation_id: c.operation_id.clone(),
                 phase: "awaiting_process".into(),
                 effect: Effect::None,
-                lifetime: Lifetime::Thread, content: None, })
+                lifetime: Lifetime::Thread,
+                content: None,
+            })
         })();
         result.unwrap_or_else(|e| ToolCompletion::Result {
             outcome: Outcome::Failed,

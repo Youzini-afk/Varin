@@ -346,7 +346,7 @@ impl DelegatedExecutionRead {
             selected_profile: serde_json::from_value(
                 self.content.load(&child.selected_profile_ref)?,
             )?,
-            launch: execution.launch.load(&self.content)?,
+            launch: execution.launch.load_child_intent(&self.content)?,
             trigger: execution.trigger,
             policy_target: execution.policy_target,
             source_basis,

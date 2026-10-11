@@ -52,6 +52,8 @@ export interface VarinExtensionServiceRequirement {
 
 /** One service declaration also supplies its tool projection; read is a claim, never a grant. */
 export interface VarinExtensionToolDeclaration {
+  /** Execution dependency declaration; actual source and process grants remain Host-owned. */
+  requirements?: { source: 'source' | 'physical' | 'live'; process: boolean };
   name: string;
   description: string;
   inputSchema: JsonObject | boolean;

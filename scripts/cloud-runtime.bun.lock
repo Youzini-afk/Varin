@@ -37,6 +37,11 @@
         "tar": "^7.5.22",
       },
     },
+    "packages/script-runtime": {
+      "name": "@varin/script-runtime",
+      "version": "0.1.0",
+      "dependencies": { "@varin/protocol": "workspace:*" },
+    },
     "packages/pi-host": {
       "name": "@varin/pi-host",
       "version": "0.1.0",
@@ -49,6 +54,7 @@
         "@earendil-works/pi-coding-agent": "1.0.4",
         "@earendil-works/pi-mcp": "1.0.4",
         "@varin/protocol": "0.1.0",
+        "@varin/script-runtime": "0.1.0",
         "ajv": "^8.20.0",
         "ajv-formats": "^3.0.1",
         "jsonc-parser": "^3.3.1",
@@ -91,6 +97,7 @@
         "@varin/extension-contract": "workspace:*",
         "@varin/extension-host": "workspace:*",
         "@varin/pi-host": "workspace:*",
+        "@varin/script-runtime": "workspace:*",
         "@varin/protocol": "workspace:*",
         "@varin/runtime-broker": "workspace:*",
         "@varin/settings-store": "workspace:*",
@@ -465,6 +472,8 @@
     "@varin/protocol": ["@varin/protocol@workspace:packages/protocol"],
 
     "@varin/runtime-broker": ["@varin/runtime-broker@workspace:packages/runtime-broker"],
+
+    "@varin/script-runtime": ["@varin/script-runtime@workspace:packages/script-runtime"],
 
     "@varin/settings-store": ["@varin/settings-store@workspace:packages/settings-store"],
 

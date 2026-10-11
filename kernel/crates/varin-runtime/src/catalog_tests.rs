@@ -130,11 +130,26 @@ fn pre_default_membership_catalog_is_rejected_before_recovery() {
     let f = Fixture::new();
     drop(f.open());
     let raw = Connection::open(f.0.join("conversation.sqlite")).unwrap();
-    let epoch: i64 = raw.query_row("SELECT epoch FROM runtime_meta WHERE id=1", [], |row| row.get(0)).unwrap();
+    let epoch: i64 = raw
+        .query_row("SELECT epoch FROM runtime_meta WHERE id=1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
     raw.pragma_update(None, "user_version", 39).unwrap();
     assert!(matches!(Catalog::open(&f.0), Err(RuntimeError::Format(39))));
-    assert_eq!(raw.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 39);
-    assert_eq!(raw.query_row("SELECT epoch FROM runtime_meta WHERE id=1", [], |row| row.get::<_, i64>(0)).unwrap(), epoch);
+    assert_eq!(
+        raw.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        39
+    );
+    assert_eq!(
+        raw.query_row("SELECT epoch FROM runtime_meta WHERE id=1", [], |row| row
+            .get::<_, i64>(
+            0
+        ))
+        .unwrap(),
+        epoch
+    );
 }
 
 #[test]
@@ -352,13 +367,28 @@ fn dispatched_model_is_interrupted_and_not_sent_again() {
     );
     assert!(db.dispatch_model_step("step", db.epoch()).is_err());
     let reopened = db.model_step("step").unwrap();
-    assert_eq!(reopened.request, json!({"model":"test","history":["hello"]}));
-    let usage: crate::execution::UsageReceipt =
-        serde_json::from_value(reopened.usage.expect("interrupted usage is explicitly missing")).unwrap();
-    assert_eq!(usage.measurement, crate::execution::UsageMeasurement::Missing);
     assert_eq!(
-        [usage.input_tokens, usage.output_tokens, usage.cached_input_tokens,
-         usage.cache_write_tokens, usage.reasoning_tokens],
+        reopened.request,
+        json!({"model":"test","history":["hello"]})
+    );
+    let usage: crate::execution::UsageReceipt = serde_json::from_value(
+        reopened
+            .usage
+            .expect("interrupted usage is explicitly missing"),
+    )
+    .unwrap();
+    assert_eq!(
+        usage.measurement,
+        crate::execution::UsageMeasurement::Missing
+    );
+    assert_eq!(
+        [
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cached_input_tokens,
+            usage.cache_write_tokens,
+            usage.reasoning_tokens
+        ],
         [None; 5],
     );
 }
@@ -399,7 +429,8 @@ fn request_snapshot(receipt: &Receipt) -> crate::execution::RequestSnapshot {
             },
             binding: RequestBinding {
                 child_dispatch: None,
-                goal: None, resource_activations: Vec::new(),
+                goal: None,
+                resource_activations: Vec::new(),
                 resource_checkpoint_id: None,
                 connection_identity: "fixture-connection".into(),
                 provider_family: "test".into(),
@@ -584,6 +615,7 @@ fn tool_batch_receipt_cannot_cross_between_two_active_runs() {
     let epoch = db.epoch();
     let mut snapshot = request_snapshot(&original);
     snapshot.view.binding.tools = vec![ToolSchema {
+        requirements: None,
         description: String::new(),
         output_schema: None,
         metadata: None,
@@ -666,6 +698,7 @@ fn unfinished_model_tool_exchange_cannot_complete_a_run() {
         .unwrap();
     let mut snapshot = request_snapshot(&r);
     snapshot.view.binding.tools = vec![ToolSchema {
+        requirements: None,
         description: String::new(),
         output_schema: None,
         metadata: None,
@@ -847,6 +880,7 @@ fn early_external_terminal_and_model_job_acceptance_converge() {
     let epoch = db.epoch();
     let mut snapshot = request_snapshot(&r);
     snapshot.view.binding.tools = vec![ToolSchema {
+        requirements: None,
         description: String::new(),
         output_schema: None,
         metadata: None,
@@ -954,7 +988,9 @@ fn early_external_terminal_and_model_job_acceptance_converge() {
             operation_id: operation_id.into(),
             phase: "accepted".into(),
             effect: Effect::Dispatched,
-            lifetime: Lifetime::Thread, content: None,},
+            lifetime: Lifetime::Thread,
+            content: None,
+        },
     };
     db.commit_execution(&r.run_id, epoch, &{
         let result = result.clone();
@@ -1459,12 +1495,18 @@ fn content_backed_request_stays_compact_across_phases_and_reopens_exactly() {
         .unwrap();
     assert_eq!(step.request, request);
     assert_eq!(compact_body(&db)["request"], original_ref);
-    assert_eq!(content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap(), 0);
+    assert_eq!(
+        content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap(),
+        0
+    );
     drop(db);
     let db = f.open();
     assert_eq!(db.model_step("content-step").unwrap().request, request);
     assert_eq!(compact_body(&db)["request"], original_ref);
-    assert_eq!(content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap(), 0);
+    assert_eq!(
+        content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap(),
+        0
+    );
 }
 
 #[test]
@@ -2028,6 +2070,7 @@ fn tool_activation_retains_its_exact_composition_through_collection_and_reopen()
     snapshot.view.binding = initial.binding.clone();
     snapshot.view.binding.history_range = range;
     let schema = ToolSchema {
+        requirements: None,
         description: String::new(),
         output_schema: None,
         metadata: None,
@@ -2377,6 +2420,7 @@ fn dispatched_no_effect_requires_exact_durable_executor_evidence() {
     let epoch = db.epoch();
     let mut snapshot = request_snapshot(&run);
     snapshot.view.binding.tools = vec![ToolSchema {
+        requirements: None,
         description: String::new(),
         output_schema: None,
         metadata: None,
@@ -2640,7 +2684,11 @@ fn recovery_preparation_hydrates_without_catalog_and_rechecks_its_actual_boundar
             .content
             .save(&json!({"orphan":"protected until preparation ends"}))
             .unwrap();
-        assert_eq!(content_collection::collect(|| catalog.prepare_content_collection(Default::default())).unwrap(), 0);
+        assert_eq!(
+            content_collection::collect(|| catalog.prepare_content_collection(Default::default()))
+                .unwrap(),
+            0
+        );
         let (send, receive) = mpsc::channel();
         let worker = std::thread::spawn(move || {
             send.send(preparation.load(&CancellationToken::default()))
@@ -2690,7 +2738,10 @@ fn recovery_preparation_hydrates_without_catalog_and_rechecks_its_actual_boundar
         }
         let collection = catalog.prepare_content_collection(Default::default());
         drop(catalog);
-        assert!(content_collection::collect(|| collection).unwrap() > 0, "publication pin must release");
+        assert!(
+            content_collection::collect(|| collection).unwrap() > 0,
+            "publication pin must release"
+        );
         let mut catalog = owner.lock().unwrap();
         if change == "cancel" {
             assert_eq!(
@@ -2714,6 +2765,7 @@ fn recovery_preparation_discards_stale_failure_after_a_real_tool_receipt_arrives
     let epoch = catalog.epoch();
     let mut snapshot = request_snapshot(&receipt);
     snapshot.view.binding.tools = vec![ToolSchema {
+        requirements: None,
         description: String::new(),
         output_schema: None,
         metadata: None,
@@ -2900,7 +2952,14 @@ fn result_publication_stages_without_catalog_and_gc_protects_until_commit() {
         .is_none());
     drop(catalog);
     worker.join().unwrap();
-    assert_eq!(content_collection::collect(|| owner.lock().unwrap().prepare_content_collection(Default::default())).unwrap(), 0);
+    assert_eq!(
+        content_collection::collect(|| owner
+            .lock()
+            .unwrap()
+            .prepare_content_collection(Default::default()))
+        .unwrap(),
+        0
+    );
     let operation = owner
         .lock()
         .unwrap()
@@ -2912,7 +2971,13 @@ fn result_publication_stages_without_catalog_and_gc_protects_until_commit() {
             prepared,
         )
         .unwrap();
-    content_collection::collect(|| owner.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
+    content_collection::collect(|| {
+        owner
+            .lock()
+            .unwrap()
+            .prepare_content_collection(Default::default())
+    })
+    .unwrap();
     let read = owner.lock().unwrap().capture_operation_read(operation);
     assert_eq!(read.load().unwrap().result, Some(expected));
 }
@@ -2927,6 +2992,7 @@ fn external_result_outlives_kernel_until_original_stop_receipt() {
         let epoch = db.epoch();
         let mut snapshot = request_snapshot(&run);
         snapshot.view.binding.tools = vec![ToolSchema {
+            requirements: None,
             name: "broker_read".into(),
             version: "1".into(),
             description: "Read through an external worker".into(),
@@ -3108,33 +3174,62 @@ fn reply_deadline_short_facts_recheck_clock_and_catch_up_without_replacing_a_win
         // This is the same short event produced by accepted_reply, before observation
         // registration. The body remains outside these Wait/Event records.
         let reply_cursor = accepted_at.map(|accepted_at_ms| {
-            event(&tx, case, 1, REPLY_EVENT,
-                json!({"reply_message_id":format!("reply:{case}"),"accepted_at_ms":accepted_at_ms})).unwrap()
+            event(
+                &tx,
+                case,
+                1,
+                REPLY_EVENT,
+                json!({"reply_message_id":format!("reply:{case}"),"accepted_at_ms":accepted_at_ms}),
+            )
+            .unwrap()
         });
         let mut wait = Wait {
-            id: format!("reply-wait:{case}"), run_id:receipt.run_id.clone(),
-            subject:case.into(), kind:REPLY_EVENT.into(), after_cursor:after,
-            deadline_at_ms:deadline, trigger_cursor:None, cancelled:false,
+            id: format!("reply-wait:{case}"),
+            run_id: receipt.run_id.clone(),
+            subject: case.into(),
+            kind: REPLY_EVENT.into(),
+            after_cursor: after,
+            deadline_at_ms: deadline,
+            trigger_cursor: None,
+            cancelled: false,
         };
-        tx.execute("INSERT INTO waits(id,run_id,body) VALUES(?1,?2,?3)",
-            params![wait.id,wait.run_id,encode(&wait).unwrap()]).unwrap();
+        tx.execute(
+            "INSERT INTO waits(id,run_id,body) VALUES(?1,?2,?3)",
+            params![wait.id, wait.run_id, encode(&wait).unwrap()],
+        )
+        .unwrap();
         if accepted_at.is_none() {
             assert!(!resolve(&tx, &mut wait, 900).unwrap());
-            assert!(!resolve(&tx, &mut wait, 800).unwrap(), "backward wall adjustment cannot expire early");
+            assert!(
+                !resolve(&tx, &mut wait, 800).unwrap(),
+                "backward wall adjustment cannot expire early"
+            );
         }
         assert_eq!(resolve(&tx, &mut wait, 2000).unwrap(), deadline.is_some());
         let winner = wait.trigger_cursor;
         if case == "early-before-registration" {
-            assert_eq!(winner, reply_cursor, "an already accepted on-time reply wins after delayed reconciliation");
+            assert_eq!(
+                winner, reply_cursor,
+                "an already accepted on-time reply wins after delayed reconciliation"
+            );
         } else if deadline.is_some() {
-            let kind:String=tx.query_row("SELECT kind FROM events WHERE cursor=?1",[sql_number(winner.unwrap()).unwrap()],|r|r.get(0)).unwrap();
+            let kind: String = tx
+                .query_row(
+                    "SELECT kind FROM events WHERE cursor=?1",
+                    [sql_number(winner.unwrap()).unwrap()],
+                    |r| r.get(0),
+                )
+                .unwrap();
             assert_eq!(kind, "wait.expired");
         } else {
             assert_eq!(winner, None);
         }
         assert!(!resolve(&tx, &mut wait, 700).unwrap());
-        assert_eq!(wait.trigger_cursor, winner, "backward clock adjustment cannot replace the persisted winner");
-        let persisted:Wait = record(&tx, "waits", &wait.id).unwrap();
+        assert_eq!(
+            wait.trigger_cursor, winner,
+            "backward clock adjustment cannot replace the persisted winner"
+        );
+        let persisted: Wait = record(&tx, "waits", &wait.id).unwrap();
         assert_eq!(persisted.deadline_at_ms, deadline);
         assert_eq!(persisted.trigger_cursor, winner);
         tx.commit().unwrap();

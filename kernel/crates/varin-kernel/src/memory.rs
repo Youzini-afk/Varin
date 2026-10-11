@@ -46,7 +46,7 @@ pub(crate) fn builtin_schema() -> crate::run_tools::BuiltinSchema {
     crate::run_tools::BuiltinSchema::child(schema(true), None, &[Worker])
 }
 pub(crate) fn schema(mutations: bool) -> ToolSchema {
-    ToolSchema { description: "Read or explicitly maintain ordinary persistent notes. Reads return the current catalog revision; writes require that revision. Scopes are resolved from this conversation's admitted identity. Saved notes commit immediately; system memory snapshots change only at successful compaction.".into(), output_schema: None, metadata: None,
+    ToolSchema { requirements: None, description: "Read or explicitly maintain ordinary persistent notes. Reads return the current catalog revision; writes require that revision. Scopes are resolved from this conversation's admitted identity. Saved notes commit immediately; system memory snapshots change only at successful compaction.".into(), output_schema: None, metadata: None,
         name: TOOL.into(),
         version: if mutations { "1" } else { "1-read" }.into(),
         schema: json!({"type":"object",
@@ -300,7 +300,9 @@ impl ContextPreparation for Prepare {
             let prepared: Prepared =
                 serde_json::from_value(reply["context"].clone()).map_err(error)?;
             if prepared.resources != checkpoint.resources {
-                return Err(error("ordinary personalization synchronization changed resources"));
+                return Err(error(
+                    "ordinary personalization synchronization changed resources",
+                ));
             }
             let state: MemoryState =
                 serde_json::from_value(reply["state"].clone()).map_err(error)?;

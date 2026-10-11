@@ -1,3 +1,5 @@
+import { SCRIPT_CAPABILITY, SCRIPT_TOOL_DECLARATIONS, VARIN_BUILTIN_SCRIPT_EXTENSION_ID } from './script-tools.js';
+export { SCRIPT_CAPABILITY, SCRIPT_TOOL_DECLARATIONS, VARIN_BUILTIN_SCRIPT_EXTENSION_ID } from './script-tools.js';
 import { COMPUTER_CAPABILITY, COMPUTER_TOOL_DECLARATIONS, VARIN_BUILTIN_COMPUTER_EXTENSION_ID } from './computer-tools.js';
 export { COMPUTER_CAPABILITY, COMPUTER_TOOL_DECLARATIONS, VARIN_BUILTIN_COMPUTER_EXTENSION_ID } from './computer-tools.js';
 import type {
@@ -586,6 +588,13 @@ export const VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION: VarinBuiltinExtensionDefi
   },
 };
 
+export const VARIN_BUILTIN_SCRIPT_EXTENSION: VarinBuiltinExtensionDefinition = {
+  enabledByDefault: true,
+  manifest: { id: VARIN_BUILTIN_SCRIPT_EXTENSION_ID, displayName: 'Managed JavaScript', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
+    entrypoints: { host: { activation: ['service-request'], file: 'host.cjs', mode: 'brokered' } },
+    capabilities: { host: [SCRIPT_CAPABILITY] }, provides: { services: [...SCRIPT_TOOL_DECLARATIONS] } },
+};
+
 export const VARIN_BUILTIN_COMPUTER_EXTENSION: VarinBuiltinExtensionDefinition = {
   enabledByDefault: true,
   manifest: { id: VARIN_BUILTIN_COMPUTER_EXTENSION_ID, displayName: 'Computer Use', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
@@ -686,6 +695,7 @@ export const VARIN_BUILTIN_EXTENSION_DEFINITIONS: readonly VarinBuiltinExtension
   VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION,
   VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION,
   VARIN_BUILTIN_COMPUTER_EXTENSION,
+  VARIN_BUILTIN_SCRIPT_EXTENSION,
   VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION,
   VARIN_BUILTIN_RETRIEVAL_KEYWORD_EXTENSION,
   VARIN_BUILTIN_RETRIEVAL_SEMANTIC_EXTENSION,

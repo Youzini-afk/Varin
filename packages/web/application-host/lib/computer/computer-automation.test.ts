@@ -18,6 +18,33 @@ function fixture() {
   return { actors, release, notify, revoke, coordinator, resolveActor };
 }
 describe('Computer Use execution and physical desktop ownership', () => {
+  it('cancels only its actual admitted dispatch without revoking sibling work', async () => {
+    const { coordinator: c, revoke } = fixture();
+    let first!: import('./computer-automation.js').ComputerAdmission;
+    let second!: import('./computer-automation.js').ComputerAdmission;
+    let readyA!: () => void, readyB!: () => void, finish!: () => void;
+    const a = new Promise<void>(resolve => { readyA = resolve; });
+    const b = new Promise<void>(resolve => { readyB = resolve; });
+    const drained = new Promise<void>(resolve => { finish = resolve; });
+    let physicallyCancelled = false;
+    const one = c.authorize(work('main'), 'control', 'desktop-A', async () => {
+      first = c.context.getStore()!;
+      first.signal.addEventListener('abort', () => { physicallyCancelled = true; }, { once: true });
+      readyA(); await drained; first.assert();
+    });
+    const failed = expect(one).rejects.toThrow('cell cancelled');
+    const two = c.authorize(work('main'), 'control', 'desktop-B', async () => {
+      second = c.context.getStore()!; readyB(); await drained; second.assert();
+    });
+    await Promise.all([a, b]);
+    first.cancel(new Error('cell cancelled'));
+    expect(physicallyCancelled).toBe(true);
+    expect(second.signal.aborted).toBe(false);
+    expect(revoke).not.toHaveBeenCalled();
+    finish(); await failed; await two;
+    await c.authorize(work('main'), 'control', 'desktop-A', async () => {});
+  });
+
   it('requires child requests, wakes the main thread once, waits on events, and coordinates the main thread too', async () => {
     const { coordinator: c, notify } = fixture();
     await expect(c.authorize(work('worker'), 'observe', 'desktop', async () => {})).rejects.toMatchObject({ harnessCode: 'forbidden' });
@@ -60,7 +87,7 @@ describe('Computer Use execution and physical desktop ownership', () => {
     });
     const failed = expect(active).rejects.toBeDefined();
     await ready; expect(await c.stop(actor('main').execution)).toMatchObject({ status: 'enabled', active: false }); resume(); await failed;
-    expect(revoke).toHaveBeenCalledWith(expect.objectContaining({ execution: actor('main').execution }));
+    expect(revoke).toHaveBeenCalledWith(expect.objectContaining({ execution: actor('main').execution }), ['desktop']);
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({ execution: actor('main').execution }), expect.stringContaining('user manually cancelled'), false, expect.any(String));
     await c.authorize(work('main'), 'observe', 'desktop', async () => {});
     expect((await c.request(work('worker'), 'desktop', 'control', 'Fresh work')).status).toBe('pending');

@@ -153,7 +153,10 @@ impl ChildCodeResult {
     pub fn settled(&self) -> bool {
         matches!(
             self,
-            Self::NotApplicable | Self::Published { .. } | Self::NoChanges | Self::Unavailable { .. }
+            Self::NotApplicable
+                | Self::Published { .. }
+                | Self::NoChanges
+                | Self::Unavailable { .. }
         )
     }
     pub fn effect(&self) -> Effect {
@@ -386,37 +389,40 @@ impl Catalog {
             "INSERT INTO branches(id,thread_id,head) VALUES(?1,?2,NULL)",
             params![child_branch_id, child_thread_id],
         )?;
-        let mut child = ChildTask {
-            execution_id: op.id.clone(),
-            operation_id: op.id.clone(),
-            parent_run_id: run.id.clone(),
-            parent_thread_id: run.thread_id.clone(),
-            parent_branch_id: run.branch_id.clone(),
-            origin: context.origin.clone(),
-            call_id: prepared.call_id.clone(),
-            child_thread_id,
-            child_branch_id,
-            project_id,
-            input_ref: prepared.input_ref,
-            configuration_ref: prepared.configuration_ref,
-            selected_profile_ref: prepared.selected_profile_ref,
-            dispatch_context_ref: prepared.frozen_reference,
-            launch: prepared.launch,
-            source: prepared.handoff.map_or(ChildSource::Absent, |handoff| ChildSource::Pending { handoff }),
-            code_result: if parent.selection.source.is_none() {
-                ChildCodeResult::NotApplicable
-            } else if prepared.work_mode == super::dispatch::ChildWorkMode::ReadOnly {
-                ChildCodeResult::NoChanges
-            } else {
-                ChildCodeResult::Pending
-            },
-            state: "preparing".into(),
-            revision: 1,
-            cursor: 0,
-            receipt: None,
-            report: None,
-            resources_released: false,
-        };
+        let mut child =
+            ChildTask {
+                execution_id: op.id.clone(),
+                operation_id: op.id.clone(),
+                parent_run_id: run.id.clone(),
+                parent_thread_id: run.thread_id.clone(),
+                parent_branch_id: run.branch_id.clone(),
+                origin: context.origin.clone(),
+                call_id: prepared.call_id.clone(),
+                child_thread_id,
+                child_branch_id,
+                project_id,
+                input_ref: prepared.input_ref,
+                configuration_ref: prepared.configuration_ref,
+                selected_profile_ref: prepared.selected_profile_ref,
+                dispatch_context_ref: prepared.frozen_reference,
+                launch: prepared.launch,
+                source: prepared.handoff.map_or(ChildSource::Absent, |handoff| {
+                    ChildSource::Pending { handoff }
+                }),
+                code_result: if parent.selection.source.is_none() {
+                    ChildCodeResult::NotApplicable
+                } else if prepared.work_mode == super::dispatch::ChildWorkMode::ReadOnly {
+                    ChildCodeResult::NoChanges
+                } else {
+                    ChildCodeResult::Pending
+                },
+                state: "preparing".into(),
+                revision: 1,
+                cursor: 0,
+                receipt: None,
+                report: None,
+                resources_released: false,
+            };
         // The original invocation completes at acceptance. A fast child may independently
         // finish before the model exchange or policy graph consumes this immutable fact.
         super::result_content::publish_job_acceptance(&tx, &mut op, &admitted, "preparing_child")?;
@@ -805,7 +811,9 @@ impl ChildPreparation {
         let expected = match &child.source {
             ChildSource::Absent => None,
             ChildSource::Ready { selection, .. } => Some(selection),
-            ChildSource::Pending { .. } => return Err(RuntimeError::Conflict("child source is not ready".into())),
+            ChildSource::Pending { .. } => {
+                return Err(RuntimeError::Conflict("child source is not ready".into()))
+            }
         };
         if source.as_ref() != expected {
             return Err(RuntimeError::Conflict(
@@ -855,7 +863,7 @@ impl ChildPreparation {
             Value::String(input.task)
         };
         let configuration = content.load(&child.configuration_ref)?;
-        let mut launch = child.launch.load(&content)?;
+        let mut launch = child.launch.load_child_intent(&content)?;
         launch.source = source;
         let operation_id = child.execution_id;
         let submission = submissions::PreparedSubmission::stage(submissions::SubmissionBody {
@@ -1730,11 +1738,13 @@ impl ChildWriterBindingsRead {
 }
 impl ChildWriterBindings {
     fn is_writer(&self, operation: &OperationMetadata, include_native_files: bool) -> bool {
+        if operation.managed_process.is_some() {
+            return true;
+        }
         match (&operation.execution_owner, operation.executor.as_deref()) {
             (Some(ExecutorOwner::External { identity, .. }), Some(name)) => self
                 .external_writers
                 .contains(&(identity.clone(), name.into())),
-            (Some(ExecutorOwner::Kernel), Some("process_spawn")) => true,
             (Some(ExecutorOwner::Kernel), Some("file_write" | "file_edit")) => include_native_files,
             _ => false,
         }

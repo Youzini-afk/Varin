@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
+const { protocolVersion } = require('../../../kernel/protocol/schema.json');
 const {
   defaultKernelTargetTriple,
   detectKernelBinaryIdentity,
@@ -31,7 +32,7 @@ module.exports = (context) => {
   const targetArchitecture = normalizeKernelArchitecture(process.env.VARIN_TARGET_ARCH || process.arch);
   const expectedTargetTriple = process.env.VARIN_TARGET_TRIPLE || defaultKernelTargetTriple(context.electronPlatformName, targetArchitecture);
   if (kernelManifest.schema !== 3 || kernelManifest.executable !== kernelExecutable || kernelManifest.sha256 !== kernelDigest
-    || kernelManifest.protocolVersion !== 1 || kernelManifest.platform !== context.electronPlatformName
+    || kernelManifest.protocolVersion !== protocolVersion || kernelManifest.platform !== context.electronPlatformName
     || kernelManifest.arch !== targetArchitecture || kernelManifest.targetTriple !== expectedTargetTriple
     || kernelManifest.binaryFormat !== binaryIdentity.format
     || binaryIdentity.platform !== context.electronPlatformName || binaryIdentity.arch !== targetArchitecture
@@ -85,6 +86,9 @@ module.exports = (context) => {
 
   const requiredApplicationHostFiles = [
     path.join('node_modules', '@varin', 'pi-host', 'dist', 'host-bootstrap.js'),
+    path.join('node_modules', '@varin', 'script-runtime', 'dist', 'index.js'),
+    path.join('node_modules', '@varin', 'script-runtime', 'dist', 'worker.js'),
+    path.join('node_modules', '@varin', 'extension-builtins', 'dist', 'builtin-packages', 'scripts', 'host.cjs'),
     path.join('node_modules', '@varin', 'runtime-broker', 'dist', 'index.js'),
     path.join('node_modules', '@varin', 'extension-host', 'dist', 'index.js'),
     path.join('node_modules', '@varin', 'extension-builtins', 'dist', 'builtin-packages', 'recovery', 'varin-builtin-fingerprint.txt'),

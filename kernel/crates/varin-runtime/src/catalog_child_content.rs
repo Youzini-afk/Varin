@@ -1,7 +1,9 @@
 //! Child state is metadata; task/configuration and executable descriptions are immutable bodies.
 use super::*;
 use crate::execution::ToolExecutionContext;
-use collaboration::{ChildSourceHandoff, ChildSourceRoot, ChildSource, ChildCodeResult, ChildTask, DispatchInput};
+use collaboration::{
+    ChildCodeResult, ChildSource, ChildSourceHandoff, ChildSourceRoot, ChildTask, DispatchInput,
+};
 
 pub struct ChildAdmissionPreparation {
     context: ToolExecutionContext,
@@ -34,15 +36,19 @@ impl ChildAdmissionPreparation {
         let resolved = original.resolve(&self.input)?;
         if resolved.frozen_reference != self.launch.frozen_reference
             || resolved.profile != self.launch.selected_profile
-            || serde_json::to_value(&resolved.model.configuration)? != self.launch.configuration {
-            return Err(RuntimeError::Conflict("child selection differs from its original invocation".into()));
+            || serde_json::to_value(&resolved.model.configuration)? != self.launch.configuration
+        {
+            return Err(RuntimeError::Conflict(
+                "child selection differs from its original invocation".into(),
+            ));
         }
         let database = Connection::open_with_flags(
             &self.database,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
         let operation: Operation = record(&database, "operations", &self.context.operation_id)?;
-        let admitted=super::tool_content::ToolIntent::from_operation(&operation)?.load(&self.content)?;
+        let admitted =
+            super::tool_content::ToolIntent::from_operation(&operation)?.load(&self.content)?;
         if admitted.origin != self.context.origin
             || operation.run_id != self.context.run_id
             || admitted.call.name != collaboration::DISPATCH_TOOL
@@ -53,17 +59,39 @@ impl ChildAdmissionPreparation {
             ));
         }
         if original.frozen.source.as_ref() != self.handoff.as_ref().map(|handoff| &handoff.source) {
-            return Err(RuntimeError::Conflict("child source differs from the frozen invocation".into()));
+            return Err(RuntimeError::Conflict(
+                "child source differs from the frozen invocation".into(),
+            ));
         }
         if let Some(handoff) = &self.handoff {
             handoff.source.validate()?;
-            if handoff.operation_id != format!("child-source-handoff:{}",self.context.operation_id) {
-                return Err(RuntimeError::Invalid("child source handoff identity changed".into()));
+            if handoff.operation_id != format!("child-source-handoff:{}", self.context.operation_id)
+            {
+                return Err(RuntimeError::Invalid(
+                    "child source handoff identity changed".into(),
+                ));
             }
             match &handoff.root {
-                ChildSourceRoot::Fixed{pin} if handoff.source.mode==SourceMode::FixedBranch && pin.source==handoff.source && !pin.pin_id.is_empty() && !pin.root.is_empty()=>(),
-                ChildSourceRoot::Physical{root} if handoff.source.mode!=SourceMode::FixedBranch && !root.root_id.is_empty() && !root.canonical_root.is_empty()=>(),
-                _=>return Err(RuntimeError::Invalid("child source handoff is inconsistent".into()))
+                ChildSourceRoot::Fixed { pin }
+                    if handoff.source.mode == SourceMode::FixedBranch
+                        && pin.source == handoff.source
+                        && !pin.pin_id.is_empty()
+                        && !pin.root.is_empty() =>
+                {
+                    ()
+                }
+                ChildSourceRoot::Physical { root }
+                    if handoff.source.mode != SourceMode::FixedBranch
+                        && !root.root_id.is_empty()
+                        && !root.canonical_root.is_empty() =>
+                {
+                    ()
+                }
+                _ => {
+                    return Err(RuntimeError::Invalid(
+                        "child source handoff is inconsistent".into(),
+                    ))
+                }
             }
         }
         let mut launch = self.launch.selection;
@@ -75,10 +103,15 @@ impl ChildAdmissionPreparation {
             operation_revision: operation.revision,
             call_id: admitted.call.call_id,
             configuration_ref: self.content.save(&self.launch.configuration)?,
-            launch: launch_content::LaunchSelectionMetadata::stage(&self.content, launch)?,
+            launch: launch_content::LaunchSelectionMetadata::stage_child_intent(
+                &self.content,
+                launch,
+            )?,
             handoff: self.handoff,
             work_mode: self.launch.selected_profile.work_mode,
-            selected_profile_ref: self.content.save(&serde_json::to_value(&self.launch.selected_profile)?)?,
+            selected_profile_ref: self
+                .content
+                .save(&serde_json::to_value(&self.launch.selected_profile)?)?,
             frozen_reference: self.launch.frozen_reference,
             parent_tools_ref: self.launch.parent_tools_ref,
             _publication: self.publication,
@@ -120,7 +153,7 @@ impl ChildRead {
         let child = self.child;
         let input = serde_json::from_value(self.content.load(&child.input_ref)?)?;
         let configuration = self.content.load(&child.configuration_ref)?;
-        let launch = child.launch.load(&self.content)?;
+        let launch = child.launch.load_child_intent(&self.content)?;
         Ok(ChildTaskView {
             operation_id: child.operation_id,
             parent_run_id: child.parent_run_id,
@@ -133,13 +166,18 @@ impl ChildRead {
             project_id: child.project_id,
             input,
             configuration,
-            selected_profile: serde_json::from_value(self.content.load(&child.selected_profile_ref)?)?,
+            selected_profile: serde_json::from_value(
+                self.content.load(&child.selected_profile_ref)?,
+            )?,
             launch,
             source: {
-                let mut source=serde_json::to_value(&child.source)?;
-                if let ChildSource::Ready{provenance_ref,..}=&child.source {
-                    source.as_object_mut().expect("source object").remove("provenance_ref");
-                    source["provenance"]=self.content.load(provenance_ref)?;
+                let mut source = serde_json::to_value(&child.source)?;
+                if let ChildSource::Ready { provenance_ref, .. } = &child.source {
+                    source
+                        .as_object_mut()
+                        .expect("source object")
+                        .remove("provenance_ref");
+                    source["provenance"] = self.content.load(provenance_ref)?;
                 }
                 source
             },

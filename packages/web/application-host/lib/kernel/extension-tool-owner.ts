@@ -60,6 +60,7 @@ export function extensionToolSchema(
   const tool = descriptor.tool;
   if (!tool) throw new Error('service_has_no_tool_declaration');
   return {
+    ...(tool.requirements ? { requirements: structuredClone(tool.requirements) } : {}),
     name: tool.name,
     version: createHash('sha256').update(canonical(descriptor)).digest('hex'),
     description: tool.description,
@@ -88,12 +89,32 @@ class ExtensionToolConfigurationError extends Error {
     super(`extension_tool_configuration_unavailable:${serviceId}`, { cause });
   }
 }
+export interface ExtensionToolRun {
+  runId: string;
+  threadId: string;
+  source: LaunchIntent['selection']['source'];
+  projectId?: string;
+  fixed?: boolean;
+}
+class ExtensionToolSourceError extends Error {
+  constructor(serviceId: string, dependency: string) {
+    super(`extension_tool_source_unavailable:${serviceId}:requires_${dependency}`);
+  }
+}
+/** Availability projection of the original declaration, never a grant or dispatch fence. */
+function requireToolSource(serviceId: string, requirements: LaunchTool['requirements'], source: ExtensionToolRun['source']): void {
+  if (!requirements) return;
+  const available = source && (requirements.source === 'source'
+    || (requirements.source === 'physical' && source.mode !== 'fixed_branch')
+    || (requirements.source === 'live' && source.mode === 'live_root'));
+  if (!available) throw new ExtensionToolSourceError(serviceId, requirements.source);
+}
 export interface ExtensionToolOwnerOptions {
   runtime: ApplicationExtensionRuntime;
   kernel: KernelClient;
   currentPolicy(runId: string): Promise<PermissionPolicy>;
   /** Domain configuration is captured once by the ordinary Run preparation owner. */
-  prepareConfiguration?(run: { runId: string; threadId: string; projectId?: string; fixed?: boolean }, required: readonly ExtensionToolBinding[]): Promise<ExtensionToolConfiguration>;
+  prepareConfiguration?(run: Omit<ExtensionToolRun, 'source'>, required: readonly ExtensionToolBinding[]): Promise<ExtensionToolConfiguration>;
   configurationIdentity?: ExtensionToolConfiguration;
 }
 export async function retainExtensionTool(
@@ -383,7 +404,7 @@ export interface ExtensionToolScope {
   close(): void;
 }
 export type ExtensionToolPreparer = (
-  run: { runId: string; threadId: string; projectId?: string; fixed?: boolean },
+  run: ExtensionToolRun,
   required: ExtensionToolBinding[],
   signal: AbortSignal,
 ) => Promise<ExtensionToolScope>;
@@ -470,6 +491,7 @@ export function createExtensionTools(
         },
         { expectedRoutingRevision: routingRevision },
       );
+      requireToolSource(id, selected.descriptor.tool?.requirements, run.source);
       return retainExtensionTool(preparedOptions, selected);
     };
     const snapshot = await runtime.state();
@@ -481,6 +503,7 @@ export function createExtensionTools(
       throw new Error('extension_tool_catalog_unavailable');
     try {
       for (const binding of required) {
+        requireToolSource(binding.serviceId, binding.tool.requirements, run.source);
         // A live original exchange can outlast ordinary package replacement. Derive an
         // independent pin before consulting the installed package, which now may be newer.
         const original = runtime.services
@@ -585,9 +608,12 @@ export function createExtensionTools(
             providerId,
           );
           if (!selected.descriptor.tool) continue;
-          try { initial.push(await retainExtensionTool(preparedOptions, selected)); }
+          try {
+            requireToolSource(entry.id, selected.descriptor.tool.requirements, run.source);
+            initial.push(await retainExtensionTool(preparedOptions, selected));
+          }
           catch (error) {
-            if (!(error instanceof ExtensionToolConfigurationError)) throw error;
+            if (!(error instanceof ExtensionToolConfigurationError) && !(error instanceof ExtensionToolSourceError)) throw error;
             states.set(`${entry.id}@${entry.version}`, { serviceId: entry.id, version: entry.version,
               declarations: entry.declarations, status: 'unavailable', error: error.message });
           }
@@ -690,7 +716,7 @@ export function createExtensionTools(
                 version: entry.version,
                 declarations: entry.declarations,
                 status: 'unavailable',
-                error: error instanceof ExtensionToolConfigurationError ? error.message : 'extension_tool_preparation_failed',
+                error: error instanceof ExtensionToolConfigurationError || error instanceof ExtensionToolSourceError ? error.message : 'extension_tool_preparation_failed',
               });
           });
       }

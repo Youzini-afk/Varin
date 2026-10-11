@@ -1,3 +1,4 @@
+import { createScriptRuntime, SCRIPT_CAPABILITY } from './lib/kernel/script-runtime.js';
 import { createNestedToolOwner, VARIN_RUNTIME_TOOLS_CAPABILITY } from './lib/kernel/nested-tool-owner.js';
 import { readHostHarnessSettings } from '@varin/pi-host/settings-authority';
 import { DocumentsFileObservationOwner } from './lib/kernel/file-observation-owner.js';
@@ -1918,6 +1919,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     updateSettings: (mutator) => updateSettingsOnDisk((current) => mutator(current as Record<string, unknown>) as typeof current),
   });
   const desktopControlHolder = `desktop:${hostId}`;
+  const scriptRuntimeOwner: { current?: ReturnType<typeof createScriptRuntime> } = {};
   const computerRuntimeOwner: { current?: ReturnType<typeof createComputerRuntime> } = {};
   const resolveComputerWork = async (work: import('@varin/protocol').ComputerWorkRef) => {
     if (work.runtime === 'pi') return resolvePiComputerWork(threadRegistry, work.sessionId);
@@ -1932,8 +1934,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       if (!actor.registry || actor.execution.work.runtime !== 'pi') throw new ComputerError('computer-owner-unavailable', 'Agent desktop assignment decisions are not connected');
       await threadRegistry.setThreadEnvironment(actor.registry.scopeId, actor.registry.threadId, { desktopId });
     },
-    revokeSession: async actor => {
-      if (actor.execution.work.runtime !== 'pi') return; // No Native persistent Computer scripts are connected.
+    revokeSession: async (actor, desktopIds) => {
+      if (actor.execution.work.runtime === 'agent') {
+        await scriptRuntimeOwner.current?.cancelComputer(actor.execution.runId, desktopIds);
+        return;
+      }
       await piRuntimeBroker.requestForSession(actor.execution.work.sessionId, 'session.computer.cancel', { sessionId: actor.execution.work.sessionId, runId: actor.execution.runId });
     },
     notifyActor: async (actor, text, wake, id, recipient = 'actor') => {
@@ -3004,9 +3009,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   }, createPolicyModelPreparer({ models: modelAuthority,
     // This is a user-scoped role. Native Threads do not impersonate Pi sessions.
     settings: async () => ({ global: await hostCredentialAuthority.readGlobalInferenceSettings() }),
-  }), liveSources.validate, createExtensionTools({runtime:extensionRuntime,kernel:kernelClient,prepareConfiguration: (run, required) => {
+  }), liveSources.validate, createExtensionTools({runtime:extensionRuntime,kernel:kernelClient,prepareConfiguration: async (run, required) => {
+    if (!scriptRuntimeOwner.current) throw new Error('Script tool preparation is unavailable');
     if (!computerRuntimeOwner.current) throw new ComputerError('computer-owner-unavailable', 'Computer tool preparation is unavailable');
-    return computerRuntimeOwner.current.prepareConfiguration(run, required);
+    return scriptRuntimeOwner.current.prepareConfiguration(await computerRuntimeOwner.current.prepareConfiguration(run, required));
   },currentPolicy:async runId=>{
     const launch=await kernelClient.agentRuntimeRequest<import('./lib/kernel/protocol.generated.js').LaunchIntent|null,'runtime.launch.inspect'>('runtime.launch.inspect',{runId});
     const workspace=launch?.selection.source?await documentsAuthority.inspectWorkspace(launch.selection.source.workspace_id):undefined;
@@ -3086,6 +3092,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: () => console.warn('[Calendar] preparation or asset synchronization requires attention'),
   });
   scheduledTasksRuntime.setCalendarOwner(calendarOwner);
+  scriptRuntimeOwner.current = createScriptRuntime({ kernel: kernelClient, runtime: agentRuntime, resolveLiveSource: liveSources.validate, onError: () => console.error('[Script] Original environment requires reconciliation') });
   computerRuntimeOwner.current = createComputerRuntime({ kernel: kernelClient, runtime: agentRuntime, computers: computerService, enabled: async runId => {
     const launch = await kernelClient.agentRuntimeRequest<import('./lib/kernel/protocol.generated.js').LaunchIntent | null, 'runtime.launch.inspect'>('runtime.launch.inspect', { runId });
     const workspace = launch?.selection.source ? await documentsAuthority.inspectWorkspace(launch.selection.source.workspace_id) : undefined;
@@ -4216,6 +4223,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   const unregisterMaterialToolCapability=extensionRuntime.capabilities.register(MATERIAL_SNAPSHOT_CAPABILITY,createMaterialToolOwner(webMaterials));
   const unregisterNestedToolCapability = extensionRuntime.capabilities.register(VARIN_RUNTIME_TOOLS_CAPABILITY, createNestedToolOwner(kernelClient));
+  const unregisterScriptCapability = extensionRuntime.capabilities.register(SCRIPT_CAPABILITY, scriptRuntimeOwner.current.capability);
   const unregisterComputerCapability = extensionRuntime.capabilities.register(COMPUTER_CAPABILITY, computerRuntimeOwner.current.capability);
   const unregisterResearchCapability = extensionRuntime.capabilities.register(RESEARCH_CAPABILITY, researchRuntime.capability);
   researchRuntime.start();
@@ -4742,6 +4750,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     stop: async (shutdownOptions: { exitProcess?: boolean | undefined } = {}) => {
       // Stop timer/watcher producers before their runtime and storage
       // dependencies begin shutting down.
+      await scriptRuntimeOwner.current?.dispose();
       computerRuntimeOwner.current?.stop();
       runObservers.stop();
       collaboration.stop();
@@ -4753,6 +4762,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       piSessionTitles.stop();
       unregisterNestedToolCapability();
       unregisterComputerCapability();
+      unregisterScriptCapability();
       unregisterResearchCapability();
       await researchRuntime.dispose();
       await resourceService.dispose();

@@ -11,6 +11,8 @@ export interface ComputerAdmission {
   key: string;
   signal: AbortSignal;
   assert(): void;
+  /** Trusted cancellation of this actual admitted in-flight dispatch only. */
+  cancel(reason: unknown): void;
 }
 
 /** Live authorization over existing Thread/Run identities. No model or renderer owns this state. */
@@ -25,7 +27,7 @@ export function createComputerAutomation(options: {
   release(lease: ComputerLease): Promise<{ released: boolean }>;
   controlAvailable(desktopId: string): boolean;
   notify(actor: ComputerActor, text: string, wake: boolean, id: string, recipient?: 'actor' | 'root'): Promise<void>;
-  revokeSession(actor: ComputerActor): Promise<void>;
+  revokeSession(actor: ComputerActor, desktopIds?: readonly string[]): Promise<void>;
   bindDesktop(actor: ComputerActor, desktopId: string): Promise<void>;
   cancelWork?(actor: ComputerActor, desktopIds: readonly string[], cancellationId: string): Promise<void>;
   notifyCancelled?(actor: ComputerActor, desktopIds: readonly string[], cancellationId: string): Promise<void>;
@@ -164,6 +166,7 @@ export function createComputerAutomation(options: {
     const id = randomUUID();
     const admission: ComputerAdmission = {
       actor, ...(lease ? { lease } : {}), sequence, key: JSON.stringify([actorKey(actor), fenceKeys(actor, desktopId).map(key => revisions.get(key) ?? 0)]), signal: abort.signal,
+      cancel: reason => abort.abort(reason),
       assert() {
         assertRound(actor, desktopId); abort.signal.throwIfAborted();
         if (lease && leases.get(lease.id) !== lease) throw new HarnessServiceError('forbidden', 'The desktop assignment was released or transferred; request a new assignment and observe the current scene');
@@ -300,7 +303,7 @@ export function createComputerAutomation(options: {
       const metadata = Promise.allSettled([
         ...(requestCancellation ? [requestCancellation] : []),
         ...[...new Map(participants.map(participant => [actorKey(participant), participant])).values()].map(async recipient => {
-          if (await isCurrent(recipient)) await options.revokeSession(recipient);
+          if (await isCurrent(recipient)) await options.revokeSession(recipient, desktopsFor(recipient));
         }),
       ]);
       const results = [...await physical, ...await metadata];
@@ -444,7 +447,7 @@ export function createComputerAutomation(options: {
       const actor = owner(desktopId)?.actor;
       const interrupted = [...controllers.values()].filter(entry => entry.desktopId === desktopId && entry.access === 'control').map(entry => computerExecutionKey(entry.actor.execution));
       for (const entry of controllers.values()) if (entry.desktopId === desktopId) entry.abort.abort(new Error('User took control of the desktop'));
-      if (actor && await isCurrent(actor)) await options.revokeSession(actor);
+      if (actor && await isCurrent(actor)) await options.revokeSession(actor, [desktopId]);
       return interrupted;
     },
     async notifyHandoff(actor: ComputerActor, text: string, id: string, deliveredByTool: readonly string[] = []) {
@@ -499,7 +502,7 @@ export function createComputerAutomation(options: {
       const lease = foreign.get(token);
       if (!lease || lease.desktopId !== desktopId || (access === 'control' && lease.access !== 'control')) throw new HarnessServiceError('forbidden', 'A live Host desktop assignment is required');
       const abort = new AbortController(); const id = randomUUID();
-      const admission: ComputerAdmission = { actor: lease.actor, lease, sequence: ++admissionSequence, key: actorKey(lease.actor), signal: abort.signal, assert() {
+      const admission: ComputerAdmission = { actor: lease.actor, lease, sequence: ++admissionSequence, key: actorKey(lease.actor), signal: abort.signal, cancel: reason => abort.abort(reason), assert() {
         abort.signal.throwIfAborted(); if (foreign.get(token) !== lease || leases.get(token) !== lease) throw new HarnessServiceError('forbidden', 'The Host desktop assignment ended');
       } };
       controllers.set(id, { actor: lease.actor, abort, desktopId, access });

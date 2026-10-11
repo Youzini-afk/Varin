@@ -67,6 +67,7 @@ fn authority_cannot_be_forged_by_another_run_policy_origin_or_expanded_child_too
     for name in ["file_write", "file_list", "process_spawn"] {
         let mut expanded = f.launch.clone();
         expanded.tools.push(ToolSchema {
+            requirements: None,
             description: String::new(),
             output_schema: None,
             metadata: None,
@@ -93,9 +94,23 @@ fn child_body_roots_survive_collection_and_broken_task_text_does_not_block_contr
     let mut f = Fixture::new_parent_extension();
     let child = f.accept();
     assert!(child.receipt.is_none());
-    assert_ne!(child.launch.extension_bindings_ref,f.db.launch_metadata(&f.context.run_id).unwrap().unwrap().selection.extension_bindings_ref);
+    assert_ne!(
+        child.launch.extension_bindings_ref,
+        f.db.launch_metadata(&f.context.run_id)
+            .unwrap()
+            .unwrap()
+            .selection
+            .extension_bindings_ref
+    );
     content_collection::collect(|| f.db.prepare_content_collection(Default::default())).unwrap();
-    assert!(f.db.capture_child_read(child.clone()).load().unwrap().launch.extension_bindings.is_empty());
+    assert!(f
+        .db
+        .capture_child_read(child.clone())
+        .load()
+        .unwrap()
+        .launch
+        .extension_bindings
+        .is_empty());
     let (source, proposal, basis) = child_context(&child);
     let child =
         f.db.prepare_child(&child.operation_id, source, proposal, basis)
@@ -150,7 +165,10 @@ fn preparation_failure_before_dispatch_exchange_commit_preserves_the_real_receip
         f.db.fail_child_preparation(&child.operation_id, "fixture preparation failure")
             .unwrap();
     assert_eq!(failed.report.as_ref().unwrap().outcome, Outcome::Failed);
-    assert_eq!(failed.code_result, varin_runtime::catalog::collaboration::ChildCodeResult::NoChanges);
+    assert_eq!(
+        failed.code_result,
+        varin_runtime::catalog::collaboration::ChildCodeResult::NoChanges
+    );
     assert_ne!(
         f.db.operation(&child.operation_id).unwrap().phase,
         OperationPhase::Terminal
@@ -362,7 +380,11 @@ fn cancelled_wait_rejects_a_prepared_report_append_and_a_new_observer_can_receiv
             .unwrap()
             .load()
             .unwrap();
-    assert_eq!(content_collection::collect(|| f.db.prepare_content_collection(Default::default())).unwrap(), 0);
+    assert_eq!(
+        content_collection::collect(|| f.db.prepare_content_collection(Default::default()))
+            .unwrap(),
+        0
+    );
     f.db.request_cancel_child_wait(&wait.id).unwrap();
     assert!(f.db.admit_child_wait(prepared).unwrap().is_none());
     assert!(f
@@ -645,18 +667,80 @@ fn incompatible_collaboration_domain_is_rejected_without_rewriting_existing_asse
 
 #[test]
 fn fixed_parent_can_admit_private_writable_child_and_cancelled_empty_report_keeps_partial_result() {
-    use varin_runtime::catalog::collaboration::{ChildCodeResult,ChildSource,ChildWorkingResultRef};
-    let mut f=Fixture::new_isolated();
-    let child=f.accept();
-    assert!(matches!(child.source,ChildSource::Pending{..}));
-    assert_eq!(child.code_result,ChildCodeResult::Pending);
+    use varin_runtime::catalog::collaboration::{
+        ChildCodeResult, ChildSource, ChildWorkingResultRef,
+    };
+    let mut f = Fixture::new_isolated();
+    // These are the native writer declarations carried by the real kernel. The
+    // delegation still retains its parent's fixed handoff until materialization.
+    for tool in &mut f.launch.tools {
+        if matches!(tool.name.as_str(), "file_write" | "file_edit") {
+            tool.requirements = Some(ToolRequirements {
+                source: ToolSourceRequirement::Physical,
+                process: false,
+            });
+        }
+    }
+    assert!(
+        f.db.prepare_launch_selection(f.launch.clone())
+            .load()
+            .is_err(),
+        "an ordinary executable launch cannot use physical tools on the fixed handoff"
+    );
+    let child = f.accept();
+    assert!(matches!(child.source, ChildSource::Pending { .. }));
+    assert_eq!(child.code_result, ChildCodeResult::Pending);
+    let pending = f.db.capture_child_read(child.clone()).load().unwrap();
+    assert_eq!(
+        pending.launch.source.as_ref().unwrap().mode,
+        SourceMode::FixedBranch
+    );
+    let execution = f.db.delegated_execution(&child.execution_id).unwrap();
+    assert_eq!(
+        f.db.capture_delegated_execution(execution)
+            .unwrap()
+            .load()
+            .unwrap()
+            .launch,
+        pending.launch
+    );
     f.settle_exchange();
     let (mut source, proposal, basis) = child_context(&child);
     source.mode = SourceMode::Materialized;
+    assert!(
+        f.db.capture_child_preparation(
+            &child.execution_id,
+            Some(source.clone()),
+            proposal.clone(),
+            basis.clone()
+        )
+        .unwrap()
+        .load()
+        .is_err(),
+        "a proposed materialized identity cannot replace the original Pending source fact"
+    );
+    assert!(f
+        .db
+        .execution_task(&child.execution_id)
+        .unwrap()
+        .receipt
+        .is_none());
     let child =
         f.db.prepare_child(&child.operation_id, source, proposal, basis)
             .unwrap();
     let run = child.receipt.as_ref().unwrap().run_id.clone();
+    let executable =
+        f.db.capture_launch(&run)
+            .unwrap()
+            .unwrap()
+            .load()
+            .unwrap()
+            .selection;
+    assert_eq!(
+        executable.source.as_ref().unwrap().mode,
+        SourceMode::Materialized
+    );
+    assert!(f.db.prepare_launch_selection(executable).load().is_ok());
     let epoch = f.db.epoch();
     let context = admit_native_child_writer(&mut f.db, &run, "file_write", "child-file-request");
     settle_native_child_writer(
@@ -670,59 +754,164 @@ fn fixed_parent_can_admit_private_writable_child_and_cancelled_empty_report_keep
         true,
     );
     f.db.request_cancel_run(&run).unwrap();
-    f.db.commit_execution(&run,epoch,&ExecutionRecord::StateChanged{state:RunState::Cancelled,waiting_on:None}).unwrap();
+    f.db.commit_execution(
+        &run,
+        epoch,
+        &ExecutionRecord::StateChanged {
+            state: RunState::Cancelled,
+            waiting_on: None,
+        },
+    )
+    .unwrap();
     f.db.reconcile_child_reports().unwrap();
-    let reported=f.db.child_task(&child.operation_id).unwrap();
-    assert_eq!(reported.report.as_ref().unwrap().outcome,Outcome::Cancelled);
+    let reported = f.db.child_task(&child.operation_id).unwrap();
+    assert_eq!(
+        reported.report.as_ref().unwrap().outcome,
+        Outcome::Cancelled
+    );
     assert!(reported.report.as_ref().unwrap().history_ids.is_empty());
-    assert_eq!(reported.code_result,ChildCodeResult::Pending);
-    assert_eq!(f.db.child_file_effect(&child.operation_id).unwrap(),Effect::Partial);
-    let publication_id=format!("child-result:{}",child.operation_id);
+    assert_eq!(reported.code_result, ChildCodeResult::Pending);
+    assert_eq!(
+        f.db.child_file_effect(&child.operation_id).unwrap(),
+        Effect::Partial
+    );
+    let publication_id = format!("child-result:{}", child.operation_id);
     f.db.begin_child_settlement(&child.operation_id).unwrap();
-    let candidate=KernelWorkingResultCandidate {publication_id:publication_id.clone(),candidate_operation_id:format!("result-prepare:{publication_id}"),
-        workspace_id:"workspace-A".into(),branch_id:format!("child-source:{}",child.operation_id),root:"fixed-result-root".into(),base_root:child.source.pin().unwrap().root.clone(),
-        write_revision:1,pin_id:"result-pin".into(),base_pin_id:"result-base-pin".into()};
-    f.db.attach_child_candidate(&child.operation_id,candidate.clone()).unwrap();
-    let result=ChildWorkingResultRef{publication_id:publication_id.clone(),workspace_id:candidate.workspace_id,branch_id:candidate.branch_id,root:candidate.root,base_root:candidate.base_root,
-        result_revision:1,record_id:"working-result:fixed".into()};
-    f.db.attach_child_result(&child.operation_id,result.clone(),Effect::Partial).unwrap();
+    let candidate = KernelWorkingResultCandidate {
+        publication_id: publication_id.clone(),
+        candidate_operation_id: format!("result-prepare:{publication_id}"),
+        workspace_id: "workspace-A".into(),
+        branch_id: format!("child-source:{}", child.operation_id),
+        root: "fixed-result-root".into(),
+        base_root: child.source.pin().unwrap().root.clone(),
+        write_revision: 1,
+        pin_id: "result-pin".into(),
+        base_pin_id: "result-base-pin".into(),
+    };
+    f.db.attach_child_candidate(&child.operation_id, candidate.clone())
+        .unwrap();
+    let result = ChildWorkingResultRef {
+        publication_id: publication_id.clone(),
+        workspace_id: candidate.workspace_id,
+        branch_id: candidate.branch_id,
+        root: candidate.root,
+        base_root: candidate.base_root,
+        result_revision: 1,
+        record_id: "working-result:fixed".into(),
+    };
+    f.db.attach_child_result(&child.operation_id, result.clone(), Effect::Partial)
+        .unwrap();
     f.db.settle_child_receipts().unwrap();
-    let operation=f.db.operation(&child.operation_id).unwrap();
-    assert_eq!(operation.outcome,Some(Outcome::Cancelled));assert_eq!(operation.effect,Effect::Partial);
-    let original_revision=operation.revision;
-    f.db.settle_child_receipts().unwrap();assert_eq!(f.db.operation(&child.operation_id).unwrap().revision,original_revision);
-    let root=f.root.clone();drop(f.db);let db=Catalog::open(&root).unwrap();
-    assert_eq!(db.child_task(&child.operation_id).unwrap().code_result,ChildCodeResult::Published{result,effect:Effect::Partial});
-    drop(db);std::fs::remove_dir_all(root).unwrap();
+    let operation = f.db.operation(&child.operation_id).unwrap();
+    assert_eq!(operation.outcome, Some(Outcome::Cancelled));
+    assert_eq!(operation.effect, Effect::Partial);
+    let original_revision = operation.revision;
+    f.db.settle_child_receipts().unwrap();
+    assert_eq!(
+        f.db.operation(&child.operation_id).unwrap().revision,
+        original_revision
+    );
+    let root = f.root.clone();
+    drop(f.db);
+    let db = Catalog::open(&root).unwrap();
+    assert_eq!(
+        db.child_task(&child.operation_id).unwrap().code_result,
+        ChildCodeResult::Published {
+            result,
+            effect: Effect::Partial
+        }
+    );
+    drop(db);
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
 fn ended_goal_detaches_new_primary_input_but_retains_admitted_child_attribution() {
     use varin_runtime::catalog::goals::*;
-    for prepare_late in [false,true] {
-    let mut f=Fixture::new();
-    let scope=GoalScope{thread_id:"thread:parent".into(),branch_id:"branch:parent".into()};
-    let p=f.db.prepare_goal_start("goal",&f.context.run_id,scope.clone(),"Finish parent objective".into(),None).unwrap().load().unwrap();
-    f.db.admit_goal_mutation(p).unwrap();
-    let mut child=f.accept();
-    if !prepare_late {
-        let (source,proposal,basis)=child_context(&child);child=f.db.prepare_child(&child.operation_id,source,proposal,basis).unwrap();
-        let run=&child.receipt.as_ref().unwrap().run_id;
-        f.db.commit_execution(run,f.db.epoch(),&ExecutionRecord::StateChanged{state:RunState::Runnable,waiting_on:None}).unwrap();
-        f.db.register_wait("child-dependency",run,"dependency","finished",0).unwrap();
-        f.db.commit_execution(run,f.db.epoch(),&ExecutionRecord::StateChanged{state:RunState::Waiting,waiting_on:Some("child-dependency".into())}).unwrap();
-        assert_eq!(f.db.capture_goal("goal").unwrap().load().unwrap().state,GoalState::Active,"an independently waiting child does not block its still-active primary");
-    }
-    f.settle_exchange();
-    f.db.control_goal("goal",1,&scope,GoalControlAction::Complete).unwrap();
-    f.db.enqueue_input(&varin_runtime::catalog::inputs::EnqueueInput{key:"new-user-input".into(),thread_id:scope.thread_id.clone(),branch_id:scope.branch_id.clone(),mode:InputMode::Boundary,input:json!("new ordinary task"),configuration:None}).unwrap();
-    let head=f.db.head(&scope.branch_id).unwrap();f.db.consume_inputs(&f.context.run_id,f.db.epoch(),head.as_deref()).unwrap();
-    assert!(f.db.goal_binding(&f.context.run_id).unwrap().is_none());
-    if prepare_late {let (source,proposal,basis)=child_context(&child);child=f.db.prepare_child(&child.operation_id,source,proposal,basis).unwrap();}
-    let child_run=&child.receipt.as_ref().unwrap().run_id;
-    assert_eq!(f.db.goal_binding(child_run).unwrap().unwrap().id,"goal");
-    assert!(matches!(f.db.goal_boundary(child_run,f.db.epoch()).unwrap(),GoalBoundary::Finish{state:RunState::Cancelled}));
-    let root=f.root.clone();drop(f);std::fs::remove_dir_all(root).unwrap();
+    for prepare_late in [false, true] {
+        let mut f = Fixture::new();
+        let scope = GoalScope {
+            thread_id: "thread:parent".into(),
+            branch_id: "branch:parent".into(),
+        };
+        let p =
+            f.db.prepare_goal_start(
+                "goal",
+                &f.context.run_id,
+                scope.clone(),
+                "Finish parent objective".into(),
+                None,
+            )
+            .unwrap()
+            .load()
+            .unwrap();
+        f.db.admit_goal_mutation(p).unwrap();
+        let mut child = f.accept();
+        if !prepare_late {
+            let (source, proposal, basis) = child_context(&child);
+            child =
+                f.db.prepare_child(&child.operation_id, source, proposal, basis)
+                    .unwrap();
+            let run = &child.receipt.as_ref().unwrap().run_id;
+            f.db.commit_execution(
+                run,
+                f.db.epoch(),
+                &ExecutionRecord::StateChanged {
+                    state: RunState::Runnable,
+                    waiting_on: None,
+                },
+            )
+            .unwrap();
+            f.db.register_wait("child-dependency", run, "dependency", "finished", 0)
+                .unwrap();
+            f.db.commit_execution(
+                run,
+                f.db.epoch(),
+                &ExecutionRecord::StateChanged {
+                    state: RunState::Waiting,
+                    waiting_on: Some("child-dependency".into()),
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                f.db.capture_goal("goal").unwrap().load().unwrap().state,
+                GoalState::Active,
+                "an independently waiting child does not block its still-active primary"
+            );
+        }
+        f.settle_exchange();
+        f.db.control_goal("goal", 1, &scope, GoalControlAction::Complete)
+            .unwrap();
+        f.db.enqueue_input(&varin_runtime::catalog::inputs::EnqueueInput {
+            key: "new-user-input".into(),
+            thread_id: scope.thread_id.clone(),
+            branch_id: scope.branch_id.clone(),
+            mode: InputMode::Boundary,
+            input: json!("new ordinary task"),
+            configuration: None,
+        })
+        .unwrap();
+        let head = f.db.head(&scope.branch_id).unwrap();
+        f.db.consume_inputs(&f.context.run_id, f.db.epoch(), head.as_deref())
+            .unwrap();
+        assert!(f.db.goal_binding(&f.context.run_id).unwrap().is_none());
+        if prepare_late {
+            let (source, proposal, basis) = child_context(&child);
+            child =
+                f.db.prepare_child(&child.operation_id, source, proposal, basis)
+                    .unwrap();
+        }
+        let child_run = &child.receipt.as_ref().unwrap().run_id;
+        assert_eq!(f.db.goal_binding(child_run).unwrap().unwrap().id, "goal");
+        assert!(matches!(
+            f.db.goal_boundary(child_run, f.db.epoch()).unwrap(),
+            GoalBoundary::Finish {
+                state: RunState::Cancelled
+            }
+        ));
+        let root = f.root.clone();
+        drop(f);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
 
@@ -784,7 +973,7 @@ fn completed_report_does_not_stop_process_tree_cancel_is_scoped_and_waits_for_or
     assert!(f.db.begin_child_settlement(&child.operation_id).is_err());
     assert!(f
         .db
-        .pending_external_operations("process_spawn")
+        .pending_managed_processes()
         .unwrap()
         .contains(&"child-process-request:tool:process_spawn".into()));
     let target = TreeCancelTarget::Child {
@@ -1002,6 +1191,13 @@ fn admit_native_child_writer(
         },
     )
     .unwrap();
+    if name == "process_spawn" {
+        db.bind_managed_process(
+            &context,
+            varin_runtime::catalog::managed_process::ManagedProcessKind::ProcessJob,
+        )
+        .unwrap();
+    }
     context
 }
 fn settle_native_child_writer(
@@ -1099,54 +1295,150 @@ fn independent_child_report_body_failure_keeps_healthy_report_and_receipt_admiss
     let broken = f.accept();
     f.settle_exchange();
     let call = f.admit_policy_call(ToolCall {
-        call_id:"healthy-sibling".into(),name:"dispatch".into(),schema_version:"1".into(),
-        arguments:serde_json::to_value(&f.input).unwrap(),
+        call_id: "healthy-sibling".into(),
+        name: "dispatch".into(),
+        schema_version: "1".into(),
+        arguments: serde_json::to_value(&f.input).unwrap(),
     });
-    let healthy=f.db.accept_child(&call,f.input.clone(),f.pin.clone(),f.launch.clone()).unwrap();
-    f.settle_policy_call(&call,"preparing_child");
-    let mut broken_item=None;
-    for child in [&broken,&healthy] {
-        let (source,proposal,basis)=child_context(child);
-        let prepared=f.db.prepare_child(&child.execution_id,source,proposal,basis).unwrap();
-        let run=prepared.receipt.unwrap().run_id;
-        let epoch=f.db.epoch();
-        f.db.commit_execution(&run,epoch,&ExecutionRecord::StateChanged{state:RunState::Runnable,waiting_on:None}).unwrap();
-        let item=f.db.append_history(&run,epoch,f.db.head(&child.child_branch_id).unwrap().as_deref(),HistorySource::Assistant,serde_json::to_value(ConversationItem {
-            id:format!("report:{}",child.execution_id),resource_activation:None,provenance:Provenance::Assistant,
-            content:Content::Text{text:format!("Independent report {}",child.execution_id)},opaque:None,
-        }).unwrap(),None).unwrap();
-        f.db.commit_execution(&run,epoch,&ExecutionRecord::StateChanged{state:RunState::Completed,waiting_on:None}).unwrap();
-        if child.execution_id==broken.execution_id {broken_item=Some(item.id);}
+    let healthy =
+        f.db.accept_child(&call, f.input.clone(), f.pin.clone(), f.launch.clone())
+            .unwrap();
+    f.settle_policy_call(&call, "preparing_child");
+    let mut broken_item = None;
+    for child in [&broken, &healthy] {
+        let (source, proposal, basis) = child_context(child);
+        let prepared =
+            f.db.prepare_child(&child.execution_id, source, proposal, basis)
+                .unwrap();
+        let run = prepared.receipt.unwrap().run_id;
+        let epoch = f.db.epoch();
+        f.db.commit_execution(
+            &run,
+            epoch,
+            &ExecutionRecord::StateChanged {
+                state: RunState::Runnable,
+                waiting_on: None,
+            },
+        )
+        .unwrap();
+        let item =
+            f.db.append_history(
+                &run,
+                epoch,
+                f.db.head(&child.child_branch_id).unwrap().as_deref(),
+                HistorySource::Assistant,
+                serde_json::to_value(ConversationItem {
+                    id: format!("report:{}", child.execution_id),
+                    resource_activation: None,
+                    provenance: Provenance::Assistant,
+                    content: Content::Text {
+                        text: format!("Independent report {}", child.execution_id),
+                    },
+                    opaque: None,
+                })
+                .unwrap(),
+                None,
+            )
+            .unwrap();
+        f.db.commit_execution(
+            &run,
+            epoch,
+            &ExecutionRecord::StateChanged {
+                state: RunState::Completed,
+                waiting_on: None,
+            },
+        )
+        .unwrap();
+        if child.execution_id == broken.execution_id {
+            broken_item = Some(item.id);
+        }
     }
-    let fault=rusqlite::Connection::open(f.root.join("conversation.sqlite")).unwrap();
-    let raw:String=fault.query_row("SELECT body FROM history WHERE id=?1",[broken_item.unwrap()],|r|r.get(0)).unwrap();
-    let metadata:serde_json::Value=serde_json::from_str(&raw).unwrap();
-    let hash=metadata["content"]["content_object"].as_str().unwrap().strip_prefix("sha256-").unwrap();
-    let path=f.root.join("content/objects").join(&hash[..2]).join(&hash[2..]);
-    let held=path.with_extension("fault-injection");std::fs::rename(&path,&held).unwrap();
-    let runtime=varin_runtime::supervisor::RunSupervisor::new(f.db);
+    let fault = rusqlite::Connection::open(f.root.join("conversation.sqlite")).unwrap();
+    let raw: String = fault
+        .query_row(
+            "SELECT body FROM history WHERE id=?1",
+            [broken_item.unwrap()],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let metadata: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    let hash = metadata["content"]["content_object"]
+        .as_str()
+        .unwrap()
+        .strip_prefix("sha256-")
+        .unwrap();
+    let path = f
+        .root
+        .join("content/objects")
+        .join(&hash[..2])
+        .join(&hash[2..]);
+    let held = path.with_extension("fault-injection");
+    std::fs::rename(&path, &held).unwrap();
+    let runtime = varin_runtime::supervisor::RunSupervisor::new(f.db);
     assert!(runtime.reconcile_observations().is_err());
-    let owner=runtime.catalog();let db=owner.lock().unwrap();
-    assert!(db.child_task(&broken.operation_id).unwrap().report.is_none());
-    assert!(db.child_task(&healthy.operation_id).unwrap().report.is_some());
-    assert!(db.operation(&healthy.operation_id).unwrap().external_receipt.is_some());
-    drop(db);std::fs::rename(held,path).unwrap();
+    let owner = runtime.catalog();
+    let db = owner.lock().unwrap();
+    assert!(db
+        .child_task(&broken.operation_id)
+        .unwrap()
+        .report
+        .is_none());
+    assert!(db
+        .child_task(&healthy.operation_id)
+        .unwrap()
+        .report
+        .is_some());
+    assert!(db
+        .operation(&healthy.operation_id)
+        .unwrap()
+        .external_receipt
+        .is_some());
+    drop(db);
+    std::fs::rename(held, path).unwrap();
     runtime.reconcile_observations().unwrap();
-    assert!(owner.lock().unwrap().child_task(&broken.operation_id).unwrap().report.is_some());
-    drop(owner);drop(runtime);drop(fault);std::fs::remove_dir_all(f.root).unwrap();
+    assert!(owner
+        .lock()
+        .unwrap()
+        .child_task(&broken.operation_id)
+        .unwrap()
+        .report
+        .is_some());
+    drop(owner);
+    drop(runtime);
+    drop(fault);
+    std::fs::remove_dir_all(f.root).unwrap();
 }
 
 #[test]
 fn missing_file_handoff_and_pending_file_preparation_cannot_become_absent() {
     let mut f = Fixture::new();
-    let selected = f.db.capture_child_dispatch_invocation(&f.context).unwrap().load().unwrap().resolve(&f.input).unwrap();
-    let launch = f.db.prepare_child_launch(&f.context.run_id, f.launch.clone(), selected).unwrap().load().unwrap();
-    let preparation = f.db.prepare_child_admission(&f.context, f.input.clone(), None, launch).unwrap();
+    let selected =
+        f.db.capture_child_dispatch_invocation(&f.context)
+            .unwrap()
+            .load()
+            .unwrap()
+            .resolve(&f.input)
+            .unwrap();
+    let launch =
+        f.db.prepare_child_launch(&f.context.run_id, f.launch.clone(), selected)
+            .unwrap()
+            .load()
+            .unwrap();
+    let preparation =
+        f.db.prepare_child_admission(&f.context, f.input.clone(), None, launch)
+            .unwrap();
     assert!(preparation.load().is_err());
     assert!(f.db.child_tasks().unwrap().is_empty());
     let child = f.accept();
     let (_, proposal, basis) = child_context(&child);
-    assert!(f.db.capture_child_preparation(&child.execution_id, None, proposal, basis).unwrap().load().is_err());
+    assert!(f
+        .db
+        .capture_child_preparation(&child.execution_id, None, proposal, basis)
+        .unwrap()
+        .load()
+        .is_err());
     assert_eq!(f.db.child_task(&child.operation_id).unwrap(), child);
-    let root = f.root.clone(); drop(f); std::fs::remove_dir_all(root).unwrap();
+    let root = f.root.clone();
+    drop(f);
+    std::fs::remove_dir_all(root).unwrap();
 }

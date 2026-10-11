@@ -65,6 +65,28 @@ impl ToolKind {
             Self::CodeRetrieval => "code_retrieval",
         }
     }
+    pub(crate) fn requirements(self) -> varin_runtime::execution::ToolRequirements {
+        use varin_runtime::execution::{ToolRequirements, ToolSourceRequirement::*};
+        let source = match self {
+            Self::FileRead | Self::FileList | Self::FileSearch => Source,
+            Self::LanguageDefinition
+            | Self::LanguageReferences
+            | Self::LanguageDiagnostics
+            | Self::CodeRetrieval => Live,
+            _ => Physical,
+        };
+        ToolRequirements {
+            source,
+            process: matches!(
+                self,
+                Self::ProcessInspect
+                    | Self::ProcessRead
+                    | Self::ProcessSpawn
+                    | Self::ProcessWrite
+                    | Self::ProcessResize
+            ),
+        }
+    }
     fn description(self) -> &'static str {
         match self {
             Self::FileRead=>"Read a bounded UTF-8 range from the admitted source and return its read version.",
@@ -510,7 +532,7 @@ impl ResourceOperation {
             }
             Self::ProcessSpawn(args) => {
                 let mut params = json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,
-                    "processId":context.operation_id,"__runId":context.run_id,"cwd":args.cwd,"command":args.command,"args":args.args,
+                    "processId":context.operation_id,"cwd":args.cwd,"command":args.command,"args":args.args,
                     "env":args.env,"mode":args.mode});
                 if let Some(cols) = args.cols {
                     params["cols"] = json!(cols);
@@ -1117,16 +1139,17 @@ impl KernelToolExecutor {
     pub(crate) fn selected_builtin_schemas(
         enabled: &BTreeSet<ToolKind>,
     ) -> Vec<crate::run_tools::BuiltinSchema> {
-        use varin_runtime::catalog::dispatch::{
-            ChildPresetDefault::{Retrieval, Worker},
-            ChildSourceRequirement::{Physical, Source},
-        };
+        use varin_runtime::catalog::dispatch::ChildPresetDefault::{Retrieval, Worker};
         Self::selected_schemas(enabled)
             .into_iter()
             .zip(enabled)
             .map(|(schema, kind)| match kind {
                 ToolKind::FileRead | ToolKind::FileList | ToolKind::FileSearch => {
-                    crate::run_tools::BuiltinSchema::child(schema, Source, &[Worker, Retrieval])
+                    crate::run_tools::BuiltinSchema::child(
+                        schema,
+                        kind.requirements().source.into(),
+                        &[Worker, Retrieval],
+                    )
                 }
                 ToolKind::FileWrite
                 | ToolKind::FileEdit
@@ -1134,9 +1157,11 @@ impl KernelToolExecutor {
                 | ToolKind::ProcessInspect
                 | ToolKind::ProcessRead
                 | ToolKind::ProcessWrite
-                | ToolKind::ProcessResize => {
-                    crate::run_tools::BuiltinSchema::child(schema, Physical, &[Worker])
-                }
+                | ToolKind::ProcessResize => crate::run_tools::BuiltinSchema::child(
+                    schema,
+                    kind.requirements().source.into(),
+                    &[Worker],
+                ),
                 ToolKind::LanguageDefinition
                 | ToolKind::LanguageReferences
                 | ToolKind::LanguageDiagnostics
@@ -1148,6 +1173,7 @@ impl KernelToolExecutor {
         enabled_tools
             .iter()
             .map(|kind| ToolSchema {
+                requirements: Some(kind.requirements()),
                 description: kind.description().into(),
                 output_schema: None,
                 metadata: None,
@@ -1725,6 +1751,12 @@ fn execution_context(run_id: &str, call: &ToolCall, origin: &ToolOrigin) -> Tool
     }
 }
 impl PreparedToolCall for KernelCall {
+    fn managed_process(
+        &self,
+    ) -> Option<varin_runtime::catalog::managed_process::ManagedProcessKind> {
+        matches!(self.operation, ResourceOperation::ProcessSpawn(_))
+            .then_some(varin_runtime::catalog::managed_process::ManagedProcessKind::ProcessJob)
+    }
     fn plan(&self, _: &CancellationToken) -> Result<ToolPreparation, ExecutionError> {
         Ok(self.executor.plan_operation(&self.call, &self.operation))
     }

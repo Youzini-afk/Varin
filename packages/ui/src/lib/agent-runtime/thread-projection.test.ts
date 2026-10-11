@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import type { ThreadIdentity, ThreadSnapshot, ThreadsAPI } from '@varin/application-client';
+import { KERNEL_PROTOCOL_VERSION } from '../../../../web/application-host/lib/kernel/protocol.generated.js';
 import { ThreadProjection } from './thread-projection';
 
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:projection', branchId: 'branch:projection' };
@@ -26,7 +27,7 @@ it('reconnects from the last durable cursor and replaces lossy progress with aut
     expect(observe.mock.calls[0]![0]).toBe(6);
     connections[0]!.listener({ cursor: 7, subject: run.id, revision: 1, kind: 'run.changed', data: {} });
     await vi.advanceTimersByTimeAsync(0);
-    connections[0]!.listener({ v: 1, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'progress', runId: run.id, streamId: 'first-stream', sequence: 1, event: { kind: 'provider', data: { kind: 'text_delta', item_id: 'assistant', text: 'unfinished display text' } } });
+    connections[0]!.listener({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'progress', runId: run.id, streamId: 'first-stream', sequence: 1, event: { kind: 'provider', data: { kind: 'text_delta', item_id: 'assistant', text: 'unfinished display text' } } });
     expect(progress).toHaveBeenLastCalledWith('unfinished display text');
     connections[0]!.close();
     await vi.advanceTimersByTimeAsync(0);

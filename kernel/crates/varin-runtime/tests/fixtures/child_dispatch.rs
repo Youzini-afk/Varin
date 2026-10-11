@@ -21,6 +21,7 @@ pub(crate) struct Fixture {
 }
 fn read_schema() -> ToolSchema {
     ToolSchema {
+        requirements: None,
         description: String::new(),
         output_schema: None,
         metadata: None,
@@ -36,6 +37,7 @@ impl Fixture {
             7,
             read_schema(),
             ToolSchema {
+                requirements: None,
                 description: String::new(),
                 output_schema: None,
                 metadata: None,
@@ -70,6 +72,7 @@ impl Fixture {
             7,
             read_schema(),
             ToolSchema {
+                requirements: None,
                 description: String::new(),
                 output_schema: None,
                 metadata: None,
@@ -94,6 +97,7 @@ impl Fixture {
             7,
             read_schema(),
             ToolSchema {
+                requirements: None,
                 description: String::new(),
                 output_schema: None,
                 metadata: None,
@@ -108,6 +112,7 @@ impl Fixture {
     }
     pub(crate) fn new_isolated_process() -> Self {
         let process = ToolSchema {
+            requirements: None,
             name: "process_spawn".into(),
             version: "1".into(),
             description: "Native process fixture".into(),
@@ -120,6 +125,7 @@ impl Fixture {
             7,
             read_schema(),
             ToolSchema {
+                requirements: None,
                 description: String::new(),
                 output_schema: None,
                 metadata: None,
@@ -143,6 +149,7 @@ impl Fixture {
             7,
             read_schema(),
             ToolSchema {
+                requirements: None,
                 description: String::new(),
                 output_schema: None,
                 metadata: None,
@@ -199,6 +206,7 @@ impl Fixture {
             7,
             read_schema(),
             ToolSchema {
+                requirements: None,
                 description: String::new(),
                 output_schema: None,
                 metadata: None,
@@ -269,6 +277,7 @@ impl Fixture {
             7,
             read_schema(),
             ToolSchema {
+                requirements: None,
                 description: String::new(),
                 output_schema: None,
                 metadata: None,
@@ -336,14 +345,14 @@ impl Fixture {
         launch.child_dispatch = Some(varin_runtime::catalog::dispatch::ChildDispatchCatalog {
             native_capabilities: launch.tools.iter().map(|tool| {
                 use varin_runtime::catalog::dispatch::{ChildCapabilityDescriptor, ChildSourceRequirement};
-                ChildCapabilityDescriptor { name: tool.name.clone(), version: tool.version.clone(),
+                ChildCapabilityDescriptor { process: matches!(tool.name.as_str(), "process_spawn" | "process_inspect" | "process_read" | "process_write" | "process_resize" | "wait_process"), name: tool.name.clone(), version: tool.version.clone(),
                     source_requirement: match tool.name.as_str() {
                         "file_read" => ChildSourceRequirement::Source,
                         "file_write" | "file_edit" | "process_spawn" | "process_inspect" | "process_read" | "process_write" | "process_resize" | "wait_process" => ChildSourceRequirement::Physical,
                         _ => ChildSourceRequirement::None,
                     }, default_presets: Vec::new() }
             }).chain(["file_write", "file_edit"].into_iter().filter(|name| !launch.tools.iter().any(|tool| tool.name == *name))
-                .map(|name| varin_runtime::catalog::dispatch::ChildCapabilityDescriptor { name: name.into(), version: "1".into(),
+                .map(|name| varin_runtime::catalog::dispatch::ChildCapabilityDescriptor { process: false, name: name.into(), version: "1".into(),
                     source_requirement: varin_runtime::catalog::dispatch::ChildSourceRequirement::Physical, default_presets: Vec::new() })).collect(),
             identity: "fixture-catalog".into(),
             normal_unavailable: None,
@@ -410,6 +419,7 @@ impl Fixture {
             if isolated {
                 for name in ["file_write", "file_edit"] {
                     child_launch.tools.push(ToolSchema {
+                        requirements: None,
                         name: name.into(),
                         version: "1".into(),
                         description: String::new(),
@@ -575,6 +585,7 @@ impl Fixture {
         if isolated {
             for name in ["file_write", "file_edit"] {
                 child_launch.tools.push(ToolSchema {
+                    requirements: None,
                     name: name.into(),
                     version: "1".into(),
                     description: String::new(),

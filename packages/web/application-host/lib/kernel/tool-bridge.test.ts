@@ -201,9 +201,13 @@ it('cancel/Run release/reset leaves original callback and lost-ACK evidence aliv
   f.bridge.reset();
   f.setEpoch(null);
   expect(f.released).toEqual([]);
+  const originalOwner = { kind: 'external' as const, identity: owner.binding.reference, epoch: owner.ownerId };
+  expect(f.bridge.callbackEnded('run', originalOwner, call.operationId)).toBe(false);
   finish('late original result');
   await tick();
   expect(f.released).toEqual([]);
+  expect(f.bridge.callbackEnded('run', originalOwner, call.operationId)).toBe(true);
+  expect(f.bridge.callbackEnded('run', { ...originalOwner, epoch: 'replacement' }, call.operationId)).toBeUndefined();
   expect(f.effects).toEqual(['original']);
   f.setEpoch('replacement');
   f.bridge.reconnect();

@@ -303,7 +303,7 @@ it('installed SDK declaration reaches shared bridge, compiled schemas, validated
       ),
     ).toMatchObject({ completion: { kind: 'not_dispatched' } });
     const scope = await createExtensionTools(options)(
-      { runId: 'second', threadId: 'thread' },
+      { runId: 'second', threadId: 'thread', source: null },
       [],
       new AbortController().signal,
     );
@@ -318,7 +318,7 @@ it('installed SDK declaration reaches shared bridge, compiled schemas, validated
     const computer = createComputerRuntime({ kernel, runtime: {} as never, enabled: async () => true,
       computers: { automation: { attachRequests: () => {} }, defaultDesktop: async () => { throw new Error('malformed original Computer default'); } } as never });
     const isolated = await createExtensionTools({ ...options, prepareConfiguration: computer.prepareConfiguration })(
-      { runId: 'independent-custom-selection', threadId: 'thread' }, [], new AbortController().signal,
+      { runId: 'independent-custom-selection', threadId: 'thread', source: null }, [], new AbortController().signal,
     );
     try {
       expect(isolated.initial.map(value => value.binding.serviceId)).toEqual([descriptor.id]);
@@ -327,7 +327,7 @@ it('installed SDK declaration reaches shared bridge, compiled schemas, validated
       }));
       // Exact saved bindings remain mandatory even though optional candidates isolate failure.
       await expect(createExtensionTools({ ...options, configurationIdentity: () => { throw new Error('required configuration unavailable'); } })(
-        { runId: 'required', threadId: 'thread' }, [retained.binding], new AbortController().signal,
+        { runId: 'required', threadId: 'thread', source: null }, [retained.binding], new AbortController().signal,
       )).rejects.toThrow(`extension_tool_configuration_unavailable:${descriptor.id}`);
     } finally { isolated.close(); for (const initial of isolated.initial) initial.lease.release(); }
     bridge.close();
@@ -505,7 +505,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
       routing: { sessionId: 'thread' },
     });
     const scope = await createExtensionTools(options)(
-      { runId: 'run', threadId: 'thread' },
+      { runId: 'run', threadId: 'thread', source: null },
       [],
       new AbortController().signal,
     );
@@ -534,7 +534,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
     // Reconstruct the saved exact A while current routing points to B. Only subsequent
     // new candidate preparation follows B; recovery never silently rewrites the old binding.
     const recovered = await createExtensionTools(options)(
-      { runId: 'recovered', threadId: 'thread' },
+      { runId: 'recovered', threadId: 'thread', source: null },
       [scope.initial[0]!.binding],
       new AbortController().signal,
     );
@@ -570,7 +570,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
       expect(stale.catalog.authoritative).toBe(true);
       expect(stale.routing.authoritative).toBe(false);
       staleRecovered = await createExtensionTools(options)(
-        { runId: 'stale-recovery', threadId: 'thread' },
+        { runId: 'stale-recovery', threadId: 'thread', source: null },
         [scope.initial[0]!.binding],
         new AbortController().signal,
       );
@@ -584,7 +584,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
       ).toBe(true);
       await expect(
         createExtensionTools(options)(
-          { runId: 'new-selection', threadId: 'thread' },
+          { runId: 'new-selection', threadId: 'thread', source: null },
           [],
           new AbortController().signal,
         ),
@@ -683,7 +683,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
     await expect.poll(() => removed).toEqual([a]);
     await expect(
       createExtensionTools(options)(
-        { runId: 'disabled', threadId: 'thread' },
+        { runId: 'disabled', threadId: 'thread', source: null },
         [scope.initial[0]!.binding],
         new AbortController().signal,
       ),

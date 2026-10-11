@@ -1,6 +1,10 @@
 use super::*;
 
-pub(super) fn register(f: &mut Fixture, key: &str, trigger: FollowupRegistrationTrigger) -> Followup {
+pub(super) fn register(
+    f: &mut Fixture,
+    key: &str,
+    trigger: FollowupRegistrationTrigger,
+) -> Followup {
     let p =
         f.db.prepare_followup_registration(
             key,
@@ -121,9 +125,14 @@ fn second_process(f: &mut Fixture) -> String {
         context: context.clone(),
         executor_owner: ExecutorOwner::Kernel,
     });
+    f.db.bind_managed_process(
+        &context,
+        varin_runtime::catalog::managed_process::ManagedProcessKind::ProcessJob,
+    )
+    .unwrap();
     let completion = ToolCompletion::JobAccepted {
         content: None,
-                operation_id: operation.clone(),
+        operation_id: operation.clone(),
         phase: "running".into(),
         effect: Effect::Dispatched,
         lifetime: Lifetime::Thread,
@@ -317,11 +326,7 @@ fn register_rechecks_multiple_original_receipts_and_all_needs_both_real_stops() 
     let first = f.db.admit_followup_registration(p).unwrap().followup;
     assert!(first.sources[0].observed.is_some() && first.sources[1].observed.is_none());
     assert!(first.occurrence.is_none());
-    assert!(f
-        .db
-        .pending_external_operations("process_spawn")
-        .unwrap()
-        .contains(&second));
+    assert!(f.db.pending_managed_processes().unwrap().contains(&second));
     stopped(&mut f, &second, true);
     f.reconcile();
     let value = f.db.followup("all").unwrap();

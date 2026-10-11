@@ -28,11 +28,16 @@ interface Registration {
   signal: AbortSignal;
   accepting: boolean;
   nested: Set<Promise<unknown>>;
+  parent?: Registration;
+  cell?: { environmentId: string; computerUsed(desktopId: string): void; usesComputer(desktopId: string): boolean; computerCancellation?(cancel: (reason: unknown) => void): () => void };
   effect?: { domain: string; work: Promise<ToolExecutionReceipt> };
 }
 // This recognizes the very same object owned by the service invocation. It neither schedules
 // execution nor stores an independent Operation/receipt or accepts extension-reported identities.
 const registrations = new WeakMap<HostInvocationScope, Registration>();
+// A short-lived index of those same registrations, retained through their actual drain.
+// It carries ancestry, never permission or another Operation/receipt authority.
+const liveOperations = new Map<string, Registration>();
 
 /** Host-only bridge entry. The caller must first validate the original Catalog invocation and
  * immutable Run launch. `work` must be the real pin.invoke promise, never a cancelled reader race.
@@ -61,7 +66,13 @@ export async function withToolInvocation<T>(options: {
   Object.freeze(authority);
   const scope: HostInvocationScope = Object.freeze({ id: randomUUID(), value: null });
   const registration: Registration = { authority, owner: Object.freeze({ ...options.owner }), signal: options.signal, accepting: true, nested: new Set() };
+  if (liveOperations.has(authority.operationId)) throw new Error('tool_invocation_already_active');
+  if (origin.kind === 'nested_call') {
+    const parent = liveOperations.get(origin.parent_operation_id);
+    if (parent && parent.authority.runId === authority.runId && parent.authority.threadId === authority.threadId) registration.parent = parent;
+  }
   registrations.set(scope, registration);
+  liveOperations.set(authority.operationId, registration);
   try { return await work(scope); }
   finally {
     // A broker response/exit stops new capabilities, but does not stop a Host file writer
@@ -74,7 +85,49 @@ export async function withToolInvocation<T>(options: {
         const receipt = await registration.effect.work.catch(unknownToolReceipt);
         options.onEffectReceipt?.(receipt);
       }
-    } finally { registrations.delete(scope); }
+    } finally { registrations.delete(scope); liveOperations.delete(authority.operationId); }
+  }
+}
+
+/** Trusted script-domain lifecycle attachment, never a broker-supplied identity. */
+export async function withScriptCell<T>(context: HostCapabilityCallContext,
+  cell: { environmentId: string; computerUsed(desktopId: string): void; usesComputer(desktopId: string): boolean; computerCancellation?(cancel: (reason: unknown) => void): () => void }, work: () => Promise<T>): Promise<T> {
+  requireToolInvocation(context);
+  const registration = registrations.get(context.invocation!)!;
+  if (registration.cell) throw new Error('script_cell_already_active');
+  registration.cell = cell;
+  try { return await work(); }
+  finally { delete registration.cell; }
+}
+
+/** The actual Computer dispatch calls this only after resolving its admitted desktop. */
+export function noteInvocationComputerUse(context: HostCapabilityCallContext, desktopId: string, cancel?: (reason: unknown) => void): () => void {
+  requireToolInvocation(context);
+  const removers: Array<() => void> = [];
+  try {
+    for (let current = registrations.get(context.invocation!); current; current = current.parent) {
+      if (current.signal.aborted) throw new Error('tool_invocation_unavailable');
+      current.cell?.computerUsed(desktopId);
+      const remove = cancel && current.cell?.computerCancellation?.(cancel);
+      if (remove) removers.push(remove);
+    }
+  } catch (error) { for (const remove of removers) remove(); throw error; }
+  return () => { for (const remove of removers) remove(); };
+}
+
+/** A nested Computer cancellation must not wait for the same active cell that waits for it. */
+export function assertNoScriptComputerStopCycle(context: HostCapabilityCallContext, desktopId: string): void {
+  requireToolInvocation(context);
+  for (let current = registrations.get(context.invocation!)?.parent; current; current = current.parent) {
+    if (current.cell?.usesComputer(desktopId)) throw new Error('script_environment_dependency_cycle: finish the current cell, then cancel this desktop from an independent ordinary tool call');
+  }
+}
+
+/** Reject only a proved cycle to the actual active ancestor cell. */
+export function assertNoScriptCellCycle(context: HostCapabilityCallContext, environmentId: string): void {
+  requireToolInvocation(context);
+  for (let current = registrations.get(context.invocation!)?.parent; current; current = current.parent) {
+    if (current.cell?.environmentId === environmentId) throw new Error('script_environment_dependency_cycle');
   }
 }
 

@@ -248,12 +248,37 @@ pub struct ConversationItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ToolSchema {
+    /// Owning execution dependency declaration, not a grant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requirements: Option<ToolRequirements>,
     pub name: String,
     pub version: String,
     pub description: String,
     pub schema: Value,
     pub output_schema: Option<Value>,
     pub metadata: Option<ToolMetadata>,
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolSourceRequirement {
+    Source,
+    Physical,
+    Live,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ToolRequirements {
+    pub source: ToolSourceRequirement,
+    pub process: bool,
+}
+impl ToolRequirements {
+    pub fn accepts(&self, source: Option<&crate::catalog::launches::SourceSelection>) -> bool {
+        source.is_some_and(|source| match self.source {
+            ToolSourceRequirement::Source => true,
+            ToolSourceRequirement::Physical => source.mode != crate::SourceMode::FixedBranch,
+            ToolSourceRequirement::Live => source.mode == crate::SourceMode::LiveRoot,
+        })
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -724,6 +749,9 @@ pub use policy_model::*;
 /// A selected invocation. External arguments are decoded when this handle is created, and the
 /// same implementation and typed input are retained through preparation, admission and dispatch.
 pub trait PreparedToolCall: Send {
+    fn managed_process(&self) -> Option<crate::catalog::managed_process::ManagedProcessKind> {
+        None
+    }
     fn executor_owner(&self) -> ExecutorOwner {
         ExecutorOwner::Kernel
     }
@@ -1032,6 +1060,16 @@ pub enum ToolResume {
 }
 
 pub trait Persistence: Send + Sync + 'static {
+    fn bind_managed_process(
+        &self,
+        _context: &ToolExecutionContext,
+        _kind: crate::catalog::managed_process::ManagedProcessKind,
+    ) -> Result<(), ExecutionError> {
+        Err(ExecutionError::new(
+            "managed_process_owner_unavailable",
+            "Persistence has no managed process authority",
+        ))
+    }
     fn nested_tools(&self) -> Option<Arc<crate::nested_tools::NestedTools>> {
         None
     }

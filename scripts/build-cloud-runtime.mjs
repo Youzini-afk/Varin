@@ -27,6 +27,7 @@ export const CLOUD_RUNTIME_PACKAGE_DIRS = Object.freeze([
   'extension-builtins',
   'extension-host',
   'protocol',
+  'script-runtime',
   'pi-host',
   'runtime-broker',
   'settings-store',
@@ -108,6 +109,7 @@ const packageFiles = Object.freeze({
     required: ['package.json', 'dist'],
     optional: [],
   },
+  'script-runtime': { required: ['package.json', 'dist'], optional: [] },
   'pi-host': {
     required: ['package.json', 'dist', 'patches'],
     optional: [],

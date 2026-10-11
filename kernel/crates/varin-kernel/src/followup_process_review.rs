@@ -299,7 +299,14 @@ fn process_followup_reads_real_original_output_and_rechecks_both_grants() {
         |_| Ok(()),
         crate::process::ProcessControlRegistry::default(),
     );
-    let executor = KernelToolExecutor::new(binding.clone(), resources.clone()).unwrap();
+    let executor = Arc::new(
+        varin_runtime::composition::tools::ToolDirectory::assemble(
+            KernelToolExecutor::new(binding.clone(), resources.clone())
+                .unwrap()
+                .declarations(false),
+        )
+        .unwrap(),
+    );
     let token = CancellationToken::default();
     let mut processes = Vec::new();
     for (index, marker) in ["followup-original-output", "unrelated-process-output"]
@@ -337,7 +344,8 @@ fn process_followup_reads_real_original_output_and_rechecks_both_grants() {
             &call,
             &tools,
         );
-        let contract = executor.prepare(&call, &frozen, &token).unwrap();
+        let bound = executor.clone().bind_call(&call, &frozen, &token).unwrap();
+        let contract = bound.prepare(&token).unwrap();
         record(
             &owner,
             &source.run_id,
@@ -349,9 +357,7 @@ fn process_followup_reads_real_original_output_and_rechecks_both_grants() {
                 },
             },
         );
-        executor
-            .authorize(&context, &call, &contract, &token)
-            .unwrap();
+        bound.authorize(&context, &contract, &token).unwrap();
         record(
             &owner,
             &source.run_id,
@@ -360,7 +366,17 @@ fn process_followup_reads_real_original_output_and_rechecks_both_grants() {
                 executor_owner: ExecutorOwner::Kernel,
             },
         );
-        let completion = executor.execute(&context, &call, &contract, &token);
+        owner
+            .lock()
+            .unwrap()
+            .bind_managed_process(
+                &context,
+                bound
+                    .managed_process()
+                    .expect("native process declaration owns its association"),
+            )
+            .unwrap();
+        let completion = bound.execute(&context, &contract, &token).completion;
         assert!(
             matches!(completion, ToolCompletion::JobAccepted { .. }),
             "real process acceptance: {completion:?}"
@@ -932,6 +948,16 @@ fn native_input_uses_original_model_intent_and_guardian_receipt_then_reads_same_
             executor_owner: ExecutorOwner::Kernel,
         },
     );
+    owner
+        .lock()
+        .unwrap()
+        .bind_managed_process(
+            &context,
+            prepared
+                .managed_process()
+                .expect("native process declaration owns its association"),
+        )
+        .unwrap();
     let accepted = prepared.execute(&context, &contract, &token).completion;
     assert!(matches!(accepted, ToolCompletion::JobAccepted { .. }));
     close_call(&owner, &context, &spawn, accepted, false);
@@ -1043,6 +1069,13 @@ fn native_input_uses_original_model_intent_and_guardian_receipt_then_reads_same_
                 executor_owner: ExecutorOwner::Kernel,
             },
         );
+        if let Some(kind) = prepared.managed_process() {
+            owner
+                .lock()
+                .unwrap()
+                .bind_managed_process(&context, kind)
+                .unwrap();
+        }
         (context, prepared, contract)
     };
     let recover_spawn = ToolCall {

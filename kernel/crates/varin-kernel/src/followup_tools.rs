@@ -26,7 +26,7 @@ pub(crate) fn schema() -> ToolSchema {
          "required":["kind","path","condition"],"additionalProperties":false},
         {"type":"object","properties":{"kind":{"const":"at"},"atMs":{"type":"integer","description":"Absolute Unix time in milliseconds.","minimum":0,"maximum":varin_runtime::catalog::observations::MAX_DEADLINE_MS}},
          "required":["kind","atMs"],"additionalProperties":false},
-        {"type":"object","description":"Observe the process_spawn operation's actual stop.",
+        {"type":"object","description":"Observe an original managed process operation's actual stop, including a script environment in its owning Run.",
          "properties":{"kind":{"const":"process_stopped"},"operationId":text},
          "required":["kind","operationId"],"additionalProperties":false},
         {"type":"object","description":"Observe an accepted job from jobs until its executor stops. Artifact collection is separate.",
@@ -51,6 +51,7 @@ pub(crate) fn schema() -> ToolSchema {
          "required":["kind","sources"],"additionalProperties":false}
     ]});
     ToolSchema {
+        requirements: None,
         name: followups::TOOL.into(),
         version: "8".into(),
         description: "Schedule an instruction to continue this conversation when a condition is met. Registration returns immediately; idle conversations start a new run. Current pauses, unanswered questions and goal limits remain in effect. jobs lists accepted task-family jobs; list shows registrations; get reads an instruction; occurrences pages delivery history; occurrence reads one occurrence's evidence. control pauses, resumes or cancels a registration using its current revision. Pause holds observation and pending delivery; cancel removes future and undelivered work while preserving existing results and observed jobs.".into(),

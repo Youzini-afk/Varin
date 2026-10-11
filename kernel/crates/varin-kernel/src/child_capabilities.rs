@@ -24,6 +24,11 @@ pub(crate) fn descriptors() -> Vec<ChildCapabilityDescriptor> {
             let (source_requirement, default_presets) =
                 definition.child.expect("child declaration");
             ChildCapabilityDescriptor {
+                process: definition
+                    .schema
+                    .requirements
+                    .as_ref()
+                    .is_some_and(|r| r.process),
                 name: definition.schema.name,
                 version: definition.schema.version,
                 source_requirement,
@@ -223,7 +228,12 @@ fn discovery(
     let normal_failure = selected.catalog.normal_unavailable.clone().or_else(|| {
         let mut unknown = unsupported(&normal);
         let source = selected.unavailable_source_tools(&normal);
-        let code = if unknown.is_empty() && !source.is_empty() { unknown = source; "source_required" } else { "unsupported" };
+        let code = if unknown.is_empty() && !source.is_empty() {
+            unknown = source;
+            "source_required"
+        } else {
+            "unsupported"
+        };
         (!unknown.is_empty()).then(
             || varin_runtime::catalog::dispatch::ChildCapabilityFailure {
                 code: code.into(),

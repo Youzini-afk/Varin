@@ -717,6 +717,9 @@ export class KernelClient {
   setFileObservationOwner(owner: FileObservationOwner): void { this.fileObservationBridge.setOwner(owner); }
   setPlanOwner(owner: PlanOwner): void { this.planBridge.setOwner(owner); }
   setLanguageOwner(owner: LanguageToolOwner): void { this.languageBridge.setOwner(owner); }
+  toolCallbackEnded(runId: string, owner: import('./protocol.generated.js').ExecutorOwner, operationId: string): boolean | undefined {
+    return this.toolBridge.callbackEnded(runId, owner, operationId);
+  }
   toolAvailability(runId:string,name:string,version:string):boolean|undefined{return this.toolBridge.availability(runId,name,version);}
   mcpBinding(runId: string): McpBinding | undefined { return this.toolBridge.binding(runId) as McpBinding | undefined; }
   mcpLiveBinding(runId:string):LiveMcpBinding|undefined {return this.toolBridge.liveBinding(runId) as LiveMcpBinding | undefined;}

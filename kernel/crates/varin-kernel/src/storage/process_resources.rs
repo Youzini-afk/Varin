@@ -547,7 +547,7 @@ impl Storage {
         if let Err(error)=self.processes.spawn(id,json!({"processId":id,"kernelEpoch":grant.kernel_epoch,
             "receiptPath":receipt_path,"jobName":job_name,"cwd":cwd,"command":command,"args":params_value["args"],
             "windowsRawArguments":params_value["windowsRawArguments"],
-            "env":params_value["env"],"mode":mode,"cols":cols,"rows":rows,"runId":params_value["__runId"]})){
+            "env":params_value["env"],"mode":mode,"cols":cols,"rows":rows,"runId":grant.run_id})){
             let mut failed=record;
             failed["status"]=json!("failed");failed["writerActive"]=json!(false);failed["reason"]=json!(error.to_string());
             self.persist_process_record(id,&failed)?;

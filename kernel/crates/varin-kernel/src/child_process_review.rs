@@ -55,13 +55,16 @@ impl Harness {
             .authorize(Some(actor), EPOCH, HOST, GENERATION, method, &params)
             .unwrap_or_else(|e| panic!("{method} authorization: {e}"));
         if matches!(method, "file.capture" | "file.captureBatch") {
-            let task = storage.prepare_capture(method, &params, &grant, Arc::new(AtomicBool::new(false))).unwrap();
+            let task = storage
+                .prepare_capture(method, &params, &grant, Arc::new(AtomicBool::new(false)))
+                .unwrap();
             drop(lock);
             let captured = task.run();
             let mut lock = self.storage.lock().unwrap();
             let storage = lock.as_mut().unwrap();
             let result = (|| {
-                let (grant, _) = storage.authorize(Some(actor), EPOCH, HOST, GENERATION, method, &params)?;
+                let (grant, _) =
+                    storage.authorize(Some(actor), EPOCH, HOST, GENERATION, method, &params)?;
                 storage.publish_capture(&task, captured?, &grant)
             })();
             storage.finish_retained_file_lease(task.lease_id());
@@ -481,16 +484,32 @@ impl Harness {
             arguments: json!({"cwd":"","command":"/bin/sh","args":["-c",script],"env":[],"mode":"pipe"}),
         };
         let (context, frozen) = self.request(node, Some(&call));
-        let executor =
-            KernelToolExecutor::new(node.binding.clone(), self.resources.clone()).unwrap();
+        let directory = Arc::new(
+            varin_runtime::composition::tools::ToolDirectory::assemble(
+                KernelToolExecutor::new(node.binding.clone(), self.resources.clone())
+                    .unwrap()
+                    .declarations(false),
+            )
+            .unwrap(),
+        );
         let token = CancellationToken::default();
-        let contract = executor.prepare(&call, &frozen, &token).unwrap();
+        let bound = directory.bind_call(&call, &frozen, &token).unwrap();
+        let contract = bound.prepare(&token).unwrap();
         self.admit(&context, &call, &contract);
-        executor
-            .authorize(&context, &call, &contract, &token)
-            .unwrap();
+        bound.authorize(&context, &contract, &token).unwrap();
         self.dispatched(&context);
-        let completion = executor.execute(&context, &call, &contract, &token);
+        self.runtime
+            .catalog()
+            .lock()
+            .unwrap()
+            .bind_managed_process(
+                &context,
+                bound
+                    .managed_process()
+                    .expect("native process declaration owns its association"),
+            )
+            .unwrap();
+        let completion = bound.execute(&context, &contract, &token).completion;
         assert!(
             matches!(completion, ToolCompletion::JobAccepted { .. }),
             "actual guardian: {completion:?}"
@@ -585,7 +604,7 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
         identity: "original-settings-selection".into(),
         normal_unavailable: None,
         presets: vec![ChildPreset {
-        tools_source: varin_runtime::catalog::dispatch::ChildPresetToolsSource::Explicit,
+            tools_source: varin_runtime::catalog::dispatch::ChildPresetToolsSource::Explicit,
             id: "writer".into(),
             name: "Writer".into(),
             instructions: "Use only the admitted private view.".into(),
@@ -953,7 +972,9 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
                     trigger: FollowupRegistrationTrigger::All {
                         sources: vec![
                             FollowupRegistrationSource::At { at_ms: 0 },
-                            FollowupRegistrationSource::ProcessStopped { operation_id: child_process.clone() },
+                            FollowupRegistrationSource::ProcessStopped {
+                                operation_id: child_process.clone(),
+                            },
                         ],
                     },
                     instruction:

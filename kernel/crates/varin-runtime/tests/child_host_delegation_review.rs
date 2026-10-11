@@ -15,6 +15,7 @@ use varin_runtime::*;
 
 fn mcp() -> HostToolBinding {
     let tool = |name: &str| ToolSchema {
+        requirements: None,
         name: name.into(),
         version: "declaration-1".into(),
         description: format!("Original {name}"),
@@ -646,9 +647,7 @@ fn child_result_waits_for_original_workspace_and_service_callbacks_but_not_globa
                 "external callbacks retain normal Run cancellation"
             );
             assert!(
-                f.db.pending_external_operations("process_spawn")
-                    .unwrap()
-                    .is_empty(),
+                f.db.pending_managed_processes().unwrap().is_empty(),
                 "native recovery cannot replay a Host callback"
             );
             assert!(f
@@ -696,12 +695,21 @@ fn child_result_waits_for_original_workspace_and_service_callbacks_but_not_globa
         );
         f.db.reconcile_child_reports().unwrap();
         let continuation = varin_runtime::catalog::delegated::ChildContinuationCommand {
-            key: "explicit-after-callback".into(), child_operation_id: child.operation_id.clone(),
-            previous_run_id: run.clone(), expected_head: f.db.head(&child.child_branch_id).unwrap(),
+            key: "explicit-after-callback".into(),
+            child_operation_id: child.operation_id.clone(),
+            previous_run_id: run.clone(),
+            expected_head: f.db.head(&child.child_branch_id).unwrap(),
             input: json!("Continue from the exact fixed result"),
         };
-        let pending=f.db.capture_child_continuation(continuation.clone()).unwrap().load().unwrap();
-        assert!(f.db.accept_child_continuation(pending).is_err(), "an unstopped source callback still blocks a new source");
+        let pending =
+            f.db.capture_child_continuation(continuation.clone())
+                .unwrap()
+                .load()
+                .unwrap();
+        assert!(
+            f.db.accept_child_continuation(pending).is_err(),
+            "an unstopped source callback still blocks a new source"
+        );
         let receipt = |index: usize, effect| ExternalReceipt {
             identity: contexts[index].operation_id.clone(),
             executor: calls[index].name.clone(),
@@ -798,14 +806,28 @@ fn child_result_waits_for_original_workspace_and_service_callbacks_but_not_globa
         assert!(
             matches!(published.code_result, ChildCodeResult::Published { effect: actual, .. } if actual == effect)
         );
-        let old_receipts=contexts.iter().map(|context|f.db.operation(&context.operation_id).unwrap()).collect::<Vec<_>>();
-        let old_result=published.code_result.clone();
-        let pending=f.db.capture_child_continuation(continuation).unwrap().load().unwrap();
-        let next=f.db.accept_child_continuation(pending).unwrap();
-        let ChildCodeResult::Published { result: fixed, .. }=&old_result else{unreachable!()};
-        assert_eq!(next.source_basis.as_ref().unwrap().root(),fixed.root);
-        assert_eq!(f.db.child_task(&child.operation_id).unwrap().code_result,old_result);
-        for (context,old) in contexts.iter().zip(old_receipts){assert_eq!(f.db.operation(&context.operation_id).unwrap(),old);}
+        let old_receipts = contexts
+            .iter()
+            .map(|context| f.db.operation(&context.operation_id).unwrap())
+            .collect::<Vec<_>>();
+        let old_result = published.code_result.clone();
+        let pending =
+            f.db.capture_child_continuation(continuation)
+                .unwrap()
+                .load()
+                .unwrap();
+        let next = f.db.accept_child_continuation(pending).unwrap();
+        let ChildCodeResult::Published { result: fixed, .. } = &old_result else {
+            unreachable!()
+        };
+        assert_eq!(next.source_basis.as_ref().unwrap().root(), fixed.root);
+        assert_eq!(
+            f.db.child_task(&child.operation_id).unwrap().code_result,
+            old_result
+        );
+        for (context, old) in contexts.iter().zip(old_receipts) {
+            assert_eq!(f.db.operation(&context.operation_id).unwrap(), old);
+        }
         drop(writers);
         drop(f);
         std::fs::remove_dir_all(root).unwrap();
@@ -815,24 +837,51 @@ fn child_result_waits_for_original_workspace_and_service_callbacks_but_not_globa
 #[test]
 fn source_free_delegation_preserves_actual_global_or_workspace_mcp_scope() {
     for scope in [McpExecutionScope::Global, McpExecutionScope::Workspace] {
-        let mut binding = mcp(); binding.provenance.execution_scope = scope;
+        let mut binding = mcp();
+        binding.provenance.execution_scope = scope;
         let first = binding.tools[0].clone();
-        let f = Fixture::new_parent_custom(0, first, ToolSchema { name: "dispatch".into(), version: "1".into(),
-            description: String::new(), schema: json!({"type":"object"}), metadata: None, output_schema: None }, false, false, false,
+        let f = Fixture::new_parent_custom(
+            0,
+            first,
+            ToolSchema {
+                requirements: None,
+                name: "dispatch".into(),
+                version: "1".into(),
+                description: String::new(),
+                schema: json!({"type":"object"}),
+                metadata: None,
+                output_schema: None,
+            },
+            false,
+            false,
+            false,
             move |input, launch| {
                 input.tools = Some(vec!["first".into()]);
                 launch.tools.retain(|tool| tool.name != "first");
-                launch.tools.extend(binding.tools.iter().cloned()); launch.mcp_binding = Some(binding); launch.source = None;
-            });
-        let selected = f.db.capture_child_dispatch_invocation(&f.context).unwrap().load().unwrap();
+                launch.tools.extend(binding.tools.iter().cloned());
+                launch.mcp_binding = Some(binding);
+                launch.source = None;
+            },
+        );
+        let selected =
+            f.db.capture_child_dispatch_invocation(&f.context)
+                .unwrap()
+                .load()
+                .unwrap();
         let result = selected.resolve(&f.input);
         if scope == McpExecutionScope::Global {
             let resolved = result.unwrap();
-            assert_eq!(resolved.mcp_binding.unwrap().provenance.execution_scope, McpExecutionScope::Global);
+            assert_eq!(
+                resolved.mcp_binding.unwrap().provenance.execution_scope,
+                McpExecutionScope::Global
+            );
         } else {
             let failure = result.unwrap_err().to_string();
             assert!(failure.contains("first") && failure.contains("select a source"));
         }
-        let root = f.root.clone(); drop(selected); drop(f); std::fs::remove_dir_all(root).unwrap();
+        let root = f.root.clone();
+        drop(selected);
+        drop(f);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

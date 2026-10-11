@@ -51,7 +51,7 @@
   },
   "scripts": {
     "build": "bun run build:dependencies && tsc -p tsconfig.build.json",
-    "build:dependencies": "bun run --cwd ../protocol build",
+    "build:dependencies": "bun run --cwd ../protocol build && bun run --cwd ../script-runtime build",
     "lint": "eslint \"./src/**/*.ts\" --config ../../eslint.config.js",
     "test": "tsx --test \"test/**/*.test.ts\"",
     "test:dist": "node --test test/dist-smoke.test.mjs",
@@ -68,7 +68,8 @@
     "proper-lockfile": "4.1.2",
     "typebox": "1.3.36",
     "ajv": "^8.20.0",
-    "ajv-formats": "^3.0.1"
+    "ajv-formats": "^3.0.1",
+    "@varin/script-runtime": "0.1.0"
   },
   "devDependencies": {
     "@types/proper-lockfile": "4.1.4"

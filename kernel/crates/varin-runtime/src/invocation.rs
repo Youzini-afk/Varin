@@ -102,6 +102,9 @@ impl<P: Persistence + ?Sized + 'static> InvocationRunner<P> {
                     Ok(Ok(ToolExecutionReceipt::not_dispatched("cancelled")))
                 } else {
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        if let Some(kind) = bound.managed_process() {
+                            self.persistence.bind_managed_process(context, kind)?;
+                        }
                         let nested_guard = if let (Some(registry), Some(scope)) =
                             (self.persistence.nested_tools(), nested.clone())
                         {

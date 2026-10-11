@@ -27,6 +27,7 @@ impl Drop for Fixture {
 }
 fn schema() -> ToolSchema {
     ToolSchema {
+        requirements: None,
         name: "resource_read".into(),
         version: "2".into(),
         description: "Read selected resource".into(),

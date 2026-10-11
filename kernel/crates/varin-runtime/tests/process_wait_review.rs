@@ -26,7 +26,7 @@ impl Fixture {
         let launch: LaunchSelection = serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"fixture",
             "provider_family":"fixture","model":"model","configuration_generation":1,"tool_schema_generation":1,
             "tools":[{"name":WAIT_TOOL,"version":"1","description":"Wait for fixture operation","output_schema":null,"metadata":null,"schema":{"type":"object"}},
-                {"name":"process_spawn","version":"1","description":"Original native process","output_schema":null,"metadata":null,"schema":{"type":"object"}}],"policy":{"name":"fixture","version":"1"},"source":null})).unwrap();
+                {"name":"process_spawn","version":"1","description":"Original native process","output_schema":null,"metadata":null,"schema":{"type":"object"}}],"policy":{"name":"fixture","version":"1"},"source":{"mode":"live_root","live_root":{"hostId":"fixture","canonicalRoot":root,"rootId":"fixture-root"},"workspace_id":"fixture","execution_workspace_id":"fixture","branch_id":null,"revision":null}})).unwrap();
         let receipt = db
             .submit_with_launch(
                 &SubmitInput {
@@ -120,9 +120,15 @@ impl Fixture {
             context: context.clone(),
             executor_owner: ExecutorOwner::Kernel,
         });
+        self.db
+            .bind_managed_process(
+                &context,
+                varin_runtime::catalog::managed_process::ManagedProcessKind::ProcessJob,
+            )
+            .unwrap();
         let completion = ToolCompletion::JobAccepted {
             content: None,
-                operation_id: PROCESS.into(),
+            operation_id: PROCESS.into(),
             phase: "running".into(),
             effect: Effect::Dispatched,
             lifetime: Lifetime::Thread,
@@ -527,7 +533,7 @@ impl Fixture {
             origin: origin.clone(),
             tool_schema_generation: launch.tool_schema_generation,
             tools: std::sync::Arc::new(launch.tools),
-            source: None,
+            source: launch.source,
         };
         self.db
             .admit_policy_graph(
@@ -575,7 +581,7 @@ impl Fixture {
         let wait = self.db.wait_for_process(&context, PROCESS).unwrap();
         let completion = ToolCompletion::JobAccepted {
             content: None,
-                operation_id: context.operation_id.clone(),
+            operation_id: context.operation_id.clone(),
             phase: "awaiting_process".into(),
             effect: Effect::None,
             lifetime: Lifetime::Thread,

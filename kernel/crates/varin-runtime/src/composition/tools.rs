@@ -245,6 +245,9 @@ fn selected(
     }))
 }
 impl PreparedToolCall for SelectedCall {
+    fn managed_process(&self) -> Option<crate::catalog::managed_process::ManagedProcessKind> {
+        self.invocation.managed_process()
+    }
     fn executor_owner(&self) -> crate::ExecutorOwner {
         self.invocation.executor_owner()
     }
@@ -450,6 +453,7 @@ mod tests {
     fn declaration(version: &'static str) -> ToolDeclaration {
         ToolDeclaration::new(
             ToolSchema {
+                requirements: None,
                 description: String::new(),
                 output_schema: None,
                 metadata: None,

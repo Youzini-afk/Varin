@@ -1,3 +1,4 @@
+import { KERNEL_PROTOCOL_VERSION } from './protocol.generated.js';
 import { expect, it, vi } from 'vitest';
 import { FileObservationService } from './file-observation-service.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
@@ -23,7 +24,7 @@ it('retains in-flight invalidations, pauses without losing them, and cancels onl
     observeFileFollowup: observe, releaseFileFollowup: release } as unknown as AgentRuntimeClient;
   const errors = vi.fn(); const stop = vi.fn();
   const service = new FileObservationService(runtime, { has: () => true, stop } as unknown as DocumentsFileObservationOwner, errors);
-  const emit = () => event({ v: 1, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: cursor++ });
+  const emit = () => event({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: cursor++ });
   const settle = (index: number) => reads[index]!.resolve({ accepted: true, followup: { revision: binding.definitionRevision } as Followup });
   try {
     await service.recover(); await vi.waitFor(() => expect(reads).toHaveLength(1));

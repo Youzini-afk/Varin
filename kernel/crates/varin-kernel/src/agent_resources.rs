@@ -102,7 +102,7 @@ pub(crate) fn builtin_schema() -> crate::run_tools::BuiltinSchema {
     crate::run_tools::BuiltinSchema::child(schema(), None, &[Worker, Retrieval])
 }
 pub(crate) fn schema() -> ToolSchema {
-    ToolSchema { name:"resource_read".into(),version:"2".into(),
+    ToolSchema { requirements: None, name:"resource_read".into(),version:"2".into(),
         description:"Read a selected skill, a file within its bundle, or the instructions applying to a target in the admitted source. Pass a retained explicit skill input's activationId and matching resourceId to select its original version. Without activationId, read from this invocation's current frozen catalog. Returned text retains its original source and scope.".into(),
         output_schema:None,metadata:None,
         schema:json!({"type":"object","oneOf":[
@@ -141,17 +141,35 @@ fn request(
     checkpoint(&request, context)?;
     Ok(request)
 }
-fn checkpoint<'a>(request: &ResourceRequest, context: &'a FrozenToolContext) -> Result<&'a str, ExecutionError> {
+fn checkpoint<'a>(
+    request: &ResourceRequest,
+    context: &'a FrozenToolContext,
+) -> Result<&'a str, ExecutionError> {
     if let Some(activation_id) = request.activation_id() {
-        let binding = context.resource_activations.iter().find(|binding| binding.activation_id == activation_id)
+        let binding = context
+            .resource_activations
+            .iter()
+            .find(|binding| binding.activation_id == activation_id)
             .ok_or_else(|| failed("resource activation is not retained by this invocation"))?;
-        if activation_id.is_empty() || Some(binding.resource_id.as_str()) != request.resource_id()
-            || context.resource_activations.iter().filter(|binding| binding.activation_id == activation_id).count() != 1 {
-            return Err(failed("resource activation differs from the selected resource"));
+        if activation_id.is_empty()
+            || Some(binding.resource_id.as_str()) != request.resource_id()
+            || context
+                .resource_activations
+                .iter()
+                .filter(|binding| binding.activation_id == activation_id)
+                .count()
+                != 1
+        {
+            return Err(failed(
+                "resource activation differs from the selected resource",
+            ));
         }
         return Ok(&binding.resource_checkpoint_id);
     }
-    context.resource_checkpoint_id.as_deref().filter(|id| !id.is_empty())
+    context
+        .resource_checkpoint_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
         .ok_or_else(|| failed("resource checkpoint is not bound"))
 }
 pub(crate) fn declaration(

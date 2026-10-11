@@ -86,6 +86,10 @@ impl Fixture {
             process: "request:tool:process".into(),
         };
         fixture.state(RunState::Runnable);
+        // Source-only continuation fixtures have no physical process to admit.
+        if source.is_null() || source["mode"] == "fixed_branch" {
+            return fixture;
+        }
         let range = HistoryRange {
             branch_id: "branch".into(),
             ancestor_id: None,
@@ -164,6 +168,13 @@ impl Fixture {
             context: fixture.context(),
             executor_owner: ExecutorOwner::Kernel,
         });
+        fixture
+            .db
+            .bind_managed_process(
+                &fixture.context(),
+                varin_runtime::catalog::managed_process::ManagedProcessKind::ProcessJob,
+            )
+            .unwrap();
         let completion = ToolCompletion::JobAccepted {
             content: None,
             operation_id: fixture.process.clone(),
@@ -285,6 +296,7 @@ impl Fixture {
 }
 fn schema(name: &str) -> ToolSchema {
     ToolSchema {
+        requirements: None,
         name: name.into(),
         version: "1".into(),
         description: format!("Fixture {name}"),

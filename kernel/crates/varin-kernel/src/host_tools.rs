@@ -535,7 +535,12 @@ impl HostTools {
                     _ => CompletionKind::Result,
                 },
                 lifetime: match self.schema.metadata.as_ref() {
-                    Some(metadata) if metadata.completion == RegisteredToolCompletion::Job => metadata.lifetime.filter(|l| matches!(l, Lifetime::Thread | Lifetime::Environment)).ok_or_else(|| failed("host_job_lifetime_required"))?,
+                    Some(metadata) if metadata.completion == RegisteredToolCompletion::Job => {
+                        metadata
+                            .lifetime
+                            .filter(|l| matches!(l, Lifetime::Thread | Lifetime::Environment))
+                            .ok_or_else(|| failed("host_job_lifetime_required"))?
+                    }
                     _ => Lifetime::Run,
                 },
                 resources: vec![],
@@ -691,7 +696,8 @@ impl ToolExecutor for HostTools {
                 (
                     Some(
                         completion @ (ToolCompletion::NotDispatched { .. }
-                        | ToolCompletion::Result { .. } | ToolCompletion::JobAccepted { .. }),
+                        | ToolCompletion::Result { .. }
+                        | ToolCompletion::JobAccepted { .. }),
                     ),
                     Some(executor_stopped),
                 ) => ToolExecutionReceipt {
@@ -790,10 +796,15 @@ impl LateReceipt {
                 json!({"not_dispatched":reason}),
             ),
             completion @ ToolCompletion::JobAccepted { .. } => {
-                let saved = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                    .host_job_acceptance(&operation.id).map_err(domain)?;
+                let saved = catalog
+                    .lock()
+                    .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                    .host_job_acceptance(&operation.id)
+                    .map_err(domain)?;
                 if self.receipt.executor_stopped || saved.load().map_err(domain)? != completion {
-                    return Err(KernelError::Authorization("Host job acceptance differs from its trusted domain receipt".into()));
+                    return Err(KernelError::Authorization(
+                        "Host job acceptance differs from its trusted domain receipt".into(),
+                    ));
                 }
                 return Ok(());
             }
@@ -932,6 +943,7 @@ mod tests {
         ] {
             let (bridge, frames) = fixture();
             let schema = ToolSchema {
+                requirements: None,
                 name: "helper".into(),
                 version: "declaration".into(),
                 description: "Original helper".into(),

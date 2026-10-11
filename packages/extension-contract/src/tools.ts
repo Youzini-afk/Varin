@@ -17,7 +17,7 @@ export function parseVarinToolJson(value: unknown, path = "tool value"): JsonVal
 export function parseVarinExtensionToolDeclaration(value: unknown): VarinExtensionToolDeclaration {
   const declaration = parseVarinToolJson(value, "tool");
   if (!declaration || typeof declaration !== "object" || Array.isArray(declaration)) throw new Error("tool must be an object");
-  const keys = new Set(["name", "description", "inputSchema", "outputSchema", "completion", "lifetime", "operation", "examples", "source"]);
+  const keys = new Set(["name", "description", "inputSchema", "outputSchema", "completion", "lifetime", "operation", "examples", "source", "requirements"]);
   for (const key of Object.keys(declaration)) if (!keys.has(key)) throw new Error(`Unknown tool declaration field: ${key}`);
   for (const key of ["name", "description"] as const) {
     if (typeof declaration[key] !== "string" || !declaration[key].trim()) throw new Error(`tool.${key} must be a non-empty string`);
@@ -34,6 +34,12 @@ export function parseVarinExtensionToolDeclaration(value: unknown): VarinExtensi
   }
   if (declaration.operation !== "read" && declaration.operation !== "effect") throw new Error("tool.operation must be read or effect");
   if (declaration.examples !== undefined && !Array.isArray(declaration.examples)) throw new Error("tool.examples must be an array");
+  if (declaration.requirements !== undefined) {
+    const requirement = declaration.requirements;
+    if (!requirement || typeof requirement !== 'object' || Array.isArray(requirement)
+      || !['source', 'physical', 'live'].includes(String(requirement.source)) || typeof requirement.process !== 'boolean'
+      || Object.keys(requirement).some(key => key !== 'source' && key !== 'process')) throw new Error('tool.requirements must declare source and process dependencies');
+  }
   if (declaration.source !== undefined) {
     const source = declaration.source;
     if (!source || typeof source !== "object" || Array.isArray(source)

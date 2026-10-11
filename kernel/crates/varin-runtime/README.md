@@ -557,9 +557,9 @@ output does not suppress their next legal request delivery or replay the write a
 
 The private protocol releases only completed-body transfer credit after a nested call belongs to its
 live worker, preserving the pending cancellation/final response. This permits further original
-permission/domain requests at the existing window size. Catalog **46** rejects older internal formats
-directly. Persistent script environments and typed media delivery are separate capabilities; this
-entry does not claim that arbitrary extension Node I/O is sandboxed or intercepted.
+permission/domain requests at the existing window size. Catalog **47** rejects older internal formats
+directly. Persistent script environments use the contract below; typed media delivery remains a
+separate capability. Arbitrary extension Node I/O is not sandboxed or intercepted.
 
 Question and process observers reuse the original Job acceptance and Wait owners. A pending observation
 parks before an ordinary policy callback, retaining the committed private state and original event.
@@ -575,6 +575,40 @@ the caller, question and Wait before returning. It neither changes JobAccepted i
 nor treats an answer as permission. The ordinary installed
 [`domain-policy`](../../../examples/extensions/domain-policy/README.md) example consumes these tools,
 owned result chunks and explicit Deliver/Pause/Resume without model inference.
+
+### Managed persistent script environments
+
+The ordinary `varin.builtin.scripts` service provides `script_open`, `script_run` and `script_close`.
+An accepted open is the original Environment-lifetime Operation; its ID is the environment ID.
+`managed_process` links that Operation to its actual Storage process and non-secret Node binding.
+Process Jobs and script environments use explicit purpose metadata rather than a tool-name prefix.
+The Storage grant supplies the original Run identity for physical control. No second process, effect,
+grant or result database exists. General Node execution requires the selected physical source; absent
+and fixed-only sources do not acquire an invented working directory.
+
+Each ordinary cell has its own ModelStep/PolicyAction/NestedCall identity and immutable tool context.
+The Host queues cells through real execution and accepted callback drain. The shared Node REPL keeps
+lexical declarations, classes, objects, closures and top-level await across cells. Old asynchronous
+scopes stay closed; a function called by a later cell uses that caller's actual scope. A script can
+invoke only tools from its original frozen directory, using their original permissions and receipts.
+The script process is unrestricted Node execution, not a Computer-only or filesystem sandbox.
+
+Cancellation reaches the exact original cell token, including policy graph nodes, then starts original
+Computer-admission abort controllers and guardian termination before waiting for callbacks. A stopped
+process tree alone does not prove that an accepted Host callback drained. The environment stays a
+potential source writer between cells and closes on its creating Run's terminal state. An independent
+nested Thread ProcessJob remains with its own guardian and lifetime. `script_close` reports its own
+completed control request separately from the target environment's actual stop evidence, so an
+uncertain target does not create a second unresolved writer.
+
+The public declaration's `requirements` is the dependency owner for source/process readiness,
+child descriptors and grant preparation. It grants no permission by itself. Selecting script tools
+does not require selecting `process_spawn` or file tools. Frozen Node executable/worker/configuration
+identity and original source must match for evaluation; cleanup can still target the old environment.
+Reopening never reconstructs a heap or replays code. Retained live Host callbacks can provide actual
+drain evidence; a new epoch or an empty new Host map cannot. Lost cleanup responses are reconciled
+against the original receipt. See the [shared evaluator](../../../packages/script-runtime/README.md)
+for the explicitly retained Node 24 top-level-await/null-rejection limitation and text-only output.
 
 ## Safe policy activation
 

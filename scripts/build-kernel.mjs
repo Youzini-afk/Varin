@@ -8,6 +8,7 @@ const require = createRequire(import.meta.url);
 const { defaultKernelTargetTriple, detectKernelBinaryIdentity, normalizeKernelArchitecture } = require('./kernel-binary-identity.cjs');
 
 const root = path.resolve(import.meta.dirname, '..');
+const { protocolVersion } = JSON.parse(fs.readFileSync(path.join(root, 'kernel', 'protocol', 'schema.json'), 'utf8'));
 const args = process.argv.slice(2);
 const stageIndex = args.indexOf('--stage');
 const stage = stageIndex >= 0 && args[stageIndex + 1]
@@ -97,7 +98,7 @@ fs.writeFileSync(path.join(stage, 'manifest.json'), JSON.stringify({
   arch,
   binaryFormat: binaryIdentity.format,
   buildIdentity,
-  protocolVersion: 1,
+  protocolVersion,
   kernelVersion: '0.1.0',
   sha256: digest,
 }, null, 2) + '\n');

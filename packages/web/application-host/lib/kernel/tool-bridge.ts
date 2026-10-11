@@ -294,6 +294,14 @@ export class ToolBridge {
       ? { ownerId: key!, binding: structuredClone(owner.binding) }
       : undefined;
   }
+  /** Actual retained callback completion, not physical stop or a new-epoch inference. */
+  callbackEnded(runId: string, owner: ExecutorOwner, operationId: string): boolean | undefined {
+    if (owner.kind !== 'external') return undefined;
+    const entry = this.#owners.get(runId)?.get(owner.epoch);
+    if (!entry || entry.binding.reference !== owner.identity) return undefined;
+    const call = entry.calls.get(operationId);
+    return call?.started ? !call.actualPending : undefined;
+  }
   availability(
     runId: string,
     name: string,

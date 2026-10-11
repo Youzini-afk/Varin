@@ -1,5 +1,13 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
 
+export interface ManagedProcess { purpose: ManagedProcessKind; kernel_epoch: string | null; }
+
+export type ManagedProcessKind = {kind:'process_job'} | {kind:'script_environment';node:NodeBinding};
+
+export interface NodeBinding { executable: string; worker_path: string; worker_identity: string; configuration_identity: string; }
+
+export interface ToolRequirements { source: 'source' | 'physical' | 'live'; process: boolean; }
+
 export type ComputerEventKind = 'takeover' | 'cancel' | 'handback';
 
 export interface ComputerEventFact {
@@ -1030,7 +1038,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 1; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 2; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -1121,6 +1129,7 @@ export interface LaunchTool {
   schema: unknown;
   output_schema: unknown;
   metadata: ToolMetadata | null;
+  requirements?: ToolRequirements;
 }
 
 export interface LaunchPolicy {
@@ -1881,6 +1890,7 @@ export interface Operation {
   waiting_on: string | null;
   intent: unknown;
   result: unknown;
+  managed_process?: ManagedProcess;
 }
 
 export interface ProviderOriginal {
@@ -1995,8 +2005,9 @@ export interface ChildWaitParams {
 export interface ChildCapabilityDescriptor {
   name: string;
   version: string;
-  source_requirement: 'none' | 'source' | 'physical';
+  source_requirement: 'none' | 'source' | 'physical' | 'live';
   default_presets: ('worker' | 'retrieval')[];
+  process?: boolean;
 }
 
 export type ChildWorkMode = 'read_only' | 'isolated_write';
