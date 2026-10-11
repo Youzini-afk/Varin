@@ -110,3 +110,19 @@ or assert physical stop. The ordinary [research example](../../examples/extensio
 uses that boundary for accepted experiments and observation waits. This is not a generic extension-owned
 durable job store. A declared read operation
 still needs its ordinary capability grants and the Host's current invocation authority.
+
+Tool callbacks can compose other selected tools with
+`await call.tools.invoke({ callId: 'memory', name: 'memory', arguments: { action: 'read' } })`.
+Declare `runtime.tools` in the Host entrypoint's capabilities. The returned `NestedToolReceipt`
+contains `operationId` and the original `completion` (`not_dispatched`, `result`, or `job_accepted`).
+The native owner derives the schema version and binds the call to the original invocation's frozen
+selected directory, source, context and generation. Every inner tool performs its own ordinary
+permission and resource admission; the composition does not enable an unselected tool.
+
+Choose a stable `callId` within this callback. Repeating it with identical input shares the actual
+in-flight call or receipt; changed input is rejected. Returned callbacks close new calls and drain
+already accepted calls even if their JavaScript promises were abandoned. Foreground cancellation
+reaches the original inner executor. An accepted independent Job keeps its original lifetime.
+Callback success describes the callback itself: an inner error caught or omitted from output still
+has its own native Operation and receipt. Closed or restarted invocation scopes cannot issue calls
+or replay unknown effects. See the [nested-tools example](../../examples/extensions/nested-tools/README.md).

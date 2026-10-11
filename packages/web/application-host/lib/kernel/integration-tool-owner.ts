@@ -71,7 +71,7 @@ export function createIntegrationToolOwner(options: IntegrationToolOwnerOptions)
         const result = child.code_result.result;
         const operationBinding = { kind: 'runtime_operation' as const, operationId: authority.operationId,
           parentRunId: authority.runId, parentThreadId: authority.threadId, parentBranchId: run.branch_id,
-          origin: authority.origin, callId: authority.origin.kind === 'policy_action' ? authority.origin.node_id : authority.operationId.slice(`${authority.origin.request_id}:tool:`.length),
+          origin: authority.origin, callId: authority.callId,
           childOperationId: child.child_operation_id, childExecutionId: child.execution_id, childThreadId: child.child_thread_id,
           result: { workspaceId: result.workspace_id, branchId: result.branch_id, resultRevision: result.result_revision,
             root: result.root, publicationId: result.publication_id }, target: authority.source as LaunchSource };

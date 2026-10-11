@@ -236,8 +236,10 @@ pub(crate) fn spawn(
     policy_bridge: crate::policy::PolicyBridge,
     responses: crate::transport::Sender,
     finished: impl Fn(&str) + Send + Sync + 'static,
+    release_credit: impl Fn(&str, &str) + Send + Sync + 'static,
 ) -> JoinHandle<()> {
     let finished: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(finished);
+    let release_credit: Arc<dyn Fn(&str, &str) + Send + Sync> = Arc::new(release_credit);
     let (content_tasks, content_jobs) = mpsc::channel::<Box<dyn FnOnce() + Send>>();
     let content_jobs = Arc::new(Mutex::new(content_jobs));
     // The protocol admits this many ordinary requests. Independent content reads get their
@@ -604,6 +606,7 @@ pub(crate) fn spawn(
                                 | "runtime.child.prepare"
                                 | "runtime.child.source.ready"
                                 | "runtime.tools.ready"
+                                | "runtime.tools.invoke"
                                 | "runtime.launch.mcp.prepare"
                                 | "runtime.launch.policy.prepare"
                                 | "runtime.policy.ready"
@@ -886,8 +889,11 @@ pub(crate) fn spawn(
                             let done = finished.clone();
                             let cancelled = cancellation.clone();
                             thread::spawn(move || {
-                                let result = if method.starts_with("runtime.computer.") { computer_commands::execute(runtime, &method, params, &cancelled) }
-                                else { host_job_commands::execute(runtime, &method, params, &cancelled) };
+                                let result = if method.starts_with("runtime.computer.") {
+                                    computer_commands::execute(runtime, &method, params, &cancelled)
+                                } else {
+                                    host_job_commands::execute(runtime, &method, params, &cancelled)
+                                };
                                 let response = match result {
                                     Ok(value) => response_ok(&response_id, value),
                                     Err(error) => response_error(&response_id, &error),
@@ -1883,6 +1889,55 @@ pub(crate) fn spawn(
                             deferred = true;
                             return Ok(Value::Null);
                         }
+                        if method == "runtime.tools.invoke" {
+                            let registry = runtime
+                                .catalog()
+                                .lock()
+                                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                                .nested_tools();
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            let release_credit = release_credit.clone();
+                            // A nested executor may itself invoke another tool. Its actual resource
+                            // admission controls concurrency; never occupy the bounded content-reader pool.
+                            thread::Builder::new()
+                                .name("nested-tool".into())
+                                .spawn(move || {
+                                    let result = (|| -> Result<Value, KernelError> {
+                                        let p: NestedToolInvokeParams =
+                                            serde_json::from_value(params)?;
+                                        let receipt = registry
+                                            .invoke_owned(
+                                                &p.parent_operation_id,
+                                                &p.executor_owner,
+                                                p.call,
+                                                || {
+                                                    release_credit(
+                                                        &response_id,
+                                                        "runtime.tools.invoke",
+                                                    )
+                                                },
+                                            )
+                                            .map_err(|error| {
+                                                KernelError::Operation(format!(
+                                                    "{}: {}",
+                                                    error.code, error.message
+                                                ))
+                                            })?;
+                                        Ok(serde_json::to_value(receipt)?)
+                                    })();
+                                    let response = match result {
+                                        Ok(value) => response_ok(&response_id, value),
+                                        Err(error) => response_error(&response_id, &error),
+                                    };
+                                    done(&response_id);
+                                    let _ = response_sender.send(response);
+                                })
+                                .map_err(|error| KernelError::Storage(error.to_string()))?;
+                            deferred = true;
+                            return Ok(Value::Null);
+                        }
                         if method == "runtime.history.body" {
                             let p: HistoryBodyParams = serde_json::from_value(params)?;
                             let chunk_index = usize::try_from(p.chunk_index).map_err(|_| {
@@ -2196,16 +2251,21 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
             let p: AdmissionInspectParams = serde_json::from_value(params)?;
             let epoch = u64::try_from(p.owner_generation)
                 .map_err(|_| KernelError::Protocol("ownerGeneration must be nonnegative".into()))?;
-            let origin = match (p.request_id, p.action_id, p.node_id) {
-                (Some(request_id), None, None) => {
+            let origin = match (p.request_id, p.action_id, p.node_id, p.parent_operation_id) {
+                (Some(request_id), None, None, None) => {
                     varin_runtime::execution::ToolOrigin::ModelStep { request_id }
                 }
-                (None, Some(action_id), Some(node_id)) => {
+                (None, Some(action_id), Some(node_id), None) => {
                     varin_runtime::execution::ToolOrigin::PolicyAction { action_id, node_id }
+                }
+                (None, None, None, Some(parent_operation_id)) => {
+                    varin_runtime::execution::ToolOrigin::NestedCall {
+                        parent_operation_id,
+                    }
                 }
                 _ => {
                     return Err(KernelError::Protocol(
-                        "specify a model request or a policy action and node".into(),
+                        "specify one original model, policy or nested caller".into(),
                     ))
                 }
             };

@@ -1,5 +1,7 @@
 import type { JsonValue, VarinExtensionToolDeclaration } from "./types.js";
 
+export const VARIN_RUNTIME_TOOLS_CAPABILITY = 'runtime.tools';
+
 /** Detached normal JSON, preserving null and empty values and rejecting missing/non-JSON values. */
 export function parseVarinToolJson(value: unknown, path = "tool value"): JsonValue {
   if (value === null || typeof value === "string" || typeof value === "boolean") return value;

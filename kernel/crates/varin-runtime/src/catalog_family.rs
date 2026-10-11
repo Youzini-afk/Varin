@@ -2,8 +2,7 @@
 //! Captures are short control operations; ancestry, decoding and body IO belong to readers.
 use super::*;
 use crate::execution::{
-    Content, ConversationItem, RequestSnapshot, ToolCall, ToolExecutionContext, ToolOrigin,
-    ToolSchema,
+    Content, ConversationItem, ToolCall, ToolExecutionContext, ToolOrigin, ToolSchema,
 };
 use serde::Deserialize;
 use std::collections::BTreeSet;
@@ -245,9 +244,7 @@ struct Invocation {
     context: ToolExecutionContext,
     call: ToolCall,
     schema: ToolSchema,
-    body: Value,
-    metadata: Option<super::policy_body::PolicyActionMetadata>,
-    stored: Option<super::tool_content::ToolCallMetadata>,
+    frozen: super::tool_content::ToolInvocationRead,
 }
 fn check(cancel: &dyn Fn() -> bool) -> Result<()> {
     if cancel() {
@@ -328,48 +325,13 @@ impl Catalog {
                 "family invocation owner changed".into(),
             ));
         }
-        let (body, metadata, stored) = match &context.origin {
-            ToolOrigin::ModelStep { request_id } => {
-                let step: ModelStep = record(&self.db, "model_steps", request_id)?;
-                if step.run_id != run.id || step.epoch != self.epoch {
-                    return Err(RuntimeError::Conflict(
-                        "family request belongs to another Run".into(),
-                    ));
-                }
-                let raw: String = self
-                    .db
-                    .query_row(
-                        "SELECT body FROM tool_calls WHERE request_id=?1 AND call_id=?2",
-                        params![request_id, call.call_id],
-                        |row| row.get(0),
-                    )
-                    .optional()?
-                    .ok_or_else(|| RuntimeError::NotFound("family tool call".into()))?;
-                let stored: super::tool_content::ToolCallMetadata = serde_json::from_str(&raw)?;
-                (step.request, None, Some(stored))
-            }
-            ToolOrigin::PolicyAction { action_id, .. } => {
-                let operation = self.operation(action_id)?;
-                if operation.run_id != run.id
-                    || operation.epoch != self.epoch
-                    || operation.cancel_requested
-                {
-                    return Err(RuntimeError::Conflict("family policy owner changed".into()));
-                }
-                let metadata = super::policy::graph_metadata(&operation)?.ok_or_else(|| {
-                    RuntimeError::Invalid("family origin is not a policy graph".into())
-                })?;
-                (metadata.body_ref().clone(), Some(metadata), None)
-            }
-        };
+        let frozen = self.capture_tool_invocation(&context, &call.call_id)?;
         let mut read = self.capture_family_read(&run.thread_id, thread, branch)?;
         read.invocation = Some(Invocation {
             context,
             call,
             schema,
-            body,
-            metadata,
-            stored,
+            frozen,
         });
         Ok(read)
     }
@@ -388,7 +350,8 @@ impl FamilyRead {
             if run.cancel_requested {
                 return Err(RuntimeError::DispatchCancelled);
             }
-            if let ToolOrigin::PolicyAction { action_id, .. } = &invocation.context.origin {
+            let root = super::tool_content::root_tool_context(&current, &invocation.context, true)?;
+            if let ToolOrigin::PolicyAction { action_id, .. } = &root.origin {
                 let operation: Operation = record(&current, "operations", action_id)?;
                 if operation.run_id != run.id
                     || operation.epoch != self.epoch
@@ -423,50 +386,12 @@ impl FamilyRead {
             if run.cancel_requested {
                 return Err(RuntimeError::DispatchCancelled);
             }
-            let tools = match &invocation.context.origin {
-                ToolOrigin::ModelStep { request_id } => {
-                    if invocation
-                        .stored
-                        .clone()
-                        .expect("captured call")
-                        .load(&self.content)?
-                        != invocation.call
-                    {
-                        return Err(RuntimeError::Conflict(
-                            "family call differs from original ModelStep".into(),
-                        ));
-                    }
-                    let snapshot: RequestSnapshot = serde_json::from_value(
-                        self.content.load_cancellable(&invocation.body, cancel)?,
-                    )?;
-                    if snapshot.view.run_id != run.id || snapshot.view.request_id != *request_id {
-                        return Err(RuntimeError::Conflict(
-                            "family frozen request identity changed".into(),
-                        ));
-                    }
-                    snapshot.view.binding.tools
-                }
-                ToolOrigin::PolicyAction { node_id, .. } => {
-                    let graph = invocation
-                        .metadata
-                        .as_ref()
-                        .expect("captured policy metadata")
-                        .load_graph(&self.content, &run.id)?;
-                    let node = graph
-                        .nodes()
-                        .iter()
-                        .find(|node| node.node.id == *node_id)
-                        .ok_or_else(|| RuntimeError::NotFound("family policy node".into()))?;
-                    if node.node.call != invocation.call
-                        || node.context.origin != invocation.context.origin
-                    {
-                        return Err(RuntimeError::Conflict(
-                            "family call differs from frozen policy node".into(),
-                        ));
-                    }
-                    node.context.tools.as_ref().clone()
-                }
-            };
+            super::tool_content::root_tool_context(&db, &invocation.context, true)?;
+            let frozen = invocation.frozen.load()?;
+            if frozen.call != invocation.call {
+                return Err(RuntimeError::Conflict("family invocation changed".into()));
+            }
+            let tools = frozen.tools;
             if invocation.schema.name != invocation.call.name
                 || invocation.schema.version != invocation.call.schema_version
                 || !tools.contains(&invocation.schema)
@@ -602,7 +527,10 @@ impl FamilyRead {
                 )
                 .optional()?;
             let child = child
-                .map(|raw| {let relation:delegated::ChildRelation=serde_json::from_str(&raw)?;delegated::execution_task(&db,&relation.operation_id)})
+                .map(|raw| {
+                    let relation: delegated::ChildRelation = serde_json::from_str(&raw)?;
+                    delegated::execution_task(&db, &relation.operation_id)
+                })
                 .transpose()?;
             let mut statement = db.prepare(
                 "SELECT id,head,active_run FROM branches WHERE thread_id=?1 ORDER BY rowid",
@@ -655,7 +583,7 @@ impl FamilyRead {
                 }
             } else if let Some(child) = &child {
                 let body:String=db.query_row("SELECT body FROM delegated_executions WHERE child_operation_id=?1 ORDER BY rowid DESC LIMIT 1",[&child.operation_id],|row|row.get(0))?;
-                let execution:delegated::DelegatedExecution=serde_json::from_str(&body)?;
+                let execution: delegated::DelegatedExecution = serde_json::from_str(&body)?;
                 execution.state().to_owned()
             } else {
                 db.query_row(

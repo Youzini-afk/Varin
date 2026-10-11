@@ -3,9 +3,12 @@ use super::result_content::{ToolCompletionMetadata, ToolReceiptMetadata};
 use super::tool_content::{ToolCallMetadata, ToolIntent};
 use super::*;
 use crate::execution::*;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 impl Persistence for Mutex<Catalog> {
+    fn nested_tools(&self) -> Option<Arc<crate::nested_tools::NestedTools>> {
+        self.lock().ok().map(|catalog| catalog.nested_tools())
+    }
     fn settle_tool(
         &self,
         context: &ToolExecutionContext,
@@ -905,8 +908,15 @@ impl ExecutionBodyPreparation {
                     phase,
                     ..
                 } => match &receipt.completion {
-                    ToolCompletionMetadata::JobAccepted { content_ref: Some(reference), .. } => OperationResultMetadata::Content { reference: reference.clone() },
-                    _ => OperationResultMetadata::Control { value: json!({"operation_id":operation_id,"phase":phase}) },
+                    ToolCompletionMetadata::JobAccepted {
+                        content_ref: Some(reference),
+                        ..
+                    } => OperationResultMetadata::Content {
+                        reference: reference.clone(),
+                    },
+                    _ => OperationResultMetadata::Control {
+                        value: json!({"operation_id":operation_id,"phase":phase}),
+                    },
                 },
             };
             results.insert(result.call_id.clone(), body);
@@ -931,8 +941,15 @@ impl ExecutionBodyPreparation {
                     phase,
                     ..
                 } => match &receipt {
-                    ToolCompletionMetadata::JobAccepted { content_ref: Some(reference), .. } => OperationResultMetadata::Content { reference: reference.clone() },
-                    _ => OperationResultMetadata::Control { value: json!({"operation_id":operation_id,"phase":phase}) },
+                    ToolCompletionMetadata::JobAccepted {
+                        content_ref: Some(reference),
+                        ..
+                    } => OperationResultMetadata::Content {
+                        reference: reference.clone(),
+                    },
+                    _ => OperationResultMetadata::Control {
+                        value: json!({"operation_id":operation_id,"phase":phase}),
+                    },
                 },
             };
             results.insert("invocation".into(), body);
@@ -1073,7 +1090,7 @@ impl Catalog {
             | ExecutionRecord::ToolDispatched { context, .. }
             | ExecutionRecord::ToolSettled { context, .. } => match &context.origin {
                 ToolOrigin::ModelStep { request_id } => Some(request_id.as_str()),
-                ToolOrigin::PolicyAction { .. } => None,
+                ToolOrigin::PolicyAction { .. } | ToolOrigin::NestedCall { .. } => None,
             },
             _ => None,
         };
@@ -1419,6 +1436,17 @@ impl Catalog {
                     .get(&tool.call.call_id)
                     .ok_or_else(|| RuntimeError::Invalid("prepared tool intent missing".into()))?;
                 let expected = match &context.origin {
+                    ToolOrigin::NestedCall { .. } => {
+                        super::tool_content::root_tool_context(&tx, context, true)?;
+                        let original = self.nested_tools.metadata(context).ok_or_else(|| {
+                            RuntimeError::Conflict("nested caller is not active".into())
+                        })?;
+                        if &original != intent.call() {
+                            return Err(RuntimeError::Conflict("nested call input changed".into()));
+                        }
+                        // The prepared original intent is the only durable invocation record.
+                        encode(intent.call())?
+                    }
                     ToolOrigin::ModelStep { request_id } => tx.query_row(
                         "SELECT body FROM tool_calls WHERE request_id=?1 AND call_id=?2",
                         params![request_id, tool.call.call_id],
@@ -1463,7 +1491,7 @@ impl Catalog {
                     put(&tx, "operations", key, &previous)?;
                 } else {
                     let op = Operation {
-            host_job: None,
+                        host_job: None,
                         external_receipt: None,
                         call_completion: None,
                         id: key.clone(),
@@ -1513,7 +1541,8 @@ impl Catalog {
                         "tool dispatch origin changed".into(),
                     ));
                 }
-                if let ToolOrigin::PolicyAction { action_id, .. } = &context.origin {
+                let root = super::tool_content::root_tool_context(&tx, context, true)?;
+                if let ToolOrigin::PolicyAction { action_id, .. } = &root.origin {
                     let graph: Operation = super::record(&tx, "operations", action_id)?;
                     if graph.epoch != epoch {
                         return Err(RuntimeError::Conflict(
@@ -1565,8 +1594,16 @@ impl Catalog {
                 let receipt = prepared_completion.as_ref().ok_or_else(|| {
                     RuntimeError::Invalid("prepared tool completion missing".into())
                 })?;
-                if matches!(completion,ToolCompletion::JobAccepted{..}) && matches!(op.execution_owner,Some(crate::ExecutorOwner::External{..})) && op.call_completion.is_none() {
-                    return Err(RuntimeError::Conflict("Host job requires original trusted domain acceptance".into()));
+                if matches!(completion, ToolCompletion::JobAccepted { .. })
+                    && matches!(
+                        op.execution_owner,
+                        Some(crate::ExecutorOwner::External { .. })
+                    )
+                    && op.call_completion.is_none()
+                {
+                    return Err(RuntimeError::Conflict(
+                        "Host job requires original trusted domain acceptance".into(),
+                    ));
                 }
                 if let Some(previous) = &op.call_completion {
                     if previous != receipt {
@@ -1639,7 +1676,9 @@ impl Catalog {
                         operation_id,
                         phase: _,
                         effect,
-                        lifetime, ..} => {
+                        lifetime,
+                        ..
+                    } => {
                         if !matches!(lifetime, Lifetime::Thread | Lifetime::Environment)
                             || *lifetime != op.lifetime
                             || operation_id.is_empty()
@@ -2358,7 +2397,8 @@ impl Catalog {
                 "unknown external effect requires indeterminate outcome".into(),
             ));
         }
-        let settle = op.host_job.is_some() || op.handed_off
+        let settle = op.host_job.is_some()
+            || op.handed_off
             || (op.phase == OperationPhase::Terminal && op.outcome == Some(Outcome::Indeterminate));
         if let Some(previous) = &op.external_receipt {
             let mut same_receipt = receipt.clone();

@@ -1,3 +1,4 @@
+import { createNestedToolOwner, VARIN_RUNTIME_TOOLS_CAPABILITY } from './lib/kernel/nested-tool-owner.js';
 import { readHostHarnessSettings } from '@varin/pi-host/settings-authority';
 import { DocumentsFileObservationOwner } from './lib/kernel/file-observation-owner.js';
 import { FileObservationService } from './lib/kernel/file-observation-service.js';
@@ -4214,6 +4215,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
   const unregisterMaterialToolCapability=extensionRuntime.capabilities.register(MATERIAL_SNAPSHOT_CAPABILITY,createMaterialToolOwner(webMaterials));
+  const unregisterNestedToolCapability = extensionRuntime.capabilities.register(VARIN_RUNTIME_TOOLS_CAPABILITY, createNestedToolOwner(kernelClient));
   const unregisterComputerCapability = extensionRuntime.capabilities.register(COMPUTER_CAPABILITY, computerRuntimeOwner.current.capability);
   const unregisterResearchCapability = extensionRuntime.capabilities.register(RESEARCH_CAPABILITY, researchRuntime.capability);
   researchRuntime.start();
@@ -4749,6 +4751,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       followUpService.dispose();
       piSessionAutomation.stop();
       piSessionTitles.stop();
+      unregisterNestedToolCapability();
       unregisterComputerCapability();
       unregisterResearchCapability();
       await researchRuntime.dispose();

@@ -92,7 +92,8 @@ pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "runtime.calendar.occurrence.control",
     "runtime.calendar.calculation.retry",
 ];
-pub(crate) const KERNEL_DEFERRED_RESPONSE_METHODS: &[&str] = &["process.write", "process.resize"];
+pub(crate) const KERNEL_DEFERRED_RESPONSE_METHODS: &[&str] =
+    &["process.write", "process.resize", "runtime.tools.invoke"];
 pub(crate) const KERNEL_INPUT_ORDER_PARAMS: &[(&str, &str)] = &[
     ("runtime.thread.create", "branchId"),
     ("runtime.branch.fork", "branchId"),
@@ -100,7 +101,8 @@ pub(crate) const KERNEL_INPUT_ORDER_PARAMS: &[(&str, &str)] = &[
     ("runtime.input.enqueue", "branchId"),
     ("runtime.input.edit", "inputId"),
 ];
-pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &["runtime.history.body"];
+pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] =
+    &["runtime.tools.invoke", "runtime.history.body"];
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(transparent)]
@@ -176,6 +178,14 @@ pub(crate) struct ComputerRequestReconcileParams {
 pub(crate) struct ComputerRequestWaitParams {
     pub(crate) operation_id: String,
     pub(crate) request_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NestedToolInvokeParams {
+    pub(crate) parent_operation_id: String,
+    pub(crate) executor_owner: varin_runtime::ExecutorOwner,
+    pub(crate) call: varin_runtime::execution::NestedToolInput,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -749,6 +759,7 @@ pub(crate) struct ModelSelectParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AdmissionInspectParams {
+    pub(crate) parent_operation_id: Option<String>,
     pub(crate) run_id: String,
     pub(crate) owner_generation: i64,
     pub(crate) call_id: String,
@@ -2576,6 +2587,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
+        "runtime.tools.invoke" => serde_json::from_value::<NestedToolInvokeParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.computer.scope" => serde_json::from_value::<ComputerScopeParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

@@ -154,10 +154,14 @@ pub(super) fn hydrate_operation(
         operation.intent =
             serde_json::to_value(ToolIntent::from_operation(&operation)?.load(content)?)?;
     }
-    if operation.intent.get("kind").and_then(Value::as_str)==Some("user_host_job") {
-        let body=content.load(&operation.intent["request_ref"])?;
-        let intent=operation.intent.as_object_mut().ok_or_else(||RuntimeError::Invalid("User job intent malformed".into()))?;
-        intent.remove("request_ref");intent.insert("request".into(),body);
+    if operation.intent.get("kind").and_then(Value::as_str) == Some("user_host_job") {
+        let body = content.load(&operation.intent["request_ref"])?;
+        let intent = operation
+            .intent
+            .as_object_mut()
+            .ok_or_else(|| RuntimeError::Invalid("User job intent malformed".into()))?;
+        intent.remove("request_ref");
+        intent.insert("request".into(), body);
     }
     let result = match operation.result {
         Some(OperationResultMetadata::Control { mut value }) => {
@@ -278,6 +282,44 @@ impl Catalog {
     }
 }
 
+/// Resolve a nested caller through canonical Operation intents. The original model/graph
+/// boundary remains the only frozen directory/source authority; IDs are never parsed.
+pub(super) fn root_tool_context(
+    db: &Connection,
+    context: &ToolExecutionContext,
+    live: bool,
+) -> Result<ToolExecutionContext> {
+    let mut root = context.clone();
+    let run: Run = record(db, "runs", &context.run_id)?;
+    let mut visited = std::collections::BTreeSet::new();
+    while let ToolOrigin::NestedCall {
+        parent_operation_id,
+    } = &root.origin
+    {
+        if !visited.insert(parent_operation_id.clone()) {
+            return Err(RuntimeError::Invalid("cyclic nested invocation".into()));
+        }
+        let parent: Operation = record(db, "operations", parent_operation_id)?;
+        let intent = ToolIntent::from_operation(&parent)?;
+        if parent.run_id != run.id
+            || (live
+                && (parent.epoch != run.epoch
+                    || parent.cancel_requested
+                    || parent.phase == OperationPhase::Terminal))
+        {
+            return Err(RuntimeError::Conflict(
+                "nested caller is no longer active in this Run".into(),
+            ));
+        }
+        root = ToolExecutionContext {
+            run_id: run.id.clone(),
+            origin: intent.origin().clone(),
+            operation_id: parent.id,
+        };
+    }
+    Ok(root)
+}
+
 /// Validate one admitted Job against its actual model or graph caller. Metadata only.
 pub(super) fn require_job_invocation(
     db: &Connection,
@@ -304,6 +346,10 @@ pub(super) fn require_job_invocation(
         ));
     }
     let expected: String = match &context.origin {
+        ToolOrigin::NestedCall { .. } => {
+            root_tool_context(db, context, true)?;
+            return Ok(admitted);
+        }
         ToolOrigin::ModelStep { request_id } => {
             let step: ModelStep = record(db, "model_steps", request_id)?;
             if step.run_id != run.id || step.state != ModelStepState::Completed {
@@ -343,6 +389,7 @@ pub(super) fn require_job_invocation(
 }
 
 /// A captured invocation's immutable caller binding. Loading never holds Catalog.
+#[derive(Clone)]
 enum InvocationOwner {
     Model {
         step: ModelStep,
@@ -352,15 +399,22 @@ enum InvocationOwner {
         metadata: super::policy_body::PolicyActionMetadata,
     },
 }
+enum InvocationCall {
+    Stored(ToolCallMetadata),
+    Live(std::sync::Arc<ToolCall>),
+}
 pub struct ToolInvocationRead {
+    root: ToolExecutionContext,
+    source: Option<super::launches::SourceSelection>,
     context: ToolExecutionContext,
     branch_id: String,
-    call: ToolCallMetadata,
+    call: InvocationCall,
     owner: InvocationOwner,
     content: crate::content::ContentStore,
     _publication: crate::content::ContentPublication,
 }
 pub struct ToolInvocationSnapshot {
+    pub frozen: crate::execution::FrozenToolContext,
     pub context: ToolExecutionContext,
     pub call: ToolCall,
     pub history_range: crate::execution::HistoryRange,
@@ -370,10 +424,13 @@ pub struct ToolInvocationSnapshot {
     _publication: crate::content::ContentPublication,
 }
 impl ToolInvocationRead {
-    pub fn load(self) -> Result<ToolInvocationSnapshot> {
+    pub fn load(&self) -> Result<ToolInvocationSnapshot> {
         use crate::execution::{RequestOrigin, RequestSnapshot};
-        let call = self.call.load(&self.content)?;
-        let (history_range, tools, owner_epoch) = match &self.owner {
+        let call = match &self.call {
+            InvocationCall::Stored(call) => call.clone().load(&self.content)?,
+            InvocationCall::Live(call) => call.as_ref().clone(),
+        };
+        let (history_range, frozen, owner_epoch) = match &self.owner {
             InvocationOwner::Model { step } => {
                 let snapshot: RequestSnapshot =
                     serde_json::from_value(self.content.load(&step.request)?)?;
@@ -386,9 +443,26 @@ impl ToolInvocationRead {
                         "invocation is not its admitted conversation snapshot".into(),
                     ));
                 }
+                if snapshot.view.binding.resource_activations
+                    != super::resources::retained_activations(&snapshot.view.history)
+                {
+                    return Err(RuntimeError::Conflict(
+                        "invocation resource bindings differ from original history".into(),
+                    ));
+                }
+                let binding = snapshot.view.binding;
                 (
-                    snapshot.view.binding.history_range,
-                    std::sync::Arc::new(snapshot.view.binding.tools),
+                    binding.history_range,
+                    crate::execution::FrozenToolContext {
+                        run_id: self.context.run_id.clone(),
+                        origin: self.context.origin.clone(),
+                        tools: std::sync::Arc::new(binding.tools),
+                        tool_schema_generation: binding.tool_schema_generation,
+                        resource_activations: binding.resource_activations,
+                        resource_checkpoint_id: binding.resource_checkpoint_id,
+                        child_dispatch: binding.child_dispatch,
+                        source: self.source.clone(),
+                    },
                     step.epoch,
                 )
             }
@@ -397,7 +471,7 @@ impl ToolInvocationRead {
                 metadata,
             } => {
                 let graph = metadata.load_graph(&self.content, &self.context.run_id)?;
-                let ToolOrigin::PolicyAction { node_id, .. } = &self.context.origin else {
+                let ToolOrigin::PolicyAction { node_id, .. } = &self.root.origin else {
                     unreachable!("captured policy owner")
                 };
                 let node = graph
@@ -405,8 +479,8 @@ impl ToolInvocationRead {
                     .iter()
                     .find(|node| &node.node.id == node_id)
                     .ok_or_else(|| RuntimeError::NotFound(node_id.clone()))?;
-                if node.node.call != call
-                    || node.context.origin != self.context.origin
+                if (self.root == self.context && node.node.call != call)
+                    || node.context.origin != self.root.origin
                     || metadata.boundary().history_range.branch_id != self.branch_id
                 {
                     return Err(RuntimeError::Conflict(
@@ -415,19 +489,24 @@ impl ToolInvocationRead {
                 }
                 (
                     metadata.boundary().history_range.clone(),
-                    node.context.tools.clone(),
+                    {
+                        let mut frozen = node.context.clone();
+                        frozen.origin = self.context.origin.clone();
+                        frozen
+                    },
                     operation.epoch,
                 )
             }
         };
         Ok(ToolInvocationSnapshot {
-            context: self.context,
+            context: self.context.clone(),
             call,
             history_range,
-            tools,
+            tools: frozen.tools.clone(),
+            frozen,
             owner_epoch,
-            owner: self.owner,
-            _publication: self._publication,
+            owner: self.owner.clone(),
+            _publication: self.content.begin_publication(),
         })
     }
 }
@@ -444,7 +523,16 @@ impl Catalog {
                 "invocation operation identity changed".into(),
             ));
         }
-        let (owner, call) = match &context.origin {
+        let root = root_tool_context(&self.db, context, false)?;
+        let root_call_id = if root != *context {
+            ToolIntent::from_operation(&self.operation(&root.operation_id)?)?
+                .call()
+                .call_id
+                .clone()
+        } else {
+            call_id.into()
+        };
+        let (owner, root_call) = match &root.origin {
             ToolOrigin::ModelStep { request_id } => {
                 let step = self.model_step_metadata(request_id)?;
                 if step.run_id != run.id {
@@ -454,7 +542,7 @@ impl Catalog {
                 }
                 let raw: String = self.db.query_row(
                     "SELECT body FROM tool_calls WHERE request_id=?1 AND call_id=?2",
-                    params![request_id, call_id],
+                    params![request_id, root_call_id],
                     |row| row.get(0),
                 )?;
                 (
@@ -467,13 +555,13 @@ impl Catalog {
                 let metadata = super::policy::graph_metadata(&operation)?.ok_or_else(|| {
                     RuntimeError::Invalid("invocation owner is not a policy graph".into())
                 })?;
-                if operation.run_id != run.id || node_id != call_id {
+                if operation.run_id != run.id || node_id != &root_call_id {
                     return Err(RuntimeError::Conflict(
                         "invocation graph owner changed".into(),
                     ));
                 }
                 let raw: String = self.db.query_row("SELECT call FROM policy_graph_nodes WHERE action_id=?1 AND node_id=?2 AND call_id=?3",
-                    params![action_id, node_id, call_id], |row| row.get(0))?;
+                    params![action_id, node_id, root_call_id], |row| row.get(0))?;
                 (
                     InvocationOwner::Policy {
                         operation,
@@ -482,8 +570,36 @@ impl Catalog {
                     serde_json::from_str::<ToolCallMetadata>(&raw)?,
                 )
             }
+            ToolOrigin::NestedCall { .. } => unreachable!("resolved root invocation"),
+        };
+        let call = if root == *context {
+            InvocationCall::Stored(root_call)
+        } else if let Some(operation) =
+            optional_record::<Operation>(&self.db, "operations", &context.operation_id)?
+        {
+            let intent = ToolIntent::from_operation(&operation)?;
+            if operation.run_id != run.id
+                || intent.origin() != &context.origin
+                || intent.call().call_id != call_id
+            {
+                return Err(RuntimeError::Conflict(
+                    "nested invocation identity changed".into(),
+                ));
+            }
+            InvocationCall::Stored(intent.call().clone())
+        } else {
+            InvocationCall::Live(
+                self.nested_tools
+                    .call(context)
+                    .filter(|call| call.call_id == call_id)
+                    .ok_or_else(|| RuntimeError::NotFound("nested invocation".into()))?,
+            )
         };
         Ok(ToolInvocationRead {
+            root,
+            source: self
+                .launch_metadata(&run.id)?
+                .and_then(|launch| launch.selection.source),
             context: context.clone(),
             branch_id: run.branch_id,
             call,
@@ -499,6 +615,7 @@ impl Catalog {
         live: bool,
     ) -> Result<()> {
         let run = self.run(&snapshot.context.run_id)?;
+        root_tool_context(&self.db, &snapshot.context, live)?;
         if run.branch_id != snapshot.history_range.branch_id {
             return Err(RuntimeError::Conflict("invocation branch changed".into()));
         }

@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "id": "example.nested-tools",
+  "displayName": "Memory Then Read",
+  "version": "1.0.0",
+  "engines": { "varin": "*" },
+  "entrypoints": { "host": { "file": "dist/host.cjs", "mode": "brokered", "activation": ["service-request"] } },
+  "capabilities": { "host": ["runtime.tools"] },
+  "provides": {
+    "services": [{
+      "id": "example.nested-tools.memory-then-read",
+      "version": 1,
+      "tool": {
+        "name": "memory_then_read",
+        "description": "Run one explicit memory operation, then optionally read a file only after memory returns a succeeded Result. Pass the current memory catalog revision for save/delete. Returns the original nested operation identities, completions and domain receipts; a failed or accepted-job memory call does not start the read. Both inner tools must be selected and independently permitted in this invocation's frozen directory.",
+        "completion": "result",
+        "operation": "effect",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "memory": {
+              "type": "object",
+              "description": "Arguments forwarded unchanged to the selected memory tool. Save needs content and revision; delete needs id and revision. The actual memory owner validates action-specific requirements.",
+              "properties": {
+                "action": { "enum": ["read", "search", "save", "delete"] },
+                "scope": { "enum": ["global", "project", "currentThread"] },
+                "id": { "type": "integer", "minimum": 1 },
+                "content": { "type": "string" },
+                "query": { "type": "string" },
+                "revision": { "type": "integer", "minimum": 0 }
+              },
+              "required": ["action"],
+              "additionalProperties": false
+            },
+            "read": {
+              "type": "object",
+              "description": "Optional arguments for the selected native file_read tool. Offset and length are byte positions and counts in the original admitted Source.",
+              "properties": {
+                "path": { "type": "string" },
+                "offset": { "type": "integer", "minimum": 0 },
+                "length": { "type": "integer", "minimum": 0 }
+              },
+              "required": ["path"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["memory"],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "$defs": {
+            "receipt": {
+              "type": "object",
+              "properties": {
+                "operationId": { "type": "string" },
+                "completion": {
+                  "type": "object",
+                  "properties": { "kind": { "enum": ["not_dispatched", "result", "job_accepted"] } },
+                  "required": ["kind"],
+                  "additionalProperties": true
+                }
+              },
+              "required": ["operationId", "completion"],
+              "additionalProperties": false
+            }
+          },
+          "properties": {
+            "memory": { "$ref": "#/$defs/receipt" },
+            "read": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": { "status": { "const": "not_requested" } },
+                  "required": ["status"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "status": { "const": "skipped" },
+                    "reason": { "const": "memory_not_succeeded" }
+                  },
+                  "required": ["status", "reason"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": { "status": { "const": "invoked" }, "receipt": { "$ref": "#/$defs/receipt" } },
+                  "required": ["status", "receipt"],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": ["memory", "read"],
+          "additionalProperties": false
+        },
+        "examples": [{ "memory": { "action": "read", "scope": "currentThread" }, "read": { "path": "README.md", "offset": 0, "length": 2048 } }],
+        "source": { "path": "host.ts", "line": 27 }
+      }
+    }]
+  }
+}

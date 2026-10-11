@@ -103,7 +103,7 @@ async function fixture(records = new Map<string, KernelRecordResult>()) {
     const config = await computer.prepareConfiguration({ runId, threadId }, []);
     const origin: ToolOrigin = policy ? { kind: 'policy_action', action_id: `policy-${method}`, node_id: 'input' } : { kind: 'model_step', request_id: `model-${method}` };
     let receipt!: ToolExecutionReceipt;
-    const content = await withToolInvocation({ owner, signal, authority: { invocationId: 'controlled-invocation', runId, threadId,
+    const content = await withToolInvocation({ owner, signal, authority: { callId: 'input', executorOwner: { kind: 'kernel' }, invocationId: 'controlled-invocation', runId, threadId,
       operationId: policy ? `policy-${method}:node:input` : `model-${method}:tool:input`, origin, source: null,
       toolName: declaration.tool!.name, operation: declaration.tool!.operation, arguments: args, configurationIdentity: config(declaration) },
       onEffectReceipt: result => { receipt = result; },

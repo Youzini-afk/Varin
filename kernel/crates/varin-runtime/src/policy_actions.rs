@@ -244,8 +244,15 @@ impl<
         let boundary = self
             .persistence
             .policy_boundary(&input.run_id, input.owner_generation)?;
-        let projected = self.persistence.compile_context(&input.run_id, input.owner_generation, head)?;
-        let resource_activations = crate::catalog::resources::retained_activations(projected.as_ref().map(|projection| projection.history.as_slice()).unwrap_or(history));
+        let projected =
+            self.persistence
+                .compile_context(&input.run_id, input.owner_generation, head)?;
+        let resource_activations = crate::catalog::resources::retained_activations(
+            projected
+                .as_ref()
+                .map(|projection| projection.history.as_slice())
+                .unwrap_or(history),
+        );
         let action_id = format!("{}:policy:{}", input.run_id, boundary.id);
         let mut admitted = Vec::new();
         let schemas = Arc::new(input.binding.tools.clone());
@@ -451,6 +458,7 @@ impl<
                         });
                         let tx = tx.clone();
                         let action = action.clone();
+                        let frozen = &frozen;
                         running += 1;
                         scope.spawn(move || {
                             let result = guarded("policy_tool_worker_panicked", || {
@@ -458,7 +466,17 @@ impl<
                                 let completion = if let Some(completion) = completion {
                                     let mut completion = completion.load()?;
                                     if existing {
-                                        completion=self.persistence.settle_tool(&context,input.owner_generation,ToolExecutionReceipt{completion,executor_stopped:false})?.completion;
+                                        completion = self
+                                            .persistence
+                                            .settle_tool(
+                                                &context,
+                                                input.owner_generation,
+                                                ToolExecutionReceipt {
+                                                    completion,
+                                                    executor_stopped: false,
+                                                },
+                                            )?
+                                            .completion;
                                     }
                                     completion
                                 } else {
@@ -498,7 +516,17 @@ impl<
                                                 },
                                             };
                                             if existing {
-                                                completion=self.persistence.settle_tool(&context,input.owner_generation,ToolExecutionReceipt{completion,executor_stopped:true})?.completion;
+                                                completion = self
+                                                    .persistence
+                                                    .settle_tool(
+                                                        &context,
+                                                        input.owner_generation,
+                                                        ToolExecutionReceipt {
+                                                            completion,
+                                                            executor_stopped: true,
+                                                        },
+                                                    )?
+                                                    .completion;
                                             }
                                             completion
                                         }
@@ -532,6 +560,16 @@ impl<
                                                 &token,
                                                 reservation,
                                                 durable,
+                                                Some(crate::nested_tools::NestedExecutionScope {
+                                                    frozen: Arc::new(admitted.context.clone()),
+                                                    directory: crate::nested_tools::directory(
+                                                        frozen.as_ref().ok().and_then(
+                                                            |directory| directory.clone(),
+                                                        ),
+                                                        self.tools.clone(),
+                                                    ),
+                                                    run_cancel: cancel.clone(),
+                                                }),
                                             )?
                                         }
                                     }

@@ -34,7 +34,8 @@ impl Fixture {
         Self::with_tools(goal, Vec::new(), vec!["helper".into()])
     }
     fn with_tools(goal: bool, native: Vec<ToolSchema>, selected: Vec<String>) -> Self {
-        let mut f = dispatch::Fixture::new_host_child_with_native(true, false, None, selected, native);
+        let mut f =
+            dispatch::Fixture::new_host_child_with_native(true, false, None, selected, native);
         f.launch.policy = crate::observations::default_policy_identity();
         // The real parent policy graph already committed private {"stage": 1}; the child must
         // nevertheless start with null. No checkpoint is copied or fabricated for the child.
@@ -109,14 +110,39 @@ impl Fixture {
             "extensionBindings":original.extension_bindings.iter().map(|binding| json!({"ownerId":"child-host-owner","generation":1,"binding":binding})).collect::<Vec<_>>()});
         Self::from_catalog(f.root, child, run, original, params, f.db)
     }
-    fn source_free(parent_policy: bool, mode: varin_runtime::catalog::dispatch::ChildWorkMode) -> Self {
+    fn source_free(
+        parent_policy: bool,
+        mode: varin_runtime::catalog::dispatch::ChildWorkMode,
+    ) -> Self {
         let declarations = crate::child_capabilities::schemas();
         let descriptors = crate::child_capabilities::descriptors();
-        let native: Vec<_> = declarations.into_iter().filter(|tool| descriptors.iter().any(|descriptor|
-            descriptor.name == tool.name && descriptor.source_requirement == varin_runtime::catalog::dispatch::ChildSourceRequirement::None)).collect();
-        let dispatch_schema = native.iter().find(|tool| tool.name == "dispatch").unwrap().clone();
-        let memory = native.iter().find(|tool| tool.name == "memory").unwrap().clone();
-        let mut f = dispatch::Fixture::new_parent_custom(0, memory, dispatch_schema.clone(), parent_policy, false, true,
+        let native: Vec<_> = declarations
+            .into_iter()
+            .filter(|tool| {
+                descriptors.iter().any(|descriptor| {
+                    descriptor.name == tool.name
+                        && descriptor.source_requirement
+                            == varin_runtime::catalog::dispatch::ChildSourceRequirement::None
+                })
+            })
+            .collect();
+        let dispatch_schema = native
+            .iter()
+            .find(|tool| tool.name == "dispatch")
+            .unwrap()
+            .clone();
+        let memory = native
+            .iter()
+            .find(|tool| tool.name == "memory")
+            .unwrap()
+            .clone();
+        let mut f = dispatch::Fixture::new_parent_custom(
+            0,
+            memory,
+            dispatch_schema.clone(),
+            parent_policy,
+            false,
+            true,
             move |input, launch| {
                 input.task = "Use selected capabilities without a file workspace".into();
                 input.work_mode = Some(mode);
@@ -127,53 +153,124 @@ impl Fixture {
                 launch.tools.push(helper);
                 input.tools = Some(launch.tools.iter().map(|tool| tool.name.clone()).collect());
                 launch.source = None;
-            });
+            },
+        );
         if parent_policy {
-            f.context = f.admit_policy_call(ToolCall { call_id: "dispatch-call".into(), name: "dispatch".into(),
-                schema_version: dispatch_schema.version.clone(), arguments: serde_json::to_value(&f.input).unwrap() });
+            f.context = f.admit_policy_call(ToolCall {
+                call_id: "dispatch-call".into(),
+                name: "dispatch".into(),
+                schema_version: dispatch_schema.version.clone(),
+                arguments: serde_json::to_value(&f.input).unwrap(),
+            });
         }
         let catalog = Arc::new(Mutex::new(f.db));
         let (output, frames) = mpsc::sync_channel(16);
         let bridge = crate::host_tools::ToolBridge::new(output.into());
         bridge.initialize(EPOCH);
-        let directory = Arc::new(varin_runtime::composition::tools::ToolDirectory::assemble(
-            crate::collaboration::declarations(catalog.clone(), None, crate::tools::KernelResourceClient::new(
-                |_| panic!("source-free dispatch must not create a Storage handoff or grant"), |_| Ok(()), Default::default()), bridge.clone())).unwrap());
-        let frozen = FrozenToolContext { run_id: f.context.run_id.clone(), origin: f.context.origin.clone(),
-            tool_schema_generation: 1, tools: Arc::new(vec![dispatch_schema.clone()]), source: None,
-            child_dispatch: catalog.lock().unwrap().launch_metadata(&f.context.run_id).unwrap().unwrap().dispatch_context_ref,
-            resource_checkpoint_id: None, resource_activations: vec![] };
-        let call = ToolCall { call_id: "dispatch-call".into(), name: "dispatch".into(), schema_version: dispatch_schema.version,
-            arguments: serde_json::to_value(&f.input).unwrap() };
-        let invocation = directory.clone().bind_call(&call, &frozen, &CancellationToken::default()).unwrap();
+        let directory = Arc::new(
+            varin_runtime::composition::tools::ToolDirectory::assemble(
+                crate::collaboration::declarations(
+                    catalog.clone(),
+                    None,
+                    crate::tools::KernelResourceClient::new(
+                        |_| {
+                            panic!(
+                                "source-free dispatch must not create a Storage handoff or grant"
+                            )
+                        },
+                        |_| Ok(()),
+                        Default::default(),
+                    ),
+                    bridge.clone(),
+                ),
+            )
+            .unwrap(),
+        );
+        let frozen = FrozenToolContext {
+            run_id: f.context.run_id.clone(),
+            origin: f.context.origin.clone(),
+            tool_schema_generation: 1,
+            tools: Arc::new(vec![dispatch_schema.clone()]),
+            source: None,
+            child_dispatch: catalog
+                .lock()
+                .unwrap()
+                .launch_metadata(&f.context.run_id)
+                .unwrap()
+                .unwrap()
+                .dispatch_context_ref,
+            resource_checkpoint_id: None,
+            resource_activations: vec![],
+        };
+        let call = ToolCall {
+            call_id: "dispatch-call".into(),
+            name: "dispatch".into(),
+            schema_version: dispatch_schema.version,
+            arguments: serde_json::to_value(&f.input).unwrap(),
+        };
+        let invocation = directory
+            .clone()
+            .bind_call(&call, &frozen, &CancellationToken::default())
+            .unwrap();
         let contract = invocation.prepare(&CancellationToken::default()).unwrap();
-        invocation.authorize(&f.context, &contract, &CancellationToken::default()).unwrap();
+        invocation
+            .authorize(&f.context, &contract, &CancellationToken::default())
+            .unwrap();
         let completion = std::thread::scope(|scope| {
             let context = f.context.clone();
-            let pending = scope.spawn(move || invocation.execute(&context, &contract, &CancellationToken::default()));
+            let pending = scope.spawn(move || {
+                invocation.execute(&context, &contract, &CancellationToken::default())
+            });
             let frame = frames.recv_timeout(Duration::from_secs(5)).unwrap();
             assert_eq!(frame["kind"], "host-tool-child-retain");
             assert_eq!(frame["childOperationId"], f.context.operation_id);
             bridge.receive(json!({"v":1,"kind":"host-tool-response","id":frame["id"],"kernelEpoch":EPOCH,"ok":true}));
             pending.join().unwrap()
         });
-        assert!(matches!(completion.completion, ToolCompletion::JobAccepted { .. }));
+        assert!(matches!(
+            completion.completion,
+            ToolCompletion::JobAccepted { .. }
+        ));
         drop(directory);
         f.db = Arc::try_unwrap(catalog).ok().unwrap().into_inner().unwrap();
-        if parent_policy { f.settle_policy_call(&f.context.clone(), "preparing_child"); }
-        else { f.settle_exchange(); }
+        if parent_policy {
+            f.settle_policy_call(&f.context.clone(), "preparing_child");
+        } else {
+            f.settle_exchange();
+        }
         let child = f.db.child_task(&f.context.operation_id).unwrap();
-        assert_eq!(child.source, varin_runtime::catalog::collaboration::ChildSource::Absent);
-        assert_eq!(child.code_result, varin_runtime::catalog::collaboration::ChildCodeResult::NotApplicable);
-        assert!(child.source.pin().is_none() && child.source.handoff().is_none() && child.launch.source.is_none());
-        let proposal = varin_runtime::catalog::context::ContextProposal { key: "source-free-context".into(),
-            branch_id: child.child_branch_id.clone(), through_id: None, expected_revision: 0, summary: String::new(),
-            effective_system_prompt: "Independent capability worker".into(), instruction_sources: vec![], memory_checkpoint: None };
+        assert_eq!(
+            child.source,
+            varin_runtime::catalog::collaboration::ChildSource::Absent
+        );
+        assert_eq!(
+            child.code_result,
+            varin_runtime::catalog::collaboration::ChildCodeResult::NotApplicable
+        );
+        assert!(
+            child.source.pin().is_none()
+                && child.source.handoff().is_none()
+                && child.launch.source.is_none()
+        );
+        let proposal = varin_runtime::catalog::context::ContextProposal {
+            key: "source-free-context".into(),
+            branch_id: child.child_branch_id.clone(),
+            through_id: None,
+            expected_revision: 0,
+            summary: String::new(),
+            effective_system_prompt: "Independent capability worker".into(),
+            instruction_sources: vec![],
+            memory_checkpoint: None,
+        };
         let basis = serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,
             "configurationDigest":"source-free-child","memorySnapshot":{"revision":0,"memories":[]},
             "sessionId":child.child_thread_id,"projectId":child.project_id,
             "originalSections":[{"name":"preamble","content":"Independent capability worker"}],"instructionSources":[]})).unwrap();
-        let prepared = f.db.capture_child_preparation(&child.execution_id, None, proposal, basis).unwrap().load().unwrap();
+        let prepared =
+            f.db.capture_child_preparation(&child.execution_id, None, proposal, basis)
+                .unwrap()
+                .load()
+                .unwrap();
         let child = f.db.admit_child(prepared).unwrap();
         let run = f.db.run(&child.receipt.as_ref().unwrap().run_id).unwrap();
         let original = f.db.launch_intent(&run.id).unwrap().unwrap().selection;
@@ -1051,3 +1148,6 @@ fn child_policy_graph_cannot_add_an_undelegated_memory_tool() {
 
 #[path = "child_memory_plan_review.rs"]
 mod memory_plan_review;
+
+#[path = "nested_memory_review.rs"]
+mod nested_memory_review;

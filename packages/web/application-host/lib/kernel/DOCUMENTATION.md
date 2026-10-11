@@ -559,13 +559,25 @@ that candidate at a closed request/action boundary. A frozen request keeps its a
 explicit revocation still rejects it. Recovery verifies the original package/declaration identity,
 and does not substitute a newer artifact when the original is unavailable.
 
-`tool-bridge.ts` and Rust `host_tools.rs` carry real ModelStep or PolicyAction origins. The existing
+`tool-bridge.ts` and Rust `host_tools.rs` carry real ModelStep, PolicyAction or NestedCall origins. The existing
 permission owner checks the exact operation, arguments, schema and selected owner. Host-only invocation
 scope is derived from that admitted operation and its immutable Run source. Only the opaque scope ID
 crosses the broker boundary; the original owner/generation and active callback determine capability
 access. `material-tool-owner.ts` exposes `materials.snapshot` through the existing WebMaterialStore,
 snapshot grants, persisted collections and native byte-range reader. The runnable authoring example is
 [`material-snapshot-tool`](../../../../../examples/extensions/material-snapshot-tool/README.md).
+
+`nested-tool-owner.ts` exposes the ordinary `runtime.tools` capability only through this active
+invocation. The SDK's `call.tools.invoke` supplies a stable local call ID, tool name and JSON arguments;
+the Host supplies the verified original parent Operation and executor owner. Rust owns input decoding,
+frozen selection and each target's original permission/resource lifecycle. No second tool allowlist
+or caller-provided source is used. `withToolInvocation` closes new calls and retains actual registered
+RPC promises after callback return; observer abort is not a physical-stop receipt. Independent accepted
+Jobs and returned Unknown effects remain with their original owners, not an outer aggregate receipt.
+The protocol schema owns deferred-body-credit methods, so accepted nested calls can make further
+domain/permission requests without occupying the entire body window. Cancellation and final receipts
+still use the original pending identity. See the installable
+[`nested-tools` example](../../../../../examples/extensions/nested-tools/README.md).
 
 Cancellation detaches the observer without fabricating a stopped callback or no-effect result.
 The existing bridge call retains its actual callback and unacknowledged receipt across a kernel-channel

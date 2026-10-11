@@ -316,7 +316,7 @@ it('installed SDK declaration reaches shared bridge, compiled schemas, validated
     runtime.capabilities.register(COMPUTER_CAPABILITY, async () => null);
     await runtime.activateExtension(VARIN_BUILTIN_COMPUTER_EXTENSION_ID);
     const computer = createComputerRuntime({ kernel, runtime: {} as never, enabled: async () => true,
-      computers: { defaultDesktop: async () => { throw new Error('malformed original Computer default'); } } as never });
+      computers: { automation: { attachRequests: () => {} }, defaultDesktop: async () => { throw new Error('malformed original Computer default'); } } as never });
     const isolated = await createExtensionTools({ ...options, prepareConfiguration: computer.prepareConfiguration })(
       { runId: 'independent-custom-selection', threadId: 'thread' }, [], new AbortController().signal,
     );

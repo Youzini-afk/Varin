@@ -19,6 +19,14 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-11 增量：原真实嵌套工具调用
+
+- 普通 SDK `call.tools.invoke` 经实际 broker/Host 活调用进入原冻结工具目录；真实 `NestedCall` 保父 Operation，不伪造模型 request/工具配对，也不复制 enabled 名单或 grant。完整参数只由 Rust decoder 判合法，父身份、source、epoch 和 executor 来自原 scope；Model/Policy/Nested 共用单调用执行、授权、资源与结算 owner。Catalog **46**直接拒旧。
+- scope 先关闭新准入，再等实际已注册调用；父取消与精确内层 Stop 保实际 token。已返回 Unknown 与未返回 foreground 分开，原内层 Operation/occupancy 等自身证据，外层不复制永久未知屏障。独立 Job 保原寿命；纯读仍轻路径。原记忆提交/下一请求事实/重开不依赖扩展输出，即使外层随后失败也保真实提交。
+- 原协议额度在完整 nested body 已交实际worker后归还，保原 pending/取消/最终回执；窗口2并发及深一层可继续原permission/domain请求。原family/source/dispatch/Goal/计划/检索与Host公开消费者一起接新origin，安装示例用真实SDK声明与回执。
+- 实际安装示例/broker/Host memory owner，以及真实child Engine/MemoryTools→同Host memory owner两段交叉验收分别注明受控边界；独审真实question Job早答/外层完成后可答、无源child Computer原assignment/拒绝和pending/Unknown证据分列。Runtime最终458、kernel150/12ignored与显式memory/fresh guardian各1，Host24+7、types/协议/真实bundle通过；原失败与修后范围见[嵌套工具验收](../reviews/runtime-nested-tools-2026-10-11.md)。完整产品socket IPC仍待外部验收。
+- 本片是持久脚本的必要前置。接着实现原选定环境/进程owner下的持久async单元格与绑定寿命、typed media实际模型消费，再继续两设计其余领域；没有将任意Host Node权限包装成Computer-only沙箱。用户最终迁移分工保持。
+
 ## 2026-10-11 校正：辅助作业来源与实际执行分支
 
 - 真实 producer 与公开 API 核实：ContextJob 的 `request.branch_id` 是摘要来源，actual Run 固定在独立 context-job Thread/branch。上一片“同 branch 辅助 Run 误选已修复”的文字证据不成立；原测试只证明真实 helper 与 handback 共存，未证明同 branch。

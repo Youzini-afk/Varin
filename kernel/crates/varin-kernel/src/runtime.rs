@@ -1,6 +1,8 @@
 use crate::error::{response_error, KernelError};
 use crate::protocol::*;
-use crate::protocol_generated::{KERNEL_CONTROL_RESPONSE_METHODS, KERNEL_DEFERRED_RESPONSE_METHODS, KERNEL_REQUEST_WINDOW};
+use crate::protocol_generated::{
+    KERNEL_CONTROL_RESPONSE_METHODS, KERNEL_DEFERRED_RESPONSE_METHODS, KERNEL_REQUEST_WINDOW,
+};
 use crate::storage::materialization::{
     Admission as MaterializationAdmission, Control as MaterializationControl,
     Controlled as MaterializationControlled, Task as MaterializationTask,
@@ -102,6 +104,36 @@ impl ActiveRequest {
             self.token.store(true, Ordering::Release);
         }
     }
+}
+
+/// Transfer only completed-body transport credit. The original request, cancellation and
+/// final response remain owned until the worker finishes. Call after real execution admission.
+fn release_request_credit(
+    active: &Mutex<HashMap<String, ActiveRequest>>,
+    responses: &crate::transport::Sender,
+    id: &str,
+    method: &str,
+) {
+    if !KERNEL_DEFERRED_RESPONSE_METHODS.contains(&method) {
+        return;
+    }
+    let frame = {
+        let Ok(mut requests) = active.lock() else {
+            return;
+        };
+        let Some(request) = requests.get_mut(id) else {
+            return;
+        };
+        if request.pending_body || request.wire_lane.is_none() {
+            return;
+        }
+        let Some(epoch) = request.epoch.clone() else {
+            return;
+        };
+        request.wire_lane = None;
+        json!({"v":PROTOCOL_VERSION,"kind":"request-credit-released","id":id,"kernelEpoch":epoch,"method":method})
+    };
+    let _ = responses.send_control(frame);
 }
 
 fn mark_grant_revoked(
@@ -1148,6 +1180,8 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }))
     });
+    let credit_cancellations = cancellations.clone();
+    let credit_responses = response_tx.clone();
     let agent_control = crate::agent_runtime::AgentControl::default();
     let agent_worker = crate::agent_runtime::spawn(
         agent_rx,
@@ -1168,6 +1202,9 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             if let Ok(mut active) = agent_cancellations.lock() {
                 active.remove(id);
             }
+        },
+        move |id, method| {
+            release_request_credit(&credit_cancellations, &credit_responses, id, method)
         },
     );
     let worker_agent_control = agent_control.clone();
@@ -1970,7 +2007,9 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         // Credits follow the response lane, as on the Host. A short control request
         // such as run.inspect can return a streamed body and owns ordinary credit.
         let wire_lane = if lane == Lane::Control
-            && request["method"].as_str().is_some_and(|method| KERNEL_CONTROL_RESPONSE_METHODS.contains(&method))
+            && request["method"]
+                .as_str()
+                .is_some_and(|method| KERNEL_CONTROL_RESPONSE_METHODS.contains(&method))
         {
             WireLane::Control
         } else {
@@ -2023,27 +2062,14 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 active.token = cancel.shared_flag();
                 active.runtime_cancel = Some(cancel.clone());
-                if KERNEL_DEFERRED_RESPONSE_METHODS
-                    .contains(&request["method"].as_str().unwrap_or_default())
-                {
-                    // The complete body is owned by this cancellable interaction, not by the
-                    // shared transport window. Its final response remains the effect evidence.
-                    active.wire_lane = None;
-                }
                 cancel
             };
-            if KERNEL_DEFERRED_RESPONSE_METHODS
-                .contains(&request["method"].as_str().unwrap_or_default())
-            {
-                let epoch = admission_epoch
-                    .lock()
-                    .map_err(|_| "admission epoch poisoned")?
-                    .clone();
-                let _ = response_tx.send_control(json!({
-                    "v": PROTOCOL_VERSION, "kind": "request-credit-released", "id": request_id,
-                    "kernelEpoch": epoch.unwrap_or_default(), "method": request["method"]
-                }));
-            }
+            release_request_credit(
+                &cancellations,
+                &response_tx,
+                &request_id,
+                request["method"].as_str().unwrap_or_default(),
+            );
             let client = interaction_client.clone();
             let responses = response_tx.clone();
             let active = cancellations.clone();
@@ -2207,3 +2233,7 @@ mod tests {
 #[cfg(test)]
 #[path = "runtime_inventory_tests.rs"]
 mod file_inventory_tests;
+
+#[cfg(test)]
+#[path = "runtime_nested_credit_tests.rs"]
+mod nested_credit_tests;

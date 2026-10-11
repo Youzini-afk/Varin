@@ -30,7 +30,9 @@ function identityOf(input: SemanticInferenceLedgerIdentity): SemanticInferenceLe
         ? { kind: invocation.kind, requestId: text(invocation.requestId), toolCallId: text(invocation.toolCallId) }
         : invocation.kind === "policy_action"
           ? { kind: invocation.kind, actionId: text(invocation.actionId), nodeId: text(invocation.nodeId), toolCallId: text(invocation.toolCallId) }
-          : invalid() };
+          : invocation.kind === "nested_call"
+            ? { kind: invocation.kind, parentOperationId: text(invocation.parentOperationId), toolCallId: text(invocation.toolCallId) }
+            : invalid() };
   } else if (source.kind === "index-build" && source.stage === "document-embedding") {
     operation = { kind: source.kind, hostId: text(source.hostId), workspaceId: text(source.workspaceId),
       recipeId: text(source.recipeId), stage: source.stage };

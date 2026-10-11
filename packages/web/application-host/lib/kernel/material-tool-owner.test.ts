@@ -13,6 +13,7 @@ import { withToolInvocation, type ToolInvocationAuthority } from "./tool-invocat
 
 const owner = { extensionId: "example.materials", extensionVersion: "1.0.0", entrypointId: "host", generation: 1 };
 const authority = (policy = false): ToolInvocationAuthority => ({
+  callId: policy ? "node" : "call", executorOwner: { kind: "kernel" },
   invocationId: "invocation",
   toolName: "material_snapshot_read",
   operation: "read",

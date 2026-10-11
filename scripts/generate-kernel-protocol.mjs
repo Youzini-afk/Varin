@@ -8,6 +8,7 @@ const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
 const target = path.join(root, 'packages', 'web', 'application-host', 'lib', 'kernel', 'protocol.generated.ts');
 const rustTarget = path.join(root, 'kernel', 'crates', 'varin-kernel', 'src', 'protocol_generated.rs');
 const protocolTarget = path.join(root, 'packages', 'protocol', 'src', 'agent-runtime.generated.ts');
+const extensionToolsTarget = path.join(root, 'packages', 'extension-contract', 'src', 'nested-tools.generated.ts');
 const runtimeTypesTarget = path.join(root, 'kernel', 'crates', 'varin-runtime', 'src', 'types_generated.rs');
 const structs = Object.entries(schema.runtimeStructs ?? {}).map(([name, spec]) => {
   const fields = Object.entries(spec.fields).map(([key, value]) => {
@@ -43,6 +44,9 @@ const renderRequestUnion = () => {
 };
 const renderMethodParams = () => `export type KernelMethodParams = {\n${Object.entries(methodParams).map(([method, paramsType]) => `  ${JSON.stringify(method)}: ${paramsType};`).join('\n')}\n};`;
 const dtoEntries = Object.entries(schema.dto ?? {}).filter(([name]) => !(schema.requestUnion && name === 'KernelRequest'));
+const extensionToolNames = ['Outcome', 'Effect', 'Lifetime', 'OperationCallCompletion', 'NestedToolInput', 'NestedToolReceipt'];
+const extensionToolsGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\n\n'
+  + extensionToolNames.map(name => renderDto(name, schema.dto[name])).join('\n\n') + '\n';
 const protocolGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\n\n' + dtoEntries.filter(([name]) => (schema.runtimeExports ?? []).includes(name)).map(([name, spec]) => renderDto(name, spec)).join('\n\n') + '\n';
 const generated = `/**
  * Generated from \`kernel/protocol/schema.json\`.
@@ -143,13 +147,15 @@ if (checkOnly) {
   const existingRust = fs.existsSync(rustTarget) ? fs.readFileSync(rustTarget, 'utf8') : '';
   const existingTypes = fs.existsSync(runtimeTypesTarget) ? fs.readFileSync(runtimeTypesTarget, "utf8") : "";
   const existingProtocol = fs.existsSync(protocolTarget) ? fs.readFileSync(protocolTarget, 'utf8') : '';
-  if (existing !== generated || existingRust !== rustGenerated || existingTypes !== runtimeTypesGenerated || existingProtocol !== protocolGenerated) {
-    const stale = [existing !== generated ? target : null, existingRust !== rustGenerated ? rustTarget : null, existingTypes !== runtimeTypesGenerated ? runtimeTypesTarget : null, existingProtocol !== protocolGenerated ? protocolTarget : null].filter(Boolean);
+  const existingExtensionTools = fs.existsSync(extensionToolsTarget) ? fs.readFileSync(extensionToolsTarget, 'utf8') : '';
+  if (existingExtensionTools !== extensionToolsGenerated || existing !== generated || existingRust !== rustGenerated || existingTypes !== runtimeTypesGenerated || existingProtocol !== protocolGenerated) {
+    const stale = [existingExtensionTools !== extensionToolsGenerated ? extensionToolsTarget : null, existing !== generated ? target : null, existingRust !== rustGenerated ? rustTarget : null, existingTypes !== runtimeTypesGenerated ? runtimeTypesTarget : null, existingProtocol !== protocolGenerated ? protocolTarget : null].filter(Boolean);
     console.error(`Kernel protocol DTO is out of date: ${stale.map((entry) => path.relative(root, entry)).join(', ')}`);
     process.exit(1);
   }
   console.log(`Kernel protocol ${schema.protocolVersion} is up to date.`);
 } else {
+  fs.writeFileSync(extensionToolsTarget, extensionToolsGenerated);
   fs.writeFileSync(protocolTarget, protocolGenerated);
   fs.writeFileSync(target, generated);
   fs.writeFileSync(rustTarget, rustGenerated);
