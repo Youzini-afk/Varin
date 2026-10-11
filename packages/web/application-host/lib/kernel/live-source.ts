@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { LiveRoot } from './protocol.generated.js';
 import type { KernelClient } from './kernel-client.js';
-import { canonicalizePathIdentity } from '../workspace/path-safety.js';
+import { canonicalizePathIdentity, normalizePathIdentity } from '../workspace/path-safety.js';
 
 export interface LiveSourceSelection {
   workspaceId: string; executionWorkspaceId: string; liveRoot: LiveRoot;
@@ -23,8 +23,9 @@ export function createLiveSourceOwner({ documents, kernel }: Owners) {
     const handshake = kernel.handshake ?? await kernel.start();
     if (source.liveRoot.hostId !== handshake.hostId || workspace.hostId !== source.liveRoot.hostId
       || execution.hostId !== source.liveRoot.hostId
-      || workspace.root !== source.liveRoot.canonicalRoot || execution.root !== source.liveRoot.canonicalRoot
-      || await canonicalizePathIdentity(workspace.root) !== source.liveRoot.canonicalRoot) {
+      || normalizePathIdentity(workspace.root) !== normalizePathIdentity(source.liveRoot.canonicalRoot)
+      || normalizePathIdentity(execution.root) !== normalizePathIdentity(source.liveRoot.canonicalRoot)
+      || normalizePathIdentity(await canonicalizePathIdentity(workspace.root)) !== normalizePathIdentity(source.liveRoot.canonicalRoot)) {
       throw new Error('Live workspace identity changed; select the workspace again');
     }
     signal?.throwIfAborted();
@@ -39,7 +40,8 @@ export function createLiveSourceOwner({ documents, kernel }: Owners) {
       capabilities: ['storage.read', 'storage.write'], pathScopes: [''] });
     try {
       const registered = await kernel.scoped(grant).fileRootRegister({ workspaceId, executionWorkspaceId, canonicalRoot: workspace.root });
-      if (typeof registered.rootId !== 'string' || registered.canonicalRoot !== workspace.root) throw new Error('Live root admission failed');
+      if (typeof registered.rootId !== 'string' || typeof registered.canonicalRoot !== 'string'
+        || normalizePathIdentity(registered.canonicalRoot) !== normalizePathIdentity(workspace.root)) throw new Error('Live root admission failed');
       return { ...source.liveRoot, rootId: registered.rootId };
     } finally { await kernel.revokeGrant(grant.grantId); }
   };

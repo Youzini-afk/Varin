@@ -47,6 +47,10 @@ it('absence, unselected old installation and another scope do not block the defa
   await f.runtime.setEnabled('review.policy-v1', false, (await f.runtime.state()).catalog.revision);
   expect(await f.prepare(scope)).toBeUndefined();
   const installed = await f.install(3);
+  expect(await f.prepare(scope)).toBeUndefined();
+  await f.route(3, installed, { sessionId: 'another-thread' });
+  expect(await f.prepare(scope)).toBeUndefined();
+  await f.route(3, installed, { sessionId: 'thread' });
   const lease = await f.prepare(scope);
   expect(lease?.binding.artifact.identity.name).toBe(`${installed}:installed-v3`);
   lease?.release();
@@ -263,6 +267,7 @@ it('exact policy recovery selects the complete configuration among retained gene
       return { action: { kind: 'complete' }, state: configuration };
     } }];
   await services.replaceOwner(owner(1), provision('old'));
+  services.setSelection('varin.agent.policy', 3, services.getSnapshot().providers[0]!.providerId);
   // Real registry and preparer; supervisor identity is a fixture for two generations of one package.
   const runtime = { services,
     routing: { read: async () => ({ authoritative: true, document: { schemaVersion: 1, revision: 0, updatedAt: '2026-10-10T00:00:00Z', rules: [] } }) },
@@ -273,6 +278,7 @@ it('exact policy recovery selects the complete configuration among retained gene
   const old = (await prepare({ sessionId: 'thread:old-child' }))!;
   const replacement = services.prepareOwnerReplacement(owner(2), provision('new'));
   replacement.commit();
+  services.setSelection('varin.agent.policy', 3, services.getSnapshot().providers.find(provider => provider.status === 'active')!.providerId);
   const current = (await prepare({ sessionId: 'thread:new-child' }))!;
   try {
     expect(old.binding.artifact.configurationIdentity).not.toBe(current.binding.artifact.configurationIdentity);

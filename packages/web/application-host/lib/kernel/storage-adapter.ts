@@ -3,7 +3,7 @@ import { runKernelCompute } from "./compute-runner.js";
 import type { WorkingStateFileQuery, WorkingStateQueryOptions, WorkingStateQueryResult } from "../harness/working-state/query-contract.js";
 import { randomUUID, createHash } from "node:crypto";
 import path from "node:path";
-import { canonicalizePathIdentity } from "../workspace/path-safety.js";
+import { canonicalizePathIdentity, normalizePathIdentity } from "../workspace/path-safety.js";
 import type { ChildSourceProvenance, KernelBranchReadResult, KernelBranchState, KernelEntry, KernelRecordResult, KernelWorkingDraftDocument } from "./protocol.generated.js";
 import type { KernelClient, KernelGrantHandle, KernelScopedClient } from "./kernel-client.js";
 import type { WorkspaceRecoveryEngine } from "../recovery/engine.js";
@@ -165,8 +165,8 @@ const toKernelState = (state: RecoveryState): KernelBranchState => {
 
 const fromKernelState = (state: KernelBranchState): RecoveryState => {
   if (state.kind === "regular-file") return { kind: "regular-file", objectHash: state.objectHash, byteLength: state.byteLength, mode: state.mode };
-  if (state.kind === "directory") return { kind: "directory", ...(state.mode === undefined ? {} : { mode: state.mode }) };
-  if (state.kind === "symlink") return { kind: "symlink", symlinkTarget: state.symlinkTarget, ...(state.mode === undefined ? {} : { mode: state.mode }) };
+  if (state.kind === "directory") return { kind: "directory", ...(state.mode == null ? {} : { mode: state.mode }) };
+  if (state.kind === "symlink") return { kind: "symlink", symlinkTarget: state.symlinkTarget, ...(state.mode == null ? {} : { mode: state.mode }) };
   return { kind: state.kind };
 };
 
@@ -390,9 +390,9 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     }
   }
 
-  private async readRoot(branchId: string, revision: number | undefined, signal?: AbortSignal): Promise<KernelBranchReadResult | null> {
+  private async readRoot(branchId: string, revision: number | undefined, signal?: AbortSignal, includeEntries = true): Promise<KernelBranchReadResult | null> {
     try {
-      return await this.context.client.readBranch({ branchId, ...(revision === undefined ? {} : { revision }) }, signal);
+      return await this.context.client.readBranch({ branchId, includeEntries, ...(revision === undefined ? {} : { revision }) }, signal);
     } catch (error) {
       if (branchMissing(error)) return null;
       throw error;
@@ -401,8 +401,8 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
 
   async getBranchRoot(branchId: string, options?: { signal?: AbortSignal }): Promise<WorkingBranchRoot | null> {
     const [current, base] = await Promise.all([
-      this.readRoot(branchId, undefined, options?.signal),
-      this.readRoot(branchId, 0, options?.signal),
+      this.readRoot(branchId, undefined, options?.signal, false),
+      this.readRoot(branchId, 0, options?.signal, false),
     ]);
     if (!current || !base) return null;
     if (current.branchId !== branchId || base.branchId !== branchId
@@ -1719,7 +1719,6 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
 export interface KernelStorageAdapterOptions {
   client: KernelClient;
   hostId: string;
-  hostGeneration?: string;
   resolveWorkspaceRoot: (workspaceId: string) => Promise<string>;
   fileStore?: RecoveryFileStore;
   storageRoot: string;
@@ -1833,7 +1832,8 @@ export class KernelStorageAdapter {
       executionWorkspaceId: input.executionWorkspaceId,
       canonicalRoot,
     });
-    if (typeof registered.rootId !== "string" || registered.canonicalRoot !== canonicalRoot) {
+    if (typeof registered.rootId !== "string" || typeof registered.canonicalRoot !== "string"
+      || normalizePathIdentity(registered.canonicalRoot) !== normalizePathIdentity(canonicalRoot)) {
       throw new Error("Kernel returned an invalid file root registration");
     }
     const rootId = registered.rootId;
@@ -1857,7 +1857,7 @@ export class KernelStorageAdapter {
       client, rootId,
       owningWorkspaceId: input.owningWorkspaceId,
       executionWorkspaceId: input.executionWorkspaceId,
-      canonicalRoot: registered.canonicalRoot,
+      canonicalRoot,
       pendingFileOperations,
       reconcilePendingFileOperation: (operationId: string) => client.fileOperationReconcile({
         workspaceId: input.owningWorkspaceId, rootId, operationId,
@@ -1874,13 +1874,13 @@ export class KernelStorageAdapter {
     // writers construct the same named fields in different orders; hashing those
     // raw objects minted different grants and invalidated transferred owners.
     const actorJson = JSON.stringify(Object.fromEntries(Object.entries(actor)
-      .filter(([, value]) => value !== undefined).sort(([left], [right]) => left.localeCompare(right))));
+      .filter(([field, value]) => field !== "capabilities" && value !== undefined).sort(([left], [right]) => left.localeCompare(right))));
     const key = JSON.stringify({ workspaceId, actorJson, capabilities });
     const existing = this.grants.get(key); if (existing) return existing;
     const grant = (async () => {
-      const actorKey = createHash("sha256").update(actorJson).digest("hex").slice(0, 24);
-      const capabilityKey = createHash("sha256").update(JSON.stringify(capabilities)).digest("hex").slice(0, 12);
-      return this.client.issueGrant({ grantId: `product:${this.options.hostId}:${this.options.hostGeneration ?? process.pid}:${workspaceId}:${actorKey}:${capabilityKey}`, ...actor, capabilities, pathScopes: actor.pathScopes ?? [""] });
+      // The cache reuses a live grant. A later adapter/session lifetime needs a new
+      // identity: the previous grant may have been explicitly revoked on disposal.
+      return this.client.issueGrant({ grantId: `product:${this.options.hostId}:${randomUUID()}`, ...actor, capabilities, pathScopes: actor.pathScopes ?? [""] });
     })();
     this.grants.set(key, grant); return grant;
   }
@@ -1897,7 +1897,8 @@ export class KernelStorageAdapter {
     if (canonicalRoot !== input.canonicalRoot) throw new Error("Admitted storage root is no longer canonical");
     const registered = await this.client.scoped(grant).fileRootRegister({ workspaceId: input.owningWorkspaceId,
       executionWorkspaceId: input.executionWorkspaceId, canonicalRoot });
-    if (registered.rootId !== input.rootId || registered.canonicalRoot !== canonicalRoot) {
+    if (registered.rootId !== input.rootId || typeof registered.canonicalRoot !== "string"
+      || normalizePathIdentity(registered.canonicalRoot) !== normalizePathIdentity(canonicalRoot)) {
       throw new Error("Admitted storage resource root changed");
     }
     return this.contextUsingGrant(grant, { authorityId: this.options.hostId, canonicalRoot,

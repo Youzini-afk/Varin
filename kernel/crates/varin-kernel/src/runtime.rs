@@ -1,6 +1,6 @@
 use crate::error::{response_error, KernelError};
 use crate::protocol::*;
-use crate::protocol_generated::{KERNEL_DEFERRED_RESPONSE_METHODS, KERNEL_REQUEST_WINDOW};
+use crate::protocol_generated::{KERNEL_CONTROL_RESPONSE_METHODS, KERNEL_DEFERRED_RESPONSE_METHODS, KERNEL_REQUEST_WINDOW};
 use crate::storage::materialization::{
     Admission as MaterializationAdmission, Control as MaterializationControl,
     Controlled as MaterializationControlled, Task as MaterializationTask,
@@ -435,25 +435,6 @@ impl Kernel {
             )));
         }
         if method == "authority.grant.issue" {
-            reject_unknown_fields(
-                &params_value,
-                &[
-                    "grantId",
-                    "hostGeneration",
-                    "authorityInstanceId",
-                    "workerId",
-                    "workerGeneration",
-                    "sessionId",
-                    "threadId",
-                    "runId",
-                    "owningWorkspace",
-                    "executionWorkspace",
-                    "storageIdentity",
-                    "capabilities",
-                    "pathScopes",
-                ],
-                "grant",
-            )?;
             let storage_identity = storage.root().to_string_lossy().to_string();
             return Ok(Some(response_ok(
                 id,
@@ -473,7 +454,6 @@ impl Kernel {
             )));
         }
         if method == "authority.grant.revoke" {
-            reject_unknown_fields(&params_value, &["grantId"], "grant revoke")?;
             return Ok(Some(response_ok(
                 id,
                 storage.revoke_grant(&params_value, host_id)?,
@@ -1987,7 +1967,11 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 mark_grant_revoked(&revoked_grants, &cancellations, &target);
             }
         }
-        let wire_lane = if lane == Lane::Control {
+        // Credits follow the response lane, as on the Host. A short control request
+        // such as run.inspect can return a streamed body and owns ordinary credit.
+        let wire_lane = if lane == Lane::Control
+            && request["method"].as_str().is_some_and(|method| KERNEL_CONTROL_RESPONSE_METHODS.contains(&method))
+        {
             WireLane::Control
         } else {
             WireLane::Data

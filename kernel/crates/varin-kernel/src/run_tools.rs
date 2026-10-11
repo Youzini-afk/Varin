@@ -129,6 +129,35 @@ pub(crate) struct RunTools {
 fn failed(error: impl ToString) -> ExecutionError {
     ExecutionError::new("tool_composition", error.to_string())
 }
+/// Shared declarations for input admission, launch selection and child capability discovery.
+/// Live executors bind these same owning schemas during assembly.
+pub(crate) fn builtin_schemas(
+    enabled: &std::collections::BTreeSet<crate::tools::ToolKind>,
+    has_source: bool,
+    plan_eligible: bool,
+    include_goal: bool,
+) -> Vec<ToolSchema> {
+    let mut tools = crate::process_wait::schemas(
+        crate::tools::KernelToolExecutor::selected_schemas(enabled),
+    );
+    tools = crate::questions::schemas(tools);
+    tools = crate::collaboration::schemas(tools, has_source);
+    tools.extend(crate::family_tools::schemas());
+    tools.extend([
+        crate::message_tools::schema(),
+        crate::followup_tools::schema(),
+        crate::memory::schema(true),
+        crate::agent_resources::schema(),
+    ]);
+    if plan_eligible {
+        tools.push(crate::plan::schema());
+    }
+    if include_goal {
+        tools.push(crate::agent_goals::schema());
+    }
+    tools.sort_by(|left, right| left.name.cmp(&right.name));
+    tools
+}
 fn declarations(
     base: &[ToolDeclaration],
     mcp: Option<&RetainedMcp>,

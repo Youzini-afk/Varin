@@ -303,24 +303,10 @@ impl PreparedSubmission {
             selection.validate()?;
         }
         if inherit_source
-            && launch.as_ref().is_none_or(|selection| {
-                selection.source.is_some()
-                    || selection.tools.iter().any(|tool| {
-                        !matches!(
-                            tool.name.as_str(),
-                            questions::QUESTION_TOOL
-                                | collaboration::STATUS_TOOL
-                                | collaboration::WAIT_TOOL
-                                | collaboration::REPORT_TOOL
-                                | "resource_read"
-                                | "memory"
-                                | "todo"
-                        )
-                    })
-            })
+            && launch.as_ref().is_none_or(|selection| selection.source.is_some())
         {
             return Err(RuntimeError::Invalid(
-                "source inheritance requires an unoverridden model launch".into(),
+                "source inheritance requires a launch without an explicit source".into(),
             ));
         }
         if let Some(basis) = &personalization {

@@ -85,7 +85,7 @@ export default defineHostExtension({
           return fail('Unexpected graph after the parent answer began');
         }
         if (input.state === null && (event.kind === 'started' || event.kind === 'input_delivered')) return {
-          action: { kind: 'tool_graph', nodes: [node('dispatch', 'dispatch', { task: config.task, workMode: 'read_only', tools: ['file_read', 'file_list', 'file_search'] }, '2')] }, state: asJson(state),
+          action: { kind: 'tool_graph', nodes: [node('dispatch', 'dispatch', { task: config.task, workMode: 'read_only', tools: ['file_read'] }, '2')] }, state: asJson(state),
         };
         return fail('Collaboration policy requires its committed operation event');
       },

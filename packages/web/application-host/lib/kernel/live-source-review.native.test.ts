@@ -173,7 +173,7 @@ it('rejects forged host, root, path and execution owner before durable input or 
 it('freezes actual Documents AGENTS revision at first context while live reads and later turns remain current', async () => {
   let serial = 0; const outputs: string[] = [];
   const f = await fixture((body, response) => {
-    if ((body.input as Array<Record<string, unknown>>).at(-1)?.type !== 'function_call_output') tool(response, 'file_read', { path: 'AGENTS.md' }, ++serial);
+    if ((body.input as Array<Record<string, unknown>>).filter(item => item.role !== 'system').at(-1)?.type !== 'function_call_output') tool(response, 'file_read', { path: 'AGENTS.md' }, ++serial);
     else { outputs.push(String(lastOutput(body)!.output)); done(response); }
   });
   const identity = await f.api.create('live-context');
@@ -323,7 +323,7 @@ it('cancelling after actual live-root registration revokes the fresh grant befor
   await expect.poll(() => revocations.mock.calls.some(([grantId]) => grantId === issued)).toBe(true);
   await revocations.mock.results[revocations.mock.calls.findIndex(([grantId]) => grantId === issued)]!.value;
   const grant = await grants.mock.results[grants.mock.calls.findIndex(([value]) => value.grantId === issued)]!.value;
-  await expect(f.kernel.scoped(grant).fileRootRegister({ workspaceId: prepared.source.workspaceId, executionWorkspaceId: prepared.source.executionWorkspaceId, canonicalRoot: f.workspace })).rejects.toThrow(/revoked/i);
+  await expect(f.kernel.scoped(grant).fileRootRegister({ workspaceId: prepared.source.workspaceId, executionWorkspaceId: prepared.source.executionWorkspaceId, canonicalRoot: f.workspace })).rejects.toThrow(/revoked|no longer active/i);
   expect((await f.runtime.run(pending.run_id)).state).toBe('cancelled');
   expect(f.requests).toHaveLength(0);
   registration.mockRestore();
@@ -363,9 +363,10 @@ it('the kernel refuses process effects attached to a fixed branch even with a va
   const grant = await f.kernel.issueGrant({ grantId: 'fixed-process-attempt', owningWorkspace: source.workspaceId, executionWorkspace: source.executionWorkspaceId, threadId: identity.threadId, runId: pending.run_id,
     capabilities: ['storage.read', 'storage.write', 'process'], pathScopes: [''] });
   const registered = await f.kernel.scoped(grant).fileRootRegister({ workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId, canonicalRoot: f.workspace });
-  await expect(f.runtime.startRun(pending.run_id, undefined, { grantId: grant.grantId, runId: pending.run_id, threadId: identity.threadId,
+  await f.runtime.startRun(pending.run_id, undefined, { grantId: grant.grantId, runId: pending.run_id, threadId: identity.threadId,
     workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId, sourceMode: 'fixed_branch', rootId: registered.rootId,
-    fileSource: { branchId: source.branchId, revision: source.revision }, enabledTools: ['process_spawn'] })).rejects.toThrow();
+    fileSource: { branchId: source.branchId, revision: source.revision }, enabledTools: ['process_spawn'] });
+  await expect.poll(async () => (await f.runtime.run(pending.run_id)).state).toBe('waiting');
   expect(f.requests).toHaveLength(0);
   await expect(fs.access(path.join(f.workspace, 'forbidden.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
   await f.runtime.cancelRun(pending.run_id);

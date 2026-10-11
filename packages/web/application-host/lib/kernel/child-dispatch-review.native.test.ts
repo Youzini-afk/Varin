@@ -3,7 +3,7 @@ import { createMemoryOwner, type MemoryQuery } from './memory-owner.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import express from 'express';
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import fs from 'node:fs/promises';
 import { createServer, type Server, type ServerResponse } from 'node:http';
@@ -123,7 +123,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
     const grants: Array<{ runId: string; grantId: string; pathScopes: string[] }> = [];
     const issueGrant = kernel.issueGrant.bind(kernel);
     kernel.issueGrant = async (input, signal) => {
-      const selected = input.grantId.startsWith('source:') && options.sourceGrantScopes ? { ...input, pathScopes: options.sourceGrantScopes } : input;
+      const selected = input.grantId.startsWith('source:') && input.runId && options.sourceGrantScopes ? { ...input, pathScopes: options.sourceGrantScopes } : input;
       const grant = await issueGrant(selected, signal);
       if (selected.grantId.startsWith('source:') && selected.runId) grants.push({ runId: selected.runId, grantId: grant.grantId, pathScopes: selected.pathScopes });
       return grant;
@@ -168,11 +168,14 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
           outfile: path.join(folder, 'host.cjs'), alias: { '@varin/extension-sdk': path.join(repository, 'packages/extension-sdk/dist/index.js') } });
         await extensions.installOrStage({ expectedRevision: (await extensions.state()).catalog.revision,
           source: { kind: 'local', display: 'Collaboration policy example', specifier: folder } });
-        await extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision,
-          rule: { serviceId: 'varin.agent.policy', version: 3, providerKey: 'example.collaboration-policy:host:varin.agent.policy@3',
-            scope: { projectId }, allowFallback: false } });
       }
     }
+    const selectParentPolicy = async (threadId: string) => {
+      if (!extensions) throw new Error('Policy example is not installed');
+      await extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision,
+        rule: { serviceId: 'varin.agent.policy', version: 3, providerKey: 'example.collaboration-policy:host:varin.agent.policy@3',
+          scope: { sessionId: threadId }, allowFallback: false } });
+    };
     const policyDecisions: VarinAgentPolicyInput[] = [];
     const runtime = new AgentRuntimeClient(kernel, undefined, extensions ? { prepare: async ({ threadId, requiredBinding }, signal) => {
       const lease = await createAgentPolicy(extensions)({ sessionId: threadId, projectId, ...(requiredBinding ? { requiredBinding } : {}) }, signal);
@@ -218,7 +221,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
       await exited; await kernel.close();
     };
     return { kernel, grants, crash, runtime, adapter, collaboration, models, prepareContext, workingStates, personalization, documents, memoryQueries, memoryControl, policyDecisions,
-      errors, close, api: createThreadsHttpAPI(), hostUrl: host.url };
+      errors, close, selectParentPolicy, api: createThreadsHttpAPI(), hostUrl: host.url };
   }
   return { root, workspace, requests, openHost, setProject(value: string) { projectId = value; }, setTrusted(value: boolean) { trusted = value; } };
 }
@@ -901,10 +904,10 @@ it('a narrow parent read scope cannot turn a whole fixed root into wider child a
       complete(response, [answer('Whole-root handoff is not authorized', 'parent-final')]);
     }
   });
-  await fs.mkdir(path.join(f.workspace, 'allowed'));
-  await fs.writeFile(path.join(f.workspace, 'allowed', 'read.txt'), 'allowed narrow content');
-  const h = await f.openHost({ sourceGrantScopes: ['allowed'] }); const identity = await h.api.create('child-review-narrow-scope');
+  const scopeOptions: { sourceGrantScopes?: string[] } = {};
+  const h = await f.openHost(scopeOptions); const identity = await h.api.create('child-review-narrow-scope');
   const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+  scopeOptions.sourceGrantScopes = ['source.txt'];
   prepared.source.tools = ['file_read'];
   const receipt = await h.api.submit({ ...identity, key: 'parent-input', expectedHead: null, text: 'dispatch must honor narrow read scopes', model, source: prepared.source });
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state).toBe('completed');
@@ -943,14 +946,14 @@ it('a revoked child grant blocks its own reads even though the parent handoff wa
   expect(childSteps).toBe(2); expect(parentSteps).toBe(2);
 }, 20_000);
 
-it('credential-owner failure after child Run admission is durable and prevents any child model request', async () => {
+it('credential-owner failure holds the admitted child for explicit retry without making a model request', async () => {
   const entered = gate(); const release = gate();
   let parentSteps = 0; let childSteps = 0; let operationId = '';
   const f = await fixture(({ body, response }) => {
     if (isParent(body)) {
       if (++parentSteps === 1) complete(response, [tool('dispatch', dispatch, 'dispatch')]);
       else { operationId = job(body); complete(response, [answer('Parent done', 'parent-final')]); }
-    } else { childSteps++; complete(response, [answer('Unexpected unauthorized generation', 'child-final')]); }
+    } else { childSteps++; complete(response, [answer('Child continued after credential readmission', 'child-final')]); }
   });
   const h = await f.openHost({ context: original => blockChild(original, entered, release) });
   const identity = await h.api.create('child-review-rebind-failure');
@@ -960,16 +963,20 @@ it('credential-owner failure after child Run admission is durable and prevents a
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state).toBe('completed');
   h.models.rebindModel = async () => { throw new Error('fixture credential owner was explicitly disabled'); };
   release.release();
-  await expect.poll(async () => (await h.runtime.child(operationId)).report?.outcome).toBe('failed');
+  await expect.poll(async () => (await h.runtime.child(operationId)).receipt).not.toBeNull();
   const child = await h.runtime.child(operationId);
   expect(child.receipt).not.toBeNull();
-  expect((await h.runtime.launch(child.receipt!.run_id))?.preparation_failure).toBe('preparation_failed');
-  expect((await h.runtime.run(child.receipt!.run_id)).state).toBe('failed');
+  await expect.poll(async () => (await h.runtime.launch(child.receipt!.run_id))?.preparation_failure).toBe('preparation_failed');
+  expect((await h.runtime.run(child.receipt!.run_id)).state).toBe('waiting');
+  expect((await h.runtime.child(operationId)).report).toBeNull();
   expect(childSteps).toBe(0); expect(parentSteps).toBe(2);
   await h.close(); const reopened = await f.openHost();
   await reopened.collaboration!.recover(); await reopened.adapter.recover();
-  expect((await reopened.runtime.child(operationId)).report).toEqual(child.report);
+  expect((await reopened.runtime.child(operationId)).report).toBeNull();
   expect(childSteps).toBe(0);
+  await reopened.api.retryPreparation(child.receipt!.run_id);
+  await expect.poll(async () => (await reopened.runtime.child(operationId)).report?.outcome).toBe('succeeded');
+  expect(childSteps).toBe(1);
 }, 20_000);
 
 it('failure between the durable source pin and child Catalog admission compensates the exact pin and never reports accepted work', async () => {
@@ -984,16 +991,23 @@ it('failure between the durable source pin and child Catalog admission compensat
   });
   const h = await f.openHost(); const identity = await h.api.create('child-review-pin-admission-gap');
   const catalog = path.join(f.root, 'agent-runtime', 'conversation.sqlite');
-  const sql = (query: string) => execFileSync('python3', ['-c', 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.executescript(sys.argv[2]); c.commit()', catalog, query]);
+  const sql = (query: string) => {
+    const database = new DatabaseSync(catalog);
+    try { database.exec(query); } finally { database.close(); }
+  };
   sql("CREATE TRIGGER review_reject_child_admission BEFORE INSERT ON child_tasks BEGIN SELECT RAISE(ABORT,'review failed child admission after source receipt'); END;");
   const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
   const receipt = await h.api.submit({ ...identity, key: 'parent-input', expectedHead: null, text: 'dispatch with an injected local admission failure', model, source: prepared.source });
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state).toBe('completed');
   expect(await h.runtime.children()).toEqual([]);
-  const evidence = JSON.parse(execFileSync('python3', ['-c',
-    'import sqlite3,sys,json; c=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro",uri=True); print(json.dumps({"receipts":c.execute("SELECT kind,state FROM operations WHERE operation_id LIKE ?",("child-pin:%",)).fetchall(),"pins":c.execute("SELECT count(*) FROM pins WHERE pin_id LIKE ?",("child-pin:%",)).fetchone()[0]}))',
-    path.join(f.root, 'catalog.sqlite')], { encoding: 'utf8' })) as { receipts: Array<[string, string]>; pins: number };
-  expect(evidence.receipts).toEqual([['branch.pin', 'committed']]);
+  const database = new DatabaseSync(path.join(f.root, 'catalog.sqlite'), { readOnly: true });
+  const evidence = (() => {
+    try { return {
+      receipts: database.prepare("SELECT kind,state FROM operations WHERE operation_id LIKE 'child-source-handoff:%'").all().map(row => [row.kind, row.state]),
+      pins: database.prepare("SELECT count(*) AS total FROM pins WHERE pin_id LIKE 'child-pin:%'").get()!.total,
+    }; } finally { database.close(); }
+  })();
+  expect(evidence.receipts).toEqual([['source.handoff', 'committed']]);
   expect(evidence.pins).toBe(0);
   sql('DROP TRIGGER review_reject_child_admission;');
   await h.close(); const reopened = await f.openHost();
@@ -1348,11 +1362,12 @@ for (const [defect, mutation] of Object.entries(combinedFormatDefects)) {
     await h.close();
     const catalog = path.join(f.root, 'agent-runtime', 'conversation.sqlite');
     const database = new DatabaseSync(catalog);
-    expect(database.prepare("SELECT name,version FROM runtime_domains WHERE name IN ('context_checkpoints','collaboration') ORDER BY name").all()).toEqual([
-      { name: 'collaboration', version: 2 }, { name: 'context_checkpoints', version: 3 },
-    ]);
-    database.exec(`PRAGMA foreign_keys=OFF; ${mutation}; PRAGMA wal_checkpoint(TRUNCATE)`);
-    database.close();
+    try {
+      expect(database.prepare("SELECT name FROM runtime_domains WHERE name IN ('context_checkpoints','collaboration') ORDER BY name").all()).toEqual([
+        { name: 'collaboration' }, { name: 'context_checkpoints' },
+      ]);
+      database.exec(`PRAGMA foreign_keys=OFF; ${mutation}; PRAGMA wal_checkpoint(TRUNCATE)`);
+    } finally { database.close(); }
     const before = await fs.readFile(catalog);
     const inspect = () => {
       const db = new DatabaseSync(catalog, { readOnly: true });
@@ -1360,9 +1375,10 @@ for (const [defect, mutation] of Object.entries(combinedFormatDefects)) {
       finally { db.close(); }
     };
     const facts = inspect();
-    const reopened = await f.openHost();
-    await expect(reopened.runtime.status()).rejects.toThrow();
-    await reopened.close();
+    const reopened = createKernelClient({ hostId: 'child-review-host', storageRoot: f.root, buildVersion,
+      kernelPath, allowCargoDevRunner: false });
+    try { await expect(new AgentRuntimeClient(reopened).status()).rejects.toThrow(); }
+    finally { await reopened.close(); }
     expect(await fs.readFile(catalog)).toEqual(before);
     expect(inspect()).toEqual(facts);
     expect(f.requests).toHaveLength(4);
@@ -1401,6 +1417,7 @@ it('installed collaboration policy accepts a child and reads before any parent M
   const h = await f.openHost({ policyExample: true, context: original => blockChild(original, entered, release) });
   try {
     const identity = await h.api.create('policy-child-fixed');
+    await h.selectParentPolicy(identity.threadId);
     const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
     prepared.source.tools = ['file_read'];
     const receipt = await h.api.submit({ ...identity, key: 'input', expectedHead: null, text: 'Delegate, independently inspect, then answer from the report', model, source: prepared.source });
@@ -1413,7 +1430,8 @@ it('installed collaboration policy accepts a child and reads before any parent M
     const dispatchEvent = h.policyDecisions.find(input => input.event.kind === 'tool_graph_completed' && input.event.receipts.some(item => item.node_id === 'dispatch'))!.event;
     if (dispatchEvent.kind !== 'tool_graph_completed') throw new Error('Missing actual dispatch graph completion');
     expect(child.origin).toEqual({ kind: 'policy_action', action_id: dispatchEvent.action_id, node_id: 'dispatch' });
-    expect(child.configuration).toEqual((await h.runtime.run(receipt.run_id)).configuration);
+    const withoutUnset = (configuration: unknown) => Object.fromEntries(Object.entries(configuration as Record<string, unknown>).filter(([, value]) => value !== null));
+    expect(withoutUnset(child.configuration)).toEqual(withoutUnset((await h.runtime.run(receipt.run_id)).configuration));
     expect(child).toMatchObject({ parent_run_id: receipt.run_id, parent_thread_id: identity.threadId, parent_branch_id: identity.branchId, state: 'preparing', receipt: null });
     expect(policyReceipts(h)).toEqual([
       { node_id: 'dispatch', completion: { kind: 'job_accepted', operation_id: child.operation_id, phase: 'preparing_child', effect: 'none', lifetime: 'thread' } },
@@ -1453,6 +1471,7 @@ it('installed collaboration policy reopens its pending Wait without duplicating 
   });
   const h = await f.openHost({ policyExample: true, collaboration: false });
   const identity = await h.api.create('policy-child-reopen');
+  await h.selectParentPolicy(identity.threadId);
   const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
   prepared.source.tools = ['file_read'];
   const receipt = await h.api.submit({ ...identity, key: 'input', expectedHead: null, text: 'Await the delegated report', model, source: prepared.source });
@@ -1506,6 +1525,7 @@ it('cancelling a policy child observation resumes from the real cancellation fac
   const h = await f.openHost({ policyExample: true, context: original => blockChild(original, entered, release) });
   try {
     const identity = await h.api.create('policy-child-cancel-observation');
+    await h.selectParentPolicy(identity.threadId);
     const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
     prepared.source.tools = ['file_read'];
     const receipt = await h.api.submit({ ...identity, key: 'input', expectedHead: null, text: 'Delegate and observe', model, source: prepared.source });

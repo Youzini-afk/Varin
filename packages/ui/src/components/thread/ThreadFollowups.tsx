@@ -33,6 +33,10 @@ function triggerLabel(item: Followup) {
   if (item.trigger.kind === 'all') return 'When every condition is observed';
   return item.trigger.kind === 'run_completed' ? 'After the original run completes' : 'Continuing goal work';
 }
+function isPastFollowup(item: Followup): boolean {
+  return item.state === 'cancelled' || (item.repeat === 'once'
+    && (item.occurrence?.delivery?.state === 'delivered' || item.occurrence?.state === 'cancelled'));
+}
 type SourceDraft = { kind: FollowupRegistrationSource['kind']; at: string; processId: string; jobId: string; path: string; condition: 'exists' | 'changed' | 'ready'; artifactSelector: 'any' | 'artifactId' | 'name'; artifactValue: string };
 const emptySource = (): SourceDraft => ({ kind: 'at', at: '', processId: '', jobId: '', path: '', condition: 'exists', artifactSelector: 'any', artifactValue: '' });
 // The original Job owner declares supported observations; the renderer owns no domain/version table.
@@ -63,8 +67,7 @@ function SourceEditor({ value, onChange, processes, jobs, disabled, repeating, l
       <option value="">Select an accepted {research ? 'research ' : ''}job in this task family</option>{candidates.map(job => <option key={job.binding.operationId} value={job.binding.operationId}>
         {job.binding.domain} · {job.binding.workspaceId} · {job.binding.subjectId} · {job.executorStopped ? 'executor stopped' : 'awaiting executor stop'} · {job.threadId}
       </option>)}</select></label>
-      <p className="text-xs text-muted-foreground">Continues this selected work. The job's historical source Run is attribution only. Executor stop does not prove artifact collection is finished.</p>
-      {value.kind === 'job_stopped' && <p className="text-xs text-muted-foreground">Submission, Unknown and cancelled observations do not prove executor stop.</p>}
+      {value.kind === 'job_stopped' && <p className="text-xs text-muted-foreground">Runs after the job stops. Collection may finish later.</p>}
       {value.kind === 'artifact' && <>
         <label className="block">Artifact selector<select aria-label={`${label} artifact selector`} value={value.artifactSelector} disabled={disabled}
           onChange={event => onChange({ ...value, artifactSelector: event.target.value as SourceDraft['artifactSelector'], artifactValue: '' })}>
@@ -72,10 +75,9 @@ function SourceEditor({ value, onChange, processes, jobs, disabled, repeating, l
         </select></label>
         {value.artifactSelector !== 'any' && <label className="block">{value.artifactSelector === 'artifactId' ? 'Artifact ID' : 'Artifact name'}<Input aria-label={`${label} artifact value`} value={value.artifactValue}
           disabled={disabled} onChange={event => onChange({ ...value, artifactValue: event.target.value })} /></label>}
-        <p className="text-xs text-muted-foreground">Available, failed and expired records are distinct facts. {repeating ? 'Each new matching record revision can trigger this instruction.' : 'Once uses the first applicable record in the current ordered snapshot.'} No match is reported only after a real collection completion. Failed collection does not prove a source file is missing.</p>
+        <p className="text-xs text-muted-foreground">{repeating ? 'Runs for each matching artifact update.' : 'Runs for the first matching artifact record.'} Includes failed or expired records.</p>
       </>}
-      {value.kind === 'collection' && <p className="text-xs text-muted-foreground">Waits for an actual done, failed or not-started collection receipt, including an empty collection. Unknown or a stopped job alone is not completion.</p>}
-      {research && <p className="text-xs text-muted-foreground">To observe individual artifacts and collection completion, use Any with both conditions. Completion does not trigger an existing artifact again. Each stays authorized until cancelled; an explicit collection retry may produce new facts. Pause and Cancel affect only this follow-up, never the job or collector.</p>}
+      {value.kind === 'collection' && <p className="text-xs text-muted-foreground">Runs when collection finishes, including failed or empty results.</p>}
     </>;
   }
   const atMs = value.at ? new Date(value.at).getTime() : NaN;
@@ -84,7 +86,7 @@ function SourceEditor({ value, onChange, processes, jobs, disabled, repeating, l
     <label>File condition<select aria-label={`${label} file condition`} value={value.condition} disabled={disabled}
       onChange={event => onChange({ ...value, condition: event.target.value as SourceDraft['condition'] })}>
       <option value="exists">Exists</option><option value="changed">{repeating ? 'Each observed change' : 'Changed since registration'}</option><option value="ready">Stable, managed writers stopped</option>
-    </select></label><p className="text-xs text-muted-foreground">Uses the original run's source. A fixed revision cannot change. Ready describes managed writer and capture evidence, not semantic completion or every external writer.</p></>;
+    </select></label><p className="text-xs text-muted-foreground">Uses this run's source. A fixed revision cannot change; Ready waits for Varin-managed writes to stop.</p></>;
   return value.kind === 'at' ? <><label className="block">Time ({Intl.DateTimeFormat().resolvedOptions().timeZone})<Input aria-label={`${label} time`} type="datetime-local" step="1" value={value.at}
     disabled={disabled} onChange={event => onChange({ ...value, at: event.target.value })} /></label>
     {Number.isFinite(atMs) && <p className="text-xs text-muted-foreground">{atLabel(atMs)}. A past time becomes due once.</p>}</>
@@ -133,8 +135,9 @@ function OccurrenceView({ occurrence, family, identity, api, followupId }: { api
   const delivery = occurrence.delivery;
   const evidence = occurrence.evidence;
   return <div className="space-y-1" aria-label="Follow-up occurrence">
-    <p className="break-all text-xs">{occurrence.id} · accepted at {occurrence.accepted_cursor} · source event {occurrence.trigger_cursor}</p>
     <p>{occurrence.hold_reason ? heldReason[occurrence.hold_reason] : `Occurrence ${occurrence.state}`}</p>
+    <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">Delivery details</summary>
+    <p className="break-all">{occurrence.id} · accepted at {occurrence.accepted_cursor} · source event {occurrence.trigger_cursor}</p>
     <p className="break-all text-xs text-muted-foreground">{'sources' in evidence
       ? evidence.sources.map(source => `Condition ${source.source_index + 1} · accepted ${source.accepted_cursor} · ${evidenceLabel(source.evidence)}`).join('; ')
       : evidence.kind === 'run_completed' || evidence.kind === 'goal_requested' ? `Original Run revision ${evidence.run_revision}` : evidenceLabel(evidence)}</p>
@@ -142,6 +145,7 @@ function OccurrenceView({ occurrence, family, identity, api, followupId }: { api
       {delivery.run_id && ` · run ${delivery.run_id}`}{delivery.execution_id && ` · child execution ${delivery.execution_id}`}
       {delivery.delivered_cursor !== null && ` · delivered at ${delivery.delivered_cursor}`}{delivery.failure_code && ` · ${delivery.failure_code}`}</p>
       : <p className="text-xs text-muted-foreground">No input bound</p>}
+    </details>
     <ThreadFollowupOccurrenceDetails api={api} identity={identity} followupId={followupId} occurrence={occurrence} />
     {family && delivery?.run_id && <>
       <Button size="sm" variant="ghost" aria-expanded={readingRun} onClick={() => setReadingRun(value => !value)}>{readingRun ? 'Hide occurrence Run' : 'Read occurrence Run'}</Button>
@@ -168,7 +172,7 @@ function FollowupOccurrences({ api, family, identity, item }: { api: ThreadFollo
   return <div className="space-y-2">
     <Button size="sm" variant="ghost" aria-expanded={open} onClick={() => setOpen(value => !value)}>{open ? 'Hide occurrence history' : 'Read occurrence history'}</Button>
     {open && <div aria-label="Follow-up occurrence history" className="space-y-2 border-t pt-2">
-      <p className="text-xs text-muted-foreground">Original occurrences, oldest first. Reading or closing this view does not change monitoring.</p>
+      <p className="text-xs text-muted-foreground">Oldest first.</p>
       {loading && <p role="status">Reading occurrence history…</p>}
       {error && <p role="alert">Occurrence history could not be read.</p>}
       {page && <>
@@ -189,6 +193,7 @@ export function ThreadFollowups({ api, family, identity, run, operations, follow
   pending: boolean; act(work: () => Promise<unknown>): Promise<void>; cancelObservation(operationId: string): Promise<void>;
 }) {
   const [editing, setEditing] = React.useState(false);
+  const [showPast, setShowPast] = React.useState(false);
   const [kind, setKind] = React.useState<FollowupRegisterParams['trigger']['kind']>('at');
   const [repeat, setRepeat] = React.useState<'once' | 'each'>('once');
   const [at, setAt] = React.useState(''); const [processId, setProcessId] = React.useState(''); const [jobId, setJobId] = React.useState('');
@@ -228,6 +233,7 @@ export function ThreadFollowups({ api, family, identity, run, operations, follow
   React.useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
   const current = () => live.current && host.current === getRuntimeEndpointGeneration();
   const independent = followups.filter(item => item.actor.kind !== 'goal');
+  const pastCount = independent.filter(isPastFollowup).length;
   const processes = operations.filter(operation => operation.executor === 'process_spawn' && operation.execution_owner?.kind === 'kernel'
     && ['thread', 'environment'].includes(operation.lifetime) && operation.call_completion?.kind === 'job_accepted');
   const process = processes.find(operation => operation.id === processId);
@@ -265,21 +271,21 @@ export function ThreadFollowups({ api, family, identity, run, operations, follow
     <div className="flex items-center gap-2"><span>Follow-ups</span>{run && <Button variant="ghost" size="sm" aria-expanded={editing}
       onClick={() => setEditing(value => !value)}>{editing ? 'Hide follow-up form' : 'Schedule a follow-up'}</Button>}</div>
     {editing && <div className="space-y-2">
-      <p>Deliver this instruction at the next legal boundary, or start a new run here when idle. Current pauses, questions, permissions and goal limits still apply.</p>
+      <p>Continue this conversation when the condition is met. Pauses, unanswered questions and goal limits remain in effect.</p>
       <label className="block">Repetition<select aria-label="Follow-up repetition" value={repeat} disabled={pending || uncertain}
         onChange={event => setRepeat(event.target.value as typeof repeat)} className="ml-2 rounded border bg-background p-1">
         <option value="once">Once</option><option value="each">Each observed change</option>
       </select></label>
-      {repeat === 'each' && <p>This authorizes repeated delivery of this same instruction in this branch until cancelled. Only accepted source facts count; unavailable file changes are not reconstructed. Pause blocks new source reads and undelivered execution; accepted occurrences are retained.</p>}
+      {repeat === 'each' && <p>Repeats for observed changes until cancelled. Changes while observation is unavailable may be missed.</p>}
       <label className="block">Trigger<select aria-label="Follow-up trigger" value={kind} disabled={pending || uncertain}
         onChange={event => setKind(event.target.value as typeof kind)} className="ml-2 rounded border bg-background p-1">
         <option value="at">At a specific time</option><option value="process_stopped">After a process stops</option><option value="job_stopped">After an accepted job stops</option><option value="artifact">When an original research artifact is observed</option><option value="collection">After original research collection finishes</option><option value="file">When a file condition is met</option>
         <option value="any">Any condition</option><option value="all">Every condition</option>
       </select></label>
       {composite ? <div className="space-y-2">
-        <p>{repeat === 'once' ? 'This registers one follow-up. For a time check and a later process-completion check, register two separate follow-ups.'
-          : kind === 'any' ? 'Each observed change may continue the work. Time, process, job, exists and ready conditions contribute at most once.'
-          : 'Every condition must be repeatable: file changes, artifact revisions or collection receipts. Each round pairs the oldest unconsumed fact from every condition.'}</p>
+        <p>{repeat === 'once' ? 'Runs once when the selected conditions are met.'
+          : kind === 'any' ? 'Runs for each observed change. Time and stop conditions trigger once.'
+          : 'Runs after every condition has a new observation.'}</p>
         {conditions.map((value, index) => <fieldset key={index} className="space-y-1 rounded border p-2">
           <legend>Condition {index + 1}</legend>
           <select aria-label={`Condition ${index + 1} kind`} value={value.kind} disabled={pending || uncertain}
@@ -298,7 +304,7 @@ export function ThreadFollowups({ api, family, identity, run, operations, follow
       {needsJobs && jobError && <p role="alert">Accepted jobs could not be read. <Button variant="ghost" size="sm" disabled={pending || uncertain} onClick={() => setJobRetry(value => value + 1)}>Retry accepted jobs</Button></p>}
       <label className="block">Instruction<Textarea aria-label="Follow-up instruction" value={instruction} disabled={pending || uncertain}
         onChange={event => setInstruction(event.target.value)} rows={3} /></label>
-      {uncertain && <p role="status">Acceptance is unconfirmed. Retry keeps the original trigger, repetition, instruction, source Run and key. Leaving this draft does not cancel an accepted follow-up.</p>}
+      {uncertain && <p role="status">Acceptance is unconfirmed. Retry resends the same request. Leaving this draft does not cancel an accepted follow-up.</p>}
       <Button variant="outline" size="sm" disabled={pending || (!uncertain && !valid)} onClick={() => void register()}>{uncertain ? 'Retry original follow-up' : repeat === 'each' ? 'Register repeating follow-up' : 'Register one-time follow-up'}</Button>
       {uncertain && <Button variant="ghost" size="sm" disabled={pending} onClick={() => { intent.current = null; setUncertain(false); }}>Leave uncertain follow-up draft</Button>}
     </div>}
@@ -308,13 +314,16 @@ export function ThreadFollowups({ api, family, identity, run, operations, follow
       <p className="break-all text-xs text-muted-foreground">{item.id} · original run {item.sourceRunId} · {item.paths.join(', ')}</p>
       <Button variant="ghost" size="sm" disabled={pending} onClick={() => void discardRegistration(item)}>Cancel unconfirmed registration</Button>
     </div>)}
-    {independent.map(item => {
-      const delivery = item.occurrence?.delivery;
-      const consumed = delivery?.state === 'delivered';
-      const ended = item.state === 'cancelled' || (item.repeat === 'once' && (consumed || item.occurrence?.state === 'cancelled'));
+    {pastCount > 0 && <Button variant="ghost" size="sm" aria-expanded={showPast} onClick={() => setShowPast(value => !value)}>
+      {showPast ? 'Hide past follow-ups' : `Past follow-ups (${pastCount})`}
+    </Button>}
+    {independent.filter(item => showPast || !isPastFollowup(item)).map(item => {
+      const ended = isPastFollowup(item);
       return <div key={item.id} className="space-y-1 rounded border p-3" aria-label={ended ? 'Past follow-up' : 'Pending follow-up'}>
         <p>{triggerLabel(item)}</p>
         <p>{item.repeat === 'each' ? item.state === 'cancelled' ? 'Repeating authorization cancelled' : item.state === 'paused' ? 'Repeating authorization paused' : 'Continuing to observe changes' : 'One-time instruction'} · {item.pending_occurrences} undelivered {item.pending_occurrences === 1 ? 'occurrence' : 'occurrences'}</p>
+        {item.occurrence ? <div aria-label="Latest follow-up occurrence"><p className="text-xs text-muted-foreground">Latest occurrence</p><OccurrenceView key={item.occurrence.id} occurrence={item.occurrence} identity={identity} family={family} api={api} followupId={item.id} /></div> : <p>Waiting for the original trigger</p>}
+        <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">Condition details</summary>
         {(item.trigger.kind === 'any' || item.trigger.kind === 'all') && <ul className="space-y-1 text-xs text-muted-foreground">
           {item.trigger.sources.map((source, index) => {
             const state = item.sources.find(state => state.source_index === index);
@@ -323,23 +332,17 @@ export function ThreadFollowups({ api, family, identity, run, operations, follow
           })}
         </ul>}
         <p className="text-xs text-muted-foreground">{item.id} · registered by {item.actor.kind === 'agent' ? `Agent in ${item.actor.run_id}` : 'User'} · {item.state}</p>
-        {item.occurrence ? <div aria-label="Latest follow-up occurrence"><p className="text-xs text-muted-foreground">Latest occurrence</p><OccurrenceView key={item.occurrence.id} occurrence={item.occurrence} identity={identity} family={family} api={api} followupId={item.id} /></div> : <p>Waiting for the original trigger</p>}
+        </details>
         {item.sources.filter(source => source.file !== null).map(source => {
           const file = source.file!;
           return <p key={source.source_index} className="text-xs text-muted-foreground">File condition {source.source_index + 1}: {file.current?.kind ?? 'awaiting original baseline'}
             {file.immutable && ' · fixed immutable source'}{file.gap && ' · observation gap; unavailable changes are not reconstructed'}
             {file.failure_code && ` · ${file.failure_code}`}{file.released && ' · observer released'}</p>;
         })}
-        {item.sources.map(source => {
-          const evidence = source.observed?.evidence;
-          return evidence?.kind === 'job_stopped' ? <p key={`job:${source.source_index}`} className="break-all text-xs text-muted-foreground">
-            Original job stop · {evidence.binding.domain} v{evidence.binding.domainVersion} · {evidence.binding.subjectId} · {evidence.outcome} · effect {evidence.effect} · event {source.observed!.trigger_cursor} · receipt {evidence.receipt_identity} · epoch {evidence.receipt_epoch}
-          </p> : null;
-        })}
         <FollowupInstruction api={api} identity={identity} item={item} />
         <FollowupOccurrences api={api} family={family} identity={identity} item={item} />
         {!ended && <>
-          {item.repeat === 'each' && <p className="text-xs text-muted-foreground">Cancel withdraws future and undelivered occurrences. Delivered Runs, history, results and observed jobs remain. Stopping the current Run also withdraws existing repeating authorizations in this branch; stopping an old Run or one operation does not.</p>}
+          {item.repeat === 'each' && <p className="text-xs text-muted-foreground">Cancel stops future and pending deliveries. Existing results and the observed job remain available.</p>}
           {item.state === 'active' && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void control(item, 'pause')}>Pause follow-up</Button>}
           {item.state === 'paused' ? <Button variant="ghost" size="sm" disabled={pending} onClick={() => void control(item, 'resume')}>Resume follow-up</Button>
             : (item.repeat === 'each' || item.occurrence?.hold_reason === 'preparation_failed') && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void control(item, 'resume')}>{item.repeat === 'each' ? 'Retry undelivered occurrences' : 'Resume follow-up'}</Button>}

@@ -672,6 +672,15 @@ export class KernelRecoveryStore {
     return output;
   }
 
+  private async adoptOperationObjects(context: Pick<KernelStorageContext, "client">, workspaceId: string,
+    references: readonly { ownerId?: string }[]): Promise<void> {
+    // Scoped runtime integrations already share their exact execution grant.
+    // Host working-state candidates transfer to the recovery record writer before CAS.
+    if (this.scopedActor) return;
+    const owners = new Set(references.flatMap(reference => reference.ownerId ? [reference.ownerId] : []));
+    await Promise.all([...owners].map(ownerId => context.client.rebindObjectOwner(workspaceId, ownerId)));
+  }
+
   async createOperation(input: {
     operationId: string;
     workspaceId: string;
@@ -702,6 +711,7 @@ export class KernelRecoveryStore {
       phase: "pending",
       references: surfacePaths.has(filePath) ? [] : this.stateReferences(input.workspaceId, states, filePath),
     }));
+    await this.adoptOperationObjects(context, input.workspaceId, files.flatMap(file => file.references));
     const result = await context.client.recoveryOperationCreate({
       operationId: input.operationId,
       workspaceId: input.workspaceId,
@@ -755,6 +765,7 @@ export class KernelRecoveryStore {
       safety: input.safety ?? parseState("safetyJson"),
     };
     const references = this.stateReferences(input.workspaceId, states, input.path);
+    await this.adoptOperationObjects(context, input.workspaceId, references);
     const result = await context.client.recoveryOperationFileCas({
       transitionId: `recovery-file:${input.operationId}:${input.path}:${input.expectedRevision}:${input.expectedPhase}:${input.phase}`,
       operationId: input.operationId,

@@ -136,6 +136,14 @@ export function createAgentPolicy(runtime: ApplicationExtensionRuntime): AgentPo
           && (selections[`${VARIN_AGENT_POLICY_SERVICE_ID}@${version}`] || explicitRoute(version))) {
           throw new HostServiceBindingError('selected_unavailable', `Selected agent policy service version ${version} is unsupported; version ${VARIN_AGENT_POLICY_VERSION} is required`);
         }
+        // The built-in loop is the default. Merely installing the sole provider
+        // must not apply its orchestration to unrelated threads or child tasks.
+        const current = await waitWithSignal(runtime.routing.read(), signal);
+        if (!current.authoritative || current.document.revision !== routing.document.revision) {
+          throw new Error('Policy routing changed during preparation');
+        }
+        assertSelectionsUnchanged();
+        return undefined;
       }
       const request = { serviceId: VARIN_AGENT_POLICY_SERVICE_ID, version: VARIN_AGENT_POLICY_VERSION, method: 'describe', args: [], routing: scope };
       try { selected = await waitWithSignal(runtime.prepareService(request, { expectedRoutingRevision: routing.document.revision }), signal); }
@@ -175,7 +183,7 @@ export function createAgentPolicy(runtime: ApplicationExtensionRuntime): AgentPo
             const resolution = resolveVarinExtensionServiceRouting({ candidates, document: state.routing.document,
               serviceId: VARIN_AGENT_POLICY_SERVICE_ID, version, context: scope });
             const selected = state.services.selections[`${VARIN_AGENT_POLICY_SERVICE_ID}@${version}`];
-            if (version !== VARIN_AGENT_POLICY_VERSION && !selected && !resolution.matchedRule
+            if (!selected && !resolution.matchedRule
               && !resolution.diagnostics.some(item => item.code.startsWith('service_selection_'))) return [];
             const provider = state.services.providers.find(item => item.status === 'active'
               && (selected ? item.providerId === selected : item.providerKey === resolution.providerKey));

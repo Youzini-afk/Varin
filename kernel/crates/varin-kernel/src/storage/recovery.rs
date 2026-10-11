@@ -1535,5 +1535,5 @@ impl Storage {
 fn physical_paths_overlap(left:&Path,right:&Path)->bool{
     #[cfg(windows)]
     let (left,right)=(PathBuf::from(left.to_string_lossy().to_lowercase()),PathBuf::from(right.to_string_lossy().to_lowercase()));
-    left.starts_with(right)||right.starts_with(left)
+    left.starts_with(&right)||right.starts_with(&left)
 }

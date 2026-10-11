@@ -877,7 +877,7 @@
         "capabilities": {"type": "string[]"}
       }
     },
-    "KernelBranchState": {"raw": "export type KernelBranchState =\n  | { kind: \"regular-file\"; objectHash: string; byteLength: number; mode: number }\n  | { kind: \"directory\"; mode?: number }\n  | { kind: \"symlink\"; symlinkTarget: string; mode?: number }\n  | { kind: \"missing\" }\n  | { kind: \"unsupported\" };"},
+    "KernelBranchState": {"raw": "export type KernelBranchState =\n  | { kind: \"regular-file\"; objectHash: string; byteLength: number; mode: number }\n  | { kind: \"directory\"; mode?: number | null }\n  | { kind: \"symlink\"; symlinkTarget: string; mode?: number | null }\n  | { kind: \"missing\" }\n  | { kind: \"unsupported\" };"},
     "KernelEntry": {
       "fields": {
         "path": {"type": "string"},

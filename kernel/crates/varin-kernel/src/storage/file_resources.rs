@@ -363,7 +363,9 @@ impl Storage {
         host_id: &str,
     ) -> Result<(), KernelError> {
         let root = self.registered_file_root(&identity.root_id, grant)?;
-        if identity.host_id != host_id || root.canonical_root != Path::new(&identity.canonical_root)
+        // Host realpath and Rust canonicalize use different Windows namespace spellings.
+        // Compare the same filesystem identity while retaining the admitted root and host.
+        if identity.host_id != host_id || root.canonical_root != fs::canonicalize(&identity.canonical_root)?
         {
             return Err(KernelError::Authorization(
                 "live source environment identity changed".into(),

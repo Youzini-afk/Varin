@@ -1589,7 +1589,9 @@ export class KernelClient {
 
   async claimChildSource(params: KernelMethodParams["source.handoff.claim"], signal?: AbortSignal): Promise<KernelGrantHandle> {
     if (!this.handshakeResult) await this.start();
-    const result = await this.requestRaw<Record<string, unknown>>("source.handoff.claim", params, { signal });
+    // This Host-only command obtains the child grant from an already accepted handoff.
+    // Rust validates that handoff and rejects requests carrying a tool grant.
+    const result = await this.requestRaw<Record<string, unknown>>("source.handoff.claim", params, { signal, allowBootstrap: true });
     const handle = this.grantFromResponse(result);
     this.inactiveGrants.delete(handle.grantId); this.issuedGrants.set(handle.grantId, handle);
     return handle;
