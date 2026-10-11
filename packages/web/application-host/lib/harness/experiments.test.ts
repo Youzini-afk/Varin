@@ -71,6 +71,11 @@ async function fixture() {
       records.set(id, structuredClone(record)); events.push(`${id}:${input.state}`); return structuredClone(record);
     },
     async listRecords(input: { workspaceId: string; recordType: string }) { return { records: structuredClone([...records.values()].filter((r) => r.workspaceId === input.workspaceId && r.recordType === input.recordType)), nextCursor: null }; },
+    async experimentArtifacts(input: { workspaceId: string; attemptId: string; after?: string; pageSize?: number }) {
+      const all = [...records.values()].filter(record => record.workspaceId === input.workspaceId && record.recordType === "experiment.artifact" && JSON.parse(record.payloadJson).attemptId === input.attemptId && JSON.parse(record.payloadJson).internalLogChunk !== true && record.recordId > (input.after ?? "")).sort((a,b) => a.recordId.localeCompare(b.recordId));
+      const size = input.pageSize ?? 128, page = all.slice(0,size);
+      return { records: structuredClone(page), nextCursor: all.length > size ? page.at(-1)!.recordId : null };
+    },
     async fileLeaseAcquire(input: { leaseId: string }) { activeLeases.add(input.leaseId); return { status: "acquired" }; },
     async fileLeaseRelease(input: { leaseId: string }) { activeLeases.delete(input.leaseId); return { released: true }; },
     async fileRootRegister() { return { rootId: "source-root" }; },
@@ -159,8 +164,7 @@ async function fixture() {
 }
 
 async function until(check: () => boolean) {
-  for (let i = 0; i < 200; i++) { if (check()) return; await turn(); }
-  assert.fail("Expected the controlled owner transition to complete");
+  await vi.waitFor(() => assert.ok(check(), "Expected the controlled owner transition to complete"), { timeout: 5000, interval: 10 });
 }
 
 const intent = { requestId: "request", command: "fixture-command", args: ["first", "second"] };
@@ -500,6 +504,7 @@ it('installed ordinary research tools hand original model and policy invocations
   const hints=new Set<()=>void>();
   const notify=()=>{for(const hint of hints)hint();};
   const kernel={agentRuntimeRequest:async(method:string,params:Record<string,unknown>)=>{
+    if (method === "runtime.followup.research") return { works: [], nextCursor: null };
     if(method==='runtime.run.inspect')return {id:'run',thread_id:'thread',branch_id:'branch',cancel_requested:false,state:'executing'};
     if(method==='runtime.launch.inspect')return {run_id:'run',selection:{source}};
     if(method==='runtime.research.scopes')return [{rootThreadId:'thread',threadId:'thread',branchId:'branch',sourceRunId:'run',source,readThreadIds:['thread'],controlThreadIds:['thread'],canSubmit:true}];
@@ -681,4 +686,109 @@ it("publishes drained execution before slow collection and preserves its reader 
   assert.equal(reads, 2);
   assert.equal((await service.collect(caller, id)).attempt.collection, "done");
   assert.equal(reads, 2, "completed collection reuses durable artifacts");
+});
+
+it("does not report collection done when both output capture and its failure record fail", async () => {
+  const f = await fixture();
+  const originalPut = f.scoped.putRecord.bind(f.scoped);
+  let failRecord = true;
+  f.scoped.putRecord = async (input, signal) => {
+    if (failRecord && input.recordType === "experiment.artifact" && input.state === "failed") {
+      throw new Error("controlled failed artifact record write failure");
+    }
+    return originalPut(input, signal);
+  };
+  const service = f.makeService();
+  const accepted = await service.submit(f.caller, { requestId: "double-output-failure", command: "fixture", outputPaths: ["result.bin"] });
+  await until(() => f.counters().spawnCalls === 1);
+  f.observe("cancelled");
+  await vi.waitFor(() => assert.equal(f.records.get(`experiment.attempt:${accepted.attempt.attemptId}`)?.state, "cancelled"));
+  await vi.waitFor(() => assert.notEqual(JSON.parse(f.records.get(`experiment.attempt:${accepted.attempt.attemptId}`)!.payloadJson).collection, "pending"));
+  assert.equal((await service.get(f.caller, accepted.attempt.attemptId)).attempt.collection, "failed");
+  assert.equal(f.events.includes("backend-release"), false);
+  failRecord = false;
+  f.backend.collectFile = async () => Buffer.from("recovered output");
+  assert.equal((await service.collect(f.caller, accepted.attempt.attemptId)).attempt.collection, "done");
+  assert.equal(f.counters().spawnCalls, 1);
+});
+
+async function nativeArtifactFixture() {
+  const f = await fixture();
+  const { prepareExperimentInput } = await import('./experiment-workspace.js');
+  const source = { workspace_id: 'ws', execution_workspace_id: 'exec', mode: 'live_root' as const,
+    branch_id: null, revision: null, live_root: { hostId: 'fixture-host', canonicalRoot: f.root, rootId: 'source-root' } };
+  const caller: ExperimentCaller = { workspaceId: 'ws', executionWorkspaceId: 'exec', threadId: 'thread', runId: 'run', workspaceScope: [],
+    owner: { runtime: 'agent', actor: { kind: 'user', key: 'artifacts' }, rootThreadId: 'thread', threadId: 'thread', branchId: 'branch', runId: 'run', operationId: 'artifact-job', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, source },
+    access: { kind: 'family', readThreadIds: ['thread'], controlThreadIds: ['thread'] } };
+  const service = f.makeService({ async admit(_caller, cwd) { return { kind: 'physical', selection: source, canonicalRoot: f.root, cwd: cwd ?? '' }; },
+    async capture(owner, _source, options) { return prepareExperimentInput(f.client, owner, f.root, options); }, async release() {}, async reconcileUnaccepted() { return true; } });
+  const binding = (subjectId: string): import('../kernel/protocol.generated.js').HostJobBinding => ({ operationId: 'artifact-job', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'ws', subjectId });
+  return { ...f, service, caller, binding, source };
+}
+
+it('observes durable artifact readiness during collection, stable completion revisions and actual family read permissions', async () => {
+  const f = await nativeArtifactFixture();
+  const held = deferred(), entered = deferred(); cleanup.push(() => held.resolve());
+  const hints: Array<string> = [];
+  cleanup.push(f.service.subscribeAttempts((_workspace, id, view) => { if (view === null) hints.push(id); }));
+  cleanup.push(f.service.subscribeAttempts((_workspace, _id, view) => { if (view === null) throw new Error('observer failure after durable commit'); }));
+  f.backend.collectFile = async (_site, name) => { if (name === 'b') { entered.resolve(); await held.promise; } return Buffer.from(name); };
+  const accepted = await f.service.submit(f.caller, { requestId: 'artifacts', command: 'fixture', outputPaths: ['a', 'b'] });
+  await until(() => f.counters().spawnCalls === 1); f.observe('cancelled'); await entered.promise;
+  const target = f.binding(accepted.attempt.attemptId);
+  const first = await f.service.readArtifactObservation(f.caller, target, { name: 'a' });
+  assert.equal(first.artifacts[0]!.state, 'available'); assert.equal(first.artifacts[0]!.recordRevision, 1);
+  assert.equal(first.completion, null); assert.ok(hints.includes(target.subjectId));
+  assert.equal((await f.service.nativeReceipt('ws', target.subjectId))!.executorStopped, true);
+  const sibling: ExperimentCaller = { ...f.caller, threadId: 'sibling', runId: 'sibling-run', owner: { runtime: 'agent', actor: { kind: 'reader' }, rootThreadId: 'thread', threadId: 'sibling', branchId: 'sibling-branch', runId: 'sibling-run', source: f.source }, access: { kind: 'family', readThreadIds: ['thread', 'sibling'], controlThreadIds: ['sibling'] } };
+  assert.equal((await f.service.readArtifactObservation(sibling, target, { name: 'a' })).artifacts.length, 1);
+  await assert.rejects(f.service.collect(sibling, target.subjectId), /control/i);
+  await assert.rejects(f.service.readArtifactObservation({ ...sibling, access: { kind: 'maintenance' } }, target, {}), /family reader/i);
+  await assert.rejects(f.service.readArtifactObservation({ ...sibling, access: { kind: 'family', readThreadIds: ['sibling'], controlThreadIds: [] } }, target, {}), /Unknown/);
+  held.resolve(); await vi.waitFor(async () => assert.equal((await f.service.get(f.caller, target.subjectId)).attempt.collection, 'done'));
+  const done = await f.service.readArtifactObservation(f.caller, target, {}); assert.equal(done.completion!.outcome, 'done');
+  assert.equal(done.counts.failed, 0, 'listener failure cannot rewrite a committed available artifact');
+  const record = f.records.get(`experiment.attempt:${target.subjectId}`)!;
+  await f.scoped.putRecord({ ...record, expectedRecordRevision: record.recordRevision, operationId: 'unrelated-metadata', ownerIds: [], payloadJson: JSON.stringify({ ...JSON.parse(record.payloadJson), harmlessMetadata: true }) });
+  assert.deepEqual((await f.service.readArtifactObservation(f.caller, target, {})).completion, done.completion);
+  assert.equal((await f.service.readArtifactObservation(f.caller, target, { name: 'absent' })).artifacts.length, 0);
+  assert.equal((await f.service.collect(f.caller, target.subjectId)).attempt.collectionCompletion!.recordRevision, done.completion!.recordRevision);
+});
+
+it('does not combine an old completed collection with a newly pending retry when reading absence', async () => {
+  const f = await nativeArtifactFixture();
+  const accepted = await f.service.submit(f.caller, { requestId: 'artifacts', command: 'fixture', outputPaths: ['result'] });
+  await until(() => f.counters().spawnCalls === 1); f.observe('cancelled');
+  const target = f.binding(accepted.attempt.attemptId);
+  await vi.waitFor(async () => assert.equal((await f.service.get(f.caller, target.subjectId)).attempt.collection, 'failed'));
+  const old = await f.service.readArtifactObservation(f.caller, target, {}); assert.equal(old.completion!.outcome, 'failed');
+  const pageGate = deferred(), pageEntered = deferred(), collectGate = deferred(), collectEntered = deferred();
+  cleanup.push(() => { pageGate.resolve(); collectGate.resolve(); });
+  const getRecord = f.scoped.getRecord.bind(f.scoped); let gateRead = true;
+  f.scoped.getRecord = async (workspace, id, signal) => {
+    const result = await getRecord(workspace, id, signal);
+    if (gateRead && id.startsWith('experiment.artifact:') && !result) { gateRead = false; pageEntered.resolve(); await pageGate.promise; }
+    return result;
+  };
+  const reading = f.service.readArtifactObservation(f.caller, target, { name: 'absent' }); await pageEntered.promise;
+  f.backend.collectFile = async () => { collectEntered.resolve(); await collectGate.promise; return Buffer.from('recovered'); };
+  const retry = f.service.collect(f.caller, target.subjectId); await collectEntered.promise; pageGate.resolve();
+  assert.equal((await reading).completion, null, 'pending retry invalidates prior terminal absence snapshot');
+  collectGate.resolve(); await retry;
+  const recovered = await f.service.readArtifactObservation(f.caller, target, {});
+  assert.equal(recovered.completion!.outcome, 'done'); assert.ok(recovered.completion!.recordRevision > old.completion!.recordRevision);
+  const artifact = recovered.artifacts.find(value => value.name === 'result')!; assert.equal(artifact.state, 'available'); assert.equal(artifact.recordRevision, 2);
+  assert.equal(f.counters().spawnCalls, 1);
+});
+
+it('records not_started only after original unspawned cancellation drains its capture', async () => {
+  const f = await nativeArtifactFixture(); const gate = deferred(), entered = deferred(); cleanup.push(() => gate.resolve());
+  f.scan(async () => { entered.resolve(); await gate.promise; });
+  const accepted = await f.service.submit(f.caller, { requestId: 'artifacts', command: 'fixture', outputPaths: ['result'] }); await entered.promise;
+  const target = f.binding(accepted.attempt.attemptId);
+  await f.service.cancel(f.caller, target.subjectId);
+  assert.equal((await f.service.readArtifactObservation(f.caller, target, {})).completion, null);
+  gate.resolve();
+  await vi.waitFor(async () => assert.equal((await f.service.readArtifactObservation(f.caller, target, {})).completion?.outcome, 'not_started'));
+  assert.equal(f.counters().spawnCalls, 0);
 });

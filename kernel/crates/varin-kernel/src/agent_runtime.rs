@@ -700,6 +700,9 @@ pub(crate) fn spawn(
                             "runtime.followup.register"
                                 | "runtime.followup.get"
                                 | "runtime.followup.occurrences"
+                                | "runtime.followup.occurrence"
+                                | "runtime.followup.research"
+                                | "runtime.followup.research.observe"
                                 | "runtime.followup.files"
                                 | "runtime.followup.registrations.pending"
                                 | "runtime.followup.registration.cancel"
@@ -866,7 +869,9 @@ pub(crate) fn spawn(
                             deferred = true;
                             return Ok(Value::Null);
                         }
-                        if method.starts_with("runtime.host_job.") || method == "runtime.research.scopes" {
+                        if method.starts_with("runtime.host_job.")
+                            || method == "runtime.research.scopes"
+                        {
                             let runtime = runtime.clone();
                             let method = method.to_owned();
                             let response_id = id.clone();
@@ -874,11 +879,18 @@ pub(crate) fn spawn(
                             let done = finished.clone();
                             let cancelled = cancellation.clone();
                             thread::spawn(move || {
-                                let result = host_job_commands::execute(runtime, &method, params, &cancelled);
-                                let response = match result { Ok(value) => response_ok(&response_id, value), Err(error) => response_error(&response_id, &error) };
-                                done(&response_id); let _ = response_sender.send(response);
+                                let result = host_job_commands::execute(
+                                    runtime, &method, params, &cancelled,
+                                );
+                                let response = match result {
+                                    Ok(value) => response_ok(&response_id, value),
+                                    Err(error) => response_error(&response_id, &error),
+                                };
+                                done(&response_id);
+                                let _ = response_sender.send(response);
                             });
-                            deferred = true; return Ok(Value::Null);
+                            deferred = true;
+                            return Ok(Value::Null);
                         }
                         if matches!(
                             method,

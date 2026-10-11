@@ -38,7 +38,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 38;
+pub(crate) const FORMAT: i64 = 39;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -1472,6 +1472,16 @@ impl Catalog {
                 put(&tx, "operations", &op.id, &op)?;
                 continue;
             }
+            // An accepted external domain Job already has its original durable call receipt.
+            // Its owner may still run or collect after this Catalog closes. Recovery cannot
+            // invent a kernel interruption result (including for an independent User Job).
+            if op
+                .host_job
+                .as_ref()
+                .is_some_and(|job| job.acceptance_ref.is_some())
+            {
+                continue;
+            }
             // Only an explicitly kernel-owned Result ends with this process. Host/broker and
             // remote calls may survive it, even when their caller contract returns a Result.
             // This is stop evidence only; it never resolves an unknown business effect.
@@ -1764,8 +1774,9 @@ pub(super) fn request_cancel_operation_in(tx: &Transaction<'_>, key: &str) -> Re
             "policy pause requires explicit Run resume or Run cancellation".into(),
         ));
     }
-    let unproven_process = (op.host_job.is_some() || (op.execution_owner == Some(ExecutorOwner::Kernel)
-        && op.executor.as_deref() == Some("process_spawn")))
+    let unproven_process = (op.host_job.is_some()
+        || (op.execution_owner == Some(ExecutorOwner::Kernel)
+            && op.executor.as_deref() == Some("process_spawn")))
         && op.effect != Effect::None
         && !op
             .external_receipt

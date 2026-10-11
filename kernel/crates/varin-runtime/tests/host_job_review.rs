@@ -672,6 +672,14 @@ fn actual_model_batch_and_policy_graph_consume_canonical_accepted_receipts() {
         if graph {
             assert!(!encoded.contains("model_step"));
         }
+        let accepted = op.clone();
+        assert!(accepted.handed_off);
+        drop(engine);
+        drop(db);
+        let reopened = Catalog::open(&f.root).unwrap();
+        assert_eq!(reopened.operation(&accepted.id).unwrap(), accepted);
+        assert_eq!(reopened.pending_host_jobs().unwrap(), vec![accepted]);
+        assert_eq!(reopened.history("branch").unwrap(), history);
     }
 }
 

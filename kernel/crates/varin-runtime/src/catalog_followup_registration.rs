@@ -22,6 +22,16 @@ pub enum FollowupRegistrationSource {
     JobStopped {
         operation_id: String,
     },
+    Artifact {
+        operation_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        artifact_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    Collection {
+        operation_id: String,
+    },
     File {
         path: String,
         condition: FileCondition,
@@ -30,6 +40,18 @@ pub enum FollowupRegistrationSource {
 impl FollowupRegistrationSource {
     fn source(&self) -> FollowupSource {
         match self {
+            Self::Artifact {
+                operation_id,
+                artifact_id,
+                name,
+            } => FollowupSource::Artifact {
+                operation_id: operation_id.clone(),
+                artifact_id: artifact_id.clone(),
+                name: name.clone(),
+            },
+            Self::Collection { operation_id } => FollowupSource::Collection {
+                operation_id: operation_id.clone(),
+            },
             Self::JobStopped { operation_id } => FollowupSource::JobStopped {
                 operation_id: operation_id.clone(),
             },
@@ -52,6 +74,16 @@ impl FollowupRegistrationSource {
     deny_unknown_fields
 )]
 pub enum FollowupRegistrationTrigger {
+    Artifact {
+        operation_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        artifact_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    Collection {
+        operation_id: String,
+    },
     File {
         path: String,
         condition: FileCondition,
@@ -89,6 +121,18 @@ impl FollowupRegistrationTrigger {
     }
     fn trigger(&self) -> FollowupTrigger {
         match self {
+            Self::Artifact {
+                operation_id,
+                artifact_id,
+                name,
+            } => FollowupTrigger::Artifact {
+                operation_id: operation_id.clone(),
+                artifact_id: artifact_id.clone(),
+                name: name.clone(),
+            },
+            Self::Collection { operation_id } => FollowupTrigger::Collection {
+                operation_id: operation_id.clone(),
+            },
             Self::JobStopped { operation_id } => FollowupTrigger::JobStopped {
                 operation_id: operation_id.clone(),
             },
@@ -122,7 +166,9 @@ impl FollowupRegistrationTrigger {
                 FollowupSource::ProcessStopped { operation_id } => Some(operation_id),
                 FollowupSource::At { .. }
                 | FollowupSource::File { .. }
-                | FollowupSource::JobStopped { .. } => None,
+                | FollowupSource::JobStopped { .. }
+                | FollowupSource::Artifact { .. }
+                | FollowupSource::Collection { .. } => None,
             })
             .collect()
     }
@@ -161,13 +207,25 @@ impl FollowupRegistration {
             };
             if !valid {
                 return Err(RuntimeError::Invalid(
-                    "each requires a changed file; every All leaf must emit new repeatable edges"
+                    "each requires repeatable artifact, collection or changed-file facts; every All leaf must emit new edges"
                         .into(),
                 ));
             }
         }
         for source in sources {
             match source {
+                FollowupSource::Artifact {
+                    operation_id,
+                    artifact_id,
+                    name,
+                } => artifacts::validate_source(
+                    &operation_id,
+                    artifact_id.as_deref(),
+                    name.as_deref(),
+                )?,
+                FollowupSource::Collection { operation_id } => {
+                    artifacts::validate_source(&operation_id, None, None)?
+                }
                 FollowupSource::File { path, .. } => validate_file_path(&path)?,
                 FollowupSource::At { at_ms } if at_ms > observations::MAX_DEADLINE_MS => {
                     return Err(RuntimeError::Invalid(
@@ -207,6 +265,10 @@ pub enum FollowupToolInput {
     },
     List,
     Jobs,
+    Occurrence {
+        followup_id: String,
+        occurrence_id: String,
+    },
     Occurrences {
         followup_id: String,
         after: Option<u64>,
@@ -383,6 +445,10 @@ impl Catalog {
                 FollowupSource::ProcessStopped { operation_id } => {
                     require_process(&self.db, &p.run, &operation_id)?
                 }
+                FollowupSource::Artifact { operation_id, .. }
+                | FollowupSource::Collection { operation_id } => {
+                    artifacts::require_target(&self.db, &p.run, &operation_id)?;
+                }
                 FollowupSource::JobStopped { operation_id } => {
                     self.require_host_job_observation(&p.run.id, &operation_id)?;
                 }
@@ -428,6 +494,10 @@ impl Catalog {
             match source {
                 FollowupSource::ProcessStopped { operation_id } => {
                     require_process(&tx, &run, &operation_id)?
+                }
+                FollowupSource::Artifact { operation_id, .. }
+                | FollowupSource::Collection { operation_id } => {
+                    artifacts::require_target(&tx, &run, &operation_id)?;
                 }
                 FollowupSource::JobStopped { operation_id } => {
                     host_jobs::require_observation(&tx, &run, &operation_id)?;
@@ -718,6 +788,21 @@ impl Catalog {
     ) -> Result<Vec<host_jobs::HostJobSource>> {
         self.validate_tool_invocation(&p.invocation, true)?;
         self.host_job_sources(&p.invocation.context.run_id)
+    }
+    pub fn get_tool_followup_occurrence(
+        &self,
+        p: PreparedFollowupToolRead,
+        id: &str,
+        occurrence_id: &str,
+    ) -> Result<FollowupOccurrenceRead> {
+        self.validate_tool_invocation(&p.invocation, true)?;
+        let d: Definition = record(&self.db, "followups", id)?;
+        if d.thread_id != p.thread || d.branch_id != p.branch {
+            return Err(RuntimeError::Conflict(
+                "follow-up belongs to another Thread or branch".into(),
+            ));
+        }
+        self.capture_followup_occurrence(id, occurrence_id)
     }
     pub fn list_tool_followup_occurrences(
         &self,

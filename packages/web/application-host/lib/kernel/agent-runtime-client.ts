@@ -48,7 +48,7 @@ import type {
   ChildPrepareParams,
   ChildSourceReadyParams, ChildSettleParams, ChildResultCandidateParams, ChildResultPublishedParams, HostToolReconcileParams,
   ChildWait,
-  Followup, FollowupView, FollowupOccurrencesResult,
+  Followup, FollowupView, FollowupOccurrenceView, FollowupOccurrencesResult,
   Goal, GoalControlReceipt, GoalStartParams, GoalUpdateParams, GoalControlParams,
   FollowupRegisterParams,
   FollowupControlParams,
@@ -706,6 +706,9 @@ export class AgentRuntimeClient {
   }
   followupOccurrences(followupId: string, after?: number, signal?: AbortSignal): Promise<FollowupOccurrencesResult> {
     return this.kernel.agentRuntimeRequest('runtime.followup.occurrences', { followupId, ...(after === undefined ? {} : { after }) }, signal);
+  }
+  followupOccurrence(followupId: string, occurrenceId: string, signal?: AbortSignal): Promise<FollowupOccurrenceView> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.occurrence', { followupId, occurrenceId }, signal);
   }
   controlFollowup(input: FollowupControlParams, signal?: AbortSignal): Promise<Followup> {
     return this.kernel.agentRuntimeRequest('runtime.followup.control', input, signal);

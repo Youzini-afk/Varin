@@ -8,6 +8,14 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-11 增量：原研究产物与收集事实续接
+
+- 普通 follow_up **版本6** 与 User/API/UI 新增独立 artifact/collection 叶，原 accepted Job binding 与实际 family 读权限贯穿。artifact 可按ID或name选择，once读当前适用快照、each按原每件revision；真实collection完成与产物可用、空收集、失败/未知分开。明确Any才同时消费两者，不因一次收集完成偷加模型轮。
+- 原 ExperimentService/Storage 仍唯一拥有记录、字节及收集，completion身份落原最终CAS。Catalog **39**、Storage **13**直接拒旧；原索引分页和source事件高水位去重，metadata锁外ContentStore准备，原event/occurrence/GC保确切旧事实。短历史与按需 occurrence 详情贯穿工具、SDK、Host和UI，不制造历史字节快照或新授权。
+- 原Job对账与metadata飞行分开，逐产物提交唤醒既有订阅，Job停止后仍发现观察工作；Pause丢未启动旧页，读中/结算窗口通知不丢。已accepted HostJob重开保原owner和回执，不冒充普通本地中断。原root/child新Run、两调用origin、Wait和真实metadata input/history沿共同执行owner闭合。
+- 原真实反例已闭合：双重产物持久化失败误记done、metadata拖住取消、accepted User Job重开失败、Pause旧页新读、scan结算丢通知，以及宽套件发现的新增索引列表顺序。修复保原失败探针与原恢复/权限校验，没有另加调度器或结果库。最终runtime **435/0、2 ignored**、kernel **135/0、11 ignored**、all-targets、准确fresh binary原guardian **1/1**、Host组合 **57/57**、UI **57/57**、types/lint/协议/真实bundle通过；独审接受，**5,216**项广输入指纹同源，完整证据见[产物与收集验收](../reviews/runtime-artifact-followups-2026-10-11.md)。
+- 接着推进原日志、指标与其他领域来源，以及两设计其余能力。完整Host/实际浏览器、平台/真实外部环境与用户最终迁移分别保留边界，不能用组件通过代替。
+
 ## 2026-10-11 增量：明确重复授权与原发生项
 
 - 普通 follow_up **版本5** 和 User/API/UI 明确 repeat once/each，默认仍once。首条真实可重复source是原文件changed；each Any每accepted leafedge一次且有限叶不重放，each All按FIFO保留未配对事实。原事件accepted cursor与因果trigger cursor分开，与叶消费和原occurrence同事务，无新队列/Host调度器。

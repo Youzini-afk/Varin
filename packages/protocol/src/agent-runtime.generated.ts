@@ -51,6 +51,7 @@ export interface HostJobPending {
 }
 
 export interface HostJobSource {
+  observationKinds: ('job_stopped' | 'artifact' | 'collection')[];
   binding: HostJobBinding;
   sourceRunId: string;
   threadId: string;
@@ -330,6 +331,33 @@ export interface MessagePage {
   nextCursor: string | null;
 }
 
+export type ResearchCollectionOutcome = 'done' | 'failed' | 'not_started';
+
+export interface ResearchArtifactCounts {
+  available: number;
+  failed: number;
+  expired: number;
+  pending: number;
+}
+
+export type FollowupArtifactFact = { kind: 'artifact_available' | 'artifact_failed' | 'artifact_expired'; artifact_id: string; record_revision: number } | { kind: 'artifact_missing' | 'artifact_absent'; completion_revision: number; outcome: ResearchCollectionOutcome };
+
+export interface FollowupArtifactEvidence {
+  kind: 'artifact';
+  binding: HostJobBinding;
+  fact: FollowupArtifactFact;
+  gap: boolean;
+}
+
+export interface FollowupCollectionEvidence {
+  kind: 'collection';
+  binding: HostJobBinding;
+  completion_revision: number;
+  outcome: ResearchCollectionOutcome;
+  counts: ResearchArtifactCounts;
+  gap: boolean;
+}
+
 export type FileCondition = 'exists' | 'changed' | 'ready';
 
 export type FileState = { kind: 'regular-file'; objectHash: string; byteLength: number; mode: number | null } | { kind: 'directory'; mode: number | null } | { kind: 'symlink'; symlinkTarget: string; mode: number | null } | { kind: 'missing' } | { kind: 'unsupported' };
@@ -395,9 +423,9 @@ export interface FollowupRegistrationCancelResult {
   followup: Followup | null;
 }
 
-export type FollowupSource = { kind: 'at'; at_ms: number } | { kind: 'process_stopped'; operation_id: string } | { kind: 'job_stopped'; operation_id: string } | { kind: 'file'; path: string; condition: FileCondition };
+export type FollowupSource = { kind: 'at'; at_ms: number } | { kind: 'process_stopped'; operation_id: string } | { kind: 'job_stopped'; operation_id: string } | { kind: 'file'; path: string; condition: FileCondition } | { kind: 'artifact'; operation_id: string; artifact_id?: string; name?: string } | { kind: 'collection'; operation_id: string };
 
-export type FollowupLeafEvidence = { kind: 'at'; at_ms: number; observed_at_ms: number } | { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string } | { kind: 'job_stopped'; binding: HostJobBinding; outcome: Outcome; effect: Effect; receipt_identity: string; receipt_epoch: string } | FollowupFileEvidence;
+export type FollowupLeafEvidence = { kind: 'at'; at_ms: number; observed_at_ms: number } | { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string } | { kind: 'job_stopped'; binding: HostJobBinding; outcome: Outcome; effect: Effect; receipt_identity: string; receipt_epoch: string } | FollowupFileEvidence | FollowupArtifactEvidence | FollowupCollectionEvidence;
 
 export interface FollowupSourceObservation {
   accepted_cursor: number;
@@ -1378,6 +1406,22 @@ export interface RunContextScope {
 
 export type FollowupRepeat = 'once' | 'each';
 
+export interface FollowupOccurrenceGetParams {
+  followupId: string;
+  occurrenceId: string;
+}
+
+export interface FollowupOccurrenceFact {
+  source_index: number;
+  accepted_cursor: number;
+  content: unknown;
+}
+
+export interface FollowupOccurrenceView {
+  occurrence: FollowupOccurrence;
+  facts: FollowupOccurrenceFact[];
+}
+
 export interface FollowupOccurrencesParams {
   followupId: string;
   after?: number;
@@ -1390,7 +1434,7 @@ export interface FollowupOccurrencesResult {
 
 export type FollowupControlAction = 'pause' | 'resume' | 'cancel';
 
-export type FollowupRegistrationSource = { kind: 'at'; atMs: number } | { kind: 'process_stopped'; operationId: string } | { kind: 'job_stopped'; operationId: string } | { kind: 'file'; path: string; condition: FileCondition };
+export type FollowupRegistrationSource = { kind: 'at'; atMs: number } | { kind: 'process_stopped'; operationId: string } | { kind: 'job_stopped'; operationId: string } | { kind: 'file'; path: string; condition: FileCondition } | { kind: 'artifact'; operationId: string; artifactId?: string; name?: string } | { kind: 'collection'; operationId: string };
 
 export type FollowupRegistrationTrigger = FollowupRegistrationSource | { kind: 'any' | 'all'; sources: FollowupRegistrationSource[] };
 
@@ -1439,7 +1483,7 @@ export interface FollowupControlParams {
 
 export interface FollowupWait {
   id: string;
-  kind: 'process_stopped' | 'job_stopped' | 'run_completed' | 'goal_requested' | 'at' | 'any' | 'all' | 'file';
+  kind: 'process_stopped' | 'job_stopped' | 'run_completed' | 'goal_requested' | 'at' | 'any' | 'all' | 'file' | 'artifact' | 'collection';
   after_cursor: number;
   trigger_cursor: number | null;
   state: 'waiting' | 'observed' | 'consumed' | 'cancelled';

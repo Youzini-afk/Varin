@@ -49,6 +49,17 @@ export async function listThreadFollowupOccurrences(owner: FollowupOwner,
   return owner.runtime.followupOccurrences(followupId, after, signal);
 }
 
+export async function getThreadFollowupOccurrence(owner: FollowupOwner,
+  identity: ThreadIdentity, followupId: string, occurrenceId: string, signal?: AbortSignal) {
+  const followups = await listThreadFollowups(owner, identity, signal);
+  if (!followups.some(followup => followup.id === followupId)) {
+    throw new Error('Follow-up does not belong to the selected Thread branch');
+  }
+  // The original occurrence owner validates membership and hydrates only its accepted source facts.
+  // Neither the latest occurrence nor the instruction body participates in this authorization.
+  return owner.runtime.followupOccurrence(followupId, occurrenceId, signal);
+}
+
 export async function controlThreadFollowup(owner: FollowupOwner,
   input: Parameters<ThreadFollowupsAPI['control']>[0], signal?: AbortSignal) {
   const followups = await listThreadFollowups(owner, input, signal);

@@ -331,6 +331,20 @@ pub(crate) struct FollowupFilesParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupResearchWorksParams {
+    pub(crate) after: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupResearchObserveParams {
+    pub(crate) key: varin_runtime::catalog::followups::FollowupResearchKey,
+    pub(crate) evidence: varin_runtime::catalog::followups::FollowupLeafEvidence,
+    pub(crate) content: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct FollowupFileObserveParams {
     pub(crate) followup_id: String,
     pub(crate) generation: i64,
@@ -361,6 +375,13 @@ pub(crate) struct FollowupGetParams {
 pub(crate) struct FollowupOccurrencesParams {
     pub(crate) followup_id: String,
     pub(crate) after: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupOccurrenceGetParams {
+    pub(crate) followup_id: String,
+    pub(crate) occurrence_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1143,6 +1164,15 @@ pub(crate) struct KernelRecordListParams {
     pub(crate) run_id: Option<String>,
     pub(crate) branch_id: Option<String>,
     pub(crate) cursor: Option<i64>,
+    pub(crate) page_size: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelExperimentArtifactsParams {
+    pub(crate) workspace_id: String,
+    pub(crate) attempt_id: String,
+    pub(crate) after: Option<String>,
     pub(crate) page_size: Option<i64>,
 }
 
@@ -2495,6 +2525,16 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.followup.files" => serde_json::from_value::<FollowupFilesParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.followup.research" => {
+            serde_json::from_value::<FollowupResearchWorksParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.research.observe" => {
+            serde_json::from_value::<FollowupResearchObserveParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.followup.file.observe" => {
             serde_json::from_value::<FollowupFileObserveParams>(params.clone())
                 .map(|_| ())
@@ -2513,6 +2553,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map_err(|error| error.to_string()),
         "runtime.followup.occurrences" => {
             serde_json::from_value::<FollowupOccurrencesParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.occurrence" => {
+            serde_json::from_value::<FollowupOccurrenceGetParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
@@ -2911,6 +2956,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "storage.record.list" => serde_json::from_value::<KernelRecordListParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "storage.experiment.artifacts" => {
+            serde_json::from_value::<KernelExperimentArtifactsParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "storage.record.workspaces" => {
             serde_json::from_value::<KernelRecordWorkspacesParams>(params.clone())
                 .map(|_| ())

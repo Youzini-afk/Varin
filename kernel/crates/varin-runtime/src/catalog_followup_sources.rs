@@ -15,6 +15,16 @@ pub enum FollowupSource {
     JobStopped {
         operation_id: String,
     },
+    Artifact {
+        operation_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        artifact_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    Collection {
+        operation_id: String,
+    },
     File {
         path: String,
         condition: FileCondition,
@@ -23,6 +33,18 @@ pub enum FollowupSource {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum FollowupLeafEvidence {
+    Artifact {
+        binding: host_jobs::HostJobBinding,
+        fact: FollowupArtifactFact,
+        gap: bool,
+    },
+    Collection {
+        binding: host_jobs::HostJobBinding,
+        completion_revision: u64,
+        outcome: ResearchCollectionOutcome,
+        counts: ResearchArtifactCounts,
+        gap: bool,
+    },
     File {
         receipt_id: String,
         condition: FileCondition,
@@ -77,16 +99,30 @@ impl FollowupSource {
     pub(super) fn repeatable(&self) -> bool {
         matches!(
             self,
-            Self::File {
-                condition: FileCondition::Changed,
-                ..
-            }
+            Self::Artifact { .. }
+                | Self::Collection { .. }
+                | Self::File {
+                    condition: FileCondition::Changed,
+                    ..
+                }
         )
     }
 }
 impl FollowupTrigger {
     pub fn sources(&self) -> Vec<FollowupSource> {
         match self {
+            Self::Artifact {
+                operation_id,
+                artifact_id,
+                name,
+            } => vec![FollowupSource::Artifact {
+                operation_id: operation_id.clone(),
+                artifact_id: artifact_id.clone(),
+                name: name.clone(),
+            }],
+            Self::Collection { operation_id } => vec![FollowupSource::Collection {
+                operation_id: operation_id.clone(),
+            }],
             Self::JobStopped { operation_id } => vec![FollowupSource::JobStopped {
                 operation_id: operation_id.clone(),
             }],
@@ -172,7 +208,9 @@ fn observe_leaf(
     now: u64,
 ) -> Result<Option<(u64, FollowupLeafEvidence)>> {
     let (trigger_cursor, evidence) = match source {
-        FollowupSource::File { .. } => return Ok(None),
+        FollowupSource::File { .. }
+        | FollowupSource::Artifact { .. }
+        | FollowupSource::Collection { .. } => return Ok(None),
         FollowupSource::At { at_ms } => {
             if now < *at_ms {
                 return Ok(None);
@@ -244,12 +282,18 @@ fn observe_leaf(
 }
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct AcceptedSourceFact {
+pub(super) struct AcceptedSourceFact {
     generation: u64,
     source_index: usize,
     // File facts are accepted directly here; other domains retain their original receipt cursor.
     trigger_cursor: Option<u64>,
     evidence: FollowupLeafEvidence,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    content_ref: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    entity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    domain_revision: Option<u64>,
 }
 /// This is a short Catalog receipt for an observed source fact, not the transient
 /// watcher notification. The original source cursor retains its own provenance.
@@ -259,6 +303,17 @@ pub(super) fn accept_observation(
     index: usize,
     trigger_cursor: Option<u64>,
     evidence: FollowupLeafEvidence,
+) -> Result<()> {
+    accept_observation_content(tx, d, index, trigger_cursor, evidence, None, None)
+}
+pub(super) fn accept_observation_content(
+    tx: &Transaction<'_>,
+    d: &mut Definition,
+    index: usize,
+    trigger_cursor: Option<u64>,
+    evidence: FollowupLeafEvidence,
+    content_ref: Option<Value>,
+    identity: Option<(String, u64)>,
 ) -> Result<()> {
     let accepted_cursor = event(
         tx,
@@ -270,6 +325,9 @@ pub(super) fn accept_observation(
             source_index: index,
             trigger_cursor,
             evidence: evidence.clone(),
+            content_ref,
+            entity: identity.as_ref().map(|v| v.0.clone()),
+            domain_revision: identity.map(|v| v.1),
         })?,
     )?;
     d.sources[index].observed = Some(FollowupSourceObservation {
@@ -393,6 +451,24 @@ pub(super) fn observe_sources(
         FollowupTrigger::Any { .. } => TriggerEvidence::Any { sources: observed },
         FollowupTrigger::All { .. } => TriggerEvidence::All { sources: observed },
         _ => match &observed[0].evidence {
+            FollowupLeafEvidence::Artifact { binding, fact, gap } => TriggerEvidence::Artifact {
+                binding: binding.clone(),
+                fact: fact.clone(),
+                gap: *gap,
+            },
+            FollowupLeafEvidence::Collection {
+                binding,
+                completion_revision,
+                outcome,
+                counts,
+                gap,
+            } => TriggerEvidence::Collection {
+                binding: binding.clone(),
+                completion_revision: *completion_revision,
+                outcome: *outcome,
+                counts: counts.clone(),
+                gap: *gap,
+            },
             FollowupLeafEvidence::File {
                 receipt_id,
                 condition,
@@ -490,7 +566,10 @@ fn job_settled(
 }
 fn leaf_settled(db: &Connection, evidence: &FollowupLeafEvidence) -> Result<bool> {
     match evidence {
-        FollowupLeafEvidence::At { .. } | FollowupLeafEvidence::File { .. } => Ok(true),
+        FollowupLeafEvidence::At { .. }
+        | FollowupLeafEvidence::File { .. }
+        | FollowupLeafEvidence::Artifact { .. }
+        | FollowupLeafEvidence::Collection { .. } => Ok(true),
         FollowupLeafEvidence::JobStopped {
             binding,
             receipt_identity,

@@ -39,10 +39,11 @@ pub(crate) const CATALOG_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS metadata (ke
      CREATE INDEX IF NOT EXISTS recovery_operation_files_operation ON recovery_operation_files(workspace_id, operation_id, ordinal);
      CREATE INDEX IF NOT EXISTS recovery_refs_hash ON recovery_refs(object_hash);
      CREATE INDEX IF NOT EXISTS domain_records_workspace ON domain_records(workspace_id, record_type, updated_at DESC);
+     CREATE INDEX IF NOT EXISTS experiment_artifacts_attempt ON domain_records(workspace_id,json_extract(payload_json,'$.attemptId'),record_id) WHERE record_type='experiment.artifact' AND COALESCE(json_extract(payload_json,'$.internalLogChunk'),0)!=1;
      CREATE INDEX IF NOT EXISTS domain_records_thread ON domain_records(workspace_id, thread_id, record_type);
      CREATE INDEX IF NOT EXISTS domain_record_refs_hash ON domain_record_refs(object_hash);";
 
-pub(crate) const CATALOG_USER_VERSION: i64 = 12;
+pub(crate) const CATALOG_USER_VERSION: i64 = 13;
 
 pub(crate) const REQUIRED_TABLES: &[&str] = &[
     "blobs",
@@ -73,6 +74,7 @@ pub(crate) const REQUIRED_INDEXES: &[&str] = &[
     "domain_record_refs_hash",
     "domain_records_thread",
     "domain_records_workspace",
+    "experiment_artifacts_attempt",
     "grants_operation_lifetime",
     "object_owners_blob",
     "object_owners_workspace",

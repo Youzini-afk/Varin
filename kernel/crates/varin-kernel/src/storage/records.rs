@@ -121,9 +121,7 @@ impl Storage {
                 .get(field)
                 .and_then(Value::as_str)
                 .filter(|value| !value.is_empty())
-                .ok_or_else(|| {
-                    KernelError::Operation(format!("typed record {field} is required"))
-                })
+                .ok_or_else(|| KernelError::Operation(format!("typed record {field} is required")))
         };
         let derived = |prefix: &str| -> Result<(), KernelError> {
             let id = required("id")?;
@@ -482,7 +480,11 @@ impl Storage {
             "managed.remote.object" => {
                 derived("managed.remote.object")?;
                 required("objectHash")?;
-                if object.get("byteLength").and_then(Value::as_i64).is_none_or(|value| value < 0) {
+                if object
+                    .get("byteLength")
+                    .and_then(Value::as_i64)
+                    .is_none_or(|value| value < 0)
+                {
                     return Err(KernelError::Operation(
                         "managed remote object byteLength is invalid".to_string(),
                     ));
@@ -531,7 +533,11 @@ impl Storage {
                 required("jobId")?;
                 required("path")?;
                 required("objectHash")?;
-                if object.get("byteLength").and_then(Value::as_i64).is_none_or(|value| value < 0) {
+                if object
+                    .get("byteLength")
+                    .and_then(Value::as_i64)
+                    .is_none_or(|value| value < 0)
+                {
                     return Err(KernelError::Operation(
                         "managed remote output byteLength is invalid".to_string(),
                     ));
@@ -1079,6 +1085,63 @@ impl Storage {
         }
     }
 
+    /// Concrete original-domain index. Keyset identity is unaffected by record updates.
+    pub(super) fn experiment_artifact_page(
+        &self,
+        input: &Value,
+        grant_id: &str,
+    ) -> Result<Value, KernelError> {
+        let workspace = input
+            .get("workspaceId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| KernelError::Operation("artifact workspace required".into()))?;
+        let attempt = input
+            .get("attemptId")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| KernelError::Operation("artifact attempt required".into()))?;
+        let grant = self.load_grant(grant_id)?;
+        if grant.owning_workspace.as_deref() != Some(workspace)
+            && !grant.capabilities.contains("storage.admin")
+        {
+            return Err(KernelError::Authorization(
+                "artifact workspace differs from its grant".into(),
+            ));
+        }
+        let after = input.get("after").and_then(Value::as_str).unwrap_or("");
+        let size = input.get("pageSize").and_then(Value::as_u64).unwrap_or(128);
+        if size == 0 || size >= i64::MAX as u64 {
+            return Err(KernelError::Operation(
+                "artifact pageSize must be positive and representable".into(),
+            ));
+        }
+        let mut q=self.conn.prepare("SELECT record_id FROM domain_records WHERE workspace_id=?1 AND record_type='experiment.artifact' AND json_extract(payload_json,'$.attemptId')=?2 AND COALESCE(json_extract(payload_json,'$.internalLogChunk'),0)!=1 AND record_id>?3 ORDER BY record_id LIMIT ?4")?;
+        let ids = q
+            .query_map(params![workspace, attempt, after, size as i64 + 1], |r| {
+                r.get::<_, String>(0)
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let more = ids.len() > size as usize;
+        let mut records = vec![];
+        for id in ids.iter().take(size as usize) {
+            let value = self
+                .domain_record_value(workspace, id)?
+                .ok_or_else(|| KernelError::Storage("indexed artifact disappeared".into()))?;
+            if !self.grant_can_access_domain_record(&value, grant_id)? {
+                return Err(KernelError::Authorization(
+                    "artifact record is outside the reader scope".into(),
+                ));
+            }
+            records.push(value);
+        }
+        let next = if more {
+            ids.get(size as usize - 1).cloned()
+        } else {
+            None
+        };
+        Ok(json!({"records":records,"nextCursor":next}))
+    }
+
     pub(super) fn domain_record_list(
         &self,
         params_value: &Value,
@@ -1620,28 +1683,28 @@ impl Storage {
             // silently rewrite this revision's provenance (3.18D). A put
             // replays alongside its publish, so `base_root` is still the base
             // the result was published on.
-            let document_base_root = object
-                .get("baseRoot")
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    KernelError::Operation("working.result baseRoot is required".to_string())
-                })?;
+            let document_base_root =
+                object
+                    .get("baseRoot")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        KernelError::Operation("working.result baseRoot is required".to_string())
+                    })?;
             if document_base_root != base_root {
                 return Err(KernelError::Operation(
                     "working.result baseRoot does not match the publish-time baseline".to_string(),
                 ));
             }
             let state_map = |key: &str| -> Result<&serde_json::Map<String, Value>, KernelError> {
-                object
-                    .get(key)
-                    .and_then(Value::as_object)
-                    .ok_or_else(|| {
-                        KernelError::Operation(format!("working.result {key} is required"))
-                    })
+                object.get(key).and_then(Value::as_object).ok_or_else(|| {
+                    KernelError::Operation(format!("working.result {key} is required"))
+                })
             };
             let base_states = state_map("baseStates")?;
             let path_states = state_map("pathStates")?;
-            if base_states.len() != expected_paths.len() || path_states.len() != expected_paths.len() {
+            if base_states.len() != expected_paths.len()
+                || path_states.len() != expected_paths.len()
+            {
                 return Err(KernelError::Operation(
                     "working.result state maps must cover exactly the changed paths".to_string(),
                 ));
@@ -1653,7 +1716,9 @@ impl Storage {
                     .map(|state| serde_json::to_value(state))
                     .transpose()
                     .map_err(|error| {
-                        KernelError::Operation(format!("working.result base state encode failed: {error}"))
+                        KernelError::Operation(format!(
+                            "working.result base state encode failed: {error}"
+                        ))
                     })?
                     .unwrap_or_else(|| missing_state.clone());
                 if base_states.get(path) != Some(&expected_base) {
@@ -1666,7 +1731,9 @@ impl Storage {
                     .map(|state| serde_json::to_value(state))
                     .transpose()
                     .map_err(|error| {
-                        KernelError::Operation(format!("working.result result state encode failed: {error}"))
+                        KernelError::Operation(format!(
+                            "working.result result state encode failed: {error}"
+                        ))
                     })?
                     .unwrap_or_else(|| missing_state.clone());
                 if path_states.get(path) != Some(&expected_result) {
@@ -1939,24 +2006,116 @@ impl Storage {
 }
 
 impl Storage {
-    pub(super) fn insert_prepared_working_result(&mut self, prepared:&super::result_publication::PreparedWorkingResult)->Result<(),KernelError> {
+    pub(super) fn insert_prepared_working_result(
+        &mut self,
+        prepared: &super::result_publication::PreparedWorkingResult,
+    ) -> Result<(), KernelError> {
         self.conn.execute("INSERT INTO domain_records(record_id,workspace_id,record_type,state,branch_id,result_revision,record_revision,payload_json,created_at,updated_at) VALUES(?1,?2,'working.result','published',?3,?4,1,?5,?6,?6)",
             params![prepared.record_id,prepared.workspace,prepared.branch_id,prepared.revision,prepared.payload,now_ms()])?;
         let mut statement=self.conn.prepare("INSERT INTO domain_record_refs(workspace_id,record_id,slot,object_hash) VALUES(?1,?2,?3,?4)")?;
-        for (slot,hash) in &prepared.references {statement.execute(params![prepared.workspace,prepared.record_id,slot,hash])?;}
+        for (slot, hash) in &prepared.references {
+            statement.execute(params![prepared.workspace, prepared.record_id, slot, hash])?;
+        }
         Ok(())
     }
 }
 
 impl Storage {
     /// The original branch creation transaction owns this short provenance reference.
-    pub(super) fn insert_source_provenance(&mut self,workspace:&str,branch:&str,root:&str,reference:&Value)->Result<Value,KernelError>{
-        let record_id=format!("working-source:{branch}");
-        let hash=reference["objectHash"].as_str().ok_or_else(||KernelError::Operation("source provenance hash missing".into()))?;
-        let result=json!({"objectHash":hash,"recordId":record_id,"slot":"source-provenance"});
-        let payload=serde_json::to_string(&json!({"branchId":branch,"root":root,"provenance":result}))?;
+    pub(super) fn insert_source_provenance(
+        &mut self,
+        workspace: &str,
+        branch: &str,
+        root: &str,
+        reference: &Value,
+    ) -> Result<Value, KernelError> {
+        let record_id = format!("working-source:{branch}");
+        let hash = reference["objectHash"]
+            .as_str()
+            .ok_or_else(|| KernelError::Operation("source provenance hash missing".into()))?;
+        let result = json!({"objectHash":hash,"recordId":record_id,"slot":"source-provenance"});
+        let payload =
+            serde_json::to_string(&json!({"branchId":branch,"root":root,"provenance":result}))?;
         self.conn.execute("INSERT INTO domain_records(record_id,workspace_id,record_type,state,branch_id,revision,record_revision,payload_json,created_at,updated_at) VALUES(?1,?2,'working.source','captured',?3,0,1,?4,?5,?5)",params![record_id,workspace,branch,payload,now_ms()])?;
         self.conn.execute("INSERT INTO domain_record_refs(workspace_id,record_id,slot,object_hash) VALUES(?1,?2,'source-provenance',?3)",params![workspace,record_id,hash])?;
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod artifact_page_tests {
+    use super::*;
+    #[test]
+    fn original_artifact_index_pages_stably_excludes_chunks_and_rechecks_reader_authority() {
+        let root = std::env::temp_dir().join(format!("artifact-index-{}", Uuid::new_v4()));
+        let mut storage = Storage::open(&root, "host").unwrap();
+        for (id, capabilities, thread) in [
+            ("owner", vec!["storage.admin"], "thread"),
+            ("reader", vec!["storage.read"], "thread"),
+            ("other", vec!["storage.read"], "foreign"),
+        ] {
+            storage.issue_grant(&json!({"grantId":id,"hostGeneration":"generation","capabilities":capabilities,"pathScopes":[""],"threadId":thread,"owningWorkspace":"workspace","executionWorkspace":"workspace"}),"host","generation",&root.to_string_lossy(),"epoch").unwrap();
+        }
+        let write = |storage: &mut Storage,
+                     id: &str,
+                     attempt: &str,
+                     internal: bool,
+                     expected: Option<u64>| {
+            let mut p = json!({"operationId":format!("{id}-{expected:?}"),"recordId":format!("experiment.artifact:{id}"),"workspaceId":"workspace","recordType":"experiment.artifact","state":"available","threadId":"thread","ownerIds":[],"references":[],"payloadJson":serde_json::to_string(&json!({"id":id,"attemptId":attempt,"name":id,"kind":"file","internalLogChunk":internal})).unwrap()});
+            if let Some(revision) = expected {
+                p["expectedRecordRevision"] = json!(revision);
+            }
+            let (grant, p) = storage
+                .authorize(
+                    Some("owner"),
+                    "epoch",
+                    "host",
+                    "generation",
+                    "storage.record.put",
+                    &p,
+                )
+                .unwrap();
+            storage
+                .dispatch("storage.record.put", &p, Some("owner"), &grant)
+                .unwrap()
+        };
+        write(&mut storage, "a", "selected", false, None);
+        write(&mut storage, "b", "selected", false, None);
+        write(&mut storage, "chunk", "selected", true, None);
+        write(&mut storage, "irrelevant", "different", false, None);
+        let page = storage
+            .experiment_artifact_page(
+                &json!({"workspaceId":"workspace","attemptId":"selected","pageSize":1}),
+                "reader",
+            )
+            .unwrap();
+        assert_eq!(page["records"][0]["recordId"], "experiment.artifact:a");
+        assert_eq!(page["nextCursor"], "experiment.artifact:a");
+        write(&mut storage, "a", "selected", false, Some(1));
+        let page=storage.experiment_artifact_page(&json!({"workspaceId":"workspace","attemptId":"selected","pageSize":1,"after":page["nextCursor"]}),"reader").unwrap();
+        assert_eq!(page["records"][0]["recordId"], "experiment.artifact:b");
+        assert!(page["nextCursor"].is_null());
+        let all = storage
+            .experiment_artifact_page(
+                &json!({"workspaceId":"workspace","attemptId":"selected"}),
+                "reader",
+            )
+            .unwrap();
+        assert_eq!(all["records"].as_array().unwrap().len(), 2);
+        assert_eq!(all["records"][0]["recordRevision"], 2);
+        assert!(storage
+            .experiment_artifact_page(
+                &json!({"workspaceId":"workspace","attemptId":"selected"}),
+                "other"
+            )
+            .is_err());
+        assert!(storage
+            .experiment_artifact_page(
+                &json!({"workspaceId":"different","attemptId":"selected"}),
+                "reader"
+            )
+            .is_err());
+        drop(storage);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
