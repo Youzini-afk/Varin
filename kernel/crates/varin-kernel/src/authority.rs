@@ -18,6 +18,7 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "storage.record.get"
         | "storage.record.list"
         | "storage.experiment.artifacts"
+        | "storage.experiment.logChunks"
         | "working.result.get"
         | "working.result.list"
         | "working.draft.get"

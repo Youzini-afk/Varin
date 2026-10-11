@@ -1206,3 +1206,6 @@ mod repeating;
 
 #[path = "fixtures/followup_artifacts.rs"]
 mod artifacts;
+
+#[path = "fixtures/followup_logs.rs"]
+mod logs;

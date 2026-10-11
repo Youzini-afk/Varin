@@ -834,37 +834,6 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     }
   };
 
-  const listLogChunks = async (
-    ctx: ExperimentContext,
-    workspaceId: string,
-    attemptId: string,
-    stream: "stdout" | "stderr",
-  ): Promise<Array<{ record: KernelRecordResult; offset: number; byteLength: number; objectHash: string }>> => {
-    const chunks: Array<{ record: KernelRecordResult; offset: number; byteLength: number; objectHash: string }> = [];
-    let cursor: number | undefined;
-    do {
-      const page = await ctx.scoped.listRecords({
-        workspaceId,
-        recordType: "experiment.artifact",
-        pageSize: 128,
-        ...(cursor === undefined ? {} : { cursor }),
-      });
-      for (const record of page.records) {
-        const payload = payloadOf(record);
-        if (payload.internalLogChunk !== true || str(payload.attemptId) !== attemptId || payload.stream !== stream) continue;
-        const offset = num(payload.streamOffset);
-        const byteLength = num(payload.byteLength);
-        const objectHash = record.references.find((reference) => reference.slot === "content")?.objectHash;
-        if (offset !== undefined && byteLength !== undefined && objectHash) {
-          chunks.push({ record, offset, byteLength, objectHash });
-        }
-      }
-      cursor = page.nextCursor === null ? undefined : page.nextCursor;
-    } while (cursor !== undefined);
-    chunks.sort((left, right) => left.offset - right.offset);
-    return chunks;
-  };
-
   const readLogRange = async (
     ctx: ExperimentContext,
     workspaceId: string,
@@ -873,40 +842,43 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     offset: number,
     length: number,
     signal?: AbortSignal,
+    publishedEnd?: number,
+    caller?: ExperimentCaller,
   ): Promise<{ bytes: Buffer; total: number; nextOffset: number; eof: boolean }> => {
-    const chunks = await listLogChunks(ctx, workspaceId, attemptId, stream);
-    const total = chunks.reduce((end, chunk) => Math.max(end, chunk.offset + chunk.byteLength), 0);
+    // Chunks may be durable before their original job cursor CAS. Only published
+    // stream lengths expose bytes; the chunk index is never a publication owner.
+    const job = publishedEnd === undefined ? await ctx.scoped.getRecord(workspaceId, recordIdFor.job(jobIdFor(attemptId)), signal) : null;
+    const total = publishedEnd ?? (job ? num(payloadOf(job)[`${stream}Bytes`]) ?? 0 : 0);
     const start = Math.min(Math.max(0, offset), total);
     const end = Math.min(total, start + Math.max(0, length));
     const parts: Buffer[] = [];
     let covered = start;
-    for (const chunk of chunks) {
-      const chunkEnd = chunk.offset + chunk.byteLength;
-      if (chunkEnd <= start || chunk.offset >= end) continue;
-      const rangeStart = Math.max(start, chunk.offset);
-      const rangeEnd = Math.min(end, chunkEnd);
-      if (rangeStart !== covered) {
+    while (covered < end) {
+      signal?.throwIfAborted();
+      const page = await ctx.scoped.experimentLogChunks({ workspaceId, attemptId, stream, offset: covered, endOffset: end }, signal);
+      for (const record of page.records) {
+        if (caller) assertRecordAllowed(caller, record, `experiment log: ${record.recordId}`);
+        const payload = payloadOf(record);
+        const chunkOffset = num(payload.streamOffset), byteLength = num(payload.byteLength);
+        const objectHash = record.references.find(reference => reference.slot === "content")?.objectHash;
+        if (record.state !== "available" || payload.internalLogChunk !== true || payload.attemptId !== attemptId || payload.stream !== stream
+          || chunkOffset === undefined || byteLength === undefined || byteLength <= 0 || !objectHash) {
+          throw new HarnessServiceError("unavailable", `${stream} durable chunk metadata is unreadable`);
+        }
+        const chunkEnd = chunkOffset + byteLength;
+        if (chunkEnd <= covered) continue;
+        const rangeStart = Math.max(start, chunkOffset), rangeEnd = Math.min(end, chunkEnd);
+        if (rangeStart !== covered) throw new HarnessServiceError("unavailable", `${stream} has a missing or overlapping durable page at byte ${covered}`);
+        const blob = await ctx.scoped.getBlob(objectHash, { recordId: record.recordId, slot: "content" },
+          { offset: rangeStart - chunkOffset, length: rangeEnd - rangeStart, ...(signal ? { signal } : {}) });
+        const bytes = Buffer.from(blob.bytesBase64, "base64");
+        if (bytes.byteLength !== rangeEnd - rangeStart) throw new HarnessServiceError("unavailable", `${stream} durable page is incomplete at byte ${rangeStart}`);
+        parts.push(bytes); covered = rangeEnd;
+        if (covered >= end) break;
+      }
+      if (covered < end && (page.nextOffset === null || page.nextOffset !== covered)) {
         throw new HarnessServiceError("unavailable", `${stream} has a missing durable page at byte ${covered}`);
       }
-      const page = await ctx.scoped.getBlob(
-        chunk.objectHash,
-        { recordId: chunk.record.recordId, slot: "content" },
-        {
-          offset: rangeStart - chunk.offset,
-          length: rangeEnd - rangeStart,
-          ...(signal ? { signal } : {}),
-        },
-      );
-      const bytes = Buffer.from(page.bytesBase64, "base64");
-      if (bytes.byteLength !== rangeEnd - rangeStart) {
-        throw new HarnessServiceError("unavailable", `${stream} durable page is incomplete at byte ${rangeStart}`);
-      }
-      parts.push(bytes);
-      covered = rangeEnd;
-      if (covered >= end) break;
-    }
-    if (covered !== end) {
-      throw new HarnessServiceError("unavailable", `${stream} has a missing durable page at byte ${covered}`);
     }
     return { bytes: Buffer.concat(parts), total, nextOffset: end, eof: end >= total };
   };
@@ -2636,6 +2608,49 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     return { attempt: current ?? view, timedOut: !current || !TERMINAL.has(current.state) };
   };
 
+  /** Raw published bytes for the original accepted research Job. No UTF-8
+   * display pagination, inferred stop, copied log, or observer-owned storage. */
+  const readLogObservation = async (
+    caller: ExperimentCaller,
+    binding: import("../kernel/protocol.generated.js").HostJobBinding,
+    input: { stream: "stdout" | "stderr"; offset: number; maxBytes?: number },
+    signal?: AbortSignal,
+  ) => {
+    signal?.throwIfAborted();
+    if (caller.access.kind !== "family" || caller.workspaceId !== binding.workspaceId || binding.domain !== "research.experiment" || binding.domainVersion !== 1) {
+      throw new HarnessServiceError("denied", "Log observation requires its actual family reader and original research Job");
+    }
+    if (!Number.isSafeInteger(input.offset) || input.offset < 0) throw new HarnessServiceError("invalid-params", "Log byte offset must be a nonnegative safe integer");
+    const { ctx, record, view } = await requireAttempt(caller, binding.subjectId);
+    const requireOriginal = (record: KernelRecordResult) => {
+      assertRecordAllowed(caller, record, `experiment log owner: ${record.recordId}`);
+      const owner = researchOwner(record);
+      if (owner.runtime !== "agent" || owner.operationId !== binding.operationId || !isDeepStrictEqual(owner.executionOwner, binding.executionOwner)) {
+        throw new HarnessServiceError("denied", "Log observation differs from its original accepted owner");
+      }
+    };
+    requireOriginal(record);
+    const job = await ctx.scoped.getRecord(caller.workspaceId, recordIdFor.job(jobIdFor(binding.subjectId)), signal);
+    if (job) requireOriginal(job);
+    const payload = job ? payloadOf(job) : null;
+    const publishedBytes = payload ? payload[`${input.stream}Bytes`] ?? 0 : 0;
+    if (!Number.isSafeInteger(publishedBytes) || (publishedBytes as number) < 0
+      || (payload && payload.attemptId !== binding.subjectId)
+      || (payload && payload[`${input.stream}Bytes`] === undefined && (num(payload.outputCursor) ?? 0) > 0)) {
+      throw new HarnessServiceError("unavailable", "Original published log byte cursor is unreadable; retry after the research owner reconnects");
+    }
+    const end = publishedBytes as number;
+    const maxBytes = input.maxBytes ?? 64 * 1024;
+    if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new HarnessServiceError("invalid-params", "Log read size must be a positive safe integer");
+    const range = input.offset < end
+      ? await readLogRange(ctx, caller.workspaceId, binding.subjectId, input.stream, input.offset, maxBytes, signal, end, caller)
+      : { bytes: Buffer.alloc(0), nextOffset: input.offset };
+    signal?.throwIfAborted();
+    return { bytes: range.bytes, offset: input.offset, nextOffset: range.nextOffset, publishedBytes: end,
+      eof: originalOutputDrained(record, view, job) && range.nextOffset >= end,
+      jobRevision: job?.recordRevision ?? null, attemptRevision: record.recordRevision };
+  };
+
   const logs = async (
     caller: ExperimentCaller,
     params: { attemptId: string; stream?: "stdout" | "stderr"; offset?: number; maxBytes?: number },
@@ -2982,7 +2997,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
 
 
   return {
-    submit, list, get, logs, cancel, wait, collect, readArtifactObservation, readArtifact, readArtifactPage, submissionId, reconcileUnaccepted, nativeReceipt,
+    submit, list, get, logs, cancel, wait, collect, readArtifactObservation, readLogObservation, readArtifact, readArtifactPage, submissionId, reconcileUnaccepted, nativeReceipt,
     stopForThreads, refreshQueue, ensureReconciled, subscribeAttempts,
     detachObservers,
     dispose: detachObservers,

@@ -1,7 +1,7 @@
 import React from 'react';
 import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import type { ThreadFamilyAPI, ThreadFollowupsAPI, ThreadIdentity } from '@varin/application-client';
-import type { HostJobSource, FollowupPendingRegistration, Followup, FollowupOccurrence, FollowupOccurrencesResult, FollowupLeafEvidence, FollowupRegisterParams, FollowupRegistrationSource, FollowupSource, FollowupView, Operation, Run } from '@varin/protocol';
+import type { HostJobSource, FollowupPendingRegistration, Followup, FollowupOccurrence, FollowupOccurrencesResult, FollowupLeafEvidence, FollowupRegisterParams, FollowupRegistrationSource, FollowupSource, FollowupSourceState, FollowupView, Operation, Run } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -21,6 +21,8 @@ function atLabel(at: number) {
   return Number.isNaN(date.getTime()) ? `Unix time ${at} ms` : `${date.toLocaleString()} · ${date.toISOString()}`;
 }
 function sourceLabel(source: FollowupSource) {
+  if (source.kind === 'log_literal') return `When original job ${source.operation_id} ${source.stream} matches ${source.literal_bytes} literal bytes from byte ${source.from_offset}`;
+  if (source.kind === 'log_end') return `When original job ${source.operation_id} ${source.stream} ends`;
   if (source.kind === 'artifact') return `When original job ${source.operation_id} has an artifact fact${source.artifact_id ? ` for ID ${source.artifact_id}` : source.name ? ` named ${source.name}` : ' for any artifact'}`;
   if (source.kind === 'collection') return `When original job ${source.operation_id} collection finishes`;
   if (source.kind === 'job_stopped') return `After accepted job ${source.operation_id} actually stops`;
@@ -28,21 +30,37 @@ function sourceLabel(source: FollowupSource) {
   return source.kind === 'at' ? `At ${atLabel(source.at_ms)}` : `After process ${source.operation_id} actually stops`;
 }
 function triggerLabel(item: Followup) {
-  if (item.trigger.kind === 'at' || item.trigger.kind === 'process_stopped' || item.trigger.kind === 'file' || item.trigger.kind === 'job_stopped' || item.trigger.kind === 'artifact' || item.trigger.kind === 'collection') return sourceLabel(item.trigger);
+  if (item.trigger.kind === 'at' || item.trigger.kind === 'process_stopped' || item.trigger.kind === 'file' || item.trigger.kind === 'job_stopped' || item.trigger.kind === 'artifact' || item.trigger.kind === 'collection' || item.trigger.kind === 'log_literal' || item.trigger.kind === 'log_end') return sourceLabel(item.trigger);
   if (item.trigger.kind === 'any') return 'When any condition is observed';
   if (item.trigger.kind === 'all') return 'When every condition is observed';
   return item.trigger.kind === 'run_completed' ? 'After the original run completes' : 'Continuing goal work';
 }
+function logStateLabel(state: FollowupSourceState): string {
+  const log = state.log!;
+  if (log.failure_code) return `Log observation unavailable · ${log.failure_code}`;
+  if (log.ended) return state.observed?.evidence.kind === 'log_end' ? 'Stream ended'
+    : state.observed ? 'Stream ended; no further matches' : 'Stream ended without a literal match';
+  return `Observed through byte ${log.offset}`;
+}
 function isPastFollowup(item: Followup): boolean {
-  return item.state === 'cancelled' || (item.repeat === 'once'
+  return item.state === 'cancelled' || (item.exhausted && item.pending_occurrences === 0
+    && !item.observation?.delivery_pending) || (item.repeat === 'once'
     && (item.occurrence?.delivery?.state === 'delivered' || item.occurrence?.state === 'cancelled'));
 }
-type SourceDraft = { kind: FollowupRegistrationSource['kind']; at: string; processId: string; jobId: string; path: string; condition: 'exists' | 'changed' | 'ready'; artifactSelector: 'any' | 'artifactId' | 'name'; artifactValue: string };
-const emptySource = (): SourceDraft => ({ kind: 'at', at: '', processId: '', jobId: '', path: '', condition: 'exists', artifactSelector: 'any', artifactValue: '' });
+type SourceDraft = { kind: FollowupRegistrationSource['kind']; at: string; processId: string; jobId: string; path: string; condition: 'exists' | 'changed' | 'ready'; artifactSelector: 'any' | 'artifactId' | 'name'; artifactValue: string; stream: 'stdout' | 'stderr'; literal: string; fromOffset: string };
+const emptySource = (): SourceDraft => ({ kind: 'at', at: '', processId: '', jobId: '', path: '', condition: 'exists', artifactSelector: 'any', artifactValue: '', stream: 'stdout', literal: '', fromOffset: '' });
 // The original Job owner declares supported observations; the renderer owns no domain/version table.
 const supportsJobSource = (job: HostJobSource, kind: string) => job.observationKinds.some(value => value === kind);
-const usesJobs = (kind: FollowupRegisterParams['trigger']['kind']) => kind === 'job_stopped' || kind === 'artifact' || kind === 'collection';
+const usesJobs = (kind: FollowupRegisterParams['trigger']['kind']) => kind === 'job_stopped' || kind === 'artifact' || kind === 'collection' || kind === 'log_literal' || kind === 'log_end';
 function sourceInput(draft: SourceDraft, processes: Operation[], jobs: HostJobSource[]): FollowupRegistrationSource | null {
+  if (draft.kind === 'log_literal' || draft.kind === 'log_end') {
+    if (!jobs.some(job => supportsJobSource(job, draft.kind) && job.binding.operationId === draft.jobId)) return null;
+    if (draft.kind === 'log_end') return { kind: 'log_end', operationId: draft.jobId, stream: draft.stream };
+    const fromOffset = draft.fromOffset === '' ? 0 : Number(draft.fromOffset);
+    if (!draft.literal.length || !/^\d*$/.test(draft.fromOffset) || !Number.isSafeInteger(fromOffset)) return null;
+    return { kind: 'log_literal', operationId: draft.jobId, stream: draft.stream, literal: draft.literal,
+      ...(draft.fromOffset === '' ? {} : { fromOffset }) };
+  }
   if (draft.kind === 'artifact' || draft.kind === 'collection') {
     if (!jobs.some(job => supportsJobSource(job, draft.kind) && job.binding.operationId === draft.jobId)) return null;
     if (draft.kind === 'collection') return { kind: 'collection', operationId: draft.jobId };
@@ -59,14 +77,28 @@ function sourceInput(draft: SourceDraft, processes: Operation[], jobs: HostJobSo
 function SourceEditor({ value, onChange, processes, jobs, disabled, repeating, label = 'Follow-up' }: {
   value: SourceDraft; onChange(value: SourceDraft): void; processes: Operation[]; jobs: HostJobSource[]; disabled: boolean; repeating: boolean; label?: string;
 }) {
-  if (value.kind === 'job_stopped' || value.kind === 'artifact' || value.kind === 'collection') {
-    const research = value.kind !== 'job_stopped';
+  if (usesJobs(value.kind)) {
+    const research = value.kind === 'artifact' || value.kind === 'collection';
     const candidates = jobs.filter(job => supportsJobSource(job, value.kind));
     return <><label className="block">Accepted {research ? 'research ' : ''}job<select aria-label={`${label} job`} value={value.jobId} disabled={disabled}
       onChange={event => onChange({ ...value, jobId: event.target.value })} className="ml-2 rounded border bg-background p-1">
       <option value="">Select an accepted {research ? 'research ' : ''}job in this task family</option>{candidates.map(job => <option key={job.binding.operationId} value={job.binding.operationId}>
         {job.binding.domain} · {job.binding.workspaceId} · {job.binding.subjectId} · {job.executorStopped ? 'executor stopped' : 'awaiting executor stop'} · {job.threadId}
       </option>)}</select></label>
+      {(value.kind === 'log_literal' || value.kind === 'log_end') && <>
+        <label className="block">Log stream<select aria-label={`${label} log stream`} value={value.stream} disabled={disabled}
+          onChange={event => onChange({ ...value, stream: event.target.value as SourceDraft['stream'] })}>
+          <option value="stdout">stdout</option><option value="stderr">stderr</option>
+        </select></label>
+        {value.kind === 'log_literal' ? <>
+          <label className="block">Exact literal<Textarea aria-label={`${label} log literal`} value={value.literal} disabled={disabled}
+            onChange={event => onChange({ ...value, literal: event.target.value })} rows={2} /></label>
+          <label className="block">Start byte offset<Input aria-label={`${label} log offset`} value={value.fromOffset} disabled={disabled}
+            onChange={event => onChange({ ...value, fromOffset: event.target.value })} inputMode="numeric" placeholder="0" /></label>
+          {value.fromOffset !== '' && (!/^\d+$/.test(value.fromOffset) || !Number.isSafeInteger(Number(value.fromOffset))) && <p role="alert">Enter a non-negative whole byte offset.</p>}
+          <p className="text-xs text-muted-foreground">Case-sensitive UTF-8 bytes, including spaces and line breaks. {repeating ? 'Runs for every match, including overlaps.' : 'Runs for the first match.'} Starts at byte 0 by default, including published history. An offset beyond the current end waits for future output.</p>
+        </> : <p className="text-xs text-muted-foreground">Runs once when this stream ends, even if it is empty. Artifact collection may finish later.</p>}
+      </>}
       {value.kind === 'job_stopped' && <p className="text-xs text-muted-foreground">Runs after the job stops. Collection may finish later.</p>}
       {value.kind === 'artifact' && <>
         <label className="block">Artifact selector<select aria-label={`${label} artifact selector`} value={value.artifactSelector} disabled={disabled}
@@ -99,25 +131,40 @@ function FollowupInstruction({ api, identity, item }: { api: ThreadFollowupsAPI;
   const [open, setOpen] = React.useState(false);
   const [view, setView] = React.useState<FollowupView>();
   const [error, setError] = React.useState(false);
+  const [retry, setRetry] = React.useState(0);
+  const hasLiteral = item.trigger.kind === 'log_literal' || ((item.trigger.kind === 'any' || item.trigger.kind === 'all')
+    && item.trigger.sources.some(source => source.kind === 'log_literal'));
   React.useEffect(() => {
     if (!open) return;
     const controller = new AbortController(); const host = getRuntimeEndpointGeneration(); setView(undefined); setError(false);
     void api.get(identity, item.id, controller.signal).then(value => {
       if (controller.signal.aborted || host !== getRuntimeEndpointGeneration()) return;
-      if (value.followup.id !== item.id || value.followup.thread_id !== identity.threadId || value.followup.branch_id !== identity.branchId) { setError(true); return; }
+      if (value.followup.id !== item.id || value.followup.thread_id !== identity.threadId || value.followup.branch_id !== identity.branchId
+        || value.followup.generation !== item.generation) { setError(true); return; }
       setView(value);
     }, () => { if (!controller.signal.aborted && host === getRuntimeEndpointGeneration()) setError(true); });
     return () => controller.abort();
-  }, [api, identity, item.id, open]);
-  if (!item.has_instruction) return null;
+  }, [api, identity, item.id, item.generation, open, retry]);
+  if (!item.has_instruction && !hasLiteral) return null;
+  const label = hasLiteral ? 'follow-up instruction and literal' : 'follow-up instruction';
+  const trigger = view?.registration_trigger;
+  const originalSources = trigger ? ('sources' in trigger ? trigger.sources : [trigger]) : [];
   return <div>
-    <Button variant="ghost" size="sm" aria-expanded={open} onClick={() => setOpen(value => !value)}>{open ? 'Hide follow-up instruction' : 'Read follow-up instruction'}</Button>
-    {open && (error ? <p role="alert">The original instruction could not be read.</p> : view
-      ? <pre className="whitespace-pre-wrap break-words text-sm">{view.instruction ?? 'No instruction stored'}</pre> : <p>Reading original instruction…</p>)}
+    <Button variant="ghost" size="sm" aria-expanded={open} onClick={() => setOpen(value => !value)}>{open ? `Hide ${label}` : `Read ${label}`}</Button>
+    {open && (error ? <p role="alert">The original follow-up could not be read. <Button variant="ghost" size="sm" onClick={() => setRetry(value => value + 1)}>Retry original follow-up details</Button></p> : view
+      ? <div aria-label="Original follow-up details">
+        {item.has_instruction && <pre className="whitespace-pre-wrap break-words text-sm">{view.instruction ?? 'No instruction stored'}</pre>}
+        {hasLiteral && (originalSources.some(source => source.kind === 'log_literal') ? originalSources.map((source, index) => source.kind === 'log_literal' && <div key={index}>
+          <p className="text-xs text-muted-foreground">Condition {index + 1} · {source.stream} · from byte {source.fromOffset ?? 0} · exact literal</p>
+          <pre className="whitespace-pre-wrap break-words text-sm" aria-label={`Condition ${index + 1} original literal`}>{source.literal}</pre>
+        </div>) : <p role="alert">The original log literal is unavailable.</p>)}
+      </div> : <p>Reading original follow-up…</p>)}
   </div>;
 }
 
 function evidenceLabel(evidence: FollowupLeafEvidence): string {
+  if (evidence.kind === 'log_literal') return `${evidence.binding.subjectId} · ${evidence.stream} literal match · bytes ${evidence.start_offset}–${evidence.end_offset} (end exclusive) · ${evidence.published_bytes} published bytes · job revision ${evidence.job_revision}`;
+  if (evidence.kind === 'log_end') return `${evidence.binding.subjectId} · ${evidence.stream} ended · ${evidence.published_bytes} published bytes · attempt revision ${evidence.attempt_revision}${evidence.job_revision === null ? '' : ` · job revision ${evidence.job_revision}`}`;
   if (evidence.kind === 'file') return `${evidence.path} · ${evidence.proof} · ${evidence.state.kind}${evidence.state.kind === 'regular-file' ? ` · ${evidence.state.objectHash}` : ''}${evidence.position ? ` · watch ${evidence.position.generation}:${evidence.position.sequence}` : ''}${evidence.gap ? ' · observation gap' : ''}`;
   if (evidence.kind === 'artifact') {
     const fact = evidence.fact;
@@ -199,6 +246,8 @@ export function ThreadFollowups({ api, family, identity, run, operations, follow
   const [at, setAt] = React.useState(''); const [processId, setProcessId] = React.useState(''); const [jobId, setJobId] = React.useState('');
   const [artifactSelector, setArtifactSelector] = React.useState<SourceDraft['artifactSelector']>('any');
   const [artifactValue, setArtifactValue] = React.useState('');
+  const [stream, setStream] = React.useState<SourceDraft['stream']>('stdout');
+  const [literal, setLiteral] = React.useState(''); const [fromOffset, setFromOffset] = React.useState('');
   const [filePath, setFilePath] = React.useState(''); const [fileCondition, setFileCondition] = React.useState<SourceDraft['condition']>('exists');
   const [conditions, setConditions] = React.useState<SourceDraft[]>([emptySource(), { ...emptySource(), kind: 'process_stopped' }]);
   const [instruction, setInstruction] = React.useState(''); const [uncertain, setUncertain] = React.useState(false);
@@ -238,8 +287,8 @@ export function ThreadFollowups({ api, family, identity, run, operations, follow
     && ['thread', 'environment'].includes(operation.lifetime) && operation.call_completion?.kind === 'job_accepted');
   const process = processes.find(operation => operation.id === processId);
   const composite = kind === 'any' || kind === 'all';
-  const selected = composite ? conditions.map(value => sourceInput(value, processes, jobs)) : [sourceInput({ kind, at, processId, jobId, path: filePath, condition: fileCondition, artifactSelector, artifactValue }, processes, jobs)];
-  const repeatable = (value: FollowupRegistrationSource | null) => value?.kind === 'artifact' || value?.kind === 'collection' || (value?.kind === 'file' && value.condition === 'changed');
+  const selected = composite ? conditions.map(value => sourceInput(value, processes, jobs)) : [sourceInput({ kind, at, processId, jobId, path: filePath, condition: fileCondition, artifactSelector, artifactValue, stream, literal, fromOffset }, processes, jobs)];
+  const repeatable = (value: FollowupRegistrationSource | null) => value?.kind === 'log_literal' || value?.kind === 'artifact' || value?.kind === 'collection' || (value?.kind === 'file' && value.condition === 'changed');
   const repeatValid = repeat === 'once' || (kind === 'any' ? selected.some(repeatable) : selected.every(repeatable));
   const valid = repeatValid && instruction.trim().length > 0 && selected.every(value => value !== null) && (composite || kind !== 'process_stopped' ? Boolean(run) : Boolean(process));
   const register = () => {
@@ -252,7 +301,7 @@ export function ThreadFollowups({ api, family, identity, run, operations, follow
     return act(async () => {
       try {
         await api.register({ ...identity, ...original });
-        if (current()) { intent.current = null; setUncertain(false); setInstruction(''); setAt(''); setRepeat('once'); setFilePath(''); setArtifactSelector('any'); setArtifactValue(''); setConditions([emptySource(), { ...emptySource(), kind: 'process_stopped' }]); setEditing(false); }
+        if (current()) { intent.current = null; setUncertain(false); setInstruction(''); setAt(''); setRepeat('once'); setFilePath(''); setArtifactSelector('any'); setArtifactValue(''); setStream('stdout'); setLiteral(''); setFromOffset(''); setConditions([emptySource(), { ...emptySource(), kind: 'process_stopped' }]); setEditing(false); }
       } catch (error) { if (current()) setUncertain(true); throw error; }
     });
   };
@@ -276,21 +325,21 @@ export function ThreadFollowups({ api, family, identity, run, operations, follow
         onChange={event => setRepeat(event.target.value as typeof repeat)} className="ml-2 rounded border bg-background p-1">
         <option value="once">Once</option><option value="each">Each observed change</option>
       </select></label>
-      {repeat === 'each' && <p>Repeats for observed changes until cancelled. Changes while observation is unavailable may be missed.</p>}
+      {repeat === 'each' && <p>Repeats for accepted observations until cancelled or the conditions end. File changes while observation is unavailable may be missed.</p>}
       <label className="block">Trigger<select aria-label="Follow-up trigger" value={kind} disabled={pending || uncertain}
         onChange={event => setKind(event.target.value as typeof kind)} className="ml-2 rounded border bg-background p-1">
-        <option value="at">At a specific time</option><option value="process_stopped">After a process stops</option><option value="job_stopped">After an accepted job stops</option><option value="artifact">When an original research artifact is observed</option><option value="collection">After original research collection finishes</option><option value="file">When a file condition is met</option>
+        <option value="at">At a specific time</option><option value="process_stopped">After a process stops</option><option value="job_stopped">After an accepted job stops</option><option value="artifact">When an original research artifact is observed</option><option value="collection">After original research collection finishes</option><option value="log_literal">When a log literal matches</option><option value="log_end">When a log stream ends</option><option value="file">When a file condition is met</option>
         <option value="any">Any condition</option><option value="all">Every condition</option>
       </select></label>
       {composite ? <div className="space-y-2">
         <p>{repeat === 'once' ? 'Runs once when the selected conditions are met.'
-          : kind === 'any' ? 'Runs for each observed change. Time and stop conditions trigger once.'
+          : kind === 'any' ? 'Runs for each observed change. Time, stop and log-end conditions trigger once.'
           : 'Runs after every condition has a new observation.'}</p>
         {conditions.map((value, index) => <fieldset key={index} className="space-y-1 rounded border p-2">
           <legend>Condition {index + 1}</legend>
           <select aria-label={`Condition ${index + 1} kind`} value={value.kind} disabled={pending || uncertain}
             onChange={event => setConditions(values => values.map((item, i) => i === index ? { ...item, kind: event.target.value as SourceDraft['kind'] } : item))}>
-            <option value="at">At a specific time</option><option value="process_stopped">After a process stops</option><option value="job_stopped">After an accepted job stops</option><option value="artifact">When an original research artifact is observed</option><option value="collection">After original research collection finishes</option><option value="file">When a file condition is met</option>
+            <option value="at">At a specific time</option><option value="process_stopped">After a process stops</option><option value="job_stopped">After an accepted job stops</option><option value="artifact">When an original research artifact is observed</option><option value="collection">After original research collection finishes</option><option value="log_literal">When a log literal matches</option><option value="log_end">When a log stream ends</option><option value="file">When a file condition is met</option>
           </select>
           <SourceEditor value={value} onChange={next => setConditions(values => values.map((item, i) => i === index ? next : item))}
             processes={processes} jobs={jobs} disabled={pending || uncertain} repeating={repeat === 'each'} label={`Condition ${index + 1}`} />
@@ -298,8 +347,8 @@ export function ThreadFollowups({ api, family, identity, run, operations, follow
             onClick={() => setConditions(values => values.filter((_, i) => i !== index))}>Remove condition {index + 1}</Button>
         </fieldset>)}
         <Button variant="ghost" size="sm" disabled={pending || uncertain} onClick={() => setConditions(values => [...values, emptySource()])}>Add condition</Button>
-      </div> : <SourceEditor value={{ kind, at, processId, jobId, path: filePath, condition: fileCondition, artifactSelector, artifactValue }} onChange={value => { setAt(value.at); setProcessId(value.processId); setJobId(value.jobId); setFilePath(value.path); setFileCondition(value.condition); setArtifactSelector(value.artifactSelector); setArtifactValue(value.artifactValue); }} processes={processes} jobs={jobs} disabled={pending || uncertain} repeating={repeat === 'each'} />}
-      {!repeatValid && <p role="alert">{kind === 'any' ? 'Repeated Any requires at least one file-change, artifact or collection condition.' : kind === 'all' ? 'Repeated All requires every condition to be a file-change, artifact or collection condition.' : 'Repetition requires a file-change, artifact or collection condition.'}</p>}
+      </div> : <SourceEditor value={{ kind, at, processId, jobId, path: filePath, condition: fileCondition, artifactSelector, artifactValue, stream, literal, fromOffset }} onChange={value => { setAt(value.at); setProcessId(value.processId); setJobId(value.jobId); setFilePath(value.path); setFileCondition(value.condition); setArtifactSelector(value.artifactSelector); setArtifactValue(value.artifactValue); setStream(value.stream); setLiteral(value.literal); setFromOffset(value.fromOffset); }} processes={processes} jobs={jobs} disabled={pending || uncertain} repeating={repeat === 'each'} />}
+      {!repeatValid && <p role="alert">{kind === 'any' ? 'Repeated Any requires at least one file-change, artifact, collection or log-literal condition.' : kind === 'all' ? 'Repeated All requires every condition to be a file-change, artifact, collection or log-literal condition.' : 'Repetition requires a file-change, artifact, collection or log-literal condition.'}</p>}
       {needsJobs && !jobCandidates && !jobError && <p role="status">Reading accepted jobs…</p>}
       {needsJobs && jobError && <p role="alert">Accepted jobs could not be read. <Button variant="ghost" size="sm" disabled={pending || uncertain} onClick={() => setJobRetry(value => value + 1)}>Retry accepted jobs</Button></p>}
       <label className="block">Instruction<Textarea aria-label="Follow-up instruction" value={instruction} disabled={pending || uncertain}
@@ -319,16 +368,17 @@ export function ThreadFollowups({ api, family, identity, run, operations, follow
     </Button>}
     {independent.filter(item => showPast || !isPastFollowup(item)).map(item => {
       const ended = isPastFollowup(item);
+      const logFailed = item.sources.some(source => source.log?.failure_code);
       return <div key={item.id} className="space-y-1 rounded border p-3" aria-label={ended ? 'Past follow-up' : 'Pending follow-up'}>
         <p>{triggerLabel(item)}</p>
-        <p>{item.repeat === 'each' ? item.state === 'cancelled' ? 'Repeating authorization cancelled' : item.state === 'paused' ? 'Repeating authorization paused' : 'Continuing to observe changes' : 'One-time instruction'} · {item.pending_occurrences} undelivered {item.pending_occurrences === 1 ? 'occurrence' : 'occurrences'}</p>
-        {item.occurrence ? <div aria-label="Latest follow-up occurrence"><p className="text-xs text-muted-foreground">Latest occurrence</p><OccurrenceView key={item.occurrence.id} occurrence={item.occurrence} identity={identity} family={family} api={api} followupId={item.id} /></div> : <p>Waiting for the original trigger</p>}
+        <p>{item.repeat === 'each' ? item.state === 'cancelled' ? 'Repeating authorization cancelled' : item.state === 'paused' ? 'Repeating authorization paused' : item.exhausted ? 'Log observation ended' : 'Continuing to observe changes' : 'One-time instruction'} · {item.pending_occurrences} undelivered {item.pending_occurrences === 1 ? 'occurrence' : 'occurrences'}</p>
+        {item.occurrence ? <div aria-label="Latest follow-up occurrence"><p className="text-xs text-muted-foreground">Latest occurrence</p><OccurrenceView key={item.occurrence.id} occurrence={item.occurrence} identity={identity} family={family} api={api} followupId={item.id} /></div> : <p>{item.exhausted ? 'Log ended without satisfying the condition' : 'Waiting for the original trigger'}</p>}
         <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">Condition details</summary>
         {(item.trigger.kind === 'any' || item.trigger.kind === 'all') && <ul className="space-y-1 text-xs text-muted-foreground">
           {item.trigger.sources.map((source, index) => {
             const state = item.sources.find(state => state.source_index === index);
             const observed = state?.observed;
-            return <li key={index}>Condition {index + 1}: {sourceLabel(source)} · {observed ? `observed at event ${observed.trigger_cursor} · accepted ${observed.accepted_cursor} · consumed through ${state!.consumed_cursor}` : 'waiting'}</li>;
+            return <li key={index}>Condition {index + 1}: {sourceLabel(source)} · {state?.log ? logStateLabel(state) : observed ? `observed at event ${observed.trigger_cursor} · accepted ${observed.accepted_cursor} · consumed through ${state!.consumed_cursor}` : 'waiting'}</li>;
           })}
         </ul>}
         <p className="text-xs text-muted-foreground">{item.id} · registered by {item.actor.kind === 'agent' ? `Agent in ${item.actor.run_id}` : 'User'} · {item.state}</p>
@@ -339,17 +389,20 @@ export function ThreadFollowups({ api, family, identity, run, operations, follow
             {file.immutable && ' · fixed immutable source'}{file.gap && ' · observation gap; unavailable changes are not reconstructed'}
             {file.failure_code && ` · ${file.failure_code}`}{file.released && ' · observer released'}</p>;
         })}
+        {item.sources.filter(source => source.log !== null).map(source => <p key={source.source_index} className="text-xs text-muted-foreground" aria-label={`Log condition ${source.source_index + 1}`}>
+          Log condition {source.source_index + 1}: {logStateLabel(source)}
+        </p>)}
         <FollowupInstruction api={api} identity={identity} item={item} />
         <FollowupOccurrences api={api} family={family} identity={identity} item={item} />
         {!ended && <>
           {item.repeat === 'each' && <p className="text-xs text-muted-foreground">Cancel stops future and pending deliveries. Existing results and the observed job remain available.</p>}
           {item.state === 'active' && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void control(item, 'pause')}>Pause follow-up</Button>}
           {item.state === 'paused' ? <Button variant="ghost" size="sm" disabled={pending} onClick={() => void control(item, 'resume')}>Resume follow-up</Button>
-            : (item.repeat === 'each' || item.occurrence?.hold_reason === 'preparation_failed') && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void control(item, 'resume')}>{item.repeat === 'each' ? 'Retry undelivered occurrences' : 'Resume follow-up'}</Button>}
+            : (logFailed || item.repeat === 'each' || item.occurrence?.hold_reason === 'preparation_failed') && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void control(item, 'resume')}>{logFailed ? 'Retry log observation' : item.repeat === 'each' ? 'Retry undelivered occurrences' : 'Resume follow-up'}</Button>}
           <Button variant="ghost" size="sm" disabled={pending} onClick={() => void control(item, 'cancel')}>Cancel follow-up</Button>
         </>}
-        {item.observation && <div className="text-xs text-muted-foreground">Original Agent observation · {item.observation.state} · {item.observation.delivered ? 'result delivered' : 'result not delivered'}{item.repeat === 'each' && ' · observes only the first occurrence; ending this observation does not withdraw repeating authorization'}
-          {item.observation.state === 'waiting' && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void cancelObservation(item.observation!.operation_id)}>End follow-up observation</Button>}
+        {item.observation && <div className="text-xs text-muted-foreground">Original Agent observation · {item.observation.state === 'exhausted' ? 'ended without triggering' : item.observation.state} · {item.observation.delivered ? 'result delivered' : item.observation.delivery_pending ? 'result awaiting delivery' : 'no result pending delivery'}{item.repeat === 'each' && ' · observes only the first occurrence; ending this observation does not withdraw repeating authorization'}
+          {item.observation.state === 'waiting' && item.observation.delivery_pending && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void cancelObservation(item.observation!.operation_id)}>End follow-up observation</Button>}
         </div>}
       </div>;
     })}

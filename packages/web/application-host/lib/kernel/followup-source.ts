@@ -10,6 +10,7 @@ export function followupFilePaths(trigger: FollowupRegistrationTrigger): string[
   const sources = trigger.kind === 'any' || trigger.kind === 'all' ? trigger.sources : [trigger];
   return [...new Set(sources.flatMap(source => {
     if (source.kind !== 'file') return [];
+    if (typeof source.path !== 'string') throw new Error('File follow-up requires a string source path');
     const normalized = source.path.replace(/\\/g, '/');
     const segments = normalized.split('/');
     if (!normalized || normalized.includes('\0') || path.parse(normalized).root !== ''

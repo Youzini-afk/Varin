@@ -5,7 +5,7 @@ import { createThreadsHttpAPI } from '@varin/application-client';
 import type { ThreadIdentity } from '@varin/application-client';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { KernelClientError, type KernelClient } from './kernel-client.js';
-import type { HostJobSource, FollowupPendingRegistration, Followup, FollowupOccurrenceView, FollowupOccurrencesResult, Run } from './protocol.generated.js';
+import type { HostJobSource, FollowupPendingRegistration, Followup, FollowupOccurrenceView, FollowupOccurrencesResult, FollowupRegistrationTrigger, Run } from './protocol.generated.js';
 import { ThreadAdapter } from './thread-adapter.js';
 import { registerThreadRoutes } from './thread-routes.js';
 
@@ -15,10 +15,10 @@ const run: Run = { id: 'run:source', thread_id: identity.threadId, branch_id: id
 const operationId = 'operation:process';
 const trigger = { kind: 'process_stopped' as const, operationId };
 const instruction = '  Read the original process output.\nDo not start it again.  ';
-const definition: Followup = { repeat: 'once', pending_occurrences: 0, id: 'followup:process', revision: 1, generation: 1,
+const definition: Followup = { repeat: 'once', pending_occurrences: 0, exhausted: false, id: 'followup:process', revision: 1, generation: 1,
   thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: run.id,
   actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1_700_000_000_000, observation: null,
-  goal_id: null, trigger: { kind: 'process_stopped', operation_id: operationId }, sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 4, observed: null, file: null }], state: 'active',
+  goal_id: null, trigger: { kind: 'process_stopped', operation_id: operationId }, sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 4, observed: null, file: null, log: null }], state: 'active',
   wait: { id: 'wait:process', kind: 'process_stopped', after_cursor: 4, trigger_cursor: null, state: 'waiting' }, occurrence: null };
 
 /** These are transport contract tests: real HTTP/client/admission functions, with a controlled RPC boundary.
@@ -174,16 +174,12 @@ it('management routes enforce authentication, exact fields and revision conflict
   }
   expect(f.requests).not.toHaveBeenCalled();
   for (const body of [
-    { ...register, text: 'different work' }, { ...register, schedule: 'daily' }, { ...register, trigger: { kind: 'process_stopped', operationId: '' } },
-    { ...register, fileAuthority: { grantId: 'borrowed' } },
-    { ...register, trigger: { kind: 'file', path: 'out.txt', condition: 'exists', rootId: 'other' } },
+    { ...register, text: 'different work' }, { ...register, schedule: 'daily' },
+    { ...register, fileAuthority: { grantId: 'borrowed' } }, { ...register, grantId: 'borrowed' },
     { ...register, runtime: 'pi' }, { ...register, actor: { kind: 'user' } }, { ...register, wait: {} },
-    { ...register, trigger: { kind: 'at', atMs: -1 } }, { ...register, trigger: { kind: 'at', atMs: 1.5 } },
-    { ...register, trigger: { kind: 'at', atMs: 123, timeZone: 'UTC' } },
-    { ...register, trigger: { kind: 'any', sources: [] } },
-    { ...register, trigger: { kind: 'all', sources: [{ kind: 'any', sources: [{ kind: 'at', atMs: 0 }] }] } },
-    { ...register, trigger: { kind: 'all', sources: [{ kind: 'process_stopped', operationId: 'one', actor: 'user' }] } },
-    { ...register, trigger: { kind: 'any', sources: [{ kind: 'at', atMs: 0 }], repeat: true } },
+    { ...register, trigger: null }, { ...register, trigger: [] },
+    { ...register, trigger: { kind: 'any', sources: {} } },
+    { ...register, trigger: { kind: 'all', sources: [null] } },
     { ...register, repeat: true }, { ...register, repeat: 'daily' }, { ...register, repeat: null },
   ]) expect((await f.request('/api/threads/followup/register', body)).status).toBe(400);
   const control = { ...identity, followupId: definition.id, expectedRevision: 1, action: 'cancel' };
@@ -197,6 +193,53 @@ it('management routes enforce authentication, exact fields and revision conflict
     .rejects.toMatchObject({ status: 409, code: 'thread-conflict' });
   const response = await f.request('/api/threads/followup/control', control);
   expect(await response.json()).toEqual({ code: 'thread-conflict', error: 'Thread request could not be completed' });
+});
+
+it('public log registration preserves literal bytes, stream, offset and the original key after a lost HTTP reply', async () => {
+  const f = fixture();
+  const literal = { kind: 'log_literal' as const, operationId: 'accepted:job', stream: 'stdout' as const,
+    literal: ' \n准备 🧪\t ', fromOffset: 13 };
+  const end = { kind: 'log_end' as const, operationId: literal.operationId, stream: 'stderr' as const };
+  const triggers: FollowupRegistrationTrigger[] = [literal, { ...literal, literal: ' \t\n ' }, end,
+    { kind: 'any', sources: [literal, end] }, { kind: 'all', sources: [literal, end] }];
+  let loseReply = true;
+  vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+    const response = await f.request(new URL(url, 'http://fixture.invalid').pathname, JSON.parse(String(init.body)));
+    if (loseReply) { loseReply = false; throw new Error('acceptance reply lost'); }
+    return response;
+  });
+  const inputs = triggers.map((trigger, index) => ({ ...identity, key: `log-original-${index}`, runId: run.id, trigger, instruction }));
+  await expect(f.api.followups.register(inputs[0]!)).rejects.toThrow('acceptance reply lost');
+  for (const input of inputs) expect(await f.api.followups.register(input)).toEqual(f.facts.reply);
+  expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.followup.register').map(([, params]) => params))
+    .toEqual([inputs[0]!, ...inputs].map(({ key, runId, trigger, instruction }) => ({ key, runId, trigger, instruction })));
+  expect(f.issueGrant).not.toHaveBeenCalled();
+  expect(f.models.resolveModel).not.toHaveBeenCalled();
+});
+
+it('forwards nested condition decoding to the original owner while retaining safe file-path admission', async () => {
+  const f = fixture();
+  const input = { ...identity, key: 'owner-decodes', runId: run.id, instruction };
+  f.facts.registerError = true;
+  // This controlled RPC only returns an owner error; Rust's real invalid-input
+  // tests own rejection semantics. The HTTP layer must not strip unknown fields.
+  for (const trigger of [
+    { kind: 'unknown', extra: 'preserved' },
+    { kind: 'log_literal', operationId: 'accepted:job', stream: 'stdout', literal: '', fromOffset: -1 },
+    { kind: 'any', sources: [], repeat: true },
+    { kind: 'all', sources: [{ kind: 'any', sources: [] }] },
+  ]) {
+    const response = await f.request('/api/threads/followup/register', { ...input, trigger });
+    expect(response.status).toBe(400);
+    expect(f.requests.mock.calls.at(-1)!.slice(0, 2)).toEqual(['runtime.followup.register', { key: input.key, runId: run.id, instruction, trigger }]);
+  }
+  f.requests.mockClear();
+  for (const path of [null, 7, '', '../outside', '/absolute', '.']) {
+    expect((await f.request('/api/threads/followup/register', { ...input,
+      trigger: { kind: 'file', path, condition: 'changed' } })).status).toBe(400);
+  }
+  expect(f.issueGrant).not.toHaveBeenCalled();
+  expect(f.requests.mock.calls.some(([method]) => method === 'runtime.followup.register')).toBe(false);
 });
 
 
@@ -238,6 +281,7 @@ it('User file follow-ups admit only original-source exact reads and retire fresh
     trigger: { kind: 'all' as const, sources: [
       { kind: 'file' as const, path: 'results\\output.txt', condition: 'changed' as const },
       { kind: 'file' as const, path: 'results/output.txt', condition: 'ready' as const },
+      { kind: 'log_literal' as const, operationId: 'accepted:job', stream: 'stdout' as const, literal: 'ready' },
       { kind: 'at' as const, atMs: 0 },
     ] } };
   await f.api.followups.register(input);
@@ -359,18 +403,7 @@ it('routes artifact selectors and independent collection conditions without chan
     expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.followup.register').at(-1)?.[1])
       .toEqual({ key: body.key, runId: run.id, trigger, repeat: 'each', instruction });
   }
-  f.requests.mockClear();
-  for (const trigger of [
-    { kind: 'artifact', operationId: '', artifactId: 'a' },
-    { kind: 'artifact', operationId: 'job', artifactId: 'a', name: 'same' },
-    { kind: 'artifact', operationId: 'job', artifactId: null },
-    { kind: 'artifact', operationId: 'job', name: '' },
-    { kind: 'artifact', operationId: 'job', artifact_id: 'private' },
-    { kind: 'artifact', operationId: 'job', workspaceId: 'forged' },
-    { kind: 'collection', operationId: 'job', name: 'not-a-selector' },
-    { kind: 'collection', operationId: 'job', completionRevision: 9 },
-  ]) expect((await f.request('/api/threads/followup/register', { ...identity, key: 'invalid', runId: run.id, trigger, instruction })).status).toBe(400);
-  expect(f.requests).not.toHaveBeenCalled(); expect(f.issueGrant).not.toHaveBeenCalled(); expect(f.models.resolveModel).not.toHaveBeenCalled();
+  expect(f.issueGrant).not.toHaveBeenCalled(); expect(f.models.resolveModel).not.toHaveBeenCalled();
 });
 
 it('reads only the exact original occurrence metadata through the public API and short branch authorization', async () => {

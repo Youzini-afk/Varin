@@ -13,7 +13,7 @@ const deferred = () => { let resolve!: () => void; const promise = new Promise<v
 const source = { workspace_id: 'observer-workspace', execution_workspace_id: 'observer-execution', mode: 'fixed_branch' as const, branch_id: 'fixed', revision: 3, live_root: null };
 const binding: HostJobBinding = { operationId: 'original-job', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'target-workspace', subjectId: 'attempt' };
 const observer: FollowupResearchWork['observer'] = { rootThreadId: 'parent', threadId: 'child', branchId: 'child-branch', sourceRunId: 'child-source', source, canSubmit: true, readThreadIds: ['parent', 'child'], controlThreadIds: ['child'] };
-const work = (kind: 'artifact' | 'collection'): FollowupResearchWork => ({ key: { followupId: kind, generation: 1, sourceIndex: 0, definitionRevision: 1, ownerEpoch: 1 }, binding, observer, source: { kind, operation_id: binding.operationId } });
+const work = (kind: 'artifact' | 'collection'): FollowupResearchWork => ({ key: { followupId: kind, generation: 1, sourceIndex: 0, definitionRevision: 1, ownerEpoch: 1 }, binding, observer, log: null, source: { kind, operation_id: binding.operationId } });
 
 it('continues original research leaves after Job pending is empty and preserves hints received inside the metadata read', async () => {
   const entered = deferred(), release = deferred(); let hints = () => {}; let events = () => {}; let reads = 0, version = 1;

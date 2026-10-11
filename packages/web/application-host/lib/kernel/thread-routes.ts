@@ -1,4 +1,4 @@
-import type { FamilyRunsParams, FamilyReadParams, FamilyItemParams, FollowupRegistrationSource, FollowupRegistrationTrigger } from '@varin/protocol';
+import type { FamilyRunsParams, FamilyReadParams, FamilyItemParams, FollowupRegistrationTrigger } from '@varin/protocol';
 import { PlanConflict } from './plan-service.js';
 import { parseThreadImages } from './thread-images.js';
 import type { Express, RequestHandler } from 'express';
@@ -31,35 +31,15 @@ const familyRequest = <T>(value: unknown): Omit<T, 'callerThreadId'> => {
   if ('callerThreadId' in request) throw new Error('Family caller is the authenticated Thread identity');
   return request as Omit<T, 'callerThreadId'>;
 };
-const followupSource = (value: unknown): FollowupRegistrationSource => {
-  const trigger = object(value);
-  if (trigger.kind === 'at' && Object.keys(trigger).every(key => key === 'kind' || key === 'atMs')
-    && Number.isSafeInteger(trigger.atMs) && Number(trigger.atMs) >= 0) {
-    return { kind: 'at', atMs: Number(trigger.atMs) };
-  }
-  if ((trigger.kind === 'process_stopped' || trigger.kind === 'job_stopped' || trigger.kind === 'collection') && Object.keys(trigger).every(key => key === 'kind' || key === 'operationId')) {
-    return { kind: trigger.kind, operationId: text(trigger.operationId) };
-  }
-  if (trigger.kind === 'artifact' && Object.keys(trigger).every(key => ['kind', 'operationId', 'artifactId', 'name'].includes(key))
-    && !('artifactId' in trigger && 'name' in trigger)) {
-    return { kind: 'artifact', operationId: text(trigger.operationId),
-      ...('artifactId' in trigger ? { artifactId: text(trigger.artifactId) } : {}),
-      ...('name' in trigger ? { name: text(trigger.name) } : {}) };
-  }
-  if (trigger.kind === 'file' && Object.keys(trigger).every(key => ['kind', 'path', 'condition'].includes(key))
-    && (trigger.condition === 'exists' || trigger.condition === 'changed' || trigger.condition === 'ready')) {
-    return { kind: 'file', path: text(trigger.path), condition: trigger.condition };
-  }
-  throw new Error('Invalid follow-up trigger');
-};
+/** Rust owns leaf decoding and condition semantics. Host needs only a safe flat
+ * traversal to acquire original-source authority for actual file paths. */
 const followupTrigger = (value: unknown): FollowupRegistrationTrigger => {
   const trigger = object(value);
   if (trigger.kind === 'any' || trigger.kind === 'all') {
-    if (Object.keys(trigger).some(key => key !== 'kind' && key !== 'sources')
-      || !Array.isArray(trigger.sources) || !trigger.sources.length) throw new Error('Follow-up conditions are required');
-    return { kind: trigger.kind, sources: trigger.sources.map(followupSource) };
+    if (!Array.isArray(trigger.sources)) throw new Error('Follow-up conditions must be an array');
+    for (const source of trigger.sources) object(source);
   }
-  return followupSource(trigger);
+  return trigger as unknown as FollowupRegistrationTrigger;
 };
 const goalBudget = (value: unknown): { maxOutputTokens: number } | null => {
   if (value === null) return null;

@@ -19,6 +19,15 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-11 增量：原研究日志条件与真实接续
+
+- 普通 follow_up **版本7** 与 User/API/UI 接入原 accepted Job 的 stdout/stderr `log_literal`、`log_end`，独立或 flat Any/All。literal 按精确 UTF-8 字节、默认从0读取已发布历史；each 包含重叠命中。EOF 只认真实输出排空，空流可结束，产物收集独立，未来offset不倒退。
+- 原 ExperimentService 的 Job 字节高水位 CAS 是发布权威，Storage 原 chunk 索引/对象是唯一字节来源；Catalog 只存短 offset/prefix/ended 与原事件、发生项。每次游标和最多一个命中原子提交，恢复保重叠余项；原 command intent/ContentStore 保存 literal，公开详情锁外读取、原 GC 保活。Catalog **41**、Storage **14** 直接拒旧，不加日志库/观察作业。
+- 无匹配EOF不造 input；原队列派生耗尽，保未配对 All 事实及已受理发生项，不能继续的组合释放原 watch/timer/其他领域观察。原 Wait 独立结算，先有匹配后EOF不篡改首个事件；失败旧Run的 delivery_pending 从原状态派生，保真实 delivered=false，不再让不可交付结果永久占活动区。
+- 独审还以真实client→Host route反例找出旧手抄trigger名单的400拒绝；本片删除该重复嵌套decoder，保认证/外层身份/实际file path准入，合法性回原Rust。新增trigger有限入口映射及原route→decoder复验完成，没有另补授权名单或裁掉非法字段。两确认反例均修后通过，独审接受。
+- 广Rust runtime **442/0、2 ignored**、kernel **144/0、11 ignored** 在末尾两项小修前通过；最终受影响 followup **58/58**、真实child双origin Wait六路径、all-targets、fresh binary guardian **1/1**、Host原组合 **53/53**与最终route **14/14**、UI **59/59**、types/lint/协议/生产bundle均通过。原Service→字节reader→matcher→控制/通知跨owner独立probe通过。真实完整HTTP/IPC/process→新Run→重开用例已添加并类型检查，本环境未执行；准确同源/证据边界见[日志条件验收与复跑](../reviews/runtime-log-followups-2026-10-11.md)。
+- 下一步继续指标与Computer/环境、Web/材料/Bot、MCP/script和来源/检索/上下文/provider等两设计余项。各层通过不相加冒称完整产品/平台/性能验收；用户最终默认切换/Pi与资产迁移分工保持。
+
 ## 2026-10-11 增量：真实运行时预设与独立设置入口
 
 - 原 settings.json、SettingsManager 和 revision CAS 继续唯一拥有配置。原工具数组保持显式用户选择；同一字段可分别选择 Pi/Agent，空数组、缺失运行时、自定义和发行默认各有明确语义。Rust owning declarations 同时投影实际 schema、来源要求和默认成员，删除 Native 设置依赖 Pi provider 的入口错位，没有新增工具白名单、配置库或 grant。

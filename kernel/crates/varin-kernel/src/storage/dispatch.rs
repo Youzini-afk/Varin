@@ -96,6 +96,9 @@ impl Storage {
             "storage.record.get" => {
                 storage.domain_record_get(authorized_params, grant_id.unwrap_or(""))
             }
+            "storage.experiment.logChunks" => {
+                storage.experiment_log_chunk_page(authorized_params, grant_id.unwrap_or(""))
+            }
             "storage.experiment.artifacts" => {
                 storage.experiment_artifact_page(authorized_params, grant_id.unwrap_or(""))
             }

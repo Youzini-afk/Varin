@@ -463,6 +463,9 @@ export class KernelScopedClient {
     return this.owner.getRecord({ workspaceId, recordId }, this.grant, signal);
   }
 
+  experimentLogChunks(params: KernelMethodParams["storage.experiment.logChunks"], signal?: AbortSignal): Promise<import("./protocol.generated.js").KernelExperimentLogChunksResult> {
+    return this.owner.experimentLogChunks(params, this.grant, signal);
+  }
   experimentArtifacts(params: KernelMethodParams["storage.experiment.artifacts"], signal?: AbortSignal): Promise<import("./protocol.generated.js").KernelExperimentArtifactsResult> {
     return this.owner.experimentArtifacts(params, this.grant, signal);
   }
@@ -1700,6 +1703,9 @@ export class KernelClient {
     return this.requestRaw<KernelRecordResult | null>("storage.record.get", params, { signal, grant });
   }
 
+  async experimentLogChunks(params: KernelMethodParams["storage.experiment.logChunks"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<import("./protocol.generated.js").KernelExperimentLogChunksResult> {
+    return this.requestRaw("storage.experiment.logChunks", params, { signal, grant });
+  }
   async experimentArtifacts(params: KernelMethodParams["storage.experiment.artifacts"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<import("./protocol.generated.js").KernelExperimentArtifactsResult> {
     return this.requestRaw("storage.experiment.artifacts", params, { signal, grant });
   }

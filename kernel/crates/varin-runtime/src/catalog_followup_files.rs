@@ -284,15 +284,15 @@ pub(super) fn observe_registration(
     }
     Ok(())
 }
-fn release_required(d: &Definition, index: usize) -> bool {
-    d.state == FollowupState::Cancelled
+fn release_required(db: &Connection, d: &Definition, index: usize) -> Result<bool> {
+    Ok(sources::exhausted(db, d)? || d.state == FollowupState::Cancelled
         || (d.repeat == FollowupRepeat::Once && d.wait.state != NextRunWaitState::Waiting)
         || (d.sources[index].observed.is_some()
             && !(d.repeat == FollowupRepeat::Each && d.trigger.sources()[index].repeatable()))
         || d.sources[index]
             .file
             .as_ref()
-            .is_some_and(|f| f.failure_code.as_deref() == Some("authority_revoked"))
+            .is_some_and(|f| f.failure_code.as_deref() == Some("authority_revoked")))
 }
 fn work(db: &Connection, d: &Definition, index: usize, epoch: u64) -> Result<FileObservationWork> {
     let source = d
@@ -338,7 +338,7 @@ fn work(db: &Connection, d: &Definition, index: usize, epoch: u64) -> Result<Fil
             intent_ref: serde_json::from_str(&intent)?,
         },
         file,
-        release_required: release_required(d, index),
+        release_required: release_required(db, d, index)?,
         epoch,
         definition_revision: d.revision,
         paused: d.state == FollowupState::Paused,
@@ -535,7 +535,7 @@ impl Catalog {
     pub fn confirm_file_observation_released(&mut self, key: &FileObservationKey) -> Result<()> {
         let tx = self.db.transaction()?;
         let mut d: Definition = record(&tx, "followups", &key.followup_id)?;
-        if d.generation != key.generation || !release_required(&d, key.source_index) {
+        if d.generation != key.generation || !release_required(&tx, &d, key.source_index)? {
             return Err(RuntimeError::Conflict(
                 "file observation is still required".into(),
             ));

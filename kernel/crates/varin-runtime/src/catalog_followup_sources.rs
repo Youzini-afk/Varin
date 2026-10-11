@@ -6,6 +6,17 @@ use super::*;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum FollowupSource {
+    LogLiteral {
+        operation_id: String,
+        stream: LogStream,
+        from_offset: u64,
+        literal_bytes: u64,
+    },
+    LogEnd {
+        operation_id: String,
+        stream: LogStream,
+    },
+
     At {
         at_ms: u64,
     },
@@ -33,6 +44,22 @@ pub enum FollowupSource {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum FollowupLeafEvidence {
+    LogLiteral {
+        binding: host_jobs::HostJobBinding,
+        stream: LogStream,
+        start_offset: u64,
+        end_offset: u64,
+        published_bytes: u64,
+        job_revision: u64,
+    },
+    LogEnd {
+        binding: host_jobs::HostJobBinding,
+        stream: LogStream,
+        published_bytes: u64,
+        job_revision: Option<u64>,
+        attempt_revision: u64,
+    },
+
     Artifact {
         binding: host_jobs::HostJobBinding,
         fact: FollowupArtifactFact,
@@ -86,6 +113,7 @@ pub struct FollowupSourceState {
     pub consumed_cursor: u64,
     pub observed: Option<FollowupSourceObservation>,
     pub file: Option<FollowupFileSourceState>,
+    pub log: Option<FollowupLogState>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -99,7 +127,8 @@ impl FollowupSource {
     pub(super) fn repeatable(&self) -> bool {
         matches!(
             self,
-            Self::Artifact { .. }
+            Self::LogLiteral { .. }
+                | Self::Artifact { .. }
                 | Self::Collection { .. }
                 | Self::File {
                     condition: FileCondition::Changed,
@@ -111,6 +140,10 @@ impl FollowupSource {
 impl FollowupTrigger {
     pub fn sources(&self) -> Vec<FollowupSource> {
         match self {
+            Self::LogLiteral { operation_id, stream, from_offset, literal_bytes } => vec![FollowupSource::LogLiteral {
+                operation_id: operation_id.clone(), stream: *stream, from_offset: *from_offset, literal_bytes: *literal_bytes,
+            }],
+            Self::LogEnd { operation_id, stream } => vec![FollowupSource::LogEnd { operation_id: operation_id.clone(), stream: *stream }],
             Self::Artifact {
                 operation_id,
                 artifact_id,
@@ -210,7 +243,9 @@ fn observe_leaf(
     let (trigger_cursor, evidence) = match source {
         FollowupSource::File { .. }
         | FollowupSource::Artifact { .. }
-        | FollowupSource::Collection { .. } => return Ok(None),
+        | FollowupSource::Collection { .. }
+        | FollowupSource::LogLiteral { .. }
+        | FollowupSource::LogEnd { .. } => return Ok(None),
         FollowupSource::At { at_ms } => {
             if now < *at_ms {
                 return Ok(None);
@@ -451,6 +486,12 @@ pub(super) fn observe_sources(
         FollowupTrigger::Any { .. } => TriggerEvidence::Any { sources: observed },
         FollowupTrigger::All { .. } => TriggerEvidence::All { sources: observed },
         _ => match &observed[0].evidence {
+            FollowupLeafEvidence::LogLiteral { binding, stream, start_offset, end_offset, published_bytes, job_revision } => TriggerEvidence::LogLiteral {
+                binding: binding.clone(), stream: *stream, start_offset: *start_offset, end_offset: *end_offset, published_bytes: *published_bytes, job_revision: *job_revision,
+            },
+            FollowupLeafEvidence::LogEnd { binding, stream, published_bytes, job_revision, attempt_revision } => TriggerEvidence::LogEnd {
+                binding: binding.clone(), stream: *stream, published_bytes: *published_bytes, job_revision: *job_revision, attempt_revision: *attempt_revision,
+            },
             FollowupLeafEvidence::Artifact { binding, fact, gap } => TriggerEvidence::Artifact {
                 binding: binding.clone(),
                 fact: fact.clone(),
@@ -569,7 +610,9 @@ fn leaf_settled(db: &Connection, evidence: &FollowupLeafEvidence) -> Result<bool
         FollowupLeafEvidence::At { .. }
         | FollowupLeafEvidence::File { .. }
         | FollowupLeafEvidence::Artifact { .. }
-        | FollowupLeafEvidence::Collection { .. } => Ok(true),
+        | FollowupLeafEvidence::Collection { .. }
+        | FollowupLeafEvidence::LogLiteral { .. }
+        | FollowupLeafEvidence::LogEnd { .. } => Ok(true),
         FollowupLeafEvidence::JobStopped {
             binding,
             receipt_identity,
@@ -622,23 +665,78 @@ pub(super) fn evidence_settled(db: &Connection, evidence: &TriggerEvidence) -> R
     }
 }
 pub(super) fn nearest_deadline(db: &Connection) -> Result<Option<u64>> {
-    // Read just the persisted clock-leaf cursors. A malformed independent definition is
-    // reported by fact reconciliation; it must not disarm unrelated Wait deadlines.
-    let next: Option<i64> = db.query_row(
-        "SELECT min(CASE json_extract(f.body,'$.trigger.kind')
+    // Candidate clock facts stay in their original rows. The same exhaustion
+    // projection suppresses impossible All timers as well as external readers.
+    let mut query = db.prepare(
+        "SELECT f.body,min(CASE json_extract(f.body,'$.trigger.kind')
             WHEN 'at' THEN json_extract(f.body,'$.trigger.at_ms')
-            ELSE json_extract(f.body,'$.trigger.sources[' || json_extract(s.value,'$.source_index') || '].at_ms') END)
+            ELSE json_extract(f.body,'$.trigger.sources[' || json_extract(s.value,'$.source_index') || '].at_ms') END) AS deadline
          FROM followups f JOIN json_each(f.body,'$.sources') s
          WHERE json_extract(f.body,'$.wait.state')='waiting'
            AND json_extract(f.body,'$.state')!='cancelled'
            AND json_extract(s.value,'$.observed') IS NULL
            AND ((json_extract(f.body,'$.trigger.kind')='at' AND json_extract(s.value,'$.source_index')=0)
              OR (json_extract(f.body,'$.trigger.kind') IN ('any','all')
-               AND json_extract(f.body,'$.trigger.sources[' || json_extract(s.value,'$.source_index') || '].kind')='at'))",
-        [], |row| row.get(0),
-    )?;
-    next.map(|n| {
-        u64::try_from(n).map_err(|_| RuntimeError::Invalid("negative follow-up deadline".into()))
+               AND json_extract(f.body,'$.trigger.sources[' || json_extract(s.value,'$.source_index') || '].kind')='at'))
+         GROUP BY f.id ORDER BY deadline")?;
+    for row in query.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?))
+    })? {
+        let (raw, deadline) = row?;
+        // Reconciliation reports a malformed independent definition without
+        // disarming an unrelated valid deadline.
+        let Ok(d) = serde_json::from_str::<Definition>(&raw) else {
+            continue;
+        };
+        if exhausted(db, &d)? {
+            continue;
+        }
+        if let Some(deadline) = deadline {
+            return Ok(Some(u64::try_from(deadline).map_err(|_| {
+                RuntimeError::Invalid("negative follow-up deadline".into())
+            })?));
+        }
+    }
+    Ok(None)
+}
+
+/// Exhaustion is a projection of the original queues, never a second terminal ledger.
+/// Pending facts can still complete an All round even after their stream has ended.
+pub(super) fn exhausted(db: &Connection, d: &Definition) -> Result<bool> {
+    if d.state == FollowupState::Cancelled
+        || (d.repeat == FollowupRepeat::Once && d.wait.state != NextRunWaitState::Waiting)
+    {
+        return Ok(false);
+    }
+    if !d
+        .sources
+        .iter()
+        .any(|s| s.log.as_ref().is_some_and(|l| l.ended))
+    {
+        return Ok(false);
+    }
+    let sources = d.trigger.sources();
+    if sources.is_empty() {
+        return Ok(false);
+    }
+    let mut impossible = Vec::with_capacity(sources.len());
+    for (index, source) in sources.iter().enumerate() {
+        let pending = if d.repeat == FollowupRepeat::Each {
+            next_observation(db, d, index)?.is_some()
+        } else {
+            d.sources[index].observed.is_some()
+        };
+        let ended = match source {
+            FollowupSource::LogLiteral { .. } | FollowupSource::LogEnd { .. } => {
+                d.sources[index].log.as_ref().is_some_and(|l| l.ended)
+            }
+            _ => !source.repeatable() && d.sources[index].observed.is_some(),
+        };
+        impossible.push(!pending && ended);
+    }
+    Ok(if matches!(d.trigger, FollowupTrigger::All { .. }) {
+        impossible.into_iter().any(|v| v)
+    } else {
+        impossible.into_iter().all(|v| v)
     })
-    .transpose()
 }

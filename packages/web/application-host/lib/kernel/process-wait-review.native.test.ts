@@ -21,6 +21,10 @@ import { ExistingHostCredentialOwner } from './credential-owner.js';
 import { ThreadAdapter } from './thread-adapter.js';
 import { registerThreadRoutes } from './thread-routes.js';
 import { registerCommonRequestMiddleware } from '../platform/core-routes.js';
+import { createResourceService } from '../harness/resources.js';
+import { createSourceService } from '../harness/sources.js';
+import { createExperimentService } from '../harness/experiments.js';
+import { createResearchRuntime, createResearchSourceAuthority } from './research-runtime.js';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
 const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.join(repository, 'kernel/target/release', process.platform === 'win32' ? 'varin-kernel.exe' : 'varin-kernel');
@@ -43,7 +47,7 @@ async function listen(server: Server) {
   cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
   return `http://127.0.0.1:${address.port}`;
 }
-async function fixture(reply: (body: Record<string, unknown>, response: ServerResponse) => void, existingRoot?: string) {
+async function fixture(reply: (body: Record<string, unknown>, response: ServerResponse) => void, existingRoot?: string, withResearch = false) {
   await fs.access(kernelPath);
   const root = existingRoot ?? await fs.mkdtemp(path.join(os.tmpdir(), 'varin-http-review-'));
   const kernel = createKernelClient({ hostId: 'http-review', storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
@@ -75,9 +79,12 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const resources = resourceScopeFixture(root, workingStates, documents);
   const prepare = createThreadSourcePreparer({ documents, workingStates, prepareResources: resources.prepareSourceCapture });
   const context = contextOwner(kernel, resources);
+  let research: ReturnType<typeof createResearchRuntime> | undefined;
+  let experiments: ReturnType<typeof createExperimentService> | undefined;
   let closed = false; let kernelClosed = false;
   const closeKernel = async () => { kernelClosed = true; await kernel.close(); };
   const close = async () => { if (closed) return; closed = true;
+    await research?.dispose(); await experiments?.dispose();
     try { if (!kernelClosed) await storage.dispose(); } finally { await documents.dispose(); await closeKernel(); } };
   cleanups.push(close);
 
@@ -88,6 +95,20 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
     },
     rebindModel: async () => owner,
   }, async source => { await documents.inspectWorkspace(source.workspaceId); await documents.inspectWorkspace(source.executionWorkspaceId); }, (_runId, error) => { launchErrors.push(error); }, prepare, context.prepareContext);
+  if (withResearch) {
+    const computeResources = createResourceService({ client: kernel,
+      probeLocalGpu: async () => ({ status: 'unavailable', reason: 'no-device' }),
+      onError: error => { launchErrors.push(error); } });
+    const sources = createSourceService({ client: kernel });
+    experiments = createExperimentService({ client: kernel, resources: computeResources, sources,
+      sourceAuthority: createResearchSourceAuthority({ kernel, runtime: () => adapter.runtime,
+        resolveLiveSource: async () => { throw new Error('This fixture uses its admitted materialized source'); } }),
+      resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root,
+      onError: error => { launchErrors.push(error); } });
+    research = createResearchRuntime({ kernel, runtime: adapter.runtime, experiments, sources,
+      resources: computeResources, onError: error => { launchErrors.push(error); } });
+    research.start();
+  }
   const collaboration = new ThreadCollaboration({ kernel, storageAdapter: storage, resolveLiveSource: async () => { throw new Error("No live child expected"); }, sourceCaptureOwners: { documents, prepareResources: resources.prepareSourceCapture, inspectInventory: async () => { throw new Error("No child capture expected"); } }, runtime: adapter.runtime, workingStates,
     continueRun: (runId, signal) => adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => adapter.recover(signal),
     prepareContext: context.prepareContext,
@@ -98,11 +119,11 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   registerThreadRoutes(app, adapter, (request, response, next) => {
     if (request.headers['x-fixture-auth'] !== 'fixture-client') { response.status(401).json({ error: 'authentication required' }); return; }
     next();
-  });
+  }, research?.user);
   const hostUrl = await listen(createServer(app));
   configureRuntimeUrlResolver({ apiBaseUrl: hostUrl, realtimeBaseUrl: hostUrl });
   setRuntimeExtraHeaders({ 'x-fixture-auth': 'fixture-client' });
-  return { adapter, workspace, documents, storage, workingStates, close, kernel, grants, collaboration, owner, configuration, context, api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel };
+  return { adapter, workspace, documents, storage, workingStates, close, kernel, grants, collaboration, owner, configuration, context, api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel, research };
 }
 
 function tool(response: ServerResponse, name: string, args: Record<string, unknown>, serial: number) {
@@ -201,6 +222,80 @@ it.each(['none', 'original', 'current'] as const)('durable wait resumes with exa
     await fs.writeFile(path.join(f.root, 'release-process'), 'release');
     if (processId) await f.runtime.cancelOperation(processId).catch(() => undefined);
   }
+}, 60_000);
+
+it('original research log bytes and drained stderr jointly resume one new Run and remain consumed after restart', async () => {
+  const inputs: string[] = [];
+  const f = await fixture((body, response) => { inputs.push(JSON.stringify(body.input)); done(response); }, undefined, true);
+  const identity = await f.api.create('research-log-continuation');
+  await fs.writeFile(path.join(f.workspace, 'input.txt'), 'original experiment source');
+  const prepared = await f.api.prepareSource({ ...identity, key: 'research-log-source', path: f.workspace, mode: 'materialized' });
+  const original = await f.api.submit({ ...identity, key: 'research-log-owner', expectedHead: null,
+    text: 'Prepare this work for a later log condition.', model, source: prepared.source });
+  await expect.poll(async () => (await f.runtime.run(original.run_id)).state, { timeout: 15_000 }).toBe('completed');
+  f.collaboration.stop();
+  const selection = { ...identity, sourceRunId: original.run_id };
+  const release = path.join(f.root, 'release-research-log');
+  const spawnCount = path.join(f.root, 'research-log-spawn-count');
+  cleanups.push(async () => { await fs.writeFile(release, 'finish original test process'); });
+  const accepted = await f.api.research!.submit(selection, {
+    requestId: 'original-log-job', command: process.execPath,
+    args: ['-e', `const fs=require('node:fs');const gate=${JSON.stringify(release)};fs.appendFileSync(${JSON.stringify(spawnCount)},'1');process.stdout.write('λab');let finished=false;const watch=fs.watch(${JSON.stringify(f.root)},()=>finish());function finish(){if(finished||!fs.existsSync(gate))return;finished=true;watch.close();process.stdout.write('aba!');}finish();`],
+  });
+  try {
+    await expect.poll(async () => (await f.api.research!.logs(selection, { attemptId: accepted.attempt.attemptId })).text,
+      { timeout: 15_000 }).toBe('λab');
+    const jobs = await f.api.followups.jobSources(identity, original.run_id);
+    const job = jobs.find(item => item.binding.subjectId === accepted.attempt.attemptId)!;
+    expect(job).toBeDefined();
+    expect(job.observationKinds).toEqual(expect.arrayContaining(['log_literal', 'log_end']));
+    const command = { ...identity, key: 'both-original-log-facts', runId: original.run_id,
+      trigger: { kind: 'all' as const, sources: [
+        { kind: 'log_literal' as const, operationId: job.binding.operationId, stream: 'stdout' as const, literal: 'aba', fromOffset: 0 },
+        { kind: 'log_end' as const, operationId: job.binding.operationId, stream: 'stderr' as const },
+      ] }, instruction: 'Inspect the original matching log after its empty stderr is genuinely drained. Do not resubmit the job.' };
+    const registered = await f.api.followups.register(command);
+    await f.research!.reconcile();
+    expect((await f.api.followups.get(identity, registered.id)).registration_trigger).toEqual(command.trigger);
+    expect((await f.api.followups.list(identity)).find(item => item.id === registered.id)?.occurrence).toBeNull();
+    expect((await f.api.research!.logs(selection, { attemptId: accepted.attempt.attemptId, stream: 'stderr' })).eof).toBe(false);
+    await fs.writeFile(release, 'continue original process');
+    await expect.poll(async () => Boolean((await f.api.followups.list(identity)).find(item => item.id === registered.id)?.occurrence?.delivery?.run_id),
+      { timeout: 20_000 }).toBe(true);
+    const observed = (await f.api.followups.list(identity)).find(item => item.id === registered.id)!;
+    const occurrence = observed.occurrence!;
+    const delivery = occurrence.delivery!;
+    expect(occurrence.evidence).toMatchObject({ kind: 'all', sources: [
+      { source_index: 0, evidence: { kind: 'log_literal', stream: 'stdout', start_offset: 2, end_offset: 5, binding: job.binding } },
+      { source_index: 1, evidence: { kind: 'log_end', stream: 'stderr', published_bytes: 0, binding: job.binding } },
+    ] });
+    expect(delivery.run_id).not.toBe(original.run_id);
+    expect((await f.api.research!.logs(selection, { attemptId: accepted.attempt.attemptId })).text).toBe('λababa!');
+    expect((await f.api.research!.logs(selection, { attemptId: accepted.attempt.attemptId, stream: 'stderr' })).eof).toBe(true);
+    await f.adapter.recover();
+    await expect.poll(async () => (await f.runtime.run(delivery.run_id!)).state, { timeout: 15_000 }).toBe('completed');
+    expect(inputs).toHaveLength(2);
+    expect(inputs[1]).toContain(command.instruction);
+    expect(inputs[1]).toContain('log_literal');
+    expect((await f.runtime.history(identity.branchId)).filter(item => item.id === delivery.input_id)).toHaveLength(1);
+    expect(await fs.readFile(spawnCount, 'utf8')).toBe('1');
+    // Join any automatic collection before teardown; held-collector tests establish EOF independence.
+    await f.api.research!.collect(selection, accepted.attempt.attemptId);
+    expect(f.launchErrors).toEqual([]);
+
+    await f.close();
+    const reopened = await fixture((_body, response) => done(response), f.root, true);
+    await reopened.adapter.recover();
+    await reopened.research!.reconcile();
+    const retained = await reopened.api.followups.register(command);
+    expect(retained.occurrence?.id).toBe(occurrence.id);
+    expect(retained.occurrence?.delivery).toMatchObject({ input_id: delivery.input_id, run_id: delivery.run_id, state: 'delivered' });
+    expect((await reopened.api.followups.occurrences(identity, registered.id)).occurrences).toHaveLength(1);
+    expect((await reopened.runtime.history(identity.branchId)).filter(item => item.id === delivery.input_id)).toHaveLength(1);
+    expect(reopened.requests).toHaveLength(0);
+    expect(await fs.readFile(spawnCount, 'utf8')).toBe('1');
+    expect(reopened.launchErrors).toEqual([]);
+  } finally { await fs.writeFile(release, 'finish cleanup'); }
 }, 60_000);
 
 it('reopens a parked wait after kernel shutdown and delivers the original stopped process fact without respawn', async () => {

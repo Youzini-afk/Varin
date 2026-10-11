@@ -547,7 +547,7 @@ impl Catalog {
 pub(super) fn observation_kinds(binding: &HostJobBinding) -> Vec<String> {
     let mut kinds = vec!["job_stopped".into()];
     if binding.domain == "research.experiment" && binding.domain_version == 1 {
-        kinds.extend(["artifact".into(), "collection".into()]);
+        kinds.extend(["artifact".into(), "collection".into(), "log_literal".into(), "log_end".into()]);
     }
     kinds
 }

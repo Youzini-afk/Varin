@@ -345,6 +345,16 @@ pub(crate) struct FollowupResearchObserveParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupLogObserveParams {
+    pub(crate) key: varin_runtime::catalog::followups::FollowupResearchKey,
+    pub(crate) binding: varin_runtime::catalog::host_jobs::HostJobBinding,
+    pub(crate) expected: varin_runtime::catalog::followups::FollowupLogState,
+    pub(crate) next: varin_runtime::catalog::followups::FollowupLogState,
+    pub(crate) evidence: RequiredNullable<varin_runtime::catalog::followups::FollowupLogEvidence>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct FollowupFileObserveParams {
     pub(crate) followup_id: String,
     pub(crate) generation: i64,
@@ -1174,6 +1184,16 @@ pub(crate) struct KernelExperimentArtifactsParams {
     pub(crate) attempt_id: String,
     pub(crate) after: Option<String>,
     pub(crate) page_size: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelExperimentLogChunksParams {
+    pub(crate) workspace_id: String,
+    pub(crate) attempt_id: String,
+    pub(crate) stream: varin_runtime::catalog::followups::LogStream,
+    pub(crate) offset: i64,
+    pub(crate) end_offset: i64,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2535,6 +2555,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
+        "runtime.followup.log.observe" => {
+            serde_json::from_value::<FollowupLogObserveParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.followup.file.observe" => {
             serde_json::from_value::<FollowupFileObserveParams>(params.clone())
                 .map(|_| ())
@@ -2958,6 +2983,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map_err(|error| error.to_string()),
         "storage.experiment.artifacts" => {
             serde_json::from_value::<KernelExperimentArtifactsParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "storage.experiment.logChunks" => {
+            serde_json::from_value::<KernelExperimentLogChunksParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

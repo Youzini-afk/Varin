@@ -116,6 +116,18 @@ Each timeline supplies its own session identity, including a child conversation
 preview. Pending requests, explicit reply waits and failures appear in the work
 overview. Technical identities and timestamps remain in expandable details.
 
+The Agent runtime's `ThreadFollowups` uses the existing accepted task-family Job picker for log
+literal and stream-end conditions. The Job owner's `observationKinds` filters candidates; the renderer
+has no domain/version support table. Literal input preserves exact whitespace, UTF-8 bytes and case,
+with byte-zero history as the default. Short cards show cursor/end/failure and fixed occurrence evidence;
+only explicit instruction/literal expansion reads `followups.get`. Original text renders as data.
+The owner's `exhausted` projection moves ended logs into history only after pending occurrence and
+Agent-observation delivery obligations finish; the original owner's `delivery_pending` distinguishes
+an undelivered live observation from one whose original Run has ended. No-match exhaustion is distinct
+from a trigger. Controls keep the
+original cursor and never stop the observed Job. Uncertain registration retries keep
+the original key, source Run and trigger; Host or Thread/branch replacement discards stale reads/drafts.
+
 The header services menu and mobile conversation metadata show the current session's token usage
 by provider and model from `SessionStats.usageByModel`. Pi Host reads the complete native journal,
 including inactive branches, messages before compaction and auxiliary usage. Calls lacking model

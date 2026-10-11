@@ -347,12 +347,27 @@ fn register_rechecks_multiple_original_receipts_and_all_needs_both_real_stops() 
 #[test]
 fn every_composite_leaf_is_validated_and_authorized_even_when_at_is_already_due() {
     let mut f = Fixture::new();
+    let job = super::jobs::job(&mut f, "invalid-log-conditions", true);
     let invalid = [
         json!({"kind":"any","sources":[]}),
         json!({"kind":"all","sources":[{"kind":"any","sources":[{"kind":"at","atMs":0}]}]}),
         json!({"kind":"any","sources":[{"kind":"at","atMs":0},{"kind":"process_stopped","operationId":" "}]}),
         json!({"kind":"all","sources":[{"kind":"at","atMs":u64::MAX}]}),
         json!({"kind":"any","sources":[{"kind":"at","atMs":0},{"kind":"process_stopped","operationId":"request"}]}),
+        json!({"kind":"unknown"}),
+        json!({"kind":"at","atMs":1.5}),
+        json!({"kind":"file","path":"out.txt","condition":"exists","rootId":"caller-selected"}),
+        json!({"kind":"any","sources":[{"kind":"at","atMs":0}],"repeat":true}),
+        json!({"kind":"artifact","operationId":job.operation_id,"artifactId":"a","name":"same"}),
+        json!({"kind":"artifact","operationId":job.operation_id,"name":""}),
+        json!({"kind":"artifact","operationId":job.operation_id,"workspaceId":"caller-selected"}),
+        json!({"kind":"collection","operationId":job.operation_id,"completionRevision":9}),
+        json!({"kind":"log_literal","operationId":job.operation_id,"stream":"stdout","literal":""}),
+        json!({"kind":"log_literal","operationId":job.operation_id,"stream":"stdout","literal":"x","fromOffset":-1}),
+        json!({"kind":"log_literal","operationId":job.operation_id,"stream":"stdout","literal":"x","fromOffset":1.5}),
+        json!({"kind":"log_literal","operationId":job.operation_id,"stream":"stdout","literal":"x","fromOffset":9_007_199_254_740_992_u64}),
+        json!({"kind":"log_end","operationId":job.operation_id,"stream":"combined"}),
+        json!({"kind":"all","sources":[{"kind":"log_end","operationId":job.operation_id,"stream":"stdout","actor":"user"}]}),
     ];
     for (n, trigger) in invalid.into_iter().enumerate() {
         let result = serde_json::from_value::<FollowupRegistrationTrigger>(trigger)

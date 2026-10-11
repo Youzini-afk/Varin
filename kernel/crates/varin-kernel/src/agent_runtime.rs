@@ -703,6 +703,7 @@ pub(crate) fn spawn(
                                 | "runtime.followup.occurrence"
                                 | "runtime.followup.research"
                                 | "runtime.followup.research.observe"
+                                | "runtime.followup.log.observe"
                                 | "runtime.followup.files"
                                 | "runtime.followup.registrations.pending"
                                 | "runtime.followup.registration.cancel"
