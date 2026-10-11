@@ -210,6 +210,8 @@ export async function retainExtensionTool(
         runId: call.runId,
         threadId: run.thread_id,
         operationId: call.operationId,
+        callId: call.callId,
+        executorOwner: owner,
         origin: call.origin,
         toolName: call.name,
         operation: descriptor.tool!.operation,

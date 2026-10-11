@@ -308,6 +308,9 @@ pub(super) fn job_acceptance_consumed(db: &Connection, op: &Operation) -> Result
         return Ok(false);
     };
     let receipt: Option<String> = match admitted.origin() {
+        // The canonical Operation acceptance is the nested caller's receipt. No model pairing
+        // or second consumption ledger is invented for a callback that may omit its output.
+        ToolOrigin::NestedCall { .. } => return Ok(matches!(completion, ToolCompletionMetadata::JobAccepted { .. })),
         ToolOrigin::ModelStep { request_id } => db.query_row(
             "SELECT receipt FROM tool_calls WHERE request_id=?1 AND call_id=?2 AND committed=1",
             params![request_id, admitted.call().call_id], |row| row.get(0),

@@ -334,8 +334,7 @@ fn policy_graph_freezes_original_resource_checkpoint_without_model_step() {
         .is_err());
     assert!(db
         .capture_resource_snapshot(&receipt.run_id, &origin, "other-node", &old.id, None)
-        .unwrap()
-        .load()
+        .and_then(|read| read.load())
         .is_err());
 }
 

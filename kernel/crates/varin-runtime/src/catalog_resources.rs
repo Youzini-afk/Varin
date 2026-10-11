@@ -1,7 +1,7 @@
 //! Host-selected instruction and skill snapshots live in the ordinary context object.
 //! The Host owns discovery and path selection; Catalog owns exact checkpoint/call binding.
 use super::*;
-use crate::execution::{RequestSnapshot, ToolOrigin};
+use crate::execution::ToolOrigin;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -448,17 +448,6 @@ impl ResourceRefresh {
     }
 }
 
-enum ResourceCallRead {
-    Model {
-        request: super::tool_content::ModelStepRead,
-        call: super::tool_content::ToolCallMetadata,
-    },
-    Policy {
-        metadata: super::policy_body::PolicyActionMetadata,
-        node_id: String,
-        call_id: String,
-    },
-}
 pub struct ResourceSnapshotRead {
     pub epoch: u64,
     activation_id: Option<String>,
@@ -466,7 +455,7 @@ pub struct ResourceSnapshotRead {
     head: Option<String>,
     run: Run,
     checkpoint: context::CheckpointRead,
-    origin: ResourceCallRead,
+    invocation: super::tool_content::ToolInvocationRead,
     content: crate::content::ContentStore,
     scope: context::ContextScope,
 }
@@ -484,7 +473,16 @@ impl Catalog {
                 "resource call owner is no longer active".into(),
             ));
         }
-        if let ToolOrigin::PolicyAction { action_id, .. } = origin {
+        let root = super::tool_content::root_tool_context(
+            &self.db,
+            &crate::execution::ToolExecutionContext {
+                run_id: run_id.into(),
+                operation_id: String::new(),
+                origin: origin.clone(),
+            },
+            true,
+        )?;
+        if let ToolOrigin::PolicyAction { action_id, .. } = &root.origin {
             let operation = self.operation(action_id)?;
             if operation.run_id != run_id
                 || operation.cancel_requested
@@ -517,48 +515,14 @@ impl Catalog {
                 checkpoint_id,
             )?
             .ok_or_else(|| RuntimeError::NotFound(checkpoint_id.into()))?;
-        let origin = match origin {
-            ToolOrigin::ModelStep { request_id } => {
-                let request = self.capture_model_step_read(request_id)?;
-                if request.metadata.run_id != run_id {
-                    return Err(RuntimeError::Conflict(
-                        "resource request belongs to another Run".into(),
-                    ));
-                }
-                let raw: String = self
-                    .db
-                    .query_row(
-                        "SELECT body FROM tool_calls WHERE request_id=?1 AND call_id=?2",
-                        params![request_id, call_id],
-                        |row| row.get(0),
-                    )
-                    .optional()?
-                    .ok_or_else(|| RuntimeError::NotFound(call_id.into()))?;
-                let call: super::tool_content::ToolCallMetadata = serde_json::from_str(&raw)?;
-                if call.name != "resource_read" || call.call_id != call_id {
-                    return Err(RuntimeError::Conflict(
-                        "resource snapshot requires its original resource tool call".into(),
-                    ));
-                }
-                ResourceCallRead::Model { request, call }
-            }
-            ToolOrigin::PolicyAction { action_id, node_id } => {
-                let operation = self.operation(action_id)?;
-                if operation.run_id != run_id || operation.cancel_requested {
-                    return Err(RuntimeError::Conflict(
-                        "resource policy call owner changed".into(),
-                    ));
-                }
-                let metadata = super::policy::graph_metadata(&operation)?.ok_or_else(|| {
-                    RuntimeError::Invalid("resource origin is not a policy graph".into())
-                })?;
-                ResourceCallRead::Policy {
-                    metadata,
-                    node_id: node_id.clone(),
-                    call_id: call_id.into(),
-                }
-            }
-        };
+        let invocation = self.capture_tool_invocation(
+            &crate::execution::ToolExecutionContext {
+                run_id: run_id.into(),
+                operation_id: origin.operation_id(call_id),
+                origin: origin.clone(),
+            },
+            call_id,
+        )?;
         Ok(ResourceSnapshotRead {
             activation_id: activation_id.map(str::to_owned),
             database: self
@@ -570,7 +534,7 @@ impl Catalog {
             epoch: self.epoch,
             run,
             checkpoint,
-            origin,
+            invocation,
             content: self.content.clone(),
             scope,
         })
@@ -579,60 +543,21 @@ impl Catalog {
 impl ResourceSnapshotRead {
     pub fn load(self) -> Result<ContextResources> {
         let checkpoint_id = self.checkpoint.id.clone();
-        let (default_checkpoint, bindings, request) = match self.origin {
-            ResourceCallRead::Model { request, call } => {
-                let request_id = request.metadata.id.clone();
-                let snapshot: RequestSnapshot = serde_json::from_value(request.load_request()?)?;
-                if snapshot.view.run_id != self.run.id
-                    || snapshot.view.request_id != request_id
-                    || call.schema_version != "2"
-                    || !snapshot.view.binding.tools.iter().any(|schema| {
-                        schema.name == call.name && schema.version == call.schema_version
-                    })
-                    || snapshot.view.binding.resource_activations
-                        != retained_activations(&snapshot.view.history)
-                {
-                    return Err(RuntimeError::Conflict(
-                        "resource snapshot differs from the frozen ModelStep".into(),
-                    ));
-                }
-                let call = call.load(&self.content)?;
-                (
-                    snapshot.view.binding.resource_checkpoint_id,
-                    snapshot.view.binding.resource_activations,
-                    serde_json::from_value::<ResourceRequest>(call.arguments)?,
-                )
-            }
-            ResourceCallRead::Policy {
-                metadata,
-                node_id,
-                call_id,
-            } => {
-                let graph = metadata.load_graph(&self.content, &self.run.id)?;
-                let node = graph
-                    .nodes()
-                    .iter()
-                    .find(|node| node.node.id == node_id)
-                    .ok_or_else(|| RuntimeError::NotFound(node_id))?;
-                if node.node.call.name != "resource_read"
-                    || node.node.call.call_id != call_id
-                    || node.node.call.schema_version != "2"
-                    || !node.context.tools.iter().any(|schema| {
-                        schema.name == node.node.call.name
-                            && schema.version == node.node.call.schema_version
-                    })
-                {
-                    return Err(RuntimeError::Conflict(
-                        "resource snapshot differs from the frozen policy call".into(),
-                    ));
-                }
-                (
-                    node.context.resource_checkpoint_id.clone(),
-                    node.context.resource_activations.clone(),
-                    serde_json::from_value::<ResourceRequest>(node.node.call.arguments.clone())?,
-                )
-            }
-        };
+        let invocation = self.invocation.load()?;
+        if invocation.call.name != "resource_read"
+            || invocation.call.schema_version != "2"
+            || !invocation.tools.iter().any(|schema| {
+                schema.name == invocation.call.name
+                    && schema.version == invocation.call.schema_version
+            })
+        {
+            return Err(RuntimeError::Conflict(
+                "resource snapshot differs from its frozen invocation".into(),
+            ));
+        }
+        let default_checkpoint = invocation.frozen.resource_checkpoint_id;
+        let bindings = invocation.frozen.resource_activations;
+        let request = serde_json::from_value::<ResourceRequest>(invocation.call.arguments)?;
         if request.activation_id() != self.activation_id.as_deref() {
             return Err(RuntimeError::Conflict(
                 "resource selector differs from the original tool call".into(),

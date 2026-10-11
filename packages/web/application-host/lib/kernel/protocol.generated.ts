@@ -8,9 +8,9 @@ export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
 export const KERNEL_CONTROL_METHODS = ["runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
 export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
-export const KERNEL_DEFERRED_RESPONSE_METHODS = ["process.write","process.resize"] as const;
+export const KERNEL_DEFERRED_RESPONSE_METHODS = ["process.write","process.resize","runtime.tools.invoke"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
-export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.history.body"] as const;
+export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.tools.invoke","runtime.history.body"] as const;
 export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v1" as const;
 
 export type KernelMethod =
@@ -23,6 +23,7 @@ export type KernelMethod =
   | "runtime.computer.request.cancel"
   | "runtime.computer.request.reconcile"
   | "runtime.computer.request.wait"
+  | "runtime.tools.invoke"
   | "runtime.computer.scope"
   | "runtime.research.scopes"
   | "runtime.host_job.begin"
@@ -1422,7 +1423,7 @@ export interface KernelRecoveryOperationConflictsResult {
   operations: KernelRecoveryOperationConflict[];
 }
 
-export type RetrievalInvocation = { kind: 'model_step'; requestId: string; toolCallId: string } | { kind: 'policy_action'; actionId: string; nodeId: string; toolCallId: string };
+export type RetrievalInvocation = { kind: 'model_step'; requestId: string; toolCallId: string } | { kind: 'policy_action'; actionId: string; nodeId: string; toolCallId: string } | { kind: 'nested_call'; parentOperationId: string; toolCallId: string };
 
 export interface RetrievalQuery {
   invocation: RetrievalInvocation;
@@ -1585,6 +1586,23 @@ export interface LaunchSource {
 }
 
 export interface ToolMetadata { service_id: string; service_version: number; completion: 'result' | 'job'; lifetime?: 'thread' | 'environment'; operation: 'read' | 'effect'; examples?: unknown[]; source?: {path: string; line?: number}; }
+
+export interface NestedToolInput {
+  callId: string;
+  name: string;
+  arguments: unknown;
+}
+
+export interface NestedToolReceipt {
+  operationId: string;
+  completion: OperationCallCompletion;
+}
+
+export interface NestedToolInvokeParams {
+  parentOperationId: string;
+  executorOwner: ExecutorOwner;
+  call: NestedToolInput;
+}
 
 export interface HostToolCall {
   runId: string;
@@ -1900,7 +1918,22 @@ export interface QueuedInput {
   cursor: number;
 }
 
-export type ToolOrigin = {kind: 'model_step'; request_id: string} | {kind: 'policy_action'; action_id: string; node_id: string};
+export type ToolOrigin = {kind: 'model_step'; request_id: string} | {kind: 'policy_action'; action_id: string; node_id: string} | {kind: 'nested_call'; parent_operation_id: string};
+/** Canonical invocation identity shared by all public/Host consumers. */
+export function toolOperationId(origin: ToolOrigin, callId: string): string {
+  switch (origin.kind) {
+    case 'model_step': return `${origin.request_id}:tool:${callId}`;
+    case 'policy_action': return `${origin.action_id}:node:${origin.node_id}`;
+    case 'nested_call': return `nested:${new TextEncoder().encode(origin.parent_operation_id).length}:${origin.parent_operation_id}:${callId}`;
+  }
+}
+export function validToolOrigin(value: unknown): value is ToolOrigin {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const v = value as Record<string, unknown>;
+  const text = (key: string) => typeof v[key] === 'string' && (v[key] as string).length > 0;
+  const keys = v.kind === 'model_step' ? ['kind', 'request_id'] : v.kind === 'policy_action' ? ['kind', 'action_id', 'node_id'] : v.kind === 'nested_call' ? ['kind', 'parent_operation_id'] : [];
+  return keys.length > 0 && Object.keys(v).length === keys.length && Object.keys(v).every(key => keys.includes(key)) && keys.every(key => key === 'kind' || text(key));
+}
 
 export type ExecutorOwner = {kind: 'kernel'} | {kind: 'external'; identity: string; epoch: string};
 
@@ -2313,6 +2346,7 @@ export interface ObserverDeliveryParams {
 }
 
 export interface AdmissionInspectParams {
+  parentOperationId?: string;
   runId: string;
   ownerGeneration: number;
   callId: string;
@@ -4058,6 +4092,7 @@ export type KernelMethodParams = {
   "runtime.computer.request.cancel": ComputerRequestCancelParams;
   "runtime.computer.request.reconcile": ComputerRequestReconcileParams;
   "runtime.computer.request.wait": ComputerRequestWaitParams;
+  "runtime.tools.invoke": NestedToolInvokeParams;
   "runtime.computer.scope": ComputerScopeParams;
   "runtime.research.scopes": ResearchScopeParams;
   "runtime.host_job.begin": HostJobBeginParams;
@@ -4384,6 +4419,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.computer.request.wait";
       params: ComputerRequestWaitParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.tools.invoke";
+      params: NestedToolInvokeParams;
       epoch?: string;
       grantId?: string;
     }

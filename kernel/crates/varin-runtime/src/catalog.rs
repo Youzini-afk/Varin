@@ -38,7 +38,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 45;
+pub(crate) const FORMAT: i64 = 46;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -188,6 +188,7 @@ pub struct Catalog {
     db: Connection,
     content: crate::content::ContentStore,
     resource_admission: std::sync::Arc<crate::resource_admission::ResourceAdmission>,
+    nested_tools: std::sync::Arc<crate::nested_tools::NestedTools>,
     context_compositions: std::sync::Arc<crate::composition::context::ContextCompositions>,
     _owner: std::sync::Arc<File>,
     database_path: std::path::PathBuf,
@@ -237,6 +238,7 @@ impl Catalog {
             db,
             content,
             resource_admission,
+            nested_tools: std::sync::Arc::new(crate::nested_tools::NestedTools::default()),
             context_compositions: std::sync::Arc::new(
                 crate::composition::context::ContextCompositions::default(),
             ),
@@ -269,6 +271,9 @@ impl Catalog {
     }
     pub fn epoch(&self) -> u64 {
         self.epoch
+    }
+    pub fn nested_tools(&self) -> std::sync::Arc<crate::nested_tools::NestedTools> {
+        self.nested_tools.clone()
     }
     pub fn create_thread(&mut self, thread_id: &str, branch_id: &str) -> Result<()> {
         let tx = self.db.transaction()?;

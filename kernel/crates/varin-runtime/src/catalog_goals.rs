@@ -1082,7 +1082,27 @@ fn origin_goal(
     db: &Connection,
     origin: &crate::execution::ToolOrigin,
 ) -> Result<Option<FrozenGoal>> {
+    let resolved;
+    let origin = if let crate::execution::ToolOrigin::NestedCall {
+        parent_operation_id,
+    } = origin
+    {
+        let parent: Operation = record(db, "operations", parent_operation_id)?;
+        resolved = super::tool_content::root_tool_context(
+            db,
+            &crate::execution::ToolExecutionContext {
+                run_id: parent.run_id,
+                operation_id: String::new(),
+                origin: origin.clone(),
+            },
+            false,
+        )?;
+        &resolved.origin
+    } else {
+        origin
+    };
     match origin {
+        crate::execution::ToolOrigin::NestedCall { .. } => unreachable!("resolved root invocation"),
         crate::execution::ToolOrigin::ModelStep { request_id } => {
             Ok(record::<ModelStep>(db, "model_steps", request_id)?.goal)
         }
@@ -1222,7 +1242,8 @@ impl Catalog {
                     params![request_id, intent.call().call_id, encode(&receipt)?],
                 )?;
             }
-            crate::execution::ToolOrigin::PolicyAction { .. } => (), // The canonical Operation is the receipt; graph settlement projects it.
+            crate::execution::ToolOrigin::PolicyAction { .. }
+            | crate::execution::ToolOrigin::NestedCall { .. } => (), // The canonical Operation is the receipt; graph settlement projects it.
         }
         event(
             &tx,

@@ -321,7 +321,7 @@ passive fact interrupts an unrelated observation Wait. Physical release remains 
 Computer owner's evidence, independent of input acceptance and body failure.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 45, input domain 6 and collaboration domain 8 store input intents/queue bodies and context-job ownership,
+Catalog version 46, input domain 6 and collaboration domain 8 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
@@ -483,7 +483,7 @@ A pinned AgentPolicy may return `ToolGraph` before any model request. The public
 frozen schemas/source contexts and explicit acyclic prerequisites. Tool preparation, authorization,
 atomic resource/capacity admission, dispatch reauthorization and settlement use the same single-call
 execution path as model tools. Untrusted read-only annotations confer no permission.
-`ToolOrigin` distinguishes actual ModelSteps from policy action/node origins. There are no fabricated
+`ToolOrigin` distinguishes actual ModelSteps, policy action/node origins and nested parent invocations. There are no fabricated
 requests, tool exchanges or user messages.
 
 Core derives the action identity from the durable Run decision boundary. One Run-owned Operation
@@ -530,6 +530,36 @@ The frozen policy boundary records its actual branch/head, rather than deriving 
 today's history. Ordinary extension tools and MCP permissions also carry actual policy origins.
 Independent delivery and explicit pause use the control actions below. Other remaining design
 domains are tracked in the implementation plan.
+
+### Nested tool invocation
+
+An ordinary selected extension may call `call.tools.invoke({ callId, name, arguments })` through its
+original brokered invocation. `NestedCall { parent_operation_id }` records the actual parent; its
+canonical identity length-prefixes the parent's UTF-8 bytes, so separators and Unicode do not alias
+another call. The extension cannot supply a Run, epoch, schema version, source or grant. The same
+frozen directory and `InvocationRunner` serve model, policy and nested calls, including preparation,
+resource admission, current authorization, dispatch and settlement. Catalog resolves original source
+and policy/model boundaries through immutable parent intents rather than parsing operation IDs.
+
+The live scope closes admission before draining its registered calls, including abandoned extension
+promises. Parent cancellation and exact nested-operation cancellation reach the original executor.
+A returned Unknown receipt with no stop proof is no longer a pending callback: its own Operation and
+occupancy retain uncertainty until original evidence arrives. The outer callback does not copy that
+effect into a second permanent barrier. Accepted independent Jobs retain their original lifetimes;
+scope close does not await the whole job. Duplicate call IDs with identical input share the call or
+receipt; changed input conflicts. Closed/restarted scopes cannot dispatch again.
+
+Effectful and Job calls use original durable Operations and content references. Cheap reads retain
+the existing transient path; their returned `operationId` identifies the actual call but does not
+promise a stored Operation row. Model pairing still contains only model-issued outer calls. Memory
+facts are authenticated from the original inner memory Operation, so omitting them from extension
+output does not suppress their next legal request delivery or replay the write after reopen.
+
+The private protocol releases only completed-body transfer credit after a nested call belongs to its
+live worker, preserving the pending cancellation/final response. This permits further original
+permission/domain requests at the existing window size. Catalog **46** rejects older internal formats
+directly. Persistent script environments and typed media delivery are separate capabilities; this
+entry does not claim that arbitrary extension Node I/O is sandboxed or intercepted.
 
 Question and process observers reuse the original Job acceptance and Wait owners. A pending observation
 parks before an ordinary policy callback, retaining the committed private state and original event.

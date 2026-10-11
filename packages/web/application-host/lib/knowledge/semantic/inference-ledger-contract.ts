@@ -1,6 +1,6 @@
 /** Durable execution facts for paid semantic inference, separate from index data. */
 import { createHash } from "node:crypto";
-import type { HarnessEmbedResult } from "@varin/protocol";
+import type { HarnessEmbedResult, RetrievalInvocation } from "@varin/protocol";
 import type { SemanticInferenceReceipt } from "./runtime-inference.js";
 
 export type SemanticInferenceOperation = {
@@ -8,8 +8,7 @@ export type SemanticInferenceOperation = {
   hostId: string;
   threadId: string;
   runId: string;
-  invocation: { kind: "model_step"; requestId: string; toolCallId: string }
-    | { kind: "policy_action"; actionId: string; nodeId: string; toolCallId: string };
+  invocation: RetrievalInvocation;
   stage: "code-retrieval.semantic.query-embedding";
 } | {
   kind: "index-build";
@@ -77,7 +76,9 @@ export function semanticInferenceOperationKey(identity: SemanticInferenceLedgerI
     ? [operation.kind, operation.hostId, operation.threadId, operation.runId,
       operation.invocation.kind === "model_step"
         ? [operation.invocation.kind, operation.invocation.requestId, operation.invocation.toolCallId]
-        : [operation.invocation.kind, operation.invocation.actionId, operation.invocation.nodeId, operation.invocation.toolCallId],
+        : operation.invocation.kind === "policy_action"
+          ? [operation.invocation.kind, operation.invocation.actionId, operation.invocation.nodeId, operation.invocation.toolCallId]
+          : [operation.invocation.kind, operation.invocation.parentOperationId, operation.invocation.toolCallId],
       operation.stage]
     : [operation.kind, operation.hostId, operation.workspaceId, operation.recipeId, operation.stage];
   const binding = operation.kind === "retrieval-query" ? [] : [identity.providerId, identity.modelId,

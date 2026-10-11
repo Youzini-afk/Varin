@@ -116,3 +116,35 @@ it.each(['scan', 'measure', 'single-capture'] as const)('keeps a disconnected %s
   f.owner.failAll(new KernelClientError({ code: 'kernel-disconnected', message: 'transport lost before worker receipt' }));
   await rejected;
 });
+
+it('two accepted nested invocations release their body credits for original Host inspection and permission callbacks', async () => {
+  const f = fixture();
+  const first = f.request('runtime.tools.invoke'), second = f.request('runtime.tools.invoke');
+  await tick();
+  const inspect = f.request('runtime.operation.inspect'), permission = f.request('runtime.permission.open');
+  await tick();
+  expect(f.sent.map(v => v.frame.method)).toEqual(['runtime.tools.invoke', 'runtime.tools.invoke']);
+  f.release(0); f.release(1); await tick();
+  expect(f.sent.map(v => v.frame.method)).toEqual(['runtime.tools.invoke', 'runtime.tools.invoke', 'runtime.operation.inspect', 'runtime.permission.open']);
+  expect(f.owner.pending.size).toBe(4);
+  f.finish(2); f.finish(3); await Promise.all([inspect, permission]);
+  expect(f.owner.pending.size).toBe(2);
+  f.finish(0); f.finish(1); await Promise.all([first, second]);
+});
+
+it('a retained nested extension can reenter one more level without holding its ancestors transport credits', async () => {
+  const f = fixture();
+  const outer = f.request('runtime.tools.invoke'); await tick(); f.release(0);
+  const child = f.request('runtime.tools.invoke'); await tick(); f.release(1);
+  const operation = f.request('runtime.operation.inspect'), run = f.request('runtime.run.inspect'), launch = f.request('runtime.launch.inspect');
+  await tick();
+  expect(f.sent.map(v => v.frame.method)).toEqual(['runtime.tools.invoke', 'runtime.tools.invoke', 'runtime.operation.inspect', 'runtime.run.inspect']);
+  f.finish(2); f.finish(3); await tick();
+  expect(f.sent[4]!.frame.method).toBe('runtime.launch.inspect');
+  expect(f.owner.pending.size).toBe(3);
+  f.finish(4); await Promise.all([operation, run, launch]);
+  let idle = false; const drain = f.owner.whenRequestsIdle().then(() => { idle = true; });
+  await tick(); expect(idle).toBe(false);
+  f.finish(1); f.finish(0); await Promise.all([child, outer, drain]);
+  expect(idle).toBe(true);
+});

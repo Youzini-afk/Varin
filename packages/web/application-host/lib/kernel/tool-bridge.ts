@@ -1,3 +1,4 @@
+import { toolOperationId, validToolOrigin } from './protocol.generated.js';
 /** The single private Host tool rendezvous for retained MCP and ordinary service endpoints.
  * Calls remain owned by their original lease across Run release and kernel channel replacement.
  */
@@ -157,15 +158,8 @@ function callValid(v: unknown): v is HostToolCall {
   )
     return false;
   const origin = v.origin;
-  return origin.kind === 'model_step'
-    ? exact(origin, ['kind', 'request_id']) &&
-        text(origin.request_id) &&
-        v.operationId === `${origin.request_id}:tool:${v.callId}`
-    : origin.kind === 'policy_action' &&
-        exact(origin, ['kind', 'action_id', 'node_id']) &&
-        text(origin.action_id) &&
-        origin.node_id === v.callId &&
-        v.operationId === `${origin.action_id}:node:${origin.node_id}`;
+  return validToolOrigin(origin) && v.operationId === toolOperationId(origin, v.callId as string)
+    && (origin.kind !== 'policy_action' || origin.node_id === v.callId);
 }
 function waitForOwner<T>(
   work: Promise<T>,

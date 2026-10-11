@@ -107,7 +107,10 @@ pub enum ChildModelSource {
 }
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ChildPresetToolsSource { Default, Explicit }
+pub enum ChildPresetToolsSource {
+    Default,
+    Explicit,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildPreset {
@@ -321,29 +324,57 @@ impl ChildDispatchSelection {
     }
     pub fn source_requirement(&self, name: &str) -> Option<ChildSourceRequirement> {
         if let Some(tool) = self.host_tool(name) {
-            if self.extension_bindings.iter().any(|binding| &binding.tool == tool) {
+            if self
+                .extension_bindings
+                .iter()
+                .any(|binding| &binding.tool == tool)
+            {
                 return Some(ChildSourceRequirement::None);
             }
-            return self.mcp_binding.as_ref().map(|binding| match binding.provenance.execution_scope {
-                super::launches::McpExecutionScope::Global => ChildSourceRequirement::None,
-                super::launches::McpExecutionScope::Workspace => ChildSourceRequirement::Source,
+            return self.mcp_binding.as_ref().map(|binding| {
+                match binding.provenance.execution_scope {
+                    super::launches::McpExecutionScope::Global => ChildSourceRequirement::None,
+                    super::launches::McpExecutionScope::Workspace => ChildSourceRequirement::Source,
+                }
             });
         }
-        self.catalog.native_capabilities.iter()
+        self.catalog
+            .native_capabilities
+            .iter()
             .find(|capability| capability.name == name)
             .map(|capability| capability.source_requirement)
     }
     pub fn preset_tools(&self, preset: &ChildPreset) -> Vec<String> {
         if preset.tools_source == ChildPresetToolsSource::Default && self.frozen.source.is_none() {
-            preset.tools.iter().filter(|name| !matches!(self.source_requirement(name), Some(ChildSourceRequirement::Source | ChildSourceRequirement::Physical))).cloned().collect()
+            preset
+                .tools
+                .iter()
+                .filter(|name| {
+                    !matches!(
+                        self.source_requirement(name),
+                        Some(ChildSourceRequirement::Source | ChildSourceRequirement::Physical)
+                    )
+                })
+                .cloned()
+                .collect()
         } else {
             preset.tools.clone()
         }
     }
     pub fn unavailable_source_tools(&self, tools: &[String]) -> Vec<String> {
-        if self.frozen.source.is_some() { return Vec::new(); }
-        tools.iter().filter(|name| matches!(self.source_requirement(name),
-            Some(ChildSourceRequirement::Source | ChildSourceRequirement::Physical))).cloned().collect()
+        if self.frozen.source.is_some() {
+            return Vec::new();
+        }
+        tools
+            .iter()
+            .filter(|name| {
+                matches!(
+                    self.source_requirement(name),
+                    Some(ChildSourceRequirement::Source | ChildSourceRequirement::Physical)
+                )
+            })
+            .cloned()
+            .collect()
     }
     fn physical_tool(&self, name: &str) -> bool {
         self.source_requirement(name) == Some(ChildSourceRequirement::Physical)
@@ -379,7 +410,11 @@ impl ChildDispatchSelection {
                 ));
             }
             (
-                if input.tools.is_none() { self.preset_tools(preset) } else { preset.tools.clone() },
+                if input.tools.is_none() {
+                    self.preset_tools(preset)
+                } else {
+                    preset.tools.clone()
+                },
                 input.work_mode.unwrap_or(preset.work_mode),
                 preset.instructions.clone(),
                 preset
@@ -403,7 +438,8 @@ impl ChildDispatchSelection {
             if input.work_mode == Some(ChildWorkMode::ReadOnly) && input.tools.is_none() {
                 tools.retain(|name| !self.physical_tool(name));
             }
-            if input.work_mode == Some(ChildWorkMode::IsolatedWrite) && self.frozen.source.is_some() {
+            if input.work_mode == Some(ChildWorkMode::IsolatedWrite) && self.frozen.source.is_some()
+            {
                 for name in ["file_write", "file_edit"] {
                     if !tools.iter().any(|tool| tool == name) {
                         tools.push(name.into());
@@ -486,7 +522,9 @@ impl ChildDispatchRead {
             serde_json::from_value(self.content.load(&frozen.catalog_ref)?)?;
         catalog.validate()?;
         frozen.parent_model.connection_identity()?;
-        if let Some(source) = &frozen.source { source.validate()?; }
+        if let Some(source) = &frozen.source {
+            source.validate()?;
+        }
         let tools: Vec<ToolSchema> = serde_json::from_value(self.content.load(&frozen.tools_ref)?)?;
         if frozen
             .allowed_delegation
@@ -568,6 +606,7 @@ impl ChildInvocationRead {
                     .ok_or_else(|| RuntimeError::NotFound("dispatch graph node".into()))?
                     .child_dispatch
             }
+            ToolOrigin::NestedCall { .. } => unreachable!("resolved root invocation"),
         }
         .ok_or_else(|| {
             RuntimeError::Invalid("dispatch has no frozen configuration selection".into())
@@ -671,6 +710,7 @@ impl Catalog {
         context: &crate::execution::ToolExecutionContext,
     ) -> Result<ChildInvocationRead> {
         use crate::execution::ToolOrigin;
+        let context = super::tool_content::root_tool_context(&self.db, context, false)?;
         let body = match &context.origin {
             ToolOrigin::ModelStep { request_id } => {
                 let step: ModelStep = record(&self.db, "model_steps", request_id)?;
@@ -691,6 +731,7 @@ impl Catalog {
                     .body_ref()
                     .clone()
             }
+            ToolOrigin::NestedCall { .. } => unreachable!("resolved root invocation"),
         };
         Ok(ChildInvocationRead {
             body,
@@ -869,7 +910,15 @@ impl Catalog {
         let run_ids = runs.iter().map(|run| run.id.clone()).collect::<Vec<_>>();
         for run in &runs {
             let stopped: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='run.tree_stop_requested')", [&run.id], |r| r.get(0))?;
-            if !stopped { event(&tx, &run.id, run.revision, "run.tree_stop_requested", Value::Null)?; }
+            if !stopped {
+                event(
+                    &tx,
+                    &run.id,
+                    run.revision,
+                    "run.tree_stop_requested",
+                    Value::Null,
+                )?;
+            }
             super::request_cancel_run_in(&tx, &run.id)?;
             // Terminal source Runs can still own live process-trigger registrations. Cancel
             // those original registrations without changing the source Run's terminal fact.
@@ -891,10 +940,12 @@ impl Catalog {
         for run in &runs {
             let ids = {
                 let mut statement = tx.prepare("SELECT id FROM operations WHERE run_id=?1 AND json_extract(body,'$.execution_owner.kind')='external' AND json_extract(body,'$.lifetime') IN ('thread','environment') AND (json_extract(body,'$.host_job') IS NOT NULL OR json_extract(body,'$.intent.kind')='user_host_job' OR json_extract(body,'$.intent.contract.completion')='job') AND coalesce(json_extract(body,'$.external_receipt.executor_stopped'),0)=0 ORDER BY id")?;
-                let rows=statement.query_map([&run.id],|row|row.get::<_,String>(0))?;
-                rows.collect::<std::result::Result<Vec<_>,_>>()?
+                let rows = statement.query_map([&run.id], |row| row.get::<_, String>(0))?;
+                rows.collect::<std::result::Result<Vec<_>, _>>()?
             };
-            for id in ids { super::request_cancel_operation_in(&tx,&id)?; }
+            for id in ids {
+                super::request_cancel_operation_in(&tx, &id)?;
+            }
         }
         for child in &children {
             super::request_cancel_operation_in(&tx, &child.operation_id)?;

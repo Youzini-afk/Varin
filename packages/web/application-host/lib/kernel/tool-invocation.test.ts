@@ -6,7 +6,7 @@ import type { ToolExecutionReceipt } from './tool-bridge.js';
 
 const owner = { extensionId: 'example.integration', extensionVersion: '1.0.0', entrypointId: 'host', generation: 1 };
 const authority: ToolInvocationAuthority = {
-  invocationId: 'invocation', runId: 'run', threadId: 'thread', operationId: 'action:node:merge',
+  callId: 'merge', executorOwner: { kind: 'kernel' }, invocationId: 'invocation', runId: 'run', threadId: 'thread', operationId: 'action:node:merge',
   origin: { kind: 'policy_action', action_id: 'action', node_id: 'merge' }, source: null,
   toolName: 'integrate_child', operation: 'effect', arguments: { childOperationId: 'child', resultRevision: 2 },
 };

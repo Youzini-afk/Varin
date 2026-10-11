@@ -1721,12 +1721,7 @@ fn execution_context(run_id: &str, call: &ToolCall, origin: &ToolOrigin) -> Tool
     ToolExecutionContext {
         run_id: run_id.into(),
         origin: origin.clone(),
-        operation_id: match origin {
-            ToolOrigin::ModelStep { request_id } => format!("{request_id}:tool:{}", call.call_id),
-            ToolOrigin::PolicyAction { action_id, node_id } => {
-                format!("{action_id}:node:{node_id}")
-            }
-        },
+        operation_id: origin.operation_id(&call.call_id),
     }
 }
 impl PreparedToolCall for KernelCall {

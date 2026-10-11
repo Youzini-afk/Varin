@@ -8,6 +8,7 @@ pub use catalog::{Catalog, RuntimeError};
 pub use types::*;
 
 pub mod execution;
+pub mod nested_tools;
 
 pub mod providers;
 
@@ -17,14 +18,14 @@ pub mod model_session;
 
 pub mod content;
 
-pub mod context_job;
 pub mod context_capacity;
+pub mod context_job;
 mod context_material;
 
 #[cfg(test)]
 extern crate self as varin_runtime;
 #[cfg(test)]
-#[path="../tests/fixtures/input_admission.rs"]
+#[path = "../tests/fixtures/input_admission.rs"]
 mod test_submission;
 
 pub mod resource_admission;

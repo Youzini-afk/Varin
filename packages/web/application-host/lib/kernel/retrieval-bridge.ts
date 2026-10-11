@@ -12,7 +12,8 @@ const validQuery = (value: unknown): value is RetrievalQuery => {
   const invocation = value.invocation;
   if (!record(invocation) || !text(invocation.toolCallId)
     || !(invocation.kind === 'model_step' ? text(invocation.requestId)
-      : invocation.kind === 'policy_action' && text(invocation.actionId) && text(invocation.nodeId))) return false;
+      : invocation.kind === 'policy_action' && text(invocation.actionId) && text(invocation.nodeId)
+        || invocation.kind === 'nested_call' && text(invocation.parentOperationId))) return false;
   return (value.projectId === null || text(value.projectId))
     && (value.paths === undefined || (Array.isArray(value.paths) && value.paths.every(text)))
     && (value.limit === undefined || (Number.isSafeInteger(value.limit) && Number(value.limit) > 0));

@@ -1,14 +1,11 @@
 import { waitWithSignal } from '../cancellation.js';
-import type { AgentResourceRequest, ToolOrigin } from './protocol.generated.js';
+import { validToolOrigin, type AgentResourceRequest } from './protocol.generated.js';
 import { resourceQueryFailure, type ResourceQuery, type ResourceOwner, type ResourceToolResult } from './resource-owner.js';
 
 export interface PrivateResourceResponse { v: 1; kind: 'resource-response'; id: string; kernelEpoch: string; result: ResourceToolResult }
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 const keys = (value: Record<string, unknown>, allowed: string[]) => Object.keys(value).every(key => allowed.includes(key));
-const validOrigin = (value: unknown): value is ToolOrigin => record(value) && (
-  value.kind === 'model_step' && text(value.request_id) && keys(value, ['kind', 'request_id'])
-  || value.kind === 'policy_action' && text(value.action_id) && text(value.node_id) && keys(value, ['kind', 'action_id', 'node_id']));
 const validRequest = (value: unknown): value is AgentResourceRequest => record(value) && (
   value.kind === 'skill' && text(value.resourceId) && (value.activationId === undefined || text(value.activationId)) && keys(value, ['kind', 'resourceId', 'activationId'])
   || value.kind === 'skill-resource' && text(value.resourceId) && typeof value.relativePath === 'string'
@@ -16,7 +13,7 @@ const validRequest = (value: unknown): value is AgentResourceRequest => record(v
   || value.kind === 'instruction-scope' && typeof value.targetPath === 'string'
     && (value.targetType === undefined || value.targetType === 'file' || value.targetType === 'directory')
     && keys(value, ['kind', 'targetPath', 'targetType']));
-const validQuery = (value: unknown): value is ResourceQuery => record(value) && text(value.runId) && validOrigin(value.origin)
+const validQuery = (value: unknown): value is ResourceQuery => record(value) && text(value.runId) && validToolOrigin(value.origin)
   && text(value.callId) && text(value.resourceCheckpointId) && validRequest(value.request)
   && keys(value, ['runId', 'origin', 'callId', 'resourceCheckpointId', 'request']);
 

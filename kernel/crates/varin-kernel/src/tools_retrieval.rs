@@ -414,6 +414,11 @@ impl KernelToolExecutor {
         // These identities already belong to the committed model exchange or policy graph.
         // Recovery reuses them; the private bridge's random request ID is transport-only.
         let invocation = match &context.origin {
+            ToolOrigin::NestedCall {
+                parent_operation_id,
+            } => {
+                json!({"kind":"nested_call", "parentOperationId":parent_operation_id, "toolCallId":call.call_id})
+            }
             ToolOrigin::ModelStep { request_id } => {
                 json!({"kind":"model_step", "requestId":request_id,
                 "toolCallId":call.call_id})
@@ -504,7 +509,8 @@ impl KernelToolExecutor {
         // bytes for three growing safe-integer counters and the final status spelling.
         let metadata_size = serde_json::to_vec(&json!({"status":&reply.status,"snippets":[],
             "source":&reply.source,"omissions":&reply.omissions}))
-            .map_err(|_| invalid())?.len();
+        .map_err(|_| invalid())?
+        .len();
         let mut output_budget = crate::protocol::MAX_BLOB_RESPONSE_BYTES
             .checked_sub(metadata_size.saturating_add(64))
             .ok_or_else(invalid)?;
@@ -622,7 +628,8 @@ impl KernelToolExecutor {
         }
         // The model needs verified evidence and coverage. Composition and inference bookkeeping
         // remain with the bound pipeline and inference ledger, outside conversation tool content.
-        let mut result = json!({"status":reply.status,"snippets":snippets,"omissions":reply.omissions});
+        let mut result =
+            json!({"status":reply.status,"snippets":snippets,"omissions":reply.omissions});
         if let Some(source) = reply.source {
             result["source"] = json!(source);
         }

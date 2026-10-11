@@ -6,13 +6,15 @@ import { isDeepStrictEqual } from 'node:util';
 import { parseVarinToolJson, type JsonValue } from '@varin/extension-contract';
 import { unknownToolReceipt, type ToolExecutionReceipt } from './tool-bridge.js';
 import type { HostCapabilityCallContext, HostInvocationScope, HostServiceOwnerIdentity } from '@varin/extension-host';
-import type { LaunchSource, ToolOrigin } from './protocol.generated.js';
+import { toolOperationId, validToolOrigin, type ExecutorOwner, type LaunchSource, type ToolOrigin } from './protocol.generated.js';
 
 export interface ToolInvocationAuthority {
   readonly invocationId: string;
   readonly runId: string;
   readonly threadId: string;
   readonly operationId: string;
+  readonly callId: string;
+  readonly executorOwner: ExecutorOwner;
   readonly origin: ToolOrigin;
   readonly source: Readonly<LaunchSource> | null;
   readonly toolName: string;
@@ -25,6 +27,7 @@ interface Registration {
   owner: Readonly<HostServiceOwnerIdentity>;
   signal: AbortSignal;
   accepting: boolean;
+  nested: Set<Promise<unknown>>;
   effect?: { domain: string; work: Promise<ToolExecutionReceipt> };
 }
 // This recognizes the very same object owned by the service invocation. It neither schedules
@@ -44,22 +47,20 @@ export async function withToolInvocation<T>(options: {
   options.signal.throwIfAborted();
   const authority = structuredClone(options.authority);
   const { origin } = authority;
-  const expected = origin.kind === 'model_step'
-    ? `${origin.request_id}:tool:`
-    : `${origin.action_id}:node:${origin.node_id}`;
-  if (!authority.invocationId || !authority.runId || !authority.threadId || !authority.operationId
-    || (origin.kind === 'model_step' ? !origin.request_id || !authority.operationId.startsWith(expected)
-      : !origin.action_id || !origin.node_id || authority.operationId !== expected)) {
+  if (!authority.invocationId || !authority.runId || !authority.threadId || !authority.callId
+    || !validToolOrigin(origin) || authority.operationId !== toolOperationId(origin, authority.callId)
+    || (origin.kind === 'policy_action' && origin.node_id !== authority.callId)) {
     throw new Error('tool_invocation_identity_invalid');
   }
   Object.freeze(authority.origin);
+  Object.freeze(authority.executorOwner);
   if (authority.source) {
     if (authority.source.live_root) Object.freeze(authority.source.live_root);
     Object.freeze(authority.source);
   }
   Object.freeze(authority);
   const scope: HostInvocationScope = Object.freeze({ id: randomUUID(), value: null });
-  const registration: Registration = { authority, owner: Object.freeze({ ...options.owner }), signal: options.signal, accepting: true };
+  const registration: Registration = { authority, owner: Object.freeze({ ...options.owner }), signal: options.signal, accepting: true, nested: new Set() };
   registrations.set(scope, registration);
   try { return await work(scope); }
   finally {
@@ -67,6 +68,7 @@ export async function withToolInvocation<T>(options: {
     // already admitted by that invocation. Keep the original lease until its real promise settles.
     registration.accepting = false;
     try {
+      await Promise.allSettled(registration.nested);
       if (registration.effect) {
         // An unclassified domain error is not evidence that its physical writer stopped.
         const receipt = await registration.effect.work.catch(unknownToolReceipt);
@@ -116,4 +118,14 @@ export function runToolDomainCall(
       ? { operationId: authority.operationId, phase: receipt.completion.phase }
       : receipt.completion.content);
   });
+}
+
+/** Register before invoking the actual Kernel caller; observer cancellation does not end it. */
+export function runNestedToolCall<T>(context: HostCapabilityCallContext, execute: (authority: ToolInvocationAuthority) => Promise<T>): Promise<T> {
+  const authority = requireToolInvocation(context);
+  const registration = registrations.get(context.invocation!)!;
+  const work = Promise.resolve().then(() => execute(authority));
+  registration.nested.add(work);
+  void work.then(() => registration.nested.delete(work), () => registration.nested.delete(work));
+  return work;
 }
