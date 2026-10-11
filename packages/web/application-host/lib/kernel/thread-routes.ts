@@ -6,7 +6,7 @@ import type { ThreadIdentity, ThreadModel, ThreadSubmit, ThreadThinkingLevel, Th
 import { HarnessServiceError } from '../harness/service-error.js';
 import { KernelClientError } from './kernel-client.js';
 import { ThreadAdapter } from './thread-adapter.js';
-import { listThreadFollowupJobs, pendingThreadFollowupRegistrations, cancelThreadFollowupRegistration, controlThreadFollowup, getThreadFollowup, listThreadFollowups, registerThreadFollowup } from './thread-followups.js';
+import { listThreadFollowupJobs, pendingThreadFollowupRegistrations, cancelThreadFollowupRegistration, controlThreadFollowup, getThreadFollowup, listThreadFollowupOccurrences, listThreadFollowups, registerThreadFollowup } from './thread-followups.js';
 import { controlThreadGoal, listThreadGoals, startThreadGoal, updateThreadGoal } from './thread-goals.js';
 
 const object = (value: unknown): Record<string, unknown> => {
@@ -44,7 +44,7 @@ const followupSource = (value: unknown): FollowupRegistrationSource => {
     && (trigger.condition === 'exists' || trigger.condition === 'changed' || trigger.condition === 'ready')) {
     return { kind: 'file', path: text(trigger.path), condition: trigger.condition };
   }
-  throw new Error('Invalid one-shot follow-up trigger');
+  throw new Error('Invalid follow-up trigger');
 };
 const followupTrigger = (value: unknown): FollowupRegistrationTrigger => {
   const trigger = object(value);
@@ -111,7 +111,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'followup/jobs': ['runtime', 'threadId', 'branchId', 'runId'],
     'followup/registrations/pending': ['runtime', 'threadId', 'branchId'],
     'followup/registration/cancel': ['runtime', 'threadId', 'branchId', 'key', 'runId'],
-    'followup/register': ['runtime', 'threadId', 'branchId', 'key', 'runId', 'trigger', 'instruction'],
+    'followup/register': ['runtime', 'threadId', 'branchId', 'key', 'runId', 'trigger', 'instruction', 'repeat'],
+    'followup/occurrences': ['runtime', 'threadId', 'branchId', 'followupId', 'after'],
     'followup/get': ['runtime', 'threadId', 'branchId', 'followupId'],
     'followup/list': ['runtime', 'threadId', 'branchId'],
     'followup/control': ['runtime', 'threadId', 'branchId', 'followupId', 'expectedRevision', 'action'],
@@ -250,8 +251,14 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('followup/jobs', (body, signal) => listThreadFollowupJobs(adapter, identity(body), text(body.runId), signal));
   post('followup/registrations/pending', (body, signal) => pendingThreadFollowupRegistrations(adapter, identity(body), signal));
   post('followup/registration/cancel', (body, signal) => cancelThreadFollowupRegistration(adapter, { ...identity(body), key: text(body.key), runId: text(body.runId) }, signal));
-  post('followup/register', (body, signal) => registerThreadFollowup(adapter,
-    { ...identity(body), key: text(body.key), runId: text(body.runId), trigger: followupTrigger(body.trigger), instruction: text(body.instruction) }, signal));
+  post('followup/register', (body, signal) => {
+    if (body.repeat !== undefined && body.repeat !== 'once' && body.repeat !== 'each') throw new Error('Invalid follow-up repetition');
+    return registerThreadFollowup(adapter, { ...identity(body), key: text(body.key), runId: text(body.runId),
+      trigger: followupTrigger(body.trigger), instruction: text(body.instruction),
+      ...(body.repeat === undefined ? {} : { repeat: body.repeat }) }, signal);
+  });
+  post('followup/occurrences', (body, signal) => listThreadFollowupOccurrences(adapter, identity(body), text(body.followupId),
+    body.after === undefined ? undefined : revision(body.after), signal));
   post('followup/get', (body, signal) => getThreadFollowup(adapter, identity(body), text(body.followupId), signal));
   post('followup/list', (body, signal) => listThreadFollowups(adapter, identity(body), signal));
   post('followup/control', (body, signal) => {

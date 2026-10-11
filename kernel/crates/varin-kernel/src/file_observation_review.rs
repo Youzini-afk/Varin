@@ -347,6 +347,7 @@ fn same_key_registration_handles_are_independent_and_revocation_precedes_host_be
     let f = Fixture::new();
     let owner = f.runtime.catalog();
     let input = FollowupRegistration {
+        repeat: varin_runtime::catalog::followups::FollowupRepeat::Once,
         trigger: FollowupRegistrationTrigger::File {
             path: "result.txt".into(),
             condition: FileCondition::Changed,
@@ -538,6 +539,7 @@ fn source_failures_remain_distinct_through_private_observe_and_catalog() {
 
 fn pending_input() -> FollowupRegistration {
     FollowupRegistration {
+        repeat: varin_runtime::catalog::followups::FollowupRepeat::Once,
         trigger: FollowupRegistrationTrigger::File {
             path: "result.txt".into(),
             condition: FileCondition::Changed,
@@ -890,5 +892,94 @@ fn explicit_user_disposal_of_committed_definition_preserves_original_retries_and
         .unwrap()
         .user_followup_registration_cancelled("delivered", &f.run)
         .unwrap());
+    f.finish();
+}
+
+#[test]
+fn original_user_file_observer_accepts_repeated_real_captures_until_cancel_and_keeps_occurrence_history(
+) {
+    let f = Fixture::new();
+    let mut input = f.registration("each-real", "changed");
+    input["repeat"] = json!("each");
+    f.invoke("runtime.followup.register", input.clone())
+        .unwrap();
+    let original_watch = f.work("each-real").file.watch_id;
+    let mut first = None;
+    for (sequence, bytes) in [(1, b"second".as_slice()), (2, b"third".as_slice())] {
+        std::fs::write(f.root.join("work/result.txt"), bytes).unwrap();
+        f.watch.lock().unwrap().sequence = sequence;
+        let key = f.work("each-real").key;
+        let reply = f
+            .invoke(
+                "runtime.followup.file.observe",
+                serde_json::to_value(&key).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(reply["accepted"], true);
+        let owner = f.runtime.catalog();
+        let mut db = owner.lock().unwrap();
+        for p in db.capture_followup_continuations().unwrap() {
+            db.admit_followup_continuation(p.load().unwrap()).unwrap();
+        }
+        let p = db
+            .prepare_input_delivery(&f.run, db.epoch(), db.head("branch").unwrap().as_deref())
+            .unwrap()
+            .load()
+            .unwrap();
+        assert_eq!(db.admit_input_delivery(p).unwrap().unwrap().items.len(), 1);
+        let d = db.followup("each-real").unwrap();
+        assert_eq!(d.repeat, FollowupRepeat::Each);
+        assert_eq!(d.wait.state, NextRunWaitState::Waiting);
+        assert_eq!(d.sources[0].file.as_ref().unwrap().watch_id, original_watch);
+        let occurrence = d.occurrence.unwrap();
+        if let Some(id) = &first {
+            assert_ne!(&occurrence.id, id);
+        } else {
+            first = Some(occurrence.id);
+        }
+        drop(db);
+        drop(owner);
+        assert!(!f.work("each-real").release_required);
+        // Replaying the exact accepted request cannot create another occurrence.
+        let duplicate = f
+            .invoke(
+                "runtime.followup.file.observe",
+                serde_json::to_value(&key).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(duplicate["accepted"], false);
+    }
+    let history = f
+        .invoke(
+            "runtime.followup.occurrences",
+            json!({"followupId":"each-real"}),
+        )
+        .unwrap();
+    assert_eq!(history["occurrences"].as_array().unwrap().len(), 2);
+    let retry = f.invoke("runtime.followup.register", input).unwrap();
+    assert_eq!(retry["occurrence"]["id"], history["occurrences"][1]["id"]);
+    let owner = f.runtime.catalog();
+    let mut db = owner.lock().unwrap();
+    let d = db.followup("each-real").unwrap();
+    db.control_followup(&d.id, d.revision, varin_runtime::FollowupControlAction::Cancel)
+        .unwrap();
+    drop(db);
+    drop(owner);
+    f.invoke(
+        "runtime.followup.file.release",
+        serde_json::to_value(f.work("each-real").key).unwrap(),
+    )
+    .unwrap();
+    assert!(f.watch.lock().unwrap().open.is_empty());
+    let after = f
+        .invoke(
+            "runtime.followup.occurrences",
+            json!({"followupId":"each-real"}),
+        )
+        .unwrap();
+    assert_eq!(
+        after, history,
+        "definition cancellation does not rewrite delivered occurrences"
+    );
     f.finish();
 }

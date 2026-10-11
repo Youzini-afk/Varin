@@ -93,6 +93,7 @@ export type KernelMethod =
   | "runtime.followup.registrations.pending"
   | "runtime.followup.registration.cancel"
   | "runtime.followup.register"
+  | "runtime.followup.occurrences"
   | "runtime.followup.get"
   | "runtime.followup.list"
   | "runtime.followup.control"
@@ -650,6 +651,7 @@ export interface FollowupFileAuthority {
 }
 
 export interface FollowupRegisterAdmissionParams {
+  repeat?: FollowupRepeat;
   key: string;
   runId: string;
   trigger: FollowupRegistrationTrigger;
@@ -737,11 +739,13 @@ export type FollowupSource = { kind: 'at'; at_ms: number } | { kind: 'process_st
 export type FollowupLeafEvidence = { kind: 'at'; at_ms: number; observed_at_ms: number } | { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string } | { kind: 'job_stopped'; binding: HostJobBinding; outcome: Outcome; effect: Effect; receipt_identity: string; receipt_epoch: string } | FollowupFileEvidence;
 
 export interface FollowupSourceObservation {
+  accepted_cursor: number;
   trigger_cursor: number;
   evidence: FollowupLeafEvidence;
 }
 
 export interface FollowupSourceState {
+  consumed_cursor: number;
   source_index: number;
   after_cursor: number;
   observed: FollowupSourceObservation | null;
@@ -749,6 +753,7 @@ export interface FollowupSourceState {
 }
 
 export interface FollowupSourceEvidence {
+  accepted_cursor: number;
   source_index: number;
   trigger_cursor: number;
   evidence: FollowupLeafEvidence;
@@ -1782,6 +1787,18 @@ export interface RunContextScope {
   projectId: string | null;
 }
 
+export type FollowupRepeat = 'once' | 'each';
+
+export interface FollowupOccurrencesParams {
+  followupId: string;
+  after?: number;
+}
+
+export interface FollowupOccurrencesResult {
+  occurrences: FollowupOccurrence[];
+  nextCursor: number | null;
+}
+
 export type FollowupControlAction = 'pause' | 'resume' | 'cancel';
 
 export type FollowupRegistrationSource = { kind: 'at'; atMs: number } | { kind: 'process_stopped'; operationId: string } | { kind: 'job_stopped'; operationId: string } | { kind: 'file'; path: string; condition: FileCondition };
@@ -1818,6 +1835,7 @@ export interface FollowupDelivery {
 }
 
 export interface FollowupRegisterParams {
+  repeat?: FollowupRepeat;
   key: string;
   runId: string;
   trigger: FollowupRegistrationTrigger;
@@ -1839,6 +1857,7 @@ export interface FollowupWait {
 }
 
 export interface FollowupOccurrence {
+  accepted_cursor: number;
   id: string;
   generation: number;
   trigger_cursor: number;
@@ -1849,6 +1868,8 @@ export interface FollowupOccurrence {
 }
 
 export interface Followup {
+  repeat: FollowupRepeat;
+  pending_occurrences: number;
   id: string;
   revision: number;
   generation: number;
@@ -3703,6 +3724,7 @@ export type KernelMethodParams = {
   "runtime.followup.file.release": FollowupFileReleaseParams;
   "runtime.followup.list": ThreadParams;
   "runtime.followup.get": FollowupGetParams;
+  "runtime.followup.occurrences": FollowupOccurrencesParams;
   "runtime.followup.control": FollowupControlParams;
   "runtime.branch.fork": BranchForkParams;
   "runtime.plan.view": PlanViewParams;
@@ -4210,6 +4232,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.followup.get";
       params: FollowupGetParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.occurrences";
+      params: FollowupOccurrencesParams;
       epoch?: string;
       grantId?: string;
     }

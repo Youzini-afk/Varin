@@ -390,6 +390,7 @@ fn process_followup_reads_real_original_output_and_rechecks_both_grants() {
             "check-while-running",
             &source.run_id,
             varin_runtime::catalog::followups::FollowupRegistration {
+                repeat: varin_runtime::catalog::followups::FollowupRepeat::Once,
                 trigger: varin_runtime::catalog::followups::FollowupRegistrationTrigger::At {
                     at_ms: 0,
                 },

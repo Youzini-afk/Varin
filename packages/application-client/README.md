@@ -49,6 +49,16 @@ a bound but undelivered occurrence can still be paused/cancelled without cancell
 process. Agent-only optional waiting is not part of this User API. Independently registered followups
 retain their explicit actor even under a Goal; automatic Goal-owned definitions use Goal controls.
 
+`repeat: 'each'` explicitly authorizes the same instruction on each accepted file-change edge; omitted
+`repeat` means once. Repeated Any consumes finite leaves once; repeated All pairs FIFO changes from
+every repeatable leaf. The definition retains its observer after delivery. Pause holds accepted work;
+Cancel withdraws future and undelivered occurrences, without changing delivered Runs or results.
+`pending_occurrences` and latest `.occurrence` are compact projections. Abortable
+`followups.occurrences(identity, followupId, after?)` pages original occurrences in accepted-cursor
+order and returns `nextCursor`; source `trigger_cursor` has a different meaning. The GUI retains
+continuous controls, explicit retry of undelivered work and a refreshable history page. Run navigation
+reuses the original read-only `family` reader with the exact delivered Run, not another execution target.
+
 `followups.jobSources(identity, runId)` discovers original accepted domain Jobs in the actual task
 family, including independent User, historical and child/sibling work absent from the current history
 page. It returns short binding/origin/lifecycle metadata and accepts AbortSignal. The selected Run must

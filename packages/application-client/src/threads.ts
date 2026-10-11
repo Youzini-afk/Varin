@@ -3,7 +3,7 @@ import type { FamilyList, FamilyRuns, FamilyRead, FamilyItem, FamilyRunsParams, 
 import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, DelegatedExecution, ChildWait, TreeCancellationReceipt, Followup, FollowupView, FollowupRegisterParams, LiveRoot, ContextPersonalization, ContextResources, ResourceActivation, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
 
 import type { RunModelSelection, RunModelSelections } from '@varin/protocol';
-import type { HostJobSource, FollowupPendingRegistration, FollowupRegistrationCancelResult, FollowupControlAction } from '@varin/protocol';
+import type { HostJobSource, FollowupOccurrencesResult, FollowupPendingRegistration, FollowupRegistrationCancelResult, FollowupControlAction } from '@varin/protocol';
 import type { Goal, GoalBudget, GoalControlAction, GoalControlReceipt } from '@varin/protocol';
 import type { PolicySelection, PolicySelections } from '@varin/protocol';
 import type { ExtensionToolBinding, LaunchTool, McpBinding } from '@varin/protocol';
@@ -112,7 +112,7 @@ export interface ThreadResourcesAPI {
   /** Prepare a new resource snapshot; old in-flight requests keep their original version. */
   refresh(input: ThreadResourceRefresh): Promise<ContextCheckpoint>;
 }
-/** One explicit occurrence, delivered at a lawful boundary or admitted through the original Run owner. */
+/** Explicit follow-up authorization; occurrences are delivered through the original Run owner. */
 export interface ThreadFollowupsAPI {
   /** Accepted family Jobs; sourceRunId is target attribution, never the registration source. */
   jobSources(identity: ThreadIdentity, runId: string, signal?: AbortSignal): Promise<HostJobSource[]>;
@@ -122,7 +122,9 @@ export interface ThreadFollowupsAPI {
   cancelRegistration(input: ThreadIdentity & { key: string; runId: string }): Promise<FollowupRegistrationCancelResult>;
   list(identity: ThreadIdentity, signal?: AbortSignal): Promise<Followup[]>;
   get(identity: ThreadIdentity, followupId: string, signal?: AbortSignal): Promise<FollowupView>;
-  /** Revision-checked definition control; an already consumed occurrence keeps its original delivery facts. */
+  /** Original occurrence rows, in accepted-cursor order. Reading never activates or cancels work. */
+  occurrences(identity: ThreadIdentity, followupId: string, after?: number, signal?: AbortSignal): Promise<FollowupOccurrencesResult>;
+  /** Revision-checked definition control; delivered occurrences keep their original delivery facts. */
   control(input: ThreadIdentity & { followupId: string; expectedRevision: number; action: FollowupControlAction }): Promise<Followup>;
 }
 /** Explicit continuing-work authorization. Usage is reported by the original inference owner. */

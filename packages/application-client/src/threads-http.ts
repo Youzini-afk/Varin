@@ -69,6 +69,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
       cancelRegistration: input => post('followup/registration/cancel', input),
       list: (identity, signal) => post('followup/list', identity, signal),
       get: (identity, followupId, signal) => post('followup/get', { ...identity, followupId }, signal),
+      occurrences: (identity, followupId, after, signal) => post('followup/occurrences', { ...identity, followupId, ...(after === undefined ? {} : { after }) }, signal),
       control: input => post('followup/control', input),
     },
     goals: {

@@ -293,7 +293,7 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 37, input domain 6 and collaboration domain 7 store input intents/queue bodies and context-job ownership,
+Catalog version 38, input domain 6 and collaboration domain 7 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
@@ -589,9 +589,9 @@ a cancelled old epoch cannot erase a newer valid wake. The client separates `res
 `retryPreparation(runId)`, and the UI uses the exact displayed pause while preserving Stop run during
 pending requests. See the ordinary [SDK example](../../../examples/extensions/delivery-pause-policy/README.md).
 
-## Explicit one-shot follow-ups
+## Explicit follow-ups and repeated occurrences
 
-The ordinary `follow_up` tool (version 4) supports register/list/get/jobs/control from the actual ModelStep or policy
+The ordinary `follow_up` tool (version 5) supports register/list/get/jobs/occurrences/control from the actual ModelStep or policy
 invocation. `runtime.followup.register` is the authenticated User path. Each registration retains one
 explicit instruction and an absolute `at` instant, the original accepted `process_spawn` identity,
 an original accepted Host domain `job_stopped` identity, an exact original-source file condition, or a
@@ -600,11 +600,13 @@ another leaf is already satisfied. Empty combinations and nested conditions are 
 workflow executor or arbitrary source-count limit.
 Catalog derives the Thread/branch, actor and operation from the caller; Agent arguments cannot forge
 User authority. Original bodies live in ContentStore and are read on demand through `get`, while list
-and control use short metadata. Registration retries preserve the original identity and exact intent.
+and control use short metadata. Registration retries preserve the original identity and exact intent, including `repeat` (`once` by default,
+`each` only when explicitly requested). The stored definition always names this permission.
 
 Registration returns promptly. Only an explicit tool `wait: {}` creates a separate original Job
 observation, joining child/process/reply observations at the shared decision barrier. Cancelling that
-observation does not cancel its definition or target process. No-wait registration is not an implicit
+observation reports the exact first occurrence from its original Wait event, even if later occurrences
+already exist. Cancelling it does not cancel its definition or target process. No-wait registration is not an implicit
 Pause or a blocker that suppresses an otherwise eligible Goal continuation.
 
 The native continuation worker owns absolute deadlines and actual process-stop facts. Past instants
@@ -620,8 +622,21 @@ event for the actual consumers. The transaction freezes the currently visible sa
 an `any` does not reconstruct which source historically arrived first while offline. An observed
 time branch can satisfy `any` without waiting for its other processes to stop; `all` needs every
 source. Only the occurrence's actual process/Job stop evidence contributes receipt bodies to preparation.
-One combination produces one occurrence. A time check followed by a later completion check needs
-two explicit registrations, preserving both intents rather than treating `any` as recurring permission.
+With `once`, one combination produces one occurrence; a time check followed by a later completion
+check needs two explicit registrations. `each` is continuing authorization for this same instruction.
+Its single source must be file `changed`; repeated `any` requires at least one such source and creates
+one occurrence per accepted leaf edge. Finite time/stop/exists/ready leaves contribute at most once.
+Repeated `all` requires repeatable leaves and pairs their oldest unconsumed evidence: A1,A2,B1 yields
+(A1,B1), retaining A2 for B2, including across restart. It never overwrites unpaired facts with latest.
+
+Original indexed events retain each accepted source fact. `accepted_cursor` orders its acceptance,
+while `trigger_cursor` retains the actual original causal event. Per-leaf `consumed_cursor`, the fact
+and completed occurrence rounds commit in the same Catalog transaction. Occurrence IDs, not the
+latest projection, bind preparation, failure, optional observation, ingress and Goal checks. Later
+source progress does not stale an earlier prepared occurrence; real control/source/Goal/epoch changes do.
+`occurrences`/`runtime.followup.occurrences` pages the original rows by accepted cursor, 64 per response
+without a lifetime cap. Definition `.occurrence` is only the latest summary; `pending_occurrences`
+counts original undelivered facts through pending-occurrence/input indexes rather than all old history.
 
 `jobs` and the public `runtime.host_job.sources` query return short accepted Job metadata from the
 actual task family, including independent User work and earlier, child or sibling Runs. The target's
@@ -646,10 +661,14 @@ User admission atomically claims ready ingress instead of creating a competing w
 history/instruction refresh is allowed; changed source or ContextScope holds the occurrence.
 
 Binding is not delivery. Pause/cancel still controls bound-but-queued ingress; only actual history
-delivery consumes the definition. Cancelling a definition never cancels a shared Run or the observed
-process. Delivered definitions return their original facts and the Run has its own cancellation
-identity. Stop fences definitions already accepted at that time; a later explicit User registration
-from the stopped predecessor is new intent and survives the old Run's eventual terminal receipt.
+delivery consumes a `once` definition. An `each` delivery leaves its original source observer and
+authorization active. Pause stops new file reads and execution while retaining accepted work; Resume
+rechecks the original source and explicitly retries failed undelivered occurrences. Cancel withdraws
+future authorization and every undelivered occurrence/input, leaving delivered history and shared Runs
+unchanged. The actual current branch Run's explicit Stop transaction also withdraws existing `each`
+definitions in that branch; a historical ended Run, non-current queued Run or single Operation does
+not acquire that branch-wide scope. Tree Stop uses the original tree. A later explicit User registration
+from a stopped predecessor is new intent and survives that old Run's eventual terminal receipt.
 Manual Pause, questions, Goal control, budgets and unresolved usage retain their own authority.
 
 An explicit input with an actually observed At source under the same current Goal generation can
@@ -668,9 +687,10 @@ No old file, stdin, resize, kill or new process Wait permission follows from a r
 
 Startup and stale preparation reuse original identities. Failures remain explicit while unrelated
 healthy continuations can advance. Shutdown fences old workers, publication leases protect staged
-bodies, and original instructions/input/history remain normal GC roots. This one-shot contract does
-not grant implicit continuing authorization. Calendar definitions have their separate original asset
-and occurrence contract; log/metric/research and other event adapters remain separate work.
+bodies, and original instructions/input/history remain normal GC roots. Continuing authorization
+requires explicit `each`; it is never inferred from a delivered one-time instruction. Calendar
+definitions have their separate original asset/occurrence contract; log/metric/artifact adapters
+and broader domain combinations remain separate work.
 
 ### File conditions and source ownership
 
@@ -692,7 +712,11 @@ underlying root watcher is shared; a lost same-key admission closes only its own
 
 `exists` accepts a verified regular file, directory or symlink. `changed` uses an actual FileState
 difference or a continuous exact-path invalidation since the last durably accepted watch position.
-A restart or reset exposes a gap, never inventing offline A-to-B-to-A history. Directory invalidation
+Repeated changes compare the previous accepted current snapshot, not the permanent registration
+baseline. Replaying one key/position or rereading the same snapshot does not create a new edge;
+separate accepted observations can overlap one physical OS write, and notifications can coalesce
+several writes. This is not exactly-once delivery per OS mutation. A restart or reset exposes a gap,
+never inventing offline A-to-B-to-A history. Directory invalidation
 wakes descendants for a new read; it is not evidence that every descendant changed. `ready` requires
 a regular file, stable original Documents capture and no actual managed writer/Storage lease/process
 activity. It does not certify semantic completion or the absence of every external OS writer.

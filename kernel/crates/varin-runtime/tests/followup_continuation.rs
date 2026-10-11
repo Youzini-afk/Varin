@@ -30,6 +30,7 @@ impl RegisterProcessFollowup for Catalog {
                 key,
                 run,
                 FollowupRegistration {
+                    repeat: varin_runtime::catalog::followups::FollowupRepeat::Once,
                     trigger: FollowupRegistrationTrigger::ProcessStopped {
                         operation_id: process.into(),
                     },
@@ -165,7 +166,7 @@ impl Fixture {
         });
         let completion = ToolCompletion::JobAccepted {
             content: None,
-                operation_id: fixture.process.clone(),
+            operation_id: fixture.process.clone(),
             phase: "running".into(),
             effect: Effect::Dispatched,
             lifetime: Lifetime::Thread,
@@ -822,6 +823,7 @@ fn at(f: &mut Fixture, key: &str, instant: u64, text: &str) -> Followup {
             key,
             &f.run,
             FollowupRegistration {
+                repeat: varin_runtime::catalog::followups::FollowupRepeat::Once,
                 trigger: FollowupRegistrationTrigger::At { at_ms: instant },
                 instruction: text.into(),
                 wait: None,
@@ -850,6 +852,7 @@ fn explicit_instants_deliver_once_while_thread_process_is_running_and_cancel_onl
             "first",
             &f.run,
             FollowupRegistration {
+                repeat: varin_runtime::catalog::followups::FollowupRepeat::Once,
                 trigger: FollowupRegistrationTrigger::At { at_ms: 1 },
                 instruction: "Check the still-running job once".into(),
                 wait: None
@@ -1197,3 +1200,6 @@ mod files;
 
 #[path = "fixtures/followup_jobs.rs"]
 mod jobs;
+
+#[path = "fixtures/followup_repeating.rs"]
+mod repeating;

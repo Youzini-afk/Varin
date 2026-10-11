@@ -206,8 +206,11 @@ fn observe_file(
     index: usize,
     targeted_change: bool,
     ready: bool,
+    previous: Option<&FileState>,
 ) -> Result<()> {
-    if d.sources[index].observed.is_some() {
+    if d.sources[index].observed.is_some()
+        && !(d.repeat == FollowupRepeat::Each && d.trigger.sources()[index].repeatable())
+    {
         return Ok(());
     }
     let FollowupSource::File { path, condition } = d.trigger.sources()[index].clone() else {
@@ -223,14 +226,17 @@ fn observe_file(
     let Some(state) = &file.current else {
         return Ok(());
     };
+    let comparison = if d.repeat == FollowupRepeat::Each {
+        previous
+    } else {
+        file.baseline.as_ref()
+    };
     let proof = match condition {
         FileCondition::Exists if !matches!(state, FileState::Missing | FileState::Unsupported) => {
             Some(FileProof::Exists)
         }
         FileCondition::Changed
-            if !file.immutable
-                && file.baseline.is_some()
-                && file.baseline.as_ref() != Some(state) =>
+            if !file.immutable && comparison.is_some() && comparison != Some(state) =>
         {
             Some(FileProof::SnapshotDifference)
         }
@@ -255,17 +261,7 @@ fn observe_file(
         gap: file.gap,
         observed_at_ms: observations::wall_time_ms()?,
     };
-    let cursor = event(
-        tx,
-        &d.id,
-        d.revision,
-        "followup.file_observed",
-        json!({"source_index":index,"evidence":evidence}),
-    )?;
-    d.sources[index].observed = Some(FollowupSourceObservation {
-        trigger_cursor: cursor,
-        evidence,
-    });
+    sources::accept_observation(tx, d, index, None, evidence)?;
     Ok(())
 }
 pub(super) fn observe_registration(
@@ -274,7 +270,14 @@ pub(super) fn observe_registration(
     files: &[PreparedFileObservation],
 ) -> Result<()> {
     for file in files {
-        observe_file(tx, d, file.source_index, file.targeted_change, file.ready)?;
+        observe_file(
+            tx,
+            d,
+            file.source_index,
+            file.targeted_change,
+            file.ready,
+            file.state.as_ref(),
+        )?;
     }
     if !files.is_empty() {
         put(tx, "followups", &d.id, d)?;
@@ -283,8 +286,9 @@ pub(super) fn observe_registration(
 }
 fn release_required(d: &Definition, index: usize) -> bool {
     d.state == FollowupState::Cancelled
-        || d.wait.state != NextRunWaitState::Waiting
-        || d.sources[index].observed.is_some()
+        || (d.repeat == FollowupRepeat::Once && d.wait.state != NextRunWaitState::Waiting)
+        || (d.sources[index].observed.is_some()
+            && !(d.repeat == FollowupRepeat::Each && d.trigger.sources()[index].repeatable()))
         || d.sources[index]
             .file
             .as_ref()
@@ -478,6 +482,19 @@ impl Catalog {
             }
         }
         let previous = f.clone();
+        let targeted_change = update.targeted_change
+            && !update.gap
+            && f.watch_id == update.watch_id
+            && f.position
+                .as_ref()
+                .zip(update.position.as_ref())
+                .is_some_and(|(old, new)| {
+                    old.source_id == new.source_id
+                        && old.generation == new.generation
+                        && new.sequence > old.sequence
+                });
+        let old_observed = d.sources[index].observed.clone();
+        let f = d.sources[index].file.as_mut().expect("file source");
         if let Some(state) = update.state {
             if f.baseline.is_none() {
                 f.baseline = Some(state.clone());
@@ -488,12 +505,19 @@ impl Catalog {
         f.position = update.position;
         f.gap |= update.gap;
         f.failure_code = update.failure_code;
-        if *f != previous || update.targeted_change {
+        if *f != previous || targeted_change {
             f.revision += 1;
         }
-        observe_file(&tx, &mut d, index, update.targeted_change, update.ready)?;
-        let changed =
-            d.sources[index].file.as_ref() != Some(&previous) || d.sources[index].observed != None;
+        observe_file(
+            &tx,
+            &mut d,
+            index,
+            targeted_change,
+            update.ready,
+            previous.current.as_ref(),
+        )?;
+        let changed = d.sources[index].file.as_ref() != Some(&previous)
+            || d.sources[index].observed != old_observed;
         if changed {
             put(&tx, "followups", &d.id, &d)?;
             event(

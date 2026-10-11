@@ -1,12 +1,12 @@
 use super::*;
-fn position(id: &str, sequence: u64) -> FileWatchPosition {
+pub(super) fn position(id: &str, sequence: u64) -> FileWatchPosition {
     FileWatchPosition {
         source_id: id.into(),
         generation: 1,
         sequence,
     }
 }
-fn body(value: &str) -> FileState {
+pub(super) fn body(value: &str) -> FileState {
     FileState::RegularFile {
         object_hash: format!("sha256-{value}"),
         byte_length: value.len() as u64,
@@ -20,11 +20,22 @@ fn register_file(
     state: FileState,
     ready: bool,
 ) -> Followup {
+    register_file_repeating(f, key, trigger, state, ready, FollowupRepeat::Once)
+}
+pub(super) fn register_file_repeating(
+    f: &mut Fixture,
+    key: &str,
+    trigger: FollowupRegistrationTrigger,
+    state: FileState,
+    ready: bool,
+    repeat: FollowupRepeat,
+) -> Followup {
     let mut p =
         f.db.prepare_followup_registration(
             key,
             &f.run,
             FollowupRegistration {
+                repeat,
                 trigger,
                 instruction: "Read and explain the exact original file result".into(),
                 wait: None,
@@ -52,7 +63,7 @@ fn register_file(
     p.bind_file_observations(files).unwrap();
     f.db.admit_followup_registration(p).unwrap().followup
 }
-fn work(f: &Fixture, id: &str, index: usize) -> FileObservationWork {
+pub(super) fn work(f: &Fixture, id: &str, index: usize) -> FileObservationWork {
     let d = f.db.followup(id).unwrap();
     let file = d.sources[index].file.as_ref().unwrap();
     f.db.followup_file_work(&FileObservationKey {
@@ -64,7 +75,7 @@ fn work(f: &Fixture, id: &str, index: usize) -> FileObservationWork {
     })
     .unwrap()
 }
-fn update(
+pub(super) fn update(
     w: &FileObservationWork,
     state: FileState,
     sequence: u64,
@@ -327,6 +338,7 @@ fn fixed_changed_stays_static_while_snapshot_ready_and_directory_exists_are_hone
 fn explicit_user_registration_disposal_fence_survives_restart_and_rejects_other_actors() {
     let mut f = Fixture::new();
     let input = FollowupRegistration {
+        repeat: varin_runtime::catalog::followups::FollowupRepeat::Once,
         trigger: FollowupRegistrationTrigger::File {
             path: "result.txt".into(),
             condition: FileCondition::Changed,

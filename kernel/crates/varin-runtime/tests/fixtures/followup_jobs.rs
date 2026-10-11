@@ -124,6 +124,7 @@ fn accepted_job_discovery_and_registration_reject_unaccepted_process_and_foreign
                 &id,
                 &f.run,
                 FollowupRegistration {
+                    repeat: varin_runtime::catalog::followups::FollowupRepeat::Once,
                     trigger: FollowupRegistrationTrigger::Any {
                         sources: vec![
                             FollowupRegistrationSource::At { at_ms: 0 },
@@ -257,6 +258,7 @@ fn historical_user_job_stops_before_registration_and_continues_current_work_sour
             "historical-job",
             &f.run,
             FollowupRegistration {
+                repeat: varin_runtime::catalog::followups::FollowupRepeat::Once,
                 trigger: trigger(&binding),
                 instruction: "Follow this current work".into(),
                 wait: None,
@@ -336,6 +338,7 @@ fn any_winner_and_stop_race_keep_one_fact_while_cancellation_never_cancels_the_j
             "race-stop",
             &f.run,
             FollowupRegistration {
+                repeat: varin_runtime::catalog::followups::FollowupRepeat::Once,
                 trigger: trigger(&binding),
                 instruction: "stop race".into(),
                 wait: None,

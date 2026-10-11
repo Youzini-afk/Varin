@@ -948,6 +948,7 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
                 "process-after-real-stop",
                 &child.binding.run_id,
                 FollowupRegistration {
+                    repeat: varin_runtime::catalog::followups::FollowupRepeat::Once,
                     trigger: FollowupRegistrationTrigger::All {
                         sources: vec![
                             FollowupRegistrationSource::At { at_ms: 0 },
