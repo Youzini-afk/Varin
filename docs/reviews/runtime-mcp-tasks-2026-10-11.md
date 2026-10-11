@@ -118,8 +118,10 @@ cases; all runtime test targets compile. These do not stand in for the original-
 The installed MCP Task owner tests pass 3 cases, and original authority/HTTP lifecycle regressions pass
 10. Host coordinator plus management permission regressions pass 13; research/follow-up consumers
 pass 60. The actual application-client → authenticated route → ThreadAdapter → AgentRuntimeClient
-media-holder tests pass 3; shared UI behavior passes 74. Type checks cover Host production and tests,
-Pi Host and UI; changed-source lint, protocol generation and engineering documentation checks pass.
+media-holder tests pass 3; shared UI behavior passes 74. Type checks cover Host production and tests and UI; Pi Host production builds passed. A later
+resource-observer phase found that the full Pi Host test type-check still rejected an existing Task
+fixture message cast; its correction and complete type-check are recorded in that phase, rather than
+counting the earlier production build as test-type validation. For this Task slice, changed-source lint, protocol generation and engineering documentation checks pass.
 The final minor UI error label separately distinguishes unsupported interaction from another unsupported
 Task operation; it changes no routing or authority.
 

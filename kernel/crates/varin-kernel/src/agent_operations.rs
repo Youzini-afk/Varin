@@ -76,17 +76,23 @@ pub(super) fn execute(
             catalog.capture_operation_read(operation)
         }
         "runtime.operation.inspect" => {
-            let p: OperationParams = serde_json::from_value(params)?;
+            let p: OperationInspectParams = serde_json::from_value(params)?;
             let catalog = owner
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
-            let operation = catalog.operation(&p.operation_id).map_err(domain)?;
+            let operation = match catalog.operation(&p.operation_id) {
+                Ok(operation) => operation,
+                Err(varin_runtime::RuntimeError::NotFound(_)) if p.allow_missing == Some(true) => {
+                    return Ok(Value::Null);
+                }
+                Err(error) => return Err(domain(error)),
+            };
             catalog.capture_operation_read(operation)
         }
         _ => {
             return Err(KernelError::Protocol(
                 "unknown operation projection command".into(),
-            ))
+            ));
         }
     };
     Ok(serde_json::to_value(read.load().map_err(domain)?)?)

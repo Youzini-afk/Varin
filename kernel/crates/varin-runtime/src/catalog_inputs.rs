@@ -33,6 +33,11 @@ pub enum InputActivation {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum InputOrigin {
     UserIngress,
+    McpResource {
+        operation_id: String,
+        fact_id: String,
+        listener_id: String,
+    },
     Followup {
         followup_id: String,
         occurrence_id: String,
@@ -67,7 +72,8 @@ impl InputOrigin {
     }
     pub(super) fn history_source(&self) -> HistorySource {
         match self {
-            Self::Followup { .. }
+            Self::McpResource { .. }
+            | Self::Followup { .. }
             | Self::Calendar { .. }
             | Self::ComputerRequest { .. }
             | Self::ComputerEvent { .. } => HistorySource::Environment,
@@ -169,9 +175,9 @@ pub(super) fn initialize(tx: &Transaction<'_>) -> Result<()> {
                     "input queue exists without its schema identity".into(),
                 ));
             }
-            tx.execute_batch("CREATE TABLE input_queue(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),run_id TEXT REFERENCES runs(id),mode TEXT NOT NULL,state TEXT NOT NULL,cursor INTEGER NOT NULL,origin TEXT NOT NULL,activation TEXT NOT NULL,sender_thread_id TEXT,sender_branch_id TEXT,body TEXT NOT NULL); CREATE INDEX input_queue_pending ON input_queue(branch_id,state,activation,cursor); CREATE INDEX input_queue_outgoing ON input_queue(sender_thread_id,sender_branch_id,cursor); INSERT INTO runtime_domains(name,version) VALUES('input_queue',6);")?;
+            tx.execute_batch("CREATE TABLE input_queue(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),run_id TEXT REFERENCES runs(id),mode TEXT NOT NULL,state TEXT NOT NULL,cursor INTEGER NOT NULL,origin TEXT NOT NULL,activation TEXT NOT NULL,sender_thread_id TEXT,sender_branch_id TEXT,body TEXT NOT NULL); CREATE INDEX input_queue_pending ON input_queue(branch_id,state,activation,cursor); CREATE INDEX input_queue_outgoing ON input_queue(sender_thread_id,sender_branch_id,cursor); INSERT INTO runtime_domains(name,version) VALUES('input_queue',7);")?;
         }
-        Some(6) => check_format(tx)?,
+        Some(7) => check_format(tx)?,
         Some(version) => {
             return Err(RuntimeError::Invalid(format!(
                 "unsupported input queue domain version {version}; data was preserved"
@@ -188,7 +194,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
             |row| row.get(0),
         )
         .optional()?;
-    if version != Some(6) {
+    if version != Some(7) {
         return Err(RuntimeError::Invalid(
             "unsupported input queue format; data was preserved".into(),
         ));

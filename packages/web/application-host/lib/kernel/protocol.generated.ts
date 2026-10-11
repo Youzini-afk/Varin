@@ -3,7 +3,7 @@
  * Do not hand-edit the wire shapes; run `node scripts/generate-kernel-protocol.mjs`.
  */
 
-export const KERNEL_PROTOCOL_VERSION = 5 as const;
+export const KERNEL_PROTOCOL_VERSION = 6 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
 export const KERNEL_CONTROL_METHODS = ["runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
@@ -11,7 +11,7 @@ export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.computer.event.cancel",
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["process.write","process.resize","runtime.tools.invoke"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
-export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v5" as const;
+export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v6" as const;
 
 export type KernelMethod =
   | "runtime.managed_process.pending"
@@ -279,7 +279,15 @@ export type KernelMethod =
   | "runtime.host_job.access"
   | "runtime.host_job.task.context"
   | "runtime.host_job.task.read"
-  | "runtime.host_job.task.finish";
+  | "runtime.host_job.task.finish"
+  | "runtime.mcp.resource.begin"
+  | "runtime.mcp.resource.accept"
+  | "runtime.mcp.resource.listener"
+  | "runtime.mcp.resource.notify"
+  | "runtime.mcp.resource.pending"
+  | "runtime.mcp.resource.context"
+  | "runtime.mcp.resource.access"
+  | "runtime.mcp.resource.release_source";
 
 export interface MediaReadChunk { media:StoredMedia;partIndex:number;chunkIndex:number;chunkCount:number;totalBytes:number;bytesBase64:string }
 
@@ -1622,7 +1630,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 5; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 6; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -1853,7 +1861,7 @@ export interface HostToolErrorMarker {
   admission?: boolean;
 }
 
-export type McpRoute = {kind:"direct"} | {kind:"server_argument";argument:string} | {kind:"discovery";argument:string} | {kind:"direct_task"} | {kind:"server_task_argument";argument:string} | {kind:"task_control";argument:string;action:McpTaskAction};
+export type McpRoute = {kind:"direct"} | {kind:"server_argument";argument:string} | {kind:"discovery";argument:string} | {kind:"direct_task"} | {kind:"server_task_argument";argument:string} | {kind:"task_control";argument:string;action:McpTaskAction} | {kind:"resource_subscribe";argument:string} | {kind:"resource_unsubscribe";argument:string};
 
 export interface McpBinding {
   routes: Record<string, McpRoute>;
@@ -2526,6 +2534,7 @@ export interface Operation {
   intent: unknown;
   result: OperationResult | null;
   managed_process?: ManagedProcess;
+  mcp_resource_subscription?: McpResourceSubscription;
 }
 
 export interface ProviderOriginal {
@@ -4169,14 +4178,7 @@ export interface FamilyRead {
 
 export interface FamilyItem { threadId: string; branchId: string; runId: string | null; headId: string | null; itemId: string; format: 'conversation_json'; text: string; offset: number; nextOffset: number | null; totalBytes: number }
 
-export interface McpTaskEndpoint {
-  server: string;
-  resourceKey: string;
-  configurationVersion: string;
-  credentialVersion: string;
-}
-
-export type HostJobSubject = {kind:'workspace';workspaceId:string;subjectId:string} | {kind:'mcp';endpoint:McpTaskEndpoint;dispatchId:string};
+export type HostJobSubject = {kind:'workspace';workspaceId:string;subjectId:string} | {kind:'mcp';endpoint:McpEndpoint;dispatchId:string};
 
 export type McpTaskStatus = 'working' | 'input_required' | 'completed' | 'failed' | 'cancelled';
 
@@ -4257,8 +4259,150 @@ export interface HostJobView extends HostJobLink {
 
 export type McpTaskResultKind = 'response' | 'protocol_error';
 
-export type McpBuiltinOperation = "discover" | "call" | "start_task" | "list_resources" | "read_resource" | "list_prompts" | "get_prompt" | "task_get" | "task_wait" | "task_cancel";
+export interface McpResourceBinding {
+  operationId: string;
+  executionOwner: ExecutorOwner;
+  endpoint: McpEndpoint;
+  schemaVersion: string;
+  uri: string;
+}
+
+export interface McpResourceSubscription {
+  binding: McpResourceBinding;
+  sourceScope: McpExecutionScope;
+  acceptanceRef: unknown | null;
+  listenerId: string | null;
+  availability: McpResourceAvailability;
+  localReleased: boolean;
+  remoteCleanup: McpResourceCleanup;
+  lastEventCursor: number | null;
+  problem: string | null;
+}
+
+export interface McpResourcePending {
+  revision: number;
+  operationId: string;
+  runId: string;
+  threadId: string;
+  branchId: string;
+  cancelRequested: boolean;
+  subscription: McpResourceSubscription;
+}
+
+export type McpResourceAvailability = 'pending' | 'active' | 'gap' | 'unavailable' | 'closed';
+
+export type McpResourceCleanup = 'not_requested' | 'shared' | 'acknowledged' | 'unknown';
+
+export type McpResourceFactKind = 'updated' | 'unresolved_association' | 'gap';
+
+export interface McpResourceBeginParams {
+  binding: McpResourceBinding;
+}
+
+export interface McpResourceAcceptParams {
+  binding: McpResourceBinding;
+  listenerId: string;
+  content: unknown;
+}
+
+export interface McpResourceListenerParams {
+  binding: McpResourceBinding;
+  expectedListenerId: string | null;
+  listenerId: string | null;
+  availability: McpResourceAvailability;
+  localReleased: boolean;
+  remoteCleanup: McpResourceCleanup;
+  problem: string | null;
+}
+
+export interface McpResourceNotifyParams {
+  binding: McpResourceBinding;
+  listenerId: string;
+  factId: string;
+  kind: McpResourceFactKind;
+  notification?: unknown;
+}
+
+export interface McpResourceAccessParams {
+  runId: string;
+  targetOperationId: string;
+  control: boolean;
+}
+
+export interface McpEndpoint {
+  server: string;
+  resourceKey: string;
+  configurationVersion: string;
+  credentialVersion: string;
+}
+
+export interface OperationInspectParams {
+  operationId: string;
+  allowMissing?: boolean;
+}
+
+export type McpBuiltinOperation = "subscribe_resource" | "unsubscribe_resource" | "discover" | "call" | "start_task" | "list_resources" | "read_resource" | "list_prompts" | "get_prompt" | "task_get" | "task_wait" | "task_cancel";
 export const MCP_CAPABILITIES: readonly (LaunchTool & { route: McpRoute; operation: McpBuiltinOperation })[] = [
+  {
+    "name": "mcp_subscribe_resource",
+    "operation": "subscribe_resource",
+    "version": "1",
+    "description": "Observe resource change notifications from the selected MCP server. Use its resources schemaVersion. Notifications are passive facts; this does not read the resource or authorize new model work. Nonexact resource notifications may be unassociated.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "server": {
+          "type": "string",
+          "minLength": 1
+        },
+        "schemaVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "server",
+        "schemaVersion",
+        "uri"
+      ],
+      "additionalProperties": false
+    },
+    "output_schema": null,
+    "metadata": null,
+    "route": {
+      "kind": "resource_subscribe",
+      "argument": "server"
+    }
+  },
+  {
+    "name": "mcp_unsubscribe_resource",
+    "operation": "unsubscribe_resource",
+    "version": "1",
+    "description": "Stop the resource observer created by an original subscription Operation. Local listener release and the server unsubscribe acknowledgement are reported separately.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "operationId"
+      ],
+      "additionalProperties": false
+    },
+    "output_schema": null,
+    "metadata": null,
+    "route": {
+      "kind": "resource_unsubscribe",
+      "argument": "operationId"
+    }
+  },
   {
     "name": "mcp_discover",
     "operation": "discover",
@@ -4711,7 +4855,7 @@ export type KernelMethodParams = {
   "runtime.permission.decide": PermissionDecideParams;
   "runtime.permission.consume": PermissionOpenParams;
   "runtime.question.answer": QuestionAnswerParams;
-  "runtime.operation.inspect": OperationParams;
+  "runtime.operation.inspect": OperationInspectParams;
   "runtime.operation.status": OperationParams;
   "runtime.operation.cancel": OperationParams;
   "runtime.process.access": RuntimeProcessAccessParams;
@@ -4862,6 +5006,14 @@ export type KernelMethodParams = {
   "runtime.host_job.task.context": OperationParams;
   "runtime.host_job.task.read": HostJobAccessParams;
   "runtime.host_job.task.finish": HostJobBeginParams;
+  "runtime.mcp.resource.begin": McpResourceBeginParams;
+  "runtime.mcp.resource.accept": McpResourceAcceptParams;
+  "runtime.mcp.resource.listener": McpResourceListenerParams;
+  "runtime.mcp.resource.notify": McpResourceNotifyParams;
+  "runtime.mcp.resource.pending": KernelEmptyParams;
+  "runtime.mcp.resource.context": OperationParams;
+  "runtime.mcp.resource.access": McpResourceAccessParams;
+  "runtime.mcp.resource.release_source": RunParams;
 };
 
 export type KernelRequest =
@@ -5905,7 +6057,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.operation.inspect";
-      params: OperationParams;
+      params: OperationInspectParams;
       epoch?: string;
       grantId?: string;
     }
@@ -7256,6 +7408,78 @@ export type KernelRequest =
       id: string;
       method: "runtime.host_job.task.finish";
       params: HostJobBeginParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.mcp.resource.begin";
+      params: McpResourceBeginParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.mcp.resource.accept";
+      params: McpResourceAcceptParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.mcp.resource.listener";
+      params: McpResourceListenerParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.mcp.resource.notify";
+      params: McpResourceNotifyParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.mcp.resource.pending";
+      params: KernelEmptyParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.mcp.resource.context";
+      params: OperationParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.mcp.resource.access";
+      params: McpResourceAccessParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.mcp.resource.release_source";
+      params: RunParams;
       epoch?: string;
       grantId?: string;
     }

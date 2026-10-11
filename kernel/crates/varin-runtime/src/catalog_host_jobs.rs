@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct McpTaskEndpoint {
+pub struct McpEndpoint {
     pub server: String,
     pub resource_key: String,
     pub configuration_version: String,
@@ -25,7 +25,7 @@ pub enum HostJobSubject {
         subject_id: String,
     },
     Mcp {
-        endpoint: McpTaskEndpoint,
+        endpoint: McpEndpoint,
         dispatch_id: String,
     },
 }
@@ -215,7 +215,7 @@ pub struct UserJobIntent {
     pub source: launches::SourceSelection,
     pub request_ref: Value,
 }
-fn descendants(db: &Connection, owner: &str) -> Result<BTreeSet<String>> {
+pub(super) fn descendants(db: &Connection, owner: &str) -> Result<BTreeSet<String>> {
     let mut query = db.prepare("WITH RECURSIVE family(id) AS (SELECT ?1 UNION SELECT c.child_thread_id FROM child_tasks c JOIN family f ON json_extract(c.body,'$.parent_thread_id')=f.id) SELECT id FROM family")?;
     let rows = query.query_map([owner], |row| row.get::<_, String>(0))?;
     Ok(rows.collect::<std::result::Result<BTreeSet<_>, _>>()?)
@@ -365,6 +365,7 @@ impl Catalog {
         // This command must never hold the model Run foreground open.
         let op = Operation {
             managed_process: None,
+            mcp_resource_subscription: None,
             host_job: Some(HostJobLink {
                 binding: HostJobBinding {
                     operation_id: id.clone(),

@@ -413,7 +413,11 @@ export class AgentRuntimeClient {
     grants?.delete(grantId);
     if (!grants?.size) this.sourceGrants.delete(runId);
   }
+  private mcpResourceOwner?: Pick<import('./mcp-resource-runtime.js').McpResourceRuntime, 'releaseSource'>;
+  setMcpResourceOwner(owner:Pick<import('./mcp-resource-runtime.js').McpResourceRuntime, 'releaseSource'>):void { this.mcpResourceOwner=owner; }
+  async releaseMcpResourceSource(runId:string):Promise<void> { await this.mcpResourceOwner?.releaseSource(runId); }
   async retireSourceGrants(runId: string): Promise<void> {
+    await this.releaseMcpResourceSource(runId);
     // The durable Storage grant owner resolves this Run, including grants from a previous Host.
     await this.kernel.retireRunGrants(runId);
     this.sourceGrants.delete(runId);
@@ -1741,6 +1745,9 @@ export class AgentRuntimeClient {
       { operationId },
       signal,
     );
+  }
+  findOperation(operationId: string, signal?: AbortSignal): Promise<Operation | null> {
+    return this.kernel.agentRuntimeRequest('runtime.operation.inspect', { operationId, allowMissing: true }, signal);
   }
   operationStatus(operationId: string, signal?: AbortSignal): Promise<OperationCancellationReceipt> {
     return this.kernel.agentRuntimeRequest('runtime.operation.status', { operationId }, signal);

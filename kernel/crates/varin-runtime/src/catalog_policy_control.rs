@@ -420,6 +420,7 @@ impl Catalog {
         checkpoint.publish(&tx, run_id, &identity)?;
         let mut op = Operation {
             host_job: None,
+            mcp_resource_subscription: None,
             managed_process: None,
             id: action_id.clone(),
             run_id: run_id.into(),

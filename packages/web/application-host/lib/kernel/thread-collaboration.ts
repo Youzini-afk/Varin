@@ -300,6 +300,7 @@ export class ThreadCollaboration {
   private async releaseHandoff(child: DelegatedExecution, signal: AbortSignal): Promise<void> {
     if (child.resources_released || (!child.receipt && !child.report) || (child.source?.kind !== 'ready' && child.source?.kind !== 'absent' && !child.report)) return;
     const { kernel, runtime } = this.owners;
+    if (child.receipt && child.source?.kind !== 'absent') await runtime.releaseMcpResourceSource(child.receipt.run_id);
     if (child.source?.kind === 'absent') {
       signal.throwIfAborted();
       await runtime.releaseChildResources(child.execution_id, signal);

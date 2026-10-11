@@ -4,6 +4,7 @@ export type McpServiceOperation = 'resources/list' | 'resources/templates/list' 
 export interface McpAuthorityService {
   server: string;
   kind: McpServiceKind;
+  subscribe?:boolean;
   schemaVersion: string;
   resourceKey: string;
 }

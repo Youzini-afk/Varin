@@ -143,7 +143,9 @@ impl HostToolBinding {
                             crate::McpRoute::ServerArgument { argument }
                             | crate::McpRoute::Discovery { argument }
                             | crate::McpRoute::ServerTaskArgument { argument }
-                            | crate::McpRoute::TaskControl { argument, .. },
+                            | crate::McpRoute::TaskControl { argument, .. }
+                            | crate::McpRoute::ResourceSubscribe { argument }
+                            | crate::McpRoute::ResourceUnsubscribe { argument },
                         ) => {
                             argument.is_empty()
                                 || tool

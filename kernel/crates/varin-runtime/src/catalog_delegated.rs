@@ -1101,6 +1101,9 @@ impl Catalog {
             ));
         }
         if !execution.resources_released {
+            if let Some(receipt) = &execution.receipt {
+                super::mcp_resources::require_source_released(&self.db, &receipt.run_id)?;
+            }
             execution.resources_released = true;
             execution.revision += 1;
             let tx = self.db.transaction()?;

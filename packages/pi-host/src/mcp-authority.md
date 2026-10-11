@@ -92,6 +92,20 @@ production lockfiles when changing its exports or dependency graph.
 
 ## Native resources, prompts and protocol bodies
 
+`observeResource` uses the same negotiated original client, credential checks and `requestOnce`
+lifecycle. Each actual client/URI registration owns temporary local holders; only its last holder
+can issue remote unsubscribe. Detach removes local delivery synchronously and returns a separate
+cleanup result, preserving an actual acknowledgement when one exists. Scope/connection references
+remain until the original request settles. A delayed old cleanup cannot remove a replacement group.
+Local holder identities are not remote subscription IDs.
+
+Notification callbacks capture only holders present on the receiving client, then perform current
+credential and connection checks off the SDK reader callback before delivery. Replaced/revoked clients
+cannot address a new listener. Exact URI associations retain opaque protocol fields; other same-client
+holders receive only an unresolved-association diagnostic. This intentionally does not infer arbitrary
+URI ancestry or spread an unmatched URI/body. Resource contents still require a separate admitted read.
+Connection loss reports a gap; the authority does not invent remote replay or launch model work.
+
 The native lease discovers negotiated resources/prompts on the same original client. Its narrow
 service requests cover resource/template pages, resource reads, prompt pages and prompt retrieval.
 They use the original connection's `requestOnce(callback)` lifecycle and call the callback's exact

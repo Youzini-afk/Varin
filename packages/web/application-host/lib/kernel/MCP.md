@@ -167,4 +167,51 @@ also exist for Runs without a child-delegation directory; this does not enable c
 For `input_required`, the coordinator opens the actual `tasks/result` request, preserving the
 original client's supported roots handler and related-task association. Sampling and elicitation
 are not advertised or silently answered by this slice; unsupported requests remain explicit.
-Resource subscriptions/updates and fuller server-initiated interactions remain separate capabilities.
+Fuller server-initiated sampling/elicitation interactions remain separate capabilities.
+
+## Resource observers
+
+The schema-owned `mcp_subscribe_resource(server, schemaVersion, uri)` is a finite Result with
+Thread lifetime. Its original Operation retains a typed `mcp_resource_subscription` facet after
+the subscribe RPC settles; that facet never changes the original outcome, effect, external receipt
+or model tool/result pair. `mcp_unsubscribe_resource(operationId)` and the ordinary user Stop path
+withdraw that exact observer. Tool management keeps the original permission and subtree checks.
+Closed observers remain readable through their real finite model/policy history identity, rather
+than being misclassified as active execution or disappearing when their RPC finishes.
+
+The actual McpAuthority connection and URI own a shared live holder set. Two Threads sharing that
+client do not issue independent remote unsubscribe requests: only its last holder can unsubscribe.
+Removing a holder synchronously closes local delivery before awaiting remote cleanup. Local release,
+shared registration, acknowledged unsubscribe and unknown cleanup are distinct facts. An explicit
+unsubscribe result preserves the actual server acknowledgement and metadata; a shared release has
+no server acknowledgement. None of these facts asserts that remote business work stopped.
+
+Validated updates enter the original ContentStore, passive Input queue and immutable Environment
+history. Body serialization/durability stays outside Catalog. The ConversationItem, input and
+history node share the same identity; notification origin retains the original Operation, local
+listener incarnation and local fact ID. Retries after an uncertain local publication use that same
+ID. Only unsent invalidations coalesce; an in-flight fact cannot be overwritten by a later update.
+The subscribe receipt does not wait for observer body work. Passive updates do not create a Run,
+revive idle work, satisfy unrelated waits or grant a resource read. An authorized model boundary
+consumes the existing queue. Resource URIs and remote metadata remain external data, not instructions.
+
+The [MCP resource schema](https://modelcontextprotocol.io/specification/2025-11-25/schema#resourceupdatednotificationparams)
+allows sub-resource notifications without defining a subscription ID or universal URI ancestry.
+Exact original-client/URI holders receive the complete notification. Other live holders on that same
+client/grant receive only a short unresolved-association fact, even if another holder matched exactly.
+That diagnostic contains neither the unmatched URI nor its metadata/body and does not claim that
+the watched resource changed. No string-prefix routing, automatic fetch, parallel client per observer
+or permanent unassociated-notification inbox is introduced.
+
+Accepted global observers can survive normal Run completion. Workspace observers require their
+original source: the source-release path first commits a short withdrawal fence, synchronously
+detaches the exact listener and acknowledges local release before unpinning/retiring its grants.
+It does not wait for slow notification bytes or a remote unsubscribe ACK. Tree/Goal termination
+withdraws observers belonging to the actual retained Run membership, including already-terminal Runs.
+Previously admitted passive facts remain durable after cancellation.
+
+Host/connection loss creates an explicit observation gap. Reopening can establish a new interval only
+for a durably accepted observer under its original endpoint, configuration, credential grant, source
+and current policy. The old gap remains history when the new listener becomes active. This protocol
+provides no durable remote notification cursor or replay promise; a subscribe whose acceptance is
+unknown is not automatically repeated. This slice adds no separate resource Wait or activation rule.

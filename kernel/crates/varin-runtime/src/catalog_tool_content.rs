@@ -242,6 +242,7 @@ pub(super) fn hydrate_operation(
         })
         .transpose()?;
     Ok(crate::types::Operation {
+        mcp_resource_subscription: operation.mcp_resource_subscription,
         host_job: operation
             .host_job
             .map(|link| {

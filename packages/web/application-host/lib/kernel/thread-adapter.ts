@@ -601,14 +601,37 @@ export class ThreadAdapter {
       throw new Error('Branch does not belong to the selected thread');
     }
     const operationIds = new Set<string>();
+    const observerIds = new Set<string>();
+    const effectful = (effect: unknown) => ['dispatched', 'partial', 'confirmed', 'unknown'].includes(String(effect));
     for (const item of history) {
-      const conversation = item.content as { content?: { kind?: string; result?: { completion?: { kind?: string; operation_id?: string } } } };
-      const completion = conversation?.content?.kind === 'tool_result' ? conversation.content.result?.completion : undefined;
+      const conversation = item.content as {
+        provenance?: { kind?: string; reference?: { action_id?: string; node_id?: string } };
+        content?: { kind?: string; output?: { data?: { operationId?: unknown } };
+          result?: { request_id?: string; call_id?: string; completion?: { kind?: string; operation_id?: string; effect?: string } } };
+      };
+      const result = conversation?.content?.kind === 'tool_result' ? conversation.content.result : undefined;
+      const completion = result?.completion;
       if (completion?.kind === 'job_accepted' && typeof completion.operation_id === 'string') operationIds.add(completion.operation_id);
+      if (completion?.kind === 'result' && effectful(completion.effect)
+        && typeof result?.request_id === 'string' && typeof result.call_id === 'string') {
+        const original = `${result.request_id}:tool:${result.call_id}`;
+        operationIds.add(original); observerIds.add(original);
+      }
+      if (conversation.provenance?.kind === 'policy_tool_data' && conversation.content?.kind === 'output') {
+        const reference = conversation.provenance.reference;
+        if (typeof reference?.action_id === 'string' && typeof reference.node_id === 'string') {
+          const original = `${reference.action_id}:node:${reference.node_id}`;
+          if (conversation.content.output?.data?.operationId === original) {
+            operationIds.add(original); observerIds.add(original);
+          }
+        }
+      }
     }
     const operations = new Map(activeOperations.map(operation => [operation.id, operation]));
     const visible = await Promise.all([...operationIds].filter(id => !operations.has(id)).map(async id => {
-      const operation = await this.runtime.operation(id);
+      // Read-only policy evidence may have no durable Operation. Only a real missing row is optional.
+      const operation = observerIds.has(id) ? await this.runtime.findOperation(id) : await this.runtime.operation(id);
+      if (!operation || observerIds.has(id) && (!operation.mcp_resource_subscription || !effectful(operation.effect))) return null;
       const run = await this.requireRun(operation.run_id);
       // Forked history retains the original receipt, not control over the source branch's job.
       return run.thread_id === identity.threadId && run.branch_id === identity.branchId ? operation : null;

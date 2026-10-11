@@ -589,7 +589,8 @@ impl HostTools {
                 (Some(call.name.clone()), false, false)
             }
             varin_runtime::McpRoute::ServerArgument { argument }
-            | varin_runtime::McpRoute::ServerTaskArgument { argument } => {
+            | varin_runtime::McpRoute::ServerTaskArgument { argument }
+            | varin_runtime::McpRoute::ResourceSubscribe { argument } => {
                 let server = call
                     .arguments
                     .get(argument)
@@ -597,7 +598,8 @@ impl HostTools {
                     .ok_or_else(|| failed("mcp_target_required"))?;
                 (Some(format!("server:{server}")), false, false)
             }
-            varin_runtime::McpRoute::TaskControl { argument, .. } => {
+            varin_runtime::McpRoute::TaskControl { argument, .. }
+            | varin_runtime::McpRoute::ResourceUnsubscribe { argument } => {
                 if call
                     .arguments
                     .get(argument)
@@ -655,7 +657,7 @@ impl HostTools {
             } else {
                 CompletionKind::Result
             },
-            lifetime: if job { Lifetime::Thread } else { Lifetime::Run },
+            lifetime: if job || matches!(route, varin_runtime::McpRoute::ResourceSubscribe { .. }) { Lifetime::Thread } else { Lifetime::Run },
             resources,
         })
     }

@@ -1,5 +1,5 @@
-/** Installed SDK consumer and source-less child preparation for the original Task fixture.
- * The shared helper owns MCP, permissions, Tasks, wire frames, and its actual stdio receiver. */
+/** Installed SDK consumer and source-less child preparation for the original MCP fixture.
+ * The shared helper owns MCP, permissions, lifecycle, wire frames, and its actual stdio receiver. */
 import assert from 'node:assert/strict';
 import { cp, copyFile, mkdir, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -10,38 +10,40 @@ import { parseVarinExtensionManifest } from '@varin/extension-contract';
 import type { McpAuthority } from '@varin/pi-host/mcp-authority';
 import type { KernelClient } from './kernel-client.js';
 import type { McpTaskRuntime } from './mcp-task-runtime.js';
+import type { McpResourceRuntime } from './mcp-resource-runtime.js';
 import { createChildMcpPreparer } from './mcp-child-preparation.js';
 import { retainExtensionTool } from './extension-tool-owner.js';
 import { createNestedToolOwner, VARIN_RUNTIME_TOOLS_CAPABILITY } from './nested-tool-owner.js';
 import { ToolBridge, type McpToolLease } from './tool-bridge.js';
 import type { ExtensionToolBinding, McpBinding } from './protocol.generated.js';
 
-export async function createTaskConsumers(options: {
+export async function createMcpConsumers(options: {
   root: string;
   agentDir: string;
   authority: McpAuthority;
   kernel: KernelClient;
-  tasks: McpTaskRuntime;
+  tasks?: McpTaskRuntime;
+  resources?: McpResourceRuntime;
   bridge: ToolBridge;
   parentMcp: McpToolLease;
 }) {
   const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../..');
-  const example = join(options.root, 'nested-task-extension');
+  const example = join(options.root, 'nested-mcp-extension');
   await mkdir(join(example, 'dist'), { recursive: true });
   const manifest = parseVarinExtensionManifest({
-    schemaVersion: 1, id: 'review.mcp-task-consumer', displayName: 'Task receipt consumer', version: '1.0.0',
+    schemaVersion: 1, id: 'review.mcp-consumer', displayName: 'MCP receipt consumer', version: '1.0.0',
     engines: { varin: '*' },
     entrypoints: { host: { file: 'dist/host.cjs', mode: 'brokered', activation: ['service-request'] } },
     capabilities: { host: [VARIN_RUNTIME_TOOLS_CAPABILITY] },
-    provides: { services: [{ id: 'review.mcp-task-consumer.invoke', version: 1, tool: {
-      name: 'consume_task', description: 'Return the original nested tool receipt unchanged.', completion: 'result', operation: 'effect',
+    provides: { services: [{ id: 'review.mcp-consumer.invoke', version: 1, tool: {
+      name: 'consume_mcp', description: 'Return the original nested tool receipt unchanged.', completion: 'result', operation: 'effect',
       inputSchema: { type: 'object', properties: { callId: { type: 'string' }, name: { type: 'string' }, arguments: { type: 'object' } },
         required: ['callId', 'name', 'arguments'], additionalProperties: false },
       outputSchema: { type: 'object', properties: { operationId: { type: 'string' }, completion: { type: 'object' } },
         required: ['operationId', 'completion'], additionalProperties: false },
     } }] },
   });
-  await writeFile(join(example, 'package.json'), JSON.stringify({ name: 'varin-mcp-task-consumer-review', version: '1.0.0',
+  await writeFile(join(example, 'package.json'), JSON.stringify({ name: 'varin-mcp-consumer-review', version: '1.0.0',
     private: true, dependencies: { '@varin/extension-sdk': 'workspace:*', '@varin/extension-contract': 'workspace:*' } }));
   await writeFile(join(example, 'varin.extension.json'), JSON.stringify(manifest));
   for (const name of ['extension-sdk', 'extension-contract']) {
@@ -66,7 +68,7 @@ export default defineHostExtension({ activate(context) {
     brokerScript: join(repository, 'packages/extension-host/broker/broker-child.mjs') });
   runtime.capabilities.register(VARIN_RUNTIME_TOOLS_CAPABILITY, createNestedToolOwner(options.kernel));
   await runtime.start();
-  await runtime.installOrStage({ source: { kind: 'local', display: 'Task consumer review', specifier: example },
+  await runtime.installOrStage({ source: { kind: 'local', display: 'MCP consumer review', specifier: example },
     expectedRevision: (await runtime.catalog.snapshot()).revision });
   await runtime.reviewCapabilities({ extensionId: manifest.id, expectedRevision: (await runtime.catalog.snapshot()).revision,
     decisions: [{ capability: VARIN_RUNTIME_TOOLS_CAPABILITY, realm: 'host', granted: true }] });
@@ -79,7 +81,9 @@ export default defineHostExtension({ activate(context) {
       currentPolicy: async () => ({ mode: 'normal', rules: [] }) }, service, required);
   };
   const parentExtension = await prepareExtension('thread:parent');
-  const prepareChild = createChildMcpPreparer({ authority: options.authority, kernel: options.kernel, tasks: () => options.tasks,
+  const { tasks, resources } = options;
+  const prepareChild = createChildMcpPreparer({ authority: options.authority, kernel: options.kernel,
+    ...(tasks ? { tasks: () => tasks } : {}), ...(resources ? { resources: () => resources } : {}),
     agentDir: options.agentDir, hostId: 'fixture-host',
     inspectWorkspace: async () => { throw new Error('Source-less child acquired a workspace'); },
     projectTrusted: () => false, currentPolicy: async () => ({ mode: 'normal', rules: [] }),
@@ -103,7 +107,7 @@ export default defineHostExtension({ activate(context) {
       const extension = await prepareExtension(String(frame.threadId), frame.extensionBinding as ExtensionToolBinding);
       const live = options.bridge.register(runId, mcp);
       const extensionLive = options.bridge.register(runId, extension.lease);
-      options.tasks.start();
+      options.tasks?.start(); options.resources?.start();
       return { live, extension: { ownerId: extensionLive.ownerId, generation: extension.generation, binding: extension.binding } };
     },
     close: () => runtime.stop(),
