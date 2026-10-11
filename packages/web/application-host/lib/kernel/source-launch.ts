@@ -93,7 +93,7 @@ export async function admitRunSourceAuthority(
   kernel: KernelClient,
   runtime: AgentRuntimeClient,
   selection: SourceLaunch,
-  options: { signal?: AbortSignal; resolveLiveSource?: LiveSourceResolver; allowMaterialization?: boolean; purpose?: 'source' | 'integration' | 'result'; operationId?: string } = {},
+  options: { signal?: AbortSignal; resolveLiveSource?: LiveSourceResolver; allowMaterialization?: boolean; purpose?: 'source' | 'integration' | 'result'; operationId?: string; retention?: 'run' | 'caller' } = {},
 ) {
   const signal = options.signal;
   signal?.throwIfAborted();
@@ -129,6 +129,11 @@ export async function admitRunSourceAuthority(
     if (operation.run_id !== run.id || operation.phase !== 'running' || operation.executor !== 'integrate_child'
       || operation.execution_owner?.kind !== 'external' || operation.cancel_requested) throw new Error('Integration target authority requires its original active Host tool Operation');
   }
+  if (options.retention === 'caller') {
+    if (!options.operationId) throw new Error('Independent source lifetime requires its actual Operation');
+    const operation = await runtime.operation(options.operationId, signal);
+    if (operation.run_id !== run.id || operation.lifetime !== 'thread' || operation.execution_owner?.kind !== 'external') throw new Error('Independent source Operation differs from its original Thread/Run owner');
+  }
   // Do not use old grants from the durable selection. Each Host lifetime issues its own permit.
   const grant = await kernel.issueGrant({
     grantId: `source:${randomUUID()}`,
@@ -136,11 +141,13 @@ export async function admitRunSourceAuthority(
     executionWorkspace: selection.executionWorkspaceId,
     threadId: run.thread_id,
     runId: run.id,
+    ...(options.retention === 'caller' ? { operationId: options.operationId } : {}),
     capabilities: ['storage.read', 'storage.write', ...(integration ? ['recovery'] : []), ...(tools.some(tool => tool.startsWith('process_')) ? ['process'] : [])],
     pathScopes: [''],
   }, signal);
 
-  runtime.retainSourceGrant(run.id, grant.grantId);
+  if (options.retention !== 'caller') runtime.retainSourceGrant(run.id, grant.grantId);
+  const release = async (): Promise<void> => { if (options.retention === 'caller') await kernel.retireGrant(grant.grantId); else await runtime.releaseSourceGrant(run.id, grant.grantId); };
   const actor = kernel.scoped(grant);
   try {
     let rootId: string | undefined;
@@ -192,9 +199,9 @@ export async function admitRunSourceAuthority(
         : selection.mode === 'materialized' ? { rootId, materializedSource: fixed } : { rootId, liveRoot: selection.liveRoot }),
     };
     return { grant, client: actor, rootId, canonicalRoot: executionCwd, toolBinding,
-      release: () => runtime.releaseSourceGrant(run.id, grant.grantId) };
+      release };
   } catch (error) {
-    await runtime.releaseSourceGrant(run.id, grant.grantId).catch(() => undefined);
+    await release().catch(() => undefined);
     throw error;
   }
 }

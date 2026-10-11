@@ -14,6 +14,13 @@ export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.history.body"] as const;
 export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v1" as const;
 
 export type KernelMethod =
+  | "runtime.research.scopes"
+  | "runtime.host_job.begin"
+  | "runtime.host_job.user"
+  | "runtime.host_job.accept"
+  | "runtime.host_job.pending"
+  | "runtime.host_job.terminal"
+  | "runtime.host_job.observe"
   | "runtime.calendar.projects"
   | "runtime.calendar.sync"
   | "runtime.calendar.list"
@@ -241,6 +248,83 @@ export type KernelMethod =
   | "runtime.messages.send"
   | "runtime.messages.list"
   | "runtime.messages.get";
+
+export interface HostJobBinding {
+  operationId: string;
+  executionOwner: ExecutorOwner;
+  domain: string;
+  domainVersion: number;
+  workspaceId: string;
+  subjectId: string;
+}
+
+export interface ResearchScope {
+  canSubmit: boolean;
+  rootThreadId: string;
+  threadId: string;
+  branchId: string;
+  sourceRunId: string;
+  source: LaunchSource;
+  readThreadIds: string[];
+  controlThreadIds: string[];
+}
+
+export interface ResearchScopeParams {
+  threadId: string;
+  branchId: string;
+  sourceRunId?: string;
+  operationId?: string;
+}
+
+export interface HostJobUserParams {
+  subjectId: string;
+  threadId: string;
+  branchId: string;
+  sourceRunId: string;
+  key: string;
+  domain: string;
+  domainVersion: number;
+  request: unknown;
+}
+
+export type HostJobOrigin = {kind:'tool';origin:ToolOrigin;call_id:string;tool_name:string;schema_version:string} | {kind:'user';key:string};
+
+export interface HostJobPending {
+  executorStopped: boolean;
+  binding: HostJobBinding;
+  runId: string;
+  accepted: boolean;
+  cancelRequested: boolean;
+  phase: OperationPhase;
+  origin: HostJobOrigin;
+}
+
+export interface HostJobLink {
+  binding: HostJobBinding;
+  acceptanceRef: unknown | null;
+}
+
+export interface HostJobBeginParams {
+  binding: HostJobBinding;
+}
+
+export interface HostJobAcceptParams {
+  binding: HostJobBinding;
+  content: unknown;
+}
+
+export interface HostJobTerminalParams {
+  binding: HostJobBinding;
+  outcome: Outcome;
+  effect: Effect;
+  content: unknown;
+  executorStopped: boolean;
+}
+
+export interface HostJobObserveParams {
+  operationId: string;
+  targetOperationId: string;
+}
 
 export type CalendarRule =
   | { kind: 'once'; date: string; time: string }
@@ -1145,7 +1229,7 @@ export interface LaunchSource {
   live_root: LiveRoot | null;
 }
 
-export interface ToolMetadata { service_id: string; service_version: number; completion: 'result'; operation: 'read' | 'effect'; examples?: unknown[]; source?: {path: string; line?: number}; }
+export interface ToolMetadata { service_id: string; service_version: number; completion: 'result' | 'job'; lifetime?: 'thread' | 'environment'; operation: 'read' | 'effect'; examples?: unknown[]; source?: {path: string; line?: number}; }
 
 export interface HostToolCall {
   runId: string;
@@ -1912,9 +1996,10 @@ export interface Run {
 export type OperationCallCompletion =
   | { kind: 'not_dispatched'; reason: string }
   | { kind: 'result'; outcome: Outcome; effect: Effect; content: unknown }
-  | { kind: 'job_accepted'; operation_id: string; phase: string; effect: Effect; lifetime: Lifetime };
+  | { kind: 'job_accepted'; operation_id: string; phase: string; effect: Effect; lifetime: Lifetime; content?: unknown };
 
 export interface Operation {
+  host_job?: HostJobLink;
   execution_owner: ExecutorOwner | null;
   external_receipt: ExternalReceipt | null;
   call_completion: OperationCallCompletion | null;
@@ -2133,6 +2218,7 @@ export interface KernelGrantIssueParams {
   sessionId: string | null;
   threadId: string | null;
   runId: string | null;
+  operationId?: string | null;
   owningWorkspace: string | null;
   executionWorkspace: string | null;
   storageIdentity: string;
@@ -2140,7 +2226,7 @@ export interface KernelGrantIssueParams {
   pathScopes: string[];
 }
 
-export type KernelGrantRetireTarget = { kind: 'grant'; grantId: string } | { kind: 'run'; runId: string };
+export type KernelGrantRetireTarget = { kind: 'grant'; grantId: string } | { kind: 'run'; runId: string } | { kind: 'operation'; operationId: string };
 
 export interface KernelGrantRetireParams {
   target: KernelGrantRetireTarget;
@@ -3570,6 +3656,13 @@ export interface FamilyRead {
 export interface FamilyItem { threadId: string; branchId: string; runId: string | null; headId: string | null; itemId: string; format: 'conversation_json'; text: string; offset: number; nextOffset: number | null; totalBytes: number }
 
 export type KernelMethodParams = {
+  "runtime.research.scopes": ResearchScopeParams;
+  "runtime.host_job.begin": HostJobBeginParams;
+  "runtime.host_job.user": HostJobUserParams;
+  "runtime.host_job.accept": HostJobAcceptParams;
+  "runtime.host_job.pending": KernelEmptyParams;
+  "runtime.host_job.terminal": HostJobTerminalParams;
+  "runtime.host_job.observe": HostJobObserveParams;
   "runtime.calendar.projects": KernelEmptyParams;
   "runtime.calendar.sync": CalendarSyncParams;
   "runtime.calendar.list": CalendarProjectParams;
@@ -3800,6 +3893,69 @@ export type KernelMethodParams = {
 };
 
 export type KernelRequest =
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.research.scopes";
+      params: ResearchScopeParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.host_job.begin";
+      params: HostJobBeginParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.host_job.user";
+      params: HostJobUserParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.host_job.accept";
+      params: HostJobAcceptParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.host_job.pending";
+      params: KernelEmptyParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.host_job.terminal";
+      params: HostJobTerminalParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.host_job.observe";
+      params: HostJobObserveParams;
+      epoch?: string;
+      grantId?: string;
+    }
   | {
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";

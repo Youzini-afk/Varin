@@ -68,3 +68,15 @@ test('lost domain transport remains unknown and occupied after the broker callba
   assert.equal(observed?.executor_stopped, false);
   assert.deepEqual(observed?.completion, { kind: 'result', outcome: 'indeterminate', effect: 'unknown', content: { error: 'host_tool_effect_unknown' } });
 });
+
+test('domain result and accepted job preserve JSON null; only a bodyless job projects its handle', async () => {
+  for (const completion of [
+    { kind:'result' as const,outcome:'succeeded' as const,effect:'confirmed' as const,content:null },
+    { kind:'job_accepted' as const,operation_id:authority.operationId,phase:'accepted',effect:'confirmed' as const,lifetime:'thread' as const,content:null },
+    { kind:'job_accepted' as const,operation_id:authority.operationId,phase:'awaiting_job',effect:'none' as const,lifetime:'thread' as const },
+  ]) {
+    const signal=new AbortController().signal;
+    const value=await withToolInvocation({authority,owner,signal},invocation=>runToolDomainEffect({owner,signal,invocation},input,async()=>({executor_stopped:false,completion})));
+    assert.deepEqual(value,completion.kind==='job_accepted'&&completion.content===undefined?{operationId:authority.operationId,phase:'awaiting_job'}:null);
+  }
+});

@@ -38,7 +38,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 35;
+pub(crate) const FORMAT: i64 = 36;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -787,6 +787,7 @@ impl Catalog {
             return Err(RuntimeError::Invalid("run cancellation pending".into()));
         }
         let op = Operation {
+            host_job: None,
             external_receipt: None,
             call_completion: None,
             id: key.into(),
@@ -1582,6 +1583,7 @@ CREATE INDEX runs_branch ON runs(branch_id);
 CREATE INDEX runs_waiting ON runs(json_extract(body,'$.waiting_on')) WHERE json_extract(body,'$.state')='waiting';
 CREATE TABLE commands(id TEXT PRIMARY KEY,intent TEXT NOT NULL,receipt TEXT NOT NULL);
 CREATE TABLE operations(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs(id),body TEXT NOT NULL);
+CREATE UNIQUE INDEX host_job_subject ON operations(json_extract(body,'$.host_job.binding.domain'),json_extract(body,'$.host_job.binding.workspaceId'),json_extract(body,'$.host_job.binding.subjectId')) WHERE json_extract(body,'$.host_job') IS NOT NULL;
 CREATE INDEX operations_run ON operations(run_id);
 CREATE TABLE model_steps(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs(id),state TEXT NOT NULL,body TEXT NOT NULL);
 CREATE INDEX model_steps_run ON model_steps(run_id,state);
@@ -1761,8 +1763,8 @@ pub(super) fn request_cancel_operation_in(tx: &Transaction<'_>, key: &str) -> Re
             "policy pause requires explicit Run resume or Run cancellation".into(),
         ));
     }
-    let unproven_process = op.execution_owner == Some(ExecutorOwner::Kernel)
-        && op.executor.as_deref() == Some("process_spawn")
+    let unproven_process = (op.host_job.is_some() || (op.execution_owner == Some(ExecutorOwner::Kernel)
+        && op.executor.as_deref() == Some("process_spawn")))
         && op.effect != Effect::None
         && !op
             .external_receipt
@@ -1801,3 +1803,6 @@ pub mod activation;
 pub mod calendar;
 #[path = "catalog_ingress.rs"]
 mod ingress;
+
+#[path = "catalog_host_jobs.rs"]
+pub mod host_jobs;

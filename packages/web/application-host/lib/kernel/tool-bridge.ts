@@ -24,6 +24,7 @@ export interface LiveHostToolBinding {
 export type { HostToolCall } from './protocol.generated.js';
 export type HostToolCompletion =
   | { kind: 'not_dispatched'; reason: string }
+  | { kind: 'job_accepted'; operation_id: string; phase: string; effect: 'none' | 'confirmed'; lifetime: 'thread' | 'environment'; content?: unknown }
   | {
       kind: 'result';
       outcome: 'succeeded' | 'failed' | 'cancelled' | 'indeterminate';

@@ -1,3 +1,4 @@
+import { piResearchCaller } from './research-caller.fixture.js';
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -54,7 +55,7 @@ async function fixture() {
     resolveWorkspaceRoot: async () => workspace,
     onError,
   });
-  const caller: ExperimentCaller = {
+  const caller: ExperimentCaller = piResearchCaller({
     workspaceId: "ws",
     executionWorkspaceId: "ws",
     sessionId: "s-1",
@@ -62,7 +63,7 @@ async function fixture() {
     threadId: "t-1",
     runId: "r-1",
     workspaceScope: [],
-  };
+  });
   return { root, workspace, client, resources, sources, experiments, caller, errors };
 }
 
@@ -364,15 +365,15 @@ describe("experiment service on the real kernel", () => {
       label: "fixtures",
       path: "data/fixtures",
       note: "baseline inputs",
-    }, { sessionId: "s-1", threadId: "t-1", runId: "r-1" });
+    }, f.caller);
     assert.equal(registered.state, "available");
 
-    const listed = await f.sources.list(f.caller.workspaceId, { kind: "dataset" });
+    const listed = await f.sources.list(f.caller.workspaceId, { kind: "dataset" }, f.caller);
     assert.equal(listed.sources.length, 1);
     assert.equal(listed.sources[0]!.sourceId, registered.sourceId);
 
     await assert.rejects(
-      f.sources.register(f.caller.workspaceId, { kind: "dataset" }, {}),
+      f.sources.register(f.caller.workspaceId, { kind: "dataset" }, f.caller),
       /locator|uri|path|objectHash/i,
     );
 
@@ -802,12 +803,12 @@ describe("experiment service on the real kernel", () => {
 
   it("isolates root-scoped specs and preserves the original attempt attribution during UI collection", async () => {
     const f = await fixture();
-    const firstCaller: ExperimentCaller = {
+    const firstCaller: ExperimentCaller = piResearchCaller({
       ...f.caller,
       rootSessionId: "root-one",
       allowedThreadIds: ["t-1"],
-    };
-    const secondCaller: ExperimentCaller = {
+    });
+    const secondCaller: ExperimentCaller = piResearchCaller({
       workspaceId: f.caller.workspaceId,
       executionWorkspaceId: f.caller.executionWorkspaceId,
       sessionId: "s-2",
@@ -816,7 +817,7 @@ describe("experiment service on the real kernel", () => {
       runId: "r-2",
       workspaceScope: [],
       allowedThreadIds: ["t-2"],
-    };
+    });
     const first = await f.experiments.submit(firstCaller, node("process.stdout.write('one')"));
     const second = await f.experiments.submit(secondCaller, node("process.stdout.write('two')"));
     assert.notEqual((await prepared(f.experiments, firstCaller, first.attempt.attemptId)).spec!.specId, (await prepared(f.experiments, secondCaller, second.attempt.attemptId)).spec!.specId);
@@ -824,14 +825,14 @@ describe("experiment service on the real kernel", () => {
     assert.deepEqual((await f.experiments.list(firstCaller, {})).attempts.map((attempt) => attempt.attemptId), [first.attempt.attemptId]);
 
     await f.experiments.wait(firstCaller, first.attempt.attemptId, 15_000);
-    const uiCaller: ExperimentCaller = {
+    const uiCaller: ExperimentCaller = piResearchCaller({
       workspaceId: f.caller.workspaceId,
       executionWorkspaceId: f.caller.executionWorkspaceId,
       sessionId: "ui-session",
       rootSessionId: "root-one",
       workspaceScope: [],
       allowedThreadIds: ["t-1"],
-    };
+    });
     const collected = await f.experiments.collect(uiCaller, first.attempt.attemptId);
     assert.equal(collected.attempt.threadId, "t-1");
     assert.equal(collected.attempt.runId, "r-1");

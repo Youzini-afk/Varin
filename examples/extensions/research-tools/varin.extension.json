@@ -1,0 +1,471 @@
+{
+  "schemaVersion": 1,
+  "id": "example.research-tools",
+  "displayName": "Research Tools",
+  "version": "1.0.0",
+  "engines": {
+    "varin": "*"
+  },
+  "entrypoints": {
+    "host": {
+      "file": "host.cjs",
+      "mode": "brokered",
+      "activation": [
+        "service-request"
+      ]
+    }
+  },
+  "capabilities": {
+    "host": [
+      "research.experiments"
+    ]
+  },
+  "provides": {
+    "services": [
+      {
+        "id": "example.research.submit",
+        "version": 1,
+        "tool": {
+          "name": "research_submit",
+          "description": "Accept one experiment through the original durable research owner. Returns the exact accepted attempt; preparation and execution continue independently of this Run. Preserve requestId across uncertain retries. Uses this Run\u2019s actual source; fixed revisions are never replaced by a working directory. Explicit specId reuses an existing immutable input.",
+          "completion": "job",
+          "operation": "effect",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "requestId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "retryOfAttemptId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "specId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "command": {
+                "type": "string",
+                "minLength": 1
+              },
+              "title": {
+                "type": "string"
+              },
+              "cwd": {
+                "type": "string"
+              },
+              "machineId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "inputs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "sourceId": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "objectHash": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "resources": {
+                "type": "object",
+                "properties": {
+                  "cpuCores": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "memoryMb": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "gpuCount": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "gpuMemoryMb": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "longRunning": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "outputPaths": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false,
+            "anyOf": [
+              {
+                "required": [
+                  "specId"
+                ]
+              },
+              {
+                "required": [
+                  "command"
+                ]
+              }
+            ]
+          },
+          "outputSchema": {
+            "type": "object"
+          },
+          "lifetime": "thread"
+        }
+      },
+      {
+        "id": "example.research.wait",
+        "version": 1,
+        "tool": {
+          "name": "research_wait",
+          "description": "Observe the original accepted experiment through Catalog Wait. Returns a Job handle and parks only this observation. Cancelling the observation does not cancel the experiment. The eventual environment fact reports actual terminal and output-drain evidence; read logs/artifacts separately.",
+          "completion": "job",
+          "operation": "effect",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "attemptId": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "attemptId"
+            ]
+          },
+          "outputSchema": {
+            "type": "object"
+          },
+          "lifetime": "thread"
+        }
+      },
+      {
+        "id": "example.research.get",
+        "version": 1,
+        "tool": {
+          "name": "research_get",
+          "description": "Read authorized original research get facts. No workspace, actor, root or permission identity is accepted from tool arguments.",
+          "completion": "result",
+          "operation": "read",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "attemptId": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "attemptId"
+            ]
+          },
+          "outputSchema": {
+            "type": "object"
+          }
+        }
+      },
+      {
+        "id": "example.research.cancel",
+        "version": 1,
+        "tool": {
+          "name": "research_cancel",
+          "description": "Request cancellation of an experiment owned by this Thread or its descendants. A received stop request is not proof that the backend has stopped.",
+          "completion": "result",
+          "operation": "effect",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "attemptId": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "attemptId"
+            ]
+          },
+          "outputSchema": {
+            "type": "object"
+          }
+        }
+      },
+      {
+        "id": "example.research.collect",
+        "version": 1,
+        "tool": {
+          "name": "research_collect",
+          "description": "Collect outputs of an already stopped experiment through the original artifact/resource owners.",
+          "completion": "result",
+          "operation": "effect",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "attemptId": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "attemptId"
+            ]
+          },
+          "outputSchema": {
+            "type": "object"
+          }
+        }
+      },
+      {
+        "id": "example.research.list",
+        "version": 1,
+        "tool": {
+          "name": "research_list",
+          "description": "Read authorized original research list facts. No workspace, actor, root or permission identity is accepted from tool arguments.",
+          "completion": "result",
+          "operation": "read",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "state": {
+                "enum": [
+                  "submitted",
+                  "queued",
+                  "running",
+                  "stopping",
+                  "completed",
+                  "failed",
+                  "cancelled",
+                  "lost"
+                ]
+              },
+              "specId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "additionalProperties": false
+          },
+          "outputSchema": {
+            "type": "object"
+          }
+        }
+      },
+      {
+        "id": "example.research.logs",
+        "version": 1,
+        "tool": {
+          "name": "research_logs",
+          "description": "Read authorized original research logs facts. No workspace, actor, root or permission identity is accepted from tool arguments.",
+          "completion": "result",
+          "operation": "read",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "attemptId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "stream": {
+                "enum": [
+                  "stdout",
+                  "stderr"
+                ]
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "maxBytes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "attemptId"
+            ]
+          },
+          "outputSchema": {
+            "type": "object"
+          }
+        }
+      },
+      {
+        "id": "example.research.artifact",
+        "version": 1,
+        "tool": {
+          "name": "research_artifact",
+          "description": "Read authorized original research artifact facts. No workspace, actor, root or permission identity is accepted from tool arguments.",
+          "completion": "result",
+          "operation": "read",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "attemptId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "artifactId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "maxBytes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "attemptId",
+              "artifactId"
+            ]
+          },
+          "outputSchema": {
+            "type": "object"
+          }
+        }
+      },
+      {
+        "id": "example.research.resources",
+        "version": 1,
+        "tool": {
+          "name": "research_resources",
+          "description": "Read authorized original research resources facts. No workspace, actor, root or permission identity is accepted from tool arguments.",
+          "completion": "result",
+          "operation": "read",
+          "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "outputSchema": {
+            "type": "object"
+          }
+        }
+      },
+      {
+        "id": "example.research.sources",
+        "version": 1,
+        "tool": {
+          "name": "research_sources",
+          "description": "Read authorized original research sources facts. No workspace, actor, root or permission identity is accepted from tool arguments.",
+          "completion": "result",
+          "operation": "read",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "dataset",
+                  "paper",
+                  "code",
+                  "artifact",
+                  "collection",
+                  "other"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "outputSchema": {
+            "type": "object"
+          }
+        }
+      },
+      {
+        "id": "example.research.register",
+        "version": 1,
+        "tool": {
+          "name": "research_register",
+          "description": "Register a research input locator under this real Thread operation; registration does not fetch or execute it.",
+          "completion": "result",
+          "operation": "effect",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "dataset",
+                  "paper",
+                  "code",
+                  "artifact",
+                  "collection",
+                  "other"
+                ]
+              },
+              "label": {
+                "type": "string"
+              },
+              "uri": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "objectHash": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "kind"
+            ]
+          },
+          "outputSchema": {
+            "type": "object"
+          }
+        }
+      }
+    ]
+  }
+}

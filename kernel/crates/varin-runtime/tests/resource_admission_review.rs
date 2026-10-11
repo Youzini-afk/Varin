@@ -554,6 +554,7 @@ fn live_job_survives_run_cancel_and_restart_until_explicit_stop() {
             request_id: "model-1".into(),
             call_id: "job".into(),
             completion: ToolCompletion::JobAccepted {
+                content: None,
                 operation_id: "model-1:tool:job".into(),
                 phase: "running".into(),
                 effect: Effect::Dispatched,
@@ -584,7 +585,8 @@ fn live_job_survives_run_cancel_and_restart_until_explicit_stop() {
                 request_id: "model-1".into(),
                 call_id: "job".into(),
                 completion: ToolCompletion::JobAccepted {
-                    operation_id: "model-1:tool:job".into(),
+                    content: None,
+                operation_id: "model-1:tool:job".into(),
                     phase: "running".into(),
                     effect: Effect::Dispatched,
                     lifetime: Lifetime::Thread,
@@ -643,6 +645,7 @@ fn early_stop_before_job_accepted_never_reacquires_occupancy() {
             request_id: "model-1".into(),
             call_id: "job".into(),
             completion: ToolCompletion::JobAccepted {
+                content: None,
                 operation_id: "model-1:tool:job".into(),
                 phase: "running".into(),
                 effect: Effect::Dispatched,

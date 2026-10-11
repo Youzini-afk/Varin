@@ -36,6 +36,7 @@ import { createMcpHarnessServices } from './lib/harness/mcp-service.js';
 import { sharedHostCredentialAuthority } from '@varin/runtime-broker';
 import { AgentRuntimeClient } from './lib/kernel/agent-runtime-client.js';
 import { createThreadProcesses } from './lib/kernel/thread-processes.js';
+import { createResearchRuntime, createResearchSourceAuthority, RESEARCH_CAPABILITY } from './lib/kernel/research-runtime.js';
 import { ThreadAdapter } from './lib/kernel/thread-adapter.js';
 import { registerThreadRoutes } from './lib/kernel/thread-routes.js';
 import { registerRuntimeMaintenanceRoutes } from './lib/kernel/runtime-maintenance-routes.js';
@@ -1547,6 +1548,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     client: kernelClient,
     resources: resourceService,
     sources: sourceService,
+    sourceAuthority: createResearchSourceAuthority({ kernel: kernelClient, runtime: () => agentRuntime,
+      resolveLiveSource: (source, signal) => liveSources.validate(source, signal) }),
     resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
     onError: (error) => console.error("[VarinExperiment]", error.message),
     onAttemptChanged: (workspaceId) => broadcastResearchFacts(workspaceId, 'attempt'),
@@ -3047,7 +3050,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: () => console.warn('[Calendar] preparation or asset synchronization requires attention'),
   });
   scheduledTasksRuntime.setCalendarOwner(calendarOwner);
-  registerThreadRoutes(app, threads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
+  const researchRuntime = createResearchRuntime({ kernel: kernelClient, runtime: agentRuntime,
+    experiments: experimentService, resources: resourceService, sources: sourceService,
+    onError: (_error: Error) => console.error('[Research] Original job reconciliation requires attention'),
+  });
+  registerThreadRoutes(app, threads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), researchRuntime.user);
   registerRuntimeMaintenanceRoutes(app, agentRuntime, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
   registerHarnessThreadRoutes(app, {
     registry: threadRegistry,
@@ -4156,6 +4163,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
   const unregisterMaterialToolCapability=extensionRuntime.capabilities.register(MATERIAL_SNAPSHOT_CAPABILITY,createMaterialToolOwner(webMaterials));
+  const unregisterResearchCapability = extensionRuntime.capabilities.register(RESEARCH_CAPABILITY, researchRuntime.capability);
+  researchRuntime.start();
   const unregisterScheduleCapability = extensionRuntime.capabilities.register(SCHEDULE_CAPABILITY,
     createScheduleToolOwner({ service: scheduledTaskService, workspaceRoot: async workspaceId => (await documentsAuthority.inspectWorkspace(workspaceId)).root }));
   const unregisterChildIntegrationCapability = extensionRuntime.capabilities.register(CHILD_INTEGRATION_CAPABILITY,
@@ -4687,6 +4696,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       followUpService.dispose();
       piSessionAutomation.stop();
       piSessionTitles.stop();
+      unregisterResearchCapability();
+      await researchRuntime.dispose();
       experimentService.detachObservers();
       brokerUnsubscribe();
       harnessRouter.dispose();

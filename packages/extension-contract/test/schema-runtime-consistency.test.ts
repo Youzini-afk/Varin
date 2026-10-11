@@ -125,3 +125,19 @@ const minimalManifest = () => ({
     supports: ["web" as const],
   }],
 });
+
+test('ordinary research jobs declare independent lifetime in the same manifest contract', async () => {
+  const manifest = JSON.parse(await readFile(join(__dirname, '../../../examples/extensions/research-tools/varin.extension.json'), 'utf8'));
+  assert.equal(schemaValid(manifest), true);
+  assert.equal(runtimeValid(manifest), true);
+  const submit = manifest.provides.services.find((service: { id: string }) => service.id === 'example.research.submit').tool;
+  delete submit.lifetime;
+  assert.equal(schemaValid(manifest), false);
+  assert.equal(runtimeValid(manifest), false);
+  submit.lifetime = 'environment';
+  assert.equal(schemaValid(manifest), true);
+  assert.equal(runtimeValid(manifest), true);
+  submit.completion = 'result';
+  assert.equal(schemaValid(manifest), false);
+  assert.equal(runtimeValid(manifest), false);
+});

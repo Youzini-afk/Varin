@@ -343,8 +343,7 @@ impl ToolExecutor for Job {
             operation_id: context.operation_id.clone(),
             phase: "accepted".into(),
             effect: Effect::None,
-            lifetime: Lifetime::Thread,
-        }
+            lifetime: Lifetime::Thread, content: None,}
     }
 }
 struct NoModel;

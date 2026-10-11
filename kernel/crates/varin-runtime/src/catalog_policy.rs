@@ -16,7 +16,7 @@ struct PolicyNodeReceiptMetadata {
 impl PolicyNodeReceiptMetadata {
     fn output(&self, action: &str) -> Result<Option<PolicyEvidenceRef>> {
         match &self.completion {
-            ToolCompletionMetadata::Result { content_ref, .. } => Ok(Some(PolicyEvidenceRef {
+            ToolCompletionMetadata::Result { content_ref, .. } | ToolCompletionMetadata::JobAccepted { content_ref: Some(content_ref), .. } => Ok(Some(PolicyEvidenceRef {
                 action_id: action.into(),
                 node_id: self.node_id.clone(),
                 content_ref: content_ref["content_object"]
@@ -51,12 +51,12 @@ impl PolicyNodeReceiptMetadata {
                 operation_id,
                 phase,
                 effect,
-                lifetime,
-            } => PolicyNodeCompletion::JobAccepted {
+                lifetime, ..} => PolicyNodeCompletion::JobAccepted {
                 operation_id: operation_id.clone(),
                 phase: phase.clone(),
                 effect: *effect,
                 lifetime: *lifetime,
+                output: self.output(action)?,
             },
         };
         Ok(PolicyNodeReceipt {
@@ -417,6 +417,7 @@ impl Catalog {
             }
         }
         let op = Operation {
+            host_job: None,
             id: action_id.into(),
             run_id: run_id.into(),
             epoch,
@@ -583,12 +584,12 @@ impl Catalog {
                 operation_id,
                 phase,
                 effect,
-                lifetime,
-            } => PolicyNodeCompletion::JobAccepted {
+                lifetime, ..} => PolicyNodeCompletion::JobAccepted {
                 operation_id: operation_id.clone(),
                 phase: phase.clone(),
                 effect: *effect,
                 lifetime: *lifetime,
+                output: stored.output(action)?,
             },
         };
         let receipt = PolicyNodeReceipt {

@@ -69,6 +69,7 @@ export function extensionToolSchema(
       service_id: descriptor.id,
       service_version: descriptor.version,
       completion: tool.completion,
+      ...(tool.lifetime ? { lifetime: tool.lifetime } : {}),
       operation: tool.operation,
       ...(tool.examples ? { examples: structuredClone(tool.examples) } : {}),
       ...(tool.source ? { source: structuredClone(tool.source) } : {}),

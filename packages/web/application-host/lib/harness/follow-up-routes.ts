@@ -65,7 +65,7 @@ export function registerHarnessFollowUpRoutes(
       ...(caller.threadId ? { threadId: caller.threadId } : {}),
       rootSessionId: caller.rootSessionId ?? sessionId,
       ...(caller.workspaceScope ? { workspaceScope: caller.workspaceScope } : {}),
-      allowedThreadIds: caller.allowedThreadIds ?? [],
+      allowedThreadIds: caller.access.kind === 'family' ? [...caller.access.readThreadIds] : [],
     };
   };
 

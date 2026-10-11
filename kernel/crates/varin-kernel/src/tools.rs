@@ -1596,8 +1596,7 @@ impl KernelToolExecutor {
                         operation_id: context.operation_id.clone(),
                         phase: phase.expect("checked process receipt").into(),
                         effect: Effect::Dispatched,
-                        lifetime: Lifetime::Thread,
-                    }
+                        lifetime: Lifetime::Thread, content: None,}
                 }
             }
             // The conditional resource owner proved the target was untouched.

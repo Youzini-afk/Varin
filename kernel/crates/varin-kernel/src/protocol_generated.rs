@@ -102,7 +102,59 @@ pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ResearchScopeParams {
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) source_run_id: Option<String>,
+    pub(crate) operation_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct HostJobBeginParams {
+    pub(crate) binding: varin_runtime::catalog::host_jobs::HostJobBinding,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct HostJobUserParams {
+    pub(crate) subject_id: String,
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) source_run_id: String,
+    pub(crate) key: String,
+    pub(crate) domain: String,
+    pub(crate) domain_version: i64,
+    pub(crate) request: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct HostJobAcceptParams {
+    pub(crate) binding: varin_runtime::catalog::host_jobs::HostJobBinding,
+    pub(crate) content: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelEmptyParams {}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct HostJobTerminalParams {
+    pub(crate) binding: varin_runtime::catalog::host_jobs::HostJobBinding,
+    pub(crate) outcome: varin_runtime::Outcome,
+    pub(crate) effect: varin_runtime::Effect,
+    pub(crate) content: Value,
+    pub(crate) executor_stopped: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct HostJobObserveParams {
+    pub(crate) operation_id: String,
+    pub(crate) target_operation_id: String,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -802,6 +854,7 @@ pub(crate) struct KernelGrantIssueParams {
     pub(crate) session_id: RequiredNullable<String>,
     pub(crate) thread_id: RequiredNullable<String>,
     pub(crate) run_id: RequiredNullable<String>,
+    pub(crate) operation_id: Option<RequiredNullable<String>>,
     pub(crate) owning_workspace: RequiredNullable<String>,
     pub(crate) execution_workspace: RequiredNullable<String>,
     pub(crate) storage_identity: String,
@@ -2317,6 +2370,31 @@ pub(crate) struct KernelVerificationInputIdentity {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "runtime.research.scopes" => serde_json::from_value::<ResearchScopeParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.host_job.begin" => serde_json::from_value::<HostJobBeginParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.host_job.user" => serde_json::from_value::<HostJobUserParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.host_job.accept" => serde_json::from_value::<HostJobAcceptParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.host_job.pending" => serde_json::from_value::<KernelEmptyParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.host_job.terminal" => {
+            serde_json::from_value::<HostJobTerminalParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.host_job.observe" => {
+            serde_json::from_value::<HostJobObserveParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.calendar.projects" => serde_json::from_value::<KernelEmptyParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

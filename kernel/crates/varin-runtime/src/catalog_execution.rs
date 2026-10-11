@@ -6,6 +6,67 @@ use crate::execution::*;
 use std::sync::Mutex;
 
 impl Persistence for Mutex<Catalog> {
+    fn settle_tool(
+        &self,
+        context: &ToolExecutionContext,
+        epoch: u64,
+        receipt: ToolExecutionReceipt,
+    ) -> std::result::Result<ToolExecutionReceipt, ExecutionError> {
+        let record = ExecutionRecord::ToolSettled {
+            context: context.clone(),
+            completion: receipt.completion,
+            executor_stopped: receipt.executor_stopped,
+        };
+        let preparation = self
+            .lock()
+            .map_err(catalog_lock_error)?
+            .prepare_execution_bodies(&record)
+            .map_err(policy_error)?;
+        let prepared = preparation.write(&record).map_err(policy_error)?;
+        let (read, stopped) = {
+            let mut db = self.lock().map_err(catalog_lock_error)?;
+            let op = db.operation(&context.operation_id).map_err(policy_error)?;
+            let admitted = ToolIntent::from_operation(&op).map_err(policy_error)?;
+            if op.run_id != context.run_id
+                || admitted.origin() != &context.origin
+                || op.id != context.origin.operation_id(&admitted.call().call_id)
+            {
+                return Err(ExecutionError::new(
+                    "tool_origin_changed",
+                    "Original invocation changed",
+                ));
+            }
+            fence(&db.run(&context.run_id).map_err(policy_error)?, epoch).map_err(policy_error)?;
+            if op.call_completion.is_none() {
+                db.commit_prepared_execution(&context.run_id, epoch, &record, prepared)
+                    .map_err(policy_error)?;
+            }
+            let op = db.operation(&context.operation_id).map_err(policy_error)?;
+            let stopped = if op.host_job.is_some() {
+                op.external_receipt
+                    .as_ref()
+                    .is_some_and(|r| r.executor_stopped)
+            } else {
+                receipt.executor_stopped
+            };
+            let completion = op.call_completion.ok_or_else(|| {
+                ExecutionError::new("tool_receipt_missing", "Original completion missing")
+            })?;
+            (
+                result_content::ToolCompletionRead {
+                    completion,
+                    content: db.content.clone(),
+                    _publication: db.content.begin_publication(),
+                },
+                stopped,
+            )
+        };
+        Ok(ToolExecutionReceipt {
+            completion: read.load().map_err(policy_error)?,
+            executor_stopped: stopped,
+        })
+    }
+
     fn goal_tool_allowed(
         &self,
         c: &ToolExecutionContext,
@@ -843,8 +904,9 @@ impl ExecutionBodyPreparation {
                     operation_id,
                     phase,
                     ..
-                } => OperationResultMetadata::Control {
-                    value: json!({"operation_id":operation_id,"phase":phase}),
+                } => match &receipt.completion {
+                    ToolCompletionMetadata::JobAccepted { content_ref: Some(reference), .. } => OperationResultMetadata::Content { reference: reference.clone() },
+                    _ => OperationResultMetadata::Control { value: json!({"operation_id":operation_id,"phase":phase}) },
                 },
             };
             results.insert(result.call_id.clone(), body);
@@ -868,8 +930,9 @@ impl ExecutionBodyPreparation {
                     operation_id,
                     phase,
                     ..
-                } => OperationResultMetadata::Control {
-                    value: json!({"operation_id":operation_id,"phase":phase}),
+                } => match &receipt {
+                    ToolCompletionMetadata::JobAccepted { content_ref: Some(reference), .. } => OperationResultMetadata::Content { reference: reference.clone() },
+                    _ => OperationResultMetadata::Control { value: json!({"operation_id":operation_id,"phase":phase}) },
                 },
             };
             results.insert("invocation".into(), body);
@@ -1400,6 +1463,7 @@ impl Catalog {
                     put(&tx, "operations", key, &previous)?;
                 } else {
                     let op = Operation {
+            host_job: None,
                         external_receipt: None,
                         call_completion: None,
                         id: key.clone(),
@@ -1501,6 +1565,9 @@ impl Catalog {
                 let receipt = prepared_completion.as_ref().ok_or_else(|| {
                     RuntimeError::Invalid("prepared tool completion missing".into())
                 })?;
+                if matches!(completion,ToolCompletion::JobAccepted{..}) && matches!(op.execution_owner,Some(crate::ExecutorOwner::External{..})) && op.call_completion.is_none() {
+                    return Err(RuntimeError::Conflict("Host job requires original trusted domain acceptance".into()));
+                }
                 if let Some(previous) = &op.call_completion {
                     if previous != receipt {
                         return Err(RuntimeError::Conflict(
@@ -1572,8 +1639,7 @@ impl Catalog {
                         operation_id,
                         phase: _,
                         effect,
-                        lifetime,
-                    } => {
+                        lifetime, ..} => {
                         if !matches!(lifetime, Lifetime::Thread | Lifetime::Environment)
                             || *lifetime != op.lifetime
                             || operation_id.is_empty()
@@ -2288,7 +2354,7 @@ impl Catalog {
                 "unknown external effect requires indeterminate outcome".into(),
             ));
         }
-        let settle = op.handed_off
+        let settle = op.host_job.is_some() || op.handed_off
             || (op.phase == OperationPhase::Terminal && op.outcome == Some(Outcome::Indeterminate));
         if let Some(previous) = &op.external_receipt {
             let mut same_receipt = receipt.clone();

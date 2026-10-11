@@ -480,7 +480,7 @@ impl FollowupRegistrationPreparation {
         self.input.trigger.normalize_paths()?;
         let instruction = self.content.save(&json!(self.input.instruction))?;
         let completion=invocation.as_ref().map(|_|->Result<_>{
-            let completion=if self.input.wait.is_some(){ToolCompletion::JobAccepted{operation_id:self.operation.as_ref().expect("operation").id.clone(),phase:"awaiting_followup".into(),effect:Effect::Confirmed,lifetime:Lifetime::Thread}}else{ToolCompletion::Result{outcome:Outcome::Succeeded,effect:Effect::Confirmed,content:json!({"accepted":true,"followupId":self.id,"threadId":self.run.thread_id,"branchId":self.run.branch_id,"trigger":self.input.trigger})}};
+            let completion=if self.input.wait.is_some(){ToolCompletion::JobAccepted{operation_id:self.operation.as_ref().expect("operation").id.clone(),phase:"awaiting_followup".into(),effect:Effect::Confirmed,lifetime:Lifetime::Thread, content: None,}}else{ToolCompletion::Result{outcome:Outcome::Succeeded,effect:Effect::Confirmed,content:json!({"accepted":true,"followupId":self.id,"threadId":self.run.thread_id,"branchId":self.run.branch_id,"trigger":self.input.trigger})}};
             let metadata=result_content::ToolCompletionMetadata::write(&self.content,&completion)?;Ok((completion,metadata))
         }).transpose()?;
         Ok(PreparedFollowupRegistration {

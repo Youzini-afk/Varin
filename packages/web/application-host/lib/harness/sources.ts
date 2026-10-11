@@ -6,21 +6,17 @@
  * the workspace store. Registering a source does not fetch or copy it; the
  * locator records where the material actually lives.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.js";
 import type { KernelRecordResult } from "../kernel/protocol.generated.js";
 import type { ResearchSourceView, SourceListParams, SourceListResult, SourceRegisterParams } from "@varin/protocol";
 import { HarnessServiceError } from "./service-error.js";
-import type { ExperimentCaller } from "./experiments.js";
+import { mayAccessResearch, requireResearchOwner, type ExperimentCaller } from "./research-identity.js";
 
 const SOURCE_PREFIX = "research.source:";
-const SOURCE_KINDS = new Set(["dataset", "paper", "code", "artifact", "collection", "other"]);
+export const SOURCE_KINDS = new Set(["dataset", "paper", "code", "artifact", "collection", "other"]);
 
-const mayRead = (record: KernelRecordResult, caller?: ExperimentCaller): boolean => {
-  if (caller?.allowedThreadIds === undefined) return true;
-  if (record.threadId) return caller.allowedThreadIds.includes(record.threadId);
-  return record.sessionId === caller.sessionId || record.sessionId === caller.rootSessionId;
-};
+const mayRead = (record: KernelRecordResult, caller: ExperimentCaller): boolean => mayAccessResearch(caller, record);
 
 const relativeSourcePath = (value: string, scope?: readonly string[]): string => {
   const normalized = value.replaceAll("\\", "/");
@@ -111,8 +107,9 @@ export function createSourceService(deps: SourceServiceDeps) {
   const register = async (
     workspaceId: string,
     params: SourceRegisterParams,
-    actor: { sessionId?: string; threadId?: string; runId?: string; workspaceScope?: readonly string[] },
+    actor: ExperimentCaller,
   ): Promise<ResearchSourceView> => {
+    const originalOwner = requireResearchOwner(actor);
     const kind = typeof params.kind === "string" ? params.kind.trim() : "";
     if (!SOURCE_KINDS.has(kind)) {
       throw new HarnessServiceError("invalid-params", `source kind must be one of ${[...SOURCE_KINDS].join(", ")}`);
@@ -127,10 +124,15 @@ export function createSourceService(deps: SourceServiceDeps) {
     if (!uri && !path && !objectHash) {
       throw new HarnessServiceError("invalid-params", "source requires a uri, path or objectHash locator");
     }
-    const sourceId = `source-${randomUUID()}`;
+    const sourceId = actor.owner.runtime === "agent" ? `source-${createHash("sha256").update(originalOwner.runtime === "agent" ? originalOwner.operationId : "").digest("hex")}` : `source-${randomUUID()}`;
     const scoped = await context(workspaceId);
+    const prior = await scoped.getRecord(workspaceId, `${SOURCE_PREFIX}${sourceId}`);
+    if (prior) {
+      if (!mayRead(prior, actor) || JSON.stringify(payloadOf(prior).request) !== JSON.stringify(params)) throw new HarnessServiceError("invalid-params", "Source registration intent changed");
+      const result = view(prior); if (!result) throw new HarnessServiceError("unavailable", "Original source registration is unreadable"); return result;
+    }
     const record = await scoped.putRecord({
-      operationId: `research.source:${randomUUID()}`,
+      operationId: actor.owner.runtime === "agent" ? `research.source:${originalOwner.runtime === "agent" ? originalOwner.operationId : ""}` : `research.source:${randomUUID()}`,
       recordId: `${SOURCE_PREFIX}${sourceId}`,
       workspaceId,
       recordType: "research.source",
@@ -138,6 +140,8 @@ export function createSourceService(deps: SourceServiceDeps) {
       payloadJson: JSON.stringify({
         id: sourceId,
         workspaceId,
+        researchOwner: originalOwner, request: params,
+        executionWorkspaceId: actor.executionWorkspaceId,
         kind,
         ...(params.label?.trim() ? { label: params.label.trim() } : {}),
         ...(uri ? { uri } : {}),
@@ -158,14 +162,14 @@ export function createSourceService(deps: SourceServiceDeps) {
     return result;
   };
 
-  const get = async (workspaceId: string, sourceId: string, caller?: ExperimentCaller): Promise<ResearchSourceView | null> => {
+  const get = async (workspaceId: string, sourceId: string, caller: ExperimentCaller): Promise<ResearchSourceView | null> => {
     const scoped = await context(workspaceId);
     const record = await scoped.getRecord(workspaceId, `${SOURCE_PREFIX}${sourceId}`);
     if (record && !mayRead(record, caller)) throw new HarnessServiceError("denied", "Research source is outside the caller's task relationships");
     return record ? view(record) : null;
   };
 
-  const list = async (workspaceId: string, params: SourceListParams, caller?: ExperimentCaller): Promise<SourceListResult> => {
+  const list = async (workspaceId: string, params: SourceListParams, caller: ExperimentCaller): Promise<SourceListResult> => {
     const scoped = await context(workspaceId);
     const all: KernelRecordResult[] = [];
     let cursor: number | undefined;

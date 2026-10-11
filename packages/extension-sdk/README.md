@@ -103,5 +103,10 @@ so cold discovery and activation use one declaration. `execute(input, call)` rec
 cooperative cancellation and `call.capabilities`, a client bound to that invocation. Schema compilation
 and admission remain with the executing Host; the SDK never owns history, Operations or resource facts.
 Return the tool's JSON result directly. Null and empty results are valid; missing/non-JSON results fail.
-The first slice supports `completion: result`; it does not expose a job API. A declared read operation
+Declarations support `completion: result` and independent `completion: job` with an explicit
+`lifetime: thread | environment`. A Job needs a trusted domain adapter that durably accepts the original
+invocation and owns its cancellation/recovery; returned extension JSON cannot create an execution owner
+or assert physical stop. The ordinary [research example](../../examples/extensions/research-tools/README.md)
+uses that boundary for accepted experiments and observation waits. This is not a generic extension-owned
+durable job store. A declared read operation
 still needs its ordinary capability grants and the Host's current invocation authority.

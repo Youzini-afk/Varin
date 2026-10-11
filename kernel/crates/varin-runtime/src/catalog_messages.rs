@@ -638,8 +638,7 @@ impl MessagePreparation {
                     operation_id: self.operation.as_ref().expect("send Operation").id.clone(),
                     phase: "awaiting_reply".into(),
                     effect: Effect::Confirmed,
-                    lifetime: Lifetime::Thread,
-                }
+                    lifetime: Lifetime::Thread, content: None,}
             } else {
                 ToolCompletion::Result {
                     outcome: Outcome::Succeeded,

@@ -77,6 +77,10 @@ pub(crate) struct BranchRow {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum GrantRetireTarget {
+    Operation {
+        #[serde(rename = "operationId")]
+        operation_id: String,
+    },
     Grant {
         #[serde(rename = "grantId")]
         grant_id: String,
@@ -107,6 +111,8 @@ pub(crate) struct Grant {
     pub(crate) session_id: Option<String>,
     pub(crate) thread_id: Option<String>,
     pub(crate) run_id: Option<String>,
+    /// Independent operation lifetime; run_id remains original attribution.
+    pub(crate) operation_id: Option<String>,
     pub(crate) owning_workspace: Option<String>,
     pub(crate) execution_workspace: Option<String>,
     pub(crate) storage_identity: String,

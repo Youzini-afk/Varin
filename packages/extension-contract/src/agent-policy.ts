@@ -15,7 +15,7 @@ export type VarinAgentPolicyToolEffect = 'none' | 'dispatched' | 'partial' | 'co
 export type VarinAgentPolicyToolCompletion =
   | { kind: 'not_dispatched'; reason: string }
   | { kind: 'result'; outcome: 'succeeded' | 'failed' | 'cancelled' | 'indeterminate'; effect: VarinAgentPolicyToolEffect; output: VarinAgentPolicyEvidenceRef }
-  | { kind: 'job_accepted'; operation_id: string; phase: string; effect: VarinAgentPolicyToolEffect; lifetime: 'call' | 'run' | 'thread' | 'environment' };
+  | { kind: 'job_accepted'; operation_id: string; phase: string; effect: VarinAgentPolicyToolEffect; lifetime: 'call' | 'run' | 'thread' | 'environment'; output?: VarinAgentPolicyEvidenceRef };
 export interface VarinAgentPolicyNodeReceipt {
   node_id: string;
   completion: VarinAgentPolicyToolCompletion;
@@ -93,7 +93,7 @@ const effectSchema = { enum: ['none', 'dispatched', 'partial', 'confirmed', 'unk
 const toolCompletionSchema = { oneOf: [
   objectSchema({ kind: { const: 'not_dispatched' }, reason: stringSchema }),
   objectSchema({ kind: { const: 'result' }, outcome: { enum: ['succeeded', 'failed', 'cancelled', 'indeterminate'] }, effect: effectSchema, output: referenceSchema }),
-  objectSchema({ kind: { const: 'job_accepted' }, operation_id: stringSchema, phase: stringSchema, effect: effectSchema, lifetime: { enum: ['call', 'run', 'thread', 'environment'] } }),
+  { ...objectSchema({ kind: { const: 'job_accepted' }, operation_id: stringSchema, phase: stringSchema, effect: effectSchema, lifetime: { enum: ['call', 'run', 'thread', 'environment'] }, output: referenceSchema }), required: ['kind', 'operation_id', 'phase', 'effect', 'lifetime'] },
 ] };
 const capabilitySchema = objectSchema({ capability_id: stringSchema, purpose: { const: 'planning' },
   status: { enum: ['available', 'disabled', 'unconfigured', 'invalid', 'unavailable'] }, supported_operation: { const: 'tool_free_text' } });
@@ -174,7 +174,8 @@ function toolCompletion(value: unknown): boolean {
   if (typeof value.effect !== 'string' || !['none', 'dispatched', 'partial', 'confirmed', 'unknown'].includes(value.effect)) return false;
   if (value.kind === 'result') return exact(value, ['kind', 'outcome', 'effect', 'output'])
     && typeof value.outcome === 'string' && ['succeeded', 'failed', 'cancelled', 'indeterminate'].includes(value.outcome) && reference(value.output);
-  if (value.kind === 'job_accepted') return exact(value, ['kind', 'operation_id', 'phase', 'effect', 'lifetime'])
+  if (value.kind === 'job_accepted') return exact(value, ['kind', 'operation_id', 'phase', 'effect', 'lifetime', ...('output' in value ? ['output'] : [])])
+    && (value.output === undefined || reference(value.output))
     && text(value.operation_id) && text(value.phase) && typeof value.lifetime === 'string' && ['call', 'run', 'thread', 'environment'].includes(value.lifetime);
   return false;
 }

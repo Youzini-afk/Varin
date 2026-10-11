@@ -160,112 +160,160 @@ export interface ResolvedExperimentBackend {
     cwd: string;
     inputRoot: string;
     reused?: boolean;
+    /** Return preparation authority when no backend dispatch occurred. */
+    releaseAuthority?: () => Promise<void>;
   }>;
 }
-
 /**
- * The local backend: one Rust kernel process per attempt, supervised by the
- * kernel guardian. `processSpawn` with the derived id is idempotent, the
- * kernel keeps exit facts after the Host disconnects, and processRelease
- * only runs after termination is confirmed — matching the local row of the
- * D-300 backend table.
- */
-export const createLocalExperimentBackend = (scoped: KernelScopedClient): ExperimentBackend => ({
-  backend: "local",
-  controls: ["cancel", "attach", "collect"],
-  async spawn(site, request) {
-    const environment = { ...process.env } as Record<string, string>;
-    for (const entry of request.env) environment[entry.name] = entry.value;
-    if (request.gpuAllocation) {
-      environment[request.gpuAllocation.environment.name] = request.gpuAllocation.environment.value;
-    }
-    delete environment.NODE_CHANNEL_FD;
-    const snapshot = await scoped.processSpawn({
-      workspaceId: site.workspaceId,
-      processId: request.backendJobId,
-      rootId: site.rootId,
-      cwd: request.cwd,
-      command: request.command,
-      args: request.args,
-      env: Object.entries(environment)
-        .filter((entry): entry is [string, string] => typeof entry[1] === "string")
-        .map(([name, value]) => ({ name, value })),
-      mode: "pipe",
-    });
-    return {
-      handle: {
-        backendJobId: request.backendJobId,
-        ...(snapshot.kernelEpoch !== undefined ? { kernelEpoch: snapshot.kernelEpoch } : {}),
-        ...(snapshot.pid !== undefined && snapshot.pid !== null ? { pid: snapshot.pid } : {}),
-      },
-      observation: {
+* The local backend: one Rust kernel process per attempt, supervised by the
+* kernel guardian. `processSpawn` with the derived id is idempotent, the
+* kernel keeps exit facts after the Host disconnects, and processRelease
+* only runs after termination is confirmed — matching the local row of the
+* D-300 backend table.
+*/
+export const createLocalExperimentBackend = (scoped: KernelScopedClient, releaseAuthority?: () => Promise<void>): ExperimentBackend => {
+  let released = false;
+  const backend: ExperimentBackend = {
+    backend: "local",
+    controls: ["cancel", "attach", "collect"],
+    async spawn(site, request) {
+      const environment = { ...process.env } as Record<string, string>;
+      for (const entry of request.env)
+        environment[entry.name] = entry.value;
+      if (request.gpuAllocation) {
+        environment[request.gpuAllocation.environment.name] = request.gpuAllocation.environment.value;
+      }
+      delete environment.NODE_CHANNEL_FD;
+      const snapshot = await scoped.processSpawn({
+        workspaceId: site.workspaceId,
+        processId: request.backendJobId,
+        rootId: site.rootId,
+        cwd: request.cwd,
+        command: request.command,
+        args: request.args,
+        env: Object.entries(environment)
+          .filter((entry): entry is [
+          string,
+          string
+        ] => typeof entry[1] === "string")
+          .map(([name, value]) => ({ name, value })),
+        mode: "pipe",
+      });
+      return {
+        handle: {
+          backendJobId: request.backendJobId,
+          ...(snapshot.kernelEpoch !== undefined ? { kernelEpoch: snapshot.kernelEpoch } : {}),
+          ...(snapshot.pid !== undefined && snapshot.pid !== null ? { pid: snapshot.pid } : {}),
+        },
+        observation: {
+          status: snapshot.status,
+          writerActive: snapshot.writerActive,
+          ...(snapshot.reason ? { reason: snapshot.reason } : {}),
+        },
+      };
+    },
+    async inspect(site, backendJobId) {
+      const snapshot = await scoped.processInspect({ workspaceId: site.workspaceId, processId: backendJobId });
+      return {
         status: snapshot.status,
         writerActive: snapshot.writerActive,
+        exitCode: snapshot.exitCode,
+        signal: snapshot.signal,
         ...(snapshot.reason ? { reason: snapshot.reason } : {}),
-      },
-    };
-  },
-  async inspect(site, backendJobId) {
-    const snapshot = await scoped.processInspect({ workspaceId: site.workspaceId, processId: backendJobId });
-    return {
-      status: snapshot.status,
-      writerActive: snapshot.writerActive,
-      exitCode: snapshot.exitCode,
-      signal: snapshot.signal,
-      ...(snapshot.reason ? { reason: snapshot.reason } : {}),
-    };
-  },
-  async read(site, backendJobId, cursor) {
-    const result = await scoped.processRead({ workspaceId: site.workspaceId, processId: backendJobId, cursor });
-    return {
-      chunks: result.chunks.map((chunk) => ({
-        channel: chunk.channel,
-        bytesBase64: chunk.bytesBase64,
-      })),
-      nextCursor: result.nextCursor,
-      endCursor: result.endCursor,
-      observation: {
-        status: result.process.status,
-        writerActive: result.process.writerActive,
-        exitCode: result.process.exitCode,
-        signal: result.process.signal,
-        ...(result.process.reason ? { reason: result.process.reason } : {}),
-      },
-    };
-  },
-  async kill(site, backendJobId) {
-    await scoped.processKill({ workspaceId: site.workspaceId, processId: backendJobId, force: true });
-  },
-  async release(site, backendJobId) {
-    await scoped.processRelease({ workspaceId: site.workspaceId, processId: backendJobId });
-  },
-  async collectFile(site, relativePath) {
-    const normalized = relativePath.replaceAll("\\", "/");
-    if (!normalized || path.isAbsolute(relativePath) || normalized.split("/").includes("..") || normalized.includes("\0")) {
-      throw new Error(`output path escaped the experiment root: ${relativePath}`);
-    }
-    const captured = await scoped.fileCapture({
-      operationId: `experiment-output-capture:${randomUUID()}`,
-      workspaceId: site.workspaceId,
-      rootId: site.rootId,
-      path: normalized,
-      store: true,
-    });
-    if (typeof captured.stateJson !== "string" || typeof captured.ownerId !== "string") {
-      throw new Error(`kernel did not retain experiment output: ${relativePath}`);
-    }
-    let state: unknown;
-    try { state = JSON.parse(captured.stateJson); } catch { throw new Error(`kernel returned malformed output state: ${relativePath}`); }
-    if (!state || typeof state !== "object" || (state as { kind?: unknown }).kind !== "regular-file"
-      || typeof (state as { objectHash?: unknown }).objectHash !== "string"
-      || typeof (state as { byteLength?: unknown }).byteLength !== "number") {
-      await scoped.releaseBlob(captured.ownerId).catch(() => undefined);
-      throw new Error(`experiment output is not a regular file: ${relativePath}`);
-    }
-    return {
-      objectHash: (state as { objectHash: string }).objectHash,
-      byteLength: (state as { byteLength: number }).byteLength,
-      ownerId: captured.ownerId,
-    };
-  },
-});
+      };
+    },
+    async read(site, backendJobId, cursor) {
+      const result = await scoped.processRead({ workspaceId: site.workspaceId, processId: backendJobId, cursor });
+      return {
+        chunks: result.chunks.map((chunk) => ({
+          channel: chunk.channel,
+          bytesBase64: chunk.bytesBase64,
+        })),
+        nextCursor: result.nextCursor,
+        endCursor: result.endCursor,
+        observation: {
+          status: result.process.status,
+          writerActive: result.process.writerActive,
+          exitCode: result.process.exitCode,
+          signal: result.process.signal,
+          ...(result.process.reason ? { reason: result.process.reason } : {}),
+        },
+      };
+    },
+    async kill(site, backendJobId) {
+      await scoped.processKill({ workspaceId: site.workspaceId, processId: backendJobId, force: true });
+    },
+    async release(site, backendJobId) {
+      if (!released) {
+        await scoped.processRelease({ workspaceId: site.workspaceId, processId: backendJobId });
+        released = true;
+      }
+      await releaseAuthority?.();
+    },
+    async collectFile(site, relativePath) {
+      const normalized = relativePath.replaceAll("\\", "/");
+      if (!normalized || path.isAbsolute(relativePath) || normalized.split("/").includes("..") || normalized.includes("\0")) {
+        throw new Error(`output path escaped the experiment root: ${relativePath}`);
+      }
+      const captured = await scoped.fileCapture({
+        operationId: `experiment-output-capture:${randomUUID()}`,
+        workspaceId: site.workspaceId,
+        rootId: site.rootId,
+        path: normalized,
+        store: true,
+      });
+      if (typeof captured.stateJson !== "string" || typeof captured.ownerId !== "string") {
+        throw new Error(`kernel did not retain experiment output: ${relativePath}`);
+      }
+      let state: unknown;
+      try {
+        state = JSON.parse(captured.stateJson);
+      }
+      catch {
+        throw new Error(`kernel returned malformed output state: ${relativePath}`);
+      }
+      if (!state || typeof state !== "object" || (state as {
+        kind?: unknown;
+      }).kind !== "regular-file"
+        || typeof (state as {
+          objectHash?: unknown;
+        }).objectHash !== "string"
+        || typeof (state as {
+          byteLength?: unknown;
+        }).byteLength !== "number") {
+        await scoped.releaseBlob(captured.ownerId).catch(() => undefined);
+        throw new Error(`experiment output is not a regular file: ${relativePath}`);
+      }
+      return {
+        objectHash: (state as {
+          objectHash: string;
+        }).objectHash,
+        byteLength: (state as {
+          byteLength: number;
+        }).byteLength,
+        ownerId: captured.ownerId,
+      };
+    },
+  };
+  // The original backend retains its real Host calls until bookkeeping release. Retiring
+  // a grant while a read/kill/collection promise is still active would cancel that owner.
+  const active = new Set<Promise<unknown>>();
+  let closing = false;
+  const own = <T>(work: () => Promise<T>): Promise<T> => {
+    if (closing)
+      return Promise.reject(new Error("Experiment backend caller has retired"));
+    const pending = work();
+    active.add(pending);
+    void pending.finally(() => active.delete(pending)).catch(() => undefined);
+    return pending;
+  };
+  return {
+    ...backend,
+    spawn: (...args) => own(() => backend.spawn(...args)),
+    inspect: (...args) => own(() => backend.inspect(...args)),
+    read: (...args) => own(() => backend.read(...args)),
+    kill: (...args) => own(() => backend.kill(...args)),
+    collectFile: (...args) => own(() => backend.collectFile(...args)),
+    async release(...args) { closing = true; await Promise.allSettled([...active]); await backend.release(...args); },
+  };
+};

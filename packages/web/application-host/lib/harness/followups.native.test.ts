@@ -202,7 +202,7 @@ async function fixture(options: {
       };
     },
     getAttempt: async (attemptCaller, attemptId) => options.getAttempt
-      ? options.getAttempt(harness, attemptId, attemptCaller)
+      ? options.getAttempt(harness, attemptId, {workspaceId:attemptCaller.workspaceId,executionWorkspaceId:attemptCaller.executionWorkspaceId,sessionId:attemptCaller.sessionId!,rootSessionId:attemptCaller.rootSessionId!,...(attemptCaller.threadId?{threadId:attemptCaller.threadId}:{}),...(attemptCaller.runId?{runId:attemptCaller.runId}:{}),allowedThreadIds:attemptCaller.access.kind === "family" ? [...attemptCaller.access.readThreadIds] : []})
       : harness.attempts.get(attemptId) ?? null,
     getExperiment: async (_caller, attemptId) => harness.experiments.get(attemptId) ?? null,
     readExperimentLog: async (_caller, params) => {

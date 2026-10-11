@@ -164,7 +164,8 @@ impl Fixture {
             executor_owner: ExecutorOwner::Kernel,
         });
         let completion = ToolCompletion::JobAccepted {
-            operation_id: fixture.process.clone(),
+            content: None,
+                operation_id: fixture.process.clone(),
             phase: "running".into(),
             effect: Effect::Dispatched,
             lifetime: Lifetime::Thread,

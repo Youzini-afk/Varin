@@ -748,7 +748,8 @@ impl Fixture {
                 request_id: request_id.clone(),
                 call_id: call.call_id,
                 completion: ToolCompletion::JobAccepted {
-                    operation_id: context.operation_id.clone(),
+                    content: None,
+                operation_id: context.operation_id.clone(),
                     phase: "awaiting_child".into(),
                     effect: Effect::None,
                     lifetime: Lifetime::Thread,
@@ -881,7 +882,8 @@ impl Fixture {
             panic!("policy call required")
         };
         let completion = ToolCompletion::JobAccepted {
-            operation_id: context.operation_id.clone(),
+            content: None,
+                operation_id: context.operation_id.clone(),
             phase: phase.into(),
             effect: Effect::None,
             lifetime: Lifetime::Thread,
@@ -912,6 +914,7 @@ impl Fixture {
             request_id: "parent-request".into(),
             call_id: "dispatch-call".into(),
             completion: ToolCompletion::JobAccepted {
+                content: None,
                 operation_id: self.context.operation_id.clone(),
                 phase: "preparing_child".into(),
                 effect: Effect::None,

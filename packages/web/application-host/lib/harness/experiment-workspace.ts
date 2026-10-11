@@ -24,12 +24,15 @@ export interface ExperimentWorkspaceCaller {
   workspaceId: string;
   /** Explicit execution identity. It is never inferred from workspaceId. */
   executionWorkspaceId: string;
-  sessionId?: string;
-  threadId?: string;
-  runId?: string;
+  sessionId?: string | undefined;
+  threadId?: string | undefined;
+  runId?: string | undefined;
+  owner?: { runtime: 'pi' } | { runtime: 'agent'; operationId?: string };
 }
 
 export interface PrepareExperimentInputOptions {
+  /** Exact native source grant; owned by the caller until the actual capture drains. */
+  sourceAuthority?: { scoped: KernelScopedClient; rootId: string };
   /** Relative source directories/files explicitly admitted by the caller. `[]` means the root. */
   captureScopes?: readonly string[];
   /** Working directory relative to the captured source root. */
@@ -51,22 +54,23 @@ export class ExperimentInputCaptureError extends ExperimentPreparationError {
 export type ExperimentInputCapture = Omit<ExperimentInputSnapshot, "root">;
 
 export interface ExperimentInputSnapshot {
-  schemaVersion: 1;
+  schemaVersion: 2;
   branchId: string;
   /** Immutable root returned by branch creation. This is the durable spec input. */
   root: string;
-  sourceRoot: string;
+  sourceRoot: string | null;
   workspaceId: string;
   executionWorkspaceId: string;
   captureScopes: string[];
-  capturedPathCount: number;
-  inventoryFingerprint: string;
+  capturedPathCount: number | null;
+  inventoryFingerprint: string | null;
   /** The source file authority does not apply Git ignore rules. */
+  source: { kind: "physical-capture" } | { kind: "fixed-branch"; branchId: string; revision: number; root: string };
   captureSemantics: {
     excludedDirectories: readonly [".git", ".varin"];
     gitignore: "not-applied";
     ignoredFilesIncluded: true;
-  };
+  } | null;
   cwd?: string;
 }
 
@@ -77,6 +81,8 @@ export interface MaterializedExperimentAttempt {
   snapshotRoot: string;
   /** Ephemeral execution grant; do not persist it with the spec/attempt record. */
   scoped: KernelScopedClient;
+  /** Held by the returned backend until its actual job and output readers finish. */
+  releaseAuthority(): Promise<void>;
   /** Root registration for this attempt directory, suitable for process.spawn. */
   rootId: string;
   canonicalRoot: string;
@@ -89,6 +95,8 @@ export interface MaterializedExperimentAttempt {
 }
 
 export interface ExperimentInputTransfer {
+  /** Close only after all returned content readers settle. */
+  close(): Promise<void>;
   materialId: string;
   cwd?: string;
   entries: Array<{ path: string; state: KernelBranchState }>;
@@ -190,7 +198,7 @@ const issueExperimentGrant = async (
   caller: ExperimentWorkspaceCaller,
   purpose: string,
   signal?: AbortSignal,
-): Promise<KernelScopedClient> => {
+): Promise<{ scoped: KernelScopedClient; release(): Promise<void> }> => {
   assertCaller(caller);
   signal?.throwIfAborted();
   await client.start();
@@ -201,6 +209,7 @@ const issueExperimentGrant = async (
     sessionId: caller.sessionId,
     threadId: caller.threadId,
     runId: caller.runId,
+    ...(caller.owner?.runtime === "agent" ? {operationId:caller.owner.operationId} : {}),
     capabilities: purpose === "materialize"
       ? ["storage.read", "storage.write", "recovery", "recovery.maintenance", "process", "process.maintenance"]
       : ["storage.read", "storage.write"],
@@ -208,7 +217,8 @@ const issueExperimentGrant = async (
     // requires an unbounded source-view grant, hence the explicit empty scope.
     pathScopes: [""],
   }, signal);
-  return client.scoped(grant);
+  let released=false;
+  return { scoped: client.scoped(grant), async release(){if(released)return;await client.retireGrant(grant.grantId);released=true;} };
 };
 
 const scanInventory = async (
@@ -339,6 +349,7 @@ export async function prepareExperimentInput(
   canonicalRoot: string,
   options: PrepareExperimentInputOptions = {},
 ): Promise<ExperimentInputSnapshot> {
+  let ownGrant: Awaited<ReturnType<typeof issueExperimentGrant>> | undefined;
   let captureDrained = true;
   let branchCreateUncertain = false;
   let branchCreateDispatched = false;
@@ -351,13 +362,15 @@ export async function prepareExperimentInput(
     const scopes = [...new Set(options.captureScopes.map((entry) => normalizeRelative(entry, "Experiment capture scope")))].sort();
     for (const scope of scopes) await validateScope(sourceRoot, scope);
     const cwd = options.cwd === undefined ? undefined : normalizeRelative(options.cwd, "Experiment cwd");
-    const scoped = await issueExperimentGrant(client, caller, "prepare", options.signal);
+    if (!options.sourceAuthority) ownGrant = await issueExperimentGrant(client, caller, "prepare", options.signal);
+    const scoped = options.sourceAuthority?.scoped ?? ownGrant!.scoped;
     const registered = await scoped.fileRootRegister({
       workspaceId: caller.workspaceId,
       executionWorkspaceId: caller.executionWorkspaceId,
       canonicalRoot: sourceRoot,
     }, options.signal);
     const sourceRootId = rootIdFrom(registered, "Source file root registration");
+    if (options.sourceAuthority && sourceRootId !== options.sourceAuthority.rootId) throw new Error("Native source root differs from its grant");
     const leaseId = `experiment-input-lease:${randomUUID()}`;
     for (;;) {
       options.signal?.throwIfAborted();
@@ -419,7 +432,7 @@ export async function prepareExperimentInput(
 
         const branchId = options.branchId ?? `experiment-input-${randomUUID()}`;
         const capture: ExperimentInputCapture = {
-          schemaVersion: 1, branchId, sourceRoot,
+          schemaVersion: 2, branchId, sourceRoot, source: { kind: "physical-capture" },
           workspaceId: caller.workspaceId, executionWorkspaceId: caller.executionWorkspaceId,
           captureScopes: scopes, capturedPathCount: inventory.paths.length,
           inventoryFingerprint: inventory.fingerprint,
@@ -470,42 +483,40 @@ export async function prepareExperimentInput(
     }
   } catch (error) {
     throw new ExperimentInputCaptureError(error instanceof Error ? error.message : String(error), branchCreateDispatched, { drained: captureDrained, retryable: !captureDrained || branchCreateUncertain || error instanceof KernelClientError, cause: error });
-  }
+  } finally { if(captureDrained) await ownGrant?.release(); }
 }
-
 /** Recover only the original create receipt; a missing/changed committed branch is never recaptured. */
-export async function recoverExperimentInput(
-  client: KernelClient,
-  caller: ExperimentWorkspaceCaller,
-  capture: ExperimentInputCapture,
-  signal?: AbortSignal,
-): Promise<ExperimentInputSnapshot | null> {
-  const scoped = await issueExperimentGrant(client, caller, "prepare", signal);
-  const receipt = await scoped.getOperation(`experiment-input-branch:${capture.branchId}`, signal);
-  if (receipt === null) return null;
-  const result = receipt.result;
-  if (receipt.state !== "committed" || !result || typeof result !== "object") {
-    throw new Error("Experiment input branch creation has no confirmed immutable result");
+export async function recoverExperimentInput(client: KernelClient, caller: ExperimentWorkspaceCaller, capture: ExperimentInputCapture, signal?: AbortSignal): Promise<ExperimentInputSnapshot | null> {
+  const grant = await issueExperimentGrant(client, caller, "prepare", signal);
+  const { scoped } = grant;
+  try {
+    const receipt = await scoped.getOperation(`experiment-input-branch:${capture.branchId}`, signal);
+    if (receipt === null)
+      return null;
+    const result = receipt.result;
+    if (receipt.state !== "committed" || !result || typeof result !== "object") {
+      throw new Error("Experiment input branch creation has no confirmed immutable result");
+    }
+    const created = result as Record<string, unknown>;
+    if (created.branchId !== capture.branchId || typeof created.root !== "string" || !created.root) {
+      throw new Error("Experiment input branch receipt is unreadable");
+    }
+    const branch = await scoped.readBranch({ branchId: capture.branchId }, signal);
+    if (branch.workspaceId !== caller.workspaceId || branch.root !== created.root || branch.currentRoot !== created.root) {
+      throw new Error("Experiment input branch no longer matches its committed create receipt");
+    }
+    return { ...capture, root: created.root };
   }
-  const created = result as Record<string, unknown>;
-  if (created.branchId !== capture.branchId || typeof created.root !== "string" || !created.root) {
-    throw new Error("Experiment input branch receipt is unreadable");
+  finally {
+    await grant.release();
   }
-  const branch = await scoped.readBranch({ branchId: capture.branchId }, signal);
-  if (branch.workspaceId !== caller.workspaceId || branch.root !== created.root || branch.currentRoot !== created.root) {
-    throw new Error("Experiment input branch no longer matches its committed create receipt");
-  }
-  return { ...capture, root: created.root };
 }
-
 /** Materialize one independent attempt directory from the spec's immutable root. */
-export async function materializeExperimentAttempt(
-  client: KernelClient,
-  caller: ExperimentWorkspaceCaller,
-  attemptId: string,
-  input: ExperimentInputSnapshot,
-  options: { signal?: AbortSignal } = {},
-): Promise<MaterializedExperimentAttempt> {
+export async function materializeExperimentAttempt(client: KernelClient, caller: ExperimentWorkspaceCaller, attemptId: string, input: ExperimentInputSnapshot, options: {
+  signal?: AbortSignal;
+} = {}): Promise<MaterializedExperimentAttempt> {
+  let grant: Awaited<ReturnType<typeof issueExperimentGrant>> | undefined;
+  let transferred = false;
   let materializationDispatched = false;
   let materializationDrained = false;
   try {
@@ -516,7 +527,8 @@ export async function materializeExperimentAttempt(
     asNonEmptyString(input.branchId, "Experiment input branch identity");
     asNonEmptyString(input.root, "Experiment input root identity");
     asNonEmptyString(attemptId, "Experiment attempt identity");
-    const scoped = await issueExperimentGrant(client, caller, "materialize", options.signal);
+    grant = await issueExperimentGrant(client, caller, "materialize", options.signal);
+    const { scoped } = grant;
     const branch = await scoped.readBranch({ branchId: input.branchId }, options.signal);
     if (branch.workspaceId !== caller.workspaceId || branch.root !== input.root || branch.currentRoot !== input.root) {
       throw new Error("Experiment input branch no longer matches the persisted immutable root");
@@ -554,7 +566,9 @@ export async function materializeExperimentAttempt(
       canonicalRoot: canonicalTarget,
     }, options.signal);
     const rootId = rootIdFrom(target, "Experiment attempt root registration");
+    transferred = true;
     return {
+      releaseAuthority: grant.release,
       attemptId,
       branchId: input.branchId,
       snapshotRoot: input.root,
@@ -566,122 +580,166 @@ export async function materializeExperimentAttempt(
       managedRoot,
       materialized: true,
     };
-  } catch (error) {
+  }
+  catch (error) {
+    if (error instanceof KernelClientError && error.code === "cancelled")
+      materializationDrained = true;
     throw new ExperimentPreparationError(error instanceof Error ? error.message : String(error), {
       drained: !materializationDispatched || materializationDrained || (error instanceof KernelClientError && error.code === "cancelled"),
       retryable: (materializationDispatched && !materializationDrained) || error instanceof KernelClientError,
       cause: error,
     });
   }
+  finally {
+    if (!transferred && (!materializationDispatched || materializationDrained))
+      await grant?.release();
+  }
 }
-
 /** Probe the original source lease after an interrupted input worker, without recapturing content. */
-export async function reconcileExperimentCapture(
-  client: KernelClient,
-  caller: ExperimentWorkspaceCaller,
-  sourceRoot: string,
-  captureScopes: readonly string[],
-): Promise<"drained" | "unknown"> {
-  if (await canonicalizePathIdentity(sourceRoot) !== sourceRoot) throw new Error("Experiment source identity changed");
-  const scoped = await issueExperimentGrant(client, caller, "prepare");
-  const root = await scoped.fileRootRegister({ workspaceId: caller.workspaceId, executionWorkspaceId: caller.executionWorkspaceId, canonicalRoot: sourceRoot });
-  const rootId = rootIdFrom(root, "Experiment source reconciliation");
-  const leaseId = `experiment-input-observe:${randomUUID()}`;
-  const lease = await scoped.fileLeaseAcquire({ workspaceId: caller.workspaceId, rootId, leaseId,
-    resources: (captureScopes.length ? [...captureScopes] : [""]).map((entry) => ({ path: entry, scope: "subtree" })) });
-  if (lease.status === "busy") return "unknown";
-  if (lease.status !== "acquired") throw new Error("Experiment source lease returned no confirmed acquisition");
-  try { return "drained"; }
-  finally { await scoped.fileLeaseRelease({ workspaceId: caller.workspaceId, rootId, leaseId }); }
+export async function reconcileExperimentCapture(client: KernelClient, caller: ExperimentWorkspaceCaller, sourceRoot: string, captureScopes: readonly string[]): Promise<"drained" | "unknown"> {
+  if (await canonicalizePathIdentity(sourceRoot) !== sourceRoot)
+    throw new Error("Experiment source identity changed");
+  const grant = await issueExperimentGrant(client, caller, "prepare");
+  const { scoped } = grant;
+  try {
+    const root = await scoped.fileRootRegister({ workspaceId: caller.workspaceId, executionWorkspaceId: caller.executionWorkspaceId, canonicalRoot: sourceRoot });
+    const rootId = rootIdFrom(root, "Experiment source reconciliation");
+    const leaseId = `experiment-input-observe:${randomUUID()}`;
+    const lease = await scoped.fileLeaseAcquire({ workspaceId: caller.workspaceId, rootId, leaseId,
+      resources: (captureScopes.length ? [...captureScopes] : [""]).map((entry) => ({ path: entry, scope: "subtree" })) });
+    if (lease.status === "busy")
+      return "unknown";
+    if (lease.status !== "acquired")
+      throw new Error("Experiment source lease returned no confirmed acquisition");
+    try {
+      return "drained";
+    }
+    finally {
+      await scoped.fileLeaseRelease({ workspaceId: caller.workspaceId, rootId, leaseId });
+    }
+  }
+  finally {
+    await grant.release();
+  }
 }
-
 /** Confirm the original local materialization has committed and its real physical writer lease has drained. */
-export async function reconcileExperimentPreparation(
-  client: KernelClient,
-  caller: ExperimentWorkspaceCaller,
-  attemptId: string,
-  input: ExperimentInputSnapshot,
-): Promise<"drained" | "unknown"> {
+export async function reconcileExperimentPreparation(client: KernelClient, caller: ExperimentWorkspaceCaller, attemptId: string, input: ExperimentInputSnapshot): Promise<"drained" | "unknown"> {
   assertCaller(caller);
-  const scoped = await issueExperimentGrant(client, caller, "materialize");
-  const receipt = await scoped.getOperation(`experiment-attempt-materialize:${caller.workspaceId}:${attemptId}`);
-  if (!receipt || receipt.state !== "committed" || !receipt.result || typeof receipt.result !== "object"
-    || (receipt.result as Record<string, unknown>).root !== input.root) return "unknown";
-  const handshake = client.handshake ?? await client.start();
-  const storageRoot = await canonicalizePathIdentity(handshake.storageRoot);
-  const { attemptRoot } = managedAttemptPath(storageRoot, caller.workspaceId, attemptId);
-  const registered = await scoped.fileRootRegister({ workspaceId: caller.workspaceId,
-    executionWorkspaceId: caller.executionWorkspaceId, canonicalRoot: storageRoot });
-  const rootId = rootIdFrom(registered, "Experiment preparation reconciliation root");
-  const leaseId = `experiment-preparation-observe:${randomUUID()}`;
-  const lease = await scoped.fileLeaseAcquire({ workspaceId: caller.workspaceId, rootId, leaseId,
-    resources: [{ path: path.relative(storageRoot, attemptRoot).replaceAll("\\", "/"), scope: "subtree" }] });
-  if (lease.status === "busy") return "unknown";
-  if (lease.status !== "acquired") throw new Error("Experiment preparation lease returned no confirmed acquisition");
-  try { return "drained"; }
-  finally { await scoped.fileLeaseRelease({ workspaceId: caller.workspaceId, rootId, leaseId }); }
+  const grant = await issueExperimentGrant(client, caller, "materialize");
+  const { scoped } = grant;
+  try {
+    const receipt = await scoped.getOperation(`experiment-attempt-materialize:${caller.workspaceId}:${attemptId}`);
+    if (!receipt || receipt.state !== "committed" || !receipt.result || typeof receipt.result !== "object"
+      || (receipt.result as Record<string, unknown>).root !== input.root)
+      return "unknown";
+    const handshake = client.handshake ?? await client.start();
+    const storageRoot = await canonicalizePathIdentity(handshake.storageRoot);
+    const { attemptRoot } = managedAttemptPath(storageRoot, caller.workspaceId, attemptId);
+    const registered = await scoped.fileRootRegister({ workspaceId: caller.workspaceId,
+      executionWorkspaceId: caller.executionWorkspaceId, canonicalRoot: storageRoot });
+    const rootId = rootIdFrom(registered, "Experiment preparation reconciliation root");
+    const leaseId = `experiment-preparation-observe:${randomUUID()}`;
+    const lease = await scoped.fileLeaseAcquire({ workspaceId: caller.workspaceId, rootId, leaseId,
+      resources: [{ path: path.relative(storageRoot, attemptRoot).replaceAll("\\", "/"), scope: "subtree" }] });
+    if (lease.status === "busy")
+      return "unknown";
+    if (lease.status !== "acquired")
+      throw new Error("Experiment preparation lease returned no confirmed acquisition");
+    try {
+      return "drained";
+    }
+    finally {
+      await scoped.fileLeaseRelease({ workspaceId: caller.workspaceId, rootId, leaseId });
+    }
+  }
+  finally {
+    await grant.release();
+  }
 }
-
 /**
- * Read an immutable experiment snapshot for a managed execution target. File
- * bodies remain paged from the local Rust object store and are transferred only
- * when the target reports that their content hash is absent.
- */
-export async function openExperimentInputTransfer(
-  client: KernelClient,
-  caller: ExperimentWorkspaceCaller,
-  input: ExperimentInputSnapshot,
-  options: { signal?: AbortSignal } = {},
-): Promise<ExperimentInputTransfer> {
+* Read an immutable experiment snapshot for a managed execution target. File
+* bodies remain paged from the local Rust object store and are transferred only
+* when the target reports that their content hash is absent.
+*/
+export async function openExperimentInputTransfer(client: KernelClient, caller: ExperimentWorkspaceCaller, input: ExperimentInputSnapshot, options: {
+  signal?: AbortSignal;
+} = {}): Promise<ExperimentInputTransfer> {
   assertCaller(caller);
   if (caller.workspaceId !== input.workspaceId || caller.executionWorkspaceId !== input.executionWorkspaceId) {
     throw new Error("Experiment transfer identity does not match the input snapshot");
   }
-  const scoped = await issueExperimentGrant(client, caller, "prepare", options.signal);
-  const entries: Array<{ path: string; state: KernelBranchState }> = [];
-  let cursor: number | undefined;
-  do {
-    const page = await scoped.readBranch({
-      branchId: input.branchId,
-      includeEntries: true,
-      pageSize: 1024,
-      ...(cursor === undefined ? {} : { cursor }),
-    }, options.signal);
-    if (page.workspaceId !== caller.workspaceId || page.root !== input.root || page.currentRoot !== input.root) {
-      throw new Error("Experiment input branch no longer matches the persisted immutable root");
-    }
-    entries.push(...page.entries.map((entry) => ({ path: entry.path, state: entry.state })));
-    cursor = page.nextCursor === null || page.nextCursor === undefined ? undefined : page.nextCursor;
-  } while (cursor !== undefined);
-  const objectPaths = new Map<string, string>();
-  for (const entry of entries) {
-    if (entry.state.kind === "regular-file" && !objectPaths.has(entry.state.objectHash)) {
-      objectPaths.set(entry.state.objectHash, entry.path);
-    }
-  }
-  return {
-    materialId: input.root,
-    ...(input.cwd ? { cwd: input.cwd } : {}),
-    entries,
-    readObject: (objectHash, byteLength, signal) => (async function* () {
-      const sourcePath = objectPaths.get(objectHash);
-      if (!sourcePath) throw new Error(`Experiment snapshot does not contain object ${objectHash}`);
-      let offset = 0;
-      while (offset < byteLength) {
-        signal?.throwIfAborted();
-        const page = await scoped.getBlob(
-          objectHash,
-          { branchId: input.branchId, path: sourcePath },
-          { offset, length: Math.min(256 * 1024, byteLength - offset), ...(signal ? { signal } : {}) },
-        );
-        const bytes = Buffer.from(page.bytesBase64, "base64");
-        if (bytes.byteLength === 0 || page.nextOffset <= offset) throw new Error(`Experiment object ${objectHash} stopped at byte ${offset}`);
-        offset = page.nextOffset;
-        yield bytes;
+  const grant = await issueExperimentGrant(client, caller, "prepare", options.signal);
+  const { scoped } = grant;
+  try {
+    const entries: Array<{
+      path: string;
+      state: KernelBranchState;
+    }> = [];
+    let cursor: number | undefined;
+    do {
+      const page = await scoped.readBranch({
+        branchId: input.branchId,
+        includeEntries: true,
+        pageSize: 1024,
+        ...(cursor === undefined ? {} : { cursor }),
+      }, options.signal);
+      if (page.workspaceId !== caller.workspaceId || page.root !== input.root || page.currentRoot !== input.root) {
+        throw new Error("Experiment input branch no longer matches the persisted immutable root");
       }
-      if (offset !== byteLength) throw new Error(`Experiment object ${objectHash} length changed during transfer`);
-    })(),
-  };
+      entries.push(...page.entries.map((entry) => ({ path: entry.path, state: entry.state })));
+      cursor = page.nextCursor === null || page.nextCursor === undefined ? undefined : page.nextCursor;
+    } while (cursor !== undefined);
+    const objectPaths = new Map<string, string>();
+    for (const entry of entries) {
+      if (entry.state.kind === "regular-file" && !objectPaths.has(entry.state.objectHash)) {
+        objectPaths.set(entry.state.objectHash, entry.path);
+      }
+    }
+    const readers = new Set<Promise<void>>();
+    let closing = false;
+    let closeWork: Promise<void> | undefined;
+    return {
+      close() {
+        closing = true;
+        return closeWork ??= Promise.all([...readers]).then(() => grant.release());
+      },
+      materialId: input.root,
+      ...(input.cwd ? { cwd: input.cwd } : {}),
+      entries,
+      readObject: (objectHash, byteLength, signal) => (async function* () {
+        if (closing)
+          throw new Error("Experiment input transfer is closed");
+        let finish!: () => void;
+        const reader = new Promise<void>(resolve => { finish = resolve; });
+        readers.add(reader);
+        try {
+          const sourcePath = objectPaths.get(objectHash);
+          if (!sourcePath)
+            throw new Error(`Experiment snapshot does not contain object ${objectHash}`);
+          let offset = 0;
+          while (offset < byteLength) {
+            signal?.throwIfAborted();
+            const page = await scoped.getBlob(objectHash, { branchId: input.branchId, path: sourcePath }, { offset, length: Math.min(256 * 1024, byteLength - offset), ...(signal ? { signal } : {}) });
+            const bytes = Buffer.from(page.bytesBase64, "base64");
+            if (bytes.byteLength === 0 || page.nextOffset <= offset)
+              throw new Error(`Experiment object ${objectHash} stopped at byte ${offset}`);
+            offset = page.nextOffset;
+            yield bytes;
+          }
+          if (offset !== byteLength)
+            throw new Error(`Experiment object ${objectHash} length changed during transfer`);
+        }
+        finally {
+          readers.delete(reader);
+          finish();
+        }
+      })(),
+    };
+  }
+  catch (error) {
+    await grant.release();
+    throw error;
+  }
 }
 
 export const experimentManagedDirectoryName = MANAGED_EXPERIMENTS_DIRECTORY;

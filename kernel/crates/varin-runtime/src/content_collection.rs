@@ -339,6 +339,8 @@ impl ContentCollection {
              UNION ALL SELECT body FROM model_outputs
              UNION ALL SELECT body FROM input_history_content
              UNION ALL SELECT intent FROM commands".to_string();
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.host_job.acceptanceRef') FROM operations WHERE json_extract(body,'$.host_job.acceptanceRef') IS NOT NULL");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.intent.request_ref') FROM operations WHERE json_extract(body,'$.intent.kind')='user_host_job'");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.objective_ref') FROM goals UNION ALL SELECT json_extract(body,'$.start_intent') FROM goals UNION ALL SELECT json_extract(body,'$.reason_ref') FROM goals WHERE json_extract(body,'$.reason_ref') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT body FROM context_checkpoints UNION ALL SELECT body FROM memory_states");
         roots.push_str(" UNION ALL SELECT recipe FROM context_jobs UNION ALL SELECT body FROM context_job_parts");
@@ -371,18 +373,18 @@ impl ContentCollection {
         );
         roots.push_str(&format!(" UNION ALL SELECT json_extract(body,'$.intent.body_ref') FROM operations WHERE json_extract(body,'$.intent.kind') IN ({})", crate::catalog::policy_body::ACTION_KINDS));
         roots.push_str("
-            UNION ALL SELECT json_extract(receipt,'$.completion.content_ref') FROM policy_graph_nodes WHERE json_extract(receipt,'$.completion.kind')='result'
+            UNION ALL SELECT json_extract(receipt,'$.completion.content_ref') FROM policy_graph_nodes WHERE json_extract(receipt,'$.completion.content_ref') IS NOT NULL
             UNION ALL SELECT json_extract(receipt,'$.completion.reason_ref') FROM policy_graph_nodes WHERE json_extract(receipt,'$.completion.kind')='not_dispatched'
             UNION ALL SELECT json_extract(call,'$.arguments_ref') FROM policy_graph_nodes");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.result.reference') FROM operations WHERE json_extract(body,'$.result.kind')='content'
             UNION ALL SELECT json_extract(body,'$.external_receipt.result_ref') FROM operations WHERE json_extract(body,'$.external_receipt') IS NOT NULL
             UNION ALL SELECT json_extract(data,'$.result.reference') FROM events WHERE json_extract(data,'$.result.kind')='content'
             UNION ALL SELECT json_extract(data,'$.external_receipt.result_ref') FROM events WHERE json_extract(data,'$.external_receipt') IS NOT NULL
-            UNION ALL SELECT json_extract(receipt,'$.completion.content_ref') FROM tool_calls WHERE json_extract(receipt,'$.completion.kind')='result'
+            UNION ALL SELECT json_extract(receipt,'$.completion.content_ref') FROM tool_calls WHERE json_extract(receipt,'$.completion.content_ref') IS NOT NULL
             UNION ALL SELECT json_extract(receipt,'$.completion.reason_ref') FROM tool_calls WHERE json_extract(receipt,'$.completion.kind')='not_dispatched'");
-        roots.push_str(" UNION ALL SELECT json_extract(body,'$.call_completion.content_ref') FROM operations WHERE json_extract(body,'$.call_completion.kind')='result'
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.call_completion.content_ref') FROM operations WHERE json_extract(body,'$.call_completion.content_ref') IS NOT NULL
             UNION ALL SELECT json_extract(body,'$.call_completion.reason_ref') FROM operations WHERE json_extract(body,'$.call_completion.kind')='not_dispatched'
-            UNION ALL SELECT json_extract(data,'$.call_completion.content_ref') FROM events WHERE json_extract(data,'$.call_completion.kind')='result'
+            UNION ALL SELECT json_extract(data,'$.call_completion.content_ref') FROM events WHERE json_extract(data,'$.call_completion.content_ref') IS NOT NULL
             UNION ALL SELECT json_extract(data,'$.call_completion.reason_ref') FROM events WHERE json_extract(data,'$.call_completion.kind')='not_dispatched'");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.selection.child_dispatch_ref') FROM run_launches WHERE json_extract(body,'$.selection.child_dispatch_ref') IS NOT NULL
 

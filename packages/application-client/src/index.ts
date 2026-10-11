@@ -19,6 +19,7 @@ export type { ProjectFolders } from './project-folders.js';
 export * from "./recommended-pi-packages.js";
 export * from "./threads.js";
 export * from "./threads-http.js";
+export * from "./research.js";
 
 export { TERMINAL_PROTOCOL_VERSION } from './terminal-protocol.js';
 

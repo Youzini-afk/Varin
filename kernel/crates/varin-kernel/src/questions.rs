@@ -221,8 +221,7 @@ impl ToolExecutor for Questions {
                 operation_id: c.operation_id.clone(),
                 phase: "awaiting_user".into(),
                 effect: Effect::None,
-                lifetime: Lifetime::Thread,
-            },
+                lifetime: Lifetime::Thread, content: None,},
             Err(e) => ToolCompletion::Result {
                 outcome: Outcome::Failed,
                 effect: Effect::None,

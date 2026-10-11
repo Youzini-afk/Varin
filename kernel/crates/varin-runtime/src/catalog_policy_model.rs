@@ -324,6 +324,7 @@ impl Catalog {
             receipt: None,
         };
         let op = Operation {
+            host_job: None,
             id: action_id.clone(),
             run_id: run_id.into(),
             epoch,

@@ -74,6 +74,8 @@ export interface ExperimentSpecView {
 }
 
 export interface ExperimentAttemptView {
+  /** Current caller authorization, projected by the original research owner. Native readers always receive it. */
+  permissions?: { control: boolean };
   attemptId: string;
   /** Null until the accepted intent has a durably prepared immutable spec. */
   specId: string | null;

@@ -221,7 +221,7 @@ pub(in crate::catalog) fn pending_cancelled(
         && op.phase == OperationPhase::Waiting
         && op.handed_off
         && op.waiting_on.as_deref() == Some(&wait.id)
-        && matches!(&op.call_completion,Some(super::super::result_content::ToolCompletionMetadata::JobAccepted{operation_id,phase,effect:Effect::Confirmed,lifetime:Lifetime::Thread}) if operation_id==id && phase=="awaiting_reply"))
+        && matches!(&op.call_completion,Some(super::super::result_content::ToolCompletionMetadata::JobAccepted{operation_id,phase,effect:Effect::Confirmed,lifetime:Lifetime::Thread, ..}) if operation_id==id && phase=="awaiting_reply"))
 }
 impl Catalog {
     pub fn cancel_reply_wait(&mut self, operation_id: &str) -> Result<Operation> {

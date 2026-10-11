@@ -31,7 +31,7 @@ receipt facts.
 The Agent workbench has an explicit thread selector using the shared layout and Markdown
 renderer. Its projection controller reconstructs durable history, queue and operation facts and
 keeps transient progress separate. This is a vertical integration, not Pi parity. Default main-chat
-cutover, full multimodal coverage, calendar/general-event scheduling, remaining policy-origin domain
+cutover, full multimodal coverage, remaining general-event sources and policy-origin domain
 consumers, remote environments and the broader capabilities recorded in the runtime implementation
 plan still require their named owners. Memory, questions, automatic summary preparation and bound
 MCP/ordinary extension tools already have native paths; each retains its documented scope.
@@ -51,6 +51,28 @@ authenticated Express routes, real kernel and loopback model service. It covers 
 credential pinning, completed-submit retry without a second provider call, stable create retry,
 history/SSE, mismatched thread/branch rejection, queued input edit/cancel, active cancellation and
 credential-bound next-run completion. It uses fake credentials and proves no live-provider parity.
+
+## Research consumers
+
+`research-runtime.ts` connects the original Experiment/Source/Resource services to genuine Catalog
+invocations. The same authenticated `/api/threads/research/*` routes expose the framework-neutral
+`ThreadsAPI.research` to `ThreadConversation` and the shared Research facts view. No Pi session is
+created for these callers. Read scope is the actual task family; control remains the caller Thread
+and its descendants. Changing a branch or source does not hide older independent jobs. Historical
+read/control and admission of new work are separate decisions.
+
+User submit/rerun carries a stable request ID and exact source selection into a genuine User
+Operation. Ordinary Agent submit/observe uses the selected tool declaration and its real ModelStep
+or policy origin. Domain acceptance, call completion and physical job terminal are different facts.
+Catalog keeps the original domain association and immutable accepted content; ExperimentService
+continues to own preparation, execution, cancellation, logs and artifacts. Reconnection reads those
+original records rather than submitting another experiment. Research SSE events are invalidation
+hints, not durable execution receipts.
+
+The shared UI displays service-derived control permission, preserves rerun intent after an uncertain
+response, pages original logs/artifact bytes and rejects stale results after identity changes.
+Closing the view cancels observations only. The default Pi Research root and final product migration
+remain separate from this explicit Agent Thread consumer.
 
 ## Image input vertical
 

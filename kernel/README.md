@@ -116,7 +116,7 @@ Current milestone evidence is in [harness status](../docs/status.md).
 
 ## R4 native process resources
 
-The format-v11 catalog keeps process identities, outcomes and grant lifecycle in the same Storage. Scoped
+The format-v12 catalog keeps process identities, outcomes and grant lifecycle in the same Storage. Scoped
 `process.spawn/inspect/list/read/write/resize/kill/release` operate on admitted roots/grants.
 A guardian is another invocation of this packaged executable, not another kernel/database or Node
 PTY shim. It owns a pipe or real PTY and reports a durable native tree-exit receipt.
@@ -124,8 +124,12 @@ PTY shim. It owns a pipe or real PTY and reports a durable native tree-exit rece
 Grant state is one durable Active/Retired/Revoked value. Retirement disables the old caller without
 revoking creation provenance for an already stopped process; it requires real stop evidence and never
 kills a process to manufacture that evidence. Explicit revocation remains denied after a later retire.
-The private retirement selector names one grant or the original Host/Run, so a restarted Host does not
-rely on an old in-memory grant list. A delegated successor's read-only old spool access requires the
+The private retirement selector names one grant, the original Host/Run, or an exact operation owner,
+so a restarted Host does not rely on an old in-memory grant list. An operation-owned grant retains
+its actual source Run attribution, but normal Run retirement selects only run-owned grants. Independent
+research source/transfer/backend owners retain their grants until actual capture, reader and process
+bookkeeping drain. Whole-operation retirement queries the original persisted ownership and active-grant
+index; it is not a separate cleanup ledger. A delegated successor's read-only old spool access requires the
 Catalog's exact source lineage plus current and creating Storage authority; other old resources and
 process controls are not inherited. Existing subscription/admission cancellation closes retired callers.
 

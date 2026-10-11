@@ -37,6 +37,8 @@ pub enum PolicyNodeCompletion {
         phase: String,
         effect: Effect,
         lifetime: Lifetime,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output: Option<PolicyEvidenceRef>,
     },
 }
 impl PolicyNodeReceipt {
@@ -56,6 +58,7 @@ impl PolicyNodeReceipt {
     pub fn output(&self) -> Option<&PolicyEvidenceRef> {
         match &self.completion {
             PolicyNodeCompletion::Result { output, .. } => Some(output),
+            PolicyNodeCompletion::JobAccepted { output, .. } => output.as_ref(),
             _ => None,
         }
     }
@@ -453,16 +456,9 @@ impl<
                             let result = guarded("policy_tool_worker_panicked", || {
                                 let (planned, completion, existing) = planned?;
                                 let completion = if let Some(completion) = completion {
-                                    let completion = completion.load()?;
+                                    let mut completion = completion.load()?;
                                     if existing {
-                                        self.commit(
-                                            input,
-                                            ExecutionRecord::ToolSettled {
-                                                context: context.clone(),
-                                                completion: completion.clone(),
-                                                executor_stopped: false,
-                                            },
-                                        )?;
+                                        completion=self.persistence.settle_tool(&context,input.owner_generation,ToolExecutionReceipt{completion,executor_stopped:false})?.completion;
                                     }
                                     completion
                                 } else {
@@ -494,7 +490,7 @@ impl<
                                     });
                                     match prepared {
                                         Err(error) => {
-                                            let completion = ToolCompletion::NotDispatched {
+                                            let mut completion = ToolCompletion::NotDispatched {
                                                 reason: if token.is_cancelled() {
                                                     "cancelled".into()
                                                 } else {
@@ -502,14 +498,7 @@ impl<
                                                 },
                                             };
                                             if existing {
-                                                self.commit(
-                                                    input,
-                                                    ExecutionRecord::ToolSettled {
-                                                        context: context.clone(),
-                                                        completion: completion.clone(),
-                                                        executor_stopped: true,
-                                                    },
-                                                )?;
+                                                completion=self.persistence.settle_tool(&context,input.owner_generation,ToolExecutionReceipt{completion,executor_stopped:true})?.completion;
                                             }
                                             completion
                                         }
