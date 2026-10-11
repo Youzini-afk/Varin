@@ -258,6 +258,8 @@ export interface FollowUpServiceDeps {
   workspaceHasActiveWriters?(workspaceId: string): Promise<boolean>;
   /** `resource.sample` commits from the resource service. */
   subscribeResourceSamples?(listener: (sample: FollowUpResourceSample) => void): () => void;
+  /** Shared sampling demand belongs to the original machine resource owner. */
+  retainResourceSampling?(machineId: string): () => void;
   /** Latest committed usage sample for a machine. */
   getResourceSample?(machineId: string): Promise<FollowUpResourceSample | null>;
   /** Registered external-source adapters by provider id ("github-pr"). */
@@ -758,6 +760,7 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
   const readySettles = new Map<string, { timer: ReturnType<typeof setTimeout>; size: number | undefined; mtimeMs: number | undefined }>();
   /** machineId -> followUpId -> workspaceId for metric waits. */
   const metricWaits = new Map<string, Map<string, string>>();
+  const metricSampling = new Map<string, () => void>();
   /** Per workspace/machine sample order; metric observations persist before their serialized evaluation. */
   const metricSampleOperations = new Map<string, Promise<void>>();
   let unsubscribeSamples: (() => void) | undefined;
@@ -1030,6 +1033,8 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     if (!set) {
       set = new Map();
       metricWaits.set(machineId, set);
+      const release = deps.retainResourceSampling?.(machineId);
+      if (release) metricSampling.set(machineId, release);
     }
     set.set(followUpId, workspaceId);
     if (!unsubscribeSamples && deps.subscribeResourceSamples) {
@@ -1041,7 +1046,10 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     const set = metricWaits.get(machineId);
     if (set) {
       set.delete(followUpId);
-      if (set.size === 0) metricWaits.delete(machineId);
+      if (set.size === 0) {
+        metricWaits.delete(machineId);
+        metricSampling.get(machineId)?.(); metricSampling.delete(machineId);
+      }
     }
     if (metricWaits.size === 0) {
       unsubscribeSamples?.();
@@ -4137,6 +4145,8 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       workspaceWatches.clear();
       fileWaits.clear();
       metricWaits.clear();
+      for (const release of metricSampling.values()) release();
+      metricSampling.clear();
       metricSampleOperations.clear();
       shellWaits.clear();
       logOffsets.clear();

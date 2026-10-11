@@ -3,16 +3,19 @@ import type { Express, Request, RequestHandler, Response as ExpressResponse } fr
 import { registerManagedRemoteRoutes } from './managed-remote-routes.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
 import type { KernelRecordResult } from '../kernel/protocol.generated.js';
-import { createResourceService } from './resources.js';
+import { createResourceService, type ResourceSample } from './resources.js';
 import { createManagedRemoteExecutionService } from './managed-remote-service.js';
 import { createManagedRemoteTargetRegistry } from './managed-remote-client.js';
 
 // Real resource/remote owners; only durable Storage and HTTP transport are fixtures.
-function storage() {
+function storage(afterRead?: (recordId: string) => Promise<void>) {
   const records = new Map<string, KernelRecordResult>();
-  let failReceipt = false;
+  let failReceipt = false, epoch = 1;
+  const exits = new Set<() => void>(), ready = new Set<() => void>();
   const scoped = {
-    async getRecord(workspace: string, id: string) { return structuredClone(records.get(`${workspace}\0${id}`) ?? null); },
+    async getRecord(workspace: string, id: string) {
+      const value = structuredClone(records.get(`${workspace}\0${id}`) ?? null); await afterRead?.(id); return value;
+    },
     async putRecord(input: Record<string, unknown>) {
       if (failReceipt && input.recordType === 'managed.remote.admission') { failReceipt = false; throw new Error('receipt write reply lost'); }
       const key = `${input.workspaceId}\0${input.recordId}`;
@@ -25,9 +28,18 @@ function storage() {
       return { records: structuredClone([...records.values()].filter(v => v.workspaceId === input.workspaceId && v.recordType === input.recordType)), nextCursor: null };
     },
   };
-  return { records, loseReceipt: () => { failReceipt = true; }, client: {
-    start: async () => ({}), issueGrant: async () => ({}), scoped: () => scoped,
-  } as unknown as KernelClient };
+  return { records, loseReceipt: () => { failReceipt = true; },
+    restart: () => { for (const fn of exits) fn(); epoch++; for (const fn of ready) fn(); },
+    client: {
+      get kernelEpoch() { return String(epoch); }, get handshake() { return { hostId: 'resource-owner', kernelEpoch: String(epoch) }; },
+      start: async () => ({ kernelEpoch: String(epoch) }), issueGrant: async () => ({ epoch }),
+      subscribeExit: (fn: () => void) => { exits.add(fn); return () => exits.delete(fn); },
+      subscribeReady: (fn: () => void) => { ready.add(fn); return () => ready.delete(fn); },
+      scoped: (grant: { epoch: number }) => Object.fromEntries(Object.entries(scoped).map(([name, method]) => [name, (...args: never[]) => {
+        if (grant.epoch !== epoch) throw new Error('kernel-grant-stale');
+        return (method as (...args: never[]) => unknown)(...args);
+      }])),
+    } as unknown as KernelClient };
 }
 const probes = {
   probeLocal: () => ({ cpuCores: 4, memoryMb: 1024, usedMemoryMb: 0 }),
@@ -100,4 +112,69 @@ describe('original resource admission reconciliation', () => {
     expect([...targetStorage.records.values()].filter(v => v.recordType === 'resource.commitment' && v.state === 'confirmed')).toHaveLength(0);
     expect([...targetStorage.records.values()].filter(v => v.recordType === 'managed.remote.admission')).toMatchObject([{ state: 'released' }]);
   });
+});
+
+const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(yes => { resolve = yes; }); return { promise, resolve }; };
+
+it('shares automatic sampling only while original machine demand exists and recovers epoch-scoped reads', async () => {
+  vi.useFakeTimers();
+  const f = storage(); let value = 0, probesRun = 0;
+  const resources = createResourceService({ client: f.client, sampleIntervalMs: 10, now: () => 100,
+    probeLocal: () => { probesRun++; return { cpuCores: 4, memoryMb: 1024, usedMemoryMb: value }; }, probeLocalGpu: probes.probeLocalGpu });
+  const samples: ResourceSample[] = []; const unsubscribe = resources.subscribeSamples(sample => samples.push(sample));
+  let first = () => {}, second = () => {};
+  try {
+    await vi.advanceTimersByTimeAsync(25); expect(probesRun).toBe(0);
+    const remote = resources.retainSampling('remote'); await vi.advanceTimersByTimeAsync(25); expect(probesRun).toBe(0); remote();
+    first = resources.retainSampling('local'); await vi.advanceTimersByTimeAsync(0); expect(probesRun).toBe(1);
+    await vi.advanceTimersByTimeAsync(5); second = resources.retainSampling('local');
+    await vi.advanceTimersByTimeAsync(4); expect(probesRun).toBe(1);
+    // Joining an already settled producer does not sample early or reset its cadence.
+    await vi.advanceTimersByTimeAsync(1); expect(samples).toHaveLength(2);
+    expect(samples[0]!.observedAt).toBe(samples[1]!.observedAt);
+    expect(samples[1]!.recordRevision).toBeGreaterThan(samples[0]!.recordRevision);
+    first(); value = 128;
+    await vi.advanceTimersByTimeAsync(10); expect(samples.at(-1)!.usage.memoryMb).toBe(128);
+    f.restart();
+    expect((await resources.getMachineSample('local'))!.identity.hostId).toBe('resource-owner');
+    value = 256; await vi.advanceTimersByTimeAsync(10); expect(samples.at(-1)!.usage.memoryMb).toBe(256);
+    second(); const count = probesRun; await vi.advanceTimersByTimeAsync(30); expect(probesRun).toBe(count);
+  } finally { first(); second(); unsubscribe(); await resources.dispose(); vi.useRealTimers(); }
+});
+
+it('keeps original resource release independent of a held GPU probe and drains cancellation before disposal', async () => {
+  const f = storage(); const entered = deferred(), held = deferred(); let block = false, stopped = false;
+  const resources = createResourceService({ client: f.client, probeLocal: probes.probeLocal,
+    probeLocalGpu: async signal => {
+      if (block) { signal?.addEventListener('abort', () => { stopped = true; held.resolve(); }, { once: true }); entered.resolve(); await held.promise; }
+      return probes.probeLocalGpu();
+    } });
+  const reservation = await resources.admit('workspace', 'local', { cpuCores: 1 }, 'attempt');
+  expect(reservation.status).toBe('confirmed'); block = true;
+  const release = resources.retainSampling('local'); await entered.promise;
+  await resources.release('workspace', reservation.commitmentId!, 'original cancellation');
+  expect([...f.records.values()].find(r => r.recordType === 'resource.commitment')!.state).toBe('released');
+  release(); await resources.dispose(); expect(stopped).toBe(true);
+  // Disposal only ends observation production; final accepted-job cleanup can still read/release.
+  await resources.release('workspace', reservation.commitmentId!, 'already released');
+});
+
+it('does not publish an old captured probe through a newly issued epoch grant', async () => {
+  const entered = deferred(), held = deferred(); let probesRun = 0;
+  const f = storage(async id => {
+    if (id === 'resource.machine:local' && probesRun === 1) { entered.resolve(); await held.promise; }
+  });
+  const resources = createResourceService({ client: f.client, ...probes, probeLocalGpu: async () => {
+    probesRun++; return probes.probeLocalGpu();
+  } });
+  // The probe has finished and the old scoped actor read the original machine.
+  // Hold that reply across reconnect: the nested machine/sample writer must use
+  // that exact actor, rather than reacquiring a grant for an already old probe.
+  const pending = resources.sampleLocalMachine('workspace'); await entered.promise; f.restart(); held.resolve();
+  await expect(pending).rejects.toThrow(/kernel-grant-stale/);
+  expect([...f.records.values()].filter(record => record.recordType === 'resource.machine')).toHaveLength(0);
+  expect([...f.records.values()].filter(record => record.recordType === 'resource.sample')).toHaveLength(0);
+  await resources.sampleLocalMachine('workspace'); expect(probesRun).toBe(2);
+  expect((await resources.getMachineSample('local'))!.recordRevision).toBe(1);
+  await resources.dispose();
 });

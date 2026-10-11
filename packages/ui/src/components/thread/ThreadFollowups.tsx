@@ -1,7 +1,7 @@
 import React from 'react';
 import { getRuntimeEndpointGeneration } from '@varin/application-client';
-import type { ThreadFamilyAPI, ThreadFollowupsAPI, ThreadIdentity } from '@varin/application-client';
-import type { HostJobSource, FollowupPendingRegistration, Followup, FollowupOccurrence, FollowupOccurrencesResult, FollowupLeafEvidence, FollowupRegisterParams, FollowupRegistrationSource, FollowupSource, FollowupSourceState, FollowupView, Operation, Run } from '@varin/protocol';
+import type { ThreadFamilyAPI, ThreadFollowupsAPI, ThreadIdentity, ThreadResearchAPI } from '@varin/application-client';
+import type { HostJobSource, FollowupPendingRegistration, Followup, FollowupOccurrence, FollowupOccurrencesResult, FollowupLeafEvidence, FollowupRegisterParams, FollowupRegistrationSource, FollowupSource, FollowupSourceState, FollowupView, MetricKind, ResourceMachineView, Operation, Run } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -20,7 +20,16 @@ function atLabel(at: number) {
   const date = new Date(at);
   return Number.isNaN(date.getTime()) ? `Unix time ${at} ms` : `${date.toLocaleString()} · ${date.toISOString()}`;
 }
+const metricNames: Record<MetricKind, string> = { cpu_percent: 'CPU usage', memory_mb: 'Memory used', gpu_percent: 'GPU usage', gpu_memory_mb: 'GPU memory used' };
+const gpuMetric = (metric: MetricKind) => metric === 'gpu_percent' || metric === 'gpu_memory_mb';
+const metricValue = (metric: MetricKind, value: number) => `${value} ${metric === 'memory_mb' || metric === 'gpu_memory_mb' ? 'MiB' : '%'}`;
+function machineGpus(machine?: ResourceMachineView) {
+  // UUID is the original device identity. Inventory and usage may each contain devices absent from the other.
+  return [...new Map([...(machine?.capacity?.gpus ?? []), ...(machine?.usage?.gpus ?? [])]
+    .filter(gpu => gpu.uuid).map(gpu => [gpu.uuid!, gpu])).values()];
+}
 function sourceLabel(source: FollowupSource) {
+  if (source.kind === 'metric') return `When ${source.machine_id}${source.gpu_uuid ? ` · ${source.gpu_uuid}` : ''} ${metricNames[source.metric]} is ${source.predicate} ${metricValue(source.metric, source.threshold)}`;
   if (source.kind === 'log_literal') return `When original job ${source.operation_id} ${source.stream} matches ${source.literal_bytes} literal bytes from byte ${source.from_offset}`;
   if (source.kind === 'log_end') return `When original job ${source.operation_id} ${source.stream} ends`;
   if (source.kind === 'artifact') return `When original job ${source.operation_id} has an artifact fact${source.artifact_id ? ` for ID ${source.artifact_id}` : source.name ? ` named ${source.name}` : ' for any artifact'}`;
@@ -30,7 +39,7 @@ function sourceLabel(source: FollowupSource) {
   return source.kind === 'at' ? `At ${atLabel(source.at_ms)}` : `After process ${source.operation_id} actually stops`;
 }
 function triggerLabel(item: Followup) {
-  if (item.trigger.kind === 'at' || item.trigger.kind === 'process_stopped' || item.trigger.kind === 'file' || item.trigger.kind === 'job_stopped' || item.trigger.kind === 'artifact' || item.trigger.kind === 'collection' || item.trigger.kind === 'log_literal' || item.trigger.kind === 'log_end') return sourceLabel(item.trigger);
+  if (item.trigger.kind === 'at' || item.trigger.kind === 'process_stopped' || item.trigger.kind === 'file' || item.trigger.kind === 'job_stopped' || item.trigger.kind === 'artifact' || item.trigger.kind === 'collection' || item.trigger.kind === 'log_literal' || item.trigger.kind === 'log_end' || item.trigger.kind === 'metric') return sourceLabel(item.trigger);
   if (item.trigger.kind === 'any') return 'When any condition is observed';
   if (item.trigger.kind === 'all') return 'When every condition is observed';
   return item.trigger.kind === 'run_completed' ? 'After the original run completes' : 'Continuing goal work';
@@ -42,17 +51,51 @@ function logStateLabel(state: FollowupSourceState): string {
     : state.observed ? 'Stream ended; no further matches' : 'Stream ended without a literal match';
   return `Observed through byte ${log.offset}`;
 }
+function metricStateLabel(state: FollowupSourceState, source: Extract<FollowupSource, { kind: 'metric' }>): string {
+  const metric = state.metric!;
+  const status = metric.status === 'available'
+    ? `${metric.value === null ? 'Value unknown' : metricValue(source.metric, metric.value)} · ${metric.holding === true ? 'condition satisfied' : metric.holding === false ? 'condition not satisfied' : 'awaiting condition observation'}`
+    : `Unknown (${metric.status})${metric.holding === true ? ' · previous satisfied condition retained; waiting for a known false observation before another crossing' : ''}`;
+  return [status, metric.failure_code,
+    metric.sample_revision === null ? null : `sample revision ${metric.sample_revision}`,
+    metric.observed_at_ms === null ? null : `sampled ${atLabel(metric.observed_at_ms)}`,
+    metric.gap ? 'observation gap; unavailable crossings are not reconstructed' : null,
+  ].filter(Boolean).join(' · ');
+}
+function metricRecoveryHint(code: string | null): string {
+  switch (code) {
+    case 'sample_pending': return 'Waiting for the first sample.';
+    case 'machine_sampling_unsupported': return 'This machine does not support metric sampling. Choose a local machine; remote sampling is not supported yet.';
+    case 'machine_missing': return 'The original machine is missing. Refresh the machine directory and register from the intended machine.';
+    case 'source_identity_changed': return 'The machine identity changed. Register a new follow-up for the intended machine.';
+    case 'gpu_tool_missing': return 'The GPU probe is unavailable. Check nvidia-smi on the original machine, then retry observation.';
+    case 'gpu_missing': case 'gpu_no_device': return 'The selected GPU is missing. Check its connection and UUID; register a new condition to select another device.';
+    case 'gpu_error': case 'gpu_unavailable': return 'The GPU could not be sampled. Check the original machine GPU probe, then retry observation.';
+    case 'dimension_missing': case 'sample_missing': return 'The selected metric has no value yet. Waiting for a usable sample; missing values are never zero.';
+    case 'sample_stale': return 'Waiting for a fresh sample. Check the original machine connection.';
+    default: return 'Check the original machine connection and metric availability, then retry observation. Missing or stale samples are unknown, never zero.';
+  }
+}
 function isPastFollowup(item: Followup): boolean {
   return item.state === 'cancelled' || (item.exhausted && item.pending_occurrences === 0
     && !item.observation?.delivery_pending) || (item.repeat === 'once'
     && (item.occurrence?.delivery?.state === 'delivered' || item.occurrence?.state === 'cancelled'));
 }
-type SourceDraft = { kind: FollowupRegistrationSource['kind']; at: string; processId: string; jobId: string; path: string; condition: 'exists' | 'changed' | 'ready'; artifactSelector: 'any' | 'artifactId' | 'name'; artifactValue: string; stream: 'stdout' | 'stderr'; literal: string; fromOffset: string };
-const emptySource = (): SourceDraft => ({ kind: 'at', at: '', processId: '', jobId: '', path: '', condition: 'exists', artifactSelector: 'any', artifactValue: '', stream: 'stdout', literal: '', fromOffset: '' });
+type MetricDraft = { machineId: string; metric: MetricKind; gpuUuid: string; predicate: 'above' | 'below'; threshold: string };
+const emptyMetric = (): MetricDraft => ({ machineId: '', metric: 'cpu_percent', gpuUuid: '', predicate: 'above', threshold: '' });
+type SourceDraft = MetricDraft & { kind: FollowupRegistrationSource['kind']; at: string; processId: string; jobId: string; path: string; condition: 'exists' | 'changed' | 'ready'; artifactSelector: 'any' | 'artifactId' | 'name'; artifactValue: string; stream: 'stdout' | 'stderr'; literal: string; fromOffset: string };
+const emptySource = (): SourceDraft => ({ ...emptyMetric(), kind: 'at', at: '', processId: '', jobId: '', path: '', condition: 'exists', artifactSelector: 'any', artifactValue: '', stream: 'stdout', literal: '', fromOffset: '' });
 // The original Job owner declares supported observations; the renderer owns no domain/version table.
 const supportsJobSource = (job: HostJobSource, kind: string) => job.observationKinds.some(value => value === kind);
 const usesJobs = (kind: FollowupRegisterParams['trigger']['kind']) => kind === 'job_stopped' || kind === 'artifact' || kind === 'collection' || kind === 'log_literal' || kind === 'log_end';
-function sourceInput(draft: SourceDraft, processes: Operation[], jobs: HostJobSource[]): FollowupRegistrationSource | null {
+function sourceInput(draft: SourceDraft, processes: Operation[], jobs: HostJobSource[], machines: ResourceMachineView[]): FollowupRegistrationSource | null {
+  if (draft.kind === 'metric') {
+    const machine = machines.find(value => value.machineId === draft.machineId);
+    const threshold = draft.threshold.trim() ? Number(draft.threshold) : NaN;
+    if (!machine || !Number.isFinite(threshold) || (gpuMetric(draft.metric) && !machineGpus(machine).some(gpu => gpu.uuid === draft.gpuUuid))) return null;
+    return { kind: 'metric', machineId: draft.machineId, metric: draft.metric, predicate: draft.predicate, threshold,
+      ...(gpuMetric(draft.metric) ? { gpuUuid: draft.gpuUuid } : {}) };
+  }
   if (draft.kind === 'log_literal' || draft.kind === 'log_end') {
     if (!jobs.some(job => supportsJobSource(job, draft.kind) && job.binding.operationId === draft.jobId)) return null;
     if (draft.kind === 'log_end') return { kind: 'log_end', operationId: draft.jobId, stream: draft.stream };
@@ -74,9 +117,41 @@ function sourceInput(draft: SourceDraft, processes: Operation[], jobs: HostJobSo
   const atMs = draft.at ? new Date(draft.at).getTime() : NaN;
   return Number.isSafeInteger(atMs) && atMs >= 0 ? { kind: 'at', atMs } : null;
 }
-function SourceEditor({ value, onChange, processes, jobs, disabled, repeating, label = 'Follow-up' }: {
-  value: SourceDraft; onChange(value: SourceDraft): void; processes: Operation[]; jobs: HostJobSource[]; disabled: boolean; repeating: boolean; label?: string;
+function SourceEditor({ value, onChange, processes, jobs, machines, disabled, repeating, label = 'Follow-up' }: {
+  value: SourceDraft; onChange(value: SourceDraft): void; processes: Operation[]; jobs: HostJobSource[]; machines: ResourceMachineView[]; disabled: boolean; repeating: boolean; label?: string;
 }) {
+  if (value.kind === 'metric') {
+    const machine = machines.find(machine => machine.machineId === value.machineId);
+    const gpus = machineGpus(machine);
+    return <>
+      <label className="block">Machine<select aria-label={`${label} machine`} value={value.machineId} disabled={disabled}
+        onChange={event => onChange({ ...value, machineId: event.target.value, gpuUuid: '' })}>
+        <option value="">Select an original machine</option>{machines.map(machine => <option key={machine.machineId} value={machine.machineId}>
+          {machine.label ?? machine.machineId} · {machine.machineId} · {machine.kind} · {machine.connection.status}
+        </option>)}
+      </select></label>
+      <label className="block">Metric<select aria-label={`${label} metric`} value={value.metric} disabled={disabled}
+        onChange={event => onChange({ ...value, metric: event.target.value as MetricKind, gpuUuid: '' })}>
+        {Object.entries(metricNames).map(([kind, name]) => <option key={kind} value={kind}>{name}</option>)}
+      </select></label>
+      {gpuMetric(value.metric) && <>
+        <label className="block">GPU<select aria-label={`${label} GPU`} value={value.gpuUuid} disabled={disabled || !gpus.length}
+          onChange={event => onChange({ ...value, gpuUuid: event.target.value })}>
+          <option value="">Select a GPU by UUID</option>{gpus.map(gpu => <option key={gpu.uuid} value={gpu.uuid}>GPU {gpu.index}{gpu.name ? ` · ${gpu.name}` : ''} · {gpu.uuid}</option>)}
+        </select></label>
+        {machine && !gpus.length && <p role="alert">No stable GPU UUID is available for this machine. Refresh machines after its GPU inventory is available, or choose another metric.</p>}
+      </>}
+      <label className="block">Condition<select aria-label={`${label} metric predicate`} value={value.predicate} disabled={disabled}
+        onChange={event => onChange({ ...value, predicate: event.target.value as MetricDraft['predicate'] })}>
+        <option value="above">Strictly above</option><option value="below">Strictly below</option>
+      </select></label>
+      <label className="block">Threshold ({value.metric === 'memory_mb' || value.metric === 'gpu_memory_mb' ? 'MiB' : '%'})<Input aria-label={`${label} metric threshold`} value={value.threshold} disabled={disabled}
+        onChange={event => onChange({ ...value, threshold: event.target.value })} inputMode="decimal" /></label>
+      {value.threshold !== '' && (!value.threshold.trim() || !Number.isFinite(Number(value.threshold))) && <p role="alert">Enter a finite numeric threshold.</p>}
+      <p className="text-xs text-muted-foreground">{repeating ? 'An initially satisfied condition triggers once, then each known false-to-true crossing triggers again. Unknown samples do not rearm it.' : 'Runs once when a fresh known sample satisfies the condition, including the initial observation.'} Equality does not satisfy a strict threshold.</p>
+      <p className="text-xs text-muted-foreground">Background sampling continues without this panel. Offline or paused crossings may be missed; recovery checks the current sample. Remote metric sampling is not supported yet.</p>
+    </>;
+  }
   if (usesJobs(value.kind)) {
     const research = value.kind === 'artifact' || value.kind === 'collection';
     const candidates = jobs.filter(job => supportsJobSource(job, value.kind));
@@ -163,6 +238,18 @@ function FollowupInstruction({ api, identity, item }: { api: ThreadFollowupsAPI;
 }
 
 function evidenceLabel(evidence: FollowupLeafEvidence): string {
+  if (evidence.kind === 'metric') {
+    const fact = evidence.fact;
+    return [fact.identity.machine_id, fact.gpu_uuid,
+      `${metricNames[fact.metric]} ${metricValue(fact.metric, fact.value)}`,
+      `${fact.predicate} ${metricValue(fact.metric, fact.threshold)}`,
+      `sample revision ${fact.sample_revision}`, `machine revision ${fact.machine_revision}`, `sampled ${atLabel(fact.observed_at_ms)}`,
+      `Host ${fact.identity.host_id}`, fact.identity.kind,
+      fact.identity.backend ? `backend ${fact.identity.backend}` : null,
+      fact.identity.target_host_id ? `target Host ${fact.identity.target_host_id}` : null,
+      fact.gap ? 'observation gap; unavailable crossings are not reconstructed' : null,
+    ].filter(Boolean).join(' · ');
+  }
   if (evidence.kind === 'log_literal') return `${evidence.binding.subjectId} · ${evidence.stream} literal match · bytes ${evidence.start_offset}–${evidence.end_offset} (end exclusive) · ${evidence.published_bytes} published bytes · job revision ${evidence.job_revision}`;
   if (evidence.kind === 'log_end') return `${evidence.binding.subjectId} · ${evidence.stream} ended · ${evidence.published_bytes} published bytes · attempt revision ${evidence.attempt_revision}${evidence.job_revision === null ? '' : ` · job revision ${evidence.job_revision}`}`;
   if (evidence.kind === 'file') return `${evidence.path} · ${evidence.proof} · ${evidence.state.kind}${evidence.state.kind === 'regular-file' ? ` · ${evidence.state.objectHash}` : ''}${evidence.position ? ` · watch ${evidence.position.generation}:${evidence.position.sequence}` : ''}${evidence.gap ? ' · observation gap' : ''}`;
@@ -235,8 +322,8 @@ function FollowupOccurrences({ api, family, identity, item }: { api: ThreadFollo
 }
 
 /** Original definitions and delivery facts; no client timer or execution queue. */
-export function ThreadFollowups({ api, family, identity, run, operations, followups, pending, act, cancelObservation }: {
-  api: ThreadFollowupsAPI; family?: ThreadFamilyAPI; identity: ThreadIdentity; run?: Run; operations: Operation[]; followups: Followup[];
+export function ThreadFollowups({ api, family, research, identity, run, operations, followups, pending, act, cancelObservation }: {
+  api: ThreadFollowupsAPI; family?: ThreadFamilyAPI; research?: ThreadResearchAPI; identity: ThreadIdentity; run?: Run; operations: Operation[]; followups: Followup[];
   pending: boolean; act(work: () => Promise<unknown>): Promise<void>; cancelObservation(operationId: string): Promise<void>;
 }) {
   const [editing, setEditing] = React.useState(false);
@@ -248,6 +335,7 @@ export function ThreadFollowups({ api, family, identity, run, operations, follow
   const [artifactValue, setArtifactValue] = React.useState('');
   const [stream, setStream] = React.useState<SourceDraft['stream']>('stdout');
   const [literal, setLiteral] = React.useState(''); const [fromOffset, setFromOffset] = React.useState('');
+  const [metric, setMetric] = React.useState<MetricDraft>(emptyMetric);
   const [filePath, setFilePath] = React.useState(''); const [fileCondition, setFileCondition] = React.useState<SourceDraft['condition']>('exists');
   const [conditions, setConditions] = React.useState<SourceDraft[]>([emptySource(), { ...emptySource(), kind: 'process_stopped' }]);
   const [instruction, setInstruction] = React.useState(''); const [uncertain, setUncertain] = React.useState(false);
@@ -255,8 +343,21 @@ export function ThreadFollowups({ api, family, identity, run, operations, follow
   const [registrationError, setRegistrationError] = React.useState(false);
   const [jobCandidates, setJobCandidates] = React.useState<{ runId: string; values: HostJobSource[] }>();
   const [jobError, setJobError] = React.useState(false); const [jobRetry, setJobRetry] = React.useState(0);
+  const [machineCandidates, setMachineCandidates] = React.useState<{ runId: string; values: ResourceMachineView[] }>();
+  const [machineError, setMachineError] = React.useState(false); const [machineRetry, setMachineRetry] = React.useState(0);
   const runId = run?.id;
   const needsJobs = usesJobs(kind) || ((kind === 'any' || kind === 'all') && conditions.some(value => usesJobs(value.kind)));
+  const needsMachines = kind === 'metric' || ((kind === 'any' || kind === 'all') && conditions.some(value => value.kind === 'metric'));
+  React.useEffect(() => {
+    if (!editing || !needsMachines || !runId || !research || uncertain) return;
+    const controller = new AbortController(); const selectedHost = getRuntimeEndpointGeneration();
+    setMachineError(false); setMachineCandidates(undefined);
+    void research.resources({ ...identity, sourceRunId: runId }, controller.signal).then(result => {
+      if (!controller.signal.aborted && selectedHost === getRuntimeEndpointGeneration()) setMachineCandidates({ runId, values: result.machines });
+    }, () => { if (!controller.signal.aborted && selectedHost === getRuntimeEndpointGeneration()) setMachineError(true); });
+    return () => controller.abort();
+  }, [research, identity, runId, editing, needsMachines, machineRetry, uncertain]);
+  const machines = machineCandidates && (machineCandidates.runId === runId || uncertain) ? machineCandidates.values : [];
   React.useEffect(() => {
     if (!editing || !needsJobs || !runId) return;
     const controller = new AbortController(); const selectedHost = getRuntimeEndpointGeneration();
@@ -287,8 +388,8 @@ export function ThreadFollowups({ api, family, identity, run, operations, follow
     && ['thread', 'environment'].includes(operation.lifetime) && operation.call_completion?.kind === 'job_accepted');
   const process = processes.find(operation => operation.id === processId);
   const composite = kind === 'any' || kind === 'all';
-  const selected = composite ? conditions.map(value => sourceInput(value, processes, jobs)) : [sourceInput({ kind, at, processId, jobId, path: filePath, condition: fileCondition, artifactSelector, artifactValue, stream, literal, fromOffset }, processes, jobs)];
-  const repeatable = (value: FollowupRegistrationSource | null) => value?.kind === 'log_literal' || value?.kind === 'artifact' || value?.kind === 'collection' || (value?.kind === 'file' && value.condition === 'changed');
+  const selected = composite ? conditions.map(value => sourceInput(value, processes, jobs, machines)) : [sourceInput({ ...metric, kind, at, processId, jobId, path: filePath, condition: fileCondition, artifactSelector, artifactValue, stream, literal, fromOffset }, processes, jobs, machines)];
+  const repeatable = (value: FollowupRegistrationSource | null) => value?.kind === 'metric' || value?.kind === 'log_literal' || value?.kind === 'artifact' || value?.kind === 'collection' || (value?.kind === 'file' && value.condition === 'changed');
   const repeatValid = repeat === 'once' || (kind === 'any' ? selected.some(repeatable) : selected.every(repeatable));
   const valid = repeatValid && instruction.trim().length > 0 && selected.every(value => value !== null) && (composite || kind !== 'process_stopped' ? Boolean(run) : Boolean(process));
   const register = () => {
@@ -301,7 +402,7 @@ export function ThreadFollowups({ api, family, identity, run, operations, follow
     return act(async () => {
       try {
         await api.register({ ...identity, ...original });
-        if (current()) { intent.current = null; setUncertain(false); setInstruction(''); setAt(''); setRepeat('once'); setFilePath(''); setArtifactSelector('any'); setArtifactValue(''); setStream('stdout'); setLiteral(''); setFromOffset(''); setConditions([emptySource(), { ...emptySource(), kind: 'process_stopped' }]); setEditing(false); }
+        if (current()) { intent.current = null; setUncertain(false); setInstruction(''); setAt(''); setRepeat('once'); setFilePath(''); setArtifactSelector('any'); setArtifactValue(''); setStream('stdout'); setLiteral(''); setFromOffset(''); setMetric(emptyMetric()); setConditions([emptySource(), { ...emptySource(), kind: 'process_stopped' }]); setEditing(false); }
       } catch (error) { if (current()) setUncertain(true); throw error; }
     });
   };
@@ -325,10 +426,11 @@ export function ThreadFollowups({ api, family, identity, run, operations, follow
         onChange={event => setRepeat(event.target.value as typeof repeat)} className="ml-2 rounded border bg-background p-1">
         <option value="once">Once</option><option value="each">Each observed change</option>
       </select></label>
-      {repeat === 'each' && <p>Repeats for accepted observations until cancelled or the conditions end. File changes while observation is unavailable may be missed.</p>}
+      {repeat === 'each' && <p>Repeats for accepted observations until cancelled or the conditions end. Changes while observation is unavailable may be missed.</p>}
       <label className="block">Trigger<select aria-label="Follow-up trigger" value={kind} disabled={pending || uncertain}
         onChange={event => setKind(event.target.value as typeof kind)} className="ml-2 rounded border bg-background p-1">
         <option value="at">At a specific time</option><option value="process_stopped">After a process stops</option><option value="job_stopped">After an accepted job stops</option><option value="artifact">When an original research artifact is observed</option><option value="collection">After original research collection finishes</option><option value="log_literal">When a log literal matches</option><option value="log_end">When a log stream ends</option><option value="file">When a file condition is met</option>
+        <option value="metric">When a machine metric crosses a threshold</option>
         <option value="any">Any condition</option><option value="all">Every condition</option>
       </select></label>
       {composite ? <div className="space-y-2">
@@ -340,17 +442,25 @@ export function ThreadFollowups({ api, family, identity, run, operations, follow
           <select aria-label={`Condition ${index + 1} kind`} value={value.kind} disabled={pending || uncertain}
             onChange={event => setConditions(values => values.map((item, i) => i === index ? { ...item, kind: event.target.value as SourceDraft['kind'] } : item))}>
             <option value="at">At a specific time</option><option value="process_stopped">After a process stops</option><option value="job_stopped">After an accepted job stops</option><option value="artifact">When an original research artifact is observed</option><option value="collection">After original research collection finishes</option><option value="log_literal">When a log literal matches</option><option value="log_end">When a log stream ends</option><option value="file">When a file condition is met</option>
+            <option value="metric">When a machine metric crosses a threshold</option>
           </select>
           <SourceEditor value={value} onChange={next => setConditions(values => values.map((item, i) => i === index ? next : item))}
-            processes={processes} jobs={jobs} disabled={pending || uncertain} repeating={repeat === 'each'} label={`Condition ${index + 1}`} />
+            processes={processes} jobs={jobs} machines={machines} disabled={pending || uncertain} repeating={repeat === 'each'} label={`Condition ${index + 1}`} />
           <Button variant="ghost" size="sm" disabled={pending || uncertain || conditions.length === 1}
             onClick={() => setConditions(values => values.filter((_, i) => i !== index))}>Remove condition {index + 1}</Button>
         </fieldset>)}
         <Button variant="ghost" size="sm" disabled={pending || uncertain} onClick={() => setConditions(values => [...values, emptySource()])}>Add condition</Button>
-      </div> : <SourceEditor value={{ kind, at, processId, jobId, path: filePath, condition: fileCondition, artifactSelector, artifactValue, stream, literal, fromOffset }} onChange={value => { setAt(value.at); setProcessId(value.processId); setJobId(value.jobId); setFilePath(value.path); setFileCondition(value.condition); setArtifactSelector(value.artifactSelector); setArtifactValue(value.artifactValue); setStream(value.stream); setLiteral(value.literal); setFromOffset(value.fromOffset); }} processes={processes} jobs={jobs} disabled={pending || uncertain} repeating={repeat === 'each'} />}
-      {!repeatValid && <p role="alert">{kind === 'any' ? 'Repeated Any requires at least one file-change, artifact, collection or log-literal condition.' : kind === 'all' ? 'Repeated All requires every condition to be a file-change, artifact, collection or log-literal condition.' : 'Repetition requires a file-change, artifact, collection or log-literal condition.'}</p>}
+      </div> : <SourceEditor value={{ ...metric, kind, at, processId, jobId, path: filePath, condition: fileCondition, artifactSelector, artifactValue, stream, literal, fromOffset }} onChange={value => { setAt(value.at); setProcessId(value.processId); setJobId(value.jobId); setFilePath(value.path); setFileCondition(value.condition); setArtifactSelector(value.artifactSelector); setArtifactValue(value.artifactValue); setStream(value.stream); setLiteral(value.literal); setFromOffset(value.fromOffset); setMetric({ machineId: value.machineId, metric: value.metric, gpuUuid: value.gpuUuid, predicate: value.predicate, threshold: value.threshold }); }} processes={processes} jobs={jobs} machines={machines} disabled={pending || uncertain} repeating={repeat === 'each'} />}
+      {!repeatValid && <p role="alert">{kind === 'any' ? 'Repeated Any requires at least one metric, file-change, artifact, collection or log-literal condition.' : kind === 'all' ? 'Repeated All requires every condition to be a metric, file-change, artifact, collection or log-literal condition.' : 'Repetition requires a metric, file-change, artifact, collection or log-literal condition.'}</p>}
       {needsJobs && !jobCandidates && !jobError && <p role="status">Reading accepted jobs…</p>}
       {needsJobs && jobError && <p role="alert">Accepted jobs could not be read. <Button variant="ghost" size="sm" disabled={pending || uncertain} onClick={() => setJobRetry(value => value + 1)}>Retry accepted jobs</Button></p>}
+      {needsMachines && !research && <p role="alert">The machine directory is unavailable on this Host. Connect to a Host with research resources to choose a machine.</p>}
+      {needsMachines && research && !uncertain && <>
+        {!machineCandidates && !machineError && <p role="status">Reading original machines…</p>}
+        {machineError && <p role="alert">Original machines could not be read. Check the Host connection and retry.</p>}
+        {machineCandidates?.runId === runId && !machines.length && <p>No machines are listed by this Host.</p>}
+        <Button variant="ghost" size="sm" disabled={pending} onClick={() => setMachineRetry(value => value + 1)}>{machineError ? 'Retry machines' : 'Refresh machines'}</Button>
+      </>}
       <label className="block">Instruction<Textarea aria-label="Follow-up instruction" value={instruction} disabled={pending || uncertain}
         onChange={event => setInstruction(event.target.value)} rows={3} /></label>
       {uncertain && <p role="status">Acceptance is unconfirmed. Retry resends the same request. Leaving this draft does not cancel an accepted follow-up.</p>}
@@ -369,6 +479,8 @@ export function ThreadFollowups({ api, family, identity, run, operations, follow
     {independent.filter(item => showPast || !isPastFollowup(item)).map(item => {
       const ended = isPastFollowup(item);
       const logFailed = item.sources.some(source => source.log?.failure_code);
+      const metricFailed = item.sources.some(source => source.metric?.failure_code && source.metric.failure_code !== 'sample_pending');
+      const originalSources = item.trigger.kind === 'any' || item.trigger.kind === 'all' ? item.trigger.sources : [item.trigger];
       return <div key={item.id} className="space-y-1 rounded border p-3" aria-label={ended ? 'Past follow-up' : 'Pending follow-up'}>
         <p>{triggerLabel(item)}</p>
         <p>{item.repeat === 'each' ? item.state === 'cancelled' ? 'Repeating authorization cancelled' : item.state === 'paused' ? 'Repeating authorization paused' : item.exhausted ? 'Log observation ended' : 'Continuing to observe changes' : 'One-time instruction'} · {item.pending_occurrences} undelivered {item.pending_occurrences === 1 ? 'occurrence' : 'occurrences'}</p>
@@ -378,7 +490,7 @@ export function ThreadFollowups({ api, family, identity, run, operations, follow
           {item.trigger.sources.map((source, index) => {
             const state = item.sources.find(state => state.source_index === index);
             const observed = state?.observed;
-            return <li key={index}>Condition {index + 1}: {sourceLabel(source)} · {state?.log ? logStateLabel(state) : observed ? `observed at event ${observed.trigger_cursor} · accepted ${observed.accepted_cursor} · consumed through ${state!.consumed_cursor}` : 'waiting'}</li>;
+            return <li key={index}>Condition {index + 1}: {sourceLabel(source)} · {state?.metric && source.kind === 'metric' ? metricStateLabel(state, source) : state?.log ? logStateLabel(state) : observed ? `observed at event ${observed.trigger_cursor} · accepted ${observed.accepted_cursor} · consumed through ${state!.consumed_cursor}` : 'waiting'}</li>;
           })}
         </ul>}
         <p className="text-xs text-muted-foreground">{item.id} · registered by {item.actor.kind === 'agent' ? `Agent in ${item.actor.run_id}` : 'User'} · {item.state}</p>
@@ -392,13 +504,21 @@ export function ThreadFollowups({ api, family, identity, run, operations, follow
         {item.sources.filter(source => source.log !== null).map(source => <p key={source.source_index} className="text-xs text-muted-foreground" aria-label={`Log condition ${source.source_index + 1}`}>
           Log condition {source.source_index + 1}: {logStateLabel(source)}
         </p>)}
+        {item.sources.map(state => {
+          const source = originalSources[state.source_index];
+          if (!state.metric || source?.kind !== 'metric') return null;
+          return <div key={state.source_index} className="text-xs text-muted-foreground" aria-label={`Metric condition ${state.source_index + 1}`}>
+            <p>Metric condition {state.source_index + 1}: {metricStateLabel(state, source)}</p>
+            {state.metric.status !== 'available' && <p>{metricRecoveryHint(state.metric.failure_code)}</p>}
+          </div>;
+        })}
         <FollowupInstruction api={api} identity={identity} item={item} />
         <FollowupOccurrences api={api} family={family} identity={identity} item={item} />
         {!ended && <>
-          {item.repeat === 'each' && <p className="text-xs text-muted-foreground">Cancel stops future and pending deliveries. Existing results and the observed job remain available.</p>}
+          {item.repeat === 'each' && <p className="text-xs text-muted-foreground">Cancel stops future and pending deliveries. Existing results and observed work remain available.</p>}
           {item.state === 'active' && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void control(item, 'pause')}>Pause follow-up</Button>}
           {item.state === 'paused' ? <Button variant="ghost" size="sm" disabled={pending} onClick={() => void control(item, 'resume')}>Resume follow-up</Button>
-            : (logFailed || item.repeat === 'each' || item.occurrence?.hold_reason === 'preparation_failed') && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void control(item, 'resume')}>{logFailed ? 'Retry log observation' : item.repeat === 'each' ? 'Retry undelivered occurrences' : 'Resume follow-up'}</Button>}
+            : (metricFailed || logFailed || item.repeat === 'each' || item.occurrence?.hold_reason === 'preparation_failed') && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void control(item, 'resume')}>{metricFailed ? 'Retry metric observation' : logFailed ? 'Retry log observation' : item.repeat === 'each' ? 'Retry undelivered occurrences' : 'Resume follow-up'}</Button>}
           <Button variant="ghost" size="sm" disabled={pending} onClick={() => void control(item, 'cancel')}>Cancel follow-up</Button>
         </>}
         {item.observation && <div className="text-xs text-muted-foreground">Original Agent observation · {item.observation.state === 'exhausted' ? 'ended without triggering' : item.observation.state} · {item.observation.delivered ? 'result delivered' : item.observation.delivery_pending ? 'result awaiting delivery' : 'no result pending delivery'}{item.repeat === 'each' && ' · observes only the first occurrence; ending this observation does not withdraw repeating authorization'}

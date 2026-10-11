@@ -19,6 +19,15 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-11 增量：原机器指标与自动采样续接
+
+- 普通 follow_up **版本8** 与 User/API/UI 接入 `metric`：原 machineId、CPU/内存或稳定 GPU UUID、严格 above/below 及有限阈值，独立或 flat Any/All。内存用 MiB，百分比用 %；真实 research/source 身份逐叶核验，Any 另一叶已满足不绕过。Catalog **42** 直接拒旧，原 ResourceService/Storage 保唯一机器与样本事实，无复制历史库或采样 Job。
+- 原资源 owner 新增共享、按需求自动采样；无需打开资源面板，订阅本身不创造需求，多消费者不重置既有 cadence。OS/GPU 探测不占机器承诺锁，释放不等慢探测；最后需求撤销请求取消，真实 child close/管道排空才算停止。旧 probe 全程保捕获的原 grant，跨 epoch 不借新授权写旧测量。远端没有实际 producer 时明确 unavailable。
+- 原样本 revision 区分同毫秒事实；逐叶 FIFO 保 callback 当时由 owner 判定的可用性，慢读/慢受理/丢回应不丢已观察 false→true，恢复 head 仍按当前 freshness 判定。unknown 不冒充 false；初次已真一次，each 只认真实新边沿；原 Any/All、occurrence、Wait/input/root/child 新 Run 与重开去重闭合。Pause/Cancel 独立释放观察需求，不杀机器或实验。
+- 有限公开入口保持 client→认证 Host route→原 Rust decoder，同一 schema 同时供 ModelStep、PolicyAction 与 frozen child；删除 FollowupWait.kind 的重复名单。UI 读原目录、显示 UUID/未知/间隙与真实事件，保不确定请求和迟到回复栅栏。Pi 观察组共享原采样 owner，未改成 Native 事件语义。
+- 原跨 owner 独审反例确认并修复积压超 freshness 窗口导致已知 crossing 被撤销的问题，原失败条件复验通过。原生、Host、公开 route 与 UI 的最终证据及完整 IPC 未验边界见[指标条件验收与复跑](../reviews/runtime-metric-followups-2026-10-11.md)。
+- 接着继续 Computer/环境、Web/材料/Bot、MCP/script 和来源/检索/上下文/provider 等两设计余项；真实远端指标 producer 仍待实现。完整产品/平台/外部系统及性能验收独立，用户最终默认切换/Pi 与资产迁移分工保持。
+
 ## 2026-10-11 增量：原研究日志条件与真实接续
 
 - 普通 follow_up **版本7** 与 User/API/UI 接入原 accepted Job 的 stdout/stderr `log_literal`、`log_end`，独立或 flat Any/All。literal 按精确 UTF-8 字节、默认从0读取已发布历史；each 包含重叠命中。EOF 只认真实输出排空，空流可结束，产物收集独立，未来offset不倒退。

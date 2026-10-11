@@ -27,6 +27,9 @@ pub use artifacts::*;
 #[path = "catalog_followup_logs.rs"]
 mod logs;
 pub use logs::*;
+#[path = "catalog_followup_metrics.rs"]
+mod metrics;
+pub use metrics::*;
 
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -94,6 +97,15 @@ pub enum FollowupActor {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum FollowupTrigger {
+    Metric {
+        machine_id: String,
+        metric: MetricKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        gpu_uuid: Option<String>,
+        predicate: MetricPredicate,
+        threshold: serde_json::Number,
+    },
+
     LogLiteral {
         operation_id: String,
         stream: LogStream,
@@ -144,6 +156,7 @@ pub enum FollowupTrigger {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TriggerEvidence {
+    Metric { fact: FollowupMetricEvidence },
     LogLiteral {
         binding: host_jobs::HostJobBinding,
         stream: LogStream,
@@ -554,7 +567,8 @@ fn observe_one(tx: &Transaction<'_>, d: &mut Definition, now: u64) -> Result<boo
     }
     let run: Run = record(tx, "runs", &d.source_run_id)?;
     let (accepted_cursor, cursor, evidence) = match &d.trigger {
-        FollowupTrigger::At { .. }
+        FollowupTrigger::Metric { .. }
+        | FollowupTrigger::At { .. }
         | FollowupTrigger::ProcessStopped { .. }
         | FollowupTrigger::JobStopped { .. }
         | FollowupTrigger::File { .. }
@@ -882,9 +896,11 @@ fn definition_for_run(
             consumed_cursor: 0,
             file: None,
             log: logs::initial_state(source),
+            metric: metrics::initial_state(source),
         })
         .collect();
     let kind = match trigger {
+        FollowupTrigger::Metric { .. } => "metric",
         FollowupTrigger::At { .. } => "at",
         FollowupTrigger::File { .. } => "file",
         FollowupTrigger::Any { .. } => "any",

@@ -22,7 +22,8 @@ it('continues original research leaves after Job pending is empty and preserves 
     artifacts: [{ artifactId: 'result', attemptId: 'attempt', name: 'result', kind: 'file', state: 'available', recordRevision: revision }], counts: { available: 1, failed: 0, expired: 0, pending: 0 } });
   const kernel = { agentRuntimeRequest: async (method: string, params: Record<string, unknown>) => {
     if (method === 'runtime.host_job.pending') return [];
-    if (method === 'runtime.followup.research') { assert.ok(subscribed); return { works: [work('artifact'), work('collection')], nextCursor: null }; }
+    if (method === 'runtime.followup.metrics') return { works: [], nextCursor: null };
+      if (method === 'runtime.followup.research') { assert.ok(subscribed); return { works: [work('artifact'), work('collection')], nextCursor: null }; }
     if (method === 'runtime.followup.research.observe') {
       const p = params as unknown as FollowupResearchObserveParams;
       const id = JSON.stringify([p.key.followupId, p.evidence.kind === 'artifact' ? p.evidence.fact : p.evidence.completion_revision]);
@@ -42,7 +43,7 @@ it('continues original research leaves after Job pending is empty and preserves 
       return snapshot(captured);
     } } as unknown as ExperimentService;
   const runtime = { onReady: () => () => {}, onEvent: (fn: () => void) => { events = fn; return () => {}; }, reconcileObservations: async () => [] } as unknown as AgentRuntimeClient;
-  const research = createResearchRuntime({ kernel, runtime, experiments, sources: {} as SourceService, resources: {} as ResourceService, onError: e => errors.push(e) });
+  const research = createResearchRuntime({ kernel, runtime, experiments, sources: {} as SourceService, resources: { subscribeSamples: () => () => {} } as unknown as ResourceService, onError: e => errors.push(e) });
   try {
     research.start(); await entered.promise; version = 2; hints(); release.resolve(); await research.reconcile();
     assert.deepEqual(facts.map(p => p.evidence.kind), ['artifact', 'artifact', 'collection']);
@@ -61,6 +62,7 @@ it('keeps original cancellation responsive while an independent artifact metadat
   const research = createResearchRuntime({
     kernel: { agentRuntimeRequest: async (method: string) => {
       if (method === 'runtime.host_job.pending') return requested ? [job] : [];
+      if (method === 'runtime.followup.metrics') return { works: [], nextCursor: null };
       if (method === 'runtime.followup.research') return { works: [work('collection')], nextCursor: null };
       throw new Error(method);
     } } as unknown as KernelClient,
@@ -68,7 +70,7 @@ it('keeps original cancellation responsive while an independent artifact metadat
     experiments: { subscribeAttempts: () => () => {}, readArtifactObservation: async () => { entered.resolve(); await held.promise; return { attempt: { state: 'running' }, completion: null, artifacts: [], counts: { available: 0, failed: 0, expired: 0, pending: 0 } }; },
       nativeReceipt: async () => ({ caller, owner: caller.owner, accepted: {}, attempt: { attemptId: other.subjectId, state: 'running', cancelRequested: false }, executorStopped: false, recordRevision: 1 }),
       cancel: async () => { cancelled = true; } } as unknown as ExperimentService,
-    sources: {} as SourceService, resources: {} as ResourceService, onError: e => errors.push(e),
+    sources: {} as SourceService, resources: { subscribeSamples: () => () => {} } as unknown as ResourceService, onError: e => errors.push(e),
   });
   try {
     research.start(); await entered.promise; requested = true; event();
@@ -85,6 +87,7 @@ it('discards an unstarted old-page metadata read after durable Pause and recheck
   const research = createResearchRuntime({
     kernel: { agentRuntimeRequest: async (method: string) => {
       if (method === 'runtime.host_job.pending') return [];
+      if (method === 'runtime.followup.metrics') return { works: [], nextCursor: null };
       if (method === 'runtime.followup.research') return { works: paused ? [heldWork()] : [heldWork(), work('collection')], nextCursor: null };
       throw new Error(method);
     } } as unknown as KernelClient,
@@ -93,7 +96,7 @@ it('discards an unstarted old-page metadata read after durable Pause and recheck
       if (selector.name === 'held') { artifactReads++; if (artifactReads === 1) { entered.resolve(); await held.promise; } } else collectionReads++;
       return { attempt: { state: 'running' }, completion: null, artifacts: [], counts: { available: 0, failed: 0, expired: 0, pending: 0 } };
     } } as unknown as ExperimentService,
-    sources: {} as SourceService, resources: {} as ResourceService, onError: e => errors.push(e),
+    sources: {} as SourceService, resources: { subscribeSamples: () => () => {} } as unknown as ResourceService, onError: e => errors.push(e),
   });
   // Both entries come from the original source-work page; only A starts before Pause.
   try {

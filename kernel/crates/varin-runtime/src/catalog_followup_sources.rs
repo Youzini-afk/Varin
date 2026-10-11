@@ -6,6 +6,15 @@ use super::*;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum FollowupSource {
+    Metric {
+        machine_id: String,
+        metric: MetricKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        gpu_uuid: Option<String>,
+        predicate: MetricPredicate,
+        threshold: serde_json::Number,
+    },
+
     LogLiteral {
         operation_id: String,
         stream: LogStream,
@@ -44,6 +53,7 @@ pub enum FollowupSource {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum FollowupLeafEvidence {
+    Metric { fact: FollowupMetricEvidence },
     LogLiteral {
         binding: host_jobs::HostJobBinding,
         stream: LogStream,
@@ -114,6 +124,7 @@ pub struct FollowupSourceState {
     pub observed: Option<FollowupSourceObservation>,
     pub file: Option<FollowupFileSourceState>,
     pub log: Option<FollowupLogState>,
+    pub metric: Option<FollowupMetricState>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -127,7 +138,8 @@ impl FollowupSource {
     pub(super) fn repeatable(&self) -> bool {
         matches!(
             self,
-            Self::LogLiteral { .. }
+            Self::Metric { .. }
+                | Self::LogLiteral { .. }
                 | Self::Artifact { .. }
                 | Self::Collection { .. }
                 | Self::File {
@@ -140,6 +152,10 @@ impl FollowupSource {
 impl FollowupTrigger {
     pub fn sources(&self) -> Vec<FollowupSource> {
         match self {
+            Self::Metric { machine_id, metric, gpu_uuid, predicate, threshold } => vec![FollowupSource::Metric {
+                machine_id: machine_id.clone(), metric: *metric, gpu_uuid: gpu_uuid.clone(), predicate: *predicate, threshold: threshold.clone(),
+            }],
+
             Self::LogLiteral { operation_id, stream, from_offset, literal_bytes } => vec![FollowupSource::LogLiteral {
                 operation_id: operation_id.clone(), stream: *stream, from_offset: *from_offset, literal_bytes: *literal_bytes,
             }],
@@ -241,7 +257,8 @@ fn observe_leaf(
     now: u64,
 ) -> Result<Option<(u64, FollowupLeafEvidence)>> {
     let (trigger_cursor, evidence) = match source {
-        FollowupSource::File { .. }
+        FollowupSource::Metric { .. }
+        | FollowupSource::File { .. }
         | FollowupSource::Artifact { .. }
         | FollowupSource::Collection { .. }
         | FollowupSource::LogLiteral { .. }
@@ -486,6 +503,7 @@ pub(super) fn observe_sources(
         FollowupTrigger::Any { .. } => TriggerEvidence::Any { sources: observed },
         FollowupTrigger::All { .. } => TriggerEvidence::All { sources: observed },
         _ => match &observed[0].evidence {
+            FollowupLeafEvidence::Metric { fact } => TriggerEvidence::Metric { fact: fact.clone() },
             FollowupLeafEvidence::LogLiteral { binding, stream, start_offset, end_offset, published_bytes, job_revision } => TriggerEvidence::LogLiteral {
                 binding: binding.clone(), stream: *stream, start_offset: *start_offset, end_offset: *end_offset, published_bytes: *published_bytes, job_revision: *job_revision,
             },
@@ -607,7 +625,8 @@ fn job_settled(
 }
 fn leaf_settled(db: &Connection, evidence: &FollowupLeafEvidence) -> Result<bool> {
     match evidence {
-        FollowupLeafEvidence::At { .. }
+        FollowupLeafEvidence::Metric { .. }
+        | FollowupLeafEvidence::At { .. }
         | FollowupLeafEvidence::File { .. }
         | FollowupLeafEvidence::Artifact { .. }
         | FollowupLeafEvidence::Collection { .. }

@@ -1,5 +1,6 @@
 /** Trusted research handoff. Catalog owns invocation, ExperimentService owns every attempt.
 * Reopening this bridge only inspects original subjects; it never submits replacement work. */
+import { createMetricObserver } from './metric-followups.js';
 import { createResearchArtifactObserver } from './research-artifact-followups.js';
 import { isDeepStrictEqual } from 'node:util';
 import { parseVarinToolJson } from '@varin/extension-contract';
@@ -87,6 +88,7 @@ export function createResearchRuntime(options: {
       ? { kind: 'user', key: op.origin.key } : { kind: 'tool', origin: op.origin.origin, callId: op.origin.call_id, toolName: op.origin.tool_name, schemaVersion: op.origin.schema_version };
     return caller(scope, { runtime: 'agent', actor, rootThreadId: scope.rootThreadId, threadId: run.thread_id, branchId: run.branch_id, runId: run.id, operationId: op.binding.operationId, executionOwner: op.binding.executionOwner, source: scope.source });
   };
+  const metrics = createMetricObserver({ kernel, resources, onError: report, onAccepted: () => runtime.reconcileObservations() });
   const artifacts = createResearchArtifactObserver({ kernel, experiments, onError: report, onAccepted: () => runtime.reconcileObservations() });
   const sync = async () => {
     const pending = await request<HostJobPending[], 'runtime.host_job.pending'>('runtime.host_job.pending', {});
@@ -128,10 +130,11 @@ export function createResearchRuntime(options: {
     if (started && !disposed) {
       // Metadata observation never owns the original cancellation/acceptance flight.
       void reconcileControl().catch(report);
+      void metrics.reconcile().catch(error => { if (!disposed) report(error); });
       void artifacts.reconcile().catch(error => { if (!disposed) report(error); });
     }
   };
-  const reconcile = async (): Promise<void> => { await Promise.all([reconcileControl(), artifacts.reconcile()]); };
+  const reconcile = async (): Promise<void> => { await Promise.all([reconcileControl(), artifacts.reconcile(), metrics.reconcile()]); };
   const own = <T>(pending: Promise<T>): Promise<T> => { active.add(pending); void pending.finally(() => { active.delete(pending); wake(); }).catch(() => undefined); return pending; };
   const submit = async (scope: ResearchScope, owner: ResearchOwner, params: ExperimentSubmitParams, signal?: AbortSignal) => {
     if (owner.runtime !== 'agent')
@@ -275,7 +278,7 @@ export function createResearchRuntime(options: {
     })()));
   };
   return { user, capability, reconcile, start() { if (started || disposed)
-      return; started = true; stops.push(runtime.onReady(wake), runtime.onEvent(wake), experiments.subscribeAttempts(wake)); wake(); },
-    async dispose() { disposed = true; const artifactDrain = artifacts.dispose(); for (const stop of stops.splice(0))
-      stop(); await Promise.allSettled([artifactDrain, ...active, ...(work ? [work] : [])]); } };
+      return; started = true; metrics.start(); stops.push(runtime.onReady(wake), runtime.onEvent(wake), experiments.subscribeAttempts(wake)); wake(); },
+    async dispose() { disposed = true; const artifactDrain = artifacts.dispose(); const metricDrain = metrics.dispose(); for (const stop of stops.splice(0))
+      stop(); await Promise.allSettled([artifactDrain, metricDrain, ...active, ...(work ? [work] : [])]); } };
 }

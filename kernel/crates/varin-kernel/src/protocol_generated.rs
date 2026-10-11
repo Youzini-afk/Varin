@@ -331,6 +331,21 @@ pub(crate) struct FollowupFilesParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupMetricWorksParams {
+    pub(crate) after: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupMetricObserveParams {
+    pub(crate) key: varin_runtime::catalog::followups::FollowupResearchKey,
+    pub(crate) expected: varin_runtime::catalog::followups::FollowupMetricState,
+    pub(crate) snapshot: varin_runtime::catalog::followups::FollowupMetricSnapshot,
+    pub(crate) gap: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct FollowupResearchWorksParams {
     pub(crate) after: Option<String>,
 }
@@ -2545,6 +2560,16 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.followup.files" => serde_json::from_value::<FollowupFilesParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.followup.metrics" => {
+            serde_json::from_value::<FollowupMetricWorksParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.metric.observe" => {
+            serde_json::from_value::<FollowupMetricObserveParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.followup.research" => {
             serde_json::from_value::<FollowupResearchWorksParams>(params.clone())
                 .map(|_| ())

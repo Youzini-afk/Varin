@@ -131,6 +131,23 @@ pub(super) fn execute(
                 Ok(json!({"released":released}))
             }
         }
+        "runtime.followup.metrics" => {
+            let p: FollowupMetricWorksParams = serde_json::from_value(params)?;
+            let (works, next) = runtime.catalog().lock()
+                .map_err(|_| KernelError::Storage("Catalog owner failed".into()))?
+                .followup_metric_works(p.after.as_deref()).map_err(domain)?;
+            Ok(json!({"works":works,"nextCursor":next}))
+        }
+        "runtime.followup.metric.observe" => {
+            let input: varin_runtime::catalog::followups::FollowupMetricObservation = serde_json::from_value(params)?;
+            let id = input.key.followup_id.clone();
+            let index = input.key.source_index;
+            let catalog = runtime.catalog();
+            let mut owner = catalog.lock().map_err(|_| KernelError::Storage("Catalog owner failed".into()))?;
+            let accepted = owner.apply_metric_observation(input).map_err(domain)?;
+            let followup = owner.followup(&id).map_err(domain)?;
+            Ok(json!({"accepted":accepted,"metric":followup.sources.get(index).and_then(|s| s.metric.as_ref())}))
+        }
         "runtime.followup.research" => {
             let p: FollowupResearchWorksParams = serde_json::from_value(params)?;
             let (works, next) = runtime

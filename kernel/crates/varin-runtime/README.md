@@ -293,7 +293,7 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 41, input domain 6 and collaboration domain 7 store input intents/queue bodies and context-job ownership,
+Catalog version 42, input domain 6 and collaboration domain 7 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
@@ -591,12 +591,12 @@ pending requests. See the ordinary [SDK example](../../../examples/extensions/de
 
 ## Explicit follow-ups and repeated occurrences
 
-The ordinary `follow_up` tool (version 7) supports register/list/get/jobs/occurrences/occurrence/control from the actual ModelStep or policy
+The ordinary `follow_up` tool (version 8) supports register/list/get/jobs/occurrences/occurrence/control from the actual ModelStep or policy
 invocation. `runtime.followup.register` is the authenticated User path. Each registration retains one
 explicit instruction and an absolute `at` instant, the original accepted `process_spawn` identity,
 an original accepted Host domain `job_stopped` identity, an exact original-source file condition,
-original research `artifact`/`collection` facts, byte-exact `log_literal` / drained `log_end`, or a
-flat `any`/`all` combination of these sources. Every process/Job/file leaf is authorized even when
+original research `artifact`/`collection` facts, byte-exact `log_literal` / drained `log_end`, an original machine `metric` condition, or a
+flat `any`/`all` combination of these sources. Every process/Job/file/metric leaf is authorized even when
 another leaf is already satisfied. Empty combinations and nested conditions are invalid; there is no separate
 workflow executor or arbitrary source-count limit.
 Catalog derives the Thread/branch, actor and operation from the caller; Agent arguments cannot forge
@@ -625,7 +625,7 @@ time branch can satisfy `any` without waiting for its other processes to stop; `
 source. Only the occurrence's actual process/Job stop evidence contributes receipt bodies to preparation.
 With `once`, one combination produces one occurrence; a time check followed by a later completion
 check needs two explicit registrations. `each` is continuing authorization for this same instruction.
-Its single source must be file `changed`, research `artifact`, `collection` or `log_literal`; repeated `any` requires at least one repeatable source and creates
+Its single source must be file `changed`, research `artifact`, `collection`, `log_literal` or `metric`; repeated `any` requires at least one repeatable source and creates
 one occurrence per accepted leaf edge. Finite time/stop/exists/ready/log-end leaves contribute at most once.
 Repeated `all` requires repeatable leaves and pairs their oldest unconsumed evidence: A1,A2,B1 yields
 (A1,B1), retaining A2 for B2, including across restart. It never overwrites unpaired facts with latest.
@@ -698,6 +698,27 @@ wins if EOF arrives before Wait reconciliation; delivery retains that exact orig
 The observation projects `delivery_pending` from actual history delivery and its original Run state.
 A terminal Run needs no new result history; `delivered` stays false rather than inventing delivery.
 
+A machine `metric` observes the original ResourceService's committed local CPU/memory or stable-GPU
+sample. `above` and `below` are strict comparisons with a finite threshold; memory units are MiB
+and percentage dimensions use percent. GPU selectors use UUID,
+never a mutable device ordinal. Initial known satisfaction emits once; `each` requires a subsequent
+known false-to-true crossing. Unknown, missing, stale or disconnected values do not satisfy or reset
+that predicate. Same-millisecond samples remain distinct through their original record revisions.
+
+Catalog atomically accepts the original machine provenance, short sample cursor, last known predicate
+and at most one edge. Original Any/All queues, Wait, input, root/child activation and GC retain their
+existing owners. Pause/cancel fence late observations without stopping machines or experiments. After
+an observation gap, recovery checks the current source snapshot and does not reconstruct overwritten
+samples. Accepted edges remain durable. Remote directories currently lack a sample producer and show
+an actionable unsupported observation, rather than pretending the local machine represents them.
+
+The Host metric adapter has per-live-leaf transient callback queues and separate work/demand discovery.
+An uncertain observation reply retains unconfirmed callbacks; a slow sample read cannot defer releasing
+cancelled demand. The ResourceService owns one demand-shared local sampling flight/cadence, including
+compatible Pi watchers. Actual probe work is outside its commitment lock; writes retain the captured
+scoped actor through CAS. A new kernel epoch cannot publish an old probe through newly issued grants.
+These source mechanics do not add a Catalog timer, observation Job or copied sample history.
+
 A Job leaf retains the exact HostJobBinding, original receipt identity/epoch and original
 `operation.executor_stopped` event cursor. Job acceptance, submitting Run completion, observation
 cancellation and unknown business effects do not prove stop. An actual stopped receipt can retain
@@ -743,7 +764,7 @@ Startup and stale preparation reuse original identities. Failures remain explici
 healthy continuations can advance. Shutdown fences old workers, publication leases protect staged
 bodies, and original instructions/input/history remain normal GC roots. Continuing authorization
 requires explicit `each`; it is never inferred from a delivered one-time instruction. Calendar
-definitions have their separate original asset/occurrence contract; metric adapters
+definitions have their separate original asset/occurrence contract; remaining source adapters
 and broader domain combinations remain separate work.
 
 ### File conditions and source ownership

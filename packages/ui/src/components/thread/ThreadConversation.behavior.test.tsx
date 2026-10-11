@@ -202,7 +202,7 @@ it('registers a process follow-up through an uncertain reply and preserves the a
       kind: 'job_accepted', operation_id: 'process:original', phase: 'running', effect: 'dispatched', lifetime: 'environment',
     }, execution_owner: { kind: 'kernel' } }];
   const followup: ThreadSnapshot['followups'][number] = { repeat: 'once', exhausted: false, pending_occurrences: 0, id: 'followup:one', revision: 1, generation: 1,
-    thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: 'ui-run', sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 1, observed: null, file: null, log: null }], state: 'active', goal_id: null,
+    thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: 'ui-run', sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 1, observed: null, file: null, log: null, metric: null }], state: 'active', goal_id: null,
     actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1_700_000_000_000, observation: null,
     trigger: { kind: 'process_stopped', operation_id: 'process:original' },
     wait: { id: 'wait:process', kind: 'process_stopped', after_cursor: 1, trigger_cursor: null, state: 'waiting' }, occurrence: null };
@@ -255,7 +255,7 @@ it('retains an exact absolute time across an uncertain retry and exposes explici
   const f = fixture(true); const source = { ...f.view.activeRun!, state: 'cancelled' as const, cancel_requested: true };
   f.view.activeRun = null; f.view.thread.branches[0]!.active_run_id = null; f.view.thread.branches[0]!.latest_run = source;
   const followup: ThreadSnapshot['followups'][number] = { repeat: 'once', exhausted: false, pending_occurrences: 0, id: 'followup:time', revision: 1, generation: 1, thread_id: identity.threadId,
-    branch_id: identity.branchId, source_run_id: source.id, sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 0, observed: null, file: null, log: null }], state: 'active', goal_id: 'goal:original',
+    branch_id: identity.branchId, source_run_id: source.id, sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 0, observed: null, file: null, log: null, metric: null }], state: 'active', goal_id: 'goal:original',
     actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1_700_000_000_000, observation: null,
     trigger: { kind: 'at', at_ms: 0 }, wait: { id: 'time-wait', kind: 'at', after_cursor: 0, trigger_cursor: null, state: 'waiting' }, occurrence: null };
   const register = vi.fn<ThreadsAPI['followups']['register']>().mockRejectedValueOnce(new Error('reply lost')).mockImplementation(async input => {
@@ -286,7 +286,7 @@ it.each(['any', 'all'] as const)('registers %s conditions as one retained intent
     thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: 'ui-run', state: 'active', goal_id: null,
     actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1_700_000_000_000, observation: null,
     trigger: { kind, sources: [{ kind: 'at', at_ms: atMs }, { kind: 'process_stopped', operation_id: 'process:original' }] },
-    sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 1, observed: null, file: null, log: null }, { consumed_cursor: 0, source_index: 1, after_cursor: 1, observed: null, file: null, log: null }],
+    sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 1, observed: null, file: null, log: null, metric: null }, { consumed_cursor: 0, source_index: 1, after_cursor: 1, observed: null, file: null, log: null, metric: null }],
     wait: { id: `wait:${kind}`, kind, after_cursor: 1, trigger_cursor: null, state: 'waiting' }, occurrence: null };
   const register = vi.fn<ThreadsAPI['followups']['register']>().mockRejectedValueOnce(new Error('acceptance reply lost'))
     .mockImplementation(async () => { f.view.followups = [followup]; return followup; });
@@ -1088,7 +1088,7 @@ it('retains an original file condition after a lost reply and displays unavailab
     thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: 'ui-run', state: 'active', goal_id: null,
     actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1, observation: null,
     trigger: { kind: 'file', path: 'results/output.txt', condition: 'changed' },
-    sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 1, observed: null, log: null, file: { receipt_id: 'receipt:file', revision: 1,
+    sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 1, observed: null, log: null, metric: null, file: { receipt_id: 'receipt:file', revision: 1,
       baseline: null, current: null, immutable: true, watch_id: null,
       position: null, gap: true, failure_code: 'source_unavailable', released: false } }],
     wait: { id: 'wait:file', kind: 'file', after_cursor: 1, trigger_cursor: null, state: 'waiting' }, occurrence: null };
@@ -1199,7 +1199,7 @@ function repeatedFollowup(): ThreadSnapshot['followups'][number] {
     thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: 'ui-run', state: 'active', goal_id: null,
     actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1, observation: null,
     trigger: { kind: 'file', path: 'results/output.txt', condition: 'changed' },
-    sources: [{ source_index: 0, after_cursor: 1, consumed_cursor: 0, observed: null, file: null, log: null }],
+    sources: [{ source_index: 0, after_cursor: 1, consumed_cursor: 0, observed: null, file: null, log: null, metric: null }],
     wait: { id: 'wait:each', kind: 'file', after_cursor: 1, trigger_cursor: null, state: 'waiting' }, occurrence: null };
 }
 function repeatedOccurrence(id: string, accepted: number, delivered: boolean): NonNullable<ThreadSnapshot['followups'][number]['occurrence']> {
@@ -1222,7 +1222,7 @@ it('requires legal repeat conditions and keeps the original repeated authorizati
   await edit('[aria-label="Follow-up time"]', '2030-02-03T04:05:06');
   await edit('[aria-label="Follow-up instruction"]', 'Read each accepted change.');
   expect(button('Register repeating follow-up').disabled).toBe(true);
-  expect(container.textContent).toContain('Repetition requires a file-change, artifact, collection or log-literal condition');
+  expect(container.textContent).toContain('Repetition requires a metric, file-change, artifact, collection or log-literal condition');
   await edit('[aria-label="Follow-up trigger"]', 'any', 'change');
   await edit('[aria-label="Condition 1 time"]', '2030-02-03T04:05:06');
   await edit('[aria-label="Condition 2 kind"]', 'file', 'change');
@@ -1519,7 +1519,7 @@ function logFollowup(): ThreadSnapshot['followups'][number] {
   return { ...repeatedFollowup(), id: 'followup:log',
     wait: { id: 'wait:log', kind: 'log_literal', after_cursor: 1, trigger_cursor: null, state: 'waiting' },
     trigger: { kind: 'log_literal', operation_id: logJob().binding.operationId, stream: 'stderr', from_offset: 0, literal_bytes: 3 },
-    sources: [{ source_index: 0, after_cursor: 1, consumed_cursor: 0, observed: null, file: null,
+    sources: [{ source_index: 0, after_cursor: 1, consumed_cursor: 0, observed: null, file: null, metric: null,
       log: { offset: 0, matched_prefix: 0, ended: false, failure_code: null } }] };
 }
 function logOccurrence(id: string, accepted: number): ReturnType<typeof repeatedOccurrence> {
@@ -1730,4 +1730,204 @@ it('registers a single stream end and shows its fixed empty-stream evidence sepa
   expect(container.textContent).toContain('Log condition 1: Stream ended');
   expect(container.textContent).not.toContain('without a literal match');
   expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
+});
+
+function metricResources(): Awaited<ReturnType<NonNullable<ThreadsAPI['research']>['resources']>> {
+  return { generatedAt: 10, text: 'Original resource directory', machines: [
+    { machineId: 'machine:local', label: 'Research workstation', kind: 'local', state: 'available',
+      connection: { status: 'connected', checkedAt: 10 }, commitments: [], queued: [],
+      capacity: { gpus: [{ index: 3, uuid: 'GPU-stable-original', name: 'Compute GPU' }] },
+      usage: { cpuPercent: 35, memoryMb: 4096, observedAt: 10, source: 'host', stale: false,
+        gpus: [{ index: 7, uuid: 'GPU-stable-original', name: 'Compute GPU', utilizationPercent: 60 }] } },
+    { machineId: 'machine:no-uuid', label: 'GPU inventory incomplete', kind: 'local', state: 'degraded',
+      connection: { status: 'degraded', checkedAt: 10 }, commitments: [], queued: [], capacity: { gpus: [{ index: 0, name: 'Unnamed GPU' }] } },
+    { machineId: 'machine:remote', label: 'Offline remote', kind: 'remote', state: 'offline',
+      connection: { status: 'offline', checkedAt: 10 }, commitments: [], queued: [] },
+  ] };
+}
+function withMetricResources(f: ReturnType<typeof fixture>) {
+  const unused = async (): Promise<never> => { throw new Error('unused research API'); };
+  const resources = vi.fn<NonNullable<ThreadsAPI['research']>['resources']>(async () => metricResources());
+  f.api.research = { scopes: async () => [], resources, list: unused, get: unused, logs: unused, artifact: unused,
+    cancel: unused, collect: unused, submit: unused, sources: unused };
+  return resources;
+}
+function metricFollowup(): ThreadSnapshot['followups'][number] {
+  return { ...repeatedFollowup(), id: 'followup:metric',
+    trigger: { kind: 'metric', machine_id: 'machine:local', metric: 'cpu_percent', predicate: 'above', threshold: 75 },
+    wait: { id: 'wait:metric', kind: 'metric', after_cursor: 1, trigger_cursor: null, state: 'waiting' },
+    sources: [{ source_index: 0, after_cursor: 1, consumed_cursor: 0, observed: null, file: null, log: null,
+      metric: { identity: { host_id: 'host:original', machine_id: 'machine:local', kind: 'local', backend: null, target_host_id: null },
+        sample_revision: 9, observed_at_ms: 1000, status: 'available', failure_code: null, holding: true, value: 80, gap: false } }] };
+}
+
+it.each([
+  ['metric', 'once'], ['metric', 'each'], ['any', 'once'], ['any', 'each'], ['all', 'once'], ['all', 'each'],
+] as const)('registers %s %s metrics from the original machine directory and original source Run', async (kind, repeat) => {
+  const f = fixture(true); const resources = withMetricResources(f);
+  const register = vi.fn<ThreadsAPI['followups']['register']>(async () => metricFollowup()); f.api.followups.register = register;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  expect(resources).not.toHaveBeenCalled();
+  await act(async () => button('Schedule a follow-up').click());
+  await edit('[aria-label="Follow-up trigger"]', kind, 'change');
+  await edit('[aria-label="Follow-up repetition"]', repeat, 'change');
+  const label = kind === 'metric' ? 'Follow-up' : 'Condition 1';
+  if (kind !== 'metric') await edit('[aria-label="Condition 1 kind"]', 'metric', 'change');
+  await edit(`[aria-label="${label} machine"]`, 'machine:local', 'change');
+  await edit(`[aria-label="${label} metric threshold"]`, '75.5');
+  const finiteAny = kind === 'any' && repeat === 'each';
+  if (kind !== 'metric') {
+    if (finiteAny) {
+      await edit('[aria-label="Condition 2 kind"]', 'at', 'change');
+      await edit('[aria-label="Condition 2 time"]', '2030-02-03T04:05:06');
+    } else {
+      await edit('[aria-label="Condition 2 kind"]', 'metric', 'change');
+      await edit('[aria-label="Condition 2 machine"]', 'machine:remote', 'change');
+      await edit('[aria-label="Condition 2 metric"]', 'memory_mb', 'change');
+      expect(container.textContent).toContain('Threshold (MiB)');
+      await edit('[aria-label="Condition 2 metric predicate"]', 'below', 'change');
+      await edit('[aria-label="Condition 2 metric threshold"]', '1024');
+    }
+  }
+  await edit('[aria-label="Follow-up instruction"]', 'Continue when the observed metric qualifies.');
+  if (finiteAny) {
+    await edit('[aria-label="Follow-up trigger"]', 'all', 'change');
+    expect(button('Register repeating follow-up').disabled).toBe(true);
+    await edit('[aria-label="Follow-up trigger"]', 'any', 'change');
+  }
+  expect(container.textContent).toContain('Remote metric sampling is not supported yet');
+  expect(container.textContent).toContain(repeat === 'each' ? 'Unknown samples do not rearm it' : 'including the initial observation');
+  const submit = button(repeat === 'each' ? 'Register repeating follow-up' : 'Register one-time follow-up');
+  expect(submit.disabled).toBe(false);
+  await act(async () => submit.click());
+  const cpu = { kind: 'metric', machineId: 'machine:local', metric: 'cpu_percent', predicate: 'above', threshold: 75.5 };
+  expect(register).toHaveBeenCalledExactlyOnceWith({ ...identity, key: expect.any(String), runId: 'ui-run', repeat,
+    instruction: 'Continue when the observed metric qualifies.', trigger: kind === 'metric' ? cpu : { kind, sources: [cpu,
+      finiteAny ? { kind: 'at', atMs: new Date('2030-02-03T04:05:06').getTime() }
+        : { kind: 'metric', machineId: 'machine:remote', metric: 'memory_mb', predicate: 'below', threshold: 1024 }] } });
+  expect(resources).toHaveBeenCalledExactlyOnceWith({ ...identity, sourceRunId: 'ui-run' }, expect.any(AbortSignal));
+  expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
+});
+
+it('requires a finite threshold and stable GPU UUID, then retains the complete uncertain metric intent across newer work and Close/Back', async () => {
+  const f = fixture(true); const resources = withMetricResources(f);
+  const register = vi.fn<ThreadsAPI['followups']['register']>().mockRejectedValueOnce(new Error('reply lost')).mockResolvedValue(metricFollowup());
+  f.api.followups.register = register;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Schedule a follow-up').click());
+  await edit('[aria-label="Follow-up trigger"]', 'metric', 'change');
+  await edit('[aria-label="Follow-up repetition"]', 'each', 'change');
+  await edit('[aria-label="Follow-up machine"]', 'machine:no-uuid', 'change');
+  await edit('[aria-label="Follow-up metric"]', 'gpu_memory_mb', 'change');
+  expect(container.textContent).toContain('Threshold (MiB)');
+  await edit('[aria-label="Follow-up metric threshold"]', '1024');
+  await edit('[aria-label="Follow-up instruction"]', 'Read the GPU result.');
+  expect(container.textContent).toContain('No stable GPU UUID is available');
+  expect(container.querySelector<HTMLSelectElement>('[aria-label="Follow-up GPU"]')!.disabled).toBe(true);
+  expect(button('Register repeating follow-up').disabled).toBe(true);
+  await edit('[aria-label="Follow-up machine"]', 'machine:local', 'change');
+  expect(container.querySelectorAll('[aria-label="Follow-up GPU"] option')).toHaveLength(2);
+  expect(container.querySelector('[aria-label="Follow-up GPU"]')!.textContent).toContain('GPU 7');
+  await edit('[aria-label="Follow-up GPU"]', 'GPU-stable-original', 'change');
+  for (const invalid of ['', ' ', 'Infinity', 'NaN', '1e999']) {
+    await edit('[aria-label="Follow-up metric threshold"]', invalid);
+    expect(button('Register repeating follow-up').disabled).toBe(true);
+  }
+  await edit('[aria-label="Follow-up metric threshold"]', '1024.5');
+  await edit('[aria-label="Follow-up metric predicate"]', 'below', 'change');
+  await act(async () => button('Register repeating follow-up').click());
+  const original = register.mock.calls[0]![0];
+  expect(original.trigger).toEqual({ kind: 'metric', machineId: 'machine:local', metric: 'gpu_memory_mb',
+    gpuUuid: 'GPU-stable-original', predicate: 'below', threshold: 1024.5 });
+  expect(container.querySelector<HTMLSelectElement>('[aria-label="Follow-up machine"]')!.disabled).toBe(true);
+  await act(async () => button('Hide follow-up form').click());
+  f.view.activeRun = { ...f.view.activeRun!, id: 'new-work' };
+  await act(async () => f.emit({ cursor: 2, subject: 'new-work', revision: 1, kind: 'run.accepted', data: {} }));
+  await act(async () => button('Schedule a follow-up').click());
+  expect(container.querySelector<HTMLSelectElement>('[aria-label="Follow-up GPU"]')!.value).toBe('GPU-stable-original');
+  await act(async () => button('Retry original follow-up').click());
+  expect(register.mock.calls[1]![0]).toEqual(original);
+  expect(resources).toHaveBeenCalledTimes(1);
+  expect(f.cancelRun).not.toHaveBeenCalled();
+});
+
+it('shows original metric evidence and unknown holding without inventing occurrences, and controls only the observation', async () => {
+  const f = fixture(true); const followup = metricFollowup(); const fact = followup.sources[0]!.metric!;
+  const occurrence = { ...repeatedOccurrence('metric:O1', 20, true), evidence: { kind: 'metric' as const, fact: {
+    identity: fact.identity!, machine_revision: 4, sample_revision: 9, observed_at_ms: 1000, metric: 'cpu_percent' as const,
+    gpu_uuid: null, predicate: 'above' as const, threshold: 75, value: 80, gap: true } } };
+  followup.occurrence = occurrence; f.view.followups = [followup];
+  const control = vi.fn<ThreadsAPI['followups']['control']>(async input => {
+    followup.revision += 1; followup.state = input.action === 'cancel' ? 'cancelled' : input.action === 'pause' ? 'paused' : 'active'; return followup;
+  }); f.api.followups.control = control;
+  const details = vi.fn(f.api.followups.occurrence); f.api.followups.occurrence = details;
+  const resources = withMetricResources(f);
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  const latest = () => container.querySelector('[aria-label="Latest follow-up occurrence"]')!;
+  expect(latest().textContent).toContain('CPU usage 80 %'); expect(latest().textContent).toContain('sample revision 9');
+  expect(latest().textContent).toContain('machine revision 4'); expect(latest().textContent).toContain('1970-01-01T00:00:01.000Z');
+  expect(latest().textContent).toContain('Host host:original'); expect(latest().textContent).toContain('observation gap');
+  expect(container.querySelector('[aria-label="Metric condition 1"]')!.textContent).toContain('condition satisfied');
+  for (const [index, status] of (['missing', 'stale', 'unavailable'] as const).entries()) {
+    fact.status = status; fact.value = null; fact.sample_revision = 10 + index; fact.gap = true; fact.failure_code = 'machine_unavailable';
+    await act(async () => f.emit({ cursor: 30 + index, subject: followup.id, revision: 2 + index, kind: 'followup.changed', data: {} }));
+    const state = container.querySelector('[aria-label="Metric condition 1"]')!;
+    expect(state.textContent).toContain(`Unknown (${status})`); expect(state.textContent).toContain('previous satisfied condition retained');
+    expect(state.textContent).not.toContain('0 %'); expect(state.textContent).toContain('unavailable crossings are not reconstructed');
+    expect(latest().textContent).toContain('sample revision 9');
+    expect(container.querySelectorAll('[aria-label="Follow-up occurrence"]')).toHaveLength(1);
+  }
+  expect(details).not.toHaveBeenCalled(); expect(resources).not.toHaveBeenCalled();
+  await act(async () => button('Retry metric observation').click());
+  await act(async () => button('Pause follow-up').click());
+  await act(async () => button('Resume follow-up').click());
+  await act(async () => button('Cancel follow-up').click());
+  expect(control.mock.calls.map(([value]) => value.action)).toEqual(['resume', 'pause', 'resume', 'cancel']);
+  expect(control.mock.calls[0]![0]).toEqual({ ...identity, followupId: followup.id, expectedRevision: 1, action: 'resume' });
+  expect(button('Past follow-ups (1)')).toBeDefined(); expect(button('Cancel follow-up')).toBeUndefined();
+  expect(f.cancelRun).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
+});
+
+it('discards late machine reads after closing, changing Run, Host or Thread/branch and offers explicit retry', async () => {
+  const f = fixture(true); const resources = withMetricResources(f);
+  type Directory = Awaited<ReturnType<typeof resources>>;
+  const releases: Array<(result: Directory) => void> = [];
+  resources.mockImplementation(() => new Promise(resolve => releases.push(resolve)));
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  const open = async () => {
+    await act(async () => button('Schedule a follow-up').click());
+    await edit('[aria-label="Follow-up trigger"]', 'metric', 'change');
+    return resources.mock.calls.at(-1)![1]!;
+  };
+  const late = async (index: number) => {
+    await act(async () => releases[index]!(metricResources()));
+    expect(container.textContent).not.toContain('Research workstation');
+  };
+  const closed = await open();
+  expect(container.textContent).toContain('Reading original machines');
+  await act(async () => button('Hide follow-up form').click()); expect(closed.aborted).toBe(true); await late(0);
+  const oldRun = await open();
+  f.view.activeRun = { ...f.view.activeRun!, id: 'new-work' };
+  await act(async () => f.emit({ cursor: 2, subject: 'new-work', revision: 1, kind: 'run.accepted', data: {} }));
+  expect(oldRun.aborted).toBe(true); await late(1);
+  expect(resources.mock.calls.at(-1)![0].sourceRunId).toBe('new-work');
+  const oldHost = resources.mock.calls.at(-1)![1]!;
+  await act(async () => { endpoint.generation += 1; for (const listener of endpoint.listeners) listener(); });
+  expect(oldHost.aborted).toBe(true); await late(2);
+  const oldBranch = await open();
+  const nextIdentity = { ...identity, threadId: 'thread:metric-next', branchId: 'branch:metric-next' };
+  f.view.identity = nextIdentity; f.view.thread.thread_id = nextIdentity.threadId;
+  f.view.thread.branches[0]!.branch_id = nextIdentity.branchId;
+  f.view.activeRun = { ...f.view.activeRun!, thread_id: nextIdentity.threadId, branch_id: nextIdentity.branchId };
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={nextIdentity} />));
+  expect(oldBranch.aborted).toBe(true); await late(3);
+  resources.mockRejectedValueOnce(new Error('connection unavailable'));
+  await open();
+  expect(container.textContent).toContain('Original machines could not be read');
+  expect(button('Register one-time follow-up').disabled).toBe(true);
+  resources.mockResolvedValueOnce(metricResources());
+  await act(async () => button('Retry machines').click());
+  expect(container.textContent).toContain('Research workstation');
+  expect(resources.mock.calls.at(-1)![0]).toEqual({ ...nextIdentity, sourceRunId: 'new-work' });
+  expect(container.textContent).not.toContain('Original machines could not be read');
 });

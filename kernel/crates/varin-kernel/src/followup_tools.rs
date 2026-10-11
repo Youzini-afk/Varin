@@ -17,6 +17,10 @@ pub(crate) fn builtin_schema() -> crate::run_tools::BuiltinSchema {
 pub(crate) fn schema() -> ToolSchema {
     let text = json!({"type":"string","minLength":1});
     let leaf = json!({"oneOf":[
+        {"type":"object","description":"Observe this Host resource directory's committed machine samples. cpu_percent and gpu_percent values and thresholds use %. memory_mb and gpu_memory_mb values and thresholds use MiB (1,048,576 bytes). CPU/memory use machineId; GPU metrics select the stable GPU UUID, not an ordinal. Unknown, missing and stale values never satisfy or re-arm a condition.",
+         "properties":{"kind":{"const":"metric"},"machineId":text,"metric":{"enum":["cpu_percent","memory_mb","gpu_percent","gpu_memory_mb"]},"gpuUuid":text,"predicate":{"enum":["above","below"]},"threshold":{"type":"number"}},
+         "required":["kind","machineId","metric","predicate","threshold"],"additionalProperties":false,
+         "oneOf":[{"properties":{"metric":{"enum":["cpu_percent","memory_mb"]}},"not":{"required":["gpuUuid"]}},{"properties":{"metric":{"enum":["gpu_percent","gpu_memory_mb"]}},"required":["gpuUuid"]}]},
         {"type":"object","description":"A path in this run's source. Fixed revisions cannot change; ready means a stable regular file with no managed writer.",
          "properties":{"kind":{"const":"file"},"path":text,"condition":{"enum":["exists","changed","ready"]}},
          "required":["kind","path","condition"],"additionalProperties":false},
@@ -48,14 +52,14 @@ pub(crate) fn schema() -> ToolSchema {
     ]});
     ToolSchema {
         name: followups::TOOL.into(),
-        version: "7".into(),
+        version: "8".into(),
         description: "Schedule an instruction to continue this conversation when a condition is met. Registration returns immediately; idle conversations start a new run. Current pauses, unanswered questions and goal limits remain in effect. jobs lists accepted task-family jobs; list shows registrations; get reads an instruction; occurrences pages delivery history; occurrence reads one occurrence's evidence. control pauses, resumes or cancels a registration using its current revision. Pause holds observation and pending delivery; cancel removes future and undelivered work while preserving existing results and observed jobs.".into(),
         output_schema: None,
         metadata: None,
         schema: json!({"oneOf":[
             {"type":"object","properties":{
                 "action":{"const":"register"},"trigger":trigger,
-                "repeat":{"enum":["once","each"],"description":"Defaults to once. Each repeats on original log matches, observed file changes, artifact revisions or collection results. Any requires at least one repeatable condition; all requires every condition to repeat and pairs their oldest unconsumed facts. Retained log bytes are replayable; unobserved file changes are not reconstructed."},
+                "repeat":{"enum":["once","each"],"description":"Defaults to once. Each repeats on known machine metric crossings, original log matches, observed file changes, artifact revisions or collection results. Any requires at least one repeatable condition; all requires every condition to repeat and pairs their oldest unconsumed facts. Retained log bytes are replayable; unobserved file changes or machine crossings are not reconstructed."},
                 "instruction":text,
                 "wait":{"type":"object","description":"Also wait for the first occurrence or an exhausted condition. Cancelling this wait keeps the registration.","additionalProperties":false}
              },"required":["action","trigger","instruction"],"additionalProperties":false},

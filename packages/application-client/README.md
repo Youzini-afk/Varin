@@ -50,7 +50,7 @@ are not Goal creation commands. Goal-owned followups are controlled through thei
 
 `ThreadsAPI.followups` registers one explicit instruction for an absolute `at` instant, accepted
 `process_stopped`/`job_stopped` operation, original-source file condition, research `artifact`/`collection`,
-original-job `log_literal`/`log_end`, or flat `any`/`all` combination. Register retains a stable key and
+original-job `log_literal`/`log_end`, original-machine `metric`, or flat `any`/`all` combination. Register retains a stable key and
 exact source Run/trigger/body for uncertain retries. `list` exposes short lifecycle metadata, while
 abortable `get` reads the original instruction and `registration_trigger` (including literal text).
 Control uses the displayed revision. Triggering, input binding and actual history delivery are distinct:
@@ -59,7 +59,7 @@ process. Agent-only optional waiting is not part of this User API. Independently
 retain their explicit actor even under a Goal; automatic Goal-owned definitions use Goal controls.
 
 `repeat: 'each'` explicitly authorizes the same instruction on each accepted file-change, research
-metadata edge or log-literal match; omitted `repeat` means once. Repeated Any consumes finite leaves once; repeated All pairs FIFO changes from
+metadata edge, log-literal match or known metric crossing; omitted `repeat` means once. Repeated Any consumes finite leaves once; repeated All pairs FIFO changes from
 every repeatable leaf. The definition retains its observer after delivery. Pause holds accepted work;
 Cancel withdraws future and undelivered occurrences, without changing delivered Runs or results.
 `pending_occurrences` and latest `.occurrence` are compact projections. Abortable
@@ -78,6 +78,16 @@ remain current-domain operations with their own authority and availability.
 `collection` explicitly observes the original collection completion, including empty or failed results.
 An explicit Any observes both. Failed collection absence, missing in a completed snapshot, pending
 metadata and a zero-byte available artifact retain different meanings.
+
+`metric` selects a real `machineId`, CPU/memory dimension or stable `gpuUuid`, strict `above`/`below`
+and a finite threshold. Memory dimensions use MiB; percentage dimensions use percent. Machine/GPU choices come from the existing `research.resources` API for the
+original source Run, not a second directory or permission list. The UI sends UUIDs while displaying
+ordinals/names. Local sampling follows active definitions without an open panel; remote sampling is
+currently unsupported. Initial known satisfaction fires once; Each requires known false-to-true.
+Missing, stale or unread values stay unknown and do not rearm a previously satisfied condition.
+Short metric state and occurrence evidence retain original revision, value, time, identity and gap.
+Historical gaps are visible; overwritten unobserved crossings cannot be replayed. Uncertain retries
+keep the exact original key/source/selector, and late directory reads cannot switch Host/Thread/Run.
 
 `log_literal` selects stdout or stderr and matches exact UTF-8 literal bytes, preserving whitespace
 and case. An omitted `fromOffset` starts at byte 0, including already published output; a future offset

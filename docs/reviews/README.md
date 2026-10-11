@@ -8,6 +8,9 @@ Last updated: 2026-10-11
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [原机器指标与自动采样续接（2026-10-11）](runtime-metric-followups-2026-10-11.md) | 原 ResourceService 自动采样、阈值边沿、取消与 epoch、公开消费和实际 root/child 接续；分层验收 |
+| [原研究日志条件（2026-10-11）](runtime-log-followups-2026-10-11.md) | 原日志字节/EOF、持久匹配、公开 route 与原 Wait/input 消费；分层验收 |
+| [真实运行时预设（2026-10-11）](runtime-agent-profiles-2026-10-11.md) | 原配置 CAS、真实目录默认与显式自定义、设置及 child 冻结派发 |
 | [运行时整合验收（2026-10-11）](runtime-2026-10-11.md) | Windows 真实 Host/内核链路、并发额度、工具目录、子任务、策略选择和工作区结果交接；修复与剩余范围 |
 | [原 immutable object reader（2026-10-11）](runtime-blob-reader-2026-10-11.md) | 共同 getBlob/fixed FileRead、cold hash 锁外、取消真实排空与原 GC 保活；有限片后暂停 |
 | [原研究产物与收集事实续接（2026-10-11）](runtime-artifact-followups-2026-10-11.md) | 独立 artifact/collection、原修订/metadata、精确发生项与真实 root/child 消费；分层验收 |
