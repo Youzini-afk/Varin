@@ -415,7 +415,7 @@ export class AgentRuntimeClient {
   }
   private mcpResourceOwner?: Pick<import('./mcp-resource-runtime.js').McpResourceRuntime, 'releaseSource'>;
   setMcpResourceOwner(owner:Pick<import('./mcp-resource-runtime.js').McpResourceRuntime, 'releaseSource'>):void { this.mcpResourceOwner=owner; }
-  async releaseMcpResourceSource(runId:string):Promise<void> { await this.mcpResourceOwner?.releaseSource(runId); }
+  async releaseMcpResourceSource(runId:string):Promise<void> { await Promise.all([this.mcpResourceOwner?.releaseSource(runId), this.mcpInteractionOwner?.releaseSource(runId)]); }
   async retireSourceGrants(runId: string): Promise<void> {
     await this.releaseMcpResourceSource(runId);
     // The durable Storage grant owner resolves this Run, including grants from a previous Host.
@@ -451,6 +451,19 @@ export class AgentRuntimeClient {
     listener: Parameters<KernelClient['onAgentRuntimeEvent']>[0],
   ): () => void {
     return this.kernel.onAgentRuntimeEvent(listener);
+  }
+
+  private mcpInteractionOwner?: import('./mcp-interaction-runtime.js').McpInteractionRuntime;
+  setMcpInteractionOwner(owner: import('./mcp-interaction-runtime.js').McpInteractionRuntime): void { this.mcpInteractionOwner = owner; }
+  listMcpInteractions(input: import('./protocol.generated.js').McpInteractionListParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').McpInteractionPage> {
+    return this.kernel.agentRuntimeRequest('runtime.mcp.interaction.list', input, signal);
+  }
+  readMcpInteraction(operationId: string, interactionId: string, signal?: AbortSignal): Promise<import('./protocol.generated.js').McpInteractionView> {
+    return this.kernel.agentRuntimeRequest('runtime.mcp.interaction.read', {operationId, interactionId}, signal);
+  }
+  respondMcpInteraction(input: import('./protocol.generated.js').McpInteractionRespondParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').McpInteractionView> {
+    if (!this.mcpInteractionOwner) return Promise.reject(Object.assign(new Error('mcp_interaction_owner_unavailable'), {code:'mcp_interaction_owner_unavailable'}));
+    return this.mcpInteractionOwner.respond(input, signal);
   }
 
   decidePermission(

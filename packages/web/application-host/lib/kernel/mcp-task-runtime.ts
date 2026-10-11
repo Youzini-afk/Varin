@@ -16,6 +16,7 @@ interface Entry {
   acceptanceFlight?:Promise<void>;
   lease?: McpTaskLease;
   unobserve?:()=>void;
+  unbindInteraction?:()=>void;
   nextPoll: number;
   resultFlight?:Promise<void>;
   pollFlight?:Promise<void>;
@@ -139,20 +140,22 @@ export function createMcpTaskRuntime(options:{
   };
   const retain = (entry:Entry,lease:McpTaskLease) => {
     entry.lease=lease;
+    if(entry.op.mcpTask&&lease.bindInteraction)entry.unbindInteraction=lease.bindInteraction(entry.op.mcpTask.task.taskId,{operationId:entry.op.binding.operationId,executionOwner:entry.op.binding.executionOwner});
     entry.unobserve=lease.onChange((id,unsupported)=>{
       if(id !== (entry.op.mcpTask?.task.taskId ?? entry.acceptance?.task.taskId) || disposed)return;
       if(unsupported&&entry.op.mcpTask) void recordProblem(entry,new McpTaskRequestError('mcp-task-interaction-unsupported',false,'unsupported'),'interaction').catch(report);
       entry.nextPoll=0;wake();
     });
   };
-  const forget = (id:string,entry:Entry) => {entry.unobserve?.();entry.lease?.release();entries.delete(id);};
+  const forget = (id:string,entry:Entry) => {entry.unobserve?.();entry.unbindInteraction?.();entry.lease?.release();entries.delete(id);};
   const recordAcceptance=(entry:Entry):Promise<void>=>{
     if(!entry.acceptance)return Promise.resolve();
     if(entry.acceptanceFlight)return entry.acceptanceFlight;
     const response=entry.acceptance;
     entry.acceptanceFlight=request<HostJobPending,'runtime.host_job.accept'>('runtime.host_job.accept',{
       binding:entry.op.binding,task:response.task,content:{data:response.result,parts:[]},
-    }).then(op=>{entry.op=op;delete entry.acceptance;entry.nextPoll=0;})
+    }).then(op=>{entry.op=op;delete entry.acceptance;entry.nextPoll=0;
+      if(op.mcpTask&&!entry.unbindInteraction&&entry.lease?.bindInteraction)entry.unbindInteraction=entry.lease.bindInteraction(op.mcpTask.task.taskId,{operationId:op.binding.operationId,executionOwner:op.binding.executionOwner});})
       .finally(()=>{delete entry.acceptanceFlight;});
     return entry.acceptanceFlight;
   };

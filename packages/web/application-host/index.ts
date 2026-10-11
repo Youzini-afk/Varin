@@ -30,6 +30,7 @@ import { createPolicyModelPreparer } from './lib/kernel/policy-models.js';
 import { createAgentPolicy } from './lib/kernel/agent-policy.js';
 import { RunObservers } from './lib/kernel/run-observers.js';
 import { McpAuthority, McpCompositions, type McpCompositionScope, mcpHostAgentDir, mcpHostProjectTrusted, readMcpHostPermissionPolicy } from '@varin/pi-host/mcp-authority';
+import { createMcpInteractionRuntime } from './lib/kernel/mcp-interaction-runtime.js';
 import { createMcpResourceRuntime } from './lib/kernel/mcp-resource-runtime.js';
 import { createMcpResourceRecovery } from './lib/kernel/mcp-resource-recovery.js';
 import { createMcpTaskRuntime } from './lib/kernel/mcp-task-runtime.js';
@@ -2939,6 +2940,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const hostCredentialAuthority = options.piRuntimeBroker?.credentialAuthority ?? sharedHostCredentialAuthority(process.env.VARIN_AGENT_DIR);
   const mcpAgentDir = mcpHostAgentDir(process.env.VARIN_AGENT_DIR);
   const mcpAuthority = new McpAuthority({
+    interactions: input => mcpInteractionRuntime.receiver(input),
     providerToken: async (_scope, provider) => (await hostCredentialAuthority.getAuth(provider))?.auth.apiKey,
     credentialScope: async (_scope, provider) => hostCredentialAuthority.currentScope(provider),
   });
@@ -3103,6 +3105,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const cwd = workspace?.root ?? mcpAgentDir;
     return readHostHarnessSettings(mcpAgentDir, cwd, Boolean(workspace) && mcpHostProjectTrusted(mcpAgentDir, cwd)).tools?.computer !== false;
   } });
+  const mcpInteractionRuntime = createMcpInteractionRuntime({kernel:kernelClient,runtime:agentRuntime,onError:()=>console.error('[MCP] Original user interaction requires reconciliation')});
+  agentRuntime.setMcpInteractionOwner(mcpInteractionRuntime);
   const mcpTaskRuntime = createMcpTaskRuntime({ kernel: kernelClient, runtime: agentRuntime,
     recover:createMcpTaskRecovery({kernel:kernelClient,authority:mcpAuthority,agentDir:mcpAgentDir,hostId,
       inspectWorkspace:id=>documentsAuthority.inspectWorkspace(id),projectTrusted:cwd=>mcpHostProjectTrusted(mcpAgentDir,cwd),
@@ -4250,6 +4254,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const unregisterComputerCapability = extensionRuntime.capabilities.register(COMPUTER_CAPABILITY, computerRuntimeOwner.current.capability);
   const unregisterResearchCapability = extensionRuntime.capabilities.register(RESEARCH_CAPABILITY, researchRuntime.capability);
   researchRuntime.start();
+  mcpInteractionRuntime.start();
   mcpTaskRuntime.start();
   mcpResourceRuntime.start();
   const unregisterScheduleCapability = extensionRuntime.capabilities.register(SCHEDULE_CAPABILITY,
@@ -4790,6 +4795,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       unregisterScriptCapability();
       unregisterResearchCapability();
       await researchRuntime.dispose();
+      await mcpInteractionRuntime.dispose();
       await mcpResourceRuntime.dispose();
       await mcpTaskRuntime.dispose();
       await resourceService.dispose();

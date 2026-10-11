@@ -14,6 +14,7 @@ import { ThreadResources } from './ThreadResources';
 import { ThreadSkillMaterials } from './ThreadSkillMaterials';
 import { ThreadPermission } from './ThreadPermission';
 import { ThreadQuestion } from './ThreadQuestion';
+import { ThreadMcpInteractions } from './ThreadMcpInteraction';
 import { ThreadSourcePicker } from './ThreadSourcePicker';
 import type { ImageAttachment } from '@varin/protocol';
 import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachmentStrip';
@@ -315,6 +316,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       {snapshot && <ThreadFollowups key={`${host}:${identity.threadId}:${identity.branchId}`} api={api.followups} family={api.family} mediaRead={api.mediaRead} research={api.research} identity={identity}
         run={run ?? undefined} operations={snapshot.operations} followups={snapshot.followups} pending={pending} act={act}
         cancelObservation={operationId => act(() => api.cancelOperation(operationId))} />}
+      {snapshot && <ThreadMcpInteractions key={`mcp:${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} eventCursor={snapshot.eventCursor} />}
       {snapshot?.operations.filter(operation => operation.id !== pause?.action_id).map(operation => <div key={operation.id} className="mx-auto max-w-3xl rounded border p-2 text-sm">
         <ThreadPermission operation={operation} enabled={!pending && operation.run_id === run?.id && !run?.cancel_requested} onDecide={(permissionId, decision) => act(() => api.decidePermission({ ...identity, operationId: operation.id, permissionId, decision }))} />
         {operation.executor === 'ask_user' && <ThreadQuestion operation={operation} enabled={!pending && run?.state === 'waiting' && run.waiting_on === operation.waiting_on} onAnswer={answer => act(() => api.answerQuestion({ ...identity, operationId: operation.id, answer }))} />}

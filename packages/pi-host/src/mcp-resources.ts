@@ -1,4 +1,5 @@
 /** Narrow resource observer shapes. The original McpAuthority owns all clients and URI holders. */
+import type { McpInteractionOrigin } from './mcp-authority.js';
 import type { McpEndpoint } from '@varin/protocol';
 export type McpResourceChange = {
     kind: 'updated';
@@ -12,11 +13,11 @@ export type McpResourceChange = {
     problem: string;
 };
 export type McpResourceCleanup = 'shared' | 'acknowledged' | 'unknown';
-export type McpResourceRelease = { status: 'acknowledged'; acknowledgement: Record<string, unknown> } | { status: 'shared' | 'unknown' };
+export type McpResourceRelease = { status: 'acknowledged'; acknowledgement: Record<string, unknown> } | { status: 'shared' | 'unknown'; protocolError?: Record<string, unknown> };
 export interface McpResourceObserver {
     readonly endpoint: McpEndpoint;
     readonly listenerId: string;
     readonly acknowledgement: Record<string, unknown>;
     /** Synchronously fences/removes this holder. Remote cleanup is a separate bounded request. */
-    detach(): Promise<McpResourceRelease>;
+    detach(options?: { interaction: McpInteractionOrigin; signal: AbortSignal }): Promise<McpResourceRelease>;
 }

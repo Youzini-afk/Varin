@@ -19,6 +19,13 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-11 增量：原 MCP 用户交互
+
+- 原 authority/实际 client 在 initialize 前按已安装 receiver 协商 form/URL；Pi 先连、Native 后用仍共用原连接。HTTP 原响应流与已受理 Task 保确切关联，已知 Task 优先；无关联普通 stdio 明确不可用，不猜当前 Thread。
+- 原 Catalog **52** 短记录连接真实 Operation，request/presentation/response 经同 ContentStore/publication/GC；wire **7**直接拒旧。选择、发送准入、发送确认/未知与 URL 外部完成分开，不造 User/history、工具权限、Wait 或旧 Run 接续。原 source/Goal/cancel/client/grant 继续约束发送，Task 可在父 Run 完成后交互。
+- 实际公开 client/认证 route/UI 按 Thread/branch 分页读答，保 false/0/空串/枚举数组，URL 只经明确点击打开。原 HTTP/stdio→Rust、PolicyAction、无源 child 和已安装 SDK nested 消费链通过；原共享 MCP 11 链、Goal/HostJob、公开消费者、独审失败复验及同源打包完成。准确有限范围见[本片验收](../reviews/runtime-mcp-interactions-2026-10-11.md)，未以局部测试量宣称完整交付。
+- 随后仍需 sampling、独立 error-source URL 交互等 MCP 合同，再继续环境/Web/材料/PDF/学术/Bot、来源/检索/上下文/provider 余能力。用户负责验收后的全面迁移与默认切换。
+
 ## 2026-10-11 增量：原 MCP 资源观察
 
 - 原 schema 声明 subscribe/unsubscribe，finite Result/Thread 的原 Operation 保 observer facet；真实 McpAuthority/client/URI 共享 holder、配置/grant 与 Catalog/ContentStore/输入队列仍各有唯一 owner。Catalog **51**、input **7**、wire **6**直接拒旧，无第二任务库或兼容 reader。

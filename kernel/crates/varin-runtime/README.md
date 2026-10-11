@@ -102,7 +102,7 @@ records typed dependencies in its manifests. Original publication protection spa
 the short identity/epoch/revision-checked commit. GC follows those dependencies from the existing
 history, input, operation, event, policy and request roots. Catalog retains only original metadata;
 byte reads, hash/base64 work and provider serialization stay outside its control lock. Catalog
-format **51**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **6** reject older internal
+format **52**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **7** reject older internal
 formats directly. These are distinct from policy service **4** and private script worker protocol **2**.
 
 `runtime.output.media.read` uses the original caller Thread/branch plus an actual history, queued
@@ -143,6 +143,23 @@ accepted input stays immutable; old listener/epoch publications cannot cross a l
 Reconnect uses a new local incarnation and leaves a gap fact rather than promising remote replay.
 The Host's original MCP authority owns actual shared-client/URI holders, current policy and credentials;
 Catalog does not create another client, inbox, scheduler or remote task owner.
+
+## MCP user interactions
+
+`catalog_mcp_interactions` links short request/choice/delivery facts to the original real Operation.
+The original request, normalized presentation and reviewed answer are immutable ContentStore bodies,
+protected by publication and existing GC roots. Capture/load and stage/publish keep body work outside
+Catalog. No additional execution Operation, question tool, Wait or user-input history is created.
+
+The Host routes only the original HTTP response stream or a known accepted Task on its actual client.
+A related Task takes precedence over the response stream; missing or ambiguous association is explicit.
+Ordinary unassociated stdio cannot borrow an active Thread. User choice, response send admission,
+transport completion/uncertainty and URL completion remain separate. Cancellation, Goal and source
+retirement fence the original sender; accepted global Tasks can outlive their invoking Run.
+Reopen closes old inbound requests without replaying answers or remote tools. Original short facts and
+bodies remain readable through exact Thread/branch authenticated, paged list/read/respond APIs.
+See [MCP](../../../packages/web/application-host/lib/kernel/MCP.md) and the
+[finite verification record](../../../docs/reviews/runtime-mcp-interactions-2026-10-11.md).
 
 ## Instruction and skill checkpoint binding
 

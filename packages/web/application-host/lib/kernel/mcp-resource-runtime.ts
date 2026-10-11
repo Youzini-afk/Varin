@@ -7,6 +7,7 @@ import type { HostToolCall, ToolExecutionReceipt } from './tool-bridge.js';
 import type { ExecutorOwner, McpEndpoint, McpResourceBinding, McpResourcePending, McpResourceListenerParams, McpResourceNotifyParams, KernelMethod, KernelMethodParams } from './protocol.generated.js';
 interface Entry {
   op: McpResourcePending;
+  cleanupInteraction?: { interaction: { operationId: string; executionOwner: ExecutorOwner }; signal: AbortSignal };
   observer?: McpResourceObserver;
   controller: AbortController;
   closed: boolean;
@@ -171,7 +172,7 @@ export function createMcpResourceRuntime(options: {
     const observer = e.observer;
     delete e.observer;
     // detach is synchronous up to returning its independent remote cleanup promise.
-    const cleanup = observer?.detach();
+    const cleanup = observer?.detach(e.cleanupInteraction);
     const local = state(e, {
       listenerId: e.op.subscription.listenerId,
       availability: 'closed',
@@ -458,6 +459,7 @@ export function createMcpResourceRuntime(options: {
         e.receiving = receiver;
         const observer = await input.lease.observeResource(input.service, input.uri, {
           signal: AbortSignal.any([input.signal, e.controller.signal]),
+          interaction: {operationId: input.call.operationId, executionOwner: input.owner},
           ...(input.beforeDispatch ? { beforeDispatch: input.beforeDispatch } : {}),
           onChange: change => {
             void input.checkObservation().then(() => {
@@ -535,6 +537,7 @@ export function createMcpResourceRuntime(options: {
     },
     async unsubscribe(input: {
       call: HostToolCall;
+      owner: ExecutorOwner;
       operationId: string;
       signal: AbortSignal;
     }): Promise<ToolExecutionReceipt> {
@@ -543,16 +546,19 @@ export function createMcpResourceRuntime(options: {
         targetOperationId: input.operationId,
         control: true
       }, input.signal);
-      await request('runtime.operation.cancel', { operationId: input.operationId }, input.signal);
       let e = entries.get(input.operationId);
       if (!e) {
         e = entry(op);
         entries.set(input.operationId, e);
       }
+      // Reserve only this actual user control caller before its cancellation event can
+      // trigger the same cleanup. Autonomous cleanup never creates an interaction origin.
+      e.cleanupInteraction = {interaction:{operationId:input.call.operationId,executionOwner:input.owner},signal:input.signal};
+      await request('runtime.operation.cancel', { operationId: input.operationId }, input.signal);
       adoptLatest(e, op);
       e.op = { ...e.op, cancelRequested: true };
       const observer = e.observer;
-      const cleanup = observer?.detach();
+      const cleanup = observer?.detach(e.cleanupInteraction);
       await close(e);
       const release = cleanup ? await cleanup : { status: e.op.subscription.remoteCleanup };
       const remoteCleanup = release.status;
@@ -567,7 +573,8 @@ export function createMcpResourceRuntime(options: {
               operationId: input.operationId,
               localReleased: true,
               remoteCleanup,
-              ...('acknowledgement' in release ? { acknowledgement: release.acknowledgement } : {})
+              ...('acknowledgement' in release ? { acknowledgement: release.acknowledgement } : {}),
+              ...('protocolError' in release ? { protocolError: release.protocolError } : {})
             },
             parts: []
           }

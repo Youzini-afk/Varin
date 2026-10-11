@@ -558,6 +558,7 @@ fn cancel_resource_observers(tx: &Transaction<'_>, goal_id: &str) -> Result<()> 
     };
     for run in runs {
         super::mcp_resources::cancel_run(tx, &run, false)?;
+        super::mcp_interactions::cancel_run(tx, &run, false)?;
     }
     Ok(())
 }

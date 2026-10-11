@@ -405,7 +405,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
           if (current.generation !== policyGeneration || decision(current.value, target).decision === 'deny') throw new HostToolAdmissionError('mcp_authorization_changed');
           assertTarget(target);
         };
-        if(target.kind==='unsubscribe'){await beforeDispatch();return await options.resources!.unsubscribe({call,operationId:target.operationId,signal});}
+        if(target.kind==='unsubscribe'){await beforeDispatch();return await options.resources!.unsubscribe({call,owner,operationId:target.operationId,signal});}
         if(target.kind==='subscribe'){
           const selected=target;
           return await options.resources!.subscribe({call,owner,lease,service:target.service,uri:target.uri,signal,beforeDispatch,
@@ -417,7 +417,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
           return await options.tasks!.control({call,owner,action:target.action,targetOperationId:target.operationId,signal});
         }
         if (target.kind === 'service') {
-          const response = await lease.requestService(target.service, target.request, {signal,beforeDispatch});
+          const response = await lease.requestService(target.service, target.request, {signal,beforeDispatch,interaction:{operationId:call.operationId,executionOwner:owner}});
           const content = target.request.operation === 'resources/read' ? projectMcpOutput(response.result,'resource')
             : target.request.operation === 'prompts/get' ? projectMcpOutput(response.result,'prompt')
             : { data:{server:target.service.server,schemaVersion:target.service.schemaVersion,...response},parts:[] };
@@ -430,7 +430,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
             ...(target.ttl === undefined?{}:{ttl:target.ttl})});
         }
         const result = await lease.callTool(targetName(target.tool.name, target.tool.schemaVersion), target.args, {
-          schemaVersion: target.tool.schemaVersion, signal, beforeDispatch,
+          schemaVersion: target.tool.schemaVersion, signal, beforeDispatch, interaction:{operationId:call.operationId,executionOwner:owner},
         });
         // An MCP isError receipt is a tool failure, not proof of rollback/no remote effects.
         return receipt(
@@ -454,9 +454,10 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
             effect: 'unknown',
             content: { data: { error: 'mcp_effect_unknown',
               ...(error instanceof McpAuthorityError && error.settlement === 'session_expired' ? { reason: error.code } : {}),
+              ...(error instanceof McpAuthorityError && error.protocolError ? { protocolError:error.protocolError } : {}),
             }, parts: [] },
           },
-          error instanceof McpAuthorityError && error.settlement === 'session_expired',
+          error instanceof McpAuthorityError && (error.settlement === 'session_expired' || error.settlement === 'rpc_response'),
         );
       }
     },

@@ -44,10 +44,17 @@ const bridge = new ToolBridge(() => epoch, async frame => { write(frame); },
   () => write({ kind: 'fixture-failed', code: 'original-tool-bridge-send-failed' }));
 let consumer: Awaited<ReturnType<typeof import('./mcp-consumer-host.test-helper.js').createMcpConsumers>> | undefined;
 let resource: Awaited<ReturnType<typeof import('./mcp-resource-host.test-helper.js').createResourceFixture>> | undefined;
+let interaction: Awaited<ReturnType<typeof import('./mcp-interaction-host.test-helper.js').createInteractionFixture>> | undefined;
 const pixel = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7h8AAAAASUVORK5CYII=';
 
 async function initialize(frame: Record<string, unknown>) {
   epoch = String(frame.epoch); root = String(frame.root);
+  if (frame.interactions === 'http' || frame.interactions === 'stdio') {
+    const { createInteractionFixture } = await import('./mcp-interaction-host.test-helper.js');
+    interaction = await createInteractionFixture({ root, mode: frame.interactions, kernel, runtime, bridge,
+      onError: error => write({ kind: 'fixture-failed', code: error.message }) });
+    write({ kind: 'fixture-prepared', ...await interaction.prepare(frame) }); return;
+  }
   if (frame.resources === true) {
     const { createResourceFixture } = await import('./mcp-resource-host.test-helper.js');
     resource = await createResourceFixture({ root, kernel, runtime, authority, compositions, bridge,
@@ -128,10 +135,18 @@ createInterface({input:process.stdin}).on('line',line=>{const q=JSON.parse(line)
 }
 async function receive(frame: Record<string, unknown>) {
   if (frame.kind === 'fixture-initialize') return initialize(frame);
+  if (frame.kind === 'fixture-interaction-consumer') {
+    assert(interaction);
+    try { write({ kind: 'fixture-interaction-consumer-result', ok: true, result: await interaction.consume(frame) }); }
+    catch (error) { write({ kind: 'fixture-interaction-consumer-result', ok: false, error: error instanceof Error ? error.message : String(error) }); }
+    return;
+  }
+  if (frame.kind === 'fixture-interaction-complete') { assert(interaction); interaction.complete(String(frame.elicitationId)); return; }
   if (frame.kind === 'fixture-resource-prepare') {
     assert(resource); write({ kind: 'fixture-prepared', ...await resource.prepare(frame) }); return;
   }
   if (frame.kind === 'fixture-consumer-parent' || frame.kind === 'fixture-consumer-child') {
+    if (interaction) { write({ kind: 'fixture-prepared', ...await interaction.receive(frame) }); return; }
     if (resource) { write({ kind: 'fixture-prepared', ...await resource.receive(frame) }); return; }
     assert(consumer); write({ kind: 'fixture-prepared', ...await consumer.receive(frame) }); return;
   }
@@ -146,6 +161,7 @@ async function receive(frame: Record<string, unknown>) {
   if (frame.kind === 'fixture-event') { for (const listener of eventListeners) listener(frame.event); return; }
   if (frame.kind === 'fixture-ready') { for (const listener of readyListeners) listener(); return; }
   if (frame.kind === 'fixture-finish') {
+    if (interaction) { const result = await interaction.finish(); bridge.close(); compositions.close(); await authority.close(); write({ kind: 'fixture-finished', ...result }); return; }
     if (resource) {
       const result = await resource.finish(); bridge.close(); compositions.close(); await authority.close();
       write({ kind: 'fixture-finished', ...result }); return;
@@ -160,4 +176,4 @@ const lines = createInterface({ input: process.stdin });
 lines.on('line', line => { void receive(JSON.parse(line) as Record<string, unknown>).catch(error => {
   write({ kind: 'fixture-failed', code: error instanceof Error ? error.stack : String(error) });
 }); });
-lines.on('close', () => { void tasks.dispose(); void resource?.finish(); bridge.close(); void consumer?.close(); scope?.release(); compositions.close(); void authority.close(); });
+lines.on('close', () => { void tasks.dispose(); void interaction?.finish(); void resource?.finish(); bridge.close(); void consumer?.close(); scope?.release(); compositions.close(); void authority.close(); });

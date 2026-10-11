@@ -1,3 +1,4 @@
+import type { McpInteractionListParams, McpInteractionReadParams, McpInteractionRespondParams } from '@varin/protocol';
 import type { MediaReadParams, MediaReadChunk } from './protocol.generated.js';
 import type { MessageSendParams, MessageListParams } from '@varin/protocol';
 import type { FamilyRunsParams, FamilyReadParams, FamilyItemParams } from '@varin/protocol';
@@ -142,6 +143,24 @@ export class ThreadAdapter {
     const run = await this.requireRun(operation.run_id);
     if (run.branch_id !== input.branchId || run.thread_id !== input.threadId) throw new Error('Permission belongs to another branch');
     return this.runtime.decidePermission(input.operationId, input.permissionId, input.decision);
+  }
+  async listMcpInteractions(input: ThreadIdentity & Omit<McpInteractionListParams, 'threadId' | 'branchId'>, signal?: AbortSignal) {
+    await this.requireIdentity(input, signal);
+    return this.runtime.listMcpInteractions({ threadId: input.threadId, branchId: input.branchId,
+      ...(input.cursor === undefined ? {} : { cursor: input.cursor }), ...(input.limit === undefined ? {} : { limit: input.limit }) }, signal);
+  }
+  async readMcpInteraction(input: ThreadIdentity & McpInteractionReadParams, signal?: AbortSignal) {
+    await this.requireIdentity(input, signal);
+    const view = await this.runtime.readMcpInteraction(input.operationId, input.interactionId, signal);
+    if (view.record.threadId !== input.threadId || view.record.branchId !== input.branchId) {
+      throw Object.assign(new Error('MCP request belongs to another branch'), { code: 'forbidden' });
+    }
+    return view;
+  }
+  async respondMcpInteraction(input: ThreadIdentity & McpInteractionRespondParams, signal?: AbortSignal) {
+    await this.readMcpInteraction(input, signal);
+    return this.runtime.respondMcpInteraction({ operationId: input.operationId, interactionId: input.interactionId,
+      expectedRevision: input.expectedRevision, response: input.response }, signal);
   }
   async answerQuestion(input: ThreadIdentity & { operationId: string; answer: string }) {
     await this.requireIdentity(input);
