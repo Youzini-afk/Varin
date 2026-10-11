@@ -1818,3 +1818,6 @@ mod ingress;
 
 #[path = "catalog_host_jobs.rs"]
 pub mod host_jobs;
+
+#[path = "catalog_computer.rs"]
+pub mod computer;

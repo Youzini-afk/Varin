@@ -22,15 +22,7 @@ export interface LiveHostToolBinding {
   binding: HostToolBinding;
 }
 export type { HostToolCall } from './protocol.generated.js';
-export type HostToolCompletion =
-  | { kind: 'not_dispatched'; reason: string }
-  | { kind: 'job_accepted'; operation_id: string; phase: string; effect: 'none' | 'confirmed'; lifetime: 'thread' | 'environment'; content?: unknown }
-  | {
-      kind: 'result';
-      outcome: 'succeeded' | 'failed' | 'cancelled' | 'indeterminate';
-      effect: 'none' | 'partial' | 'confirmed' | 'unknown';
-      content: unknown;
-    };
+export type HostToolCompletion = import('./protocol.generated.js').OperationCallCompletion;
 /** Trusted adapter evidence; never accepted from the extension's ToolCompletion JSON. */
 export interface ToolExecutionReceipt {
   completion: HostToolCompletion;

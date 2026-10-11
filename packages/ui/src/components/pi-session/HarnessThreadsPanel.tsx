@@ -67,7 +67,7 @@ export const HarnessThreadsPanel: React.FC<{
   const branch = usePiSessionStore(state => state.records[parentSessionId]?.branchEntries);
   const todoCommits = usePiSessionStore(state => Object.values(state.records[parentSessionId]?.toolExecutions ?? {})
     .filter(tool => tool.name === 'todo' && tool.status === 'success').map(tool => tool.toolCallId).join('\0'));
-  const computer = useComputerAutomation(parentSessionId);
+  const computer = useComputerAutomation({ runtime: 'pi', sessionId: parentSessionId });
   const overviewKey = workOverviewStateKey(runtimeKey, parentSessionId);
   const selectedOverviewRef = React.useRef(overviewKey);
   selectedOverviewRef.current = overviewKey;
@@ -425,7 +425,7 @@ export const HarnessThreadsPanel: React.FC<{
   const hasThreadRecords = threads.length > 0;
   const hasWorkspaceChanges = (gitStatus?.files.length ?? 0) > 0;
   const computerRequests = computer.state?.requests.filter(item => item.status === 'pending').length ?? 0;
-  const hasComputer = Boolean(computer.state?.leases.length || computerRequests || computer.activities.length || computer.state && computer.state.status !== 'enabled');
+  const hasComputer = Boolean(computer.error || computer.state?.leases.length || computer.state?.cleanups.length || computerRequests || computer.activities.length || computer.state && computer.state.status !== 'enabled');
   const hasOverviewData = questions.length > 0 || threads.length > 0 || hasThreadRecords || blocks.length > 0 || suggestions.length > 0
     || webSources.length > 0 || hasWorkspaceChanges || hasComputer;
   if (presentation === 'inline' && !hasOverviewData && !activePdfMaterial) return null;
@@ -441,7 +441,7 @@ export const HarnessThreadsPanel: React.FC<{
     ...blockGroups.other,
   ];
   const hasOutputs = gitDiff.files > 0 || pendingThreadDiff.files > 0;
-  const attentionCount = questions.length + suggestions.length + planSummary.blocked + threadSummary.attention + computerRequests + (computer.state?.status === 'cancel-unconfirmed' ? 1 : 0);
+  const attentionCount = questions.length + suggestions.length + planSummary.blocked + threadSummary.attention + computerRequests + (computer.error || computer.state?.status === 'cancel-unconfirmed' ? 1 : 0);
   const overviewSummary = questions.length > 0 ? t('pi.question.pending') + ' · ' + questions.length : threadSummary.attention > 0
     ? t('harness.overview.summary.attention', { count: threadSummary.attention })
     : planSummary.blocked > 0
@@ -459,11 +459,11 @@ export const HarnessThreadsPanel: React.FC<{
                 : t('harness.overview.summary.context');
   const peekRows: OverviewPeekRow[] = [];
   if (hasComputer) peekRows.push({ id: 'computer', section: 'computer', icon: 'computer', label: t('computer.automation.title'),
-    value: computerRequests ? t('computer.automation.pending', { count: computerRequests })
+    value: computer.error ?? (computerRequests ? t('computer.automation.pending', { count: computerRequests })
       : computer.state?.status !== 'enabled' ? t(`computer.automation.${computer.state?.status ?? 'enabled'}`)
-        : computer.activities.find(entry => entry.activity.status === 'running')?.activity.app ?? computer.state?.leases.length,
-    ...(computerRequests || computer.state?.status === 'cancel-unconfirmed' ? { tone: 'attention' as const } : {}),
-    ...(computer.state?.active ? { action: { label: t('computer.automation.stop'), disabled: computer.busy || computer.state.status === 'cancelling', run: () => void computer.stop() } } : {}) });
+        : computer.activities.find(entry => entry.activity.status === 'running')?.activity.app ?? computer.state?.leases.length),
+    ...(computer.error || computerRequests || computer.state?.status === 'cancel-unconfirmed' ? { tone: 'attention' as const } : {}),
+    ...(computer.state?.active && (computer.state.currentRootExecution || computer.state.currentExecution) ? { action: { label: t('computer.automation.stop'), disabled: computer.busy || computer.state.status === 'cancelling', run: () => void computer.stop() } } : {}) });
   const planProgress = { done: planSummary.done, total: planSummary.total };
   if (blockGroups.plan) peekRows.push({
     id: 'plan', section: 'plan',
@@ -495,7 +495,7 @@ export const HarnessThreadsPanel: React.FC<{
         <p className="px-3 py-4 typography-meta text-muted-foreground">{t('harness.overview.empty')}</p>
       ) : null}
       {hasComputer ? <HarnessOverviewSection title={t('computer.automation.title')} icon="computer" status={computerRequests || undefined}
-        attention={computerRequests > 0 || computer.state?.status === 'cancel-unconfirmed'} open={choices.computer ?? true} onOpenChange={open => setDisclosure(overviewKey, 'computer', open)}>
+        attention={Boolean(computer.error) || computerRequests > 0 || computer.state?.status === 'cancel-unconfirmed'} open={choices.computer ?? true} onOpenChange={open => setDisclosure(overviewKey, 'computer', open)}>
         <ComputerAutomationSection view={computer} directory={fallbackCwd ?? ''} />
       </HarnessOverviewSection> : null}
       {questions.length > 0 ? <HarnessOverviewSection title={t('pi.question.pending')} icon="question" status={questions.length} attention open={choices.questions ?? true} onOpenChange={open => setDisclosure(overviewKey, 'questions', open)}>

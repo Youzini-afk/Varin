@@ -8,7 +8,7 @@ import { useI18n } from '@/lib/i18n';
 export function PiComputerActivity({ sessionId, directory }: { sessionId: string; directory: string }) {
   const { t } = useI18n();
   const openTab = useUIStore(state => state.openContextPanelTab);
-  const { activities: entries } = useComputerAutomation(sessionId);
+  const { activities: entries } = useComputerAutomation({ runtime: 'pi', sessionId });
   if (!entries.length) return null;
   return <div className="chat-input-column flex flex-wrap gap-1.5 pb-1.5">
     {entries.map(({ desktopId, activity }) => <button key={desktopId} type="button"

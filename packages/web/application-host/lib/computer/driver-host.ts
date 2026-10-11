@@ -5,7 +5,7 @@
  * line-delimited JSON protocol on stdin/stdout — the managed connection the
  * product plan requires in place of per-action interpreter restarts. This
  * module owns spawn, request/response correlation, stderr capture, and the
- * restart-on-unexpected-exit boundary; higher layers own catalogs,
+ * single input-helper lifetime (capture may restart); higher layers own catalogs,
  * observations, and cancellation semantics.
  */
 
@@ -279,6 +279,7 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
 
   const ensureChild = (): ChildProcess => {
     if (isAlive() && child) return child;
+    if (started && spec.env?.VARIN_DRIVER_ROLE !== 'capture') throw new Error('The original Computer input helper exited; acquire a new session without reusing its physical release identity');
     buffer = "";
     stderrTail = "";
     mkdirSync(cancelDir, { recursive: true });

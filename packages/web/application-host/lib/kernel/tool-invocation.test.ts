@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { HostCapabilityCallContext } from '@varin/extension-host';
-import { withToolInvocation, runToolDomainEffect, requireToolInvocation, type ToolInvocationAuthority } from './tool-invocation.js';
+import { withToolInvocation, runToolDomainCall, requireToolInvocation, type ToolInvocationAuthority } from './tool-invocation.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
 
 const owner = { extensionId: 'example.integration', extensionVersion: '1.0.0', entrypointId: 'host', generation: 1 };
@@ -10,7 +10,7 @@ const authority: ToolInvocationAuthority = {
   origin: { kind: 'policy_action', action_id: 'action', node_id: 'merge' }, source: null,
   toolName: 'integrate_child', operation: 'effect', arguments: { childOperationId: 'child', resultRevision: 2 },
 };
-const input = { domain: 'collaboration.integrations', toolName: 'integrate_child', arguments: authority.arguments as { childOperationId: string; resultRevision: number } };
+const input = { operation: 'effect' as const, domain: 'collaboration.integrations', toolName: 'integrate_child', arguments: authority.arguments as { childOperationId: string; resultRevision: number } };
 const receipt: ToolExecutionReceipt = { completion: { kind: 'result', outcome: 'indeterminate', effect: 'partial', content: { status: 'conflict', appliedPaths: ['a'] } }, executor_stopped: true };
 
 test('a returned broker callback cannot retire its still-running domain effect or forge its receipt', async () => {
@@ -26,8 +26,8 @@ test('a returned broker callback cannot retire its still-running domain effect o
   const work = withToolInvocation({ authority, owner, signal, onEffectReceipt: value => { observed = value; } }, async invocation => {
     context = { owner, signal, invocation };
     const execute = async () => { calls += 1; await blocked; return receipt; };
-    void runToolDomainEffect(context, input, execute);
-    void runToolDomainEffect(context, input, execute);
+    void runToolDomainCall(context, input, execute);
+    void runToolDomainCall(context, input, execute);
     callbackReturned();
     return { fakeEffect: 'none' };
   }).then(value => { settled = true; return value; });
@@ -40,7 +40,7 @@ test('a returned broker callback cannot retire its still-running domain effect o
   finish();
   assert.deepEqual(await work, { fakeEffect: 'none' });
   assert.deepEqual(observed, receipt);
-  assert.throws(() => runToolDomainEffect(context, input, async () => receipt), /tool_invocation_unavailable/);
+  assert.throws(() => runToolDomainCall(context, input, async () => receipt), /tool_invocation_unavailable/);
 });
 
 test('a domain effect requires the exact permission-admitted arguments and original live owner', async () => {
@@ -48,11 +48,11 @@ test('a domain effect requires the exact permission-admitted arguments and origi
   let executed = false;
   await withToolInvocation({ authority, owner, signal }, async invocation => {
     const context = { owner, signal, invocation };
-    assert.throws(() => runToolDomainEffect(context, { ...input, arguments: { childOperationId: 'other', resultRevision: 2 } }, async () => { executed = true; return receipt; }), /tool_domain_call_changed/);
-    assert.throws(() => runToolDomainEffect({ ...context, owner: { ...owner, generation: 2 } }, input, async () => receipt), /tool_invocation_unavailable/);
+    assert.throws(() => runToolDomainCall(context, { ...input, arguments: { childOperationId: 'other', resultRevision: 2 } }, async () => { executed = true; return receipt; }), /tool_domain_call_changed/);
+    assert.throws(() => runToolDomainCall({ ...context, owner: { ...owner, generation: 2 } }, input, async () => receipt), /tool_invocation_unavailable/);
   });
   await withToolInvocation({ authority: { ...authority, operation: 'read' }, owner, signal }, async invocation => {
-    assert.throws(() => runToolDomainEffect({ owner, signal, invocation }, input, async () => { executed = true; return receipt; }), /tool_domain_call_changed/);
+    assert.throws(() => runToolDomainCall({ owner, signal, invocation }, input, async () => { executed = true; return receipt; }), /tool_domain_call_changed/);
   });
   assert.equal(executed, false);
 });
@@ -62,7 +62,7 @@ test('lost domain transport remains unknown and occupied after the broker callba
   const signal = new AbortController().signal;
   let observed: ToolExecutionReceipt | undefined;
   await withToolInvocation({ authority, owner, signal, onEffectReceipt: value => { observed = value; } }, async invocation => {
-    await assert.rejects(runToolDomainEffect({ owner, signal, invocation }, input, async () => { throw new Error('file response lost'); }), /file response lost/);
+    await assert.rejects(runToolDomainCall({ owner, signal, invocation }, input, async () => { throw new Error('file response lost'); }), /file response lost/);
     return { pretendSuccess: true };
   });
   assert.equal(observed?.executor_stopped, false);
@@ -76,7 +76,7 @@ test('domain result and accepted job preserve JSON null; only a bodyless job pro
     { kind:'job_accepted' as const,operation_id:authority.operationId,phase:'awaiting_job',effect:'none' as const,lifetime:'thread' as const },
   ]) {
     const signal=new AbortController().signal;
-    const value=await withToolInvocation({authority,owner,signal},invocation=>runToolDomainEffect({owner,signal,invocation},input,async()=>({executor_stopped:false,completion})));
+    const value=await withToolInvocation({authority,owner,signal},invocation=>runToolDomainCall({owner,signal,invocation},input,async()=>({executor_stopped:false,completion})));
     assert.deepEqual(value,completion.kind==='job_accepted'&&completion.content===undefined?{operationId:authority.operationId,phase:'awaiting_job'}:null);
   }
 });

@@ -37,7 +37,7 @@ export function createBotLifecycleRuntime(options: BotLifecycleRuntimeOptions): 
     const associated = vmDesktops(vm, desktops);
     if (!associated.length && !owners.includes(botScopeId(bot.id))) return "The VM has no verified exclusive Bot work association";
     for (const desktop of associated) {
-      if (desktop.work?.some((work) => work.scopeId !== botScopeId(bot.id))) return "Shared with other work";
+      if (desktop.work?.some((work) => work.registry?.scopeId !== botScopeId(bot.id))) return "Shared with other work";
       if ((await options.computers.control(desktop.id)).owner === "human") return "Currently controlled by the user";
     }
     return null;
@@ -78,7 +78,7 @@ export function createBotLifecycleRuntime(options: BotLifecycleRuntimeOptions): 
     async planMachines(bot) {
       const scope = botScopeId(bot.id);
       const { desktops } = await options.computers.list();
-      const used = desktops.filter((desktop) => desktop.work?.some((item) => item.scopeId === scope));
+      const used = desktops.filter((desktop) => desktop.work?.some((item) => item.registry?.scopeId === scope));
       const machines: BotSleepMachine[] = [];
       for (const vm of await options.computers.listVms()) {
         const remoteOwners = vm.binding.guest?.hostId ? await options.remoteMachineOwners(vm.binding.guest.hostId) : [];
@@ -127,10 +127,10 @@ export function createBotLifecycleRuntime(options: BotLifecycleRuntimeOptions): 
       const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
       if (failures.length) throw new Error(failures.map((result) => String(result.reason)).join('\n'));
       for (const desktop of await options.computers.workDesktops(scope)) {
-        if (!desktop.usage || !desktop.work?.some((work) => work.scopeId === scope && work.sessionId === desktop.usage!.sessionId)) continue;
+        if (!desktop.usage || !desktop.work?.some((work) => work.registry?.scopeId === scope && work.work.runtime === "pi" && desktop.usage!.execution.work.runtime === "pi" && work.work.sessionId === desktop.usage!.execution.work.sessionId)) continue;
         // cancel() invalidates the entire desktop lane. On a shared desktop
         // that would also stop another Bot or a user's queued operations.
-        if (desktop.work.some((work) => work.scopeId !== scope)) continue;
+        if (desktop.work.some((work) => work.registry?.scopeId !== scope)) continue;
         try {
           if ((await options.computers.control(desktop.id)).owner !== "human") await options.computers.cancel(desktop.id);
         } catch (error) {

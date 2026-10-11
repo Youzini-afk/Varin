@@ -1,3 +1,4 @@
+import { readHostHarnessSettings } from '@varin/pi-host/settings-authority';
 import { DocumentsFileObservationOwner } from './lib/kernel/file-observation-owner.js';
 import { FileObservationService } from './lib/kernel/file-observation-service.js';
 import { createScheduleToolOwner, SCHEDULE_CAPABILITY } from './lib/kernel/schedule-tool-owner.js';
@@ -156,7 +157,10 @@ import { createBotService } from './lib/bots/bot-service.js';
 import { createBotLifecycleRuntime } from './lib/bots/bot-lifecycle-runtime.js';
 import { registerBotRoutes } from './lib/bots/bot-routes.js';
 import { createComputerService } from './lib/computer/computer-service.js';
-import { resolveComputerActor } from './lib/computer/computer-actor.js';
+import { resolvePiComputerWork } from './lib/computer/computer-actor.js';
+import { ComputerError } from './lib/computer/computer-error.js';
+import { createComputerRuntime, COMPUTER_CAPABILITY } from './lib/kernel/computer-runtime.js';
+import { computerExecutionKey } from '@varin/protocol';
 import { HostSshManager } from './lib/connections/ssh-manager.js';
 import { registerConnectionRoutes } from './lib/connections/connection-routes.js';
 import { attachConnectionProxy } from './lib/connections/host-proxy.js';
@@ -1792,7 +1796,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       if (isBotScopeId(workspaceId)) memoryOrganizerRef.current?.noteScope(workspaceId);
     },
     onThreadReturned: (_scopeId, _parent, _threadId, run) => {
-      void computerServiceRef.current?.finishExecution(run.id).catch(error => console.error('[Computer] Run cleanup failed:', errorMessage(error)));
+      if (run.sessionId) void computerServiceRef.current?.finishExecution({ work: { runtime: 'pi', sessionId: run.sessionId }, runId: run.id }).catch(error => console.error('[Computer] Run cleanup failed:', errorMessage(error)));
     },
 
     onThreadDequeued: createOnThreadDequeued({
@@ -1913,18 +1917,33 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     updateSettings: (mutator) => updateSettingsOnDisk((current) => mutator(current as Record<string, unknown>) as typeof current),
   });
   const desktopControlHolder = `desktop:${hostId}`;
+  let computerRuntime: ReturnType<typeof createComputerRuntime> | undefined;
+  const resolveComputerWork = async (work: import('@varin/protocol').ComputerWorkRef) => {
+    if (work.runtime === 'pi') return resolvePiComputerWork(threadRegistry, work.sessionId);
+    if (!computerRuntime) throw new ComputerError('computer-owner-unavailable', 'The Agent Computer identity owner is unavailable');
+    return computerRuntime.resolve(work);
+  };
   const computerService = createComputerService({
     localControlHolder: options.onComputerControlsReady ? desktopControlHolder : undefined,
-    resolveActor: (sessionId) => resolveComputerActor(threadRegistry, sessionId),
-    bindDesktop: (actor, desktopId) => threadRegistry.setThreadEnvironment(actor.scopeId, actor.threadId, { desktopId }).then(() => {}),
-    revokeSession: (actor) => piRuntimeBroker.requestForSession(actor.sessionId, 'session.computer.cancel', { sessionId: actor.sessionId, runId: actor.runId }).then(() => {}),
-    notifyActor: async (actor, text, wake, id) => {
-      await piRuntimeBroker.requestForSession(actor.sessionId, wake ? 'agent.threadRequest' : 'agent.notify', { sessionId: actor.sessionId, messageId: `computer:${id}`, text });
+    resolveActor: async work => (await resolveComputerWork(work))?.actor ?? null,
+    resolveScope: async work => (await resolveComputerWork(work))?.scope ?? null,
+    bindDesktop: async (actor, desktopId) => {
+      if (!actor.registry || actor.execution.work.runtime !== 'pi') throw new ComputerError('computer-owner-unavailable', 'Agent desktop assignment decisions are not connected');
+      await threadRegistry.setThreadEnvironment(actor.registry.scopeId, actor.registry.threadId, { desktopId });
+    },
+    revokeSession: async actor => {
+      if (actor.execution.work.runtime !== 'pi') return; // No Native persistent Computer scripts are connected.
+      await piRuntimeBroker.requestForSession(actor.execution.work.sessionId, 'session.computer.cancel', { sessionId: actor.execution.work.sessionId, runId: actor.execution.runId });
+    },
+    notifyActor: async (actor, text, wake, id, recipient = 'actor') => {
+      const work = recipient === 'root' ? actor.rootWork : actor.execution.work;
+      if (work.runtime !== 'pi') throw new ComputerError('computer-owner-unavailable', 'Agent Computer environment input is not connected');
+      await piRuntimeBroker.requestForSession(work.sessionId, wake ? 'agent.threadRequest' : 'agent.notify', { sessionId: work.sessionId, messageId: `computer:${id}`, text });
     },
     onAutomationChange: (state) => {
       // A previous Run can finish releasing input after the next one has started. Project the
       // registry's current root execution, never publish that old cleanup as the new round's state.
-      void computerServiceRef.current?.automation.snapshot(state.rootSessionId).then(current => {
+      void computerServiceRef.current?.automation.snapshot(state.rootWork).then(current => {
         broadcastGlobalUiEvent?.({ type: 'varin:computer-automation', properties: current });
       }).catch(error => console.error('[Computer] State projection failed:', errorMessage(error)));
     },
@@ -1943,16 +1962,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return owner ? { scopeId: owner.owningScopeId, threadId: owner.threadId } : null;
     },
     onHandback: async (event) => {
+      if (event.actor.execution.work.runtime !== 'pi' || !event.actor.registry) throw new ComputerError('computer-owner-unavailable', 'Agent Computer handback delivery is not connected; its original event remains pending');
       await createFollowUpThreadSender({
         registry: threadRegistry,
         continueRun: (input) => threadRuntime!.continueRun(input),
         sendToSession: (sessionId, message, meta) => threadRuntime!.send(sessionId, message, meta),
       })({
-        scopeId: event.scopeId, threadId: event.threadId,
+        scopeId: event.actor.registry!.scopeId, threadId: event.actor.registry!.threadId,
         requestId: event.id, from: { kind: 'user', id: `desktop:${event.desktopId}` },
         text: `Human returned control of desktop "${event.label}" (${event.desktopId}) at ${event.at}. Inspect the current desktop state before continuing; the human may have changed files or applications while holding control.`,
       });
-      await computerService.automation.notifyHandoff(event.actor, `The user returned control of desktop "${event.label}". The assigned worker can observe the current scene and continue.`, `handback:${event.id}`, [event.actor.sessionId]);
+      await computerService.automation.notifyHandoff(event.actor, `The user returned control of desktop "${event.label}". The assigned worker can observe the current scene and continue.`, `handback:${event.id}`, [computerExecutionKey(event.actor.execution)]);
     },
     // BC6: remote desktops are served by the same `desktopHosts` connection
     // settings managed-remote resolves — apiUrl + clientToken authenticate
@@ -2973,7 +2993,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   }, createPolicyModelPreparer({ models: modelAuthority,
     // This is a user-scoped role. Native Threads do not impersonate Pi sessions.
     settings: async () => ({ global: await hostCredentialAuthority.readGlobalInferenceSettings() }),
-  }), liveSources.validate, createExtensionTools({runtime:extensionRuntime,kernel:kernelClient,currentPolicy:async runId=>{
+  }), liveSources.validate, createExtensionTools({runtime:extensionRuntime,kernel:kernelClient,prepareConfiguration: (run, required) => {
+    if (!computerRuntime) throw new ComputerError('computer-owner-unavailable', 'Computer tool preparation is unavailable');
+    return computerRuntime.prepareConfiguration(run, required);
+  },currentPolicy:async runId=>{
     const launch=await kernelClient.agentRuntimeRequest<import('./lib/kernel/protocol.generated.js').LaunchIntent|null,'runtime.launch.inspect'>('runtime.launch.inspect',{runId});
     const workspace=launch?.selection.source?await documentsAuthority.inspectWorkspace(launch.selection.source.workspace_id):undefined;
     const cwd=workspace?.root??mcpAgentDir;
@@ -3052,11 +3075,18 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: () => console.warn('[Calendar] preparation or asset synchronization requires attention'),
   });
   scheduledTasksRuntime.setCalendarOwner(calendarOwner);
+  computerRuntime = createComputerRuntime({ kernel: kernelClient, runtime: agentRuntime, computers: computerService, enabled: async runId => {
+    const launch = await kernelClient.agentRuntimeRequest<import('./lib/kernel/protocol.generated.js').LaunchIntent | null, 'runtime.launch.inspect'>('runtime.launch.inspect', { runId });
+    const workspace = launch?.selection.source ? await documentsAuthority.inspectWorkspace(launch.selection.source.workspace_id) : undefined;
+    const cwd = workspace?.root ?? mcpAgentDir;
+    return readHostHarnessSettings(mcpAgentDir, cwd, Boolean(workspace) && mcpHostProjectTrusted(mcpAgentDir, cwd)).tools?.computer !== false;
+  } });
   const researchRuntime = createResearchRuntime({ kernel: kernelClient, runtime: agentRuntime,
     experiments: experimentService, resources: resourceService, sources: sourceService,
     onError: (_error: Error) => console.error('[Research] Original job reconciliation requires attention'),
   });
-  registerThreadRoutes(app, threads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), researchRuntime.user);
+  computerRuntime.start(error => console.error('[Computer] Native execution cleanup is unconfirmed:', error instanceof Error ? error.message : String(error)));
+  registerThreadRoutes(app, threads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), researchRuntime.user, computerRuntime.user);
   registerAgentProfileRoutes(app, createAgentProfilesAPI({ settings: hostCredentialAuthority.globalSettingsAuthority,
     capabilities: signal => agentRuntime.childCapabilities(signal),
     onChanged: () => {
@@ -4174,6 +4204,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
   const unregisterMaterialToolCapability=extensionRuntime.capabilities.register(MATERIAL_SNAPSHOT_CAPABILITY,createMaterialToolOwner(webMaterials));
+  const unregisterComputerCapability = extensionRuntime.capabilities.register(COMPUTER_CAPABILITY, computerRuntime.capability);
   const unregisterResearchCapability = extensionRuntime.capabilities.register(RESEARCH_CAPABILITY, researchRuntime.capability);
   researchRuntime.start();
   const unregisterScheduleCapability = extensionRuntime.capabilities.register(SCHEDULE_CAPABILITY,
@@ -4699,6 +4730,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     stop: async (shutdownOptions: { exitProcess?: boolean | undefined } = {}) => {
       // Stop timer/watcher producers before their runtime and storage
       // dependencies begin shutting down.
+      computerRuntime?.stop();
       runObservers.stop();
       collaboration.stop();
       await fileObservations.stop();
@@ -4707,6 +4739,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       followUpService.dispose();
       piSessionAutomation.stop();
       piSessionTitles.stop();
+      unregisterComputerCapability();
       unregisterResearchCapability();
       await researchRuntime.dispose();
       await resourceService.dispose();

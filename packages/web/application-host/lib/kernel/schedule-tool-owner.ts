@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { parseVarinToolJson, type JsonValue } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
 import { ScheduledTaskError, type createScheduledTaskService } from '../scheduled-tasks/service.js';
-import { runToolDomainEffect } from './tool-invocation.js';
+import { runToolDomainCall } from './tool-invocation.js';
 export const SCHEDULE_CAPABILITY = 'tasks.schedules';
 export function createScheduleToolOwner(options: {
   service: ReturnType<typeof createScheduledTaskService>;
@@ -11,7 +11,7 @@ export function createScheduleToolOwner(options: {
 }): HostCapabilityHandler {
   return async (method, params, context) => {
     if (method !== 'manage' || !params || typeof params !== 'object' || Array.isArray(params) || typeof params.action !== 'string') throw new Error('Invalid scheduled task invocation');
-    return runToolDomainEffect(context, { domain: SCHEDULE_CAPABILITY, toolName: 'scheduled_task', arguments: params }, async authority => {
+    return runToolDomainCall(context, { operation: 'effect', domain: SCHEDULE_CAPABILITY, toolName: 'scheduled_task', arguments: params }, async authority => {
       let enteredMutation = false;
       try {
         if (!authority.source) throw new Error('Scheduled tasks require the caller’s admitted project source');

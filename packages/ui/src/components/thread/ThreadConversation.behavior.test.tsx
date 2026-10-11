@@ -52,7 +52,7 @@ function fixture(active = false) {
   });
   let listener: Parameters<ThreadsAPI['observe']>[1] | undefined;
   const unused = async (): Promise<never> => { throw new Error('unused fixture API'); };
-  const api: ThreadsAPI = { goals: { start: vi.fn(unused), update: unused, control: unused, list: async () => view.goals }, resources: { refresh: unused }, followups: { jobSources: async () => [], register: unused, list: unused, get: unused, occurrence: unused, occurrences: unused, control: unused, pendingRegistrations: async () => [], cancelRegistration: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
+  const api: ThreadsAPI = { computer: { state: vi.fn<ThreadsAPI['computer']['state']>(async target => ({ state: { work: target, rootWork: target, currentExecution: null, currentRootExecution: null, active: false, status: 'enabled', leases: [], requests: [], cleanups: [] }, activities: [] })), stop: vi.fn(unused) }, goals: { start: vi.fn(unused), update: unused, control: unused, list: async () => view.goals }, resources: { refresh: unused }, followups: { jobSources: async () => [], register: unused, list: unused, get: unused, occurrence: unused, occurrences: unused, control: unused, pendingRegistrations: async () => [], cancelRegistration: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
     snapshot: async () => structuredClone(view), submit, enqueue, editInput, cancelInput, cancelRun,
     inspectTools: unused, inspectPolicy: unused, restartPolicy: unused, cancelPolicyUpdate: unused, selectModel: unused, decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, retryPreparation: unused, events: async () => [],
     observe: async (_cursor, onEvent, { signal }) => new Promise<void>(resolve => { listener = onEvent; if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true }); }),
@@ -1930,4 +1930,19 @@ it('discards late machine reads after closing, changing Run, Host or Thread/bran
   expect(container.textContent).toContain('Research workstation');
   expect(resources.mock.calls.at(-1)![0]).toEqual({ ...nextIdentity, sourceRunId: 'new-work' });
   expect(container.textContent).not.toContain('Original machines could not be read');
+});
+
+it('shows Native Computer owner state and stops the exact displayed execution without a Pi session', async () => {
+  const f = fixture(true);
+  const execution = { work: identity, runId: 'computer-run' };
+  const computerState = { work: identity, rootWork: identity, currentExecution: execution, currentRootExecution: execution,
+    active: true, status: 'enabled' as const, leases: [], requests: [], cleanups: [] };
+  vi.mocked(f.api.computer.state).mockResolvedValue({ state: computerState, activities: [] });
+  vi.mocked(f.api.computer.stop).mockResolvedValue({ state: { ...computerState, currentExecution: null, currentRootExecution: null,
+    status: 'cancel-unconfirmed', cleanups: [{ execution, desktopId: 'desktop', status: 'cancel-unconfirmed' }] } });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  expect(f.api.computer.state).toHaveBeenCalledWith(identity, expect.any(AbortSignal));
+  await act(async () => button('computer.automation.stop').click());
+  expect(f.api.computer.stop).toHaveBeenCalledWith(identity, { runId: 'computer-run', desktopId: undefined });
+  expect(container.textContent).toContain('computer.automation.cancel-unconfirmed');
 });

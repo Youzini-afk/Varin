@@ -25,7 +25,7 @@ const mocks = vi.hoisted(() => ({
   toggleContextPanel: vi.fn(),
   translate: (key: string) => key,
   events: new Set<(event: VarinEvent) => void>(),
-  computer: { state: null as ComputerAutomationState | null, activities: [], busy: false, error: null, stop: vi.fn() },
+  computer: { state: null as ComputerAutomationState | null, activities: [], busy: false, error: null as string | null, stop: vi.fn(), refresh: vi.fn() },
 }));
 vi.mock('@varin/application-client', async (importOriginal) => ({
   ...await importOriginal<typeof import('@varin/application-client')>(),
@@ -127,7 +127,7 @@ let failPreview: (error: Error) => void;
 beforeEach(() => {
   mocks.runtimeKey = 'runtime-1';
   mocks.events.clear();
-  mocks.computer.state = null; mocks.computer.stop.mockReset();
+  mocks.computer.state = null; mocks.computer.error = null; mocks.computer.stop.mockReset(); mocks.computer.refresh.mockReset();
   mocks.records = {};
   mocks.webSources = [];
   useWorkOverviewStore.setState({ bySession: {}, parentBySession: {} });
@@ -488,9 +488,12 @@ describe('work overview presentation', () => {
   });
 
   it('lets the user stop Computer Use from the compact overview without opening a large panel', async () => {
-    mocks.computer.state = { rootSessionId: 'parent-1', runId: 'run', active: true, status: 'enabled', requests: [], leases: [{ id: 'lease', desktopId: 'desktop', access: 'control', grantedAt: 'now', actor: {
-      sessionId: 'parent-1', runId: 'run', rootSessionId: 'parent-1', rootRunId: 'run', scopeId: 'workspace-1', threadId: 'root', label: 'Main', readOnly: false,
-    } }] };
+    const work = { runtime: 'pi' as const, sessionId: 'parent-1' };
+    const execution = { work, runId: 'run' };
+    mocks.computer.state = { work, rootWork: work, currentExecution: execution, currentRootExecution: execution,
+      active: true, status: 'enabled', requests: [], cleanups: [], leases: [{ id: 'lease', desktopId: 'desktop', access: 'control', grantedAt: 'now', actor: {
+        execution, rootWork: work, rootExecution: execution, registry: { scopeId: 'workspace-1', threadId: 'root' }, label: 'Main', readOnly: false,
+      } }] };
     await act(async () => root.render(<HarnessThreadStateContext.Provider value={state}><HarnessThreadsPanel workspaceId="workspace-1" parentSessionId="parent-1" fallbackCwd="/parent" /></HarnessThreadStateContext.Provider>));
     await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="harness.overview.peek"]')!.click());
     const stop = container.querySelector<HTMLButtonElement>('button[aria-label="computer.automation.stop"]')!;
@@ -498,6 +501,16 @@ describe('work overview presentation', () => {
     await act(async () => stop.click());
     expect(mocks.computer.stop).toHaveBeenCalledTimes(1);
     expect(container.querySelector('[data-harness-overview-floating]')).toBeNull();
+  });
+
+  it('shows an initial Computer owner error even when no assignments or other work exist', async () => {
+    state.threads = [];
+    mocks.computer.error = 'Computer owner unavailable';
+    await act(async () => root.render(<HarnessThreadStateContext.Provider value={state}><HarnessThreadsPanel workspaceId="workspace-1" parentSessionId="parent-1" fallbackCwd="/parent" presentation="inline" /></HarnessThreadStateContext.Provider>));
+    expect(container.textContent).toContain('Computer owner unavailable');
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe('Computer owner unavailable');
+    await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'settings.harness.retry')!.click());
+    expect(mocks.computer.refresh).toHaveBeenCalledOnce();
   });
 
   it('still appears for real workspace changes when no plan, memory, source or subtask exists', async () => {

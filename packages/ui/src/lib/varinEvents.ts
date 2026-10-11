@@ -1,5 +1,6 @@
 import { getRuntimeUrlResolver } from '@varin/application-client';
 import { subscribeRuntimeEndpointChanged } from '@varin/application-client';
+import { parseComputerAutomationState, parseComputerActivity } from '@varin/protocol';
 import type { Thread, ThreadParent, ThreadRun, ComputerActivityEntry, ComputerAutomationState } from '@varin/protocol';
 import { bindClientSurfaceSession, clientSurfaceQuery, handleClientSettingsRequest } from '@/lib/client-settings-bridge';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
@@ -246,23 +247,19 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   }
 
   if (envelope.type === 'varin:computer-automation') {
-    const state = getEventProperties(envelope.properties);
-    if (typeof state?.rootSessionId === 'string' && typeof state.runId === 'string' && typeof state.active === 'boolean' && ['enabled', 'cancelling', 'cancel-unconfirmed'].includes(String(state.status))
-      && Array.isArray(state.leases) && Array.isArray(state.requests)) {
-      for (const listener of listeners) listener({ type: 'computer-automation', state: state as unknown as ComputerAutomationState });
-    }
+    try {
+      const state = parseComputerAutomationState(envelope.properties);
+      for (const listener of listeners) listener({ type: 'computer-automation', state });
+    } catch { /* Ignore malformed owner projections. */ }
     return;
   }
   if (envelope.type === 'varin:computer-activity') {
     const properties = getEventProperties(envelope.properties);
-    const activity = getEventProperties(properties?.activity);
-    if (typeof properties?.desktopId === 'string' && typeof activity?.app === 'string'
-      && typeof activity.operation === 'string' && ['observe', 'click', 'type', 'key', 'scroll', 'drag', 'set_value', 'secondary'].includes(activity.operation)
-      && typeof activity.updatedAt === 'string' && ['running', 'idle', 'error'].includes(String(activity.status))) {
-      const nextEvent = { type: 'computer-activity', desktopId: properties.desktopId,
-        activity: { app: activity.app, operation: activity.operation, status: activity.status, updatedAt: activity.updatedAt,
-          ...(typeof activity.sessionId === 'string' ? { sessionId: activity.sessionId } : {}) } } as Extract<VarinEvent, { type: 'computer-activity' }>;
-      for (const listener of listeners) listener(nextEvent);
+    if (typeof properties?.desktopId === 'string' && properties.desktopId) {
+      try {
+        const activity = parseComputerActivity(properties.activity);
+        for (const listener of listeners) listener({ type: 'computer-activity', desktopId: properties.desktopId, activity });
+      } catch { /* Ignore malformed activity projections. */ }
     }
     return;
   }

@@ -96,6 +96,24 @@ describe('Varin events', () => {
     unsubscribe();
   });
 
+  test('preserves Native Computer execution identities and idle cleanup while rejecting Pi aliases', async () => {
+    const { subscribeVarinEvents } = await import('./varinEvents');
+    const events: unknown[] = [];
+    const unsubscribe = subscribeVarinEvents(event => events.push(event));
+    const source = MockEventSource.instances[0];
+    const work = { runtime: 'agent', threadId: 'same', branchId: 'branch' };
+    const execution = { work, runId: 'old-run' };
+    const state = { work, rootWork: work, currentExecution: null, currentRootExecution: null,
+      active: false, status: 'cancel-unconfirmed', leases: [], requests: [], cleanups: [{ execution, status: 'cancel-unconfirmed' }] };
+    const activity = { execution, app: 'Editor', operation: 'click', status: 'running', updatedAt: 'now' };
+    source.onmessage?.({ data: JSON.stringify({ type: 'varin:computer-automation', properties: state }) });
+    source.onmessage?.({ data: JSON.stringify({ type: 'varin:computer-activity', properties: { desktopId: 'desktop', activity } }) });
+    source.onmessage?.({ data: JSON.stringify({ type: 'varin:computer-activity', properties: { desktopId: 'desktop', activity: { ...activity, sessionId: 'same' } } }) });
+    source.onmessage?.({ data: JSON.stringify({ type: 'varin:computer-automation', properties: { ...state, cleanups: [{ execution: { runId: 'bad', work: { runtime: 'agent', threadId: 'same' } }, status: 'cancel-unconfirmed' }] } }) });
+    expect(events).toEqual([{ type: 'computer-automation', state }, { type: 'computer-activity', desktopId: 'desktop', activity }]);
+    unsubscribe();
+  });
+
   test('dispatches native plan identity hints and rejects malformed envelopes', async () => {
     const { subscribeVarinEvents } = await import('./varinEvents');
     const events: unknown[] = [];

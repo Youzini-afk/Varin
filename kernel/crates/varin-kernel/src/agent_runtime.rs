@@ -16,6 +16,8 @@ use std::sync::{
 use std::thread::{self, JoinHandle};
 use varin_runtime::{model_session, supervisor::RunSupervisor, Catalog, SubmitInput};
 
+#[path = "agent_computer.rs"]
+mod computer_commands;
 #[path = "agent_host_jobs.rs"]
 mod host_job_commands;
 
@@ -874,6 +876,7 @@ pub(crate) fn spawn(
                         }
                         if method.starts_with("runtime.host_job.")
                             || method == "runtime.research.scopes"
+                            || method == "runtime.computer.scope"
                         {
                             let runtime = runtime.clone();
                             let method = method.to_owned();
@@ -882,9 +885,8 @@ pub(crate) fn spawn(
                             let done = finished.clone();
                             let cancelled = cancellation.clone();
                             thread::spawn(move || {
-                                let result = host_job_commands::execute(
-                                    runtime, &method, params, &cancelled,
-                                );
+                                let result = if method == "runtime.computer.scope" { computer_commands::execute(runtime, params, &cancelled) }
+                                else { host_job_commands::execute(runtime, &method, params, &cancelled) };
                                 let response = match result {
                                     Ok(value) => response_ok(&response_id, value),
                                     Err(error) => response_error(&response_id, &error),

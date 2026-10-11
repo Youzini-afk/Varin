@@ -1,4 +1,4 @@
-import type { HarnessServiceMap, ComputerAccess } from "@varin/protocol";
+import type { HarnessServiceMap, ComputerAccess, ComputerExecutionRef } from "@varin/protocol";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import { HarnessServiceError } from "./service-error.js";
@@ -115,24 +115,27 @@ export function registerComputerServices(
       const access: ComputerAccess = params.access ?? 'control';
       if (!['observe', 'control'].includes(access)) throw new HarnessServiceError('invalid-params', 'Unknown desktop access mode');
       const desktopId = await computers.resolveDesktop(await desktopIdFor(host, ctx, params));
-      request = await coordinator.request(ctx.sessionId, desktopId, access, params.reason ?? '');
+      request = await coordinator.request({ runtime: 'pi', sessionId: ctx.sessionId }, desktopId, access, params.reason ?? '');
       if (params.wait && request.status === 'pending') {
         const binding = await host.threadRegistry?.getSessionBinding(ctx.sessionId);
         if (binding && host.threadRegistry) await host.threadRegistry.yieldExecutionSlot(binding.owningScopeId, binding.threadId, binding.runId,
           { kind: 'thread', text: `Waiting for the main thread to assign desktop ${desktopId}` });
-        try { request = await coordinator.wait(ctx.sessionId, request.id, ctx.signal); }
+        try { request = await coordinator.wait({ runtime: 'pi', sessionId: ctx.sessionId }, request.id, ctx.signal); }
         finally { if (binding && !ctx.signal.aborted) await host.threadRegistry?.awaitExecutionSlot(binding.owningScopeId, binding.threadId, binding.runId, ctx.signal); }
       }
     } else if (params.op === 'grant' || params.op === 'deny') {
       if (!ctx.actor.grantedCapabilities.includes('control.computer')) throw new HarnessServiceError('forbidden', 'Desktop grants require Computer Use control authorization');
       if (!params.requestId) throw new HarnessServiceError('invalid-params', 'Supply requestId');
-      request = await coordinator.decide(ctx.sessionId, params.requestId, params.op === 'grant', params.reason);
-    } else if (params.op === 'release') await coordinator.release(ctx.sessionId, params.desktopId);
+      request = await coordinator.decide({ runtime: 'pi', sessionId: ctx.sessionId }, params.requestId, params.op === 'grant', params.reason);
+    } else if (params.op === 'release') await coordinator.release({ runtime: 'pi', sessionId: ctx.sessionId }, params.desktopId);
     else if (params.op !== 'status') throw new HarnessServiceError('invalid-params', 'Unknown access operation');
-    return { state: await coordinator.snapshot(ctx.sessionId), ...(request ? { request } : {}) };
+    return { state: await coordinator.snapshot({ runtime: 'pi', sessionId: ctx.sessionId }), ...(request ? { request } : {}) };
   } });
   const register: typeof router.register = (method, service) => router.register(method, {
-    handle: (params, ctx) => computers.automation.authorize(ctx.sessionId, 'observe', undefined, async () => {
+    handle: (params, ctx) => {
+      if (!ctx.actor.runId) throw new HarnessServiceError('forbidden', 'Computer Use requires the original live Pi Run');
+      const execution: ComputerExecutionRef = { work: { runtime: 'pi', sessionId: ctx.sessionId }, runId: ctx.actor.runId };
+      return computers.automation.authorize(execution.work, 'observe', undefined, async () => {
       const metadata = ['computer.list', 'computer.evidence'].includes(method);
       const bridge = params as { op?: string; act?: { kind?: string } };
       const bridgeRead = method === 'computer.browser' && (['status', 'tabs', 'snapshot'].includes(bridge.op ?? '') || bridge.op === 'act' && bridge.act?.kind === 'screenshot')
@@ -141,10 +144,11 @@ export function registerComputerServices(
       const requested = params as { desktopId?: string };
       const desktopId = metadata || method === 'computer.prepare' ? undefined
         : await computers.resolveDesktop(await desktopIdFor(host, ctx, requested));
-      return computers.automation.authorize(ctx.sessionId, access, desktopId, () => service.handle(
+      return computers.automation.authorize({ runtime: 'pi', sessionId: ctx.sessionId }, access, desktopId, () => service.handle(
         desktopId ? { ...params, desktopId } : params, ctx,
-      ));
-    }),
+      ), execution);
+      }, execution);
+    },
   });
   register("computer.list", createComputerListService(host));
   register("computer.prepare", { handle: async (params) => ({ desktop: await requireService(host).prepareDesktop(params, true) }) });

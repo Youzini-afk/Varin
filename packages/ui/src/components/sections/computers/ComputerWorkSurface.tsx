@@ -1,3 +1,4 @@
+import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import React from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useI18n } from '@/lib/i18n';
@@ -16,21 +17,26 @@ import type { ComputerDesktop } from '@varin/protocol';
  */
 export function ComputerWorkSurface({ directory, tabID }: { directory: string; tabID: string }) {
   const { t } = useI18n();
+  const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const tab = useUIStore((state) => state.contextPanelByDirectory[directory]?.tabs.find((entry) => entry.id === tabID));
   const setTabTarget = useUIStore((state) => state.setContextPanelTabTargetPath);
-  const [catalog, setCatalog] = React.useState<ComputerCatalog | null>(null);
+  const [catalogState, setCatalog] = React.useState<{ host: number; catalog: ComputerCatalog } | null>(null);
+  const catalog = catalogState?.host === host ? catalogState.catalog : null;
+  const read = React.useRef(0);
   const [error, setError] = React.useState<string | null>(null);
 
   const refresh = React.useCallback(async () => {
+    const request = ++read.current;
     try {
-      setCatalog(await listComputers());
-      setError(null);
+      const catalog = await listComputers();
+      if (host !== getRuntimeEndpointGeneration() || request !== read.current) return;
+      setCatalog({ host, catalog }); setError(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      if (host === getRuntimeEndpointGeneration() && request === read.current) setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, []);
+  }, [host]);
 
-  React.useEffect(() => { void refresh(); }, [refresh]);
+  React.useEffect(() => { setError(null); void refresh(); return () => { read.current += 1; }; }, [refresh]);
 
   const desktops = React.useMemo(() => catalog?.desktops ?? [], [catalog]);
   const selectedId = tab?.targetPath ?? null;
@@ -38,11 +44,10 @@ export function ComputerWorkSurface({ directory, tabID }: { directory: string; t
     ? desktops.find((desktop) => desktop.id === selectedId) ?? null
     : null;
 
-  // Work association (BC8): the last agent session that drove this desktop,
-  // stamped by the Host service. Projection only — work state lives on the
-  // session's Thread/Run records.
+  // The Host's last actual execution. Native work never opens a Pi session.
   const usageSession = usePiSessionStore((state) => {
-    const sessionId = selected?.usage?.sessionId;
+    const work = selected?.usage?.execution.work;
+    const sessionId = work?.runtime === 'pi' ? work.sessionId : undefined;
     return sessionId ? state.summaries.find((summary) => summary.id === sessionId) ?? null : null;
   });
 
@@ -83,15 +88,18 @@ export function ComputerWorkSurface({ directory, tabID }: { directory: string; t
         </button>
       </div>
       {error ? <p role="alert" className="typography-meta text-destructive">{error}</p> : null}
-      {selected?.usage ? (
+      {selected?.usage && (selected.usage.execution.work.runtime === 'pi' ? (
         <button
           type="button"
           className="typography-meta text-muted-foreground hover:text-foreground text-left"
-          onClick={() => { void openPiSessionFromNavigation({ sessionId: selected.usage!.sessionId }); }}
+          onClick={() => { const work = selected.usage?.execution.work; if (work?.runtime === 'pi') void openPiSessionFromNavigation({ sessionId: work.sessionId }); }}
         >
-          {t('contextPanel.computer.lastSession')}: {usageSession?.name || usageSession?.firstMessage?.slice(0, 60) || selected.usage.sessionId}
+          {t('contextPanel.computer.lastSession')}: {usageSession?.name || usageSession?.firstMessage?.slice(0, 60) || selected.usage.execution.work.sessionId}
         </button>
-      ) : null}
+      ) : <p className="typography-meta break-all text-muted-foreground">
+        {t('computer.automation.agentWork', { threadId: selected.usage.execution.work.threadId, branchId: selected.usage.execution.work.branchId })}
+        {' · '}{t('computer.automation.execution', { runId: selected.usage.execution.runId })}
+      </p>)}
       {selected ? (
         <ComputerDesktopPane key={selected.id} desktop={selected} />
       ) : catalog ? (

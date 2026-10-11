@@ -17,6 +17,8 @@
   "response": {"v": 1, "kind": "response", "id": "request-id", "ok": true, "result": {}},
   "requestUnion": true,
   "methodParams": {
+    "runtime.computer.scope": "ComputerScopeParams",
+
     "runtime.research.scopes": "ResearchScopeParams",
     "runtime.host_job.begin": "HostJobBeginParams",
     "runtime.host_job.user": "HostJobUserParams",
@@ -267,6 +269,9 @@
     "runtime.messages.get": "MessageGetParams"
   },
   "dto": {
+    "ComputerScopeParams": {"fields":{"threadId":{"type":"string"},"branchId":{"type":"string"},"runId":{"type":"string","optional":true},"operationId":{"type":"string","optional":true}}},
+    "ComputerScope": {"fields":{"threadId":{"type":"string"},"branchId":{"type":"string"},"rootThreadId":{"type":"string"},"rootBranchId":{"type":"string"},"currentRunId":{"type":"string | null"},"currentRootRunId":{"type":"string | null"},"canExecute":{"type":"boolean"}}},
+
     "HostJobBinding": {"fields":{"operationId":{"type":"string"},"executionOwner":{"type":"ExecutorOwner"},"domain":{"type":"string"},"domainVersion":{"type":"number"},"workspaceId":{"type":"string"},"subjectId":{"type":"string"}},"rustType":"varin_runtime::catalog::host_jobs::HostJobBinding"},
     "ResearchScope": {"fields":{"canSubmit":{"type":"boolean"},"rootThreadId":{"type":"string"},"threadId":{"type":"string"},"branchId":{"type":"string"},"sourceRunId":{"type":"string"},"source":{"type":"LaunchSource"},"readThreadIds":{"type":"string[]"},"controlThreadIds":{"type":"string[]"}}},
     "ResearchScopeParams": {"fields":{"threadId":{"type":"string"},"branchId":{"type":"string"},"sourceRunId":{"type":"string","optional":true},"operationId":{"type":"string","optional":true}}},
@@ -1039,6 +1044,8 @@
     "FamilyItem": {"raw": "export interface FamilyItem { threadId: string; branchId: string; runId: string | null; headId: string | null; itemId: string; format: 'conversation_json'; text: string; offset: number; nextOffset: number | null; totalBytes: number }"}
   },
   "methods": {
+    "runtime.computer.scope": "Read actual Computer Thread/branch/Run family identity without a file source",
+
     "runtime.research.scopes": "Trusted Host research and original job authority",
     "runtime.host_job.begin": "Trusted Host domain dispatch identity",
     "runtime.host_job.user": "Trusted Host research and original job authority",

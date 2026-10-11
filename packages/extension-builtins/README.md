@@ -2,6 +2,15 @@
 
 This package contains the browser-safe manifests for Varin's built-in extensions and the immutable Node runtimes used by brokered Host extensions.
 
+`varin.builtin.computer` provides the ordinary native root single-call Computer tools. Its shared
+`COMPUTER_TOOL_DECLARATIONS` supplies the product manifest, tool directory and Host argument decoder;
+the immutable `host.cjs` uses SDK `provideTool` and the reviewed `computer.use` capability. The original
+ComputerService retains desktop assignment, physical control and action receipts. Enabled-by-default
+distribution does not bypass capability review, selected tool configuration or actual Computer settings.
+The saved execution binding fixes its default desktop and is restored unchanged after reconnect.
+Native child request/Wait, trusted handback continuation and persistent Computer scripts are still
+pending. See the [Computer owner](../web/application-host/lib/computer/DOCUMENTATION.md).
+
 The lazy brokered `varin.builtin.retrieval-structured`, `varin.builtin.retrieval-keyword`, and
 `varin.builtin.retrieval-semantic` packages
 provide `varin.retrieval.plan@1`. The structured declaration is the native retrieval distribution

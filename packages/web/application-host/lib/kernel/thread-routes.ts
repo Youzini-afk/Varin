@@ -1,8 +1,10 @@
+import { parseComputerWorkRef, parseComputerExecutionRef } from '@varin/protocol';
 import type { FamilyRunsParams, FamilyReadParams, FamilyItemParams, FollowupRegistrationTrigger } from '@varin/protocol';
 import { PlanConflict } from './plan-service.js';
 import { parseThreadImages } from './thread-images.js';
 import type { Express, RequestHandler } from 'express';
-import type { ThreadIdentity, ThreadModel, ThreadSubmit, ThreadThinkingLevel, ThreadResearchAPI, ThreadResearchSelection } from '@varin/application-client';
+import type { ThreadIdentity, ThreadModel, ThreadSubmit, ThreadThinkingLevel, ThreadResearchAPI, ThreadResearchSelection, ThreadComputerAPI } from '@varin/application-client';
+import { ComputerError } from '../computer/computer-error.js';
 import { HarnessServiceError } from '../harness/service-error.js';
 import { KernelClientError } from './kernel-client.js';
 import { ThreadAdapter } from './thread-adapter.js';
@@ -61,8 +63,10 @@ const modelSelection = (value: unknown): ThreadModel => {
 };
 
 /** Mounted in the existing authenticated Application Host, shared by Web and Electron. */
-export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requireAuth: RequestHandler, research?: ThreadResearchAPI): void {
+export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requireAuth: RequestHandler, research?: ThreadResearchAPI, computer?: ThreadComputerAPI): void {
   const fields: Record<string, readonly string[]> = {
+    'computer/state': ['runtime', 'threadId', 'branchId'],
+    'computer/stop': ['runtime', 'threadId', 'branchId', 'runId', 'desktopId'],
     'research/scopes': ['runtime', 'threadId', 'branchId'],
     'research/list': ['runtime', 'threadId', 'branchId', 'sourceRunId', 'request'],
     'research/get': ['runtime', 'threadId', 'branchId', 'sourceRunId', 'attemptId'],
@@ -125,13 +129,26 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       const closed = () => { if (!response.writableEnded) controller.abort(new DOMException('Request closed', 'AbortError')); };
       response.once('close', closed);
       try {
-        const body = object(request.body);
-        if (Object.keys(body).some(key => !fields[method]!.includes(key))) throw new Error('Unsupported thread request field');
+        let body: Record<string, unknown>;
+        try {
+          body = object(request.body);
+          if (Object.keys(body).some(key => !fields[method]!.includes(key))) throw new Error('Unsupported thread request field');
+          if (method === 'computer/state' || method === 'computer/stop') {
+            const work = parseComputerWorkRef(body);
+            if (work.runtime !== 'agent') throw new Error('Agent Thread required');
+            if (method === 'computer/stop') parseComputerExecutionRef({ work, runId: body.runId });
+            if (body.desktopId !== undefined && (typeof body.desktopId !== 'string' || !body.desktopId.trim())) throw new Error('Desktop must be nonempty');
+          }
+        } catch (error) {
+          if (method === 'computer/state' || method === 'computer/stop') throw new ComputerError('computer-request-invalid', 'Choose an Agent Thread and branch; Stop also requires the exact Run shown in its Computer state');
+          throw error;
+        }
         response.json(await action(body, controller.signal));
       }
       catch (error) {
         // Errors from credentials/model services can contain upstream bodies. Do not echo them.
         const conflict = error instanceof PlanConflict || error instanceof KernelClientError && error.code === 'operation-error' && error.message.startsWith('operation error: conflict:');
+        if (error instanceof ComputerError) { response.status(error.computerCode === 'computer-work-not-found' ? 404 : error.computerCode === 'computer-execution-stale' ? 409 : error.computerCode === 'computer-request-invalid' ? 400 : 503).json({ code: error.computerCode, error: error.message }); return; }
         const code = conflict ? 'thread-conflict' : error instanceof HarnessServiceError ? error.harnessCode
           : error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'thread-request-failed';
         const status = code.includes('conflict') ? 409 : code === 'denied' || code === 'forbidden' ? 403
@@ -140,6 +157,10 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       } finally { response.removeListener('close', closed); }
     });
   };
+  if (computer) {
+    post('computer/state', (body, signal) => computer.state(identity(body), signal));
+    post('computer/stop', body => computer.stop(identity(body), { runId: text(body.runId), ...(body.desktopId === undefined ? {} : { desktopId: text(body.desktopId) }) }));
+  }
   if (research) {
     const selection = (body: Record<string, unknown>): ThreadResearchSelection => ({ ...identity(body), sourceRunId: text(body.sourceRunId) });
     const request = <T>(value: unknown, allowed: readonly string[]): T => {

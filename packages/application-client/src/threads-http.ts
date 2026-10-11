@@ -1,3 +1,4 @@
+import { parseComputerAutomationProjection, parseComputerAutomationState } from '@varin/protocol';
 import type { ThreadsAPI } from './threads.js';
 import { runtimeFetch } from './transport/runtime-fetch.js';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointWillChange } from './transport/runtime-switch.js';
@@ -12,20 +13,32 @@ export class ThreadRequestError extends Error {
 /** Uses the same Application Host transport/auth selection as the other RuntimeAPIs. */
 export function createThreadsHttpAPI(): ThreadsAPI {
   const post = async <T>(method: string, body: unknown, signal?: AbortSignal): Promise<T> => {
+    signal?.throwIfAborted();
     const generation = getRuntimeEndpointGeneration();
     const response = await runtimeFetch(`/api/threads/${method}`, { method: 'POST', ...(signal ? { signal } : {}),
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body) });
+    signal?.throwIfAborted();
     if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during thread request');
     if (!response.ok) {
       const failure = await response.json().catch(() => ({})) as { code?: unknown };
+      signal?.throwIfAborted();
+      if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during thread request');
       throw new ThreadRequestError(response.status, typeof failure.code === 'string' ? failure.code
         : response.status === 413 ? 'http-body-too-large' : 'thread-request-failed');
     }
     const result = await response.json() as T;
+    signal?.throwIfAborted();
     if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during thread request');
     return result;
   };
   return {
+    computer: {
+      state: async (identity, signal) => parseComputerAutomationProjection(await post('computer/state', identity, signal)),
+      stop: async (identity, request, signal) => {
+        const result = await post<{ state: unknown }>('computer/stop', { ...identity, ...request }, signal);
+        return { state: parseComputerAutomationState(result.state) };
+      },
+    },
     research: {
       scopes: (identity, signal) => post('research/scopes', identity, signal),
       list: (selection, request = {}, signal) => post('research/list', { ...selection, request }, signal),

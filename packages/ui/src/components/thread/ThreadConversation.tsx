@@ -1,3 +1,5 @@
+import { ComputerAutomationSection } from '@/components/pi-session/ComputerAutomationSection';
+import { useComputerAutomation } from '@/stores/useComputerAutomation';
 import { ChildExecutions, ThreadExecutions } from './ThreadExecutions';
 import { ThreadMessages } from './ThreadMessages';
 import { ThreadFamily } from './ThreadFamily';
@@ -90,6 +92,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const branch = snapshot?.thread.branches.find(value => value.branch_id === identity.branchId);
   const run = snapshot?.activeRun ?? branch?.latest_run;
   const active = Boolean(branch?.active_run_id);
+  const computer = useComputerAutomation(identity, api.computer, branch?.active_run_id);
+  const hasComputer = Boolean(computer.error || computer.state?.active || computer.state && computer.state.status !== 'enabled' || computer.state?.cleanups.length || computer.state?.leases.length || computer.state?.requests.length || computer.activities.length);
   const delegated = Boolean(snapshot?.delegatedExecutions?.length);
   const preparingDelegation = snapshot?.delegatedExecutions?.some(execution => !execution.receipt && !execution.report && !execution.cancel_requested) ?? false;
   React.useEffect(() => { if (delegated && inputMode === 'next_run') setInputMode('boundary'); }, [delegated, inputMode]);
@@ -291,6 +295,10 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         </div>;
       })}
     </details>}
+    {hasComputer && <section className="mx-auto w-full max-w-3xl px-4" aria-label={t('computer.automation.title')}>
+      <h3 className="typography-meta">{t('computer.automation.title')}</h3>
+      <ComputerAutomationSection view={computer} directory={initialWorkspacePath ?? ''} />
+    </section>}
     <form className="mx-auto w-full max-w-3xl space-y-2 p-4" onSubmit={event => {
       event.preventDefault();
       if (preparingSource || sourceCannotBeApplied) return;

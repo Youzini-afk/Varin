@@ -6,12 +6,33 @@ lane. It does not create another scheduler or another desktop backend.
 
 ## Thread identity and desktop assignments
 
-`computer-actor.ts` resolves the broker's session through the actual Registry Thread/Run and its durable
+The protocol's `ComputerWorkRef` distinguishes Pi sessions from Agent Thread/branch identity;
+`ComputerExecutionRef` adds the actual Run. Idle work has no execution. Native work never acquires a
+synthetic Pi session or Registry record. The Rust `runtime.computer.scope` request resolves native
+lineage from the original Catalog and the branch's active Run, including source-less work; a context
+or auxiliary Run does not become the branch owner. Tool calls additionally validate their real
+ModelStep or PolicyAction Operation. `computer-actor.ts` resolves the Pi broker's session through the actual Registry Thread/Run and its durable
 ancestors. Attached Agent, research and Bot roots retain their main-agent role even though their Thread
 kind is `discussion`. Retrieval presets and ordinary discussion children receive observation only.
 The caller cannot supply a parent, Run or role to the model-facing API.
 
-Workers and retrieval threads have the `computer` tool when Computer Use is enabled. A child calls
+Native root calls use the shipped `varin.builtin.computer` ordinary extension. Its single declaration
+owns `computer_list/apps/observe/act/cancel/release`, their schemas, and read/effect classification.
+The original extension capability review, immutable binding and ToolInvocationAuthority remain in
+force. `computer.use` dispatches through this service, not a separate desktop backend. Actual global
+and trusted-project Computer settings can disable dispatch. The original tool binding freezes the
+default desktop once per execution; replay restores that configuration rather than reading a new
+sidebar selection or default. Explicit desktop selection and actual assignments still take precedence.
+An invalid captured Computer default makes that service candidate unavailable through the existing
+tool-preparation projection. Unrelated tools can still prepare, even when the Computer provider was
+already active. Required saved Computer bindings remain exact; errors do not become a null default.
+
+Native child discovery is connected, but desktop request/grant/Wait and trusted handback continuation
+are not yet connected. A child without an actual assignment receives an explicit failure before input.
+Native persistent Computer scripts are also pending. These gaps are independent of the existing Pi
+capabilities described below; selected tools alone never grant a desktop assignment.
+
+Pi workers and retrieval threads have the `computer` tool when Computer Use is enabled. A child calls
 `computer` with `action:"request"`, desktopId, access (`observe` or `control`) and reason. The Host wakes
 the main conversation with the request identity. The main agent coordinates the work segment with
 `grant`/`deny`. A grant fixes the child's desktop environment without replacing its shell target.
@@ -34,22 +55,38 @@ reservation requires explicit human takeover on the target; there is no speculat
 
 ## Cancel work and transfer control
 
-The overview cancels the current task family's computer work through `automation/stop`. A desktop
-control bar scopes cancellation to that desktop. The Host invalidates old admission tickets, denies
+The conversation overview captures an exact execution and cancels its family's computer work. Native
+uses `ThreadsAPI.computer` through the authenticated `/api/threads/computer/state` and `/stop` routes;
+Pi retains `automation/stop` with its actual session and displayed Run. Old cleanup is addressed by
+its own work and Run, including when shown under an idle root. Known accepted cleanup starts before
+waiting for a new identity projection; stale work cannot stop a replacement execution.
+
+The full desktop viewer instead calls `/api/computers/desktops/:id/stop` with the displayed
+`automationEpoch`. Its real target owner validates the generation; a remote actor is never sent to
+the viewing Host's local Thread owner. The Electron control bar calls the original desktop owner
+directly. The Host invalidates old admission tickets, denies
 matching pending requests, cancels exact-Run Computer REPL evaluations, drains native/external work,
 releases held input and ends those assignments. Other desktop assignments remain independent.
 Permissions are unchanged: fresh work in the same Run can acquire an assignment after release.
 Old scripts and observation bindings cannot resume through that new assignment.
 
-The Agent receives a passive user-cancellation notification. The operation reports any known partial
+Native terminal cleanup is also a product consumer, not a requirement for the model to call release.
+Original runtime/owner notifications wake reconciliation of Computer's already accepted executions;
+the original Catalog must confirm completed/failed/cancelled before `finishExecution` runs. A tool
+binding update or kernel channel reset alone is not terminal evidence. Reconciliation has no timer,
+second execution ledger or full Catalog scan; original physical release rules still apply.
+
+Pi receives its existing passive user-cancellation notification; native trusted notification delivery
+is a remaining integration. The operation reports any known partial
 effects. `cancelling` lasts through release; success returns to `enabled` and removes the work banner.
 `cancel-unconfirmed` preserves a real release failure for recovery. There is no stopped-round state.
 
-Human takeover requires an explicit action. It suspends the assignment, interrupts its active script,
+Human takeover requires an explicit action. It suspends the assignment, interrupts its active Pi script,
 invalidates queued input and releases managed keys/buttons; physical mouse motion does not transfer
 ownership. Target/focus changes interrupt the affected action and retain Agent ownership. Handback
-keeps the assignment, invalidates old observations and delivers a durable continuation to the actor
+keeps the assignment, invalidates old observations and retains a durable continuation for the actor
 captured at takeover, with its root informed. Ended or replaced Runs do not receive that continuation.
+Pi consumes this continuation today; an undelivered native event is not falsely acknowledged.
 The latest observer/usage record never selects the recipient. Remote control assignments subscribe
 to the owning Host's control stream without frames, even when no viewer is open.
 
@@ -73,6 +110,22 @@ fact-based reason and recovery. OS acceptance is not application completion. Onl
 readback confirms `set_value`. Tool text contains the short result and relevant next step, not an
 internal trace. Explicit `app_post` text requires a native Edit/RichEdit handle in the selected window;
 it cannot silently route browser input through unsupported Win32 edit messages.
+
+The original desktop record's `runtimeVersion:2` stores discriminated work/usage and a short
+`physicalControl` marker before input. It identifies the Host control generation, original input
+helper and actual assignment or human holder. Malformed or obsolete nonempty runtime metadata remains
+an actionable fenced state; desktop configuration and external assets are not migrated or erased.
+An empty reservation map, replacement Host/helper, readiness probe or new control epoch cannot prove
+old held input released. Confirmation requires the original helper's release acknowledgement plus
+callback/process drainage, or the original managed desktop session's actual stop. A failed durable
+clear retains the barrier and may retry using that same retained proof. A local-console helper lost
+with its Host has no durable cross-restart release acknowledgement, so it remains unconfirmed.
+
+`ComputerActionResult.inputWriterStopped` is separate from both action effect and assignment release.
+A lost action response stays unknown even if explicit cancellation later proves its writer drained.
+Ordinary tool settlement consumes that original result. The Host does not manufacture success from
+an ended callback or repeat unknown input. An input supervisor never respawns a new helper under the
+same physical-owner identity; capture helpers may still restart independently.
 
 ## Feedback and presentation
 
@@ -107,6 +160,11 @@ The overview and small desktop launcher share `useComputerAutomation`: one snaps
 UI stream per viewed conversation, no capture or polling. Full/compact overview show the desktop,
 operator, current app/operation and pending requests; both offer Cancel computer work. The compact action
 does not open the full panel. This state is a Host projection, not a renderer authority.
+Native conversations use the same projection and show current work separately from unresolved old
+cleanup. Snapshot reads do not probe or capture desktops. Shared protocol parsers serve HTTP and SSE;
+late Host/work/Run and control-generation replies cannot erase newer cleanup, including delayed
+takeover and handback replies. Errors expose bounded owner/stale/format/release diagnoses and refresh
+or recovery actions. Unknown cleanup does not invent a new ban on the original recovery controls.
 
 The Windows native shell adds a nonfocusable bottom control bar with Take control / Return to Varin
 and Cancel computer work. Its fixed commands call this same Host. Varin windows are excluded from

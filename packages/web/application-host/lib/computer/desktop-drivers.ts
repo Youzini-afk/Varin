@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { ComputerDesktop } from '@varin/protocol';
 import { createDriverSession, type ComputerDriverSession, type DriverSpawnSpec } from './driver-host.js';
 
@@ -9,6 +10,7 @@ export function createDesktopDriverPool(options: {
   onInputReset(desktopId: string): void;
 }) {
   const inputs = new Map<string, ComputerDriverSession>();
+  const inputIdentities = new WeakMap<ComputerDriverSession, string>();
   const captures = new Map<string, ComputerDriverSession>();
   const loading = new Map<string, Promise<{ driver: ComputerDriverSession; desktop: ComputerDesktop }>>();
   const resetting = new Map<string, Promise<void>>();
@@ -31,6 +33,7 @@ export function createDesktopDriverPool(options: {
       const driver = (options.createDriver ?? createDriverSession)({ ...spec,
         env: { ...process.env, ...spec.env, VARIN_DRIVER_ROLE: purpose } });
       drivers.set(desktopId, driver);
+      if (purpose === 'input') inputIdentities.set(driver, randomUUID());
       // A new helper only releases keys it owns; it cannot safely reset the
       // physical keyboard after a previous process crashed.
       try {
@@ -63,6 +66,7 @@ export function createDesktopDriverPool(options: {
   };
   return {
     inputs, acquire,
+    inputOwnerId: (driver: ComputerDriverSession) => inputIdentities.get(driver),
     reset,
     async dispose() {
       closed = true;
