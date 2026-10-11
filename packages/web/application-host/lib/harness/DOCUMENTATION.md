@@ -1086,6 +1086,17 @@ service does not leave a synthetic operation running across restart.
 
 ### Follow-up sources and delivery
 
+Native Agent work uses Catalog FollowupDefinition/occurrence/typed ingress, through ordinary
+`follow_up` and `ThreadsAPI.followups`. Accepted domain Job sources reuse the original HostJobBinding,
+executor-stopped receipt and existing research runtime/domain notifications. `jobSources` reads short
+accepted Job metadata across the actual task family; the selected observer Run remains the continuation
+source. Bodies are loaded outside Catalog, and original ExperimentService retains outputs/artifact
+collection. Cancellation of an observation or follow-up does not cancel the observed Job. There is no
+native instance of the Pi FollowUpService or extra Host polling owner. Native root/child activation,
+Goal/question/pause gates and occurrence/history delivery remain the original runtime owners.
+
+The following `followups.ts` service describes the still-supported Pi runtime path.
+
 Run settlement clears execution yield and live input/stall attention. A retained follow-up wait has
 its own lifetime; worker loss retains recovery attention. An idle discussion uses the typed
 `discussion-ready` reason and is presented as idle, rather than as a pending user answer. Settled Run

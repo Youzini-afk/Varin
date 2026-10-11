@@ -8,6 +8,14 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-11 增量：原 accepted Job 停止事件与续接
+
+- 普通 follow_up **版本4** 与 User/API/UI 接入 job_stopped 独立或 flat Any/All。原 Catalog 已接受 HostJobBinding 是唯一目标身份；jobs/jobSources 短查询沿实际家系索引覆盖历史、独立User及child/sibling工作，不依赖active operations或一页历史。目标sourceRunId只归因，续接始终使用当前实际调用/所选工作来源。
+- 原 stop event 保当时短 receipt metadata，合法 Unknown→known 细化不能替换已赢的叶证据/正文；worker和公开event解引用、GC原root完整，Catalog **37**直接拒旧，Storage不变。接受、Run结束、取消观察、collection与真正executor-stopped区分，Unknown保真实标签而不形成重复永久封禁。
+- 复用原 occurrence→typed input→activation，真实双origin、active root/child、idle root及新DelegatedExecution/source/context/Run消费；原Goal/Pause/question/source/单writer继续守卫。定义取消、观察取消、目标Job及treeStop的受理集合分别结算，后来的明确User意图独立。原research/domain订阅对账原subject，无新poller或作业重提。
+- 最终 runtime **423/0、2 ignored**，kernel **131/0、11 ignored**，all-targets、准确fresh binary原guardian/固定source组合 **1/1**；Host **39/39**、UI **40/40**，类型/lint/协议/生产bundle通过。独立自动通知probe **1/1**不用显式reconcile，原snapshot读取中通知与重建对账均通过；独审接受无确认阻断，1,390输入指纹一致。完整入口和证据边界见[Job事件续接验收](../reviews/runtime-job-followups-2026-10-11.md)。
+- 下一切片建立明确重复事件/发生项语义和真实原source消费者，然后继续日志/产物/指标及其余设计能力；当前Job触发仍是显式一次意图。完整Host/平台/真实外部环境和用户最终迁移分工保持。
+
 ## 2026-10-11 增量：单文件正文 capture 与原消费者
 
 - 原 file.capture 进入共同 CaptureTask/file_workers，Single/Batch/Observation 共享唯一 read/hash/verify/stage 算法。原单结果和 non-indexed object owner 保留，batch仍indexed；旧重复同步store分支删除。原mutation/reconciliation观察只作同算法同步适配，该其他控制边界仍明确保留。

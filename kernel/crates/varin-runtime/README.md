@@ -293,7 +293,7 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 36, input domain 6 and collaboration domain 7 store input intents/queue bodies and context-job ownership,
+Catalog version 37, input domain 6 and collaboration domain 7 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
@@ -591,11 +591,12 @@ pending requests. See the ordinary [SDK example](../../../examples/extensions/de
 
 ## Explicit one-shot follow-ups
 
-The ordinary `follow_up` tool (version 3) supports register/list/get/control from the actual ModelStep or policy
+The ordinary `follow_up` tool (version 4) supports register/list/get/jobs/control from the actual ModelStep or policy
 invocation. `runtime.followup.register` is the authenticated User path. Each registration retains one
 explicit instruction and an absolute `at` instant, the original accepted `process_spawn` identity,
-an exact original-source file condition, or a flat `any`/`all` combination of these sources. Every
-process/file leaf is authorized even when another leaf is already satisfied. Empty combinations and nested conditions are invalid; there is no separate
+an original accepted Host domain `job_stopped` identity, an exact original-source file condition, or a
+flat `any`/`all` combination of these sources. Every process/Job/file leaf is authorized even when
+another leaf is already satisfied. Empty combinations and nested conditions are invalid; there is no separate
 workflow executor or arbitrary source-count limit.
 Catalog derives the Thread/branch, actor and operation from the caller; Agent arguments cannot forge
 User authority. Original bodies live in ContentStore and are read on demand through `get`, while list
@@ -618,9 +619,23 @@ Only unobserved time leaves remain in the native deadline selection. Source prog
 event for the actual consumers. The transaction freezes the currently visible satisfied sources;
 an `any` does not reconstruct which source historically arrived first while offline. An observed
 time branch can satisfy `any` without waiting for its other processes to stop; `all` needs every
-source. Only the occurrence's actual process evidence contributes receipt bodies to preparation.
+source. Only the occurrence's actual process/Job stop evidence contributes receipt bodies to preparation.
 One combination produces one occurrence. A time check followed by a later completion check needs
 two explicit registrations, preserving both intents rather than treating `any` as recurring permission.
+
+`jobs` and the public `runtime.host_job.sources` query return short accepted Job metadata from the
+actual task family, including independent User work and earlier, child or sibling Runs. The target's
+`sourceRunId` is attribution only: registration continues the actual invoking/selected Run's work.
+An unaccepted domain intent, ordinary Result or kernel process is not an accepted Host Job. Discovery
+confers no submit/cancel authority and never hydrates accepted content or log bodies.
+
+A Job leaf retains the exact HostJobBinding, original receipt identity/epoch and original
+`operation.executor_stopped` event cursor. Job acceptance, submitting Run completion, observation
+cancellation and unknown business effects do not prove stop. An actual stopped receipt can retain
+Unknown business effects; the original stopped fact and released writer occupancy govern continuation.
+Preparation loads accepted and terminal content outside Catalog and describes them as domain facts,
+without inventing `process_read` or claiming artifact collection finished. Original research runtime
+and domain subscriptions reconcile the same subject; there is no additional polling or experiment owner.
 
 An occurrence enters the existing input queue with typed Followup provenance, original IDs and one
 referenced Environment history item. Active lawful work consumes it at its existing input boundary.

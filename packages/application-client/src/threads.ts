@@ -3,7 +3,7 @@ import type { FamilyList, FamilyRuns, FamilyRead, FamilyItem, FamilyRunsParams, 
 import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, DelegatedExecution, ChildWait, TreeCancellationReceipt, Followup, FollowupView, FollowupRegisterParams, LiveRoot, ContextPersonalization, ContextResources, ResourceActivation, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
 
 import type { RunModelSelection, RunModelSelections } from '@varin/protocol';
-import type { FollowupPendingRegistration, FollowupRegistrationCancelResult, FollowupControlAction } from '@varin/protocol';
+import type { HostJobSource, FollowupPendingRegistration, FollowupRegistrationCancelResult, FollowupControlAction } from '@varin/protocol';
 import type { Goal, GoalBudget, GoalControlAction, GoalControlReceipt } from '@varin/protocol';
 import type { PolicySelection, PolicySelections } from '@varin/protocol';
 import type { ExtensionToolBinding, LaunchTool, McpBinding } from '@varin/protocol';
@@ -114,6 +114,8 @@ export interface ThreadResourcesAPI {
 }
 /** One explicit occurrence, delivered at a lawful boundary or admitted through the original Run owner. */
 export interface ThreadFollowupsAPI {
+  /** Accepted family Jobs; sourceRunId is target attribution, never the registration source. */
+  jobSources(identity: ThreadIdentity, runId: string, signal?: AbortSignal): Promise<HostJobSource[]>;
   register(input: ThreadIdentity & FollowupRegisterParams): Promise<Followup>;
   /** Original accepted file resources awaiting Catalog admission; never another definition ledger. */
   pendingRegistrations(identity: ThreadIdentity, signal?: AbortSignal): Promise<FollowupPendingRegistration[]>;

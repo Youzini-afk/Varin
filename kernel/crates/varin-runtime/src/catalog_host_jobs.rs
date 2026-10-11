@@ -45,6 +45,19 @@ pub struct HostJobPending {
     pub executor_stopped: bool,
     pub origin: HostJobOrigin,
 }
+/// Discovery metadata only. source_run_id is target attribution, never a continuation source.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HostJobSource {
+    pub binding: HostJobBinding,
+    pub source_run_id: String,
+    pub thread_id: String,
+    pub branch_id: String,
+    pub cancel_requested: bool,
+    pub phase: OperationPhase,
+    pub executor_stopped: bool,
+    pub origin: HostJobOrigin,
+}
 impl HostJobPending {
     pub fn from_operation(op: Operation) -> Result<Self> {
         let link = op
@@ -104,20 +117,11 @@ pub struct UserJobIntent {
     pub request_ref: Value,
 }
 fn descendants(db: &Connection, owner: &str) -> Result<BTreeSet<String>> {
-    let mut selected = BTreeSet::from([owner.to_owned()]);
-    let children = read_all::<delegated::ChildRelation>(db, "child_tasks")?;
-    loop {
-        let before = selected.len();
-        for child in &children {
-            if selected.contains(&child.parent_thread_id) {
-                selected.insert(child.child_thread_id.clone());
-            }
-        }
-        if selected.len() == before {
-            return Ok(selected);
-        }
-    }
+    let mut query = db.prepare("WITH RECURSIVE family(id) AS (SELECT ?1 UNION SELECT c.child_thread_id FROM child_tasks c JOIN family f ON json_extract(c.body,'$.parent_thread_id')=f.id) SELECT id FROM family")?;
+    let rows = query.query_map([owner], |row| row.get::<_, String>(0))?;
+    Ok(rows.collect::<std::result::Result<BTreeSet<_>, _>>()?)
 }
+
 fn scopes(
     db: &Connection,
     thread: &str,
@@ -539,24 +543,116 @@ impl Catalog {
     }
 }
 
+pub(super) fn require_observation(
+    db: &Connection,
+    run: &Run,
+    target_id: &str,
+) -> Result<Operation> {
+    let target: Operation = record(db, "operations", target_id)?;
+    let source: Run = record(db, "runs", &target.run_id)?;
+    let accepted = target.host_job.as_ref().is_some_and(|link| {
+        link.acceptance_ref.is_some()
+            && link.binding.operation_id == target.id
+            && Some(&link.binding.execution_owner) == target.execution_owner.as_ref()
+            && matches!(link.binding.execution_owner, ExecutorOwner::External { .. })
+    });
+    if !accepted
+        || scheduling::thread_family(db, &run.thread_id)?
+            != scheduling::thread_family(db, &source.thread_id)?
+    {
+        return Err(RuntimeError::Conflict(
+            "Job is outside the observer's actual task family or lacks its original acceptance"
+                .into(),
+        ));
+    }
+    Ok(target)
+}
+pub(super) fn require_stop_receipt(
+    op: &Operation,
+    receipt: &ExternalReceiptMetadata,
+) -> Result<()> {
+    let link = op
+        .host_job
+        .as_ref()
+        .ok_or_else(|| RuntimeError::Invalid("Job binding missing".into()))?;
+    let ExecutorOwner::External { epoch, .. } = &link.binding.execution_owner else {
+        return Err(RuntimeError::Invalid(
+            "Job execution owner is not external".into(),
+        ));
+    };
+    if link.acceptance_ref.is_none()
+        || link.binding.operation_id != op.id
+        || op.execution_owner.as_ref() != Some(&link.binding.execution_owner)
+        || receipt.identity != op.id
+        || &receipt.epoch != epoch
+        || op.executor.as_deref() != Some(receipt.executor.as_str())
+    {
+        return Err(RuntimeError::Conflict(
+            "Job stop receipt differs from its original accepted binding".into(),
+        ));
+    }
+    Ok(())
+}
+/// Read the indexed, immutable first stop event, never a later business refinement.
+pub(super) fn stop_receipt(
+    db: &Connection,
+    cursor: u64,
+    binding: &HostJobBinding,
+    identity: &str,
+    epoch: &str,
+) -> Result<ExternalReceiptMetadata> {
+    #[derive(Deserialize)]
+    struct Stop {
+        binding: HostJobBinding,
+        receipt: ExternalReceiptMetadata,
+    }
+    let raw: String = db.query_row("SELECT json_extract(data,'$.host_job_stop') FROM events WHERE cursor=?1 AND subject=?2 AND kind='operation.executor_stopped' AND json_extract(data,'$.receipt_identity')=?3 AND json_extract(data,'$.receipt_epoch')=?4",params![sql_number(cursor)?,binding.operation_id,identity,epoch],|r|r.get(0))?;
+    let stop: Stop = serde_json::from_str(&raw)?;
+    if &stop.binding != binding
+        || stop.receipt.identity != identity
+        || stop.receipt.epoch != epoch
+        || !stop.receipt.executor_stopped
+    {
+        return Err(RuntimeError::Conflict(
+            "Job follow-up evidence differs from original stop event".into(),
+        ));
+    }
+    Ok(stop.receipt)
+}
 pub const WAIT_PREFIX: &str = "host-job-wait:";
 impl Catalog {
-    pub fn require_host_job_observation(&self, run_id: &str, target_id: &str) -> Result<Operation> {
+    pub fn host_job_sources(&self, run_id: &str) -> Result<Vec<HostJobSource>> {
         let run = self.run(run_id)?;
-        let target = self.operation(target_id)?;
-        let source = self.run(&target.run_id)?;
-        if !target
-            .host_job
-            .as_ref()
-            .is_some_and(|link| link.acceptance_ref.is_some())
-            || scheduling::thread_family(&self.db, &run.thread_id)?
-                != scheduling::thread_family(&self.db, &source.thread_id)?
-        {
-            return Err(RuntimeError::Conflict(
-                "Job is outside the observer's actual task family".into(),
-            ));
+        let root = scheduling::thread_family(&self.db, &run.thread_id)?;
+        let mut out = Vec::new();
+        // Traverse only the actual task family and its indexed branch/Run operations.
+        // The Operation contains short references; no accepted body or call arguments are loaded.
+        let mut query = self.db.prepare("SELECT o.body,r.body FROM branches b JOIN runs r ON r.branch_id=b.id JOIN operations o ON o.run_id=r.id WHERE b.thread_id=?1 AND json_extract(o.body,'$.host_job.acceptanceRef') IS NOT NULL ORDER BY o.rowid")?;
+        for thread in descendants(&self.db, &root)? {
+            let rows = query.query_map([thread], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            })?;
+            for row in rows {
+                let (op, source) = row?;
+                let op: Operation = serde_json::from_str(&op)?;
+                let source: Run = serde_json::from_str(&source)?;
+                let pending = HostJobPending::from_operation(op)?;
+                out.push(HostJobSource {
+                    binding: pending.binding,
+                    source_run_id: pending.run_id,
+                    thread_id: source.thread_id,
+                    branch_id: source.branch_id,
+                    cancel_requested: pending.cancel_requested,
+                    phase: pending.phase,
+                    executor_stopped: pending.executor_stopped,
+                    origin: pending.origin,
+                });
+            }
         }
-        Ok(target)
+        Ok(out)
+    }
+    pub fn require_host_job_observation(&self, run_id: &str, target_id: &str) -> Result<Operation> {
+        require_observation(&self.db, &self.run(run_id)?, target_id)
     }
     pub fn wait_for_host_job(&mut self, operation_id: &str, target_id: &str) -> Result<Operation> {
         let current = self.operation(operation_id)?;

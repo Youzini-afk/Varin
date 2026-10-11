@@ -48,3 +48,44 @@ it('a User admission shields only its own original subject while its Catalog res
   release();assert.equal((await submission).attempt.requestId,'key');assert.equal(operations.get('user')!.accepted,true);assert.deepEqual(errors,[]);
  }finally{release();await research.dispose();}
 });
+
+
+it.each([false, true])('original subscriptions precede recheck and preserve one accepted Job when already stopped is %s', async initiallyStopped => {
+  const binding: HostJobPending['binding'] = { operationId: 'user-job:early', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'ws', subjectId: 'attempt:early' };
+  const job: HostJobPending = { binding, runId: 'completed-source-run', accepted: false, cancelRequested: false, phase: 'running', executorStopped: false, origin: { kind: 'user', key: 'early' } };
+  const source = { workspace_id: 'ws', execution_workspace_id: 'exec', mode: 'fixed_branch' as const, branch_id: 'fixed', revision: 1, live_root: null };
+  const actor = { runtime: 'agent' as const, actor: { kind: 'user' as const, key: 'early' }, rootThreadId: 'thread', threadId: 'thread', branchId: 'branch', runId: job.runId, operationId: binding.operationId, executionOwner: binding.executionOwner, source };
+  const accepted = { spec: null, attempt: { attemptId: binding.subjectId, state: 'submitted' }, text: 'original acceptance' };
+  let stopped = initiallyStopped;
+  const calls: string[] = [];
+  let attemptWake: (() => void) | undefined; let eventWake: (() => void) | undefined;
+  let observations = 0; let submits = 0;
+  const kernel = { agentRuntimeRequest: async (method: string, params: Record<string, unknown>) => {
+    calls.push(method);
+    if (method === 'runtime.host_job.pending') { assert.ok(attemptWake && eventWake, 'subscribe before first snapshot'); return job.executorStopped ? [] : [structuredClone(job)]; }
+    assert.deepEqual(params.binding, binding);
+    if (method === 'runtime.host_job.accept') { assert.deepEqual(params.content, accepted); job.accepted = true; eventWake!(); return structuredClone(job); }
+    if (method === 'runtime.host_job.terminal') { assert.equal(params.executorStopped, true); assert.equal((params.content as { attempt: { collectionState: string } }).attempt.collectionState, 'pending'); job.phase = 'terminal'; job.executorStopped = true; eventWake!(); return structuredClone(job); }
+    throw new Error(`Unexpected operation: ${method}`);
+  } } as unknown as KernelClient;
+  const runtime = { onReady: () => () => {}, onEvent: (fn: () => void) => { eventWake = fn; return () => { eventWake = undefined; }; }, reconcileObservations: async () => { observations++; return []; } } as unknown as AgentRuntimeClient;
+  const experiments = { subscribeAttempts: (fn: () => void) => { attemptWake = fn; return () => { attemptWake = undefined; }; },
+    nativeReceipt: async () => ({ caller: { workspaceId: 'ws' }, owner: actor, accepted, attempt: { attemptId: binding.subjectId, state: 'completed', collectionState: 'pending', cancelRequested: false }, executorStopped: stopped }),
+    submit: async () => { submits++; assert.fail('reconciliation cannot resubmit'); },
+  } as unknown as ExperimentService;
+  const errors: Error[] = [];
+  let research = createResearchRuntime({ kernel, runtime, experiments, sources: {} as SourceService, resources: {} as ResourceService, onError: error => errors.push(error) });
+  try {
+    research.start(); await research.reconcile();
+    assert.equal(job.accepted, true); assert.equal(job.executorStopped, initiallyStopped); assert.equal(observations, initiallyStopped ? 1 : 0);
+    // Domain completion is not enough. Only its actual drained executor receipt wakes the original stop consumer.
+    stopped = true; attemptWake!(); await research.reconcile();
+    assert.equal(job.executorStopped, true); assert.equal(observations, 1);
+    assert.equal(calls.filter(method => method === 'runtime.host_job.accept').length, 1);
+    assert.equal(calls.filter(method => method === 'runtime.host_job.terminal').length, 1);
+    await research.dispose();
+    research = createResearchRuntime({ kernel, runtime, experiments, sources: {} as SourceService, resources: {} as ResourceService, onError: error => errors.push(error) });
+    research.start(); await research.reconcile();
+    assert.equal(calls.filter(method => method === 'runtime.host_job.terminal').length, 1); assert.equal(submits, 0); assert.deepEqual(errors, []);
+  } finally { await research.dispose(); }
+});

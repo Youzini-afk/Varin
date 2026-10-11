@@ -2282,12 +2282,16 @@ fn record_executor_stopped(
     receipt: &ExternalReceiptMetadata,
 ) -> Result<()> {
     if receipt.executor_stopped {
+        let mut data = json!({"operation_id":operation.id,"executor":receipt.executor,"receipt_identity":receipt.identity,"receipt_epoch":receipt.epoch});
+        if let Some(job) = &operation.host_job {
+            data["host_job_stop"] = json!({"binding":job.binding,"receipt":receipt});
+        }
         event(
             tx,
             &operation.id,
             operation.revision,
             "operation.executor_stopped",
-            json!({"operation_id":operation.id,"executor":receipt.executor,"receipt_identity":receipt.identity,"receipt_epoch":receipt.epoch}),
+            data,
         )?;
     }
     Ok(())

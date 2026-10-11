@@ -19,6 +19,9 @@ pub enum FollowupRegistrationSource {
     ProcessStopped {
         operation_id: String,
     },
+    JobStopped {
+        operation_id: String,
+    },
     File {
         path: String,
         condition: FileCondition,
@@ -27,6 +30,9 @@ pub enum FollowupRegistrationSource {
 impl FollowupRegistrationSource {
     fn source(&self) -> FollowupSource {
         match self {
+            Self::JobStopped { operation_id } => FollowupSource::JobStopped {
+                operation_id: operation_id.clone(),
+            },
             Self::At { at_ms } => FollowupSource::At { at_ms: *at_ms },
             Self::File { path, condition } => FollowupSource::File {
                 path: path.clone(),
@@ -56,6 +62,9 @@ pub enum FollowupRegistrationTrigger {
     ProcessStopped {
         operation_id: String,
     },
+    JobStopped {
+        operation_id: String,
+    },
     Any {
         sources: Vec<FollowupRegistrationSource>,
     },
@@ -80,6 +89,9 @@ impl FollowupRegistrationTrigger {
     }
     fn trigger(&self) -> FollowupTrigger {
         match self {
+            Self::JobStopped { operation_id } => FollowupTrigger::JobStopped {
+                operation_id: operation_id.clone(),
+            },
             Self::At { at_ms } => FollowupTrigger::At { at_ms: *at_ms },
             Self::File { path, condition } => FollowupTrigger::File {
                 path: path.clone(),
@@ -108,7 +120,9 @@ impl FollowupRegistrationTrigger {
             .into_iter()
             .filter_map(|source| match source {
                 FollowupSource::ProcessStopped { operation_id } => Some(operation_id),
-                FollowupSource::At { .. } | FollowupSource::File { .. } => None,
+                FollowupSource::At { .. }
+                | FollowupSource::File { .. }
+                | FollowupSource::JobStopped { .. } => None,
             })
             .collect()
     }
@@ -147,10 +161,11 @@ impl FollowupRegistration {
                     ));
                 }
                 FollowupSource::ProcessStopped { operation_id }
+                | FollowupSource::JobStopped { operation_id }
                     if operation_id.trim().is_empty() =>
                 {
                     return Err(RuntimeError::Invalid(
-                        "original process operationId is required".into(),
+                        "original accepted operationId is required".into(),
                     ));
                 }
                 _ => (),
@@ -174,6 +189,7 @@ pub enum FollowupToolInput {
         wait: Option<FollowupWaitOptions>,
     },
     List,
+    Jobs,
     Get {
         followup_id: String,
     },
@@ -339,8 +355,16 @@ impl Catalog {
                 "file observation source changed during registration".into(),
             ));
         }
-        for operation_id in p.input.trigger.process_operation_ids() {
-            require_process(&self.db, &p.run, &operation_id)?;
+        for source in p.input.trigger.trigger().sources() {
+            match source {
+                FollowupSource::ProcessStopped { operation_id } => {
+                    require_process(&self.db, &p.run, &operation_id)?
+                }
+                FollowupSource::JobStopped { operation_id } => {
+                    self.require_host_job_observation(&p.run.id, &operation_id)?;
+                }
+                _ => (),
+            }
         }
         Ok(())
     }
@@ -377,8 +401,16 @@ impl Catalog {
         self.authorize_followup_registration(&p)?;
         let tx = self.db.transaction()?;
         let run: Run = record(&tx, "runs", &p.run.id)?;
-        for operation_id in p.input.trigger.process_operation_ids() {
-            require_process(&tx, &run, &operation_id)?;
+        for source in p.input.trigger.trigger().sources() {
+            match source {
+                FollowupSource::ProcessStopped { operation_id } => {
+                    require_process(&tx, &run, &operation_id)?
+                }
+                FollowupSource::JobStopped { operation_id } => {
+                    host_jobs::require_observation(&tx, &run, &operation_id)?;
+                }
+                _ => (),
+            }
         }
         if let (Some(op), Some(i)) = (&p.operation, &p.invocation) {
             require_invocation(&tx, self.epoch, op, i, p.input.wait.is_some())?;
@@ -652,6 +684,16 @@ impl Catalog {
             ));
         }
         Ok(value)
+    }
+    pub fn authorize_followup_read(&self, p: PreparedFollowupToolRead) -> Result<()> {
+        self.validate_tool_invocation(&p.invocation, true)
+    }
+    pub fn list_tool_followup_jobs(
+        &self,
+        p: PreparedFollowupToolRead,
+    ) -> Result<Vec<host_jobs::HostJobSource>> {
+        self.validate_tool_invocation(&p.invocation, true)?;
+        self.host_job_sources(&p.invocation.context.run_id)
     }
     pub fn list_tool_followups(&self, p: PreparedFollowupToolRead) -> Result<Vec<Followup>> {
         self.validate_tool_invocation(&p.invocation, true)?;

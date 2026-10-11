@@ -217,6 +217,13 @@ pub struct EventRead {
 impl EventRead {
     pub fn load(mut self) -> Result<Vec<Event>> {
         for event in &mut self.events {
+            if event.kind == "operation.executor_stopped" {
+                if let Some(stop) = event.data.get_mut("host_job_stop") {
+                    let receipt: ExternalReceiptMetadata =
+                        serde_json::from_value(stop["receipt"].take())?;
+                    stop["receipt"] = json!({"executor":receipt.executor,"identity":receipt.identity,"epoch":receipt.epoch,"outcome":receipt.outcome,"effect":receipt.effect,"executor_stopped":receipt.executor_stopped,"result":self.content.load(&receipt.result_ref)?});
+                }
+            }
             if matches!(
                 event.kind.as_str(),
                 "operation.accepted"

@@ -288,14 +288,73 @@ fn enable_fixed_file_reader(f: &mut Fixture) {
     f.assembly.resources = f.assembly.resources.clone().with_file_observations(client);
 }
 
+fn accepted_family_job(
+    f: &Fixture,
+    key: &str,
+) -> varin_runtime::catalog::host_jobs::HostJobBinding {
+    let owner = f.catalog();
+    let mut db = owner.lock().unwrap();
+    let parent = db.child_task(&f.child.operation_id).unwrap().parent_run_id;
+    let run = db.run(&parent).unwrap();
+    let prepared = db
+        .prepare_result_content()
+        .write_result(&json!({"requestId":key}))
+        .unwrap();
+    let op = db
+        .admit_user_host_job(
+            &run.thread_id,
+            &run.branch_id,
+            &run.id,
+            key,
+            "research.experiment",
+            1,
+            &format!("attempt:{key}"),
+            prepared,
+        )
+        .unwrap();
+    let binding = op.host_job.unwrap().binding;
+    db.begin_host_job(binding.clone()).unwrap();
+    let accepted=db.prepare_result_content().write_result(&json!({"attempt":{"attemptId":binding.subject_id},"text":"accepted original family experiment"})).unwrap();
+    db.accept_host_job(binding.clone(), accepted).unwrap();
+    binding
+}
+fn stop_family_job(f: &Fixture, binding: &varin_runtime::catalog::host_jobs::HostJobBinding) {
+    let owner = f.catalog();
+    let mut db = owner.lock().unwrap();
+    let op = db.operation(&binding.operation_id).unwrap();
+    let varin_runtime::ExecutorOwner::External { epoch, .. } = &binding.execution_owner else {
+        panic!()
+    };
+    let receipt = db
+        .prepare_result_content()
+        .write_external_receipt(varin_runtime::ExternalReceipt {
+            executor: op.executor.unwrap(),
+            identity: op.id,
+            epoch: epoch.clone(),
+            outcome: Outcome::Succeeded,
+            effect: Effect::Confirmed,
+            result: json!({"attemptId":binding.subject_id,"collectionState":"pending"}),
+        })
+        .unwrap();
+    db.record_host_job_terminal(binding, receipt, true).unwrap();
+}
+
 #[test]
 fn explicit_followup_uses_both_real_origins_and_separates_registration_from_wait() {
     use varin_runtime::catalog::followups::{
         observation::FollowupObservationState, FollowupActor, NextRunWaitState,
     };
-    for (trigger_kind, model) in ["at", "any", "all", "file"]
-        .into_iter()
-        .flat_map(|kind| [true, false].map(|model| (kind, model)))
+    for (trigger_kind, model) in [
+        "at",
+        "any",
+        "all",
+        "file",
+        "job_stopped",
+        "any_job",
+        "all_job",
+    ]
+    .into_iter()
+    .flat_map(|kind| [true, false].map(|model| (kind, model)))
     {
         for wait in [false, true] {
             let mut f = Fixture::with_tools(
@@ -308,7 +367,17 @@ fn explicit_followup_uses_both_real_origins_and_separates_registration_from_wait
             }
             let deadline = varin_runtime::catalog::observations::wall_time_ms().unwrap() + 60_000;
             let mut args = json!({"action":"register","trigger":{"kind":"at","atMs":deadline},"instruction":"Check this delegated task once at the requested time"});
-            if trigger_kind == "file" {
+            let job = trigger_kind
+                .contains("job")
+                .then(|| accepted_family_job(&f, "followup-family"));
+            if let Some(job) = &job {
+                let leaf = json!({"kind":"job_stopped","operationId":job.operation_id});
+                args["trigger"] = if trigger_kind == "job_stopped" {
+                    leaf
+                } else {
+                    json!({"kind":if trigger_kind == "any_job" {"any"} else {"all"},"sources":[leaf,{"kind":"at","atMs":deadline}]})
+                };
+            } else if trigger_kind == "file" {
                 args["trigger"] = json!({"kind":"all","sources":[{"kind":"file","path":"result.txt","condition":"exists"},{"kind":"file","path":"result.txt","condition":"changed"}]});
             } else if trigger_kind != "at" {
                 args["trigger"] = json!({"kind":trigger_kind,"sources":[{"kind":"at","atMs":deadline},{"kind":"at","atMs":deadline+1}]});
@@ -336,6 +405,15 @@ fn explicit_followup_uses_both_real_origins_and_separates_registration_from_wait
                 assert!(value.sources[0].observed.is_some());
                 assert!(value.sources[1].observed.is_none());
                 assert!(value.sources[1].file.as_ref().unwrap().immutable);
+            }
+            if let Some(job) = &job {
+                assert_eq!(db.host_job_sources(&f.run.id).unwrap()[0].binding, *job);
+                assert_ne!(
+                    db.host_job_sources(&f.run.id).unwrap()[0].source_run_id,
+                    f.run.id
+                );
+                assert_eq!(value.source_run_id, f.run.id);
+                assert!(!db.operation(&job.operation_id).unwrap().cancel_requested);
             }
             let FollowupActor::Agent {
                 run_id,
@@ -491,7 +569,8 @@ fn followup_get_list_and_control_consume_real_retained_user_instruction_from_bot
             .unwrap()
             .admit_followup_registration(prepared)
             .unwrap();
-        let calls=[json!({"action":"get","followupId":"user-instruction"}),json!({"action":"list"}),json!({"action":"control","followupId":"user-instruction","expectedRevision":1,"control":"cancel"})].into_iter().enumerate().map(|(n,arguments)|ToolCall{call_id:format!("manage-{n}"),name:"follow_up".into(),schema_version:crate::followup_tools::schema().version,arguments}).collect();
+        let job = accepted_family_job(&f, "discover-family");
+        let calls=[json!({"action":"get","followupId":"user-instruction"}),json!({"action":"list"}),json!({"action":"jobs"}),json!({"action":"control","followupId":"user-instruction","expectedRevision":1,"control":"cancel"})].into_iter().enumerate().map(|(n,arguments)|ToolCall{call_id:format!("manage-{n}"),name:"follow_up".into(),schema_version:crate::followup_tools::schema().version,arguments}).collect();
         execute(&f, model, calls, &mut OwnerReplies::default(), false);
         let read = rusqlite::Connection::open(f.root.join("conversation.sqlite")).unwrap();
         let mut values = Vec::new();
@@ -568,7 +647,11 @@ fn followup_get_list_and_control_consume_real_retained_user_instruction_from_bot
                 values.push((node_id, serde_json::from_slice(&bytes).unwrap()));
             }
         }
-        assert_eq!(values.len(), 3);
+        assert_eq!(values.len(), 4);
+        let jobs = &values.iter().find(|(id, _)| id == "manage-2").unwrap().1;
+        assert_eq!(jobs[0]["binding"]["operationId"], job.operation_id);
+        assert_ne!(jobs[0]["sourceRunId"], f.run.id);
+        assert!(jobs[0].get("accepted").is_none() && jobs[0].get("intent").is_none());
         assert_eq!(
             values.iter().find(|(id, _)| id == "manage-0").unwrap().1["instruction"],
             "User retained original instruction"
@@ -699,6 +782,280 @@ fn native_calendar_deadline_observes_one_true_cold_thread_without_host_timer_or_
     }
     drop(guard);
     worker.join().unwrap();
+    drop(owner);
+    f.finish();
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn accepted_job_stop_wakes_original_followup_observation_and_active_child_ingress() {
+    use varin_runtime::catalog::followups::observation::FollowupObservationState;
+    let f = Fixture::with_tools(
+        false,
+        vec![crate::followup_tools::schema()],
+        vec!["follow_up".into()],
+    );
+    let job = accepted_family_job(&f, "wake-job");
+    wait_review::waiting(
+        &f,
+        true,
+        vec![ToolCall {
+            call_id: "await-job".into(),
+            name: "follow_up".into(),
+            schema_version: crate::followup_tools::schema().version,
+            arguments: json!({"action":"register","trigger":{"kind":"job_stopped","operationId":job.operation_id},"instruction":"Inspect original experiment when it stops","wait":{}}),
+        }],
+    );
+    let (signal, wakes) = crate::continuation_wake::channel().unwrap();
+    let (events, rx) = mpsc::sync_channel(1);
+    f.catalog()
+        .lock()
+        .unwrap()
+        .set_event_notifier(events)
+        .unwrap();
+    let owner = Arc::downgrade(&f.assembly.runtime);
+    let worker = std::thread::spawn(move || crate::continuation_wake::drive(owner, wakes));
+    let guard = crate::continuation_wake::StopGuard(signal.clone());
+    stop_family_job(&f, &job);
+    let end = Instant::now() + Duration::from_secs(5);
+    loop {
+        rx.recv_timeout(end.saturating_duration_since(Instant::now()))
+            .expect("original stop event wake");
+        signal.notify();
+        let owner = f.catalog();
+        let db = owner.lock().unwrap();
+        let value = db.followups(&f.run.thread_id).unwrap().remove(0);
+        if value.observation.as_ref().is_some_and(|o| o.delivered)
+            && value
+                .occurrence
+                .as_ref()
+                .is_some_and(|o| o.delivery.is_some())
+        {
+            assert_eq!(
+                value.observation.unwrap().state,
+                FollowupObservationState::Triggered
+            );
+            assert_eq!(
+                value
+                    .occurrence
+                    .unwrap()
+                    .delivery
+                    .unwrap()
+                    .run_id
+                    .as_deref(),
+                Some(f.run.id.as_str())
+            );
+            assert!(db.host_job_sources(&f.run.id).unwrap()[0].executor_stopped);
+            break;
+        }
+    }
+    drop(guard);
+    worker.join().unwrap();
+    f.finish();
+}
+
+#[test]
+fn stopped_family_job_reopens_a_completed_child_as_one_real_delegated_execution() {
+    use varin_runtime::catalog::{delegated::DelegatedTrigger, followups::*};
+    let f = Fixture::with_tools(
+        false,
+        vec![crate::followup_tools::schema()],
+        vec!["follow_up".into()],
+    );
+    let job = accepted_family_job(&f, "cold-child-job");
+    execute(
+        &f,
+        false,
+        vec![ToolCall {
+            call_id: "after-job".into(),
+            name: "follow_up".into(),
+            schema_version: crate::followup_tools::schema().version,
+            arguments: json!({"action":"register","trigger":{"kind":"job_stopped","operationId":job.operation_id},"instruction":"Continue the child's original work after the family experiment stops"}),
+        }],
+        &mut OwnerReplies::default(),
+        false,
+    );
+    let owner = f.catalog();
+    let reports = owner
+        .lock()
+        .unwrap()
+        .capture_child_reports()
+        .unwrap()
+        .load()
+        .unwrap();
+    for report in reports {
+        owner.lock().unwrap().admit_child_report(report).unwrap();
+    }
+    assert!(owner
+        .lock()
+        .unwrap()
+        .run(&f.run.id)
+        .unwrap()
+        .state
+        .terminal());
+    stop_family_job(&f, &job);
+    drop(owner);
+    let f = f.reopen();
+    let owner = f.catalog();
+    reconcile(&owner).unwrap();
+    let mut db = owner.lock().unwrap();
+    let value = db.followups(&f.run.thread_id).unwrap().remove(0);
+    let child = db
+        .delegated_executions(Some(&f.child.operation_id))
+        .unwrap()
+        .into_iter()
+        .find(|v| matches!(v.trigger, DelegatedTrigger::Followup { .. }))
+        .expect("real follow-up child execution");
+    assert_ne!(child.execution_id, f.child.operation_id);
+    assert_eq!(value.source_run_id, f.run.id);
+    assert_eq!(
+        value
+            .occurrence
+            .as_ref()
+            .unwrap()
+            .delivery
+            .as_ref()
+            .unwrap()
+            .execution_id
+            .as_deref(),
+        Some(child.execution_id.as_str())
+    );
+    assert!(child.receipt.is_none());
+    assert_eq!(
+        child.source_basis.as_ref().unwrap().source().workspace_id,
+        f.original.source.as_ref().unwrap().workspace_id
+    );
+    // Prepare through the same original child source/context owner. No original Run is revived.
+    let mut source = child.source_basis.as_ref().unwrap().source().clone();
+    source.branch_id = Some(format!("child-source:{}", child.execution_id));
+    source.revision = Some(0);
+    source.environment_run_id = None;
+    let root = child.source_basis.as_ref().unwrap().root().to_owned();
+    let prepared = db
+        .prepare_child_source(
+            &child.execution_id,
+            varin_runtime::catalog::collaboration::ChildSourcePin {
+                pin_id: format!("child-source-pin:{}", child.execution_id),
+                root: root.clone(),
+                source: source.clone(),
+            },
+            source.clone(),
+            varin_runtime::catalog::collaboration::ChildSourceProvenance::FixedRoot {
+                root,
+                resources: None,
+            },
+        )
+        .unwrap()
+        .load()
+        .unwrap();
+    db.attach_child_source(prepared).unwrap();
+    let task = db.execution_task(&child.execution_id).unwrap();
+    let proposal = varin_runtime::catalog::context::ContextProposal {
+        key: "job-followup-child-context".into(),
+        branch_id: task.child_branch_id.clone(),
+        through_id: None,
+        expected_revision: 0,
+        summary: String::new(),
+        effective_system_prompt: "Independent continuation".into(),
+        instruction_sources: vec![],
+        memory_checkpoint: None,
+    };
+    let basis=serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,"configurationDigest":"job-child","memorySnapshot":{"revision":0,"memories":[]},"sessionId":task.child_thread_id,"projectId":task.project_id,"originalSections":[{"name":"system","content":"Independent continuation"}],"instructionSources":[]})).unwrap();
+    let p = db
+        .capture_child_preparation(&child.execution_id, source, proposal, basis)
+        .unwrap()
+        .load()
+        .unwrap();
+    let admitted = db.admit_child(p).unwrap();
+    let next = admitted.receipt.unwrap().run_id;
+    assert_ne!(next, f.run.id);
+    assert_eq!(db.run(&f.run.id).unwrap().state, RunState::Completed);
+    let history = db.execution_history(&f.run.branch_id).unwrap();
+    assert!(history.iter().any(|item|matches!(&item.content,Content::Text {text} if text.contains("accepted original family experiment"))));
+    drop(db);
+    reconcile(&owner).unwrap();
+    assert_eq!(
+        owner
+            .lock()
+            .unwrap()
+            .delegated_executions(Some(&f.child.operation_id))
+            .unwrap()
+            .into_iter()
+            .filter(|v| matches!(v.trigger, DelegatedTrigger::Followup { .. }))
+            .count(),
+        1
+    );
+    drop(owner);
+    f.finish();
+}
+
+#[test]
+fn stopped_job_cannot_answer_a_real_child_question_or_clear_its_recovered_wait() {
+    use varin_runtime::catalog::followups::*;
+    let f = Fixture::with_tools(
+        false,
+        vec![crate::questions::schema(), crate::followup_tools::schema()],
+        vec!["ask_user".into(), "follow_up".into()],
+    );
+    let job = accepted_family_job(&f, "question-job");
+    let owner = f.catalog();
+    let p = owner
+        .lock()
+        .unwrap()
+        .prepare_followup_registration(
+            "question-followup",
+            &f.run.id,
+            FollowupRegistration {
+                trigger: FollowupRegistrationTrigger::JobStopped {
+                    operation_id: job.operation_id.clone(),
+                },
+                instruction: "Inspect the accepted result under current controls".into(),
+                wait: None,
+            },
+        )
+        .unwrap()
+        .load()
+        .unwrap();
+    owner
+        .lock()
+        .unwrap()
+        .admit_followup_registration(p)
+        .unwrap();
+    drop(owner);
+    wait_review::waiting(
+        &f,
+        true,
+        vec![ToolCall {
+            call_id: "question".into(),
+            name: "ask_user".into(),
+            schema_version: crate::questions::schema().version,
+            arguments: json!({"question":"Which result should I use?"}),
+        }],
+    );
+    let wait = f
+        .catalog()
+        .lock()
+        .unwrap()
+        .run(&f.run.id)
+        .unwrap()
+        .waiting_on
+        .unwrap();
+    stop_family_job(&f, &job);
+    let f = f.reopen();
+    let owner = f.catalog();
+    reconcile(&owner).unwrap();
+    let db = owner.lock().unwrap();
+    let value = db.followup("question-followup").unwrap();
+    assert_eq!(
+        value.occurrence.unwrap().hold_reason,
+        Some(HoldReason::Question)
+    );
+    assert_eq!(
+        db.run(&f.run.id).unwrap().waiting_on.as_deref(),
+        Some(wait.as_str())
+    );
+    assert_eq!(db.run(&f.run.id).unwrap().state, RunState::Waiting);
+    drop(db);
     drop(owner);
     f.finish();
 }

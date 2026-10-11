@@ -1,7 +1,7 @@
 import React from 'react';
 import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import type { ThreadFollowupsAPI, ThreadIdentity } from '@varin/application-client';
-import type { FollowupPendingRegistration, Followup, FollowupRegisterParams, FollowupRegistrationSource, FollowupSource, FollowupView, Operation, Run } from '@varin/protocol';
+import type { HostJobSource, FollowupPendingRegistration, Followup, FollowupRegisterParams, FollowupRegistrationSource, FollowupSource, FollowupView, Operation, Run } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -19,27 +19,34 @@ function atLabel(at: number) {
   return Number.isNaN(date.getTime()) ? `Unix time ${at} ms` : `${date.toLocaleString()} · ${date.toISOString()}`;
 }
 function sourceLabel(source: FollowupSource) {
+  if (source.kind === 'job_stopped') return `After accepted job ${source.operation_id} actually stops`;
   if (source.kind === 'file') return `When ${source.path} ${source.condition === 'exists' ? 'exists' : source.condition === 'changed' ? 'changes' : 'is stable with managed writers stopped'}`;
   return source.kind === 'at' ? `At ${atLabel(source.at_ms)}` : `After process ${source.operation_id} actually stops`;
 }
 function triggerLabel(item: Followup) {
-  if (item.trigger.kind === 'at' || item.trigger.kind === 'process_stopped' || item.trigger.kind === 'file') return sourceLabel(item.trigger);
+  if (item.trigger.kind === 'at' || item.trigger.kind === 'process_stopped' || item.trigger.kind === 'file' || item.trigger.kind === 'job_stopped') return sourceLabel(item.trigger);
   if (item.trigger.kind === 'any') return 'When any condition is observed';
   if (item.trigger.kind === 'all') return 'When every condition is observed';
   return item.trigger.kind === 'run_completed' ? 'After the original run completes' : 'Continuing goal work';
 }
-type SourceDraft = { kind: FollowupRegistrationSource['kind']; at: string; processId: string; path: string; condition: 'exists' | 'changed' | 'ready' };
-const emptySource = (): SourceDraft => ({ kind: 'at', at: '', processId: '', path: '', condition: 'exists' });
-function sourceInput(draft: SourceDraft, processes: Operation[]): FollowupRegistrationSource | null {
+type SourceDraft = { kind: FollowupRegistrationSource['kind']; at: string; processId: string; jobId: string; path: string; condition: 'exists' | 'changed' | 'ready' };
+const emptySource = (): SourceDraft => ({ kind: 'at', at: '', processId: '', jobId: '', path: '', condition: 'exists' });
+function sourceInput(draft: SourceDraft, processes: Operation[], jobs: HostJobSource[]): FollowupRegistrationSource | null {
+  if (draft.kind === 'job_stopped') return jobs.some(job => job.binding.operationId === draft.jobId) ? { kind: 'job_stopped', operationId: draft.jobId } : null;
   if (draft.kind === 'file') return draft.path.length ? { kind: 'file', path: draft.path, condition: draft.condition } : null;
   if (draft.kind === 'process_stopped') return processes.some(value => value.id === draft.processId)
     ? { kind: 'process_stopped', operationId: draft.processId } : null;
   const atMs = draft.at ? new Date(draft.at).getTime() : NaN;
   return Number.isSafeInteger(atMs) && atMs >= 0 ? { kind: 'at', atMs } : null;
 }
-function SourceEditor({ value, onChange, processes, disabled, label = 'Follow-up' }: {
-  value: SourceDraft; onChange(value: SourceDraft): void; processes: Operation[]; disabled: boolean; label?: string;
+function SourceEditor({ value, onChange, processes, jobs, disabled, label = 'Follow-up' }: {
+  value: SourceDraft; onChange(value: SourceDraft): void; processes: Operation[]; jobs: HostJobSource[]; disabled: boolean; label?: string;
 }) {
+  if (value.kind === 'job_stopped') return <><label className="block">Accepted job<select aria-label={`${label} job`} value={value.jobId} disabled={disabled}
+    onChange={event => onChange({ ...value, jobId: event.target.value })} className="ml-2 rounded border bg-background p-1">
+    <option value="">Select an accepted job in this task family</option>{jobs.map(job => <option key={job.binding.operationId} value={job.binding.operationId}>
+      {job.binding.domain} · {job.binding.workspaceId} · {job.binding.subjectId} · {job.executorStopped ? 'executor stopped' : 'awaiting executor stop'} · {job.threadId}
+    </option>)}</select></label><p className="text-xs text-muted-foreground">Continues this selected work. The job's historical source Run is attribution only. Submission, Unknown and cancelled observations do not prove executor stop; artifact collection is independent.</p></>;
   const atMs = value.at ? new Date(value.at).getTime() : NaN;
   if (value.kind === 'file') return <><label className="block">Original source path<Input aria-label={`${label} file path`} value={value.path}
     disabled={disabled} onChange={event => onChange({ ...value, path: event.target.value })} placeholder="results/output.json" /></label>
@@ -84,12 +91,26 @@ export function ThreadFollowups({ api, identity, run, operations, followups, pen
 }) {
   const [editing, setEditing] = React.useState(false);
   const [kind, setKind] = React.useState<FollowupRegisterParams['trigger']['kind']>('at');
-  const [at, setAt] = React.useState(''); const [processId, setProcessId] = React.useState('');
+  const [at, setAt] = React.useState(''); const [processId, setProcessId] = React.useState(''); const [jobId, setJobId] = React.useState('');
   const [filePath, setFilePath] = React.useState(''); const [fileCondition, setFileCondition] = React.useState<SourceDraft['condition']>('exists');
   const [conditions, setConditions] = React.useState<SourceDraft[]>([emptySource(), { ...emptySource(), kind: 'process_stopped' }]);
   const [instruction, setInstruction] = React.useState(''); const [uncertain, setUncertain] = React.useState(false);
   const [registrations, setRegistrations] = React.useState<FollowupPendingRegistration[]>([]);
   const [registrationError, setRegistrationError] = React.useState(false);
+  const [jobCandidates, setJobCandidates] = React.useState<{ runId: string; values: HostJobSource[] }>();
+  const [jobError, setJobError] = React.useState(false); const [jobRetry, setJobRetry] = React.useState(0);
+  const runId = run?.id;
+  const needsJobs = kind === 'job_stopped' || ((kind === 'any' || kind === 'all') && conditions.some(value => value.kind === 'job_stopped'));
+  React.useEffect(() => {
+    if (!editing || !needsJobs || !runId) return;
+    const controller = new AbortController(); const selectedHost = getRuntimeEndpointGeneration();
+    setJobError(false); setJobCandidates(undefined);
+    void api.jobSources(identity, runId, controller.signal).then(values => {
+      if (!controller.signal.aborted && selectedHost === getRuntimeEndpointGeneration()) setJobCandidates({ runId, values });
+    }, () => { if (!controller.signal.aborted && selectedHost === getRuntimeEndpointGeneration()) setJobError(true); });
+    return () => controller.abort();
+  }, [api, identity, runId, editing, needsJobs, operations, jobRetry]);
+  const jobs = jobCandidates && jobCandidates.runId === runId ? jobCandidates.values : [];
   React.useEffect(() => {
     const controller = new AbortController(); const selectedHost = getRuntimeEndpointGeneration();
     setRegistrationError(false);
@@ -109,7 +130,7 @@ export function ThreadFollowups({ api, identity, run, operations, followups, pen
     && ['thread', 'environment'].includes(operation.lifetime) && operation.call_completion?.kind === 'job_accepted');
   const process = processes.find(operation => operation.id === processId);
   const composite = kind === 'any' || kind === 'all';
-  const selected = composite ? conditions.map(value => sourceInput(value, processes)) : [sourceInput({ kind, at, processId, path: filePath, condition: fileCondition }, processes)];
+  const selected = composite ? conditions.map(value => sourceInput(value, processes, jobs)) : [sourceInput({ kind, at, processId, jobId, path: filePath, condition: fileCondition }, processes, jobs)];
   const valid = instruction.trim().length > 0 && selected.every(value => value !== null) && (composite || kind !== 'process_stopped' ? Boolean(run) : Boolean(process));
   const register = () => {
     if (!intent.current) {
@@ -143,7 +164,7 @@ export function ThreadFollowups({ api, identity, run, operations, followups, pen
       <p>Deliver this instruction at the next legal boundary, or start a new run here when idle. Current pauses, questions, permissions and goal limits still apply.</p>
       <label className="block">Trigger<select aria-label="Follow-up trigger" value={kind} disabled={pending || uncertain}
         onChange={event => setKind(event.target.value as typeof kind)} className="ml-2 rounded border bg-background p-1">
-        <option value="at">At a specific time</option><option value="process_stopped">After a process stops</option><option value="file">When a file condition is met</option>
+        <option value="at">At a specific time</option><option value="process_stopped">After a process stops</option><option value="job_stopped">After an accepted job stops</option><option value="file">When a file condition is met</option>
         <option value="any">Any condition</option><option value="all">Every condition</option>
       </select></label>
       {composite ? <div className="space-y-2">
@@ -152,15 +173,17 @@ export function ThreadFollowups({ api, identity, run, operations, followups, pen
           <legend>Condition {index + 1}</legend>
           <select aria-label={`Condition ${index + 1} kind`} value={value.kind} disabled={pending || uncertain}
             onChange={event => setConditions(values => values.map((item, i) => i === index ? { ...item, kind: event.target.value as SourceDraft['kind'] } : item))}>
-            <option value="at">At a specific time</option><option value="process_stopped">After a process stops</option><option value="file">When a file condition is met</option>
+            <option value="at">At a specific time</option><option value="process_stopped">After a process stops</option><option value="job_stopped">After an accepted job stops</option><option value="file">When a file condition is met</option>
           </select>
           <SourceEditor value={value} onChange={next => setConditions(values => values.map((item, i) => i === index ? next : item))}
-            processes={processes} disabled={pending || uncertain} label={`Condition ${index + 1}`} />
+            processes={processes} jobs={jobs} disabled={pending || uncertain} label={`Condition ${index + 1}`} />
           <Button variant="ghost" size="sm" disabled={pending || uncertain || conditions.length === 1}
             onClick={() => setConditions(values => values.filter((_, i) => i !== index))}>Remove condition {index + 1}</Button>
         </fieldset>)}
         <Button variant="ghost" size="sm" disabled={pending || uncertain} onClick={() => setConditions(values => [...values, emptySource()])}>Add condition</Button>
-      </div> : <SourceEditor value={{ kind, at, processId, path: filePath, condition: fileCondition }} onChange={value => { setAt(value.at); setProcessId(value.processId); setFilePath(value.path); setFileCondition(value.condition); }} processes={processes} disabled={pending || uncertain} />}
+      </div> : <SourceEditor value={{ kind, at, processId, jobId, path: filePath, condition: fileCondition }} onChange={value => { setAt(value.at); setProcessId(value.processId); setJobId(value.jobId); setFilePath(value.path); setFileCondition(value.condition); }} processes={processes} jobs={jobs} disabled={pending || uncertain} />}
+      {needsJobs && !jobCandidates && !jobError && <p role="status">Reading accepted jobs…</p>}
+      {needsJobs && jobError && <p role="alert">Accepted jobs could not be read. <Button variant="ghost" size="sm" disabled={pending || uncertain} onClick={() => setJobRetry(value => value + 1)}>Retry accepted jobs</Button></p>}
       <label className="block">Instruction<Textarea aria-label="Follow-up instruction" value={instruction} disabled={pending || uncertain}
         onChange={event => setInstruction(event.target.value)} rows={3} /></label>
       {uncertain && <p role="status">Acceptance is unconfirmed. Retry keeps the original time, instruction, source and key. Leaving this draft does not cancel an accepted follow-up.</p>}
@@ -195,6 +218,12 @@ export function ThreadFollowups({ api, identity, run, operations, followups, pen
           return <p key={source.source_index} className="text-xs text-muted-foreground">File condition {source.source_index + 1}: {file.current?.kind ?? 'awaiting original baseline'}
             {file.immutable && ' · fixed immutable source'}{file.gap && ' · observation gap; unavailable changes are not reconstructed'}
             {file.failure_code && ` · ${file.failure_code}`}{file.released && ' · observer released'}</p>;
+        })}
+        {item.sources.map(source => {
+          const evidence = source.observed?.evidence;
+          return evidence?.kind === 'job_stopped' ? <p key={`job:${source.source_index}`} className="break-all text-xs text-muted-foreground">
+            Original job stop · {evidence.binding.domain} v{evidence.binding.domainVersion} · {evidence.binding.subjectId} · {evidence.outcome} · effect {evidence.effect} · event {source.observed!.trigger_cursor} · receipt {evidence.receipt_identity} · epoch {evidence.receipt_epoch}
+          </p> : null;
         })}
         <FollowupInstruction api={api} identity={identity} item={item} />
         {!ended && <>

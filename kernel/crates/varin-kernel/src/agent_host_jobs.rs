@@ -96,6 +96,15 @@ pub(super) fn execute(
             drop(db);
             Ok(serde_json::to_value(read.load().map_err(domain)?)?)
         }
+        "runtime.host_job.sources" => {
+            let p: RunParams = serde_json::from_value(params)?;
+            let result = owner
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                .host_job_sources(&p.run_id)
+                .map_err(domain)?;
+            Ok(serde_json::to_value(result)?)
+        }
         "runtime.host_job.pending" => {
             let db = owner
                 .lock()

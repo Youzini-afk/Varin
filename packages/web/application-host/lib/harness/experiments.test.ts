@@ -533,6 +533,7 @@ it('installed ordinary research tools hand original model and policy invocations
   } as unknown as import('../kernel/agent-runtime-client.js').AgentRuntimeClient;
   let research=createResearchRuntime({kernel,runtime,experiments,sources:f.sources,resources:f.resources,onError:error=>f.errors.push(error)});
   cleanup.push(()=>research.dispose());
+  research.start();
   const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../../../..');
   const installed=path.join(f.root,'installed');await fs.mkdir(installed);
   const example=path.join(repo,'examples/extensions/research-tools');
@@ -574,6 +575,7 @@ it('installed ordinary research tools hand original model and policy invocations
   // instance reconnects those original attempts; it may never dispatch replacement work.
   await research.dispose();experiments.detachObservers();experiments=f.makeService(sourceAuthority);
   research=createResearchRuntime({kernel,runtime,experiments,sources:f.sources,resources:f.resources,onError:error=>f.errors.push(error)});
+  research.start();
   await research.reconcile();
   const selection={runtime:'agent' as const,threadId:'thread',branchId:'branch',sourceRunId:'run'};
   const rows=await research.user.list(selection);assert.equal(rows.attempts.length,2);assert.ok(rows.attempts.every(attempt=>attempt.permissions?.control));
@@ -584,8 +586,8 @@ it('installed ordinary research tools hand original model and policy invocations
   assert.equal((await experiments.list({...sibling,owner:{...sibling.owner,rootThreadId:'other'}},{})).attempts.length,0);
   for(const attempt of rows.attempts)await research.user.cancel(selection,attempt.attemptId);
   await research.reconcile();assert.ok([...ops.values()].every(op=>op.link!.cancelRequested));
-  await vi.waitFor(async()=>{await research.reconcile();assert.ok([...f.records.values()].filter(record=>record.recordType==='experiment.attempt').every(record=>record.state==='cancelled'),JSON.stringify({errors:f.errors.map(e=>e.message),events:f.events}));},{timeout:4000,interval:10});
-  await research.reconcile();assert.ok([...ops.values()].every(op=>op.link!.executorStopped));assert.equal(f.counters().spawnCalls,2);
+  await vi.waitFor(()=>{assert.ok([...f.records.values()].filter(record=>record.recordType==='experiment.attempt').every(record=>record.state==='cancelled'),JSON.stringify({errors:f.errors.map(e=>e.message),events:f.events}));assert.ok([...ops.values()].every(op=>op.link!.executorStopped),'original attempt/runtime subscriptions must reconcile stopped Jobs without manual polling');},{timeout:4000,interval:10});
+  assert.ok([...ops.values()].every(op=>op.link!.executorStopped));assert.equal(f.counters().spawnCalls,2);
   assert.equal(f.committed.size,0);
   await vi.waitFor(()=>assert.ok([...ops.keys()].every(id=>f.events.includes(`authority-retired:${id}`))),{timeout:4000,interval:10});
 });

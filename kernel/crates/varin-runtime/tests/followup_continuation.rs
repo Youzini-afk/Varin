@@ -1194,3 +1194,6 @@ mod conditions;
 
 #[path = "fixtures/followup_files.rs"]
 mod files;
+
+#[path = "fixtures/followup_jobs.rs"]
+mod jobs;

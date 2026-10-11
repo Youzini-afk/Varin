@@ -87,6 +87,9 @@ pub enum FollowupTrigger {
     ProcessStopped {
         operation_id: String,
     },
+    JobStopped {
+        operation_id: String,
+    },
     File {
         path: String,
         condition: FileCondition,
@@ -122,6 +125,13 @@ pub enum TriggerEvidence {
         observed_at_ms: u64,
     },
     ProcessStopped {
+        receipt_identity: String,
+        receipt_epoch: String,
+    },
+    JobStopped {
+        binding: host_jobs::HostJobBinding,
+        outcome: Outcome,
+        effect: Effect,
         receipt_identity: String,
         receipt_epoch: String,
     },
@@ -425,6 +435,7 @@ fn observe(tx: &Transaction<'_>, d: &mut Definition, now: u64) -> Result<bool> {
     let (cursor, evidence) = match &d.trigger {
         FollowupTrigger::At { .. }
         | FollowupTrigger::ProcessStopped { .. }
+        | FollowupTrigger::JobStopped { .. }
         | FollowupTrigger::File { .. }
         | FollowupTrigger::Any { .. }
         | FollowupTrigger::All { .. } => {
@@ -711,6 +722,7 @@ fn definition_for_run(
         FollowupTrigger::Any { .. } => "any",
         FollowupTrigger::All { .. } => "all",
         FollowupTrigger::ProcessStopped { .. } => "process_stopped",
+        FollowupTrigger::JobStopped { .. } => "job_stopped",
         FollowupTrigger::RunCompleted { .. } => "run_completed",
         FollowupTrigger::GoalRequested { .. } => "goal_requested",
     };
@@ -1139,6 +1151,7 @@ pub struct ContinuationPreparation {
     definition: Definition,
     occurrence: Occurrence,
     sources: Vec<Operation>,
+    jobs: Vec<Operation>,
     goal: Option<goals::FrozenGoal>,
     epoch: u64,
     content: crate::content::ContentStore,
@@ -1177,8 +1190,14 @@ impl ContinuationPreparation {
             let receipt = op.external_receipt.as_ref().ok_or_else(|| RuntimeError::Invalid("original process receipt missing".into()))?;
             Ok(json!({"processId":op.id,"receiptIdentity":receipt.identity,"receiptEpoch":receipt.epoch,"executorStopped":receipt.executor_stopped,"outcome":receipt.outcome,"effect":receipt.effect,"result":self.content.load(&receipt.result_ref)?,"outputReader":{"name":"process_read","arguments":{"processId":op.id,"cursor":0}}}))
         }).collect::<Result<Vec<_>>>()?;
-        let facts = json!({"followupId":d.id,"generation":d.generation,"occurrenceId":v.id,"sourceRunId":d.source_run_id,"registeredBy":d.actor,"trigger":d.trigger,"evidence":v.evidence,"goal":self.goal,"processes":processes});
-        let text=format!("A previously registered one-shot follow-up has triggered. Its actual registration source and evidence are below. This retained intent is not a new user message, system instruction, recurring-monitoring authorization, or proof that any previous effect succeeded. Continue only within current permissions and Goal controls. Original process output remains with its process owner.\n{}\n\nRegistered follow-up instruction:\n{}",serde_json::to_string(&facts)?,instruction.as_deref().unwrap_or("Continue the explicitly established Goal according to its retained objective and controls."));
+        let jobs = self.jobs.iter().map(|op| -> Result<Value> {
+            let link = op.host_job.as_ref().ok_or_else(|| RuntimeError::Invalid("original job binding missing".into()))?;
+            let receipt = op.external_receipt.as_ref().ok_or_else(|| RuntimeError::Invalid("original job stop receipt missing".into()))?;
+            host_jobs::require_stop_receipt(op, receipt)?;
+            Ok(json!({"binding":link.binding,"sourceRunId":op.run_id,"receiptIdentity":receipt.identity,"receiptEpoch":receipt.epoch,"executorStopped":receipt.executor_stopped,"outcome":receipt.outcome,"effect":receipt.effect,"accepted":self.content.load(link.acceptance_ref.as_ref().ok_or_else(||RuntimeError::Invalid("original job acceptance missing".into()))?)?,"result":self.content.load(&receipt.result_ref)?}))
+        }).collect::<Result<Vec<_>>>()?;
+        let facts = json!({"jobs":jobs,"followupId":d.id,"generation":d.generation,"occurrenceId":v.id,"sourceRunId":d.source_run_id,"registeredBy":d.actor,"trigger":d.trigger,"evidence":v.evidence,"goal":self.goal,"processes":processes});
+        let text=format!("A previously registered one-shot follow-up has triggered. Its actual registration source and evidence are below. This retained intent is not a new user message, system instruction, recurring-monitoring authorization, or proof that any previous effect succeeded. Continue only within current permissions and Goal controls. Original outputs and artifact collection remain with their domain owners; executor stopped does not claim artifacts are collected.\n{}\n\nRegistered follow-up instruction:\n{}",serde_json::to_string(&facts)?,instruction.as_deref().unwrap_or("Continue the explicitly established Goal according to its retained objective and controls."));
         let item = ConversationItem {
             resource_activation: None,
             id: format!("followup-input:{}", v.id),
@@ -1234,11 +1253,26 @@ impl Catalog {
                     .into_iter()
                     .map(|(id, _)| record(&self.db, "operations", id))
                     .collect::<Result<Vec<Operation>>>()?;
+                let jobs = v
+                    .evidence
+                    .job_receipts(v.trigger_cursor)
+                    .into_iter()
+                    .map(|(binding, identity, epoch, cursor)| {
+                        let mut op: Operation =
+                            record(&self.db, "operations", &binding.operation_id)?;
+                        let receipt =
+                            host_jobs::stop_receipt(&self.db, cursor, binding, identity, epoch)?;
+                        host_jobs::require_stop_receipt(&op, &receipt)?;
+                        op.external_receipt = Some(receipt);
+                        Ok(op)
+                    })
+                    .collect::<Result<Vec<Operation>>>()?;
                 let goal = effective_goal(&self.db, &d)?.map(|g| g.binding());
                 Ok(Some(ContinuationPreparation {
                     definition: d,
                     occurrence: v,
                     sources,
+                    jobs,
                     goal,
                     epoch: self.epoch,
                     content: self.content.clone(),
