@@ -350,7 +350,7 @@ it.each(['dispatch', 'user_continuation'] as const)('%s binds only its admitted 
   if (trigger === 'dispatch') expect(f.releaseChildHandoff).toHaveBeenCalledExactlyOnceWith('parent-run', 'parent-dispatch');
   else expect(f.releaseChildHandoff).not.toHaveBeenCalled();
   expect(f.requests.filter(request => request.method === 'runtime.child.execution.for_run').every(request => (request.params as { runId: string }).runId === 'run')).toBe(true);
-  expect(f.preparedScopes).toEqual([{ runId: 'run', threadId: 'thread', fixed: true }]);
+  expect(f.preparedScopes).toEqual([{ runId: 'run', threadId: 'thread', source: null, fixed: true }]);
   const start = f.requests.find(request => request.method === 'runtime.run.start')!;
   expect((start.params.extensionBindings as LiveExtensionToolBinding[]).map(value => value.binding)).toEqual([extension.binding]);
   await f.publish('unselected@1', contribution('unselected', '1', released));
@@ -574,7 +574,7 @@ it('source start, saved rebind and successor continuation preserve ordinary and 
     f.launch.selection.extension_bindings = [extension.binding];
     f.launch.selection.mcp_binding = mcp.binding;
     f.launch.selection.tools = [
-      { ...f.launch.selection.tools[0]!, name: 'file_read' },
+      { ...f.launch.selection.tools[0]!, name: 'file_read', requirements: { source: 'source', process: false } },
       { ...f.launch.selection.tools[0]!, name: 'ask_user' },
       { ...f.launch.selection.tools[0]!, name: 'question_status' },
       { ...f.launch.selection.tools[0]!, name: 'goal_report' },
@@ -593,6 +593,7 @@ it('source start, saved rebind and successor continuation preserve ordinary and 
       });
     else if (entry === 'rebind') await f.runtime.rebindLaunch('run');
     else await f.runtime.continueFromLaunch('previous', 'run');
+    expect(f.preparedScopes[0]?.source).toEqual(f.launch.selection.source);
     const start = f.requests.find(
       (request) => request.method === 'runtime.run.start',
     )!.params;
@@ -622,7 +623,7 @@ it('ordinary service routing uses the admitted Run scope instead of a later acti
     );
     await f.runtime.startRun('run');
     expect(f.preparedScopes).toEqual([
-      { runId: 'run', threadId: 'thread', ...(projectId ? { projectId } : {}) },
+      { runId: 'run', threadId: 'thread', source: null, ...(projectId ? { projectId } : {}) },
     ]);
     expect(
       f.requests

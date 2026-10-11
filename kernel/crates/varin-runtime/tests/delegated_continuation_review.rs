@@ -582,6 +582,7 @@ fn continuation_resource_cas_preserves_summary_memory_and_binds_explicit_skill_t
 fn each_new_run_retargets_only_the_original_mcp_definition_and_its_own_recovery_is_exact() {
     use varin_runtime::catalog::launches::*;
     let tool = ToolSchema {
+        requirements: None,
         name: "mcp_tool".into(),
         version: "schema-v1".into(),
         description: "Frozen tool".into(),
@@ -1318,10 +1319,15 @@ fn calendar_child_hold_reopen_and_resume_preserve_original_execution_source_and_
     let source = ready_source(&mut f.db, &execution);
     let (proposal, basis) = context(&initial, "held-calendar-context");
     let prepared =
-        f.db.capture_child_preparation(&execution.execution_id, Some(source.clone()), proposal, basis)
-            .unwrap()
-            .load()
-            .unwrap();
+        f.db.capture_child_preparation(
+            &execution.execution_id,
+            Some(source.clone()),
+            proposal,
+            basis,
+        )
+        .unwrap()
+        .load()
+        .unwrap();
     input.enabled = false;
     input.asset_revision = "asset:2".into();
     sync_calendars(&mut f.db, vec![input.clone()]);

@@ -427,7 +427,7 @@ export interface ComputerServiceOptions {
   notifyActor?: (actor: ComputerActor, text: string, wake: boolean, id: string, recipient?: 'actor' | 'root') => Promise<void>;
   onAutomationChange?: (state: ComputerAutomationState) => void;
   onAutomationInvalidated?: (event: ComputerAutomationInvalidation) => void;
-  revokeSession?: (actor: ComputerActor) => Promise<void>;
+  revokeSession?: (actor: ComputerActor, desktopIds?: readonly string[]) => Promise<void>;
   bindDesktop?: (actor: ComputerActor, desktopId: string) => Promise<void>;
   client: KernelClient;
   hostId: string;

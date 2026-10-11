@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 1;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 2;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -107,6 +107,44 @@ pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] =
 #[derive(Clone, Debug, Deserialize)]
 #[serde(transparent)]
 pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelEmptyParams {}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ManagedProcessTerminalParams {
+    pub(crate) operation_id: String,
+    pub(crate) execution_owner: varin_runtime::ExecutorOwner,
+    pub(crate) tool_binding: Value,
+    pub(crate) callbacks_stopped: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ManagedProcessCellParams {
+    pub(crate) operation_id: String,
+    pub(crate) execution_owner: varin_runtime::ExecutorOwner,
+    pub(crate) environment_id: String,
+    pub(crate) closing: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ManagedProcessAcceptParams {
+    pub(crate) operation_id: String,
+    pub(crate) execution_owner: varin_runtime::ExecutorOwner,
+    pub(crate) tool_binding: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ManagedProcessBeginParams {
+    pub(crate) operation_id: String,
+    pub(crate) execution_owner: varin_runtime::ExecutorOwner,
+    pub(crate) node: varin_runtime::catalog::managed_process::NodeBinding,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -237,10 +275,6 @@ pub(crate) struct HostJobAcceptParams {
 pub(crate) struct RunParams {
     pub(crate) run_id: String,
 }
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct KernelEmptyParams {}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -2439,6 +2473,7 @@ pub(crate) struct LaunchTool {
     #[serde(rename = "output_schema")]
     pub(crate) output_schema: Value,
     pub(crate) metadata: RequiredNullable<varin_runtime::execution::ToolMetadata>,
+    pub(crate) requirements: Option<varin_runtime::execution::ToolRequirements>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2542,6 +2577,31 @@ pub(crate) struct KernelVerificationInputIdentity {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "runtime.managed_process.pending" => {
+            serde_json::from_value::<KernelEmptyParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.managed_process.terminal" => {
+            serde_json::from_value::<ManagedProcessTerminalParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.managed_process.cell" => {
+            serde_json::from_value::<ManagedProcessCellParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.managed_process.accept" => {
+            serde_json::from_value::<ManagedProcessAcceptParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.managed_process.begin" => {
+            serde_json::from_value::<ManagedProcessBeginParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.computer.event.accept" => {
             serde_json::from_value::<ComputerEventCommand>(params.clone())
                 .map(|_| ())

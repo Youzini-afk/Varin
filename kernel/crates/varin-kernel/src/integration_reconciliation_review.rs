@@ -168,6 +168,7 @@ fn replay_scenario(tail_phase: Option<&str>) {
     let nonexistent = f.root.join("deleted-original-live-root");
     let target=serde_json::from_value(json!({"mode":"live_root","live_root":{"hostId":"host","rootId":"original-root","canonicalRoot":nonexistent},"workspace_id":"workspace-A","execution_workspace_id":"workspace-A","branch_id":null,"revision":null})).unwrap();
     let tool = ToolSchema {
+        requirements: None,
         name: "integrate_child".into(),
         version: "2".into(),
         description: String::new(),

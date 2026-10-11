@@ -17,6 +17,16 @@ pub enum ChildSourceRequirement {
     None,
     Source,
     Physical,
+    Live,
+}
+impl From<crate::execution::ToolSourceRequirement> for ChildSourceRequirement {
+    fn from(source: crate::execution::ToolSourceRequirement) -> Self {
+        match source {
+            crate::execution::ToolSourceRequirement::Source => Self::Source,
+            crate::execution::ToolSourceRequirement::Physical => Self::Physical,
+            crate::execution::ToolSourceRequirement::Live => Self::Live,
+        }
+    }
 }
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -30,6 +40,8 @@ pub struct ChildCapabilityDescriptor {
     pub name: String,
     pub version: String,
     pub source_requirement: ChildSourceRequirement,
+    #[serde(default)]
+    pub process: bool,
     pub default_presets: Vec<ChildPresetDefault>,
 }
 
@@ -270,6 +282,7 @@ pub struct ChildDispatchSelection {
 }
 #[derive(Debug)]
 pub struct ResolvedChildSelection {
+    pub process: bool,
     pub frozen_reference: Value,
     pub catalog_ref: Value,
     pub profile: ChildSelectedProfile,
@@ -291,24 +304,7 @@ impl ResolvedChildSelection {
     pub fn source_delegation(&self) -> ChildSourceDelegation {
         ChildSourceDelegation {
             work_mode: self.profile.work_mode,
-            process: self.profile.tools.iter().any(|name| {
-                matches!(
-                    name.as_str(),
-                    "process_spawn"
-                        | "process_inspect"
-                        | "process_read"
-                        | "process_write"
-                        | "process_resize"
-                        | "wait_process"
-                ) && !self
-                    .extension_bindings
-                    .iter()
-                    .any(|binding| &binding.tool.name == name)
-                    && !self
-                        .mcp_binding
-                        .as_ref()
-                        .is_some_and(|binding| binding.tools.iter().any(|tool| &tool.name == name))
-            }),
+            process: self.process,
             configured_preset: self.profile.preset_id.is_some(),
             selection_ref: self.frozen_reference.clone(),
         }
@@ -329,7 +325,11 @@ impl ChildDispatchSelection {
                 .iter()
                 .any(|binding| &binding.tool == tool)
             {
-                return Some(ChildSourceRequirement::None);
+                return Some(
+                    tool.requirements
+                        .as_ref()
+                        .map_or(ChildSourceRequirement::None, |r| r.source.into()),
+                );
             }
             return self.mcp_binding.as_ref().map(|binding| {
                 match binding.provenance.execution_scope {
@@ -352,7 +352,11 @@ impl ChildDispatchSelection {
                 .filter(|name| {
                     !matches!(
                         self.source_requirement(name),
-                        Some(ChildSourceRequirement::Source | ChildSourceRequirement::Physical)
+                        Some(
+                            ChildSourceRequirement::Source
+                                | ChildSourceRequirement::Physical
+                                | ChildSourceRequirement::Live
+                        )
                     )
                 })
                 .cloned()
@@ -370,7 +374,11 @@ impl ChildDispatchSelection {
             .filter(|name| {
                 matches!(
                     self.source_requirement(name),
-                    Some(ChildSourceRequirement::Source | ChildSourceRequirement::Physical)
+                    Some(
+                        ChildSourceRequirement::Source
+                            | ChildSourceRequirement::Physical
+                            | ChildSourceRequirement::Live
+                    )
                 )
             })
             .cloned()
@@ -481,6 +489,14 @@ impl ChildDispatchSelection {
                 )));
             }
         }
+        if tools
+            .iter()
+            .any(|name| self.source_requirement(name) == Some(ChildSourceRequirement::Live))
+        {
+            return Err(RuntimeError::Invalid(
+                "Live-source tools cannot run on a child's fixed or materialized source".into(),
+            ));
+        }
         if mode == ChildWorkMode::ReadOnly && tools.iter().any(|name| self.physical_tool(name)) {
             return Err(RuntimeError::Invalid(
                 "selected child effects require a private physical source".into(),
@@ -488,7 +504,18 @@ impl ChildDispatchSelection {
         }
         tools.sort();
         model.connection_identity()?;
+        let process = tools.iter().any(|name| {
+            if let Some(tool) = self.host_tool(name) {
+                return tool.requirements.as_ref().is_some_and(|r| r.process);
+            }
+            self.catalog
+                .native_capabilities
+                .iter()
+                .find(|capability| &capability.name == name)
+                .is_some_and(|capability| capability.process)
+        });
         Ok(ResolvedChildSelection {
+            process,
             frozen_reference: self.reference.clone(),
             catalog_ref: self.frozen.catalog_ref.clone(),
             model,
@@ -928,7 +955,7 @@ impl Catalog {
         let mut process_ids = Vec::new();
         for run in &runs {
             let ids = {
-                let mut statement = tx.prepare("SELECT id FROM operations WHERE run_id=?1 AND json_extract(body,'$.executor')='process_spawn' AND json_extract(body,'$.execution_owner.kind')='kernel' AND coalesce(json_extract(body,'$.external_receipt.executor_stopped'),0)=0 ORDER BY id")?;
+                let mut statement = tx.prepare("SELECT id FROM operations WHERE run_id=?1 AND json_extract(body,'$.managed_process') IS NOT NULL AND coalesce(json_extract(body,'$.external_receipt.executor_stopped'),0)=0 ORDER BY id")?;
                 let rows = statement.query_map([&run.id], |row| row.get::<_, String>(0))?;
                 rows.collect::<std::result::Result<Vec<_>, _>>()?
             };

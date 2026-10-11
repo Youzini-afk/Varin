@@ -27,17 +27,17 @@ const formatActionReceipt = (result: ComputerActionResult): string => {
   return [`${label}${detail ? `: ${detail}` : '.'}`, effect, recovery].filter(Boolean).join(' ');
 };
 
-const computerControllers = new Map<string, Set<WeakRef<{ cancel(runId?: string): boolean }>>>();
-const controllerCleanup = new FinalizationRegistry<{ sessionId: string; reference: WeakRef<{ cancel(runId?: string): boolean }> }>(entry => {
+const computerControllers = new Map<string, Set<WeakRef<{ cancel(runId?: string): Promise<boolean> }>>>();
+const controllerCleanup = new FinalizationRegistry<{ sessionId: string; reference: WeakRef<{ cancel(runId?: string): Promise<boolean> }> }>(entry => {
   const references = computerControllers.get(entry.sessionId);
   references?.delete(entry.reference); if (!references?.size) computerControllers.delete(entry.sessionId);
 });
-export function cancelComputerEvaluations(sessionId: string, runId?: string): boolean {
-  let found = false;
+export async function cancelComputerEvaluations(sessionId: string, runId?: string): Promise<boolean> {
+  const cancellations: Promise<boolean>[] = [];
   for (const reference of computerControllers.get(sessionId) ?? []) {
-    const controller = reference.deref(); if (controller?.cancel(runId)) found = true;
+    const controller = reference.deref(); if (controller) cancellations.push(controller.cancel(runId));
   }
-  return found;
+  return (await Promise.all(cancellations)).some(Boolean);
 }
 
 /**
@@ -254,10 +254,10 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
   const repl = new ComputerRepl();
   const evaluations = new Set<AbortController>();
   let executionId: string | undefined;
-  const controller = { cancel(runId?: string) {
+  const controller = { async cancel(runId?: string) {
     if (runId !== undefined && runId !== executionId) return false;
     for (const evaluation of evaluations) evaluation.abort(new Error('User stopped Computer Use; bindings cleared'));
-    repl.reset();
+    await repl.reset();
     return true;
   } };
   const reference = new WeakRef(controller);
@@ -413,14 +413,18 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             };
           }
           case "cancel": {
-            controller.cancel();
-            const result = await request<"computer.cancel">("computer.cancel", {
-              ...(desktop ? { desktopId: desktop } : {}),
-            }) as ComputerCancelResult;
-            return {
-              content: [{ type: "text", text: `dropped ${result.cancelled} queued action(s); ${result.released ? "held input released" : "input release was not confirmed; inspect the desktop"}` }],
-              details: { cancelled: result.cancelled, released: result.released },
-            };
+            const stopped = controller.cancel();
+            try {
+              // Start the original physical-owner request without waiting for
+              // Pi's callback drain, which may itself depend on cancellation.
+              const result = await request<"computer.cancel">("computer.cancel", {
+                ...(desktop ? { desktopId: desktop } : {}),
+              }) as ComputerCancelResult;
+              return {
+                content: [{ type: "text", text: `dropped ${result.cancelled} queued action(s); ${result.released ? "held input released" : "input release was not confirmed; inspect the desktop"}` }],
+                details: { cancelled: result.cancelled, released: result.released },
+              };
+            } finally { await stopped; }
           }
           case "release": {
             const result = await request<"computer.release">("computer.release", {
@@ -447,7 +451,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
               // change while the script awaits must not redirect its next click.
               const requestOptions = { signal: controller.signal };
               const initial = (await request("computer.control", desktop ? { desktopId: desktop } : {}, requestOptions)).control;
-              if (executionId !== initial.executionId) repl.reset();
+              if (executionId !== initial.executionId) await repl.reset();
               executionId = initial.executionId;
               const epochs = new Map([[initial.desktopId, initial.automationEpoch]]);
               const images: Array<{ type: "image"; data: string; mimeType: string }> = [];
@@ -522,7 +526,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
                 const fn = api[method as keyof typeof api] as (...values: unknown[]) => Promise<unknown>;
                 if (!fn) throw new Error(`Unknown computer method: ${method}`);
                 return fn(...args);
-              }, controller.signal);
+              }, controller.signal, reason => controller.abort(reason));
               const lines = [...result.logs, ...(result.value !== undefined ? [`⇒ ${result.value}`] : [])];
               return { content: [{ type: "text", text: lines.join("\n") || "(no output)" }, ...images], details: {} };
             } finally {
@@ -693,7 +697,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
           }
           case "reset": {
             for (const evaluation of evaluations) evaluation.abort(new Error("Computer REPL reset"));
-            repl.reset();
+            await repl.reset();
             return { content: [{ type: "text", text: "REPL context reset; bindings cleared" }], details: { reset: true } };
           }
         }

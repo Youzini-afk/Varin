@@ -34,7 +34,7 @@ const WSL_PATH_PATTERN = /^\\\\wsl(\$|\.localhost)\\([^\\]+)/i;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 /** A timer is only a wake-up hint; the accepted deadline decides when to detach. */
-const scheduleAtDeadline = (deadlineAt: number, onDeadline: () => void): (() => void) => {
+export const scheduleAtDeadline = (deadlineAt: number, onDeadline: () => void): (() => void) => {
   let timer: ReturnType<typeof setTimeout>;
   const check = (): void => {
     const remaining = deadlineAt - Date.now();

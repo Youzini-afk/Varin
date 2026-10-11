@@ -417,7 +417,8 @@ impl Fixture {
             context_preparation: Arc::new(NoopContextPreparation),
             progress: ProgressSink::default(),
         };
-        let start = crate::observations::configure(questions::configure(start, owner.clone()), owner);
+        let start =
+            crate::observations::configure(questions::configure(start, owner.clone()), owner);
         self.runtime
             .start(&self.run, start)
             .unwrap()
@@ -1210,6 +1211,7 @@ impl ToolExecutor for FailureTool {
 fn failure_declaration() -> ToolDeclaration {
     ToolDeclaration::new(
         ToolSchema {
+            requirements: None,
             name: "receipt_failure".into(),
             version: "1".into(),
             description: "Explicit fixture uncertain receipt".into(),

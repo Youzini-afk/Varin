@@ -44,15 +44,20 @@ pub struct LaunchMetadata {
     pub requires_rebind: bool,
 }
 impl LaunchSelectionMetadata {
-    pub(super) fn rebase_policy_models(&mut self, content: &crate::content::ContentStore) -> Result<()> {
-        let mut models=self.load_policy_models(content)?;
+    pub(super) fn rebase_policy_models(
+        &mut self,
+        content: &crate::content::ContentStore,
+    ) -> Result<()> {
+        let mut models = self.load_policy_models(content)?;
         for model in &mut models {
-            if model.status==crate::execution::PolicyModelStatus::Available {
-                let identity=model.configuration_identity.as_deref().ok_or_else(||RuntimeError::Invalid("planning configuration identity is missing".into()))?;
-                model.binding_id=Some(format!("policy:0:{}:{identity}",model.capability_id));
+            if model.status == crate::execution::PolicyModelStatus::Available {
+                let identity = model.configuration_identity.as_deref().ok_or_else(|| {
+                    RuntimeError::Invalid("planning configuration identity is missing".into())
+                })?;
+                model.binding_id = Some(format!("policy:0:{}:{identity}", model.capability_id));
             }
         }
-        self.policy_models=stage_policy_models(content,&models)?;
+        self.policy_models = stage_policy_models(content, &models)?;
         Ok(())
     }
     pub(super) fn stage(
@@ -60,6 +65,21 @@ impl LaunchSelectionMetadata {
         selection: LaunchSelection,
     ) -> Result<Self> {
         selection.validate()?;
+        Self::stage_validated(content, selection)
+    }
+    /// Non-executable delegation description. ChildSource alone owns Pending/Ready;
+    /// submission validates the eventual child's exact source before creating its Run.
+    pub(super) fn stage_child_intent(
+        content: &crate::content::ContentStore,
+        selection: LaunchSelection,
+    ) -> Result<Self> {
+        selection.validate_structure()?;
+        Self::stage_validated(content, selection)
+    }
+    fn stage_validated(
+        content: &crate::content::ContentStore,
+        selection: LaunchSelection,
+    ) -> Result<Self> {
         let tools_ref = content.save(&serde_json::to_value(&selection.tools)?)?;
         let mut mcp_names = selection
             .mcp_binding
@@ -94,7 +114,11 @@ impl LaunchSelectionMetadata {
             .transpose()?;
         let policy_models = stage_policy_models(content, &selection.policy_models)?;
         Ok(Self {
-            child_dispatch_ref: selection.child_dispatch.as_ref().map(|catalog| content.save(&serde_json::to_value(catalog)?)).transpose()?,
+            child_dispatch_ref: selection
+                .child_dispatch
+                .as_ref()
+                .map(|catalog| content.save(&serde_json::to_value(catalog)?))
+                .transpose()?,
             credential_scope: selection.credential_scope,
             connection_identity: selection.connection_identity,
             provider_family: selection.provider_family,
@@ -111,8 +135,27 @@ impl LaunchSelectionMetadata {
         })
     }
     pub(super) fn load(self, content: &crate::content::ContentStore) -> Result<LaunchSelection> {
+        let selection = self.load_selection(content)?;
+        selection.validate()?;
+        Ok(selection)
+    }
+    pub(super) fn load_child_intent(
+        self,
+        content: &crate::content::ContentStore,
+    ) -> Result<LaunchSelection> {
+        let selection = self.load_selection(content)?;
+        selection.validate_structure()?;
+        Ok(selection)
+    }
+    fn load_selection(self, content: &crate::content::ContentStore) -> Result<LaunchSelection> {
         let selection = LaunchSelection {
-            child_dispatch: self.child_dispatch_ref.as_ref().map(|reference| serde_json::from_value(content.load(&reference)?).map_err(RuntimeError::from)).transpose()?,
+            child_dispatch: self
+                .child_dispatch_ref
+                .as_ref()
+                .map(|reference| {
+                    serde_json::from_value(content.load(&reference)?).map_err(RuntimeError::from)
+                })
+                .transpose()?,
             extension_bindings: serde_json::from_value(
                 content.load(&self.extension_bindings_ref)?,
             )?,
@@ -134,7 +177,6 @@ impl LaunchSelectionMetadata {
             policy: self.policy,
             source: self.source,
         };
-        selection.validate()?;
         Ok(selection)
     }
     pub(super) fn load_policy_models(
@@ -243,7 +285,12 @@ pub struct PreparedChildLaunch {
 }
 impl ChildLaunchPreparation {
     pub fn load(self) -> Result<PreparedChildLaunch> {
-        let mut names: Vec<_> = self.child.tools.iter().map(|tool| tool.name.clone()).collect();
+        let mut names: Vec<_> = self
+            .child
+            .tools
+            .iter()
+            .map(|tool| tool.name.clone())
+            .collect();
         names.sort();
         if names != self.selected.profile.tools
             || self.child.connection_identity != self.selected.model.connection_identity()?
@@ -270,7 +317,9 @@ impl ChildLaunchPreparation {
                 .as_ref()
                 != Some(&self.selected.catalog_ref)
         {
-            return Err(RuntimeError::Conflict("child launch differs from its frozen selection".into()));
+            return Err(RuntimeError::Conflict(
+                "child launch differs from its frozen selection".into(),
+            ));
         }
         Ok(PreparedChildLaunch {
             selection: self.child,

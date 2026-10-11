@@ -1,3 +1,4 @@
+import { KERNEL_PROTOCOL_VERSION } from './protocol.generated.js';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,7 +17,7 @@ const turn = () => new Promise<void>(resolve => setImmediate(resolve));
 
 /** Real runtime client, source rebind, process projection and terminal consumer. Only framed kernel
  * resource responses are supplied here; actual OS receipts are exercised in the Rust guardian tests. */
-function fixture() {
+function fixture(processKind: 'process_job' | 'script_environment' = 'process_job') {
   const routes = new Map<string, (req: never, res: never) => Promise<void>>();
   const spawn = vi.fn(() => { throw new Error('Opening an admitted process must never spawn'); });
   const terminal = createTerminalRuntime({
@@ -47,12 +48,12 @@ function fixture() {
     processKill: vi.fn(), processRelease: vi.fn(),
   };
   const requests = vi.fn(async (method: string, params: Record<string, unknown>) => {
-    if (method === 'runtime.operation.inspect') return { id: identity.operationId, run_id: 'run', executor: 'process_spawn' };
+    if (method === 'runtime.operation.inspect') return { id: identity.operationId, run_id: 'run', executor: 'process_spawn', managed_process: { purpose: { kind: processKind }, kernel_epoch: 'epoch' } };
     if (method === 'runtime.run.inspect') return { id: 'run', thread_id: identity.threadId, branch_id: identity.branchId, state: 'completed' };
     if (method === 'runtime.launch.inspect') return { selection: { source: { mode: 'live_root', workspace_id: 'workspace',
       execution_workspace_id: 'execution', branch_id: null, revision: null, environment_run_id: null,
       live_root: { hostId: 'host', rootId: 'root', canonicalRoot: '/workspace' } },
-      tools: [{ name: 'process_spawn' }, { name: 'process_write' }, { name: 'process_resize' }], extension_bindings: [], mcp_binding: null } };
+      tools: ['process_spawn', 'process_write', 'process_resize'].map(name => ({ name, requirements: { source: 'physical', process: true } })), extension_bindings: [], mcp_binding: null } };
     if (method === 'runtime.process.access') return { ...identity, runId: 'run', workspaceId: 'workspace', rootId: 'root', process: original };
     if (method === 'runtime.operation.cancel') return { id: params.operationId, executor: 'process_spawn', cancel_requested: true };
     throw new Error(`Unexpected request ${method}`);
@@ -67,7 +68,7 @@ function fixture() {
   const service = createThreadProcesses({ runtime, kernel: kernel as unknown as KernelClient, terminal: () => terminal,
     resolveLiveSource: async () => {}, onError: error => errors.push(error) });
   function emit(observer: KernelProcessObserver, stream: 'control' | 'data', chunks: Array<{ channel: 'stdout'; offset: number; bytesBase64: string }>, cursor: number, process = original) {
-    observer({ v: 1, kind: 'process-event', grantId: 'grant', error: null, stream, subscriptionId: 'subscription', processId: process.processId, kernelEpoch: 'epoch', sequence: 0,
+    observer({ v: KERNEL_PROTOCOL_VERSION, kind: 'process-event', grantId: 'grant', error: null, stream, subscriptionId: 'subscription', processId: process.processId, kernelEpoch: 'epoch', sequence: 0,
       result: { process, chunks, nextCursor: cursor, endCursor: cursor, inputSequence: -1, inputError: null,
         outputComplete: !process.writerActive, outputError: null } }, async () => {});
   }
@@ -150,4 +151,12 @@ it('rejects a foreign branch before granting or exposing the original process', 
   const f = fixture();
   await expect(f.service.openTerminal({ ...identity, branchId: 'foreign' })).rejects.toThrow('this branch');
   expect(f.kernel.issueGrant).not.toHaveBeenCalled(); expect(f.spawn).not.toHaveBeenCalled();
+});
+
+it('never exposes a script environment private channel as a user terminal', async () => {
+  const f = fixture('script_environment');
+  await expect(f.service.openTerminal(identity)).rejects.toThrow('original process operation');
+  expect(f.kernel.issueGrant).not.toHaveBeenCalled();
+  expect(f.scoped.processSubscribe).not.toHaveBeenCalled();
+  expect(f.spawn).not.toHaveBeenCalled();
 });

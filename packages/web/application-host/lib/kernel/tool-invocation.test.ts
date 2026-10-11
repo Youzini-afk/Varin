@@ -80,3 +80,38 @@ test('domain result and accepted job preserve JSON null; only a bodyless job pro
     assert.deepEqual(value,completion.kind==='job_accepted'&&completion.content===undefined?{operationId:authority.operationId,phase:'awaiting_job'}:null);
   }
 });
+
+test('actual live nested ancestry attaches Computer use only to its own cell and proves exact self-wait cycles', async () => {
+  const { withScriptCell, noteInvocationComputerUse, assertNoScriptCellCycle, assertNoScriptComputerStopCycle } = await import('./tool-invocation.js');
+  const { toolOperationId } = await import('./protocol.generated.js');
+  const signal = new AbortController().signal;
+  const desktops = new Set<string>();
+  const cancellations = new Set<(reason: unknown) => void>();
+  const dispatch = new AbortController();
+  await withToolInvocation({ authority, owner, signal }, async invocation => {
+    const outer = { owner, signal, invocation };
+    await withScriptCell(outer, { environmentId: 'environment-A', computerCancellation(cancel) { cancellations.add(cancel); return () => { cancellations.delete(cancel); }; }, computerUsed: id => { desktops.add(id); }, usesComputer: id => desktops.has(id) }, async () => {
+      const origin = { kind: 'nested_call' as const, parent_operation_id: authority.operationId };
+      await withToolInvocation({ authority: { ...authority, invocationId: 'nested', callId: 'computer', operationId: toolOperationId(origin, 'computer'), origin }, owner, signal }, async nested => {
+        const context = { owner, signal, invocation: nested };
+        assert.doesNotThrow(() => assertNoScriptComputerStopCycle(context, 'desktop-1'));
+        const remove = noteInvocationComputerUse(context, 'desktop-1', reason => dispatch.abort(reason));
+        assert.equal(cancellations.size, 1);
+        for (const cancel of cancellations) cancel(new Error('cell stop'));
+        assert.equal(dispatch.signal.aborted, true);
+        remove();
+        assert.equal(cancellations.size, 0);
+        assert.deepEqual([...desktops], ['desktop-1']);
+        assert.throws(() => assertNoScriptCellCycle(context, 'environment-A'), /dependency_cycle/);
+        assert.doesNotThrow(() => assertNoScriptCellCycle(context, 'environment-B'));
+        assert.throws(() => assertNoScriptComputerStopCycle(context, 'desktop-1'), /independent ordinary tool call/);
+        assert.doesNotThrow(() => assertNoScriptComputerStopCycle(context, 'desktop-2'));
+      });
+    });
+    // A later work segment cannot inherit the ended cell's desktop use.
+    const origin = { kind: 'nested_call' as const, parent_operation_id: authority.operationId };
+    await withToolInvocation({ authority: { ...authority, invocationId: 'later', callId: 'later', operationId: toolOperationId(origin, 'later'), origin }, owner, signal }, async invocation => {
+      assert.doesNotThrow(() => assertNoScriptComputerStopCycle({ owner, signal, invocation }, 'desktop-1'));
+    });
+  });
+});

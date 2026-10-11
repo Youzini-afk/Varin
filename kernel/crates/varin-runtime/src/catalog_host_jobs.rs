@@ -266,6 +266,7 @@ impl Catalog {
         // responsibility now; handed_off does not assert domain acceptance (the ref stays null).
         // This command must never hold the model Run foreground open.
         let op = Operation {
+            managed_process: None,
             host_job: Some(HostJobLink {
                 binding: HostJobBinding {
                     operation_id: id.clone(),
@@ -513,10 +514,9 @@ impl Catalog {
     pub fn host_job_acceptance(&self, id: &str) -> Result<result_content::ToolCompletionRead> {
         let op = self.operation(id)?;
         if op.host_job.is_none()
-            && !op
-                .waiting_on
-                .as_deref()
-                .is_some_and(|v| v.starts_with(WAIT_PREFIX) || v.starts_with(super::computer_wait::PREFIX))
+            && !op.waiting_on.as_deref().is_some_and(|v| {
+                v.starts_with(WAIT_PREFIX) || v.starts_with(super::computer_wait::PREFIX)
+            })
         {
             return Err(RuntimeError::Conflict(
                 "Host job has no trusted acceptance".into(),
@@ -547,7 +547,12 @@ impl Catalog {
 pub(super) fn observation_kinds(binding: &HostJobBinding) -> Vec<String> {
     let mut kinds = vec!["job_stopped".into()];
     if binding.domain == "research.experiment" && binding.domain_version == 1 {
-        kinds.extend(["artifact".into(), "collection".into(), "log_literal".into(), "log_end".into()]);
+        kinds.extend([
+            "artifact".into(),
+            "collection".into(),
+            "log_literal".into(),
+            "log_end".into(),
+        ]);
     }
     kinds
 }

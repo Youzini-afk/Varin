@@ -1,137 +1,184 @@
 import { Worker } from "node:worker_threads";
 import { installComputerAppSdk } from './computer-app-sdk.js';
 
-// Node's own REPL parser supports persistent lexical bindings and top-level
-// await. Running it in a worker lets cancellation also stop synchronous loops
-// after an await; a Promise.race in the Pi process cannot do that.
+// Pi retains its Worker transport and SDK. Parsing, lexical state, async scopes
+// and admitted-call drain belong to the shared evaluator, not this adapter.
 const SOURCE = String.raw`
-const { parentPort } = require('node:worker_threads');
-const { REPLServer } = require('node:repl');
-const { PassThrough } = require('node:stream');
-const { AsyncLocalStorage } = require('node:async_hooks');
-const { inspect } = require('node:util');
+const { parentPort, workerData } = require('node:worker_threads');
 // tsx/esbuild may retain function names in the serialized SDK function.
 const __name = (fn, name) => Object.defineProperty(fn, 'name', { value: name, configurable: true });
-const context = new AsyncLocalStorage();
 const pending = new Map();
+const logs = new Map();
 let nextId = 0;
-const server = new REPLServer({ input: new PassThrough(), output: new PassThrough(), terminal: false });
-const finish = (run, error, value) => {
-  if (!run || run.closed) return;
-  let result;
-  try {
-    result = error ? { error: error.message || String(error), errorDetails: { code: error.code, actionSent: error.actionSent, retry: error.retry } }
-      : { value: value === undefined || typeof value === 'string' && run.logs.at(-1) === value
-          ? undefined : typeof value === 'string' ? value : inspect(value, { depth: 6 }) };
-  } catch (failure) { result = { error: failure.message || String(failure) }; }
-  run.closed = true;
-  parentPort.postMessage({ type: 'result', id: run.id, logs: run.logs, ...result });
-};
-// Node's default REPL evaluator routes thrown/rejected evaluations through
-// its domain instead of invoking eval's callback. Consume that path as well;
-// AsyncLocalStorage keeps a late error attached to its original evaluation.
-server._domain.on('error', error => finish(context.getStore(), error));
-const call = (method, args) => {
-  const run = context.getStore();
-  if (!run || run.closed) return Promise.reject(new Error('Computer evaluation has ended'));
-  const id = ++nextId;
-  return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
-    parentPort.postMessage({ type: 'call', runId: run.id, id, method, args });
+(async () => {
+  const { createNodeReplSession, scriptError } = await import(workerData.evaluatorUrl);
+  const session = createNodeReplSession({
+    environmentId: workerData.environmentId,
+    invoke: (cellId, input) => new Promise((resolve, reject) => {
+      const id = ++nextId;
+      pending.set(id, { cellId, resolve, reject });
+      parentPort.postMessage({ type: 'call', runId: cellId, id, ...input });
+    }),
+    output: (cellId, text) => logs.get(cellId)?.push(text),
+    serializeError: error => ({
+      ...scriptError(error),
+      ...(typeof error?.actionSent === 'boolean' ? { actionSent: error.actionSent } : {}),
+      ...(typeof error?.retry === 'string' ? { retry: error.retry } : {}),
+    }),
+    install: ({ context, invoke, output }) => {
+      const call = (method, args) => invoke({ method, args });
+      context.computer = Object.fromEntries(['list','apps','observe','act','open','browser','office','evidence','cancel','release','access','request','grant','deny','releaseAssignment','emitImage'].map(method => [method, (...args) => call(method, args)]));
+      context.sleep = context.computer.sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+      (${installComputerAppSdk.toString()})(context.computer, call, output);
+    },
   });
-};
-server.context.computer = Object.fromEntries(['list','apps','observe','act','open','browser','office','evidence','cancel','release','access','request','grant','deny','releaseAssignment','emitImage'].map(method => [method, (...args) => call(method, args)]));
-server.context.sleep = server.context.computer.sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-server.context.console = Object.fromEntries(['log','warn','error'].map(method => [method, (...args) => {
-  const run = context.getStore();
-  if (run && !run.closed) run.logs.push(args.map(value => typeof value === 'string' ? value : inspect(value)).join(' '));
-}]));
-(${installComputerAppSdk.toString()})(server.context.computer, call, text => server.context.console.log(text));
-parentPort.on('message', message => {
-  if (message.type === 'response') {
-    const request = pending.get(message.id);
-    if (!request) return;
-    pending.delete(message.id);
-    if (message.error) request.reject(Object.assign(new Error(message.error), message.errorDetails));
-    else request.resolve(message.value);
-    return;
-  }
-  const run = { id: message.id, closed: false, logs: [] };
-  context.run(run, () => server.eval(message.script + '\n', server.context, 'computer-repl', (error, value) => {
-    if (error) { finish(run, error); return; }
-    Promise.resolve(value).then(value => finish(run, null, value), error => finish(run, error));
-  }));
-});
+  parentPort.on('message', async message => {
+    if (message.type === 'close') { session.closeAdmission(); return; }
+    if (message.type === 'response') {
+      const request = pending.get(message.id);
+      if (!request || request.cellId !== message.runId) return;
+      pending.delete(message.id);
+      if (message.error !== undefined) request.reject(Object.assign(new Error(message.error), message.errorDetails));
+      else request.resolve(message.value);
+      return;
+    }
+    if (message.type !== 'eval') return;
+    const cellId = message.id;
+    const entries = [];
+    logs.set(cellId, entries);
+    const result = await session.evaluate({ cellId, script: message.script });
+    logs.delete(cellId);
+    parentPort.postMessage({ type: 'result', id: cellId, logs: entries,
+      ...(result.error ? { error: result.error.message, errorDetails: result.error }
+        : result.valueText !== undefined && entries.at(-1) !== result.valueText ? { value: result.valueText } : {}) });
+  });
+})();
 `;
 
+interface WorkerGeneration {
+  worker: Worker;
+  closed: boolean;
+  callbacks: Set<Promise<void>>;
+  stopped?: Promise<void>;
+  onStop?: (error: Error, stopped: Promise<void>) => void;
+}
+
+interface WorkerMessage {
+  type: string;
+  id: string | number;
+  runId?: string;
+  method?: string;
+  args?: unknown[];
+  logs?: string[];
+  value?: string;
+  error?: string;
+  errorDetails?: { code?: string; actionSent?: boolean; retry?: string };
+}
+
 export class ComputerRepl {
-  #worker: Worker | null = null;
+  #generation: WorkerGeneration | null = null;
   #tail: Promise<unknown> = Promise.resolve();
+  #stopping: Promise<void> = Promise.resolve();
   #nextId = 0;
 
-  run(script: string, call: (method: string, args: unknown[]) => Promise<unknown>, signal: AbortSignal): Promise<{ logs: string[]; value?: string }> {
-    const task = this.#tail.catch(() => undefined).then(() => {
+  #stop(generation: WorkerGeneration, error: Error): Promise<void> {
+    if (generation.stopped) return generation.stopped;
+    // Fence dispatch before either asynchronous cleanup. Termination starts now,
+    // even when an accepted Host callback is still waiting for its own result.
+    generation.closed = true;
+    if (this.#generation === generation) this.#generation = null;
+    try { generation.worker.postMessage({ type: 'close' }); } catch { /* A lost worker must still be terminated and drained. */ }
+    const termination = generation.worker.terminate();
+    const callbacks = Promise.allSettled([...generation.callbacks]);
+    const stopped = Promise.all([termination, callbacks]).then(() => undefined);
+    generation.stopped = stopped;
+    this.#stopping = Promise.all([this.#stopping, stopped]).then(() => undefined);
+    // Lifecycle errors may arrive between runs, when there is no caller yet.
+    void this.#stopping.catch(() => undefined);
+    generation.onStop?.(error, stopped);
+    return stopped;
+  }
+
+  run(script: string, call: (method: string, args: unknown[]) => Promise<unknown>, signal: AbortSignal,
+    onStop?: (error: Error) => void): Promise<{ logs: string[]; value?: string }> {
+    const task = this.#tail.catch(() => undefined).then(async () => {
+      // A reset can replace the barrier while this queued cell is awaiting an
+      // earlier one. Observe a stable barrier before creating the next worker.
+      let stopping: Promise<void>;
+      do { stopping = this.#stopping; await stopping; } while (stopping !== this.#stopping);
       signal.throwIfAborted();
-      if (!this.#worker) {
-        // This evaluator promises top-level await independently of flags used
-        // to launch the embedding Host (including Electron's Node process).
-        const created = new Worker(SOURCE, { eval: true, execArgv: ['--experimental-repl-await'] });
-        this.#worker = created;
-        // Detached script work can fail after the evaluation returned. Keep
-        // a lifecycle listener even between calls so it cannot crash Pi.
-        created.on("error", () => {
-          if (this.#worker === created) this.#worker = null;
-          void created.terminate();
+      if (!this.#generation) {
+        const worker = new Worker(SOURCE, {
+          eval: true,
+          execArgv: ['--experimental-repl-await'],
+          workerData: { evaluatorUrl: import.meta.resolve('@varin/script-runtime'), environmentId: `pi-computer-${this.#nextId + 1}` },
         });
-        created.on("exit", () => { if (this.#worker === created) this.#worker = null; });
+        const generation: WorkerGeneration = { worker, closed: false, callbacks: new Set() };
+        this.#generation = generation;
+        // Detached work can fail after a cell. Keep lifecycle listeners between
+        // cells and never assign an old worker's event to a new generation.
+        worker.on('error', error => { void this.#stop(generation, error); });
+        worker.on('exit', () => { void this.#stop(generation, new Error('Computer REPL stopped; bindings were cleared')); });
       }
-      const worker = this.#worker;
-      const id = ++this.#nextId;
+      const generation = this.#generation;
+      const worker = generation.worker;
+      const id = String(++this.#nextId);
       return new Promise<{ logs: string[]; value?: string }>((resolve, reject) => {
         const cleanup = () => {
-          signal.removeEventListener("abort", abort);
-          worker.off("message", message);
-          worker.off("error", failed);
-          worker.off("exit", exited);
+          signal.removeEventListener('abort', abort);
+          worker.off('message', message);
+          delete generation.onStop;
         };
-        const failed = (error: Error) => { cleanup(); this.reset(); reject(error); };
-        const exited = () => failed(new Error("Computer REPL stopped; bindings were cleared"));
-        const abort = () => failed(signal.reason instanceof Error ? signal.reason : new Error("Computer evaluation cancelled; bindings were cleared"));
-        const message = (event: { type: string; id: number; runId?: number; method?: string; args?: unknown[]; logs?: string[]; value?: string; error?: string; errorDetails?: { code?: string; actionSent?: boolean; retry?: string } }) => {
-          if (event.type === "call" && event.runId === id) {
-            void (async () => {
+        generation.onStop = (error, stopped) => {
+          cleanup();
+          // Worker loss must cancel the original bridge waits before drain;
+          // waiting for run's caller finally would deadlock an unbounded wait.
+          onStop?.(error);
+          void stopped.then(() => reject(error), reject);
+        };
+        const failed = (error: Error) => { void this.#stop(generation, error); };
+        const abort = () => failed(signal.reason instanceof Error ? signal.reason : new Error('Computer evaluation cancelled; bindings were cleared'));
+        const message = (event: WorkerMessage) => {
+          if (generation.closed) return;
+          if (event.type === 'call' && event.runId === id) {
+            // Add before invoking the callback, including callbacks that can
+            // synchronously initiate cancellation through their Host bridge.
+            const callback = Promise.resolve().then(async () => {
               try {
                 signal.throwIfAborted();
+                if (generation.closed) return;
                 const value = await call(event.method!, event.args!);
-                if (!signal.aborted) worker.postMessage({ type: "response", id: event.id, value });
+                if (!generation.closed && !signal.aborted) worker.postMessage({ type: 'response', runId: id, id: event.id, value });
               } catch (error) {
-                const extra = error as { code?: string; actionSent?: boolean; retry?: string };
-                if (!signal.aborted) worker.postMessage({ type: "response", id: event.id, error: error instanceof Error ? error.message : String(error),
+                const extra = error as { code?: string; actionSent?: boolean; retry?: string } | null | undefined;
+                if (!generation.closed && !signal.aborted) worker.postMessage({ type: 'response', runId: id, id: event.id,
+                  error: error instanceof Error ? error.message : String(error),
                   errorDetails: { code: extra?.code, actionSent: extra?.actionSent, retry: extra?.retry } });
               }
-            })();
-          } else if (event.type === "result" && event.id === id) {
+            }).catch(error => { failed(error instanceof Error ? error : new Error(String(error))); });
+            generation.callbacks.add(callback);
+            void callback.then(() => { generation.callbacks.delete(callback); });
+          } else if (event.type === 'result' && event.id === id) {
             cleanup();
             worker.unref();
-            if (event.error) reject(Object.assign(new Error(event.error), event.errorDetails));
+            if (event.error !== undefined) reject(Object.assign(new Error(event.error), event.errorDetails));
             else resolve({ logs: event.logs ?? [], ...(event.value !== undefined ? { value: event.value } : {}) });
           }
         };
         worker.ref();
-        worker.on("message", message);
-        worker.once("error", failed);
-        worker.once("exit", exited);
-        signal.addEventListener("abort", abort, { once: true });
-        worker.postMessage({ type: "eval", id, script });
+        worker.on('message', message);
+        signal.addEventListener('abort', abort, { once: true });
+        if (signal.aborted) { abort(); return; }
+        try { worker.postMessage({ type: 'eval', id, script }); }
+        catch (error) { failed(error instanceof Error ? error : new Error(String(error))); }
       });
     });
     this.#tail = task;
     return task;
   }
 
-  reset(): void {
-    const worker = this.#worker;
-    this.#worker = null;
-    if (worker) void worker.terminate();
+  reset(): Promise<void> {
+    if (this.#generation) this.#stop(this.#generation, new Error('Computer REPL reset; bindings were cleared'));
+    return this.#stopping;
   }
 }

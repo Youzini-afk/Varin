@@ -196,6 +196,7 @@ pub(super) fn hydrate_operation(
         .transpose()?;
     Ok(crate::types::Operation {
         host_job: operation.host_job,
+        managed_process: operation.managed_process,
         call_completion: operation
             .call_completion
             .map(|completion| completion.load(content))

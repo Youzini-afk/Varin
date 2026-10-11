@@ -3,7 +3,7 @@
  * Do not hand-edit the wire shapes; run `node scripts/generate-kernel-protocol.mjs`.
  */
 
-export const KERNEL_PROTOCOL_VERSION = 1 as const;
+export const KERNEL_PROTOCOL_VERSION = 2 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
 export const KERNEL_CONTROL_METHODS = ["runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
@@ -11,9 +11,14 @@ export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.computer.event.cancel",
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["process.write","process.resize","runtime.tools.invoke"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.tools.invoke","runtime.history.body"] as const;
-export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v1" as const;
+export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v2" as const;
 
 export type KernelMethod =
+  | "runtime.managed_process.pending"
+  | "runtime.managed_process.terminal"
+  | "runtime.managed_process.cell"
+  | "runtime.managed_process.accept"
+  | "runtime.managed_process.begin"
   | "runtime.computer.event.accept"
   | "runtime.computer.event.cancel"
   | "runtime.computer.request.create"
@@ -269,6 +274,40 @@ export type KernelMethod =
   | "runtime.messages.send"
   | "runtime.messages.list"
   | "runtime.messages.get";
+
+export interface ManagedProcessTerminalParams {
+  operationId: string;
+  executionOwner: ExecutorOwner;
+  toolBinding: unknown;
+  callbacksStopped: boolean;
+}
+
+export interface ManagedProcessCellParams {
+  operationId: string;
+  executionOwner: ExecutorOwner;
+  environmentId: string;
+  closing: boolean;
+}
+
+export interface ManagedProcessAcceptParams {
+  operationId: string;
+  executionOwner: ExecutorOwner;
+  toolBinding: unknown;
+}
+
+export interface ManagedProcessBeginParams {
+  operationId: string;
+  executionOwner: ExecutorOwner;
+  node: NodeBinding;
+}
+
+export interface ManagedProcess { purpose: ManagedProcessKind; kernel_epoch: string | null; }
+
+export type ManagedProcessKind = {kind:'process_job'} | {kind:'script_environment';node:NodeBinding};
+
+export interface NodeBinding { executable: string; worker_path: string; worker_identity: string; configuration_identity: string; }
+
+export interface ToolRequirements { source: 'source' | 'physical' | 'live'; process: boolean; }
 
 export type ComputerEventKind = 'takeover' | 'cancel' | 'handback';
 
@@ -1547,7 +1586,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 1; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 2; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -1644,6 +1683,7 @@ export interface LaunchTool {
   schema: unknown;
   output_schema: unknown;
   metadata: ToolMetadata | null;
+  requirements?: ToolRequirements;
 }
 
 export interface LaunchPolicy {
@@ -2441,6 +2481,7 @@ export interface Operation {
   waiting_on: string | null;
   intent: unknown;
   result: unknown;
+  managed_process?: ManagedProcess;
 }
 
 export interface ProviderOriginal {
@@ -3784,8 +3825,9 @@ export interface ChildWaitParams {
 export interface ChildCapabilityDescriptor {
   name: string;
   version: string;
-  source_requirement: 'none' | 'source' | 'physical';
+  source_requirement: 'none' | 'source' | 'physical' | 'live';
   default_presets: ('worker' | 'retrieval')[];
+  process?: boolean;
 }
 
 export type ChildWorkMode = 'read_only' | 'isolated_write';
@@ -4083,6 +4125,11 @@ export interface FamilyRead {
 export interface FamilyItem { threadId: string; branchId: string; runId: string | null; headId: string | null; itemId: string; format: 'conversation_json'; text: string; offset: number; nextOffset: number | null; totalBytes: number }
 
 export type KernelMethodParams = {
+  "runtime.managed_process.pending": KernelEmptyParams;
+  "runtime.managed_process.terminal": ManagedProcessTerminalParams;
+  "runtime.managed_process.cell": ManagedProcessCellParams;
+  "runtime.managed_process.accept": ManagedProcessAcceptParams;
+  "runtime.managed_process.begin": ManagedProcessBeginParams;
   "runtime.computer.event.accept": ComputerEventCommand;
   "runtime.computer.event.cancel": ComputerEventCancellation;
   "runtime.computer.request.create": ComputerRequestCreateParams;
@@ -4341,6 +4388,51 @@ export type KernelMethodParams = {
 };
 
 export type KernelRequest =
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.managed_process.pending";
+      params: KernelEmptyParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.managed_process.terminal";
+      params: ManagedProcessTerminalParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.managed_process.cell";
+      params: ManagedProcessCellParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.managed_process.accept";
+      params: ManagedProcessAcceptParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.managed_process.begin";
+      params: ManagedProcessBeginParams;
+      epoch?: string;
+      grantId?: string;
+    }
   | {
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";

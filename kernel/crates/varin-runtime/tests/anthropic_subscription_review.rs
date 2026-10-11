@@ -70,7 +70,8 @@ fn subscription_tool_names_roundtrip_without_rewriting_signed_thinking_or_api_ke
         },
         binding: RequestBinding {
             child_dispatch: None,
-            goal: None, resource_activations: Vec::new(),
+            goal: None,
+            resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "fixture".into(),
             provider_family: "anthropic-messages".into(),
@@ -79,6 +80,7 @@ fn subscription_tool_names_roundtrip_without_rewriting_signed_thinking_or_api_ke
             configuration_generation: 1,
             tool_schema_generation: 1,
             tools: vec![ToolSchema {
+                requirements: None,
                 description: String::new(),
                 output_schema: None,
                 metadata: None,

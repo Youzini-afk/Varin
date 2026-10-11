@@ -1,3 +1,4 @@
+import { KERNEL_PROTOCOL_VERSION } from './protocol.generated.js';
 import { EventEmitter } from 'node:events';
 import type { Express, Request, RequestHandler, Response as ExpressResponse } from 'express';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -132,7 +133,7 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
       await vi.waitFor(() => expect(runtime.prepareChild).toHaveBeenCalledOnce());
       expect(runtime.releaseChildResources).not.toHaveBeenCalled(); expect(runtime.failChild).not.toHaveBeenCalled();
       calendarHeld = false;
-      emit({ v: 1, kind: 'runtime-event', kernelEpoch: 'same-epoch', stream: 'durable', cursor: 8 });
+      emit({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', kernelEpoch: 'same-epoch', stream: 'durable', cursor: 8 });
     }
     await vi.waitFor(() => expect(continueRun).toHaveBeenCalledOnce());
     expect(store.pinBranch).toHaveBeenCalledWith('old-result', { revision: 7, signal: expect.any(AbortSignal) });

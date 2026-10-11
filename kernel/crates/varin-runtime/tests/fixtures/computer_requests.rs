@@ -17,7 +17,7 @@ pub struct Fixture {
     pub parent_run: String,
 }
 fn schema(name: &str, job: bool) -> ToolSchema {
-    ToolSchema{name:name.into(),version:"computer-fixture-v1".into(),description:format!("Original {name}"),schema:json!({"type":"object"}),output_schema:None,metadata:Some(serde_json::from_value(json!({"completion":if job{"job"}else{"result"},"lifetime":if job{Some("thread")}else{None},"operation":if job{"read"}else{"effect"},"service_id":format!("varin.computer.{}",name.trim_start_matches("computer_")),"service_version":1})).unwrap())}
+    ToolSchema{requirements: None,name:name.into(),version:"computer-fixture-v1".into(),description:format!("Original {name}"),schema:json!({"type":"object"}),output_schema:None,metadata:Some(serde_json::from_value(json!({"completion":if job{"job"}else{"result"},"lifetime":if job{Some("thread")}else{None},"operation":if job{"read"}else{"effect"},"service_id":format!("varin.computer.{}",name.trim_start_matches("computer_")),"service_version":1})).unwrap())}
 }
 impl Fixture {
     pub fn new() -> Self {
@@ -31,6 +31,7 @@ impl Fixture {
         .map(|(name, job)| schema(name, job))
         .collect::<Vec<_>>();
         let read = ToolSchema {
+            requirements: None,
             name: "file_read".into(),
             version: "1".into(),
             description: String::new(),
@@ -39,6 +40,7 @@ impl Fixture {
             metadata: None,
         };
         let dispatch = ToolSchema {
+            requirements: None,
             name: "dispatch".into(),
             ..read.clone()
         };

@@ -18,14 +18,12 @@ export type SourceLaunch = Omit<ThreadSource, 'mode' | 'branchId' | 'revision' |
 );
 
 /** Project only source-owned declarations from the same frozen launch directory. */
-const sourceToolNames = new Set(['file_read', 'file_list', 'file_search', 'file_write', 'file_edit', 'process_inspect',
-  'process_read', 'process_spawn', 'process_write', 'process_resize', 'language_definition', 'language_references', 'language_diagnostics', 'code_retrieval']);
 export function sourceToolSchemas(selection: LaunchIntent['selection']) {
   const external = new Set([
     ...(selection.mcp_binding?.tools.map(tool => tool.name) ?? []),
     ...selection.extension_bindings.map(binding => binding.tool.name),
   ]);
-  return selection.tools.filter(tool => !external.has(tool.name) && sourceToolNames.has(tool.name));
+  return selection.tools.filter(tool => !external.has(tool.name) && tool.requirements !== undefined);
 }
 
 /** Uses the existing Storage authority for source reads, materialization and process containment.
@@ -50,10 +48,6 @@ export async function startRunFromSource(
     throw new Error('Fixed source requires a complete branch revision');
   }
   const tools = [...new Set(selection.tools)];
-  if (tools.some(tool => !sourceToolNames.has(tool))) throw new Error('Source launch selected an unavailable tool');
-  if (selection.mode !== 'live_root' && tools.some(tool => tool.startsWith('language_'))) throw new Error('Language tools require live_root; fixed dependency closure is unavailable');
-  if (selection.mode !== 'live_root' && tools.includes('code_retrieval')) throw new Error('Code retrieval requires live_root; fixed retrieval inputs are unavailable');
-  if (selection.mode === 'fixed_branch' && tools.some(tool => ['process_spawn', 'process_write', 'process_resize', 'file_write', 'file_edit'].includes(tool))) throw new Error('Mutating tools require an explicitly selected physical source');
   const run = await runtime.run(selection.runId, signal);
   if (['completed', 'failed', 'cancelled'].includes(run.state) || run.cancel_requested) throw new Error('Run is closed to launch');
   const saved = await runtime.launch(run.id, signal);
@@ -132,7 +126,7 @@ export async function admitRunSourceAuthority(
   if (options.retention === 'caller') {
     if (!options.operationId) throw new Error('Independent source lifetime requires its actual Operation');
     const operation = await runtime.operation(options.operationId, signal);
-    if (operation.run_id !== run.id || operation.lifetime !== 'thread' || operation.execution_owner?.kind !== 'external') throw new Error('Independent source Operation differs from its original Thread/Run owner');
+    if (operation.run_id !== run.id || (operation.lifetime !== 'thread' && !(operation.lifetime === 'environment' && operation.managed_process?.purpose.kind === 'script_environment')) || operation.execution_owner?.kind !== 'external') throw new Error('Independent source Operation differs from its original Thread/Run owner');
   }
   // Do not use old grants from the durable selection. Each Host lifetime issues its own permit.
   const grant = await kernel.issueGrant({
@@ -142,7 +136,7 @@ export async function admitRunSourceAuthority(
     threadId: run.thread_id,
     runId: run.id,
     ...(options.retention === 'caller' ? { operationId: options.operationId } : {}),
-    capabilities: ['storage.read', 'storage.write', ...(integration ? ['recovery'] : []), ...(tools.some(tool => tool.startsWith('process_')) ? ['process'] : [])],
+    capabilities: ['storage.read', 'storage.write', ...(integration ? ['recovery'] : []), ...(saved.selection.tools.some(tool => tool.requirements?.process) ? ['process'] : [])],
     pathScopes: [''],
   }, signal);
 

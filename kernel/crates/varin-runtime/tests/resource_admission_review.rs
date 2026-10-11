@@ -29,7 +29,8 @@ fn request_snapshot(receipt: &Receipt) -> varin_runtime::execution::RequestSnaps
             },
             binding: RequestBinding {
                 child_dispatch: None,
-                goal: None, resource_activations: Vec::new(),
+                goal: None,
+                resource_activations: Vec::new(),
                 resource_checkpoint_id: None,
                 connection_identity: "fixture-connection".into(),
                 provider_family: "test".into(),
@@ -72,6 +73,7 @@ fn setup(kind: CompletionKind) -> (std::path::PathBuf, Catalog, String) {
     let epoch = db.epoch();
     let mut snapshot = request_snapshot(&r);
     snapshot.view.binding.tools = vec![ToolSchema {
+        requirements: None,
         description: String::new(),
         output_schema: None,
         metadata: None,
@@ -272,7 +274,8 @@ mod actual_engines {
             owner_generation: db.epoch(),
             binding: RequestBinding {
                 child_dispatch: None,
-                goal: None, resource_activations: Vec::new(),
+                goal: None,
+                resource_activations: Vec::new(),
                 resource_checkpoint_id: None,
                 connection_identity: "fixture-connection".into(),
                 provider_family: "test".into(),
@@ -281,6 +284,7 @@ mod actual_engines {
                 configuration_generation: 1,
                 tool_schema_generation: 1,
                 tools: vec![ToolSchema {
+                    requirements: None,
                     description: String::new(),
                     output_schema: None,
                     metadata: None,
@@ -586,7 +590,7 @@ fn live_job_survives_run_cancel_and_restart_until_explicit_stop() {
                 call_id: "job".into(),
                 completion: ToolCompletion::JobAccepted {
                     content: None,
-                operation_id: "model-1:tool:job".into(),
+                    operation_id: "model-1:tool:job".into(),
                     phase: "running".into(),
                     effect: Effect::Dispatched,
                     lifetime: Lifetime::Thread,

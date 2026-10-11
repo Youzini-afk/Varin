@@ -104,15 +104,81 @@ describe("computer tool", () => {
     });
     const tool = createComputerTool(bridge, SESSION);
     const pending = execute(tool, { action: 'run', script: "await computer.apps(); await sleep(300); await computer.act({kind:'key',app:'editor',key:'enter'})" });
-    await started; cancelComputerEvaluations(SESSION, 'first');
+    await started; assert.equal(await cancelComputerEvaluations(SESSION, 'first'), true);
     assert.equal(isError(await pending), true);
     assert.equal(requests.filter(item => item.method === 'computer.act').length, 0);
     runId = 'second'; started = new Promise<void>(resolve => { ready = resolve; });
     const next = execute(tool, { action: 'run', script: "await computer.apps(); await sleep(100); await computer.act({kind:'key',app:'editor',key:'enter'})" });
-    await started; cancelComputerEvaluations(SESSION, 'first');
+    await started; assert.equal(await cancelComputerEvaluations(SESSION, 'first'), false);
     assert.equal(isError(await next), undefined);
     assert.equal(requests.filter(item => item.method === 'computer.act').length, 1);
     await execute(tool, { action: 'reset' }); bridge.dispose();
+  });
+  it('drains a script cancel callback when the original Host request revokes its own evaluation', { timeout: 5_000 }, async () => {
+    const session = 'script-cancel-reentry';
+    const requests: HarnessRequestData[] = [];
+    let completeCancellation!: (found: boolean) => void;
+    const cancelled = new Promise<boolean>(resolve => { completeCancellation = resolve; });
+    let cancelRequestId: string | undefined;
+    let bridgeAbortSent = false;
+    const bridge = new HostServicesBridge({
+      sessionId: session,
+      emit: (event, request) => {
+        if (event !== 'harness.request') {
+          if (request.requestId === cancelRequestId) bridgeAbortSent = true;
+          return;
+        }
+        requests.push(request);
+        if (request.method === 'computer.control') {
+          queueMicrotask(() => bridge.respond(session, request.requestId, { ok: true, result: {
+            control: { desktopId: 'local-console', automationEpoch: 'epoch:cancel', executionId: 'cancel-run', owner: 'agent', reachable: true, since: 'now' },
+          } }));
+        } else if (request.method === 'computer.cancel') {
+          cancelRequestId = request.requestId;
+          // Match the production Host's awaited session.computer.cancel callback.
+          // The bridge's local abort rejection is not physical desktop evidence.
+          void cancelComputerEvaluations(session, 'cancel-run').then(found => {
+            assert.equal(bridge.respond(session, request.requestId, { ok: true, result: { cancelled: 0, released: true } }), false);
+            completeCancellation(found);
+          });
+        }
+      },
+    });
+    const tool = createComputerTool(bridge, session);
+    try {
+      const result = await execute(tool, { action: 'run', script: "await computer.cancel(); await computer.act({kind:'key',app:'editor',key:'enter'})" });
+      assert.equal(isError(result), true);
+      assert.equal(await cancelled, true);
+      assert.equal(bridgeAbortSent, true);
+      assert.equal(requests.some(request => request.method === 'computer.act'), false);
+    } finally { await execute(tool, { action: 'reset' }); bridge.dispose(); }
+  });
+  it('cancels an unbounded bridge wait before draining an unexpectedly exited Worker', { timeout: 5_000 }, async () => {
+    const session = 'script-worker-loss';
+    let waitRequestId: string | undefined;
+    let bridgeAbortSent = false;
+    const bridge = new HostServicesBridge({
+      sessionId: session,
+      emit: (event, request) => {
+        if (event !== 'harness.request') {
+          if (request.requestId === waitRequestId) bridgeAbortSent = true;
+          return;
+        }
+        if (request.method === 'computer.access') { waitRequestId = request.requestId; return; }
+        queueMicrotask(() => bridge.respond(session, request.requestId, { ok: true, result: request.method === 'computer.control'
+          ? { control: { desktopId: 'local-console', automationEpoch: 'epoch:loss', executionId: 'loss-run', owner: 'agent', reachable: true, since: 'now' } }
+          : { apps: [] },
+        }));
+      },
+    });
+    const tool = createComputerTool(bridge, session);
+    try {
+      const result = await execute(tool, { action: 'run', script: "void computer.request({reason:'inspect', wait:true}); await computer.apps(); process.exit(17)" });
+      assert.equal(isError(result), true);
+      assert.match((result.content[0] as { text: string }).text, /Computer REPL stopped/);
+      assert.ok(waitRequestId);
+      assert.equal(bridgeAbortSent, true);
+    } finally { bridge.dispose(); await execute(tool, { action: 'reset' }); }
   });
   it("validates and forwards desktop, browser, and office operation arguments", async () => {
     const { bridge, requests } = scriptedBridge({

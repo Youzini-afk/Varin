@@ -579,6 +579,30 @@ domain/permission requests without occupying the entire body window. Cancellatio
 still use the original pending identity. See the installable
 [`nested-tools` example](../../../../../examples/extensions/nested-tools/README.md).
 
+`script-runtime.ts` binds the ordinary installed `varin.builtin.scripts` declarations to this same
+invocation owner. `script_open` returns an original Environment Job ID; `script_run` executes ordered
+async JavaScript cells against that exact Run/source/Node binding; `script_close` requests exact
+cleanup. `@varin/script-runtime` is the sole Node lexical evaluator and private worker framing owner.
+The Pi Computer adapter imports it with its existing Computer SDK rather than maintaining another
+REPL or gaining Native tool permissions. Native scripts use `tools.invoke` and the original frozen
+directory. Their direct Node I/O is unrestricted execution, not a desktop-only sandbox.
+
+The existing Storage process, interaction journal, output subscriptions and guardian launch and stop
+the helper. Process requirements come from the selected declarations; no second process-tool name
+list or forced `process_spawn` selection supplies permission. Idle environments remain source writers.
+The original Run ending stops only its environments; independent nested Thread Jobs retain their
+lifetime. A cell closes admission and waits for its actual accepted callbacks; EOF, a new Host/kernel
+epoch or cancellation intent alone never proves physical stop. The original environment Operation
+retains unresolved cleanup. A finished close control call projects `environmentStopped` and the
+original environment receipt rather than creating another Unknown writer.
+
+Actual Computer dispatches attach their already-authorized desktop and original cancellation hook to
+the active cell ancestry. Cleanup starts those controllers before waiting for the Node tree or Catalog.
+Desktop Stop selects only matching active cells. Proven same-environment or same-desktop ancestor wait
+cycles produce actionable errors; unrelated environments and desktops remain usable. Restart loses
+the heap explicitly and never replays source. See the shared evaluator README for the known Node 24
+`await Promise.reject(null)` limitation and the absence of typed image output in this slice.
+
 Cancellation detaches the observer without fabricating a stopped callback or no-effect result.
 The existing bridge call retains its actual callback and unacknowledged receipt across a kernel-channel
 replacement, using the original external execution identity. Catalog durably commits that evidence

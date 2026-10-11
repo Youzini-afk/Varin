@@ -21,7 +21,7 @@ export function createThreadProcesses(options: {
     const operation = await runtime.operation(input.operationId);
     const run = await runtime.run(operation.run_id);
     if (input.runtime !== 'agent' || run.thread_id !== input.threadId || run.branch_id !== input.branchId
-      || operation.executor !== 'process_spawn') throw new Error('Terminal must belong to this branch and original process operation');
+      || operation.managed_process?.purpose.kind !== 'process_job') throw new Error('Terminal must belong to this branch and original process operation');
     const launch = await runtime.launch(run.id);
     const source = launch?.selection.source;
     if (!source || source.mode === 'fixed_branch') throw new Error('Process has no physical source');

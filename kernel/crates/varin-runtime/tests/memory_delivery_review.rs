@@ -169,7 +169,8 @@ fn snapshot(run: &str, head: &str, id: &str, projection: ContextProjection) -> R
         },
         binding: RequestBinding {
             child_dispatch: None,
-            goal: None, resource_activations: Vec::new(),
+            goal: None,
+            resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "review-provider".into(),
             provider_family: "openai-responses".into(),
@@ -353,7 +354,13 @@ fn policy_model_quoted_real_memory_facts_keep_selection_send_and_commit_separate
         )
         .unwrap();
     assert_eq!(states(&f.0, &action), vec!["\"committed\""]);
-    content_collection::collect(|| owner.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
+    content_collection::collect(|| {
+        owner
+            .lock()
+            .unwrap()
+            .prepare_content_collection(Default::default())
+    })
+    .unwrap();
     assert_eq!(
         owner
             .policy_model_job(&receipt.run_id, epoch)
@@ -955,6 +962,7 @@ fn policy_memory_mutation_uses_original_receipt_for_evidence_or_tail_delivery() 
         binding.tools = ["memory", "read"]
             .into_iter()
             .map(|name| ToolSchema {
+                requirements: None,
                 description: String::new(),
                 output_schema: None,
                 metadata: None,
@@ -1020,7 +1028,13 @@ fn policy_memory_mutation_uses_original_receipt_for_evidence_or_tail_delivery() 
             item.content,
             Content::ToolCall { .. } | Content::ToolResult { .. }
         )));
-        content_collection::collect(|| owner.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
+        content_collection::collect(|| {
+            owner
+                .lock()
+                .unwrap()
+                .prepare_content_collection(Default::default())
+        })
+        .unwrap();
         let db = owner.lock().unwrap();
         let operations: Vec<_> = db
             .events_after(0, 1000)

@@ -84,7 +84,7 @@ pub(crate) fn execute_rpc(
     Ok(serde_json::to_value(receipt)?)
 }
 pub(crate) fn schema() -> ToolSchema {
-    ToolSchema{name:REPORT_TOOL.into(),version:"1".into(),description:"Report the explicitly established continuing Goal as complete or blocked. An ordinary final answer only finishes one Run. Give the real reason. A blocked report may name waitOperationId from this Run's original process_spawn Job; continuation then waits for its real stop. This does not grant new permissions or control a parent Goal from a child task.".into(),output_schema:None,metadata:None,
+    ToolSchema{requirements: None,name:REPORT_TOOL.into(),version:"1".into(),description:"Report the explicitly established continuing Goal as complete or blocked. An ordinary final answer only finishes one Run. Give the real reason. A blocked report may name waitOperationId from this Run's original process_spawn Job; continuation then waits for its real stop. This does not grant new permissions or control a parent Goal from a child task.".into(),output_schema:None,metadata:None,
         schema:json!({"type":"object","properties":{"state":{"type":"string","enum":["complete","blocked"]},"reason":{"type":"string","minLength":1},"waitOperationId":{"type":"string","minLength":1}},"required":["state","reason"],"additionalProperties":false})}
 }
 fn error(e: impl ToString) -> ExecutionError {

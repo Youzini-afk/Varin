@@ -53,7 +53,9 @@ pub enum FollowupSource {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum FollowupLeafEvidence {
-    Metric { fact: FollowupMetricEvidence },
+    Metric {
+        fact: FollowupMetricEvidence,
+    },
     LogLiteral {
         binding: host_jobs::HostJobBinding,
         stream: LogStream,
@@ -152,14 +154,38 @@ impl FollowupSource {
 impl FollowupTrigger {
     pub fn sources(&self) -> Vec<FollowupSource> {
         match self {
-            Self::Metric { machine_id, metric, gpu_uuid, predicate, threshold } => vec![FollowupSource::Metric {
-                machine_id: machine_id.clone(), metric: *metric, gpu_uuid: gpu_uuid.clone(), predicate: *predicate, threshold: threshold.clone(),
+            Self::Metric {
+                machine_id,
+                metric,
+                gpu_uuid,
+                predicate,
+                threshold,
+            } => vec![FollowupSource::Metric {
+                machine_id: machine_id.clone(),
+                metric: *metric,
+                gpu_uuid: gpu_uuid.clone(),
+                predicate: *predicate,
+                threshold: threshold.clone(),
             }],
 
-            Self::LogLiteral { operation_id, stream, from_offset, literal_bytes } => vec![FollowupSource::LogLiteral {
-                operation_id: operation_id.clone(), stream: *stream, from_offset: *from_offset, literal_bytes: *literal_bytes,
+            Self::LogLiteral {
+                operation_id,
+                stream,
+                from_offset,
+                literal_bytes,
+            } => vec![FollowupSource::LogLiteral {
+                operation_id: operation_id.clone(),
+                stream: *stream,
+                from_offset: *from_offset,
+                literal_bytes: *literal_bytes,
             }],
-            Self::LogEnd { operation_id, stream } => vec![FollowupSource::LogEnd { operation_id: operation_id.clone(), stream: *stream }],
+            Self::LogEnd {
+                operation_id,
+                stream,
+            } => vec![FollowupSource::LogEnd {
+                operation_id: operation_id.clone(),
+                stream: *stream,
+            }],
             Self::Artifact {
                 operation_id,
                 artifact_id,
@@ -311,8 +337,8 @@ fn observe_leaf(
                 return Ok(None);
             };
             if receipt.identity != op.id
-                || receipt.executor != "process_spawn"
-                || op.execution_owner != Some(ExecutorOwner::Kernel)
+                || Some(receipt.executor.as_str()) != op.executor.as_deref()
+                || managed_process::require_process(&op).is_err()
             {
                 return Err(RuntimeError::Invalid(
                     "process stop receipt owner mismatch".into(),
@@ -504,11 +530,33 @@ pub(super) fn observe_sources(
         FollowupTrigger::All { .. } => TriggerEvidence::All { sources: observed },
         _ => match &observed[0].evidence {
             FollowupLeafEvidence::Metric { fact } => TriggerEvidence::Metric { fact: fact.clone() },
-            FollowupLeafEvidence::LogLiteral { binding, stream, start_offset, end_offset, published_bytes, job_revision } => TriggerEvidence::LogLiteral {
-                binding: binding.clone(), stream: *stream, start_offset: *start_offset, end_offset: *end_offset, published_bytes: *published_bytes, job_revision: *job_revision,
+            FollowupLeafEvidence::LogLiteral {
+                binding,
+                stream,
+                start_offset,
+                end_offset,
+                published_bytes,
+                job_revision,
+            } => TriggerEvidence::LogLiteral {
+                binding: binding.clone(),
+                stream: *stream,
+                start_offset: *start_offset,
+                end_offset: *end_offset,
+                published_bytes: *published_bytes,
+                job_revision: *job_revision,
             },
-            FollowupLeafEvidence::LogEnd { binding, stream, published_bytes, job_revision, attempt_revision } => TriggerEvidence::LogEnd {
-                binding: binding.clone(), stream: *stream, published_bytes: *published_bytes, job_revision: *job_revision, attempt_revision: *attempt_revision,
+            FollowupLeafEvidence::LogEnd {
+                binding,
+                stream,
+                published_bytes,
+                job_revision,
+                attempt_revision,
+            } => TriggerEvidence::LogEnd {
+                binding: binding.clone(),
+                stream: *stream,
+                published_bytes: *published_bytes,
+                job_revision: *job_revision,
+                attempt_revision: *attempt_revision,
             },
             FollowupLeafEvidence::Artifact { binding, fact, gap } => TriggerEvidence::Artifact {
                 binding: binding.clone(),
@@ -587,10 +635,10 @@ fn process_settled(db: &Connection, identity: &str, epoch: &str) -> Result<bool>
     )?;
     Ok(op.phase == OperationPhase::Terminal
         && !occupied
-        && op.execution_owner == Some(ExecutorOwner::Kernel)
+        && managed_process::require_process(&op).is_ok()
         && op.external_receipt.as_ref().is_some_and(|r| {
             r.executor_stopped
-                && r.executor == "process_spawn"
+                && Some(r.executor.as_str()) == op.executor.as_deref()
                 && r.identity == identity
                 && r.epoch == epoch
         }))

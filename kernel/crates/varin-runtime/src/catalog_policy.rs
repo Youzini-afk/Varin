@@ -16,7 +16,11 @@ struct PolicyNodeReceiptMetadata {
 impl PolicyNodeReceiptMetadata {
     fn output(&self, action: &str) -> Result<Option<PolicyEvidenceRef>> {
         match &self.completion {
-            ToolCompletionMetadata::Result { content_ref, .. } | ToolCompletionMetadata::JobAccepted { content_ref: Some(content_ref), .. } => Ok(Some(PolicyEvidenceRef {
+            ToolCompletionMetadata::Result { content_ref, .. }
+            | ToolCompletionMetadata::JobAccepted {
+                content_ref: Some(content_ref),
+                ..
+            } => Ok(Some(PolicyEvidenceRef {
                 action_id: action.into(),
                 node_id: self.node_id.clone(),
                 content_ref: content_ref["content_object"]
@@ -51,7 +55,9 @@ impl PolicyNodeReceiptMetadata {
                 operation_id,
                 phase,
                 effect,
-                lifetime, ..} => PolicyNodeCompletion::JobAccepted {
+                lifetime,
+                ..
+            } => PolicyNodeCompletion::JobAccepted {
                 operation_id: operation_id.clone(),
                 phase: phase.clone(),
                 effect: *effect,
@@ -92,9 +98,18 @@ impl PolicyGraphSchemaPreparation {
     pub fn load(self, intent: &PolicyGraphIntent) -> Result<PreparedPolicyGraphSchemas> {
         let (body, run_id) = PolicyGraphBody::prepare(intent)?;
         let projection = self.context.map(context::ContextRead::load).transpose()?;
-        let resource_activations = projection.as_ref().map(|projection| resources::retained_activations(&projection.history)).unwrap_or_default();
-        if body.nodes.iter().any(|node| node.resource_activations != resource_activations) {
-            return Err(RuntimeError::Conflict("policy skill bindings differ from retained input material".into()));
+        let resource_activations = projection
+            .as_ref()
+            .map(|projection| resources::retained_activations(&projection.history))
+            .unwrap_or_default();
+        if body
+            .nodes
+            .iter()
+            .any(|node| node.resource_activations != resource_activations)
+        {
+            return Err(RuntimeError::Conflict(
+                "policy skill bindings differ from retained input material".into(),
+            ));
         }
         let tools_ref = self.content.save(&serde_json::to_value(&body.tools)?)?;
         let metadata = PolicyActionMetadata::PolicyToolGraphV1 {
@@ -263,8 +278,10 @@ impl Catalog {
             .optional()?;
         let previous =
             super::policy_body::latest_action(&self.db, run_id, true)?.map(|(op, _)| op.id);
-        let resource_checkpoint_id = self.capture_active_checkpoint(&run.branch_id)?.map(|checkpoint| checkpoint.id);
-        let goal=self.goal_binding(run_id)?;
+        let resource_checkpoint_id = self
+            .capture_active_checkpoint(&run.branch_id)?
+            .map(|checkpoint| checkpoint.id);
+        let goal = self.goal_binding(run_id)?;
         let id = hex::encode(Sha256::digest(serde_json::to_vec(&(
             run_id,
             self.head(&run.branch_id)?,
@@ -279,7 +296,17 @@ impl Catalog {
         let source = self
             .launch_metadata(run_id)?
             .and_then(|launch| launch.selection.source);
-        Ok(PolicyBoundary { history_range: HistoryRange { branch_id: run.branch_id.clone(), ancestor_id: None, leaf_id: self.head(&run.branch_id)? }, goal, id, source, resource_checkpoint_id })
+        Ok(PolicyBoundary {
+            history_range: HistoryRange {
+                branch_id: run.branch_id.clone(),
+                ancestor_id: None,
+                leaf_id: self.head(&run.branch_id)?,
+            },
+            goal,
+            id,
+            source,
+            resource_checkpoint_id,
+        })
     }
     /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn policy_graph(&self, run_id: &str, epoch: u64) -> Result<Option<PolicyGraphState>> {
@@ -359,16 +386,23 @@ impl Catalog {
         intent: &PolicyGraphIntent,
     ) -> Result<PolicyGraphState> {
         let _synchronous = self.content.begin_synchronous()?;
-        let schemas = self.prepare_policy_graph_schemas(run_id, epoch)?.load(intent)?;
+        let schemas = self
+            .prepare_policy_graph_schemas(run_id, epoch)?
+            .load(intent)?;
         self.admit_policy_graph_prepared(run_id, epoch, schemas)?
             .load()
     }
-    pub fn prepare_policy_graph_schemas(&self, run_id: &str, epoch: u64) -> Result<PolicyGraphSchemaPreparation> {
+    pub fn prepare_policy_graph_schemas(
+        &self,
+        run_id: &str,
+        epoch: u64,
+    ) -> Result<PolicyGraphSchemaPreparation> {
         let run = self.run(run_id)?;
         let head = self.head(&run.branch_id)?;
         Ok(PolicyGraphSchemaPreparation {
             context: self.prepare_context_read(run_id, epoch, head.as_deref())?,
-            content: self.content.clone(), publication: self.content.begin_publication(),
+            content: self.content.clone(),
+            publication: self.content.begin_publication(),
         })
     }
     pub fn admit_policy_graph_prepared(
@@ -395,7 +429,7 @@ impl Catalog {
             }
             return self.graph_read(previous, metadata.clone(), None);
         }
-        goals::check_dispatch(&self.db,run_id,metadata.boundary().goal.as_ref())?;
+        goals::check_dispatch(&self.db, run_id, metadata.boundary().goal.as_ref())?;
         if run.cancel_requested
             || metadata.boundary() != &self.policy_boundary(run_id, epoch)?
             || action_id != format!("{run_id}:policy:{}", metadata.boundary().id)
@@ -418,6 +452,7 @@ impl Catalog {
         }
         let op = Operation {
             host_job: None,
+            managed_process: None,
             id: action_id.into(),
             run_id: run_id.into(),
             epoch,
@@ -584,7 +619,9 @@ impl Catalog {
                 operation_id,
                 phase,
                 effect,
-                lifetime, ..} => PolicyNodeCompletion::JobAccepted {
+                lifetime,
+                ..
+            } => PolicyNodeCompletion::JobAccepted {
                 operation_id: operation_id.clone(),
                 phase: phase.clone(),
                 effect: *effect,

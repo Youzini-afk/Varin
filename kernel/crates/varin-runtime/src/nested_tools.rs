@@ -319,6 +319,7 @@ mod tests {
                     tool_schema_generation: 8,
                     source: None,
                     tools: Arc::new(vec![ToolSchema {
+                        requirements: None,
                         name: "selected".into(),
                         version: "original".into(),
                         description: "".into(),

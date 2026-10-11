@@ -20,6 +20,8 @@ use varin_runtime::{model_session, supervisor::RunSupervisor, Catalog, SubmitInp
 mod computer_commands;
 #[path = "agent_host_jobs.rs"]
 mod host_job_commands;
+#[path = "agent_managed_process.rs"]
+mod managed_process_commands;
 
 #[path = "agent_policy.rs"]
 mod policy_commands;
@@ -452,6 +454,7 @@ pub(crate) fn spawn(
                             .set_event_notifier(notify.clone())
                             .map_err(domain)?;
                         let observed = Arc::downgrade(&owner);
+                        let environment_resources = resources.clone();
                         let event_responses = responses.clone();
                         let event_epoch = epoch.clone();
                         thread::spawn(move || {
@@ -464,6 +467,10 @@ pub(crate) fn spawn(
                                     .lock()
                                     .ok()
                                     .and_then(|catalog| catalog.event_cursor().ok());
+                                let _ = managed_process_commands::close_ended_environments(
+                                    &owner,
+                                    &environment_resources,
+                                );
                                 // Subscribe before the first capture. Notifications coalesce but
                                 // the worker always rechecks durable facts; its own held state emits
                                 // no repeat events and a concurrent commit retains the next wake.
@@ -510,9 +517,7 @@ pub(crate) fn spawn(
                             let catalog = catalog
                                 .lock()
                                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
-                            catalog
-                                .pending_external_operations("process_spawn")
-                                .map_err(domain)?
+                            catalog.pending_managed_processes().map_err(domain)?
                         };
                         if let Err(error) = resources.replay_process_terminals(pending) {
                             let catalog = owner.catalog();
@@ -867,6 +872,28 @@ pub(crate) fn spawn(
                             thread::spawn(move || {
                                 let result = operation_commands::execute(
                                     runtime, &method, params, &cancelled,
+                                );
+                                let response = match result {
+                                    Ok(value) => response_ok(&response_id, value),
+                                    Err(error) => response_error(&response_id, &error),
+                                };
+                                done(&response_id);
+                                let _ = response_sender.send(response);
+                            });
+                            deferred = true;
+                            return Ok(Value::Null);
+                        }
+                        if method.starts_with("runtime.managed_process.") {
+                            let runtime = runtime.clone();
+                            let resources = resources.clone();
+                            let method = method.to_owned();
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            let cancelled = cancellation.clone();
+                            thread::spawn(move || {
+                                let result = managed_process_commands::execute(
+                                    runtime, resources, &method, params, &cancelled,
                                 );
                                 let response = match result {
                                     Ok(value) => response_ok(&response_id, value),
@@ -1621,7 +1648,11 @@ pub(crate) fn spawn(
                                             "process launch is missing".into(),
                                         )
                                     })?;
-                                if operation.run_id != binding.run_id
+                                if operation
+                                    .managed_process
+                                    .as_ref()
+                                    .is_none_or(|p| p.is_environment())
+                                    || operation.run_id != binding.run_id
                                     || run.thread_id != p.thread_id
                                     || run.branch_id != p.branch_id
                                     || binding.thread_id != p.thread_id
@@ -2089,6 +2120,7 @@ pub(crate) fn spawn(
 }
 pub(crate) fn tool_schema(tool: LaunchTool) -> varin_runtime::execution::ToolSchema {
     varin_runtime::execution::ToolSchema {
+        requirements: tool.requirements,
         name: tool.name,
         version: tool.version,
         description: tool.description,
@@ -2161,6 +2193,7 @@ fn mcp_binding(binding: McpBinding) -> Result<crate::host_tools::McpBinding, Ker
             .tools
             .into_iter()
             .map(|tool| varin_runtime::execution::ToolSchema {
+                requirements: tool.requirements,
                 description: tool.description,
                 output_schema: (!tool.output_schema.is_null()).then_some(tool.output_schema),
                 metadata: tool.metadata.0,
@@ -2407,13 +2440,39 @@ fn apply_process_terminal(
         Err(RuntimeError::NotFound(_)) => return Ok(()),
         Err(error) => return Err(domain(error)),
     };
-    if operation.execution_owner != Some(varin_runtime::ExecutorOwner::Kernel)
-        || operation.executor.as_deref() != Some("process_spawn")
+    varin_runtime::catalog::managed_process::require_process(&operation).map_err(domain)?;
+    // The guardian proves only its actual process tree. An external environment owner must
+    // also drain accepted Host callbacks before its own original receipt can prove stopped.
+    if operation
+        .managed_process
+        .as_ref()
+        .is_some_and(|p| p.is_environment())
     {
-        return Err(KernelError::Authorization(
-            "process terminal does not belong to the original kernel executor".into(),
-        ));
+        if operation
+            .managed_process
+            .as_ref()
+            .and_then(|p| p.kernel_epoch.as_deref())
+            .is_some_and(|epoch| epoch != fact.kernel_epoch)
+        {
+            return Err(KernelError::Authorization(
+                "Script physical epoch changed".into(),
+            ));
+        }
+        return Ok(());
     }
+    catalog
+        .lock()
+        .map_err(|_| KernelError::Storage("Catalog owner failed".into()))?
+        .confirm_process_epoch(&operation.id, &fact.kernel_epoch)
+        .map_err(domain)?;
+    let executor = operation
+        .executor
+        .clone()
+        .ok_or_else(|| KernelError::Authorization("Process executor is missing".into()))?;
+    let receipt_epoch = match &operation.execution_owner {
+        Some(varin_runtime::ExecutorOwner::External { epoch, .. }) => epoch.clone(),
+        _ => fact.kernel_epoch.clone(),
+    };
     let confirmed = fact.receipt.get("treeConfirmed").and_then(Value::as_bool) == Some(true);
     let status = fact.receipt.get("status").and_then(Value::as_str);
     let code = fact.receipt.get("exitCode").and_then(Value::as_i64);
@@ -2438,9 +2497,9 @@ fn apply_process_terminal(
         &catalog,
         &fact.process_id,
         ExternalReceipt {
-            executor: "process_spawn".into(),
+            executor,
             identity: fact.process_id.clone(),
-            epoch: fact.kernel_epoch.clone(),
+            epoch: receipt_epoch,
             outcome,
             effect: if !confirmed {
                 Effect::Unknown
@@ -2882,3 +2941,7 @@ mod family_public_review;
 #[cfg(test)]
 #[path = "file_observation_review.rs"]
 mod file_observation_review;
+
+#[cfg(test)]
+#[path = "managed_script_review.rs"]
+mod managed_script_review;

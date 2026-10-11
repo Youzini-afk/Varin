@@ -296,6 +296,22 @@ impl LaunchSelection {
         }
     }
     pub(super) fn validate(&self) -> Result<()> {
+        self.validate_structure()?;
+        if let Some(tool) = self.tools.iter().find(|tool| {
+            tool.requirements
+                .as_ref()
+                .is_some_and(|r| !r.accepts(self.source.as_ref()))
+        }) {
+            return Err(RuntimeError::Invalid(format!(
+                "Tool {} requires its declared source environment",
+                tool.name
+            )));
+        }
+        Ok(())
+    }
+    /// A delegated child intent retains the parent's handoff while its own source is
+    /// Pending. Its actual Run must still pass `validate` after the source becomes Ready.
+    pub(super) fn validate_structure(&self) -> Result<()> {
         if let Some(catalog) = &self.child_dispatch {
             catalog.validate()?;
         }

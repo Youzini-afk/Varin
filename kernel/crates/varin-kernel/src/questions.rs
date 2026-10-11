@@ -43,7 +43,7 @@ pub(crate) fn builtin_schemas(
     tools
 }
 pub fn schema() -> ToolSchema {
-    ToolSchema { description: "Ask the user a clarification and wait for their real answer. Answers do not grant tool permissions.".into(), output_schema: None, metadata: None,
+    ToolSchema { requirements: None, description: "Ask the user a clarification and wait for their real answer. Answers do not grant tool permissions.".into(), output_schema: None, metadata: None,
         name: QUESTION_TOOL.into(),
         version: "1".into(),
         schema: json!({"type":"object","properties":{"question":{"type":"string","minLength":1},"options":{"type":"array","items":{"type":"string","minLength":1}}},"required":["question"],"additionalProperties":false}),
@@ -51,6 +51,7 @@ pub fn schema() -> ToolSchema {
 }
 pub fn status_schema() -> ToolSchema {
     ToolSchema {
+        requirements: None,
         name: QUESTION_STATUS_TOOL.into(), version: "1".into(),
         description: "Read an accepted question from this Run. Pending and cancelled states have no answer; answered contains the original user answer and history identity. An answer does not grant permissions.".into(),
         output_schema: None, metadata: None,
@@ -234,7 +235,9 @@ impl ToolExecutor for Questions {
                 operation_id: c.operation_id.clone(),
                 phase: "awaiting_user".into(),
                 effect: Effect::None,
-                lifetime: Lifetime::Thread, content: None,},
+                lifetime: Lifetime::Thread,
+                content: None,
+            },
             Err(e) => ToolCompletion::Result {
                 outcome: Outcome::Failed,
                 effect: Effect::None,

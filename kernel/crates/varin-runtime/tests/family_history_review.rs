@@ -59,6 +59,7 @@ fn prepare(f: &mut Fixture, child: ChildTask) -> ChildTask {
 }
 fn schema(name: &str) -> ToolSchema {
     ToolSchema {
+        requirements: None,
         name: name.into(),
         version: "1".into(),
         description: String::new(),
@@ -144,24 +145,22 @@ fn real_main_sibling_nested_discovery_survives_terminal_and_never_grants_control
                 .unwrap();
         assert_eq!(list.root_thread_id, "thread:parent");
         assert_eq!(list.members.len(), 3);
-        assert!(
-            !list
-                .members
-                .iter()
-                .any(|m| m.thread_id == caller || m.thread_id == "unrelated")
-        );
+        assert!(!list
+            .members
+            .iter()
+            .any(|m| m.thread_id == caller || m.thread_id == "unrelated"));
         let all =
             f.db.capture_family_read(caller, None, None)
                 .unwrap()
                 .list(true, &|| false)
                 .unwrap();
         assert_eq!(all.members.len(), 4);
-        assert!(
-            f.db.capture_family_read(caller, Some("unrelated"), Some("unrelated-branch"))
-                .unwrap()
-                .read(request(recent(2)), &|| false)
-                .is_err()
-        );
+        assert!(f
+            .db
+            .capture_family_read(caller, Some("unrelated"), Some("unrelated-branch"))
+            .unwrap()
+            .read(request(recent(2)), &|| false)
+            .is_err());
     }
     let page = read(
         &f,
@@ -171,15 +170,14 @@ fn real_main_sibling_nested_discovery_survives_terminal_and_never_grants_control
         request(recent(20)),
     );
     assert!(!page.items.is_empty());
-    assert!(
-        page.items
-            .iter()
-            .all(|item| item.run_id != f.context.run_id)
-    );
-    assert!(
-        f.db.require_child_parent(&f.context.run_id, &sibling.operation_id)
-            .is_err()
-    );
+    assert!(page
+        .items
+        .iter()
+        .all(|item| item.run_id != f.context.run_id));
+    assert!(f
+        .db
+        .require_child_parent(&f.context.run_id, &sibling.operation_id)
+        .is_err());
     f.db.cancel_child(&sibling.operation_id).unwrap();
     let list =
         f.db.capture_family_read(&nested.child_thread_id, None, None)
@@ -331,8 +329,9 @@ fn anchors_pagination_run_selection_search_and_semantic_item_expansion_are_fixed
     assert!(forward.next_cursor.is_some());
     let mut bad = first.anchor.clone();
     bad.push('x');
-    assert!(
-        f.db.capture_family_read(
+    assert!(f
+        .db
+        .capture_family_read(
             &child.child_thread_id,
             Some("thread:parent"),
             Some("branch:parent")
@@ -348,8 +347,7 @@ fn anchors_pagination_run_selection_search_and_semantic_item_expansion_are_fixed
             },
             &|| false
         )
-        .is_err()
-    );
+        .is_err());
     f.db.commit_execution(
         &run,
         f.db.epoch(),
@@ -383,12 +381,10 @@ fn anchors_pagination_run_selection_search_and_semantic_item_expansion_are_fixed
     assert!(selected.scan_complete);
     assert!(!selected.has_earlier);
     assert!(!selected.has_later);
-    assert!(
-        !selected
-            .items
-            .iter()
-            .any(|item| item.id == receipt.input_id)
-    );
+    assert!(!selected
+        .items
+        .iter()
+        .any(|item| item.id == receipt.input_id));
     for direction in [Direction::Older, Direction::Newer] {
         for query in [
             FamilyReadQuery::Search {
@@ -504,16 +500,16 @@ fn captured_reader_is_cancelled_without_cancelling_target_and_gc_and_epoch_are_f
     );
     let page = capture.read(request(recent(1)), &|| false).unwrap();
     assert_eq!(page.items[0].id, item.id);
-    assert!(
-        f.db.capture_family_read(
+    assert!(f
+        .db
+        .capture_family_read(
             &child.child_thread_id,
             Some("thread:parent"),
             Some("branch:parent")
         )
         .unwrap()
         .read(request(recent(1)), &|| true)
-        .is_err()
-    );
+        .is_err());
     assert!(!f.db.run(&run).unwrap().cancel_requested);
     content_collection::collect(|| f.db.prepare_content_collection(Default::default())).unwrap();
     let old =
@@ -527,8 +523,9 @@ fn captured_reader_is_cancelled_without_cancelling_target_and_gc_and_epoch_are_f
     drop(f.db);
     f.db = Catalog::open(&root).unwrap();
     assert!(old.read(request(recent(1)), &|| false).is_err());
-    assert!(
-        f.db.capture_family_read(
+    assert!(f
+        .db
+        .capture_family_read(
             &child.child_thread_id,
             Some("thread:parent"),
             Some("branch:parent")
@@ -541,8 +538,7 @@ fn captured_reader_is_cancelled_without_cancelling_target_and_gc_and_epoch_are_f
             },
             &|| false
         )
-        .is_err()
-    );
+        .is_err());
     drop(f);
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -550,9 +546,8 @@ fn captured_reader_is_cancelled_without_cancelling_target_and_gc_and_epoch_are_f
 #[test]
 fn paused_read_worker_does_not_own_catalog_and_append_fork_cancel_preserve_its_view() {
     use std::sync::{
-        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
-        mpsc,
+        mpsc, Arc, Mutex,
     };
     let mut f = Fixture::new();
     let child = f.accept();
@@ -644,14 +639,14 @@ fn empty_missing_foreign_corrupt_and_changed_cursor_queries_remain_distinct() {
     assert!(empty.scan_complete);
     assert!(empty.next_cursor.is_none());
     assert!(f.db.capture_family_read("unknown", None, None).is_err());
-    assert!(
-        f.db.capture_family_read(
+    assert!(f
+        .db
+        .capture_family_read(
             "thread:parent",
             Some(&child.child_thread_id),
             Some("branch:parent")
         )
-        .is_err()
-    );
+        .is_err());
     let page = read(
         &f,
         &child.child_thread_id,
@@ -659,8 +654,9 @@ fn empty_missing_foreign_corrupt_and_changed_cursor_queries_remain_distinct() {
         "branch:parent",
         request(recent(1)),
     );
-    assert!(
-        f.db.capture_family_read(
+    assert!(f
+        .db
+        .capture_family_read(
             &child.child_thread_id,
             Some("thread:parent"),
             Some("branch:parent")
@@ -673,10 +669,10 @@ fn empty_missing_foreign_corrupt_and_changed_cursor_queries_remain_distinct() {
             },
             &|| false
         )
-        .is_err()
-    );
-    assert!(
-        f.db.capture_family_read(
+        .is_err());
+    assert!(f
+        .db
+        .capture_family_read(
             &child.child_thread_id,
             Some("thread:parent"),
             Some("branch:parent")
@@ -692,8 +688,7 @@ fn empty_missing_foreign_corrupt_and_changed_cursor_queries_remain_distinct() {
             },
             &|| false
         )
-        .is_err()
-    );
+        .is_err());
     let root = f.root.clone();
     let raw = rusqlite::Connection::open_with_flags(
         root.join("conversation.sqlite"),
@@ -714,16 +709,16 @@ fn empty_missing_foreign_corrupt_and_changed_cursor_queries_remain_distinct() {
     )
     .unwrap();
     std::fs::write(path, b"corrupt retained body").unwrap();
-    assert!(
-        f.db.capture_family_read(
+    assert!(f
+        .db
+        .capture_family_read(
             &child.child_thread_id,
             Some("thread:parent"),
             Some("branch:parent")
         )
         .unwrap()
         .read(request(recent(1)), &|| false)
-        .is_err()
-    );
+        .is_err());
     drop(raw);
     drop(f);
     std::fs::remove_dir_all(root).unwrap();
@@ -829,10 +824,10 @@ fn request_and_policy_origins_cannot_impersonate_a_selected_family_call() {
         );
         let mut wrong = f.context.clone();
         wrong.run_id = "other-run".into();
-        assert!(
-            f.db.capture_family_tool(wrong, call.clone(), selected.clone(), None, None)
-                .is_err()
-        );
+        assert!(f
+            .db
+            .capture_family_tool(wrong, call.clone(), selected.clone(), None, None)
+            .is_err());
         let root = f.root.clone();
         drop(f);
         std::fs::remove_dir_all(root).unwrap();
@@ -915,8 +910,9 @@ fn fork_lists_and_filters_visible_original_runs_without_reassigning_their_branch
     // A Run on a different branch with no inherited record is not made visible by sharing a Thread.
     f.db.fork_branch("branch:parent", "empty-fork", None)
         .unwrap();
-    assert!(
-        f.db.capture_family_read(
+    assert!(f
+        .db
+        .capture_family_read(
             &child.child_thread_id,
             Some("thread:parent"),
             Some("empty-fork")
@@ -929,8 +925,7 @@ fn fork_lists_and_filters_visible_original_runs_without_reassigning_their_branch
             },
             &|| false
         )
-        .is_err()
-    );
+        .is_err());
     let root = f.root.clone();
     drop(f);
     std::fs::remove_dir_all(root).unwrap();
@@ -939,9 +934,8 @@ fn fork_lists_and_filters_visible_original_runs_without_reassigning_their_branch
 #[test]
 fn owner_replacement_after_sqlite_snapshot_opens_rejects_family_and_existing_history_pages() {
     use std::sync::{
-        Mutex,
         atomic::{AtomicUsize, Ordering},
-        mpsc,
+        mpsc, Mutex,
     };
     for existing_page in [false, true] {
         let mut f = Fixture::new();
@@ -1092,12 +1086,10 @@ fn a_completed_fork_does_not_relabel_an_active_root_thread_as_completed() {
         .iter()
         .find(|member| member.thread_id == "thread:parent")
         .unwrap();
-    assert!(
-        root_member
-            .branches
-            .iter()
-            .any(|branch| branch.active_run_id.as_deref() == Some(root_run.as_str()))
-    );
+    assert!(root_member
+        .branches
+        .iter()
+        .any(|branch| branch.active_run_id.as_deref() == Some(root_run.as_str())));
     assert_eq!(
         root_member.state,
         serde_json::to_value(still_active.state)

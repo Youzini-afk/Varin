@@ -38,7 +38,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 46;
+pub(crate) const FORMAT: i64 = 47;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -793,6 +793,7 @@ impl Catalog {
         }
         let op = Operation {
             host_job: None,
+            managed_process: None,
             external_receipt: None,
             call_completion: None,
             id: key.into(),
@@ -1782,9 +1783,7 @@ pub(super) fn request_cancel_operation_in(tx: &Transaction<'_>, key: &str) -> Re
             "policy pause requires explicit Run resume or Run cancellation".into(),
         ));
     }
-    let unproven_process = (op.host_job.is_some()
-        || (op.execution_owner == Some(ExecutorOwner::Kernel)
-            && op.executor.as_deref() == Some("process_spawn")))
+    let unproven_process = (op.host_job.is_some() || op.managed_process.is_some())
         && op.effect != Effect::None
         && !op
             .external_receipt
@@ -1837,3 +1836,6 @@ pub mod computer;
 
 #[path = "catalog_computer_events.rs"]
 pub mod computer_events;
+
+#[path = "catalog_managed_process.rs"]
+pub mod managed_process;

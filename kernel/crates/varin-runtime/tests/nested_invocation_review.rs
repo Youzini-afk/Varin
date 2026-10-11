@@ -32,6 +32,7 @@ fn call(name: &str, id: &str) -> ToolCall {
 }
 fn schema(name: &str) -> ToolSchema {
     ToolSchema {
+        requirements: None,
         name: name.into(),
         version: "1".into(),
         description: "".into(),

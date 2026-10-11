@@ -1,3 +1,4 @@
+import { KERNEL_PROTOCOL_VERSION } from './protocol.generated.js';
 import { EventEmitter } from 'node:events';
 import type { Express, Request, RequestHandler, Response as ExpressResponse } from 'express';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -144,7 +145,7 @@ it('slow startup launch cannot block the existing child/process pump or a later 
     await vi.waitFor(() => expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce());
     const previous = reconcileObservations.mock.calls.length;
     events.push({ cursor: 1, subject: 'pause:other', revision: 2, kind: 'policy.resumed', data: { run_id: 'run:other', action_id: 'pause:other', wait_id: 'wait:other' } });
-    listener({ v: 1, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: 1 });
+    listener({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: 1 });
     await vi.waitFor(() => expect(continues).toHaveBeenCalledWith('run:other', expect.any(AbortSignal)));
     expect(reconcileObservations.mock.calls.length).toBeGreaterThan(previous);
     expect(f.runtime.pendingLaunches).toHaveBeenCalledOnce();
@@ -167,7 +168,7 @@ it.each(['ingress.run_ready', 'goal.run_ready', 'observation.run_ready'] as cons
     resolveLiveSource: async () => { throw new Error('Unexpected source'); }, sourceCaptureOwners: {} as never,
     runtime: runtime as unknown as AgentRuntimeClient, workingStates: {} as never, prepareContext: {} as never,
     continueRun: continues, recoverLaunches: signal => f.adapter.recover(signal), onError: (_id, error) => { f.errors.push(error); } });
-  const notify = () => listener({ v: 1, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: events.at(-1)!.cursor });
+  const notify = () => listener({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: events.at(-1)!.cursor });
   try {
     await collaboration.recover();
     // A prior manual Pause is still authoritative even if an old admitted notification replays.
@@ -214,7 +215,7 @@ it.each(['ingress.run_ready', 'goal.run_ready', 'observation.run_ready'] as cons
     const discovery = collaboration.recover();
     await vi.waitFor(() => expect(f.runtime.pendingLaunches).toHaveBeenCalledOnce());
     events.push({ cursor: 1, subject: kind === 'goal.run_ready' ? 'goal:one' : kind === 'ingress.run_ready' ? 'followup-input:original' : 'reply-wait:send', revision: 2, kind, data: { run_id: f.run.id } });
-    listener({ v: 1, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: 1 });
+    listener({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: 1 });
     release(); await discovery;
     await vi.waitFor(() => expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce());
     // A new Host epoch discovers the Catalog's saved launch even with no new event notification.
@@ -406,7 +407,7 @@ it.each(['child_revision', 'process_receipt'] as const)('%s observed during an a
       // Original process stop is a distinct fact; it does not revise ChildTask.
       events.push({ cursor: 1, subject: 'original-child-process', revision: 2, kind: 'operation.executor_stopped', data: { operation_id: 'original-child-process', executor: 'process_spawn', receipt_identity: 'guardian', receipt_epoch: 1 } });
     }
-    listener({ v: 1, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: 2 });
+    listener({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: 2 });
     await vi.waitFor(() => expect(children).toHaveBeenCalledTimes(wake === 'child_revision' ? 2 : 3));
     const scans = children.mock.calls.length;
     release();
@@ -484,7 +485,7 @@ it('an unrelated observation error remains visible without blocking original sav
     expect(f.errors).toEqual([failure]);
     expect(reconcileObservations).toHaveBeenCalledOnce();
     events.push({ cursor: 1, subject: 'reply-wait:send', revision: 2, kind: 'observation.run_ready', data: { run_id: f.run.id } });
-    listener({ v: 1, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: 1 });
+    listener({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: 1 });
     await vi.waitFor(() => expect(continueRun).toHaveBeenCalledOnce());
     await tick(); await tick();
     expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce();

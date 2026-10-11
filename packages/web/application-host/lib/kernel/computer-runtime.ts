@@ -14,7 +14,7 @@ import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import { KernelClientError, type KernelClient } from './kernel-client.js';
 import type { ComputerScope, Effect, Run, ComputerRequestRecord, ComputerRequestView, ComputerEventReceipt, ComputerDecisionActor, KernelMethod, KernelMethodParams, Operation } from './protocol.generated.js';
 import type { ExtensionToolOwnerOptions } from './extension-tool-owner.js';
-import { requireToolInvocation, runToolDomainCall } from './tool-invocation.js';
+import { requireToolInvocation, runToolDomainCall, noteInvocationComputerUse, assertNoScriptComputerStopCycle } from './tool-invocation.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
 
 export { COMPUTER_CAPABILITY };
@@ -224,6 +224,7 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
           return result({ requestId: accepted.id, status: context.signal.aborted || stopSignal.aborted ? 'cancelled' : accepted.status, revision: accepted.revision }, 'confirmed');
         }, desktopId);
         if (method === 'release' || method === 'cancel') {
+          if (method === 'cancel') assertNoScriptComputerStopCycle(context, desktopId);
           inputCallStarted = true;
           try {
             if (method === 'release') await computers.automation.release(work, desktopId);
@@ -236,7 +237,10 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
         }
         return await computers.automation.authorize(work, selected.declaration.tool!.operation === 'read' ? 'observe' : 'control', desktopId, async () => {
           context.signal.throwIfAborted();
-          switch (method) {
+          const admission = computers.automation.context.getStore();
+          if (!admission) throw new Error('computer_admission_unavailable');
+          const releaseScriptDispatch = noteInvocationComputerUse(context, desktopId, reason => admission.cancel(reason));
+          try { switch (method) {
             case 'apps': return result({ apps: await computers.listApps(desktopId) });
             case 'observe': return result({ observation: await computers.observe({ ...params as unknown as ComputerObserveParams, desktopId, signal: context.signal }) });
             case 'act': {
@@ -247,7 +251,7 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
                 effect === 'unknown' ? 'indeterminate' : action.cancelled ? 'cancelled' : action.accepted ? 'succeeded' : 'failed');
             }
             default: throw new ComputerError('computer-request-invalid', 'The selected Computer method is unavailable');
-          }
+          } } finally { releaseScriptDispatch(); }
         }, execution);
       } catch (error) {
         if (inputCallStarted) throw error;

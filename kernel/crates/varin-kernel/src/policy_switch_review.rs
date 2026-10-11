@@ -31,6 +31,7 @@ fn artifact(version: &str, transition: PolicyStateTransition) -> AgentPolicyArti
 }
 fn schema() -> ToolSchema {
     ToolSchema {
+        requirements: None,
         name: "independent_job".into(),
         version: "old-schema".into(),
         description: "fixture accepted job".into(),
@@ -68,7 +69,8 @@ impl Fixture {
             .unwrap();
         let binding = RequestBinding {
             child_dispatch: None,
-            goal: None, resource_activations: Vec::new(),
+            goal: None,
+            resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "original-main".into(),
             provider_family: "fixture".into(),
@@ -343,7 +345,9 @@ impl ToolExecutor for Job {
             operation_id: context.operation_id.clone(),
             phase: "accepted".into(),
             effect: Effect::None,
-            lifetime: Lifetime::Thread, content: None,}
+            lifetime: Lifetime::Thread,
+            content: None,
+        }
     }
 }
 struct NoModel;

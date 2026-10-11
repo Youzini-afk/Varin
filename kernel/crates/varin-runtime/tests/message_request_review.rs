@@ -369,6 +369,7 @@ fn request_ends_original_child_observation_only_then_resumes_same_run_after_reop
 fn request_preserves_real_manual_pause_and_unanswered_question_across_reopen() {
     for question in [false, true] {
         let schema = |name: &str| ToolSchema {
+            requirements: None,
             name: name.into(),
             version: "1".into(),
             description: String::new(),

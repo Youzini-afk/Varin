@@ -156,7 +156,9 @@ pub enum FollowupTrigger {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TriggerEvidence {
-    Metric { fact: FollowupMetricEvidence },
+    Metric {
+        fact: FollowupMetricEvidence,
+    },
     LogLiteral {
         binding: host_jobs::HostJobBinding,
         stream: LogStream,
@@ -470,7 +472,7 @@ fn dependency_check_eligible(
     let process: Operation = record(db, "operations", id)?;
     let owner: Run = record(db, "runs", &process.run_id)?;
     let launch: launch_content::LaunchMetadata = record(db, "run_launches", &owner.id)?;
-    let intent = tool_content::ToolIntent::from_operation(&process)?;
+    let process_owned = managed_process::require_process(&process).is_ok();
     Ok(
         goals::for_run(db, &owner.id)?.is_some_and(|g| g.id == goal.id)
             && owner.thread_id == d.thread_id
@@ -478,10 +480,7 @@ fn dependency_check_eligible(
             && normalized_source(launch.selection.source, &owner.id)
                 == normalized_source(d.source.clone(), &d.source_run_id)
             && matches!(process.lifetime, Lifetime::Thread | Lifetime::Environment)
-            && process.executor.as_deref() == Some("process_spawn")
-            && process.execution_owner == Some(ExecutorOwner::Kernel)
-            && intent.call().name == "process_spawn"
-            && intent.contract().completion == crate::execution::CompletionKind::Job
+            && process_owned
             && matches!(process.call_completion,Some(result_content::ToolCompletionMetadata::JobAccepted{operation_id,..}) if operation_id==process.id),
     )
 }
@@ -562,7 +561,10 @@ fn observe(tx: &Transaction<'_>, d: &mut Definition, now: u64) -> Result<bool> {
     Ok(changed)
 }
 fn observe_one(tx: &Transaction<'_>, d: &mut Definition, now: u64) -> Result<bool> {
-    if d.state == FollowupState::Cancelled || d.wait.state != NextRunWaitState::Waiting || sources::exhausted(tx, d)? {
+    if d.state == FollowupState::Cancelled
+        || d.wait.state != NextRunWaitState::Waiting
+        || sources::exhausted(tx, d)?
+    {
         return Ok(false);
     }
     let run: Run = record(tx, "runs", &d.source_run_id)?;
@@ -1201,7 +1203,10 @@ impl FollowupRead {
     pub fn load(self) -> Result<FollowupView> {
         Ok(FollowupView {
             followup: self.followup,
-            registration_trigger: load_registration_trigger(&self.content, self.registration.as_ref())?,
+            registration_trigger: load_registration_trigger(
+                &self.content,
+                self.registration.as_ref(),
+            )?,
             instruction: self
                 .instruction
                 .map(|r| {
@@ -1346,7 +1351,9 @@ fn control_tx(
             };
             if action == FollowupControlAction::Resume {
                 for source in &mut d.sources {
-                    if let Some(log) = &mut source.log { log.failure_code = None; }
+                    if let Some(log) = &mut source.log {
+                        log.failure_code = None;
+                    }
                 }
                 let unfinished = {
                     let mut q = tx.prepare("SELECT o.body FROM followup_occurrences o LEFT JOIN input_queue i ON i.id=o.input_id

@@ -64,7 +64,7 @@ pub(crate) fn builtin_schema() -> crate::run_tools::BuiltinSchema {
     crate::run_tools::BuiltinSchema::child(schema(), None, &[Worker])
 }
 pub(crate) fn schema() -> ToolSchema {
-    ToolSchema { description: "Read or replace this conversation's plan. Read first, then update using the exact returned plan ref (null when absent). A conflicting update changes nothing; read again before revising. Owner identity is fixed by the runtime.".into(), output_schema: None, metadata: None,
+    ToolSchema { requirements: None, description: "Read or replace this conversation's plan. Read first, then update using the exact returned plan ref (null when absent). A conflicting update changes nothing; read again before revising. Owner identity is fixed by the runtime.".into(), output_schema: None, metadata: None,
         name: TOOL.into(),
         version: "1".into(),
         schema: json!({"type":"object",

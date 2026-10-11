@@ -49,7 +49,13 @@ fn body_publication_keeps_policy_node_alive_and_receipt_idempotent() {
                 graph.result.receipts.is_empty(),
                 "body must precede receipt publication"
             );
-            assert_eq!(content_collection::collect(|| catalog.prepare_content_collection(Default::default())).unwrap(), 0);
+            assert_eq!(
+                content_collection::collect(
+                    || catalog.prepare_content_collection(Default::default())
+                )
+                .unwrap(),
+                0
+            );
             catalog
                 .create_thread("independent", "independent-main")
                 .unwrap();
@@ -80,7 +86,12 @@ fn body_publication_keeps_policy_node_alive_and_receipt_idempotent() {
             }
         )
         .is_err());
-    content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
+    content_collection::collect(|| {
+        f.db.lock()
+            .unwrap()
+            .prepare_content_collection(Default::default())
+    })
+    .unwrap();
     let evidence =
         f.db.policy_evidence(&run, epoch, receipt.output().unwrap())
             .unwrap();
@@ -183,7 +194,8 @@ impl Fixture {
             .unwrap();
         let binding = RequestBinding {
             child_dispatch: None,
-            goal: None, resource_activations: Vec::new(),
+            goal: None,
+            resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "local-review".into(),
             provider_family: "test".into(),
@@ -192,6 +204,7 @@ impl Fixture {
             configuration_generation: 1,
             tool_schema_generation: 1,
             tools: vec![ToolSchema {
+                requirements: None,
                 description: String::new(),
                 output_schema: None,
                 metadata: None,
@@ -908,10 +921,20 @@ fn output_chunks_are_owned_bounded_and_survive_content_collection() {
         )
         .unwrap();
     let reference = receipt.output().unwrap().clone();
-    content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
+    content_collection::collect(|| {
+        f.db.lock()
+            .unwrap()
+            .prepare_content_collection(Default::default())
+    })
+    .unwrap();
     reopen(&mut f);
     let epoch = f.db.lock().unwrap().epoch();
-    content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
+    content_collection::collect(|| {
+        f.db.lock()
+            .unwrap()
+            .prepare_content_collection(Default::default())
+    })
+    .unwrap();
     let first =
         f.db.policy_chunk(&f.input.run_id, epoch, &reference, 0)
             .unwrap();
@@ -976,7 +999,12 @@ impl AgentPolicy for CheckpointPolicy {
 }
 #[test]
 fn newer_decision_checkpoint_after_graph_results_is_not_rolled_back_on_restart() {
-    for kind in ["read_result", "read_result_consumed", "request_model_with_evidence", "complete"] {
+    for kind in [
+        "read_result",
+        "read_result_consumed",
+        "request_model_with_evidence",
+        "complete",
+    ] {
         let mut f = Fixture::new();
         let intent = admitted(&f, vec![node("a", &[])]);
         let action_id = intent.action_id().to_string();
@@ -993,7 +1021,9 @@ fn newer_decision_checkpoint_after_graph_results_is_not_rolled_back_on_restart()
             .unwrap();
         let reference = receipt.output().unwrap().clone();
         let next = match kind {
-            "read_result" | "read_result_consumed" => json!({"kind":"read_result","reference":reference,"index":0}),
+            "read_result" | "read_result_consumed" => {
+                json!({"kind":"read_result","reference":reference,"index":0})
+            }
             "request_model_with_evidence" => json!({"kind":kind,"evidence":[reference]}),
             _ => json!({"kind":kind}),
         };
@@ -1002,7 +1032,10 @@ fn newer_decision_checkpoint_after_graph_results_is_not_rolled_back_on_restart()
             f.input.owner_generation,
             &ExecutionRecord::PolicyCheckpoint {
                 previous_state: json!({"stage":"admitted"}),
-                event: PolicyEvent::ToolGraphCompleted { action_id: action_id.clone(), receipts: vec![receipt] },
+                event: PolicyEvent::ToolGraphCompleted {
+                    action_id: action_id.clone(),
+                    receipts: vec![receipt],
+                },
                 identity: identity(),
                 state: json!({"marker":"committed-after-results"}),
                 action: action(next),
@@ -1010,13 +1043,31 @@ fn newer_decision_checkpoint_after_graph_results_is_not_rolled_back_on_restart()
         )
         .unwrap();
         if kind == "read_result_consumed" {
-            let chunk = f.db.policy_chunk(&f.input.run_id, f.input.owner_generation, &reference, 0).unwrap();
-            f.db.commit(&f.input.run_id, f.input.owner_generation, &ExecutionRecord::PolicyDecisionConsumed {
-                event: PolicyEvent::ResultChunk { reference, index: 0, total_chunks: chunk.chunk_count, total_bytes: chunk.total_bytes, bytes: chunk.bytes },
-            }).unwrap();
+            let chunk =
+                f.db.policy_chunk(&f.input.run_id, f.input.owner_generation, &reference, 0)
+                    .unwrap();
+            f.db.commit(
+                &f.input.run_id,
+                f.input.owner_generation,
+                &ExecutionRecord::PolicyDecisionConsumed {
+                    event: PolicyEvent::ResultChunk {
+                        reference,
+                        index: 0,
+                        total_chunks: chunk.chunk_count,
+                        total_bytes: chunk.total_bytes,
+                        bytes: chunk.bytes,
+                    },
+                },
+            )
+            .unwrap();
         }
         reopen(&mut f);
-        content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
+        content_collection::collect(|| {
+            f.db.lock()
+                .unwrap()
+                .prepare_content_collection(Default::default())
+        })
+        .unwrap();
         let (input, recovery) =
             f.db.lock()
                 .unwrap()
@@ -1062,6 +1113,60 @@ fn newer_decision_checkpoint_after_graph_results_is_not_rolled_back_on_restart()
             usize::from(kind != "complete")
         );
     }
+}
+
+#[test]
+fn exact_policy_node_stop_uses_run_owner_without_cancelling_its_sibling() {
+    let f = Fixture::new();
+    let (tx, rx) = mpsc::channel();
+    let mut tools = Tools::new("unused");
+    tools.started = Some(tx);
+    tools.block_read = true;
+    let tools = Arc::new(tools);
+    let policy = Arc::new(Policy::new(vec![node("first", &[]), node("second", &[])]));
+    let e = engine(&f, tools, policy.clone());
+    let input = f.input.clone();
+    let cancel = CancellationToken::default();
+    let run_cancel = cancel.clone();
+    let worker = std::thread::spawn(move || e.run(input, run_cancel));
+    let mut started = vec![
+        rx.recv_timeout(Duration::from_secs(3)).unwrap(),
+        rx.recv_timeout(Duration::from_secs(3)).unwrap(),
+    ];
+    started.sort();
+    assert_eq!(started, ["first", "second"]);
+    let graph =
+        f.db.policy_graph(&f.input.run_id, f.input.owner_generation)
+            .unwrap()
+            .unwrap();
+    let operation = |node: &str| {
+        ToolOrigin::PolicyAction {
+            action_id: graph.intent.action_id().into(),
+            node_id: node.into(),
+        }
+        .operation_id(node)
+    };
+    assert!(
+        cancel.cancel_child(&operation("first")),
+        "exact Stop must find the actual policy-node token"
+    );
+    assert!(!cancel.is_cancelled());
+    assert!(
+        !cancel.child(&operation("second")).is_cancelled(),
+        "a sibling remains independent"
+    );
+    assert!(cancel.cancel_child(&operation("second")));
+    assert_eq!(worker.join().unwrap().unwrap().state, RunState::Completed);
+    let events = policy.events.lock().unwrap();
+    let completed = events
+        .iter()
+        .find(|event| event["kind"] == "tool_graph_completed")
+        .unwrap();
+    assert!(completed["receipts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|receipt| receipt["completion"]["outcome"] == "cancelled"));
 }
 
 #[test]
@@ -1159,7 +1264,12 @@ fn durable_operation_cancellation_before_worker_exists_prevents_recovered_reads(
         "durable graph cancellation was forgotten when the worker restarted"
     );
     assert!(e.provider.requests.lock().unwrap().is_empty());
-    content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
+    content_collection::collect(|| {
+        f.db.lock()
+            .unwrap()
+            .prepare_content_collection(Default::default())
+    })
+    .unwrap();
     let operation = f.db.lock().unwrap().operation(&action_id).unwrap();
     assert_eq!(operation.phase, OperationPhase::Terminal);
     let events = e.policy.events.lock().unwrap();
@@ -1375,7 +1485,12 @@ fn operation_cancel_between_graph_load_and_child_registration_is_not_lost() {
             .unwrap()
             .cancel_requested
     );
-    content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
+    content_collection::collect(|| {
+        f.db.lock()
+            .unwrap()
+            .prepare_content_collection(Default::default())
+    })
+    .unwrap();
 }
 
 #[test]
@@ -1395,7 +1510,12 @@ fn concurrent_small_receipt_publication_and_gc_preserve_every_committed_output()
         gc_start.wait();
         let mut errors = vec![];
         while !gc_stop.load(Ordering::SeqCst) {
-            if let Err(error) = content_collection::collect(|| gc_db.lock().unwrap().prepare_content_collection(Default::default())) {
+            if let Err(error) = content_collection::collect(|| {
+                gc_db
+                    .lock()
+                    .unwrap()
+                    .prepare_content_collection(Default::default())
+            }) {
                 errors.push(error.to_string());
             }
             std::thread::yield_now();
@@ -1438,7 +1558,12 @@ fn concurrent_small_receipt_publication_and_gc_preserve_every_committed_output()
         gc_errors.is_empty(),
         "GC observed a dangling committed graph output: {gc_errors:?}"
     );
-    content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
+    content_collection::collect(|| {
+        f.db.lock()
+            .unwrap()
+            .prepare_content_collection(Default::default())
+    })
+    .unwrap();
     for (value, receipt) in results {
         let reference = receipt.unwrap().output().unwrap().clone();
         let chunk =
@@ -2142,13 +2267,26 @@ fn read_only_job_recovery_waits_for_original_executor_at_both_completion_cuts() 
         let stop_events = f.db.lock().unwrap().events_after(cursor, 1000).unwrap();
         assert_eq!(stop_events.len(), 1);
         assert_eq!(stop_events[0].kind, "operation.executor_stopped");
-        assert_eq!(stop_events[0].data["receipt_identity"], context.operation_id);
+        assert_eq!(
+            stop_events[0].data["receipt_identity"],
+            context.operation_id
+        );
         assert_eq!(stop_events[0].data["receipt_epoch"], receipt.epoch);
         let repeated_stop = varin_runtime::catalog::result_content::record_external_receipt(
-            &f.db, &context.operation_id, receipt, true,
-        ).unwrap();
+            &f.db,
+            &context.operation_id,
+            receipt,
+            true,
+        )
+        .unwrap();
         assert_eq!(repeated_stop.revision, stopped.revision);
-        assert!(f.db.lock().unwrap().events_after(stop_events[0].cursor, 1000).unwrap().is_empty());
+        assert!(f
+            .db
+            .lock()
+            .unwrap()
+            .events_after(stop_events[0].cursor, 1000)
+            .unwrap()
+            .is_empty());
         assert!(f
             .db
             .resource_admission()

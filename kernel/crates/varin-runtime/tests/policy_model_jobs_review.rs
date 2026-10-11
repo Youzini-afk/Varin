@@ -36,7 +36,8 @@ impl Fixture {
             .unwrap();
         let binding = RequestBinding {
             child_dispatch: None,
-            goal: None, resource_activations: Vec::new(),
+            goal: None,
+            resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "main-account".into(),
             provider_family: "test".into(),
@@ -45,6 +46,7 @@ impl Fixture {
             configuration_generation: 7,
             tool_schema_generation: 1,
             tools: vec![ToolSchema {
+                requirements: None,
                 description: String::new(),
                 output_schema: None,
                 metadata: None,
@@ -369,7 +371,13 @@ fn body_publication_rechecks_model_admission_after_input_or_head_changes() {
                     catalog.operation(&action).is_err(),
                     "body must precede metadata admission"
                 );
-                assert_eq!(content_collection::collect(|| catalog.prepare_content_collection(Default::default())).unwrap(), 0);
+                assert_eq!(
+                    content_collection::collect(
+                        || catalog.prepare_content_collection(Default::default())
+                    )
+                    .unwrap(),
+                    0
+                );
                 catalog
                     .create_thread("independent", "independent-main")
                     .unwrap();
@@ -417,7 +425,13 @@ fn body_publication_rechecks_model_admission_after_input_or_head_changes() {
             .iter()
             .all(|event| event.kind != "policy.model_admitted"));
         assert!(
-            content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap() > 0,
+            content_collection::collect(|| f
+                .db
+                .lock()
+                .unwrap()
+                .prepare_content_collection(Default::default()))
+            .unwrap()
+                > 0,
             "failed publication must release the GC guard and leave only collectible bodies"
         );
     }
@@ -488,7 +502,13 @@ fn body_publication_preserves_model_output_usage_and_evidence_through_gc() {
                 result.original_ref.is_none(),
                 "body must precede output reference publication"
             );
-            assert_eq!(content_collection::collect(|| catalog.prepare_content_collection(Default::default())).unwrap(), 0);
+            assert_eq!(
+                content_collection::collect(
+                    || catalog.prepare_content_collection(Default::default())
+                )
+                .unwrap(),
+                0
+            );
             catalog
                 .create_thread("independent", "independent-main")
                 .unwrap();
@@ -505,7 +525,12 @@ fn body_publication_preserves_model_output_usage_and_evidence_through_gc() {
         },
     )
     .unwrap();
-    content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
+    content_collection::collect(|| {
+        f.db.lock()
+            .unwrap()
+            .prepare_content_collection(Default::default())
+    })
+    .unwrap();
     let saved = f.db.policy_model_job(&run, epoch).unwrap().unwrap();
     assert_eq!(saved.output, output);
     assert_eq!(saved.result.receipt.as_ref().unwrap().usage, output.usage);
@@ -1008,7 +1033,12 @@ fn crashes_redeliver_completed_results_and_never_replay_ambiguous_dispatch() {
         drop(ordinary);
         reopen(&mut f);
         if point == StopAt::Completed {
-            content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
+            content_collection::collect(|| {
+                f.db.lock()
+                    .unwrap()
+                    .prepare_content_collection(Default::default())
+            })
+            .unwrap();
             let epoch = f.db.lock().unwrap().epoch();
             let saved =
                 f.db.policy_model_job(&f.input.run_id, epoch)
@@ -1041,7 +1071,12 @@ fn crashes_redeliver_completed_results_and_never_replay_ambiguous_dispatch() {
         );
         assert!(main.requests.lock().unwrap().is_empty());
         assert_eq!(f.counts(), (1, 0));
-        content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
+        content_collection::collect(|| {
+            f.db.lock()
+                .unwrap()
+                .prepare_content_collection(Default::default())
+        })
+        .unwrap();
         if point == StopAt::Completed {
             assert_eq!(
                 e.policy.events.lock().unwrap()[0]["kind"],
@@ -1060,7 +1095,12 @@ fn owned_result_chunks_reject_forged_references_and_survive_gc() {
     let reference: PolicyEvidenceRef =
         serde_json::from_value(events[1]["receipt"]["output"].clone()).unwrap();
     drop(events);
-    content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
+    content_collection::collect(|| {
+        f.db.lock()
+            .unwrap()
+            .prepare_content_collection(Default::default())
+    })
+    .unwrap();
     let chunk =
         f.db.lock()
             .unwrap()
@@ -1386,7 +1426,12 @@ fn partial_failed_provider_is_indeterminate_retains_usage_and_never_replays() {
     drop(ordinary);
     reopen(&mut f);
     let epoch = f.db.lock().unwrap().epoch();
-    content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
+    content_collection::collect(|| {
+        f.db.lock()
+            .unwrap()
+            .prepare_content_collection(Default::default())
+    })
+    .unwrap();
     let saved =
         f.db.policy_model_job(&f.input.run_id, epoch)
             .unwrap()
@@ -1594,19 +1639,92 @@ fn control_result(result: varin_runtime::OperationResultMetadata) -> Value {
 #[test]
 fn main_and_auxiliary_real_receipts_share_goal_without_counting_result_reads() {
     use varin_runtime::catalog::goals::*;
-    struct CompleteGoal {inner:Policy, db:Arc<Mutex<Catalog>>}
+    struct CompleteGoal {
+        inner: Policy,
+        db: Arc<Mutex<Catalog>>,
+    }
     impl AgentPolicy for CompleteGoal {
-        fn identity(&self)->PolicyIdentity{identity()}
-        fn decide(&self,v:&PolicyView<'_>,e:&PolicyEvent,s:&Value,c:&CancellationToken)->Result<PolicyDecision,ExecutionError>{
-            if matches!(e,PolicyEvent::ModelCompleted{..}){self.db.lock().unwrap().control_goal("goal",1,&GoalScope{thread_id:"thread".into(),branch_id:"main".into()},GoalControlAction::Complete).unwrap();}
-            self.inner.decide(v,e,s,c)
+        fn identity(&self) -> PolicyIdentity {
+            identity()
+        }
+        fn decide(
+            &self,
+            v: &PolicyView<'_>,
+            e: &PolicyEvent,
+            s: &Value,
+            c: &CancellationToken,
+        ) -> Result<PolicyDecision, ExecutionError> {
+            if matches!(e, PolicyEvent::ModelCompleted { .. }) {
+                self.db
+                    .lock()
+                    .unwrap()
+                    .control_goal(
+                        "goal",
+                        1,
+                        &GoalScope {
+                            thread_id: "thread".into(),
+                            branch_id: "main".into(),
+                        },
+                        GoalControlAction::Complete,
+                    )
+                    .unwrap();
+            }
+            self.inner.decide(v, e, s, c)
         }
     }
-    let f=Fixture::new();
-    {let mut db=f.db.lock().unwrap();let p=db.prepare_goal_start("goal",&f.input.run_id,GoalScope{thread_id:"thread".into(),branch_id:"main".into()},"GOAL_CONTEXT_SENTINEL".into(),Some(GoalBudget{max_output_tokens:100})).unwrap().load().unwrap();db.admit_goal_mutation(p).unwrap();}
-    let planner=Arc::new(Provider::new("ALLOW"));let (e,main)=engine(&f,planner.clone(),true,false);
-    let engine=ExecutionEngine{context_preparation:e.context_preparation,persistence:e.persistence,provider:e.provider,tools:e.tools,policy:Arc::new(CompleteGoal{inner:Policy{events:Mutex::new(vec![]),follow:true,repeat:false},db:f.db.clone()}),progress:e.progress};
-    let report=engine.run(f.input.clone(),CancellationToken::default()).unwrap();assert_eq!(report.state,RunState::Completed,"{:?}",report.failure);
-    for provider in [&planner,&main]{let seen=provider.requests.lock().unwrap();assert_eq!(seen.len(),1);assert_eq!(seen[0].view.binding.goal.as_ref().unwrap().id,"goal");assert!(seen[0].view.history.iter().any(|item|matches!(&item.provenance,Provenance::GoalInstruction{goal_id,..} if goal_id=="goal")&&serde_json::to_string(&item.content).unwrap().contains("GOAL_CONTEXT_SENTINEL")));}
-    let db=f.db.lock().unwrap();let goal=db.capture_goal("goal").unwrap().load().unwrap();assert_eq!(goal.state,GoalState::Complete);assert_eq!(goal.usage.actual.inferences,2);assert_eq!(goal.usage.actual.output_tokens.known,8);assert_eq!(goal.usage.pending_inferences,0);assert_eq!(goal.usage.missing_inferences,0);
+    let f = Fixture::new();
+    {
+        let mut db = f.db.lock().unwrap();
+        let p = db
+            .prepare_goal_start(
+                "goal",
+                &f.input.run_id,
+                GoalScope {
+                    thread_id: "thread".into(),
+                    branch_id: "main".into(),
+                },
+                "GOAL_CONTEXT_SENTINEL".into(),
+                Some(GoalBudget {
+                    max_output_tokens: 100,
+                }),
+            )
+            .unwrap()
+            .load()
+            .unwrap();
+        db.admit_goal_mutation(p).unwrap();
+    }
+    let planner = Arc::new(Provider::new("ALLOW"));
+    let (e, main) = engine(&f, planner.clone(), true, false);
+    let engine = ExecutionEngine {
+        context_preparation: e.context_preparation,
+        persistence: e.persistence,
+        provider: e.provider,
+        tools: e.tools,
+        policy: Arc::new(CompleteGoal {
+            inner: Policy {
+                events: Mutex::new(vec![]),
+                follow: true,
+                repeat: false,
+            },
+            db: f.db.clone(),
+        }),
+        progress: e.progress,
+    };
+    let report = engine
+        .run(f.input.clone(), CancellationToken::default())
+        .unwrap();
+    assert_eq!(report.state, RunState::Completed, "{:?}", report.failure);
+    for provider in [&planner, &main] {
+        let seen = provider.requests.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].view.binding.goal.as_ref().unwrap().id, "goal");
+        assert!(seen[0].view.history.iter().any(|item|matches!(&item.provenance,Provenance::GoalInstruction{goal_id,..} if goal_id=="goal")&&serde_json::to_string(&item.content).unwrap().contains("GOAL_CONTEXT_SENTINEL")));
+    }
+    let db = f.db.lock().unwrap();
+    let goal = db.capture_goal("goal").unwrap().load().unwrap();
+    assert_eq!(goal.state, GoalState::Complete);
+    assert_eq!(goal.usage.actual.inferences, 2);
+    assert_eq!(goal.usage.actual.output_tokens.known, 8);
+    assert_eq!(goal.usage.pending_inferences, 0);
+    assert_eq!(goal.usage.missing_inferences, 0);
 }

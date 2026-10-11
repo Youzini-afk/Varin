@@ -6,6 +6,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { createKernelClient, KernelClient } from "./kernel-client.js";
 import type { KernelGrantHandle } from "./kernel-client.js";
+import { KERNEL_PROTOCOL_VERSION } from "./protocol.generated.js";
 import { KernelStorageAdapter } from "./storage-adapter.js";
 import { KernelPathLockService } from "./file-resource-lock-service.js";
 import { KernelRecoveryContentStore, KernelRecoveryStore, createKernelRecoveryDirectFacade } from "./kernel-recovery-store.js";
@@ -65,7 +66,7 @@ test("real Rust kernel persists roots, CAS revisions, pins, and objects", { time
   clients.push(host);
   const handshake = await host.start();
   const client = host.scoped(await issueActor(host, "kernel-test-actor", "workspace-test"));
-  assert.equal(handshake.protocolVersion, 1);
+  assert.equal(handshake.protocolVersion, KERNEL_PROTOCOL_VERSION);
   const first = await client.putBlob(Buffer.from("one\n"), "op-blob-one");
   const large = await client.putBlob(Buffer.alloc(200_000, 7), "op-blob-large");
   assert.equal(large.byteLength, 200_000);

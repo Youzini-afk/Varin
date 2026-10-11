@@ -356,6 +356,8 @@ impl<
                             operation_id: admitted.context.origin.operation_id(&node.call.call_id),
                         };
                         let token = graph_cancel.child(&context.operation_id);
+                        // Exact Operation Stop reaches this same node token without cancelling siblings.
+                        cancel.alias_child(&context.operation_id, &token);
                         let blocked = node
                             .depends_on
                             .iter()

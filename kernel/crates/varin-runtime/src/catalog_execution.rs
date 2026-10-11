@@ -6,6 +6,17 @@ use crate::execution::*;
 use std::sync::{Arc, Mutex};
 
 impl Persistence for Mutex<Catalog> {
+    fn bind_managed_process(
+        &self,
+        context: &ToolExecutionContext,
+        kind: super::managed_process::ManagedProcessKind,
+    ) -> std::result::Result<(), ExecutionError> {
+        self.lock()
+            .map_err(|_| ExecutionError::new("catalog", "owner unavailable"))?
+            .bind_managed_process(context, kind)
+            .map(|_| ())
+            .map_err(policy_error)
+    }
     fn nested_tools(&self) -> Option<Arc<crate::nested_tools::NestedTools>> {
         self.lock().ok().map(|catalog| catalog.nested_tools())
     }
@@ -1492,6 +1503,7 @@ impl Catalog {
                 } else {
                     let op = Operation {
                         host_job: None,
+                        managed_process: None,
                         external_receipt: None,
                         call_completion: None,
                         id: key.clone(),
@@ -2571,7 +2583,7 @@ impl Catalog {
         rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
     }
     pub fn pending_external_operations(&self, executor: &str) -> Result<Vec<String>> {
-        let mut statement=self.db.prepare("SELECT id FROM operations WHERE json_extract(body,'$.executor')=?1 AND (?1!='process_spawn' OR json_extract(body,'$.execution_owner.kind')='kernel') AND (json_extract(body,'$.phase')!='terminal' OR json_extract(body,'$.outcome')='indeterminate' OR (?1='process_spawn' AND coalesce(json_extract(body,'$.external_receipt.executor_stopped'),0)=0 AND (EXISTS(SELECT 1 FROM followups f WHERE json_extract(f.body,'$.wait.state')='waiting' AND ((json_extract(f.body,'$.trigger.kind')='process_stopped' AND json_extract(f.body,'$.trigger.operation_id')=operations.id) OR EXISTS(SELECT 1 FROM json_each(f.body,'$.trigger.sources') s WHERE json_extract(s.value,'$.kind')='process_stopped' AND json_extract(s.value,'$.operation_id')=operations.id))) OR EXISTS(SELECT 1 FROM delegated_executions c WHERE c.run_id=operations.run_id AND json_extract(c.body,'$.code_result.kind') IN ('pending','settling','candidate'))))) ORDER BY id")?;
+        let mut statement=self.db.prepare("SELECT id FROM operations WHERE json_extract(body,'$.executor')=?1 AND (json_extract(body,'$.phase')!='terminal' OR json_extract(body,'$.outcome')='indeterminate') ORDER BY id")?;
         let rows = statement.query_map([executor], |row| row.get(0))?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }

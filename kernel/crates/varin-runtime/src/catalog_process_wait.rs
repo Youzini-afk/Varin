@@ -66,7 +66,9 @@ pub(super) fn delegated_source_lineage(
         let current: delegated::DelegatedExecution = serde_json::from_str(&raw)?;
         let (previous_id, previous_run_id) = match &current.trigger {
             delegated::DelegatedTrigger::ComputerEvent {
-                previous_execution_id, previous_run_id, ..
+                previous_execution_id,
+                previous_run_id,
+                ..
             }
             | delegated::DelegatedTrigger::Followup {
                 previous_execution_id,
@@ -177,25 +179,23 @@ pub(super) fn process_observation(
 ) -> Result<Operation> {
     let process: Operation = record(db, "operations", process_id)?;
     let owner: Run = record(db, "runs", &process.run_id)?;
-    let intent = tool_content::ToolIntent::from_operation(&process)?;
+    let binding = managed_process::require_process(&process)?;
     let accepted = matches!(process.call_completion.as_ref(), Some(result_content::ToolCompletionMetadata::JobAccepted { operation_id, .. }) if operation_id == &process.id)
         || process.external_receipt.as_ref().is_some_and(|receipt| {
-            receipt.identity == process.id && receipt.executor == "process_spawn"
+            receipt.identity == process.id
+                && Some(receipt.executor.as_str()) == process.executor.as_deref()
         });
-    if owner.thread_id != run.thread_id
-        || owner.branch_id != run.branch_id
-        || process.executor.as_deref() != Some("process_spawn")
-        || process.execution_owner != Some(ExecutorOwner::Kernel)
-        || intent.call().name != "process_spawn"
-        || intent.contract().name != "process_spawn"
-        || intent.contract().completion != crate::execution::CompletionKind::Job
-        || !accepted
-    {
+    if owner.thread_id != run.thread_id || owner.branch_id != run.branch_id || !accepted {
         return Err(RuntimeError::Conflict(
             "process is not an accepted native Job of this Thread and branch".into(),
         ));
     }
     if owner.id != run.id {
+        if binding.is_environment() {
+            return Err(RuntimeError::Conflict(
+                "Script environment belongs to its original Run".into(),
+            ));
+        }
         let original =
             optional_record::<launch_content::LaunchMetadata>(db, "run_launches", &owner.id)?
                 .ok_or_else(|| RuntimeError::NotFound("process source launch".into()))?;
@@ -430,8 +430,12 @@ impl Catalog {
         let tx = self.db.transaction()?;
         let mut released = Vec::new();
         for mut operation in read_all::<Operation>(&tx, "operations")? {
-            if (!(operation.executor.as_deref() == Some(WAIT_TOOL) && operation.execution_owner == Some(ExecutorOwner::Kernel))
-                && !operation.waiting_on.as_deref().is_some_and(|v|v.starts_with(super::host_jobs::WAIT_PREFIX)))
+            if (!(operation.executor.as_deref() == Some(WAIT_TOOL)
+                && operation.execution_owner == Some(ExecutorOwner::Kernel))
+                && !operation
+                    .waiting_on
+                    .as_deref()
+                    .is_some_and(|v| v.starts_with(super::host_jobs::WAIT_PREFIX)))
                 || operation.phase == OperationPhase::Terminal
             {
                 continue;
@@ -509,6 +513,5 @@ pub(super) fn pending_cancelled_observation(
     };
     Ok(admitted.call().name == WAIT_TOOL
         && process.run_id == run.id
-        && process.executor.as_deref() == Some("process_spawn")
-        && process.execution_owner == Some(ExecutorOwner::Kernel))
+        && managed_process::require_process(&process).is_ok())
 }

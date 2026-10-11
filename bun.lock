@@ -184,6 +184,7 @@
         "varin-host": "./dist/host-bootstrap.js",
       },
       "dependencies": {
+        "@varin/script-runtime": "0.1.0",
         "@earendil-works/pi-agent-core": "1.0.4",
         "@earendil-works/pi-ai": "1.0.4",
         "@earendil-works/pi-coding-agent": "1.0.4",
@@ -218,6 +219,11 @@
       "dependencies": {
         "@varin/protocol": "0.1.0",
       },
+    },
+    "packages/script-runtime": {
+      "name": "@varin/script-runtime",
+      "version": "0.1.0",
+      "dependencies": { "@varin/protocol": "workspace:*" },
     },
     "packages/settings-store": {
       "name": "@varin/settings-store",
@@ -332,6 +338,7 @@
         "varin": "./bin/cli.js",
       },
       "dependencies": {
+        "@varin/script-runtime": "workspace:*",
         "@clack/prompts": "^1.8.1",
         "@konbakuyomu/smart-search": "^0.1.25",
         "@mozilla/readability": "0.6.0",
@@ -1540,6 +1547,8 @@
     "@varin/runtime-broker": ["@varin/runtime-broker@workspace:packages/runtime-broker"],
 
     "@varin/runtime-client": ["@varin/runtime-client@workspace:packages/runtime-client"],
+
+    "@varin/script-runtime": ["@varin/script-runtime@workspace:packages/script-runtime"],
 
     "@varin/settings-store": ["@varin/settings-store@workspace:packages/settings-store"],
 

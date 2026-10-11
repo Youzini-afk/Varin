@@ -19,6 +19,15 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-11 增量：受管持久 JavaScript 环境
+
+- 发行普通 `script_open/run/close` 沿原 SDK/broker/冻结工具调用进入真实 Node、Storage 与 guardian；open 是 Run 所属 Environment Job，各 cell 保独立 Operation。共享 Node REPL 保词法/对象/完整 async 单元与原嵌套工具，内层 memory 已提交后外层报错仍进入下一真实请求；不回放丢失 heap，不把进程隔离称作 OS 沙箱。
+- 单份 `ToolSchema.requirements` 声明真实 source/physical/live 与 process 依赖，目录/child/原 grant 一起消费。仅选择 scripts 也可运行，不要求另外勾选 process/file 工具；warm/cold/dynamic 自动发现按原 source 局部不可用，显式 required 不降级。坏 Node 配置仅影响自身工具。Catalog **47**、Kernel wire **2** 直接更新内部合同，打包读取同一版本源。
+- 树停止与已受理 Host callback 排空分开；同步死循环可由原 guardian 停止，held callback 不被冒充结束。精确 policy node Stop 绑定同一原 token；Run 结束只收所属环境，独立 Thread Job 保原寿命。重复 close 复用已确认原终态，Unknown 留原环境而不复制控制调用 writer；Computer hook 只跟真实当前环境/desktop。
+- 原合法 fixed 父→isolated_write 子任务因过早 source 校验曾失败，已把非执行 ChildTask 意图的结构读写与 Ready 后真实 Run 全校验分清，未伪造 source/改变父夹具。原 child guardian 的真实派生、可写子/孙子、树 Stop 与固定结果重跑通过；旧手工 process fixture 补回原 bound 的 typed association 前置，不放宽产品屏障。
+- 原跨 owner Node **5 条**、真实 child guardian **1 条**、原进程输入/接续 **2 条**修后通过；完整原生、原 installed scripts broker、Host/Pi/UI/包装证据及可复跑命令见[本片验收](../reviews/runtime-managed-scripts-2026-10-11.md)。Node 24 public REPL 的单点 `await Promise.reject(null)` 歧义明确保留；完整产品 IPC、真桌面/远端/跨平台包与 child-script 全链未由这些测试证明。
+- 接续 typed media/图片等环境能力，以及 Web/材料/Bot、MCP 剩余合同、来源/检索/上下文/provider 和性能/产品验收。两设计整体仍未完成；用户验收后自行全面迁移、默认切换与 Pi/资产处理的分工不变。
+
 ## 2026-10-11 增量：原真实嵌套工具调用
 
 - 普通 SDK `call.tools.invoke` 经实际 broker/Host 活调用进入原冻结工具目录；真实 `NestedCall` 保父 Operation，不伪造模型 request/工具配对，也不复制 enabled 名单或 grant。完整参数只由 Rust decoder 判合法，父身份、source、epoch 和 executor 来自原 scope；Model/Policy/Nested 共用单调用执行、授权、资源与结算 owner。Catalog **46**直接拒旧。

@@ -45,7 +45,8 @@ fn input(db: &Arc<Mutex<Catalog>>) -> ExecutionInput {
         owner_generation: db.epoch(),
         binding: RequestBinding {
             child_dispatch: None,
-            goal: None, resource_activations: Vec::new(),
+            goal: None,
+            resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "fixture-connection".into(),
             provider_family: "test".into(),
@@ -54,6 +55,7 @@ fn input(db: &Arc<Mutex<Catalog>>) -> ExecutionInput {
             configuration_generation: 1,
             tool_schema_generation: 1,
             tools: vec![ToolSchema {
+                requirements: None,
                 description: String::new(),
                 output_schema: None,
                 metadata: None,
@@ -572,7 +574,12 @@ fn worker_commit_conflict_cannot_leave_a_workerless_run_generating() {
     );
     assert!(supervisor.execution_failure(&run_id).unwrap().is_some());
     assert!(run.waiting_on.is_some());
-    content_collection::collect(|| db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
+    content_collection::collect(|| {
+        db.lock()
+            .unwrap()
+            .prepare_content_collection(Default::default())
+    })
+    .unwrap();
     let retained = db
         .lock()
         .unwrap()
@@ -591,7 +598,13 @@ fn worker_commit_conflict_cannot_leave_a_workerless_run_generating() {
     drop(db);
     drop(supervisor);
     let reopened = f.catalog();
-    content_collection::collect(|| reopened.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
+    content_collection::collect(|| {
+        reopened
+            .lock()
+            .unwrap()
+            .prepare_content_collection(Default::default())
+    })
+    .unwrap();
     assert_eq!(
         reopened.lock().unwrap().run(&run_id).unwrap().state,
         RunState::Waiting
@@ -722,6 +735,7 @@ fn independent_fast_tool_finishes_while_another_tool_is_still_running() {
     input.binding.tools = ["slow", "fast"]
         .into_iter()
         .map(|name| ToolSchema {
+            requirements: None,
             description: String::new(),
             output_schema: None,
             metadata: None,
@@ -874,6 +888,7 @@ fn cancelling_one_queued_operation_does_not_fail_its_run_or_execute_it() {
     input.binding.tools = ["first", "queued"]
         .into_iter()
         .map(|name| ToolSchema {
+            requirements: None,
             description: String::new(),
             output_schema: None,
             metadata: None,
@@ -1537,7 +1552,13 @@ fn active_context_compiles_summary_and_tail_without_destroying_original_history(
     drop(engine);
     drop(db);
     let reopened = fixture.catalog();
-    content_collection::collect(|| reopened.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
+    content_collection::collect(|| {
+        reopened
+            .lock()
+            .unwrap()
+            .prepare_content_collection(Default::default())
+    })
+    .unwrap();
     let catalog = reopened.lock().unwrap();
     assert_eq!(
         catalog.active_context("main").unwrap().unwrap().proposal,

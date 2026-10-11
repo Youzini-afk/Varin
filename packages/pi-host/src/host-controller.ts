@@ -1188,7 +1188,7 @@ export class HostController {
           readString(params, "text", { allowEmpty: true }),
         );
       case 'session.computer.cancel':
-        return { cancelled: cancelComputerEvaluations(readString(params, 'sessionId'), readString(params, 'runId')) };
+        return { cancelled: await cancelComputerEvaluations(readString(params, 'sessionId'), readString(params, 'runId')) };
       case "agent.followUp":
         return {
           accepted: await this.#sessionHost.followUp(

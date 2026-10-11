@@ -55,7 +55,8 @@ const createFixture = () => {
       },
     },
     protocol: { name: '@varin/protocol', dependencies: {} },
-    'pi-host': { name: '@varin/pi-host', dependencies: { '@varin/protocol': '0.1.0' } },
+    'script-runtime': { name: '@varin/script-runtime', dependencies: { '@varin/protocol': '0.1.0' } },
+    'pi-host': { name: '@varin/pi-host', dependencies: { '@varin/protocol': '0.1.0', '@varin/script-runtime': '0.1.0' } },
     'runtime-broker': {
       name: '@varin/runtime-broker',
       dependencies: {
