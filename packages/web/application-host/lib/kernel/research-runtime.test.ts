@@ -18,7 +18,7 @@ it('research ingress preserves legal empty values and limit zero, and rejects ma
 it('a User admission shields only its own original subject while its Catalog response is in flight',async()=>{
  const source={workspace_id:'ws',execution_workspace_id:'exec',mode:'fixed_branch' as const,branch_id:'source',revision:1,live_root:null};
  const scope:ResearchScope={rootThreadId:'thread',threadId:'thread',branchId:'branch',sourceRunId:'run',source,canSubmit:true,readThreadIds:['thread'],controlThreadIds:['thread']};
- const pending=(id:string):HostJobPending=>({binding:{operationId:id,executionOwner:{kind:'external',identity:'research.experiment',epoch:id},domain:'research.experiment',domainVersion:1,workspaceId:'ws',subjectId:id},runId:'run',accepted:false,cancelRequested:false,phase:'running',executorStopped:false,origin:{kind:'user',key:id}});
+ const pending=(id:string):HostJobPending=>({binding:{operationId:id,executionOwner:{kind:'external',identity:'research.experiment',epoch:id},domain:'research.experiment',domainVersion:1,subject:{kind:'workspace',workspaceId:'ws',subjectId:id}},runId:'run',accepted:false,cancelRequested:false,phase:'running',executorStopped:false,origin:{kind:'user',key:id}});
  const operations=new Map<string,HostJobPending>([['orphan',pending('orphan')]]),checked:string[]=[];
  let admitted=false;let release:()=>void=()=>{};const gate=new Promise<void>(resolve=>{release=resolve;});
  let receipt:Awaited<ReturnType<ExperimentService['nativeReceipt']>>=null;
@@ -53,11 +53,11 @@ it('a User admission shields only its own original subject while its Catalog res
 
 
 it.each([false, true])('original subscriptions precede recheck and preserve one accepted Job when already stopped is %s', async initiallyStopped => {
-  const binding: HostJobPending['binding'] = { operationId: 'user-job:early', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'ws', subjectId: 'attempt:early' };
+  const binding = { operationId: 'user-job:early', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, domain: 'research.experiment', domainVersion: 1, subject: { kind: 'workspace', workspaceId: 'ws', subjectId: 'attempt:early' } } satisfies HostJobPending['binding'];
   const job: HostJobPending = { binding, runId: 'completed-source-run', accepted: false, cancelRequested: false, phase: 'running', executorStopped: false, origin: { kind: 'user', key: 'early' } };
   const source = { workspace_id: 'ws', execution_workspace_id: 'exec', mode: 'fixed_branch' as const, branch_id: 'fixed', revision: 1, live_root: null };
   const actor = { runtime: 'agent' as const, actor: { kind: 'user' as const, key: 'early' }, rootThreadId: 'thread', threadId: 'thread', branchId: 'branch', runId: job.runId, operationId: binding.operationId, executionOwner: binding.executionOwner, source };
-  const accepted = { spec: null, attempt: { attemptId: binding.subjectId, state: 'submitted' }, text: 'original acceptance' };
+  const accepted = { spec: null, attempt: { attemptId: binding.subject.subjectId, state: 'submitted' }, text: 'original acceptance' };
   let stopped = initiallyStopped;
   const calls: string[] = [];
   let attemptWake: (() => void) | undefined; let eventWake: (() => void) | undefined;
@@ -68,13 +68,13 @@ it.each([false, true])('original subscriptions precede recheck and preserve one 
     calls.push(method);
     if (method === 'runtime.host_job.pending') { assert.ok(attemptWake && eventWake, 'subscribe before first snapshot'); return job.executorStopped ? [] : [structuredClone(job)]; }
     assert.deepEqual(params.binding, binding);
-    if (method === 'runtime.host_job.accept') { assert.deepEqual(params.content, accepted); job.accepted = true; eventWake!(); return structuredClone(job); }
-    if (method === 'runtime.host_job.terminal') { assert.equal(params.executorStopped, true); assert.equal((params.content as { attempt: { collectionState: string } }).attempt.collectionState, 'pending'); job.phase = 'terminal'; job.executorStopped = true; eventWake!(); return structuredClone(job); }
+    if (method === 'runtime.host_job.accept') { assert.deepEqual(params.content, { data: accepted, parts: [] }); job.accepted = true; eventWake!(); return structuredClone(job); }
+    if (method === 'runtime.host_job.terminal') { assert.equal(params.executorStopped, true); assert.equal((params.content as { data: { attempt: { collectionState: string } } }).data.attempt.collectionState, 'pending'); job.phase = 'terminal'; job.executorStopped = true; eventWake!(); return structuredClone(job); }
     throw new Error(`Unexpected operation: ${method}`);
   } } as unknown as KernelClient;
   const runtime = { onReady: () => () => {}, onEvent: (fn: () => void) => { eventWake = fn; return () => { eventWake = undefined; }; }, reconcileObservations: async () => { observations++; return []; } } as unknown as AgentRuntimeClient;
   const experiments = { subscribeAttempts: (fn: () => void) => { attemptWake = fn; return () => { attemptWake = undefined; }; },
-    nativeReceipt: async () => ({ caller: { workspaceId: 'ws' }, owner: actor, accepted, attempt: { attemptId: binding.subjectId, state: 'completed', collectionState: 'pending', cancelRequested: false }, executorStopped: stopped }),
+    nativeReceipt: async () => ({ caller: { workspaceId: 'ws' }, owner: actor, accepted, attempt: { attemptId: binding.subject.subjectId, state: 'completed', collectionState: 'pending', cancelRequested: false }, executorStopped: stopped }),
     submit: async () => { submits++; assert.fail('reconciliation cannot resubmit'); },
   } as unknown as ExperimentService;
   const errors: Error[] = [];
@@ -94,12 +94,15 @@ it.each([false, true])('original subscriptions precede recheck and preserve one 
   } finally { await research.dispose(); }
 });
 
-it('retains accepted original jobs when their domain is unavailable without resubmission or fabricated stop', async () => {
-  const binding: HostJobPending['binding'] = { operationId: 'original', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'old-owner' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'ws', subjectId: 'original-attempt' };
+it.each(['unavailable', 'invalid subject'])('retains accepted original research jobs with %s without resubmission or fabricated stop', async failure => {
+  const mcpSubject = { kind: 'mcp' as const, endpoint: { server: 'server', resourceKey: 'resource', configurationVersion: 'config', credentialVersion: 'credential' }, dispatchId: 'original-dispatch' };
+  const binding: HostJobPending['binding'] = { operationId: 'original', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'old-owner' }, domain: 'research.experiment', domainVersion: 1,
+    subject: failure === 'invalid subject' ? mcpSubject : { kind: 'workspace', workspaceId: 'ws', subjectId: 'original-attempt' } };
   const op: HostJobPending = { binding, runId: 'ended-source', accepted: true, cancelRequested: false, phase: 'running', executorStopped: false, origin: { kind: 'user', key: 'original' } };
+  const mcp: HostJobPending = { ...op, binding: { ...binding, operationId: 'mcp-job', domain: 'mcp.task', subject: mcpSubject } };
   const writes: string[] = [], errors: Error[] = []; let receiptReads = 0;
   const kernel = { agentRuntimeRequest: async (method: string) => {
-    if (method === 'runtime.host_job.pending') return [op];
+    if (method === 'runtime.host_job.pending') return [op, mcp];
     if (method === 'runtime.followup.metrics') return { works: [], nextCursor: null };
       if (method === 'runtime.followup.research') return { works: [], nextCursor: null };
     writes.push(method); throw new Error('no effect or stop may be manufactured');
@@ -108,8 +111,9 @@ it('retains accepted original jobs when their domain is unavailable without resu
   const research = createResearchRuntime({ kernel, runtime: {} as AgentRuntimeClient, experiments, sources: {} as SourceService, resources: { subscribeSamples: () => () => {} } as unknown as ResourceService, onError: error => errors.push(error) });
   try {
     await research.reconcile(); await research.reconcile();
-    assert.equal(receiptReads, 2); assert.deepEqual(writes, []); assert.equal(errors.length, 2);
-    assert.ok(errors.every(error => /Accepted original experiment subject is unavailable/.test(error.message)));
+    assert.equal(receiptReads, failure === 'invalid subject' ? 0 : 2); assert.deepEqual(writes, []); assert.equal(errors.length, 2);
+    assert.ok(errors.every(error => failure === 'invalid subject' ? /requires a workspace subject/.test(error.message) : /Accepted original experiment subject is unavailable/.test(error.message)));
     assert.equal(op.executorStopped, false); assert.equal(op.accepted, true);
+    assert.equal(mcp.executorStopped, false); assert.equal(mcp.accepted, true);
   } finally { await research.dispose(); }
 });

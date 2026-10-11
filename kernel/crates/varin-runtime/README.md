@@ -76,6 +76,14 @@ writing Pi session files or the Host harness's existing execution records.
   guarantee of provider tokenization. Provider capacity-error recovery and replaceable budget strategies
   remain to be implemented.
 
+Negotiated MCP Tasks share the original Operation/HostJob ledger and original MCP owner. Accepted
+remote identity is separate from local dispatch, immutable caller acceptance, eventual typed output
+and actual executor-stop evidence. Management tools use real origin and ordinary permission admission;
+result Waits consume current or newly observed facts without rewriting earlier history. Global Tasks
+and frozen bindings do not require a fabricated workspace or child directory. Workspace research jobs
+retain their exact source guard. See the owning [MCP contract](../../../packages/web/application-host/lib/kernel/MCP.md)
+for declaration gates, cancellation, recovery and supported server-initiated interactions.
+
 The wire source remains `kernel/protocol/schema.json`; it generates the state enums and the
 Host request/response DTOs. Domain implementation types remain private to Rust.
 
@@ -94,7 +102,7 @@ records typed dependencies in its manifests. Original publication protection spa
 the short identity/epoch/revision-checked commit. GC follows those dependencies from the existing
 history, input, operation, event, policy and request roots. Catalog retains only original metadata;
 byte reads, hash/base64 work and provider serialization stay outside its control lock. Catalog
-format **49**, content domain **4**, manifest **2** and Kernel wire **4** reject older internal
+format **50**, content domain **4**, manifest **2** and Kernel wire **5** reject older internal
 formats directly. These are distinct from policy service **4** and private script worker protocol **2**.
 
 `runtime.output.media.read` uses the original caller Thread/branch plus an actual history, queued
@@ -361,7 +369,7 @@ passive fact interrupts an unrelated observation Wait. Physical release remains 
 Computer owner's evidence, independent of input acceptance and body failure.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version **49**, input domain 6 and collaboration domain 8 store input intents/queue bodies and context-job ownership,
+Catalog version **50**, input domain 6 and collaboration domain 8 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format **4** retains typed request origins and typed output bodies. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
@@ -597,7 +605,7 @@ output does not suppress their next legal request delivery or replay the write a
 
 The private protocol releases only completed-body transfer credit after a nested call belongs to its
 live worker, preserving the pending cancellation/final response. This permits further original
-permission/domain requests at the existing window size. Catalog **49** rejects older internal formats
+permission/domain requests at the existing window size. Catalog **50** rejects older internal formats
 directly. Persistent script environments use the contract below; typed media follows the shared
 output contract above. Arbitrary extension Node I/O is not sandboxed or intercepted.
 

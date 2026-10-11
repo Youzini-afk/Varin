@@ -78,8 +78,8 @@ afterEach(() => vi.unstubAllGlobals());
 it('routes each original media holder unchanged through the authenticated public client and real Host owners', async () => {
   const f = fixture();
   const holders: OutputMediaHolder[] = [holder, { kind: 'input', inputId: 'input:original', expectedRevision: 4 },
-    ...(['completion', 'result', 'external_receipt'] as const).map(output => ({ kind: 'operation' as const, operationId: 'operation:original', output })),
-    { kind: 'event', cursor: 17, output: 'external_receipt' },
+    ...(['completion', 'result', 'external_receipt', 'mcp_task_result'] as const).map(output => ({ kind: 'operation' as const, operationId: 'operation:original', output })),
+    { kind: 'event', cursor: 17, output: 'external_receipt' }, { kind: 'event', cursor: 18, output: 'mcp_task_result' },
     { kind: 'child_report', operationId: 'child:original', itemId: 'report:original' },
     { kind: 'child_report', operationId: 'child:original', executionId: 'execution:later', itemId: 'report:later' },
     { kind: 'policy_evidence', reference: { action_id: 'action:original', node_id: 'node:original', content_ref: hash } },

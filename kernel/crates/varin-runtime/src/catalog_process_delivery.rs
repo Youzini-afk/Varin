@@ -10,6 +10,7 @@ pub struct ProcessWaitPreparation {
     wait: Wait,
     operation: Operation,
     process: Operation,
+    mcp_result: Option<super::host_jobs::McpResultFact>,
     expected_head: Option<String>,
     fact_cursor: Option<u64>,
     observer: String,
@@ -39,6 +40,11 @@ impl ProcessWaitPreparation {
         } = self;
         let receipt = if wait.cancelled {
             None
+        } else if let Some(fact) = &self.mcp_result {
+            fact.result_ref
+                .as_ref()
+                .map(|reference| self.content.load_output(reference))
+                .transpose()?
         } else {
             process
                 .external_receipt
@@ -47,8 +53,14 @@ impl ProcessWaitPreparation {
                 .transpose()?
         };
         let data = receipt.as_ref().map(|body| &body.data);
-        let result = if let Some(binding) = &process.host_job {
-            json!({"operationId":process.id,"subjectId":binding.binding.subject_id,"domain":binding.binding.domain,"outcome":process.outcome,"effect":process.effect,"receipt":receipt.as_ref().map(|body| &body.data)})
+        let result = if let Some(fact) = &self.mcp_result {
+            json!({"operationId":process.id,"task":fact.task.task,"availability":fact.task.availability,
+                "problem":fact.task.problem,"resultReady":fact.task.result_ready,
+                "outcome":fact.outcome,"effect":fact.effect,"executorStopped":fact.executor_stopped,
+                "observation":self.content.load_output(&fact.task.observation_ref)?.data,
+                "receipt":receipt.as_ref().map(|body| &body.data)})
+        } else if let Some(binding) = &process.host_job {
+            json!({"operationId":process.id,"subject":binding.binding.subject,"domain":binding.binding.domain,"outcome":process.outcome,"effect":process.effect,"receipt":receipt.as_ref().map(|body| &body.data)})
         } else {
             json!({"processId":process.id,"outcome":process.outcome,"effect":process.effect,
                 "exitCode":data.and_then(|data|data.get("exitCode")).and_then(Value::as_i64),
@@ -79,8 +91,12 @@ impl ProcessWaitPreparation {
                 Content::Output {
                     output: crate::output::OutputBody {
                         data: result,
-                        parts: std::iter::once(crate::output::OutputPart::Text { text })
-                            .chain(receipt.parts)
+                        // The wrapped data can address its original parts by index. Append
+                        // our lifecycle explanation without shifting any owned output part.
+                        parts: receipt
+                            .parts
+                            .into_iter()
+                            .chain(std::iter::once(crate::output::OutputPart::Text { text }))
                             .collect(),
                     },
                 }
@@ -134,7 +150,12 @@ impl Catalog {
             };
             // Catalog recovery marks dispatched effects indeterminate; that is not a process
             // terminal observation. Wait for the original executor's durable receipt instead.
+            let result_mode = wait.kind == super::host_jobs::RESULT_EVENT;
+            if !wait.cancelled && result_mode && wait.trigger_cursor.is_none() {
+                continue;
+            }
             if !wait.cancelled
+                && !result_mode
                 && (process.phase != OperationPhase::Terminal
                     || process.external_receipt.is_none()
                     || (process.host_job.is_some()
@@ -154,9 +175,25 @@ impl Catalog {
             }
             let fact_cursor: Option<u64> = if wait.cancelled {
                 None
+            } else if result_mode {
+                wait.trigger_cursor
             } else {
                 Some(self.db.query_row("SELECT cursor FROM events WHERE subject=?1 AND kind=?2 ORDER BY cursor DESC LIMIT 1",
                     params![process.id,if wait.id.starts_with(WAIT_PREFIX){"operation.executor_stopped"}else{"operation.settled"}], |row| read_number(row, 0))?)
+            };
+            let mcp_result = if result_mode && !wait.cancelled {
+                let raw: String = self.db.query_row(
+                    "SELECT data FROM events WHERE cursor=?1 AND subject=?2 AND kind=?3",
+                    params![
+                        sql_number(fact_cursor.expect("ready result"))?,
+                        process.id,
+                        super::host_jobs::RESULT_EVENT
+                    ],
+                    |r| r.get(0),
+                )?;
+                Some(serde_json::from_str(&raw)?)
+            } else {
+                None
             };
             let observer = format!(
                 "process-result-history:{}:{}",
@@ -196,6 +233,7 @@ impl Catalog {
                 wait,
                 operation,
                 process,
+                mcp_result,
                 fact_cursor,
                 observer,
                 visible: visible.is_some(),

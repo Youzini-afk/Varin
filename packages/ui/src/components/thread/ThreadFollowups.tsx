@@ -1,12 +1,17 @@
 import React from 'react';
 import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import type { ThreadsAPI, ThreadFamilyAPI, ThreadFollowupsAPI, ThreadIdentity, ThreadResearchAPI } from '@varin/application-client';
-import type { HostJobSource, FollowupPendingRegistration, Followup, FollowupOccurrence, FollowupOccurrencesResult, FollowupLeafEvidence, FollowupRegisterParams, FollowupRegistrationSource, FollowupSource, FollowupSourceState, FollowupView, MetricKind, ResourceMachineView, Operation, Run } from '@varin/protocol';
+import type { HostJobSubject, HostJobSource, FollowupPendingRegistration, Followup, FollowupOccurrence, FollowupOccurrencesResult, FollowupLeafEvidence, FollowupRegisterParams, FollowupRegistrationSource, FollowupSource, FollowupSourceState, FollowupView, MetricKind, ResourceMachineView, Operation, Run } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ThreadRunHistory } from './ThreadFamily';
 import { ThreadFollowupOccurrenceDetails } from './ThreadFollowupOccurrenceDetails';
+
+function jobSubjectLabel(subject: HostJobSubject): string {
+  return subject.kind === 'workspace' ? `${subject.workspaceId} · ${subject.subjectId}`
+    : `${subject.endpoint.server} · local dispatch ${subject.dispatchId}`;
+}
 
 const heldReason: Record<NonNullable<NonNullable<Followup['occurrence']>['hold_reason']>, string> = {
   control_paused: 'Follow-up paused', source_run_active: 'Waiting for the original run to finish',
@@ -158,7 +163,7 @@ function SourceEditor({ value, onChange, processes, jobs, machines, disabled, re
     return <><label className="block">Accepted {research ? 'research ' : ''}job<select aria-label={`${label} job`} value={value.jobId} disabled={disabled}
       onChange={event => onChange({ ...value, jobId: event.target.value })} className="ml-2 rounded border bg-background p-1">
       <option value="">Select an accepted {research ? 'research ' : ''}job in this task family</option>{candidates.map(job => <option key={job.binding.operationId} value={job.binding.operationId}>
-        {job.binding.domain} · {job.binding.workspaceId} · {job.binding.subjectId} · {job.executorStopped ? 'executor stopped' : 'awaiting executor stop'} · {job.threadId}
+        {job.binding.domain} · {jobSubjectLabel(job.binding.subject)} · {job.executorStopped ? 'executor stopped' : 'awaiting executor stop'} · {job.threadId}
       </option>)}</select></label>
       {(value.kind === 'log_literal' || value.kind === 'log_end') && <>
         <label className="block">Log stream<select aria-label={`${label} log stream`} value={value.stream} disabled={disabled}
@@ -250,18 +255,18 @@ function evidenceLabel(evidence: FollowupLeafEvidence): string {
       fact.gap ? 'observation gap; unavailable crossings are not reconstructed' : null,
     ].filter(Boolean).join(' · ');
   }
-  if (evidence.kind === 'log_literal') return `${evidence.binding.subjectId} · ${evidence.stream} literal match · bytes ${evidence.start_offset}–${evidence.end_offset} (end exclusive) · ${evidence.published_bytes} published bytes · job revision ${evidence.job_revision}`;
-  if (evidence.kind === 'log_end') return `${evidence.binding.subjectId} · ${evidence.stream} ended · ${evidence.published_bytes} published bytes · attempt revision ${evidence.attempt_revision}${evidence.job_revision === null ? '' : ` · job revision ${evidence.job_revision}`}`;
+  if (evidence.kind === 'log_literal') return `${jobSubjectLabel(evidence.binding.subject)} · ${evidence.stream} literal match · bytes ${evidence.start_offset}–${evidence.end_offset} (end exclusive) · ${evidence.published_bytes} published bytes · job revision ${evidence.job_revision}`;
+  if (evidence.kind === 'log_end') return `${jobSubjectLabel(evidence.binding.subject)} · ${evidence.stream} ended · ${evidence.published_bytes} published bytes · attempt revision ${evidence.attempt_revision}${evidence.job_revision === null ? '' : ` · job revision ${evidence.job_revision}`}`;
   if (evidence.kind === 'file') return `${evidence.path} · ${evidence.proof} · ${evidence.state.kind}${evidence.state.kind === 'regular-file' ? ` · ${evidence.state.objectHash}` : ''}${evidence.position ? ` · watch ${evidence.position.generation}:${evidence.position.sequence}` : ''}${evidence.gap ? ' · observation gap' : ''}`;
   if (evidence.kind === 'artifact') {
     const fact = evidence.fact;
     const detail = 'artifact_id' in fact ? `${fact.artifact_id} · record revision ${fact.record_revision}`
       : `completion revision ${fact.completion_revision} · ${fact.outcome}${fact.outcome === 'failed' ? ' · collection failed; source file absence is unproven' : ''}`;
-    return `${evidence.binding.subjectId} · ${fact.kind} · ${detail}${evidence.gap ? ' · observation gap' : ''}`;
+    return `${jobSubjectLabel(evidence.binding.subject)} · ${fact.kind} · ${detail}${evidence.gap ? ' · observation gap' : ''}`;
   }
-  if (evidence.kind === 'collection') return `${evidence.binding.subjectId} · collection ${evidence.outcome} · completion revision ${evidence.completion_revision} · ${evidence.counts.available} available, ${evidence.counts.failed} failed, ${evidence.counts.expired} expired, ${evidence.counts.pending} pending${evidence.outcome === 'done' && Object.values(evidence.counts).every(count => count === 0) ? ' · empty collection' : ''}${evidence.gap ? ' · observation gap' : ''}`;
+  if (evidence.kind === 'collection') return `${jobSubjectLabel(evidence.binding.subject)} · collection ${evidence.outcome} · completion revision ${evidence.completion_revision} · ${evidence.counts.available} available, ${evidence.counts.failed} failed, ${evidence.counts.expired} expired, ${evidence.counts.pending} pending${evidence.outcome === 'done' && Object.values(evidence.counts).every(count => count === 0) ? ' · empty collection' : ''}${evidence.gap ? ' · observation gap' : ''}`;
   if (evidence.kind === 'at') return `Time observed ${atLabel(evidence.observed_at_ms)}`;
-  if (evidence.kind === 'job_stopped') return `${evidence.binding.domain} · ${evidence.binding.subjectId} · ${evidence.outcome} · effect ${evidence.effect} · receipt ${evidence.receipt_identity}`;
+  if (evidence.kind === 'job_stopped') return `${evidence.binding.domain} · ${jobSubjectLabel(evidence.binding.subject)} · ${evidence.outcome} · effect ${evidence.effect} · receipt ${evidence.receipt_identity}`;
   return `Process stop · receipt ${evidence.receipt_identity} · epoch ${evidence.receipt_epoch}`;
 }
 function OccurrenceView({ occurrence, family, mediaRead, identity, api, followupId }: { api: ThreadFollowupsAPI; followupId: string; occurrence: FollowupOccurrence; family?: ThreadFamilyAPI; mediaRead: ThreadsAPI['mediaRead']; identity: ThreadIdentity }) {

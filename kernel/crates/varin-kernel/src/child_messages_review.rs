@@ -324,11 +324,13 @@ fn accepted_family_job(
         .unwrap();
     let binding = op.host_job.unwrap().binding;
     db.begin_host_job(binding.clone()).unwrap();
-    let accepted=db.prepare_result_content().write_result(&json!({"attempt":{"attemptId":binding.subject_id},"text":"accepted original family experiment"})).unwrap();
+    let varin_runtime::catalog::host_jobs::HostJobSubject::Workspace { subject_id, .. } = &binding.subject else { panic!("research workspace subject required") };
+    let accepted=db.prepare_result_content().write_result(&json!({"attempt":{"attemptId":subject_id},"text":"accepted original family experiment"})).unwrap();
     db.accept_host_job(binding.clone(), accepted).unwrap();
     binding
 }
 fn stop_family_job(f: &Fixture, binding: &varin_runtime::catalog::host_jobs::HostJobBinding) {
+    let varin_runtime::catalog::host_jobs::HostJobSubject::Workspace { subject_id, .. } = &binding.subject else { panic!("research workspace subject required") };
     let owner = f.catalog();
     let mut db = owner.lock().unwrap();
     let op = db.operation(&binding.operation_id).unwrap();
@@ -343,7 +345,7 @@ fn stop_family_job(f: &Fixture, binding: &varin_runtime::catalog::host_jobs::Hos
             epoch: epoch.clone(),
             outcome: Outcome::Succeeded,
             effect: Effect::Confirmed,
-            result: json!({"attemptId":binding.subject_id,"collectionState":"pending"}).into(),
+            result: json!({"attemptId":subject_id,"collectionState":"pending"}).into(),
         })
         .unwrap();
     db.record_host_job_terminal(binding, receipt, true).unwrap();

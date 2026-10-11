@@ -8,6 +8,14 @@ import type { LaunchIntent, RunStartReceipt } from './protocol.generated.js';
 import type { ExistingHostCredentialOwner } from './credential-owner.js';
 import { canonicalizePathIdentity, isPathWithinRoot, normalizePathIdentity } from '../workspace/path-safety.js';
 
+/** The original materialized execution directory. Looking it up never creates a replacement. */
+export async function originalMaterializationLocation(root:string,workspaceId:string,environmentRunId:string) {
+  const storageRoot=await canonicalizePathIdentity(root);
+  const key=createHash('sha256').update(JSON.stringify([workspaceId,environmentRunId])).digest('hex');
+  const relativeTarget=`managed/runs/${key}`;
+  return {storageRoot,key,relativeTarget,targetPath:path.resolve(storageRoot,relativeTarget)};
+}
+
 /** Explicit Host-selected source. Live identity is revalidated through Documents before binding. */
 export type SourceLaunch = Omit<ThreadSource, 'mode' | 'branchId' | 'revision' | 'liveRoot' | 'tools'> & {
   runId: string;
@@ -161,10 +169,7 @@ export async function admitRunSourceAuthority(
     }
     if (!resultOnly && selection.mode === 'materialized') {
       const handshake = kernel.handshake ?? await kernel.start();
-      const storageRoot = await canonicalizePathIdentity(handshake.storageRoot);
-      const key = createHash('sha256').update(JSON.stringify([selection.workspaceId, selection.environmentRunId ?? run.id])).digest('hex');
-      const relativeTarget = `managed/runs/${key}`;
-      const targetPath = path.resolve(storageRoot, relativeTarget);
+      const { storageRoot, key, relativeTarget, targetPath } = await originalMaterializationLocation(handshake.storageRoot, selection.workspaceId, selection.environmentRunId ?? run.id);
       if (options.allowMaterialization && !selection.environmentRunId) {
       const container = await actor.fileRootRegister({ workspaceId: selection.workspaceId, executionWorkspaceId: selection.executionWorkspaceId, canonicalRoot: storageRoot }, signal);
       if (typeof container.rootId !== 'string') throw new Error('Materialization root registration failed');

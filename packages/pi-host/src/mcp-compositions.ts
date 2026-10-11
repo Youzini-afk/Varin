@@ -171,7 +171,7 @@ class Scope {
         ?? this.gateway.lease.binding.provenance.servers[name];
       if (!isDeepStrictEqual(actual, expected)) throw new Error('mcp_saved_definition_unavailable');
     }
-    const resources = new Set(selection.tools.filter(tool => selection.routes[tool.name]?.kind === 'direct').map(tool => selection.resources[tool.name]).filter(value => typeof value === 'string'));
+    const resources = new Set(selection.tools.filter(tool => ['direct','direct_task'].includes(selection.routes[tool.name]?.kind ?? '')).map(tool => selection.resources[tool.name]).filter(value => typeof value === 'string'));
     const selected = new Set<string>();
     for (const server of this.gateway.lease.binding.servers) if (resources.delete(server.resourceKey)) selected.add(server.name);
     if (resources.size) throw new Error('mcp_saved_dependency_unavailable');
@@ -281,6 +281,7 @@ class Scope {
         const selected=await owner.lease.prepareTool(server,tool,version,signal);
         discovered.set(targetKey(selected.name,selected.schemaVersion),owner);return selected;
       },
+      taskOwner: (server,endpoint,signal) => serverOwner(server).lease.taskOwner(server,endpoint,signal),
       discoverServices: (server,signal) => serverOwner(server).lease.discoverServices(server,signal),
       prepareService: (server,kind,version,signal) => serverOwner(server).lease.prepareService(server,kind,version,signal),
       preparePrompt: (server,name,version,signal) => serverOwner(server).lease.preparePrompt(server,name,version,signal),

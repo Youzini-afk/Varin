@@ -32,6 +32,12 @@ fn owned_run(catalog: &Catalog, run_id: &str, request: &MediaReadParams) -> Resu
 }
 fn operation_reference(op: &Operation, selection: &OperationOutputSelection) -> Result<Value> {
     match selection {
+        OperationOutputSelection::McpTaskResult => op
+            .host_job
+            .as_ref()
+            .and_then(|link| link.mcp_task.as_ref())
+            .and_then(|task| task.result_ref.clone())
+            .ok_or_else(|| RuntimeError::NotFound("MCP task result".into())),
         OperationOutputSelection::Result => op
             .result
             .as_ref()
@@ -121,6 +127,16 @@ impl Catalog {
                     let op: Operation = serde_json::from_str(&data)?;
                     owned_run(self, &op.run_id, request)?;
                     Selection::Output(operation_reference(&op, output)?)
+                } else if kind == "host_job.result_observed"
+                    && matches!(output, OperationOutputSelection::McpTaskResult)
+                {
+                    let op: Operation = record(&self.db, "operations", &subject)?;
+                    owned_run(self, &op.run_id, request)?;
+                    let fact: super::host_jobs::McpResultFact = serde_json::from_str(&data)?;
+                    Selection::Output(
+                        fact.result_ref
+                            .ok_or_else(|| RuntimeError::NotFound("MCP task result".into()))?,
+                    )
                 } else if kind == "operation.executor_stopped"
                     && matches!(output, OperationOutputSelection::ExternalReceipt)
                 {

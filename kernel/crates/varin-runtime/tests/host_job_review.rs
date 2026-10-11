@@ -4,7 +4,10 @@ mod input_admission;
 use input_admission::InputAdmission;
 use serde_json::{Value, json};
 use varin_runtime::{
-    catalog::{host_jobs::HostJobBinding, launches::LaunchSelection},
+    catalog::{
+        host_jobs::{HostJobBinding, HostJobSubject},
+        launches::LaunchSelection,
+    },
     execution::*,
     *,
 };
@@ -149,12 +152,14 @@ impl Fixture {
             execution_owner: op.execution_owner.unwrap(),
             domain: "research.experiment".into(),
             domain_version: 1,
-            workspace_id: "ws".into(),
-            subject_id: op
+            subject: op
                 .host_job
                 .as_ref()
-                .map(|link| link.binding.subject_id.clone())
-                .unwrap_or_else(|| format!("attempt:{id}")),
+                .map(|link| link.binding.subject.clone())
+                .unwrap_or_else(|| HostJobSubject::Workspace {
+                    workspace_id: "ws".into(),
+                    subject_id: format!("attempt:{id}"),
+                }),
         };
         self.db.begin_host_job(b.clone()).unwrap();
         let p = self.db.prepare_result_content().write_result(body).unwrap();
@@ -200,8 +205,10 @@ fn user_job_outlives_source_run_and_tree_stop_is_a_linear_admission_boundary() {
         execution_owner: first.execution_owner.clone().unwrap(),
         domain: "research.experiment".into(),
         domain_version: 1,
-        workspace_id: "ws".into(),
-        subject_id: "attempt:one".into(),
+        subject: HostJobSubject::Workspace {
+            workspace_id: "ws".into(),
+            subject_id: "attempt:one".into(),
+        },
     };
     f.db.begin_host_job(planned).unwrap();
     assert_eq!(f.db.run(&f.run).unwrap().state, RunState::Completed);
@@ -302,8 +309,10 @@ fn recovered_acceptance_keeps_an_already_delivered_unknown_result() {
         execution_owner: op.execution_owner.unwrap(),
         domain: "research.experiment".into(),
         domain_version: 1,
-        workspace_id: "ws".into(),
-        subject_id: format!("attempt:{}", op.id),
+        subject: HostJobSubject::Workspace {
+            workspace_id: "ws".into(),
+            subject_id: format!("attempt:{}", op.id),
+        },
     })
     .unwrap();
     let unknown = ToolCompletion::Result {
@@ -554,8 +563,10 @@ impl ToolExecutor for RaceTools {
             execution_owner: self.executor_owner(),
             domain: "research.experiment".into(),
             domain_version: 1,
-            workspace_id: "ws".into(),
-            subject_id: format!("attempt:{}", c.operation_id),
+            subject: HostJobSubject::Workspace {
+                workspace_id: "ws".into(),
+                subject_id: format!("attempt:{}", c.operation_id),
+            },
         };
         let mut db = self.0.lock().unwrap();
         db.begin_host_job(binding.clone()).unwrap();
@@ -782,7 +793,10 @@ fn same_subject_cannot_acquire_a_second_user_execution_owner_and_historical_thre
             "same",
             "research.experiment",
             1,
-            &b.subject_id,
+            match &b.subject {
+                HostJobSubject::Workspace { subject_id, .. } => subject_id,
+                _ => panic!("research job requires workspace"),
+            },
             body,
         )
         .unwrap_err();

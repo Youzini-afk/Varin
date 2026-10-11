@@ -3,7 +3,7 @@
  * Do not hand-edit the wire shapes; run `node scripts/generate-kernel-protocol.mjs`.
  */
 
-export const KERNEL_PROTOCOL_VERSION = 4 as const;
+export const KERNEL_PROTOCOL_VERSION = 5 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
 export const KERNEL_CONTROL_METHODS = ["runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
@@ -11,7 +11,7 @@ export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.computer.event.cancel",
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["process.write","process.resize","runtime.tools.invoke"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
-export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v4" as const;
+export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v5" as const;
 
 export type KernelMethod =
   | "runtime.managed_process.pending"
@@ -274,13 +274,18 @@ export type KernelMethod =
   | "runtime.family.item"
   | "runtime.messages.send"
   | "runtime.messages.list"
-  | "runtime.messages.get";
+  | "runtime.messages.get"
+  | "runtime.host_job.task.update"
+  | "runtime.host_job.access"
+  | "runtime.host_job.task.context"
+  | "runtime.host_job.task.read"
+  | "runtime.host_job.task.finish";
 
 export interface MediaReadChunk { media:StoredMedia;partIndex:number;chunkIndex:number;chunkCount:number;totalBytes:number;bytesBase64:string }
 
 export interface MediaReadParams { threadId:string;branchId:string;holder:OutputMediaHolder;partIndex:number;chunkIndex:number;expectedContentRef:string }
 
-export type OutputMediaHolder = {kind:'history';itemId:string} | {kind:'input';inputId:string;expectedRevision:number} | {kind:'operation';operationId:string;output:'completion'|'result'|'external_receipt'} | {kind:'event';cursor:number;output:'completion'|'result'|'external_receipt'} | {kind:'policy_evidence';reference:OutputEvidenceRef} | {kind:'child_report';operationId:string;executionId?:string;itemId:string} | {kind:'family';threadId:string;branchId:string;runId?:string;anchor:string;itemId:string};
+export type OutputMediaHolder = {kind:'history';itemId:string} | {kind:'input';inputId:string;expectedRevision:number} | {kind:'operation';operationId:string;output:'completion'|'result'|'external_receipt' | 'mcp_task_result'} | {kind:'event';cursor:number;output:'completion'|'result'|'external_receipt' | 'mcp_task_result'} | {kind:'policy_evidence';reference:OutputEvidenceRef} | {kind:'child_report';operationId:string;executionId?:string;itemId:string} | {kind:'family';threadId:string;branchId:string;runId?:string;anchor:string;itemId:string};
 
 export type OperationResult = {kind:'control';value:unknown} | {kind:'output';output:OutputBody};
 
@@ -475,8 +480,7 @@ export interface HostJobBinding {
   executionOwner: ExecutorOwner;
   domain: string;
   domainVersion: number;
-  workspaceId: string;
-  subjectId: string;
+  subject: HostJobSubject;
 }
 
 export interface ResearchScope {
@@ -518,10 +522,11 @@ export interface HostJobPending {
   cancelRequested: boolean;
   phase: OperationPhase;
   origin: HostJobOrigin;
+  mcpTask?: McpTaskLink;
 }
 
 export interface HostJobSource {
-  observationKinds: ('job_stopped' | 'artifact' | 'collection' | 'log_literal' | 'log_end')[];
+  observationKinds: ('job_stopped' | 'job_result' | 'artifact' | 'collection' | 'log_literal' | 'log_end')[];
   binding: HostJobBinding;
   sourceRunId: string;
   threadId: string;
@@ -530,11 +535,13 @@ export interface HostJobSource {
   phase: OperationPhase;
   executorStopped: boolean;
   origin: HostJobOrigin;
+  mcpTask?: McpTaskLink;
 }
 
 export interface HostJobLink {
   binding: HostJobBinding;
   acceptanceRef: unknown | null;
+  mcpTask?: McpTaskLink;
 }
 
 export interface HostJobBeginParams {
@@ -544,6 +551,7 @@ export interface HostJobBeginParams {
 export interface HostJobAcceptParams {
   binding: HostJobBinding;
   content: OutputBody<IncomingMedia>;
+  task?: McpTaskState;
 }
 
 export interface HostJobTerminalParams {
@@ -557,6 +565,7 @@ export interface HostJobTerminalParams {
 export interface HostJobObserveParams {
   operationId: string;
   targetOperationId: string;
+  mode?: HostJobWaitMode;
 }
 
 export type CalendarRule =
@@ -1613,7 +1622,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 4; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 5; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -1844,7 +1853,7 @@ export interface HostToolErrorMarker {
   admission?: boolean;
 }
 
-export type McpRoute = {kind:"direct"} | {kind:"server_argument";argument:string} | {kind:"discovery";argument:string};
+export type McpRoute = {kind:"direct"} | {kind:"server_argument";argument:string} | {kind:"discovery";argument:string} | {kind:"direct_task"} | {kind:"server_task_argument";argument:string} | {kind:"task_control";argument:string;action:McpTaskAction};
 
 export interface McpBinding {
   routes: Record<string, McpRoute>;
@@ -2498,9 +2507,9 @@ export type OperationCallCompletion<M = StoredMedia> =
   | { kind: 'job_accepted'; operation_id: string; phase: string; effect: Effect; lifetime: Lifetime; content?: OutputBody<M> };
 
 export interface Operation {
-  host_job?: HostJobLink;
+  host_job?: HostJobView;
   execution_owner: ExecutorOwner | null;
-  external_receipt: ExternalReceipt | null;
+  external_receipt: ExternalReceiptView | null;
   call_completion: OperationCallCompletion | null;
   id: string;
   run_id: string;
@@ -4160,7 +4169,95 @@ export interface FamilyRead {
 
 export interface FamilyItem { threadId: string; branchId: string; runId: string | null; headId: string | null; itemId: string; format: 'conversation_json'; text: string; offset: number; nextOffset: number | null; totalBytes: number }
 
-export type McpBuiltinOperation = "discover" | "call" | "list_resources" | "read_resource" | "list_prompts" | "get_prompt";
+export interface McpTaskEndpoint {
+  server: string;
+  resourceKey: string;
+  configurationVersion: string;
+  credentialVersion: string;
+}
+
+export type HostJobSubject = {kind:'workspace';workspaceId:string;subjectId:string} | {kind:'mcp';endpoint:McpTaskEndpoint;dispatchId:string};
+
+export type McpTaskStatus = 'working' | 'input_required' | 'completed' | 'failed' | 'cancelled';
+
+export interface McpTaskState {
+  taskId: string;
+  status: McpTaskStatus;
+  createdAt: string;
+  lastUpdatedAt: string;
+  ttl: number | null;
+  pollInterval?: number;
+}
+
+export interface McpTaskLink {
+  task: McpTaskState;
+  observationRef: unknown;
+  availability: McpTaskAvailability;
+  resultReady: boolean;
+  problem?: McpTaskProblem;
+  revision: number;
+  resultRef?: unknown;
+  resultOutcome?: Outcome;
+  resultEffect?: Effect;
+  resultKind?: McpTaskResultKind;
+}
+
+export interface HostJobTaskUpdateParams {
+  binding: HostJobBinding;
+  expectedRevision: number;
+  task: McpTaskState;
+  availability: McpTaskAvailability;
+  content: unknown;
+  problem?: McpTaskProblem;
+  result?: McpTaskResultInput;
+}
+
+export interface HostJobAccessParams {
+  runId: string;
+  targetOperationId: string;
+  control?: boolean;
+}
+
+export type McpTaskAvailability = 'available' | 'unavailable';
+
+export type HostJobWaitMode = 'stopped' | 'result';
+
+export type McpTaskAction = 'get' | 'wait' | 'cancel';
+
+export type McpTaskProblemKind = 'transport' | 'protocol' | 'expired' | 'owner' | 'unsupported';
+
+export type McpTaskStage = 'status' | 'result' | 'cancel' | 'interaction' | 'rebind';
+
+export interface McpTaskProblem {
+  kind: McpTaskProblemKind;
+  stage: McpTaskStage;
+  rpcCode?: number;
+}
+
+export interface ExternalReceiptView {
+  executor: string;
+  identity: string;
+  epoch: string;
+  outcome: Outcome;
+  effect: Effect;
+  result: OutputBody;
+  executor_stopped: boolean;
+}
+
+export interface McpTaskResultInput {
+  outcome: Outcome;
+  effect: Effect;
+  content: OutputBody<IncomingMedia>;
+  kind: McpTaskResultKind;
+}
+
+export interface HostJobView extends HostJobLink {
+  mcpTaskResult?: OutputBody;
+}
+
+export type McpTaskResultKind = 'response' | 'protocol_error';
+
+export type McpBuiltinOperation = "discover" | "call" | "start_task" | "list_resources" | "read_resource" | "list_prompts" | "get_prompt" | "task_get" | "task_wait" | "task_cancel";
 export const MCP_CAPABILITIES: readonly (LaunchTool & { route: McpRoute; operation: McpBuiltinOperation })[] = [
   {
     "name": "mcp_discover",
@@ -4224,6 +4321,50 @@ export const MCP_CAPABILITIES: readonly (LaunchTool & { route: McpRoute; operati
     "metadata": null,
     "route": {
       "kind": "server_argument",
+      "argument": "server"
+    }
+  },
+  {
+    "name": "mcp_start_task",
+    "operation": "start_task",
+    "version": "1",
+    "description": "Start an MCP tool as an independent task. Requires task support from mcp_discover; returns the original local operationId for inspection, waiting and cancellation.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "server": {
+          "type": "string",
+          "minLength": 1
+        },
+        "schemaVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tool": {
+          "type": "string",
+          "minLength": 1
+        },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "ttl": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "server",
+        "tool",
+        "schemaVersion",
+        "arguments"
+      ],
+      "additionalProperties": false
+    },
+    "output_schema": null,
+    "metadata": null,
+    "route": {
+      "kind": "server_task_argument",
       "argument": "server"
     }
   },
@@ -4372,6 +4513,84 @@ export const MCP_CAPABILITIES: readonly (LaunchTool & { route: McpRoute; operati
     "route": {
       "kind": "server_argument",
       "argument": "server"
+    }
+  },
+  {
+    "name": "mcp_task_get",
+    "operation": "task_get",
+    "version": "1",
+    "description": "Read the original MCP task status and available result by local operationId. Reading does not restart or cancel the task.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "operationId"
+      ],
+      "additionalProperties": false
+    },
+    "output_schema": null,
+    "metadata": null,
+    "route": {
+      "kind": "task_control",
+      "argument": "operationId",
+      "action": "get"
+    }
+  },
+  {
+    "name": "mcp_task_wait",
+    "operation": "task_wait",
+    "version": "1",
+    "description": "Wait durably for the original MCP task result by local operationId. Cancelling this wait leaves the task running.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "operationId"
+      ],
+      "additionalProperties": false
+    },
+    "output_schema": null,
+    "metadata": null,
+    "route": {
+      "kind": "task_control",
+      "argument": "operationId",
+      "action": "wait"
+    }
+  },
+  {
+    "name": "mcp_task_cancel",
+    "operation": "task_cancel",
+    "version": "1",
+    "description": "Request cancellation of the original MCP task by local operationId. A remote cancellation acknowledgement does not prove execution stopped.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "operationId"
+      ],
+      "additionalProperties": false
+    },
+    "output_schema": null,
+    "metadata": null,
+    "route": {
+      "kind": "task_control",
+      "argument": "operationId",
+      "action": "cancel"
     }
   }
 ];
@@ -4638,6 +4857,11 @@ export type KernelMethodParams = {
   "runtime.messages.send": MessageSendParams;
   "runtime.messages.list": MessageListParams;
   "runtime.messages.get": MessageGetParams;
+  "runtime.host_job.task.update": HostJobTaskUpdateParams;
+  "runtime.host_job.access": HostJobAccessParams;
+  "runtime.host_job.task.context": OperationParams;
+  "runtime.host_job.task.read": HostJobAccessParams;
+  "runtime.host_job.task.finish": HostJobBeginParams;
 };
 
 export type KernelRequest =
@@ -6987,6 +7211,51 @@ export type KernelRequest =
       id: string;
       method: "runtime.messages.get";
       params: MessageGetParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.host_job.task.update";
+      params: HostJobTaskUpdateParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.host_job.access";
+      params: HostJobAccessParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.host_job.task.context";
+      params: OperationParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.host_job.task.read";
+      params: HostJobAccessParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.host_job.task.finish";
+      params: HostJobBeginParams;
       epoch?: string;
       grantId?: string;
     }

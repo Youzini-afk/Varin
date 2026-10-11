@@ -12,8 +12,10 @@ export function createResearchArtifactObserver(options: { kernel: KernelClient; 
   const logs = createResearchLogReader({ ...options, signal: controller.signal });
   const observe = async (work: FollowupResearchWork): Promise<boolean> => {
     const { observer, binding, source, key } = work;
+    const subject = binding.subject;
+    if (subject.kind !== 'workspace') throw new Error('Original research observation requires a workspace subject');
     const caller: ExperimentCaller = {
-      workspaceId: binding.workspaceId,
+      workspaceId: subject.workspaceId,
       executionWorkspaceId: observer.source.execution_workspace_id,
       threadId: observer.threadId, runId: observer.sourceRunId,
       owner: { runtime: 'agent', actor: { kind: 'reader' }, rootThreadId: observer.rootThreadId,
@@ -35,16 +37,16 @@ export function createResearchArtifactObserver(options: { kernel: KernelClient; 
     if (source.kind === 'collection') {
       if (snapshot.completion) await publish({ kind: 'collection', binding, completion_revision: snapshot.completion.recordRevision,
         outcome: snapshot.completion.outcome, counts: snapshot.counts, gap }, {
-        attemptId: binding.subjectId, attemptState: snapshot.attempt.state, collection: snapshot.completion,
-        counts: snapshot.counts, reader: { method: 'research_get', attemptId: binding.subjectId, workspaceId: binding.workspaceId },
+        attemptId: subject.subjectId, attemptState: snapshot.attempt.state, collection: snapshot.completion,
+        counts: snapshot.counts, reader: { method: 'research_get', attemptId: subject.subjectId, workspaceId: subject.workspaceId },
       });
     } else {
       const relevant = snapshot.artifacts.filter(artifact => artifact.state !== 'pending');
       for (const artifact of relevant) {
         const kind = artifact.state === 'available' ? 'artifact_available' : artifact.state === 'expired' ? 'artifact_expired' : 'artifact_failed';
         await publish({ kind: 'artifact', binding, fact: { kind, artifact_id: artifact.artifactId, record_revision: artifact.recordRevision }, gap }, {
-          attemptId: binding.subjectId, artifact,
-          reader: { method: 'research_artifact', attemptId: binding.subjectId, artifactId: artifact.artifactId, workspaceId: binding.workspaceId,
+          attemptId: subject.subjectId, artifact,
+          reader: { method: 'research_artifact', attemptId: subject.subjectId, artifactId: artifact.artifactId, workspaceId: subject.workspaceId,
             semantics: 'Reads the current domain record, which may differ from the observed record revision. Frozen historical metadata is not an immutable byte snapshot.' },
         });
       }
@@ -53,7 +55,7 @@ export function createResearchArtifactObserver(options: { kernel: KernelClient; 
         const outcome = snapshot.completion.outcome;
         await publish({ kind: 'artifact', binding, fact: { kind: outcome === 'failed' ? 'artifact_absent' : 'artifact_missing',
           completion_revision: snapshot.completion.recordRevision, outcome }, gap }, {
-          attemptId: binding.subjectId, selector, collection: snapshot.completion,
+          attemptId: subject.subjectId, selector, collection: snapshot.completion,
           status: outcome === 'failed' ? 'No matching collected record after this failed collection' : 'No matching collected record in this completed collection',
         });
       }

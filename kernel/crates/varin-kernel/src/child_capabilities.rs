@@ -130,6 +130,7 @@ impl varin_runtime::execution::ContextPreparation for BindingPreparation {
         if run.epoch != epoch {
             return Err(error("Run owner changed".into()));
         }
+        let has_child_catalog = launch.selection.child_dispatch_ref.is_some();
         let model = varin_runtime::catalog::dispatch::ChildModelBinding {
             configuration: serde_json::from_value(run.configuration)
                 .map_err(|e| error(e.to_string()))?,
@@ -160,7 +161,11 @@ impl varin_runtime::execution::ContextPreparation for BindingPreparation {
             .bind_child_dispatch(run_id, prepared)
             .map_err(|e| error(e.to_string()))?;
         if binding.tools.iter().any(|tool| tool.name == "dispatch") {
-            if let Some(reference) = &binding.child_dispatch {
+            if let Some(reference) = binding
+                .child_dispatch
+                .as_ref()
+                .filter(|_| has_child_catalog)
+            {
                 let read = self
                     .catalog
                     .lock()

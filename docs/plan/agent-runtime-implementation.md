@@ -19,6 +19,14 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-11 增量：原 MCP Tasks 与持久结果观察
+
+- 原 McpAuthority/installed client 与 Catalog Operation/HostJob 共同接 negotiated Tasks，无第二任务库、transport 或 grant owner。schema 单声明 required/optional/forbidden 双 gate 与 start/get/wait/cancel typed routes；HostJob subject 明确 Workspace/MCP，global/source-less 不伪造来源。Catalog **50**、wire **5**直接拒旧，其他正文/策略域保持。
+- 接受释放原 server dispatch 占用而非远端停止；completed/failed 状态、最终结果、cancel ACK/Unknown 独立。原 caller acceptance/已交 Unknown 与迟到完整 JSON/媒体分开，原 Wait/followup、公开 holder、历史/GC/reopen 消费同一事实。受理前后丢本地回应均只对账原 ID，不重发 tools/call 或借列表猜任务。
+- 独审五条原失败链已修后复验：roots related-task metadata、管理工具原权限、新 Wait 误取旧 unavailable、Wait typed parts 索引错位、取消控制失败污染结果观察。原短发布 queue 保当前事实，实际网络 get/result/cancel 独立；input_required 仅原 roots 可用，sampling/elicitation 尚未宣称支持。
+- 三条真实 Engine/Host/实际 stdio 整链覆盖模型/策略、source-less child、实际安装 SDK nested、Run退役/并发取消/重开/Wait媒体，以及提交前后丢受理回应。95 条受影响原消费者与47条Catalog回归、全runtime目标编译、Host/SDK/UI/认证媒体路由、真实二进制/Host与cloud布局分别通过；准确证据及边界见[本片验收](../reviews/runtime-mcp-tasks-2026-10-11.md)。完整产品socket IPC/桌面/外部账号和平台性能验收保持待用户环境补。
+- 接续 MCP 资源订阅/更新和服务端交互，再沿两总设计推进环境/Web/材料/PDF/学术/Bot、来源/检索/上下文/provider 余能力。两设计整体未完，最终默认切换、Pi与资产迁移仍交用户验收后负责。
+
 ## 2026-10-11 增量：原 MCP 内容、资源与提示
 
 - 原唯一 McpAuthority/connection 接入资源与模板分页、资源读取、提示分页/get；schema 单声明生成六个 helper 与 typed routes，原 Rust/child/恢复绑定不再手抄名字判断。配置、OAuth/grant、权限与旧 retained contribution 保原 owner；Catalog **49**、wire **4**直接拒旧，content/manifest/policy 未改。

@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 4;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 5;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -271,6 +271,7 @@ pub(crate) struct HostJobUserParams {
 pub(crate) struct HostJobAcceptParams {
     pub(crate) binding: varin_runtime::catalog::host_jobs::HostJobBinding,
     pub(crate) content: varin_runtime::output::OutputBody<varin_runtime::output::IncomingMedia>,
+    pub(crate) task: Option<varin_runtime::catalog::host_jobs::McpTaskState>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -294,6 +295,7 @@ pub(crate) struct HostJobTerminalParams {
 pub(crate) struct HostJobObserveParams {
     pub(crate) operation_id: String,
     pub(crate) target_operation_id: String,
+    pub(crate) mode: Option<varin_runtime::HostJobWaitMode>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2136,6 +2138,26 @@ pub(crate) struct MessageGetParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct HostJobTaskUpdateParams {
+    pub(crate) binding: varin_runtime::catalog::host_jobs::HostJobBinding,
+    pub(crate) expected_revision: i64,
+    pub(crate) task: varin_runtime::catalog::host_jobs::McpTaskState,
+    pub(crate) availability: varin_runtime::McpTaskAvailability,
+    pub(crate) content: Value,
+    pub(crate) problem: Option<varin_runtime::catalog::host_jobs::McpTaskProblem>,
+    pub(crate) result: Option<McpTaskResultInput>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct HostJobAccessParams {
+    pub(crate) run_id: String,
+    pub(crate) target_operation_id: String,
+    pub(crate) control: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct HostToolErrorMarker {
     pub(crate) code: String,
     pub(crate) admission: Option<bool>,
@@ -2435,6 +2457,15 @@ pub(crate) struct KernelComputeFile {
     pub(crate) revision: Option<String>,
     pub(crate) unchanged_revision: Option<String>,
     pub(crate) lines: Option<Vec<i64>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpTaskResultInput {
+    pub(crate) outcome: varin_runtime::Outcome,
+    pub(crate) effect: varin_runtime::Effect,
+    pub(crate) content: varin_runtime::output::OutputBody<varin_runtime::output::IncomingMedia>,
+    pub(crate) kind: varin_runtime::McpTaskResultKind,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3627,6 +3658,29 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.messages.get" => serde_json::from_value::<MessageGetParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.host_job.task.update" => {
+            serde_json::from_value::<HostJobTaskUpdateParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.host_job.access" => serde_json::from_value::<HostJobAccessParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.host_job.task.context" => {
+            serde_json::from_value::<OperationParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.host_job.task.read" => {
+            serde_json::from_value::<HostJobAccessParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.host_job.task.finish" => {
+            serde_json::from_value::<HostJobBeginParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         _ => Ok(()),
     }
 }

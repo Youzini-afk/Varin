@@ -531,13 +531,16 @@ it('installed ordinary research tools hand original model and policy invocations
     }
     if(method==='runtime.host_job.begin'){
       const binding=params.binding as Pending['binding'],saved=ops.get(binding.operationId)!;
-      const original=[...ops.values()].find(op=>op.link?.binding.subjectId===binding.subjectId);
+      assert.equal(binding.subject.kind,'workspace');if(binding.subject.kind!=='workspace')throw new Error('original research workspace subject required');
+      const subject=binding.subject;
+      const original=[...ops.values()].find(op=>op.link?.binding.subject.kind==='workspace'&&op.link.binding.subject.subjectId===subject.subjectId);
       if(original)return structuredClone(original.link);
       saved.link={binding,runId:'run',accepted:false,cancelRequested:false,phase:'running',executorStopped:false,origin:{kind:'tool',origin:saved.call.origin,call_id:saved.call.callId,tool_name:saved.call.name,schema_version:saved.call.schemaVersion}};return structuredClone(saved.link);
     }
     if(method==='runtime.host_job.accept'){
       const saved=ops.get((params.binding as Pending['binding']).operationId)!;assert.deepEqual(saved.link!.binding,params.binding);
-      if(saved.accepted)assert.deepEqual(saved.accepted,params.content);else{saved.accepted=structuredClone(params.content);saved.link!.accepted=true;bound++;}
+      const content=params.content as {data:unknown;parts:unknown[]};assert.deepEqual(content.parts,[]);
+      if(saved.accepted)assert.deepEqual(saved.accepted,content.data);else{saved.accepted=structuredClone(content.data);saved.link!.accepted=true;bound++;}
       notify();if(loseBindAck){loseBindAck=false;throw new Error('Original bind ACK lost');}return structuredClone(saved.link);
     }
     if(method==='runtime.host_job.pending')return [...ops.values()].flatMap(op=>op.link&&!op.link.executorStopped?[structuredClone(op.link)]:[]);
@@ -588,7 +591,8 @@ it('installed ordinary research tools hand original model and policy invocations
     assert.equal(frame.kind,'host-tool-response');if(frame.kind!=='host-tool-response')throw new Error('response missing');
     assert.equal(frame.completion?.kind,policy?'result':'job_accepted');assert.equal(frame.executor_stopped,false);
     const saved=ops.get(activeCall.operationId)!;assert.ok(saved.link!.accepted);
-    const domain=await experiments.nativeReceipt('ws',saved.link!.binding.subjectId);assert.ok(domain);assert.deepEqual(domain.owner.actor,{kind:'tool',origin,callId:activeCall.callId,toolName:activeCall.name,schemaVersion:activeCall.schemaVersion});assert.deepEqual(domain.accepted,saved.accepted);
+    const subject=saved.link!.binding.subject;assert.equal(subject.kind,'workspace');if(subject.kind!=='workspace')throw new Error('original research workspace subject required');
+    const domain=await experiments.nativeReceipt('ws',subject.subjectId);assert.ok(domain);assert.deepEqual(domain.owner.actor,{kind:'tool',origin,callId:activeCall.callId,toolName:activeCall.name,schemaVersion:activeCall.schemaVersion});assert.deepEqual(domain.accepted,saved.accepted);
   }
   const before=f.counters().spawnCalls;await research.reconcile();assert.equal(bound,2);assert.equal(f.counters().resolveCalls,0,'native source never consults cwd/Pi root fallback');
   await vi.waitFor(()=>assert.equal(f.counters().spawnCalls,2,JSON.stringify({errors:f.errors.map(e=>e.message),events:f.events})),{timeout:4000,interval:10});assert.ok(before<=2);
@@ -741,7 +745,7 @@ async function nativeArtifactFixture() {
     access: { kind: 'family', readThreadIds: ['thread'], controlThreadIds: ['thread'] } };
   const service = f.makeService({ async admit(_caller, cwd) { return { kind: 'physical', selection: source, canonicalRoot: f.root, cwd: cwd ?? '' }; },
     async capture(owner, _source, options) { return prepareExperimentInput(f.client, owner, f.root, options); }, async release() {}, async reconcileUnaccepted() { return true; } });
-  const binding = (subjectId: string): import('../kernel/protocol.generated.js').HostJobBinding => ({ operationId: 'artifact-job', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'ws', subjectId });
+  const binding = (subjectId: string) => ({ operationId: 'artifact-job', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, domain: 'research.experiment', domainVersion: 1, subject: { kind: 'workspace', workspaceId: 'ws', subjectId } } satisfies import('../kernel/protocol.generated.js').HostJobBinding);
   return { ...f, service, caller, binding, source };
 }
 
@@ -757,21 +761,22 @@ it('observes durable artifact readiness during collection, stable completion rev
   const target = f.binding(accepted.attempt.attemptId);
   const first = await f.service.readArtifactObservation(f.caller, target, { name: 'a' });
   assert.equal(first.artifacts[0]!.state, 'available'); assert.equal(first.artifacts[0]!.recordRevision, 1);
-  assert.equal(first.completion, null); assert.ok(hints.includes(target.subjectId));
-  assert.equal((await f.service.nativeReceipt('ws', target.subjectId))!.executorStopped, true);
+  assert.equal(first.completion, null); assert.ok(hints.includes(target.subject.subjectId));
+  assert.equal((await f.service.nativeReceipt('ws', target.subject.subjectId))!.executorStopped, true);
   const sibling: ExperimentCaller = { ...f.caller, threadId: 'sibling', runId: 'sibling-run', owner: { runtime: 'agent', actor: { kind: 'reader' }, rootThreadId: 'thread', threadId: 'sibling', branchId: 'sibling-branch', runId: 'sibling-run', source: f.source }, access: { kind: 'family', readThreadIds: ['thread', 'sibling'], controlThreadIds: ['sibling'] } };
   assert.equal((await f.service.readArtifactObservation(sibling, target, { name: 'a' })).artifacts.length, 1);
-  await assert.rejects(f.service.collect(sibling, target.subjectId), /control/i);
+  await assert.rejects(f.service.collect(sibling, target.subject.subjectId), /control/i);
   await assert.rejects(f.service.readArtifactObservation({ ...sibling, access: { kind: 'maintenance' } }, target, {}), /family reader/i);
   await assert.rejects(f.service.readArtifactObservation({ ...sibling, access: { kind: 'family', readThreadIds: ['sibling'], controlThreadIds: [] } }, target, {}), /Unknown/);
-  held.resolve(); await vi.waitFor(async () => assert.equal((await f.service.get(f.caller, target.subjectId)).attempt.collection, 'done'));
+  await assert.rejects(f.service.readArtifactObservation(sibling, { ...target, subject: { kind: 'mcp', endpoint: { server: 'server', resourceKey: 'resource', configurationVersion: 'config', credentialVersion: 'credential' }, dispatchId: 'dispatch' } }, {}), /original research binding/);
+  held.resolve(); await vi.waitFor(async () => assert.equal((await f.service.get(f.caller, target.subject.subjectId)).attempt.collection, 'done'));
   const done = await f.service.readArtifactObservation(f.caller, target, {}); assert.equal(done.completion!.outcome, 'done');
   assert.equal(done.counts.failed, 0, 'listener failure cannot rewrite a committed available artifact');
-  const record = f.records.get(`experiment.attempt:${target.subjectId}`)!;
+  const record = f.records.get(`experiment.attempt:${target.subject.subjectId}`)!;
   await f.scoped.putRecord({ ...record, expectedRecordRevision: record.recordRevision, operationId: 'unrelated-metadata', ownerIds: [], payloadJson: JSON.stringify({ ...JSON.parse(record.payloadJson), harmlessMetadata: true }) });
   assert.deepEqual((await f.service.readArtifactObservation(f.caller, target, {})).completion, done.completion);
   assert.equal((await f.service.readArtifactObservation(f.caller, target, { name: 'absent' })).artifacts.length, 0);
-  assert.equal((await f.service.collect(f.caller, target.subjectId)).attempt.collectionCompletion!.recordRevision, done.completion!.recordRevision);
+  assert.equal((await f.service.collect(f.caller, target.subject.subjectId)).attempt.collectionCompletion!.recordRevision, done.completion!.recordRevision);
 });
 
 it('does not combine an old completed collection with a newly pending retry when reading absence', async () => {
@@ -779,7 +784,7 @@ it('does not combine an old completed collection with a newly pending retry when
   const accepted = await f.service.submit(f.caller, { requestId: 'artifacts', command: 'fixture', outputPaths: ['result'] });
   await until(() => f.counters().spawnCalls === 1); f.observe('cancelled');
   const target = f.binding(accepted.attempt.attemptId);
-  await vi.waitFor(async () => assert.equal((await f.service.get(f.caller, target.subjectId)).attempt.collection, 'failed'));
+  await vi.waitFor(async () => assert.equal((await f.service.get(f.caller, target.subject.subjectId)).attempt.collection, 'failed'));
   const old = await f.service.readArtifactObservation(f.caller, target, {}); assert.equal(old.completion!.outcome, 'failed');
   const pageGate = deferred(), pageEntered = deferred(), collectGate = deferred(), collectEntered = deferred();
   cleanup.push(() => { pageGate.resolve(); collectGate.resolve(); });
@@ -791,7 +796,7 @@ it('does not combine an old completed collection with a newly pending retry when
   };
   const reading = f.service.readArtifactObservation(f.caller, target, { name: 'absent' }); await pageEntered.promise;
   f.backend.collectFile = async () => { collectEntered.resolve(); await collectGate.promise; return Buffer.from('recovered'); };
-  const retry = f.service.collect(f.caller, target.subjectId); await collectEntered.promise; pageGate.resolve();
+  const retry = f.service.collect(f.caller, target.subject.subjectId); await collectEntered.promise; pageGate.resolve();
   assert.equal((await reading).completion, null, 'pending retry invalidates prior terminal absence snapshot');
   collectGate.resolve(); await retry;
   const recovered = await f.service.readArtifactObservation(f.caller, target, {});
@@ -805,7 +810,7 @@ it('records not_started only after original unspawned cancellation drains its ca
   f.scan(async () => { entered.resolve(); await gate.promise; });
   const accepted = await f.service.submit(f.caller, { requestId: 'artifacts', command: 'fixture', outputPaths: ['result'] }); await entered.promise;
   const target = f.binding(accepted.attempt.attemptId);
-  await f.service.cancel(f.caller, target.subjectId);
+  await f.service.cancel(f.caller, target.subject.subjectId);
   assert.equal((await f.service.readArtifactObservation(f.caller, target, {})).completion, null);
   gate.resolve();
   await vi.waitFor(async () => assert.equal((await f.service.readArtifactObservation(f.caller, target, {})).completion?.outcome, 'not_started'));
@@ -832,7 +837,7 @@ it('reads only the original published log byte boundary, including raw UTF-8 spl
   const read = f.backend.read.bind(f.backend);
   f.backend.read = async (site, job, cursor) => cursor === 0 ? { chunks: [{ channel: 'stdout', bytesBase64: bytes.toString('base64') }], nextCursor: bytes.length, endCursor: bytes.length, observation: { status: 'running', writerActive: true } } : read(site, job, cursor);
   const accepted = await service.submit(caller, { requestId: 'log-owner', command: 'fixture-command' });
-  const binding = { operationId: 'log-operation', executionOwner: { kind: 'external' as const, identity: 'research.experiment', epoch: 'log-owner' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'ws', subjectId: accepted.attempt.attemptId };
+  const binding = { operationId: 'log-operation', executionOwner: { kind: 'external' as const, identity: 'research.experiment', epoch: 'log-owner' }, domain: 'research.experiment', domainVersion: 1, subject: { kind: 'workspace' as const, workspaceId: 'ws', subjectId: accepted.attempt.attemptId } };
   await entered.promise;
   const unpublished = await service.readLogObservation(caller, binding, { stream: 'stdout', offset: 0 });
   assert.equal(unpublished.publishedBytes, 0); assert.equal(unpublished.bytes.length, 0); assert.equal(unpublished.eof, false);
@@ -844,7 +849,8 @@ it('reads only the original published log byte boundary, including raw UTF-8 spl
   const beyond = await service.readLogObservation(caller,binding,{stream:'stdout',offset:100});
   assert.equal(beyond.nextOffset,100);assert.equal(beyond.eof,false);
   await assert.rejects(service.readLogObservation({ ...caller, access: {kind:'family',readThreadIds:[],controlThreadIds:[]} },binding,{stream:'stdout',offset:0}), /Unknown experiment attempt/);
-  await service.cancel(caller,binding.subjectId); await service.wait(caller,binding.subjectId,2000);
+  await assert.rejects(service.readLogObservation(caller, { ...binding, subject: { kind: 'mcp', endpoint: { server: 'server', resourceKey: 'resource', configurationVersion: 'config', credentialVersion: 'credential' }, dispatchId: 'dispatch' } }, { stream: 'stdout', offset: 0 }), /original research Job/);
+  await service.cancel(caller,binding.subject.subjectId); await service.wait(caller,binding.subject.subjectId,2000);
   const final = await service.readLogObservation(caller,binding,{stream:'stdout',offset:100});
   assert.equal(final.nextOffset,100);assert.equal(final.eof,true);
   assert.equal((await service.readLogObservation(caller,binding,{stream:'stderr',offset:0})).eof,true);

@@ -1,6 +1,6 @@
 //! Original Host job receipts feed ordinary follow-up admission and real input activation.
 use super::*;
-use varin_runtime::catalog::host_jobs::HostJobBinding;
+use varin_runtime::catalog::host_jobs::{HostJobBinding, HostJobSubject};
 pub(super) fn job(f: &mut Fixture, key: &str, accept: bool) -> HostJobBinding {
     let run = f.db.run(&f.run).unwrap();
     let source =
@@ -31,12 +31,14 @@ pub(super) fn job(f: &mut Fixture, key: &str, accept: bool) -> HostJobBinding {
         execution_owner: op.execution_owner.unwrap(),
         domain: "research.experiment".into(),
         domain_version: 1,
-        workspace_id: source.workspace_id,
-        subject_id: format!("attempt:{key}"),
+        subject: HostJobSubject::Workspace {
+            workspace_id: source.workspace_id,
+            subject_id: format!("attempt:{key}"),
+        },
     };
     f.db.begin_host_job(binding.clone()).unwrap();
     if accept {
-        let accepted = f.db.prepare_result_content().write_result(&json!({"attempt":{"attemptId":binding.subject_id},"text":"original domain acceptance"})).unwrap();
+        let accepted = f.db.prepare_result_content().write_result(&json!({"attempt":{"attemptId":workspace_subject(&binding)},"text":"original domain acceptance"})).unwrap();
         f.db.accept_host_job(binding.clone(), accepted).unwrap();
     }
     binding
@@ -48,7 +50,7 @@ fn stop(f: &mut Fixture, binding: &HostJobBinding, stopped: bool) {
     };
     // A real stopped executor need not have a known business outcome or complete artifacts.
     let receipt = f.db.prepare_result_content().write_external_receipt(ExternalReceipt { executor: op.executor.unwrap(), identity: op.id, epoch: epoch.clone(), outcome: Outcome::Indeterminate, effect: Effect::Unknown,
-        result: json!({"attempt":{"attemptId":binding.subject_id,"state":"unknown","collectionState":"pending"}}).into() }).unwrap();
+        result: json!({"attempt":{"attemptId":workspace_subject(&binding),"state":"unknown","collectionState":"pending"}}).into() }).unwrap();
     f.db.record_host_job_terminal(binding, receipt, stopped)
         .unwrap();
 }
@@ -602,4 +604,11 @@ fn corrupt_job_receipt_body_fails_only_its_definition_without_blocking_healthy_d
     );
     assert!(f.db.capture_followup_continuations().unwrap().is_empty());
     f.cleanup();
+}
+
+fn workspace_subject(binding: &HostJobBinding) -> &str {
+    match &binding.subject {
+        HostJobSubject::Workspace { subject_id, .. } => subject_id,
+        _ => panic!("research fixture requires workspace"),
+    }
 }

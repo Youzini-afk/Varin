@@ -47,12 +47,13 @@ impl ExecutorOwner {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Operation<
-    E = ExternalReceipt<crate::output::StoredMedia>,
+    E = ExternalReceiptView<crate::output::StoredMedia>,
     R = crate::output::OperationResult,
     C = crate::execution::ToolCompletion<crate::output::StoredMedia>,
+    H = crate::catalog::host_jobs::HostJobView,
 > {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub host_job: Option<crate::catalog::host_jobs::HostJobLink>,
+    pub host_job: Option<H>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub managed_process: Option<crate::catalog::managed_process::ManagedProcess>,
     pub external_receipt: Option<E>,
@@ -78,6 +79,7 @@ pub type OperationMetadata = Operation<
     ExternalReceiptMetadata,
     OperationResultMetadata,
     crate::catalog::result_content::ToolCompletionMetadata,
+    crate::catalog::host_jobs::HostJobLink,
 >;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -191,4 +193,18 @@ pub struct ExternalReceipt<M = crate::output::ResolvedMedia> {
     pub outcome: Outcome,
     pub effect: Effect,
     pub result: crate::output::OutputBody<M>,
+}
+
+/// Read-only projection of the sole metadata receipt and its independent stop evidence.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ExternalReceiptView<M = crate::output::StoredMedia> {
+    #[serde(flatten)]
+    pub receipt: ExternalReceipt<M>,
+    pub executor_stopped: bool,
+}
+impl<M> std::ops::Deref for ExternalReceiptView<M> {
+    type Target = ExternalReceipt<M>;
+    fn deref(&self) -> &Self::Target {
+        &self.receipt
+    }
 }

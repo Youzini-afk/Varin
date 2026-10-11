@@ -144,6 +144,55 @@ pub enum MessageKind {
     Request,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum McpTaskAvailability {
+    Available,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HostJobWaitMode {
+    Stopped,
+    Result,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum McpTaskAction {
+    Get,
+    Wait,
+    Cancel,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum McpTaskProblemKind {
+    Transport,
+    Protocol,
+    Expired,
+    Owner,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum McpTaskStage {
+    Status,
+    Result,
+    Cancel,
+    Interaction,
+    Rebind,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum McpTaskResultKind {
+    Response,
+    ProtocolError,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ContentCollectionReport {
@@ -200,4 +249,7 @@ pub enum McpRoute {
     Direct,
     ServerArgument { argument: String },
     Discovery { argument: String },
+    DirectTask,
+    ServerTaskArgument { argument: String },
+    TaskControl { argument: String, action: McpTaskAction },
 }

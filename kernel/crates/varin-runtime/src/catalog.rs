@@ -38,7 +38,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 49;
+pub(crate) const FORMAT: i64 = 50;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -1597,7 +1597,8 @@ CREATE INDEX runs_branch ON runs(branch_id);
 CREATE INDEX runs_waiting ON runs(json_extract(body,'$.waiting_on')) WHERE json_extract(body,'$.state')='waiting';
 CREATE TABLE commands(id TEXT PRIMARY KEY,intent TEXT NOT NULL,receipt TEXT NOT NULL);
 CREATE TABLE operations(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs(id),body TEXT NOT NULL);
-CREATE UNIQUE INDEX host_job_subject ON operations(json_extract(body,'$.host_job.binding.domain'),json_extract(body,'$.host_job.binding.workspaceId'),json_extract(body,'$.host_job.binding.subjectId')) WHERE json_extract(body,'$.host_job') IS NOT NULL;
+CREATE UNIQUE INDEX mcp_task_subject ON operations(json_extract(body,'$.host_job.binding.subject.endpoint.resourceKey'),json_extract(body,'$.host_job.binding.subject.endpoint.configurationVersion'),json_extract(body,'$.host_job.binding.subject.endpoint.credentialVersion'),json_extract(body,'$.host_job.mcpTask.task.taskId')) WHERE json_extract(body,'$.host_job.mcpTask') IS NOT NULL;
+CREATE UNIQUE INDEX host_job_subject ON operations(json_extract(body,'$.host_job.binding.domain'),json_extract(body,'$.host_job.binding.subject.workspaceId'),json_extract(body,'$.host_job.binding.subject.subjectId')) WHERE json_extract(body,'$.host_job') IS NOT NULL;
 CREATE INDEX operations_run ON operations(run_id);
 CREATE TABLE computer_requests(id TEXT PRIMARY KEY,requester_run_id TEXT NOT NULL REFERENCES runs(id),root_thread_id TEXT NOT NULL REFERENCES threads(id),root_branch_id TEXT NOT NULL REFERENCES branches(id),body TEXT NOT NULL);
 CREATE INDEX computer_requests_root ON computer_requests(root_thread_id,root_branch_id);

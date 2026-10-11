@@ -319,7 +319,7 @@ it('discovers and explicitly cancels an original unconfirmed file registration w
 
 it('accepted-job discovery and explicit job conditions use the observer work identity through the original public route', async () => {
   const f = fixture();
-  f.facts.jobs = [{ observationKinds: ['job_stopped', 'artifact', 'collection'], binding: { operationId: 'user-job:accepted', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'ws', subjectId: 'attempt:original' }, sourceRunId: 'historical-completed-run', threadId: 'thread:child', branchId: 'branch:child', phase: 'running', executorStopped: false, cancelRequested: false, origin: { kind: 'user', key: 'accepted-key' } }];
+  f.facts.jobs = [{ observationKinds: ['job_stopped', 'artifact', 'collection'], binding: { operationId: 'user-job:accepted', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, domain: 'research.experiment', domainVersion: 1, subject: { kind: 'workspace', workspaceId: 'ws', subjectId: 'attempt:original' } }, sourceRunId: 'historical-completed-run', threadId: 'thread:child', branchId: 'branch:child', phase: 'running', executorStopped: false, cancelRequested: false, origin: { kind: 'user', key: 'accepted-key' } }];
   expect(await f.api.followups.jobSources(identity, run.id)).toEqual(f.facts.jobs);
   expect(f.requests.mock.calls.find(([method]) => method === 'runtime.host_job.sources')?.[1]).toEqual({ runId: run.id });
   for (const trigger of [{ kind: 'job_stopped', operationId: f.facts.jobs[0]!.binding.operationId }, { kind: 'all', sources: [{ kind: 'at', atMs: 0 }, { kind: 'job_stopped', operationId: f.facts.jobs[0]!.binding.operationId }] }] as const) {
@@ -408,7 +408,7 @@ it('routes artifact selectors and independent collection conditions without chan
 
 it('reads only the exact original occurrence metadata through the public API and short branch authorization', async () => {
   const f = fixture();
-  const binding: HostJobSource['binding'] = { operationId: 'job:research', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'ws:original', subjectId: 'attempt:original' };
+  const binding = { operationId: 'job:research', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, domain: 'research.experiment', domainVersion: 1, subject: { kind: 'workspace', workspaceId: 'ws:original', subjectId: 'attempt:original' } } satisfies HostJobSource['binding'];
   const first: FollowupOccurrenceView = {
     occurrence: { id: 'occurrence:original', generation: 1, accepted_cursor: 25, trigger_cursor: 100, state: 'completed', hold_reason: null, delivery: null,
       evidence: { kind: 'all', sources: [
@@ -416,7 +416,7 @@ it('reads only the exact original occurrence metadata through the public API and
         { source_index: 1, accepted_cursor: 25, trigger_cursor: 90, evidence: { kind: 'collection', binding, completion_revision: 7, outcome: 'done', counts: { available: 1, failed: 0, expired: 0, pending: 0 }, gap: false } },
       ] } },
     facts: [{ source_index: 0, accepted_cursor: 12, content: { artifactId: 'artifact:zero', byteLength: 0 } },
-      { source_index: 1, accepted_cursor: 25, content: { attemptId: binding.subjectId, completionRevision: 7 } }],
+      { source_index: 1, accepted_cursor: 25, content: { attemptId: binding.subject.subjectId, completionRevision: 7 } }],
   };
   f.facts.occurrenceViews.set(first.occurrence.id, first);
   f.facts.list[0]!.occurrence = { ...first.occurrence, id: 'occurrence:latest', accepted_cursor: 50 };

@@ -376,6 +376,7 @@ pub enum OutputMediaHolder {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OperationOutputSelection {
+    McpTaskResult,
     Completion,
     Result,
     ExternalReceipt,

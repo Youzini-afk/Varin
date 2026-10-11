@@ -60,7 +60,7 @@ export function createResearchRuntime(options: {
       throw new HarnessServiceError('unavailable', 'Original research source is unavailable');
     return scope;
   };
-  const binding = (receipt: Receipt): HostJobBinding => ({ operationId: receipt.owner.operationId, executionOwner: receipt.owner.executionOwner, domain: DOMAIN, domainVersion: DOMAIN_VERSION, workspaceId: receipt.caller.workspaceId, subjectId: receipt.attempt.attemptId });
+  const binding = (receipt: Receipt): HostJobBinding => ({ operationId: receipt.owner.operationId, executionOwner: receipt.owner.executionOwner, domain: DOMAIN, domainVersion: DOMAIN_VERSION, subject: { kind: 'workspace', workspaceId: receipt.caller.workspaceId, subjectId: receipt.attempt.attemptId } });
   const inspect = (operationId: string) => request<Operation, 'runtime.operation.inspect'>('runtime.operation.inspect', { operationId });
   const handoff = async (receipt: Receipt, known?: HostJobPending): Promise<HostJobPending> => {
     let op = known?.accepted ? known : await request<HostJobPending, 'runtime.host_job.accept'>('runtime.host_job.accept', { binding: binding(receipt), content: { data: receipt.accepted, parts: [] } });
@@ -96,7 +96,10 @@ export function createResearchRuntime(options: {
       if (op.binding.domain !== DOMAIN)
         continue;
       try {
-        const receipt = await experiments.nativeReceipt(op.binding.workspaceId, op.binding.subjectId);
+        const subject = op.binding.subject;
+        if (subject.kind !== 'workspace')
+          throw new Error('Original research job requires a workspace subject');
+        const receipt = await experiments.nativeReceipt(subject.workspaceId, subject.subjectId);
         if (receipt) {
           if (!isDeepStrictEqual(binding(receipt), op.binding))
             throw new Error('Original domain subject owner changed');
@@ -104,7 +107,7 @@ export function createResearchRuntime(options: {
         }
         else if (op.accepted)
           throw new Error('Accepted original experiment subject is unavailable');
-        else if (!admitting.has(op.binding.operationId) && !userAdmissions.has(subjectKey(op.binding.workspaceId, op.binding.subjectId)) && await experiments.reconcileUnaccepted(await originalCaller(op), op.binding.subjectId)) {
+        else if (!admitting.has(op.binding.operationId) && !userAdmissions.has(subjectKey(subject.workspaceId, subject.subjectId)) && await experiments.reconcileUnaccepted(await originalCaller(op), subject.subjectId)) {
           await request<HostJobPending, 'runtime.host_job.terminal'>('runtime.host_job.terminal', { binding: op.binding, outcome: op.cancelRequested ? 'cancelled' : 'failed', effect: 'none', executorStopped: true, content: { data: { status: 'not_accepted', sourceAdmissionDrained: true }, parts: [] } });
         }
       }
@@ -145,7 +148,7 @@ export function createResearchRuntime(options: {
     if (!params.requestId)
       throw new Error('Research handoff requires its stable request identity');
     const subjectId = experiments.submissionId(actor, params.requestId);
-    const planned: HostJobBinding = { operationId: owner.operationId, executionOwner: owner.executionOwner, domain: DOMAIN, domainVersion: DOMAIN_VERSION, workspaceId: scope.source.workspace_id, subjectId };
+    const planned: HostJobBinding = { operationId: owner.operationId, executionOwner: owner.executionOwner, domain: DOMAIN, domainVersion: DOMAIN_VERSION, subject: { kind: 'workspace', workspaceId: scope.source.workspace_id, subjectId } };
     admitting.add(owner.operationId);
     try {
       const before = await request<HostJobPending, 'runtime.host_job.begin'>('runtime.host_job.begin', { binding: planned });
