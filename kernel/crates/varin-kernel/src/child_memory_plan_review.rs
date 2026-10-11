@@ -68,10 +68,26 @@ struct OwnerReplies {
     revision: u64,
     receipts: BTreeMap<String, Value>,
     queries: Vec<Value>,
+    host_calls: Vec<Value>,
+    deny_host: bool,
 }
 impl OwnerReplies {
     fn frame(&mut self, f: &Fixture, frame: &Value, uncertain: bool) -> bool {
         let kind = frame["kind"].as_str().unwrap();
+        if kind == "host-tool-request" {
+            assert_eq!(frame["call"]["runId"], f.run.id);
+            self.host_calls.push(frame.clone());
+            let mut reply = json!({"v":1,"kind":"host-tool-response","id":frame["id"],"kernelEpoch":EPOCH,
+                "ok":!self.deny_host});
+            if self.deny_host { reply["error"] = json!({"code":"fixture_permission_denied"}); }
+            if frame["phase"] == "execute" {
+                assert!(!self.deny_host, "denied permission must not dispatch an effect");
+                reply["completion"] = json!({"kind":"result","outcome":"succeeded","effect":"confirmed","content":{"performed":true}});
+                reply["executor_stopped"] = json!(true);
+            }
+            f.assembly.tools.bridge().receive(reply);
+            return true;
+        }
         if kind != "memory-request" && kind != "plan-request" {
             return false;
         }
@@ -580,3 +596,6 @@ mod family_review;
 
 #[path = "child_messages_review.rs"]
 mod message_review;
+
+#[path = "source_free_child_review.rs"]
+mod source_free_review;

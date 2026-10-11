@@ -19,7 +19,7 @@ fn available_metadata_is_the_actual_native_directory_and_classifies_real_source_
             .find(|tool| tool.name == "dispatch")
             .unwrap()
             .source_requirement,
-        ChildSourceRequirement::Source
+        ChildSourceRequirement::None
     );
     assert_eq!(
         metadata
@@ -220,7 +220,7 @@ fn shipped_defaults_resolve_actual_declarations_with_their_required_sources() {
         let tools: Vec<_> = metadata.iter().filter(|tool| tool.default_presets.contains(&member))
             .map(|tool| tool.name.clone()).collect();
         assert!(!tools.is_empty());
-        selected.catalog.presets.push(ChildPreset { id: id.into(), name: id.into(), instructions: String::new(),
+        selected.catalog.presets.push(ChildPreset { tools_source: varin_runtime::catalog::dispatch::ChildPresetToolsSource::Default, id: id.into(), name: id.into(), instructions: String::new(),
             tools: tools.clone(), work_mode: mode, model_source: ChildModelSource::Inherit,
             inherit_base: None, model: None, unavailable: None });
         let mut input = f.input.clone();
@@ -255,4 +255,50 @@ fn shipped_defaults_resolve_actual_declarations_with_their_required_sources() {
     drop(selected);
     drop(f);
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn absent_source_defaults_derive_from_frozen_declarations_but_explicit_tools_remain_exact() {
+    use varin_runtime::catalog::dispatch::{ChildModelSource, ChildPreset, ChildPresetDefault, ChildPresetToolsSource, ChildWorkMode};
+    let native = schemas();
+    let get = |name: &str| native.iter().find(|tool| tool.name == name).unwrap().clone();
+    let f = fixture::Fixture::new_parent_custom(0, get("memory"), get("dispatch"), false, false, true,
+        |input, launch| { input.tools = Some(vec!["helper".into()]); launch.source = None; });
+    let mut selected = f.db.capture_child_dispatch_invocation(&f.context).unwrap().load().unwrap();
+    selected.catalog.native_capabilities = descriptors();
+    let mut input = f.input.clone();
+    for (id, member, mode) in [
+        ("worker", ChildPresetDefault::Worker, ChildWorkMode::IsolatedWrite),
+        ("retrieval", ChildPresetDefault::Retrieval, ChildWorkMode::ReadOnly),
+    ] {
+        let all: Vec<_> = selected.catalog.native_capabilities.iter()
+            .filter(|descriptor| descriptor.default_presets.contains(&member))
+            .map(|descriptor| descriptor.name.clone()).collect();
+        let index = selected.catalog.presets.len();
+        selected.catalog.presets.push(ChildPreset { id: id.into(), name: id.into(), instructions: String::new(),
+            tools: all.clone(), tools_source: ChildPresetToolsSource::Default, work_mode: mode,
+            model_source: ChildModelSource::Inherit, inherit_base: None, model: None, unavailable: None });
+        input.preset = Some(id.into()); input.work_mode = None; input.tools = None;
+        let (resolved, tools) = crate::collaboration::resolve_selection(&selected, &input).unwrap();
+        assert!(!tools.is_empty());
+        assert!(tools.iter().all(|tool| selected.source_requirement(&tool.name) == Some(ChildSourceRequirement::None)));
+        assert_eq!(selected.catalog.presets[index].tools, all, "a source projection does not mutate the configured snapshot");
+        assert_eq!(resolved.profile.work_mode, mode);
+        input.work_mode = Some(ChildWorkMode::ReadOnly);
+        assert!(crate::collaboration::resolve_selection(&selected, &input).is_ok());
+        input.work_mode = None;
+        input.tools = Some(if member == ChildPresetDefault::Worker {
+            vec!["file_read".into(), "process_spawn".into()]
+        } else { vec!["file_read".into()] });
+        let error = crate::collaboration::resolve_selection(&selected, &input).unwrap_err();
+        assert!(error.message.contains("file_read") && error.message.contains("select a source"));
+        if member == ChildPresetDefault::Worker { assert!(error.message.contains("process_spawn")); }
+        input.tools = None;
+        selected.catalog.presets[index].tools_source = ChildPresetToolsSource::Explicit;
+        assert!(crate::collaboration::resolve_selection(&selected, &input).unwrap_err().message.contains("file_read"));
+    }
+    input.preset = None; input.tools = Some(vec!["helper".into()]); input.work_mode = Some(ChildWorkMode::ReadOnly);
+    let (_, tools) = crate::collaboration::resolve_selection(&selected, &input).unwrap();
+    assert_eq!(tools, vec![selected.extension_bindings[0].tool.clone()]);
+    let root = f.root.clone(); drop(selected); drop(f); std::fs::remove_dir_all(root).unwrap();
 }

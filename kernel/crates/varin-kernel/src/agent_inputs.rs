@@ -209,7 +209,7 @@ pub(super) fn selected_launch(
         } else {
             0
         },
-        tools: crate::run_tools::builtin_schemas(&kinds, source.is_some(), plan_eligible, true),
+        tools: crate::run_tools::builtin_schemas(&kinds, plan_eligible, true),
         policy: crate::observations::default_policy_identity(),
         source,
     })
@@ -459,27 +459,32 @@ fn prepare_child_input(
         .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
         .child_task(&child.child_operation_id)
         .map_err(domain)?;
-    let source = varin_runtime::catalog::launches::SourceSelection {
-        environment_run_id: p.source.environment_run_id,
-        mode: p.source.mode,
-        live_root: p.source.live_root.and_then(|root| root.0).map(|root| {
-            varin_runtime::catalog::launches::LiveRoot {
-                host_id: root.host_id,
-                canonical_root: root.canonical_root,
-                root_id: root.root_id,
-            }
-        }),
-        workspace_id: p.source.workspace_id,
-        execution_workspace_id: p.source.execution_workspace_id,
-        branch_id: p.source.branch_id.0,
-        revision: p
-            .source
-            .revision
-            .0
-            .map(u64::try_from)
-            .transpose()
-            .map_err(|_| KernelError::Protocol("source revision must be nonnegative".into()))?,
-    };
+    let source = p
+        .source
+        .0
+        .map(|source| {
+            Ok::<_, KernelError>(varin_runtime::catalog::launches::SourceSelection {
+                environment_run_id: source.environment_run_id,
+                mode: source.mode,
+                live_root: source.live_root.and_then(|root| root.0).map(|root| {
+                    varin_runtime::catalog::launches::LiveRoot {
+                        host_id: root.host_id,
+                        canonical_root: root.canonical_root,
+                        root_id: root.root_id,
+                    }
+                }),
+                workspace_id: source.workspace_id,
+                execution_workspace_id: source.execution_workspace_id,
+                branch_id: source.branch_id.0,
+                revision: source
+                    .revision
+                    .0
+                    .map(u64::try_from)
+                    .transpose()
+                    .map_err(|_| KernelError::Protocol("source revision must be nonnegative".into()))?,
+            })
+        })
+        .transpose()?;
     let basis =
         personalization_basis(p.context.personalization.ok_or_else(|| {
             KernelError::Protocol("child context requires admitted scope".into())

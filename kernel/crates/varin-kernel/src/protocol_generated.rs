@@ -1964,7 +1964,7 @@ pub(crate) struct ChildResultPublishedParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ChildPrepareParams {
     pub(crate) execution_id: String,
-    pub(crate) source: LaunchSourceParams,
+    pub(crate) source: RequiredNullable<LaunchSourceParams>,
     pub(crate) context: InitialContext,
     pub(crate) expected_context_checkpoint: RequiredNullable<String>,
     pub(crate) input_preparation:

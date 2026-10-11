@@ -5,6 +5,7 @@ import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ThreadRequestError } from '@varin/application-client';
 import type { ContextCheckpoint, ThreadIdentity, ThreadSnapshot, ThreadSubmit, ThreadsAPI } from '@varin/application-client';
+import type { ChildTask, DelegatedExecution } from '@varin/protocol';
 import { ThreadConversation } from './ThreadConversation';
 import { AgentWorkspaceShell } from '@/workbenches/agent/AgentWorkspaceShell';
 
@@ -167,28 +168,55 @@ it('active-thread controls queue the chosen mode, save/cancel queued text, and s
   expect(button('Stop run')).toBeUndefined();
 });
 
-it('keeps subtree stop available after a child report while the original writer result is pending', async () => {
+it.each(['file-backed', 'source-free'] as const)('keeps the original report, wait and subtree stop for a %s child without inferring file or effect completion', async sourceKind => {
   const f = fixture(true); pauseView(f.view);
-  const child = { operation_id: 'original-child', parent_run_id: 'ui-run', parent_thread_id: identity.threadId, parent_branch_id: identity.branchId,
+  const sourceFree = sourceKind === 'source-free';
+  const child: ChildTask = { operation_id: 'original-child', parent_run_id: 'ui-run', parent_thread_id: identity.threadId, parent_branch_id: identity.branchId,
     child_thread_id: 'thread:child', child_branch_id: 'branch:child', origin: { kind: 'model_step' as const, request_id: 'request' }, call_id: 'dispatch', project_id: null,
-    input: { task: 'Run a private experiment' }, selected_profile: { preset_id: 'custom:experiment', catalog_identity: 'frozen', work_mode: 'isolated_write' as const,
-      tools: ['process_spawn'], instructions: 'Retain measured results' }, configuration: {}, launch: f.view.launch!.selection,
-    state: 'completed' as const, revision: 3, cursor: 3, receipt: { key: 'input', run_id: 'child-run', input_id: 'input', branch_id: 'branch:child', thread_id: 'thread:child', cursor: 1 },
-    report: { outcome: 'succeeded' as const, sender_thread_id: 'thread:child', run_id: 'child-run', history_ids: [], detail: 'Independent process is still running' },
-    resources_released: true, code_result: { kind: 'pending' as const },
-    source: { kind: 'pending' as const, handoff: { operation_id: 'handoff', source: { mode: 'fixed_branch' as const, workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null },
+    input: { task: sourceFree ? 'Summarize task-family messages' : 'Run a private experiment' }, selected_profile: { preset_id: 'custom:experiment', catalog_identity: 'frozen', work_mode: sourceFree ? 'read_only' : 'isolated_write',
+      tools: sourceFree ? ['send', 'wait_child'] : ['process_spawn'], instructions: 'Retain measured results' }, configuration: {}, launch: f.view.launch!.selection,
+    state: sourceFree ? 'failed' : 'completed', revision: 3, cursor: 3, receipt: { run_id: 'child-run', input_id: 'input', branch_id: 'branch:child', thread_id: 'thread:child', cursor: 1 },
+    report: { outcome: sourceFree ? 'failed' : 'succeeded', sender_thread_id: 'thread:child', run_id: 'child-run', history_ids: ['original-report'], detail: 'The original child report' },
+    resources_released: !sourceFree, code_result: sourceFree ? { kind: 'not_applicable' } : { kind: 'pending' },
+    source: sourceFree ? { kind: 'absent' } : { kind: 'pending', handoff: { operation_id: 'handoff', source: { mode: 'fixed_branch' as const, workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null },
       root: { kind: 'fixed' as const, pin: { pin_id: 'pin', root: 'root', source: { mode: 'fixed_branch' as const, workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null } } } } },
   };
   f.view.children = [child];
+  const observation: ThreadSnapshot['operations'][number] = { id: 'original-child-wait', run_id: 'ui-run', epoch: 1, revision: 1,
+    phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'run', handed_off: false,
+    executor: 'wait_child', waiting_on: 'wait:original-child', intent: {}, result: null, external_receipt: null, call_completion: null, execution_owner: { kind: 'kernel' } };
+  f.view.operations.push(observation, { ...observation, id: 'independent-effect', executor: 'extension_capability',
+    phase: 'running', effect: 'unknown', waiting_on: null, handed_off: true });
+  const cancelOperation = vi.fn<ThreadsAPI['cancelOperation']>(async () => observation);
+  f.api.cancelOperation = cancelOperation;
+  const readReport = vi.fn<NonNullable<ThreadsAPI['collaboration']>['readReport']>(async () => ({
+    operation_id: child.operation_id, execution_id: 'original-execution', item_id: 'original-report', offset: 0, next_offset: null, total_bytes: 14, text: 'Original bytes',
+  }));
   const cancelChild = vi.fn(async (_identity: ThreadIdentity, operationId: string) => ({ target: { kind: 'child' as const, operation_id: operationId }, cursor: 4, run_count: 1, child_count: 1, process_count: 1 }));
   const cancelTree = vi.fn(async () => ({ target: { kind: 'thread' as const, thread_id: identity.threadId }, cursor: 5, run_count: 2, child_count: 1, process_count: 1 }));
-  f.api.collaboration = { continueChild: async () => { throw new Error('No continuation'); }, executions: async () => [], readExecutionReport: async () => { throw new Error('No report'); }, children: async () => [child], readReport: async () => { throw new Error('No history page'); }, cancelWait: async () => { throw new Error('No wait'); }, cancelChild, cancelTree };
+  f.api.collaboration = { continueChild: async () => { throw new Error('No continuation'); }, executions: async () => [], readExecutionReport: async () => { throw new Error('No report'); }, children: async () => [child], readReport, cancelWait: async () => { throw new Error('No wait'); }, cancelChild, cancelTree };
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
-  expect(container.textContent).toContain('Report complete; file result waiting for writers and original receipts');
+  const resultLabel = sourceFree ? 'File result not applicable' : 'Report complete; file result waiting for writers and original receipts';
+  expect(container.textContent).toContain(resultLabel);
+  if (sourceFree) {
+    const card = container.querySelector('[aria-label="Child task"]')!;
+    expect(card.textContent).toContain('No file source');
+    expect(card.textContent).toContain('Report · failed');
+    expect(card.textContent).not.toMatch(/Private working copy|Read-only source|Preparing a stable source|No file changes|File result (pending|unavailable)/);
+  }
+  expect(container.textContent).toContain('Background operation · running · In progress · effect: unknown');
+  await act(async () => { button('Read report').click(); });
+  expect(readReport).toHaveBeenCalledExactlyOnceWith(identity, child.operation_id, 'original-report', 0);
+  expect(container.textContent).toContain('Original bytes');
+  await act(async () => { button('Cancel observation wait').click(); });
+  expect(cancelOperation).toHaveBeenCalledExactlyOnceWith(observation.id);
+  expect(cancelChild).not.toHaveBeenCalled();
+  expect(container.textContent).toContain(resultLabel);
   await act(async () => { button('Stop child subtree').click(); });
   expect(cancelChild).toHaveBeenCalledExactlyOnceWith(identity, 'original-child');
   // A short admission ACK is not a process-stop or file-publication fact.
-  expect(container.textContent).toContain('Report complete; file result waiting for writers and original receipts');
+  expect(container.textContent).toContain(resultLabel);
+  expect(container.textContent).toContain('Background operation · running · In progress · effect: unknown');
   await act(async () => { button('Stop task and children').click(); });
   expect(cancelTree).toHaveBeenCalledExactlyOnceWith(identity);
 });
@@ -1036,19 +1064,28 @@ it('opens the original accepted PTY in the shared terminal and fences a late res
 });
 
 
-it('continues a completed child with its exact predecessor and retries an uncertain receipt without changing its model or old report', async () => {
-  const f = fixture(true);
+it.each(['file-backed', 'source-free'] as const)('continues a completed %s child with its exact predecessor and retries an uncertain receipt without changing its model or old report', async sourceKind => {
+  const f = fixture(true); pauseView(f.view);
+  const sourceFree = sourceKind === 'source-free';
   const previous = { ...f.view.activeRun!, state: 'completed' as const };
   f.view.activeRun = null; f.view.thread.branches[0]!.active_run_id = null; f.view.thread.branches[0]!.latest_run = previous;
   f.view.thread.branches[0]!.head = 'old-head';
-  const original = { execution_id: 'old-execution', child_operation_id: 'original-dispatch', child_thread_id: identity.threadId, child_branch_id: identity.branchId,
-    trigger: { kind: 'dispatch' }, state: 'completed', receipt: { run_id: previous.id }, cancel_requested: false,
-    code_result: { kind: 'published', effect: 'confirmed', result: { publication_id: 'old-publication', result_revision: 2 } },
-    report: { outcome: 'succeeded', detail: 'Original report stays fixed', history_ids: ['old-report'] } } as unknown as import('@varin/protocol').DelegatedExecution;
+  const source = { mode: 'fixed_branch' as const, workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null };
+  const original: DelegatedExecution = { execution_id: 'old-execution', child_operation_id: 'original-dispatch', child_thread_id: identity.threadId, child_branch_id: identity.branchId,
+    parent_run_id: 'parent-run', parent_thread_id: 'parent-thread', parent_branch_id: 'parent-branch', origin: { kind: 'model_step', request_id: 'original-request' }, call_id: 'dispatch', project_id: null,
+    selected_profile: { preset_id: null, catalog_identity: 'frozen', work_mode: sourceFree ? 'read_only' : 'isolated_write', tools: [], instructions: '' },
+    input: { task: 'Keep the original report' }, configuration: {}, launch: f.view.launch!.selection, policy_target: { kind: 'default' }, source_basis: null,
+    source: sourceFree ? { kind: 'absent' } : { kind: 'ready', handoff: null, selection: source,
+      pin: { pin_id: 'pin', root: 'root', source }, provenance: { consistency: 'fixed-root', root: 'root' } },
+    trigger: { kind: 'dispatch' }, state: 'completed', receipt: { run_id: previous.id, input_id: 'original-input',
+      thread_id: identity.threadId, branch_id: identity.branchId, cursor: 1 }, cancel_requested: false, revision: 2, cursor: 2, resources_released: true, terminal_head: 'old-head',
+    code_result: sourceFree ? { kind: 'not_applicable' } : { kind: 'published', effect: 'confirmed', result: {
+      publication_id: 'old-publication', result_revision: 2, workspace_id: 'workspace', branch_id: 'result', root: 'result-root', base_root: 'root', record_id: 'result-record' } },
+    report: { outcome: 'succeeded', sender_thread_id: identity.threadId, run_id: previous.id, detail: 'Original report stays fixed', history_ids: ['old-report'] } };
   f.view.delegatedExecutions = [original];
-  const continued = { ...original, execution_id: 'new-execution', trigger: { kind: 'user_continuation', key: 'new', previous_execution_id: original.execution_id,
+  const continued: DelegatedExecution = { ...original, execution_id: 'new-execution', trigger: { kind: 'user_continuation', key: 'new', previous_execution_id: original.execution_id,
     previous_run_id: previous.id, previous_run_revision: previous.revision, expected_head: 'old-head' }, state: 'preparing', receipt: null, report: null,
-    code_result: { kind: 'pending' } } as import('@varin/protocol').DelegatedExecution;
+    source: sourceFree ? { kind: 'absent' } : null, code_result: sourceFree ? { kind: 'not_applicable' } : { kind: 'pending' }, resources_released: false, terminal_head: null };
   const continueChild = vi.fn<NonNullable<ThreadsAPI['collaboration']>['continueChild']>(async () => {
     f.view.delegatedExecutions = [original, continued]; return continued;
   }).mockRejectedValueOnce(new Error('uncertain continuation reply'));
@@ -1060,7 +1097,7 @@ it('continues a completed child with its exact predecessor and retries an uncert
     readReport: unused, cancelChild: unused, cancelWait: unused, cancelTree };
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
   expect(container.querySelector<HTMLSelectElement>('[aria-label="Registered model"]')?.disabled).toBe(true);
-  expect(container.textContent).toContain('old-publication');
+  expect(container.textContent).toContain(sourceFree ? 'File result not applicable' : 'old-publication');
   await edit('[aria-label="Message thread"]', 'Keep the next user instruction');
   const form = container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.closest('form')!;
   await submitForm(form);
@@ -1073,6 +1110,14 @@ it('continues a completed child with its exact predecessor and retries an uncert
   expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
   expect(container.textContent).toContain('Original report stays fixed');
   expect(container.textContent).toContain('User continuation');
+  if (sourceFree) {
+    const executions = container.querySelector('[aria-label="Delegated executions"]')!;
+    expect(executions.textContent).toContain('No file source');
+    expect(executions.textContent).not.toMatch(/File result: (pending|not_applicable)|No file changes|File result unavailable/);
+    expect(executions.textContent).toContain('User continuation · preparing');
+    expect(executions.textContent).toContain('Run: Not admitted yet');
+    expect(button('Continue child').disabled).toBe(true);
+  }
   await act(async () => { button('Read execution report').click(); });
   expect(readExecutionReport).toHaveBeenCalledWith(identity, 'old-execution', 'old-report', 0, undefined, expect.any(AbortSignal));
   expect(container.textContent).toContain('old evidence');

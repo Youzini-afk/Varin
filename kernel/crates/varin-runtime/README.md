@@ -300,11 +300,12 @@ Wait is a separate Job observation, with once-only history delivery and original
 handling after recovery. Its cancellation does not cancel the requester or its physical assignment.
 Notifications interrupt only an actual parked child-dependency path to that requester. Idle-root
 activation and terminal-requester invalidation preserve the normal Goal/pause/question boundaries.
-Metadata reconciliation and cancellation never need request reason bodies. Current child admission
-still requires its original real file source; pure-capability source-less children are separate work.
+Metadata reconciliation and cancellation never need request reason bodies. Child admission accepts an
+explicit absent file source for pure-capability work; this does not grant desktop assignment or bypass
+the ordinary selected tool and per-call permission boundaries.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 43, input domain 6 and collaboration domain 7 store input intents/queue bodies and context-job ownership,
+Catalog version 44, input domain 6 and collaboration domain 8 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
@@ -504,7 +505,7 @@ The publication reference protects uncommitted objects until the short receipt t
 Graph definition preparation validates all nodes on the worker before atomic admission. Worker reads
 restore the exact definition and receipts; cancellation and admission queries require only metadata.
 Private policy state and actions are immutable references, loaded outside Catalog when continuing.
-Memory mutations and fixed-source child dispatch/observation use their existing domain writers and
+Memory mutations and child dispatch/observation use their existing domain writers and
 receipt recovery. A policy can dispatch a child, continue independent work and later observe it through
 `wait_child`, using ordinary graph nodes rather than a second child-action API. `todo`, `ask_user` and
 `wait_process` likewise accept the real policy origin. A shared invocation capture restores the
@@ -1016,13 +1017,14 @@ nested references and in-flight publication; descendants share the catalog rathe
 Normal dispatch inherits its actual model and delegated tool declarations, including ordinary memory
 and plan when present; primary Goal authority remains separate. Explicit `tools` may narrow that set; same-name but different
 declarations are not reinterpreted as core tools. The default set fails visibly if capabilities are
-unsupported. An explicit preset validates its whole declared definition before narrowing or overriding
-its work mode; missing, disabled or unsupported choices never fall back. Explicitly selected models
+unsupported. A preset validates its declared capabilities before an explicit narrowing; the frozen
+compiler checks source/work-mode requirements on the actual selected tools. Missing, disabled or
+unsupported choices never fall back. Explicitly selected models
 remain selected even if their IDs match the parent. Inherited overrides retain the original parent
 basis, including explicit zero temperature and thinking settings.
 
-`read_only` fixes the source and removes known physical capabilities. `isolated_write` preserves the
-existing controlled file_write/file_edit projection inside a private materialized source; it does not
+`read_only` fixes an existing file source; ordinary external effects retain their own permissions.
+`isolated_write` preserves the existing controlled file_write/file_edit projection inside a private materialized source; it does not
 add process authority or grant writes over the parent's source. Native children can select file tools,
 resources, questions, child dispatch/status/report/wait and managed process spawn/inspect/read/write/resize
 and wait. Process access requires the frozen configured capability or actual parent delegation, source
@@ -1030,7 +1032,8 @@ authority and ordinary permission gates. A process cwd is not an OS sandbox. Sel
 extension and MCP tools retain the actual parent request's exact bindings; the child does not discover
 new capabilities from later routing or configuration. Ordinary AgentPolicy and its declared planning
 roles use the child Run's own policy generations and credentials; the policy cannot expand this frozen
-tool directory. Primary Goal, LSP, Computer and remote child bindings remain separate work. Explicit parent Integration is a separate
+tool directory. Original Computer request/assignment bindings are ordinary selected extension calls;
+primary Goal, LSP and remaining remote child bindings retain their separate authority. Explicit parent Integration is a separate
 authorized action.
 
 The frozen dispatch body retains original tool declarations, schema generation, MCP provenance and
@@ -1052,6 +1055,23 @@ channel replacement cannot release accepted child holders; successful independen
 terminal child facts or old-epoch unaccepted recovery release them. Ordinary service replacement can
 derive a child pin from the still-retained exact generation. Explicit revocation remains authoritative;
 Host restart reconstructs only an available exact artifact/definition and never substitutes latest.
+
+A frozen dispatch with no file source uses `ChildSource::Absent`, distinct from pending preparation or
+an unavailable source. Its file-result axis is `NotApplicable`, not a successful report, empty diff,
+known business effect or stopped executor. The real dispatch declaration is available without a file
+binding. Original context/resource/credential preparation accepts null source; no file branch, grant,
+pin or cwd is manufactured. Either work mode may select ordinary source-independent capabilities.
+
+The original settings owner records default versus explicit preset tools. The frozen compiler derives
+only distribution defaults from the actual source and owning capability descriptors. Explicit arrays
+and explicit invocation tools remain exact and receive actionable missing-source errors. Workspace MCP
+retains its real source requirement; global MCP and exact ordinary extension bindings are not silently
+reclassified by a tool name. Unavailable or pending source-bearing children never become absent.
+
+Absent-source User/message/follow-up/calendar successors keep that explicit fact and have no file
+result basis to clone. They still require the original Run/report admission boundaries. File-writer
+settlement is checked only for file-source successors; independently-lived Thread Jobs keep their own
+Operation/stop evidence. Report Waits keep their exact original execution through later continuations.
 
 The source owner validates whole-root read authority and records a bounded handoff under the
 persisted tool Operation. Fixed sources retain their original revision pin. Physical sources retain

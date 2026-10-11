@@ -80,6 +80,8 @@ impl ChildSourceHandoff {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ChildSource {
+    /// The original invocation selected no file source. This is neither preparation nor failure.
+    Absent,
     Pending {
         handoff: ChildSourceHandoff,
     },
@@ -93,12 +95,14 @@ pub enum ChildSource {
 impl ChildSource {
     pub fn handoff(&self) -> Option<&ChildSourceHandoff> {
         match self {
+            Self::Absent => None,
             Self::Pending { handoff } => Some(handoff),
             Self::Ready { handoff, .. } => handoff.as_ref(),
         }
     }
     pub fn pin(&self) -> Option<&ChildSourcePin> {
         match self {
+            Self::Absent => None,
             Self::Ready { pin, .. } => Some(pin),
             Self::Pending { handoff } => match &handoff.root {
                 ChildSourceRoot::Fixed { pin } => Some(pin),
@@ -127,6 +131,7 @@ pub struct ChildWorkingResultRef {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ChildCodeResult {
+    NotApplicable,
     Pending,
     Settling {
         publication_id: String,
@@ -148,7 +153,7 @@ impl ChildCodeResult {
     pub fn settled(&self) -> bool {
         matches!(
             self,
-            Self::Published { .. } | Self::NoChanges | Self::Unavailable { .. }
+            Self::NotApplicable | Self::Published { .. } | Self::NoChanges | Self::Unavailable { .. }
         )
     }
     pub fn effect(&self) -> Effect {
@@ -315,7 +320,7 @@ impl Catalog {
             .prepare_child_admission(
                 context,
                 input,
-                ChildSourceHandoff::fixed(&context.operation_id, pin),
+                Some(ChildSourceHandoff::fixed(&context.operation_id, pin)),
                 prepared,
             )?
             .load()?;
@@ -339,7 +344,7 @@ impl Catalog {
             if old.parent_run_id == context.run_id
                 && old.origin == context.origin
                 && old.input_ref == prepared.input_ref
-                && old.source.handoff() == Some(handoff)
+                && old.source.handoff() == handoff.as_ref()
                 && &old.launch == child_launch
             {
                 return Ok(old);
@@ -366,7 +371,7 @@ impl Catalog {
             ));
         }
         let parent: launch_content::LaunchMetadata = record(&tx, "run_launches", &run.id)?;
-        if parent.selection.source.as_ref() != Some(&handoff.source)
+        if parent.selection.source.as_ref() != handoff.as_ref().map(|handoff| &handoff.source)
             || parent.selection.tool_schema_generation != child_launch.tool_schema_generation
             || parent.selection.tools_ref != prepared.parent_tools_ref
         {
@@ -397,10 +402,10 @@ impl Catalog {
             selected_profile_ref: prepared.selected_profile_ref,
             dispatch_context_ref: prepared.frozen_reference,
             launch: prepared.launch,
-            source: ChildSource::Pending {
-                handoff: prepared.handoff,
-            },
-            code_result: if prepared.work_mode == super::dispatch::ChildWorkMode::ReadOnly {
+            source: prepared.handoff.map_or(ChildSource::Absent, |handoff| ChildSource::Pending { handoff }),
+            code_result: if parent.selection.source.is_none() {
+                ChildCodeResult::NotApplicable
+            } else if prepared.work_mode == super::dispatch::ChildWorkMode::ReadOnly {
                 ChildCodeResult::NoChanges
             } else {
                 ChildCodeResult::Pending
@@ -492,7 +497,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
             .collect::<std::result::Result<_, _>>()?;
         rows
     };
-    if version != Some(7)
+    if version != Some(8)
         || columns
             != vec![
                 ("id".into(), "TEXT".into(), 0, 1),
@@ -597,7 +602,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
     Ok(())
 }
 pub(super) fn initialize_new(db: &Connection) -> Result<()> {
-    db.execute_batch("CREATE TABLE child_tasks(id TEXT PRIMARY KEY REFERENCES operations(id),child_thread_id TEXT NOT NULL UNIQUE REFERENCES threads(id),body TEXT NOT NULL); CREATE INDEX child_tasks_parent ON child_tasks(json_extract(body,'$.parent_thread_id')); CREATE TABLE delegated_executions(id TEXT PRIMARY KEY,child_operation_id TEXT NOT NULL REFERENCES child_tasks(id),command_key TEXT UNIQUE,run_id TEXT UNIQUE REFERENCES runs(id),body TEXT NOT NULL); CREATE INDEX delegated_executions_child ON delegated_executions(child_operation_id); INSERT INTO runtime_domains(name,version) VALUES('collaboration',7);")?;
+    db.execute_batch("CREATE TABLE child_tasks(id TEXT PRIMARY KEY REFERENCES operations(id),child_thread_id TEXT NOT NULL UNIQUE REFERENCES threads(id),body TEXT NOT NULL); CREATE INDEX child_tasks_parent ON child_tasks(json_extract(body,'$.parent_thread_id')); CREATE TABLE delegated_executions(id TEXT PRIMARY KEY,child_operation_id TEXT NOT NULL REFERENCES child_tasks(id),command_key TEXT UNIQUE,run_id TEXT UNIQUE REFERENCES runs(id),body TEXT NOT NULL); CREATE INDEX delegated_executions_child ON delegated_executions(child_operation_id); INSERT INTO runtime_domains(name,version) VALUES('collaboration',8);")?;
     Ok(())
 }
 
@@ -607,7 +612,7 @@ impl Catalog {
     pub fn capture_child_preparation(
         &self,
         operation_id: &str,
-        source: launches::SourceSelection,
+        source: Option<launches::SourceSelection>,
         proposal: context::ContextProposal,
         basis: personalization::PersonalizationBasis,
     ) -> Result<ChildPreparation> {
@@ -704,7 +709,7 @@ pub struct ChildPreparation {
     input_preparation: Option<resources::InputResourcePreparation>,
     expected_checkpoint: Option<String>,
     child: ChildTask,
-    source: launches::SourceSelection,
+    source: Option<launches::SourceSelection>,
     proposal: context::ContextProposal,
     basis: personalization::PersonalizationBasis,
     resources: Option<resources::ContextResources>,
@@ -793,13 +798,15 @@ impl ChildPreparation {
                 "child context does not match admitted identity/role/project".into(),
             ));
         }
-        source.validate()?;
-        let expected = child
-            .source
-            .selection()
-            .cloned()
-            .ok_or_else(|| RuntimeError::Conflict("child source is not ready".into()))?;
-        if source != expected {
+        if let Some(source) = &source {
+            source.validate()?;
+        }
+        let expected = match &child.source {
+            ChildSource::Absent => None,
+            ChildSource::Ready { selection, .. } => Some(selection),
+            ChildSource::Pending { .. } => return Err(RuntimeError::Conflict("child source is not ready".into())),
+        };
+        if source.as_ref() != expected {
             return Err(RuntimeError::Conflict(
                 "prepared source does not match child baseline identity".into(),
             ));
@@ -848,7 +855,7 @@ impl ChildPreparation {
         };
         let configuration = content.load(&child.configuration_ref)?;
         let mut launch = child.launch.load(&content)?;
-        launch.source = Some(source);
+        launch.source = source;
         let operation_id = child.execution_id;
         let submission = submissions::PreparedSubmission::stage(submissions::SubmissionBody {
             input_preparation,

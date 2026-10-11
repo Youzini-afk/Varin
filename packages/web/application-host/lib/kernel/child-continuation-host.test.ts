@@ -150,3 +150,46 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
     expect(released).toHaveBeenCalledOnce(); expect(errors).toEqual([]);
   } finally { collaboration.stop(); }
 });
+
+it.each(['dispatch', 'user_continuation', 'message_request', 'followup', 'calendar'] as const)('source-free %s prepares real null context and launches without a file handoff or branch', async kind => {
+  const child = execution();
+  child.source = { kind: 'absent' }; child.source_basis = null; child.code_result = { kind: 'not_applicable' };
+  child.selected_profile.tools = []; child.launch.tools = []; child.input = { text: 'Continue capability work' };
+  if (kind === 'dispatch') child.trigger = { kind };
+  if (kind === 'calendar') child.trigger = { kind, definition_id: 'calendar', occurrence_id: 'occurrence', input_id: 'input', previous_execution_id: 'original-dispatch', previous_run_id: 'old-run', previous_run_revision: 9, expected_head: 'old-head' };
+  if (kind === 'message_request') child.trigger = { kind, message_id: 'request', previous_execution_id: 'original-dispatch', previous_run_id: 'old-run', previous_run_revision: 9, expected_head: 'old-head' };
+  if (kind === 'followup') child.trigger = { kind, followup_id: 'followup', occurrence_id: 'occurrence', input_id: 'input', previous_execution_id: 'original-dispatch', previous_run_id: 'old-run', previous_run_revision: 9, expected_head: 'old-head' };
+  const checkpoint = { id: 'old-context', revision: 4, proposal: { through_id: 'old-head', summary: 'Retained summary' } };
+  const context = { effectiveSystemPrompt: 'Capability worker', instructionSources: [], memoryCheckpoint: 'old-memory' };
+  const prepareContext = Object.assign(vi.fn(async () => context), { forSource: vi.fn(async () => context) });
+  const errors: unknown[] = [];
+  const runtime = {
+    onEvent: () => () => {}, onExit: () => () => {}, onReady: () => () => {}, reconcileObservations: async () => [],
+    children: async () => [], childExecutions: async () => [structuredClone(child)], unacceptedChildSources: async () => [],
+    status: async () => ({ eventCursor: 1 }), events: async () => [], context: async () => checkpoint,
+    childExecution: async () => structuredClone(child), readyChildSource: vi.fn(),
+    prepareChild: vi.fn(async (_input: Parameters<AgentRuntimeClient['prepareChild']>[0]) => {
+      child.receipt = { run_id: 'source-free-run', input_id: 'input', thread_id: child.child_thread_id, branch_id: child.child_branch_id, cursor: 2 };
+      child.state = 'ready'; return structuredClone(child);
+    }),
+    releaseChildResources: vi.fn(async () => { child.resources_released = true; return structuredClone(child); }),
+    failChild: vi.fn(),
+  };
+  const kernel = { reconcileChildToolHandoffs() {}, claimChildSource: vi.fn(), releaseChildToolHandoff: vi.fn() };
+  const withBranchStore = vi.fn(); const continueRun = vi.fn(async () => {});
+  const collaboration = new ThreadCollaboration({ kernel: kernel as never, runtime: runtime as unknown as AgentRuntimeClient,
+    workingStates: { withBranchStore }, storageAdapter: {} as never, sourceCaptureOwners: {} as never,
+    resolveLiveSource: async () => { throw new Error('No file source was selected'); }, prepareContext: prepareContext as never,
+    continueRun, recoverLaunches: async () => {}, onError: (_id, error) => errors.push(error) });
+  try {
+    await collaboration.recover();
+    await vi.waitFor(() => expect(runtime.releaseChildResources).toHaveBeenCalledOnce());
+    expect(continueRun).toHaveBeenCalledWith('source-free-run', expect.any(AbortSignal));
+    expect(runtime.prepareChild).toHaveBeenCalledWith(expect.objectContaining({ source: null,
+      expectedContextCheckpoint: kind === 'dispatch' ? null : checkpoint.id }), expect.any(AbortSignal));
+    if (kind === 'dispatch') expect(prepareContext).toHaveBeenCalledWith(identity, null, expect.objectContaining({ threadRole: 'worker', childProfile: child.selected_profile }));
+    else expect(prepareContext.forSource).toHaveBeenCalledWith(checkpoint, null, expect.any(AbortSignal));
+    expect(runtime.readyChildSource).not.toHaveBeenCalled(); expect(kernel.claimChildSource).not.toHaveBeenCalled();
+    expect(withBranchStore).not.toHaveBeenCalled(); expect(runtime.failChild).not.toHaveBeenCalled(); expect(errors).toEqual([]);
+  } finally { collaboration.stop(); }
+});

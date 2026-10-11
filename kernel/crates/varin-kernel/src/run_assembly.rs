@@ -245,7 +245,7 @@ impl RunAssembly {
             start.binding.tools.push(crate::agent_resources::schema());
             if !is_child {
                 start.binding.tools = crate::run_tools::builtin_schemas(
-                    &kinds, selected.source.0.is_some(), plan_eligible, true,
+                    &kinds, plan_eligible, true,
                 );
             }
             start

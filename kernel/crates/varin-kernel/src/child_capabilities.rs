@@ -6,7 +6,7 @@ use varin_runtime::catalog::dispatch::ChildSourceRequirement;
 use varin_runtime::execution::ToolSchema;
 
 fn definitions() -> Vec<crate::run_tools::BuiltinSchema> {
-    crate::run_tools::builtin_definitions(&ToolKind::all().collect(), true, true, false)
+    crate::run_tools::builtin_definitions(&ToolKind::all().collect(), true, false)
         .into_iter()
         .filter(|definition| definition.child.is_some())
         .collect()
@@ -221,25 +221,29 @@ fn discovery(
         .map(|tool| tool.name.clone())
         .collect::<Vec<_>>();
     let normal_failure = selected.catalog.normal_unavailable.clone().or_else(|| {
-        let unknown = unsupported(&normal);
+        let mut unknown = unsupported(&normal);
+        let source = selected.unavailable_source_tools(&normal);
+        let code = if unknown.is_empty() && !source.is_empty() { unknown = source; "source_required" } else { "unsupported" };
         (!unknown.is_empty()).then(
             || varin_runtime::catalog::dispatch::ChildCapabilityFailure {
-                code: "unsupported".into(),
+                code: code.into(),
                 capabilities: unknown,
             },
         )
     });
     let presets = selected.catalog.presets.iter().map(|preset| {
+        let tools = selected.preset_tools(preset);
         let failure = preset.unavailable.clone().or_else(|| {
-            let unknown = unsupported(&preset.tools);
+            let unknown = unsupported(&tools);
             if !unknown.is_empty() { Some(varin_runtime::catalog::dispatch::ChildCapabilityFailure { code: "unsupported".into(), capabilities: unknown }) }
+            else if !selected.unavailable_source_tools(&tools).is_empty() { Some(varin_runtime::catalog::dispatch::ChildCapabilityFailure { code: "source_required".into(), capabilities: selected.unavailable_source_tools(&tools) }) }
             else if preset.inherit_base.as_ref().is_some_and(|base| base != &selected.frozen.parent_model) { Some(varin_runtime::catalog::dispatch::ChildCapabilityFailure { code: "inheritance_basis_changed".into(), capabilities: Vec::new() }) } else { None }
         });
-        json!({"id":preset.id,"name":preset.name,"work_mode":preset.work_mode,"tools":preset.tools,"model_source":preset.model_source,"model":preset.model.as_ref().map(|model|json!({"provider_family":model.configuration.provider_family,"model":model.configuration.model})),"unavailable":failure})
+        json!({"id":preset.id,"name":preset.name,"work_mode":preset.work_mode,"tools":tools,"tools_source":preset.tools_source,"model_source":preset.model_source,"model":preset.model.as_ref().map(|model|json!({"provider_family":model.configuration.provider_family,"model":model.configuration.model})),"unavailable":failure})
     }).collect::<Vec<_>>();
     json!({"kind":"child_dispatch_configuration","catalog_identity":selected.catalog.identity,"normal":{"allowed_delegation":normal,"unavailable":selected.catalog.normal_unavailable,"default_unavailable":normal_failure,"selection":"Without tools, the full delegation is selected. Explicit tools may narrow it; unsupported selected tools are rejected."},"presets":presets,
-        "work_modes":{"read_only":"fixed read source; removes physical capabilities","isolated_write":"private working copy; permits controlled file_write/file_edit; process capabilities require explicit selected authority and existing permission gates"},
-        "source_notice":"A process cwd is not an OS sandbox. Model final reports and process lifetime are independent."})
+        "work_modes":{"read_only":"fixes an existing file source; ordinary external effects retain their own permissions","isolated_write":"isolates an existing file source; without files, creates no working copy or file result"},
+        "source_notice":"Source-dependent tools require an actual selected file source. Select a source or narrow tools to source-independent capabilities. A process cwd is not an OS sandbox. Model final reports and process lifetime are independent."})
 }
 
 #[cfg(test)]

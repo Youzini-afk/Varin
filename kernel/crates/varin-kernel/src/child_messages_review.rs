@@ -994,7 +994,7 @@ fn repeating_family_job_then_time_uses_real_idle_and_active_child_occurrences() 
         };
         let basis=serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,"configurationDigest":"job-child","memorySnapshot":{"revision":0,"memories":[]},"sessionId":task.child_thread_id,"projectId":task.project_id,"originalSections":[{"name":"system","content":"Independent continuation"}],"instructionSources":[]})).unwrap();
         let p = db
-            .capture_child_preparation(&child.execution_id, source, proposal, basis)
+            .capture_child_preparation(&child.execution_id, Some(source), proposal, basis)
             .unwrap()
             .load()
             .unwrap();

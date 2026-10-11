@@ -334,7 +334,17 @@ impl Fixture {
         };
         launch.connection_identity = model.connection_identity().unwrap();
         launch.child_dispatch = Some(varin_runtime::catalog::dispatch::ChildDispatchCatalog {
-            native_capabilities: Vec::new(),
+            native_capabilities: launch.tools.iter().map(|tool| {
+                use varin_runtime::catalog::dispatch::{ChildCapabilityDescriptor, ChildSourceRequirement};
+                ChildCapabilityDescriptor { name: tool.name.clone(), version: tool.version.clone(),
+                    source_requirement: match tool.name.as_str() {
+                        "file_read" => ChildSourceRequirement::Source,
+                        "file_write" | "file_edit" | "process_spawn" | "process_inspect" | "process_read" | "process_write" | "process_resize" | "wait_process" => ChildSourceRequirement::Physical,
+                        _ => ChildSourceRequirement::None,
+                    }, default_presets: Vec::new() }
+            }).chain(["file_write", "file_edit"].into_iter().filter(|name| !launch.tools.iter().any(|tool| tool.name == *name))
+                .map(|name| varin_runtime::catalog::dispatch::ChildCapabilityDescriptor { name: name.into(), version: "1".into(),
+                    source_requirement: varin_runtime::catalog::dispatch::ChildSourceRequirement::Physical, default_presets: Vec::new() })).collect(),
             identity: "fixture-catalog".into(),
             normal_unavailable: None,
             presets: Vec::new(),

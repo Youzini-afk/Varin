@@ -338,7 +338,7 @@ fn run_sequence(cancel_before_park: bool, pause_before_observation: bool) {
     catalog.create_thread("parent", "main").unwrap();
     let kinds = BTreeSet::from([ToolKind::FileRead]);
     let read = KernelToolExecutor::selected_schemas(&kinds).remove(0);
-    let tools = schemas(vec![read], true);
+    let tools = schemas(vec![read]);
     let sequence = Arc::new(Sequence {
         decisions: AtomicUsize::new(0),
         cancel_before_park,
@@ -523,7 +523,7 @@ fn run_sequence(cancel_before_park: bool, pause_before_observation: bool) {
     let preparation = db
         .lock()
         .unwrap()
-        .capture_child_preparation(&operation, source, proposal, basis)
+        .capture_child_preparation(&operation, Some(source), proposal, basis)
         .unwrap();
     let (prepare_tx, prepare_rx) = mpsc::channel();
     let (ready_tx, ready_rx) = mpsc::channel();

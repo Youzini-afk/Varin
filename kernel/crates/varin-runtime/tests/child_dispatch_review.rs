@@ -1135,3 +1135,18 @@ fn independent_child_report_body_failure_keeps_healthy_report_and_receipt_admiss
     assert!(owner.lock().unwrap().child_task(&broken.operation_id).unwrap().report.is_some());
     drop(owner);drop(runtime);drop(fault);std::fs::remove_dir_all(f.root).unwrap();
 }
+
+#[test]
+fn missing_file_handoff_and_pending_file_preparation_cannot_become_absent() {
+    let mut f = Fixture::new();
+    let selected = f.db.capture_child_dispatch_invocation(&f.context).unwrap().load().unwrap().resolve(&f.input).unwrap();
+    let launch = f.db.prepare_child_launch(&f.context.run_id, f.launch.clone(), selected).unwrap().load().unwrap();
+    let preparation = f.db.prepare_child_admission(&f.context, f.input.clone(), None, launch).unwrap();
+    assert!(preparation.load().is_err());
+    assert!(f.db.child_tasks().unwrap().is_empty());
+    let child = f.accept();
+    let (_, proposal, basis) = child_context(&child);
+    assert!(f.db.capture_child_preparation(&child.execution_id, None, proposal, basis).unwrap().load().is_err());
+    assert_eq!(f.db.child_task(&child.operation_id).unwrap(), child);
+    let root = f.root.clone(); drop(f); std::fs::remove_dir_all(root).unwrap();
+}

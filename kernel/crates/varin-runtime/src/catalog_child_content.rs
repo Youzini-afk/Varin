@@ -6,7 +6,7 @@ use collaboration::{ChildSourceHandoff, ChildSourceRoot, ChildSource, ChildCodeR
 pub struct ChildAdmissionPreparation {
     context: ToolExecutionContext,
     input: DispatchInput,
-    handoff: ChildSourceHandoff,
+    handoff: Option<ChildSourceHandoff>,
     launch: launch_content::PreparedChildLaunch,
     invocation: super::dispatch::ChildInvocationRead,
     database: std::path::PathBuf,
@@ -18,7 +18,7 @@ pub struct PreparedChildAdmission {
     pub(super) input_ref: Value,
     pub(super) configuration_ref: Value,
     pub(super) launch: launch_content::LaunchSelectionMetadata,
-    pub(super) handoff: ChildSourceHandoff,
+    pub(super) handoff: Option<ChildSourceHandoff>,
     pub(super) work_mode: super::dispatch::ChildWorkMode,
     pub(super) selected_profile_ref: Value,
     pub(super) frozen_reference: Value,
@@ -52,17 +52,22 @@ impl ChildAdmissionPreparation {
                 "dispatch differs from its admitted call".into(),
             ));
         }
-        self.handoff.source.validate()?;
-        if self.handoff.operation_id != format!("child-source-handoff:{}",self.context.operation_id) {
-            return Err(RuntimeError::Invalid("child source handoff identity changed".into()));
+        if original.frozen.source.as_ref() != self.handoff.as_ref().map(|handoff| &handoff.source) {
+            return Err(RuntimeError::Conflict("child source differs from the frozen invocation".into()));
         }
-        match &self.handoff.root {
-            ChildSourceRoot::Fixed{pin} if self.handoff.source.mode==SourceMode::FixedBranch && pin.source==self.handoff.source && !pin.pin_id.is_empty() && !pin.root.is_empty()=>(),
-            ChildSourceRoot::Physical{root} if self.handoff.source.mode!=SourceMode::FixedBranch && !root.root_id.is_empty() && !root.canonical_root.is_empty()=>(),
-            _=>return Err(RuntimeError::Invalid("child source handoff is inconsistent".into()))
+        if let Some(handoff) = &self.handoff {
+            handoff.source.validate()?;
+            if handoff.operation_id != format!("child-source-handoff:{}",self.context.operation_id) {
+                return Err(RuntimeError::Invalid("child source handoff identity changed".into()));
+            }
+            match &handoff.root {
+                ChildSourceRoot::Fixed{pin} if handoff.source.mode==SourceMode::FixedBranch && pin.source==handoff.source && !pin.pin_id.is_empty() && !pin.root.is_empty()=>(),
+                ChildSourceRoot::Physical{root} if handoff.source.mode!=SourceMode::FixedBranch && !root.root_id.is_empty() && !root.canonical_root.is_empty()=>(),
+                _=>return Err(RuntimeError::Invalid("child source handoff is inconsistent".into()))
+            }
         }
         let mut launch = self.launch.selection;
-        launch.source = Some(self.handoff.source.clone());
+        launch.source = self.handoff.as_ref().map(|handoff| handoff.source.clone());
         let input_ref = self.content.save(&serde_json::to_value(&self.input)?)?;
         Ok(PreparedChildAdmission {
             context: self.context,
@@ -160,7 +165,7 @@ impl Catalog {
         &self,
         context: &ToolExecutionContext,
         input: DispatchInput,
-        handoff: ChildSourceHandoff,
+        handoff: Option<ChildSourceHandoff>,
         launch: launch_content::PreparedChildLaunch,
     ) -> Result<ChildAdmissionPreparation> {
         let invocation = self.capture_child_dispatch_invocation(context)?;
