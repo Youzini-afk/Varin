@@ -18,8 +18,12 @@ function transport(calls: string[]): Factory {
       async send(message) {
         if (!('method' in message) || !('id' in message)) return;
         let result: Record<string, unknown>;
-        if (message.method === 'initialize') result = { protocolVersion: '2025-11-25', capabilities: { tools: {} }, serverInfo: { name: 'grant-fixture', version: '1' } };
+        if (message.method === 'initialize') result = { protocolVersion: '2025-11-25', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'grant-fixture', version: '1' } };
         else if (message.method === 'tools/list') result = { tools: [{ name: 'send', inputSchema: { type: 'object', additionalProperties: false } }] };
+        else if (message.method === 'resources/list') result = { resources: [] };
+        else if (message.method === 'resources/templates/list') result = { resourceTemplates: [] };
+        else if (message.method === 'resources/read') { calls.push(message.method); result = { contents: [{ uri: 'fixture:///resource', text: 'data' }] }; }
+        else if (message.method === 'prompts/list') result = { prompts: [{ name: 'prompt', arguments: [] }] };
         else if (message.method === 'tools/call') { calls.push(message.method); result = { content: [{ type: 'text', text: 'sent' }] }; }
         else throw new Error(`Unexpected fixture method ${message.method}`);
         for (const listener of listeners) listener({ jsonrpc: '2.0', id: message.id, result });
@@ -46,20 +50,25 @@ for (const mode of ['provider', 'oauth'] as const) it(`${mode} grants preserve t
   try {
     const lease = await authority.acquire(scope, { servers: ['fixture'] });
     const target = lease.binding.tools[0]; assert.ok(target);
+    const service = (await lease.discoverServices('fixture', signal)).find(value => value.kind === 'resources')!;
     token = 'fake-refreshed-token';
     await server.save({ ...initial, tokens: { access_token: token, token_type: 'Bearer' } });
     assert.deepEqual(store.binding('fixture', url), firstBinding);
     await lease.callTool(target.name, {}, { schemaVersion: target.schemaVersion, signal });
     assert.equal(calls.length, 1);
+    await lease.requestService(service, { operation: 'resources/read', uri: 'fixture:///resource' }, { signal });
+    assert.equal(calls.length, 2);
     if (mode === 'provider') grant = { ...grant, generation: 2, account: 'account-two' };
     if (mode === 'oauth') await server.save({ ...initial, oauthState: 'fake-second-authorization', tokens: { access_token: 'fake-other-account', token_type: 'Bearer' } });
     if (mode === 'oauth') assert.notDeepEqual(store.binding('fixture', url), firstBinding);
     await assert.rejects(lease.callTool(target.name, {}, { schemaVersion: target.schemaVersion, signal }), /credential-revoked|owner-revoked/);
-    assert.equal(calls.length, 1, 'revoked call must never reach transport or replay');
+    await assert.rejects(lease.requestService(service, { operation: 'resources/read', uri: 'fixture:///resource' }, { signal }), /credential-revoked|owner-revoked/);
+    assert.equal(calls.length, 2, 'revoked calls must never reach transport or replay');
     const replacement = await authority.acquire({ ...scope, sessionId: 'two' }, { servers: ['fixture'] });
     assert.notEqual(replacement.binding.tools[0]?.schemaVersion, target.schemaVersion);
     await assert.rejects(replacement.prepareTool('fixture', 'send', target.schemaVersion, signal), /schema-generation-mismatch/);
-    assert.equal(calls.length, 1);
+    await assert.rejects(replacement.prepareService('fixture', 'resources', service.schemaVersion, signal), /schema-generation-mismatch/);
+    assert.equal(calls.length, 2);
     replacement.release(); lease.release();
   } finally { await authority.close(); rmSync(root, { recursive: true, force: true }); }
 });

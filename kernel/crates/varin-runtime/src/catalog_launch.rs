@@ -97,6 +97,7 @@ pub struct HostToolBinding {
     pub generation: u64,
     pub tools: Vec<ToolSchema>,
     pub resources: std::collections::BTreeMap<String, String>,
+    pub routes: std::collections::BTreeMap<String, crate::McpRoute>,
     pub provenance: McpProvenance,
 }
 impl HostToolBinding {
@@ -128,13 +129,27 @@ impl HostToolBinding {
                             .is_none_or(|selected| &selected.resource_key != key)
                     })
             })
+            || self.routes.len() != self.tools.len()
             || self.tools.iter().any(|tool| {
                 tool.name.is_empty()
                     || tool.version.is_empty()
                     || !(tool.schema.is_object() || tool.schema.is_boolean())
                     || !names.insert(&tool.name)
-                    || (!matches!(tool.name.as_str(), "mcp_call" | "mcp_discover")
-                        && !self.resources.contains_key(&tool.name))
+                    || match self.routes.get(&tool.name) {
+                        Some(crate::McpRoute::Direct) => !self.resources.contains_key(&tool.name),
+                        Some(
+                            crate::McpRoute::ServerArgument { argument }
+                            | crate::McpRoute::Discovery { argument },
+                        ) => {
+                            argument.is_empty()
+                                || tool
+                                    .schema
+                                    .get("properties")
+                                    .and_then(|p| p.get(argument))
+                                    .is_none()
+                        }
+                        None => true,
+                    }
             })
         {
             return Err(RuntimeError::Invalid(
@@ -157,7 +172,7 @@ impl HostToolBinding {
         }
         let gateway = tools
             .iter()
-            .any(|tool| matches!(tool.name.as_str(), "mcp_call" | "mcp_discover"));
+            .any(|tool| !matches!(self.routes.get(&tool.name), Some(crate::McpRoute::Direct)));
         let mut selected = self.clone();
         selected.provenance.servers.retain(|_, server| {
             gateway
@@ -171,11 +186,15 @@ impl HostToolBinding {
                     .strip_prefix("server:")
                     .is_some_and(|server| selected.provenance.servers.contains_key(server))
         });
+        selected
+            .routes
+            .retain(|name, _| tools.iter().any(|tool| &tool.name == name));
         selected.tools = tools;
         Some(selected)
     }
     pub fn derives_from(&self, original: &Self) -> bool {
         self.tools == original.tools
+            && self.routes == original.routes
             && self.provenance.configuration == original.provenance.configuration
             && self.provenance.execution_scope == original.provenance.execution_scope
             && self.provenance.servers.len() == original.provenance.servers.len()

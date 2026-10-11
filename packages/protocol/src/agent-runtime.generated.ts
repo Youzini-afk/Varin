@@ -1064,7 +1064,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 3; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 4; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -1284,7 +1284,10 @@ export interface McpProvenance {
   servers: Record<string, McpServerSelection>;
 }
 
+export type McpRoute = {kind:"direct"} | {kind:"server_argument";argument:string} | {kind:"discovery";argument:string};
+
 export interface McpBinding {
+  routes: Record<string, McpRoute>;
   provenance: McpProvenance;
   resources: Record<string, string>;
   reference: string;

@@ -6,7 +6,7 @@ import { McpAuthority } from '@varin/pi-host/mcp-authority';
 import { createMcpLease } from './mcp-owner.js';
 import { createChildMcpPreparer } from './mcp-child-preparation.js';
 import type { KernelClient } from './kernel-client.js';
-import type { HostToolCall, McpBinding } from './protocol.generated.js';
+import { MCP_CAPABILITIES, toolOperationId, type HostToolCall, type McpBinding } from './protocol.generated.js';
 import type { McpToolLease } from './tool-bridge.js';
 
 it('rebinds original MCP definitions to child stdio cwd across retirement, restores exact bindings and rejects unavailable dependencies', async () => {
@@ -24,7 +24,10 @@ it('rebinds original MCP definitions to child stdio cwd across retirement, resto
     script,
     `import fs from 'node:fs'; import readline from 'node:readline';
 readline.createInterface({input:process.stdin}).on('line',line=>{const request=JSON.parse(line);if(request.id===undefined)return;let result;
-if(request.method==='initialize')result={protocolVersion:request.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:'fixture',version:'1'}};
+if(request.method==='initialize')result={protocolVersion:request.params.protocolVersion,capabilities:{tools:{},resources:{}},serverInfo:{name:'fixture',version:'1'}};
+else if(request.method==='resources/list')result={resources:[]};
+else if(request.method==='resources/templates/list')result={resourceTemplates:[]};
+else if(request.method==='resources/read')result={contents:[{uri:request.params.uri,text:JSON.stringify({cwd:process.cwd(),marker:fs.readFileSync('marker','utf8')})},{uri:request.params.uri,blob:Buffer.from('resource-bytes').toString('base64'),mimeType:'application/octet-stream'}]};
 else if(request.method==='tools/list')result={tools:[{name:'read',description:'Read the actual working view',inputSchema:{type:'object',additionalProperties:false}}]};
 else if(request.method==='tools/call'){const value={cwd:process.cwd(),marker:fs.readFileSync('marker','utf8')};fs.appendFileSync(${JSON.stringify(calls)},JSON.stringify(value)+'\\n');result={content:[{type:'text',text:JSON.stringify(value)}]};}
 else return;process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result})+'\\n');});`,
@@ -45,7 +48,7 @@ else return;process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,res
   let allowedTool = '';
   const policy = async () => ({
     mode: 'normal' as const,
-    rules: [{ tool: allowedTool, decision: 'allow' as const }],
+    rules: [{ tool: allowedTool, decision: 'allow' as const }, { tool: MCP_CAPABILITIES.find(value => value.operation === 'read_resource')!.name, decision: 'allow' as const }],
   });
   const signal = new AbortController().signal;
   try {
@@ -73,6 +76,7 @@ else return;process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,res
     const selected: McpBinding = {
       ...structuredClone(parent.binding),
       tools: [tool],
+      routes: { [tool.name]: parent.binding.routes[tool.name]! },
       resources: {
         [tool.name]: parent.binding.resources[tool.name]!,
         'server:fixture': parent.binding.resources['server:fixture']!,
@@ -233,6 +237,46 @@ else return;process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,res
       { cwd: nextCwd, marker: 'continued' },
       { cwd: root, marker: 'neutral' },
     ]);
+    // The child preparation owner also derives a service-only selection, including a
+    // source-less neutral dependency. This is real stdio/Host admission, not a script engine test.
+    const serviceNames = new Set(MCP_CAPABILITIES.filter(value => value.operation === 'discover' || value.operation === 'read_resource').map(value => value.name));
+    for (const [original, source, expectedCwd, expectedMarker] of [
+      [parent, input.source, childCwd, 'child'],
+      [global, null, root, 'neutral'],
+    ] as const) {
+      const selection: McpBinding = {
+        ...structuredClone(original.binding),
+        tools: original.binding.tools.filter(tool => serviceNames.has(tool.name)),
+        routes: Object.fromEntries(Object.entries(original.binding.routes).filter(([name]) => serviceNames.has(name))),
+        resources: Object.fromEntries(Object.entries(original.binding.resources).filter(([name]) => name.startsWith('server:'))),
+      };
+      const servicesChild = await prepare({ ...input, source, delegatedBinding: selection }, signal);
+      leases.push(servicesChild);
+      expect(servicesChild.binding.tools.map(tool => tool.name)).toEqual(selection.tools.map(tool => tool.name));
+      const origin = { kind: 'nested_call' as const, parent_operation_id: `script:${expectedMarker}` };
+      const invoke = async (operation: 'discover' | 'read_resource', arguments_: Record<string, unknown>) => {
+        const schema = MCP_CAPABILITIES.find(value => value.operation === operation)!;
+        const callId = `${operation}:${expectedMarker}`;
+        const invocation: HostToolCall = { runId: input.runId, origin, callId, operationId: toolOperationId(origin, callId),
+          name: schema.name, schemaVersion: schema.version, arguments: arguments_ };
+        await servicesChild.authorize(invocation, signal);
+        return servicesChild.execute(invocation, signal, { kind: 'external', identity: 'service-child', epoch: 'service-child-epoch' });
+      };
+      const discovered = await invoke('discover', {server:'fixture'});
+      expect(discovered.completion.kind).toBe('result');
+      if (discovered.completion.kind !== 'result') throw new Error('expected discovery result');
+      const service = (discovered.completion.content.data as {services:{kind:string;schemaVersion:string}[]}).services.find(value => value.kind === 'resources')!;
+      const received = await invoke('read_resource', {server:'fixture',schemaVersion:service.schemaVersion,uri:'fixture:///not-listed'});
+      expect(received.completion).toMatchObject({kind:'result',outcome:'succeeded',effect:'confirmed',content:{parts:[
+        {kind:'text',text:JSON.stringify({cwd:expectedCwd,marker:expectedMarker})},
+        {kind:'media',media:{media_type:'application/octet-stream',data_base64:Buffer.from('resource-bytes').toString('base64')}},
+      ]}});
+      const savedServices = structuredClone(servicesChild.binding);
+      servicesChild.release();
+      const reopenedServices = await prepare({ ...input, source, requiredBinding: savedServices }, signal);
+      leases.push(reopenedServices);
+      expect(reopenedServices.binding).toEqual(savedServices);
+    }
     config.mcpServers.fixture.args = [script, 'new-configuration'];
     await fs.writeFile(path.join(root, 'mcp.json'), JSON.stringify(config));
     const afterUpdate = await prepare(

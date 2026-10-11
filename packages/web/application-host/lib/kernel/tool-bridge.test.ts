@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest';
+import { HostToolAdmissionError } from './tool-admission.js';
 import {
   ToolBridge,
   type HostToolLease,
@@ -392,4 +393,24 @@ it('keeps accepted child owners through parent completion and channel reset, the
   expect(f.effects).toEqual([]);
   f.bridge.releaseChild('run', 'accepted-child');
   expect(f.released).toEqual(['original']);
+});
+
+
+it('reports only branded local admission markers and keeps unknown or forged remote errors opaque', async () => {
+  for (const error of [new HostToolAdmissionError('mcp-service-unsupported'), Object.assign(new Error('remote body: secret'), { code: 'forged_remote_code', admission: true })]) {
+    const f = fixture();
+    const lease = f.lease('admission');
+    lease.authorize = async () => { throw error; };
+    const owner = f.bridge.register('run', lease);
+    f.hold('retain', owner);
+    f.request(owner, 'reject', 'authorize');
+    await tick();
+    const response = f.frames.find(frame => frame.kind === 'host-tool-response' && frame.id === 'reject');
+    expect(response).toMatchObject({ ok: false, error: error instanceof HostToolAdmissionError
+      ? {code:'mcp-service-unsupported',admission:true} : {code:'host_tool_authorization_failed'} });
+    expect(JSON.stringify(response)).not.toContain('secret');
+    expect(JSON.stringify(response)).not.toContain('forged_remote_code');
+    expect(f.effects).toEqual([]);
+    f.bridge.unregister('run');
+  }
 });

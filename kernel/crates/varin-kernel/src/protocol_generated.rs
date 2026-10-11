@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 3;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 4;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -2136,6 +2136,13 @@ pub(crate) struct MessageGetParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct HostToolErrorMarker {
+    pub(crate) code: String,
+    pub(crate) admission: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SubmitLaunch {
     pub(crate) inherit_source: Option<bool>,
     pub(crate) source: RequiredNullable<LaunchSourceParams>,
@@ -2210,6 +2217,7 @@ pub(crate) struct LaunchSourceParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct McpBinding {
+    pub(crate) routes: std::collections::BTreeMap<String, varin_runtime::McpRoute>,
     pub(crate) provenance: McpProvenance,
     pub(crate) resources: std::collections::BTreeMap<String, String>,
     pub(crate) reference: String,

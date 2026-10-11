@@ -19,6 +19,14 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-11 增量：原 MCP 内容、资源与提示
+
+- 原唯一 McpAuthority/connection 接入资源与模板分页、资源读取、提示分页/get；schema 单声明生成六个 helper 与 typed routes，原 Rust/child/恢复绑定不再手抄名字判断。配置、OAuth/grant、权限与旧 retained contribution 保原 owner；Catalog **49**、wire **4**直接拒旧，content/manifest/policy 未改。
+- 协议明确字段映射同一有序 Text/Media，原 URI/role/annotations/_meta/opaque JSON 完整保留，不猜图、不自动取 resource link，也不把 prompt role 升为指令。完整页顶层 metadata、prompt descriptor/通知失效与迟到 page、service-only 无源 child/作用域/恢复都沿实际消费者。
+- 本地真实 admission 错误经原 Host/Rust 桥成为可操作短码，远端伪码/错误正文不获信任。独审确证并修复跳过自动重试同时漏掉 HTTP session 失效 owner 的接缝：单次请求不重放、旧在途不误关，真实 expired-session RPC 停止与 Unknown 效果分开。默认策略仍停在 Unknown，显式策略选择的新操作才验证同 server 占用释放与新 session 成功。
+- 原 Engine → Host/PermissionService → 实际 MCP stdio → 原 provider 编译、PolicyAction、公开内容读取、fork/GC/reopen 整链通过；HTTP 使用原 transport 的受控 fetch，无 listener。定向运行时/Host、SDK 原 owner、单独无源 child、类型/协议/实际 bundle 与独审证据见[本片验收](../reviews/runtime-mcp-content-2026-10-11.md)。局部条目不替代整设计或产品/平台最终验收。
+- MCP Tasks/持久远端任务、资源订阅/更新和服务端交互仍是随后能力，Web/材料/Bot、其余来源/检索/上下文/provider 也继续按总设计推进；默认切换与全面迁移交用户验收后负责。
+
 ## 2026-10-11 增量：原工具与持久脚本的 typed media
 
 - 单一 `OutputBody` 保 opaque data 与有序 Text/Media；Incoming 只有字节/MIME，原调用/输入 owner 赋真实来源，Stored 引用既有 ContentStore，worker 才解引用。Computer 抽取同次 observation/action 截图并保 metadata；Node 显式 emitImage、普通 Result SDK call.output 与原结果/回执共用正文，print/普通 JSON 不猜图，nested 只显式转出、不造模型调用。

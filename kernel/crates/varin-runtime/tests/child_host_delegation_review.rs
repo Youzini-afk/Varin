@@ -19,12 +19,17 @@ fn mcp() -> HostToolBinding {
         name: name.into(),
         version: "declaration-1".into(),
         description: format!("Original {name}"),
-        schema: json!({"type":"object"}),
+        schema: json!({"type":"object","properties":{"server":{"type":"string"}}}),
         output_schema: None,
         metadata: None,
     };
     HostToolBinding {
         reference: "parent-mcp-owner".into(),
+        routes: [
+            ("first".into(), McpRoute::Direct), ("second".into(), McpRoute::Direct),
+            ("mcp_call".into(), McpRoute::ServerArgument { argument: "server".into() }),
+            ("mcp_discover".into(), McpRoute::Discovery { argument: "server".into() }),
+        ].into(),
         generation: 3,
         tools: ["first", "second", "mcp_call", "mcp_discover"]
             .into_iter()
@@ -174,6 +179,8 @@ fn host_tool_with_native_process_name_does_not_gain_a_native_process_source_gran
         .name = "process_spawn".into();
     let resource = binding.resources.remove("first").unwrap();
     binding.resources.insert("process_spawn".into(), resource);
+    let route = binding.routes.remove("first").unwrap();
+    binding.routes.insert("process_spawn".into(), route);
     let mut f = Fixture::new_host_child(false, Some(binding), vec!["process_spawn".into()]);
     let selected =
         f.db.capture_child_dispatch_invocation(&f.context)
@@ -418,11 +425,15 @@ fn child_result_waits_for_original_workspace_and_service_callbacks_but_not_globa
         let selected = if scope == McpExecutionScope::Global {
             // Native-looking names do not change the actual external execution scope.
             parent_mcp.tools[0].name = "process_spawn".into();
+            let route = parent_mcp.routes.remove("first").unwrap();
+            parent_mcp.routes.insert("process_spawn".into(), route);
             let resource = parent_mcp.resources.remove("first").unwrap();
             parent_mcp
                 .resources
                 .insert("process_spawn".into(), resource);
             parent_mcp.tools[1].name = "wait_process".into();
+            let route = parent_mcp.routes.remove("second").unwrap();
+            parent_mcp.routes.insert("wait_process".into(), route);
             let resource = parent_mcp.resources.remove("second").unwrap();
             parent_mcp.resources.insert("wait_process".into(), resource);
             "process_spawn"

@@ -1497,9 +1497,14 @@ diff --git a/dist/core/compaction/compaction.d.ts b/dist/core/compaction/compact
 diff --git a/dist/extensions/mcp/runtime.js b/dist/extensions/mcp/runtime.js
 --- a/dist/extensions/mcp/runtime.js
 +++ b/dist/extensions/mcp/runtime.js
-@@ -191,22 +191,22 @@
+@@ -190,29 +190,33 @@
+         });
          return this.opening;
      }
++    /** Run once through this connection's lifecycle; never replay an entered request. */
++    requestOnce(run) {
++        return this.withClient(run, false, false);
++    }
      callTool(name, args, options) {
 -        return this.withClient((client) => client.callTool(name, args, options));
 +        return this.withClient(async (client) => { await options.beforeDispatch?.(); return client.callTool(name, args, options); });
@@ -1526,10 +1531,35 @@ diff --git a/dist/extensions/mcp/runtime.js b/dist/extensions/mcp/runtime.js
      }
      /**
       * Run a request, reconnecting when needed. `readOnly` requests are retried once after a transient
+      * HTTP error; tool calls are not, since they may have run.
+      */
+-    async withClient(run, readOnly = false) {
++    async withClient(run, readOnly = false, retryExpiredSession = true) {
+         for (let attempt = 1;; attempt++) {
+             const client = await this.getClient();
+             try {
+@@ -227,8 +231,16 @@
+                     // The server no longer knows the session (restart, deploy), so it did not run the request.
+                     // Retry once on a new session. The old client is detached but not closed: closing would
+                     // fail its other in-flight calls, which instead get the same 404 and retry the same way.
+-                    if (this.client === client)
++                    if (this.client === client) {
+                         this.client = undefined;
++                        if (!retryExpiredSession) {
++                            this.state = "disconnected";
++                            this.error = undefined;
++                            this.changed();
++                        }
++                    }
++                    if (!retryExpiredSession)
++                        throw error;
+                     continue;
+                 }
+                 if (!this.needsSignIn(error))
 diff --git a/dist/extensions/mcp/runtime.d.ts b/dist/extensions/mcp/runtime.d.ts
 --- a/dist/extensions/mcp/runtime.d.ts
 +++ b/dist/extensions/mcp/runtime.d.ts
-@@ -68,12 +68,12 @@
+@@ -68,12 +68,14 @@
      get oauthUrl(): string | undefined;
      oauthSettings(): McpOAuthSettings;
      getClient(): Promise<McpClient>;
@@ -1539,6 +1569,8 @@ diff --git a/dist/extensions/mcp/runtime.d.ts b/dist/extensions/mcp/runtime.d.ts
 -    resourceTemplatesPage(cursor: string | undefined, options: McpRequestOptions): Promise<ListResourceTemplatesResult>;
 -    allResources(options: McpRequestOptions): Promise<Resource[]>;
 -    allResourceTemplates(options: McpRequestOptions): Promise<ResourceTemplate[]>;
++    /** Run once through the existing client lifecycle. Session/auth failures update the owner but never replay this request. */
++    requestOnce<T>(run: (client: McpClient) => Promise<T>): Promise<T>;
 +    callTool(name: string, args: Record<string, unknown>, options: McpRequestOptions & { beforeDispatch?: () => void | Promise<void> }): Promise<CallToolResult>;
 +    readResource(uri: string, options: McpRequestOptions & { beforeDispatch?: () => void | Promise<void> }): Promise<ReadResourceResult>;
 +    resourcesPage(cursor: string | undefined, options: McpRequestOptions & { beforeDispatch?: () => void | Promise<void> }): Promise<ListResourcesResult>;

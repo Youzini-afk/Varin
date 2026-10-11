@@ -2118,6 +2118,7 @@ fn tool_activation_retains_its_exact_composition_through_collection_and_reopen()
         schema: json!({"type":"object"}),
     };
     let mcp = launches::HostToolBinding {
+        routes: [("query".into(), crate::McpRoute::Direct)].into(),
         reference: "exact-owner".into(),
         generation: 42,
         tools: vec![schema.clone()],
