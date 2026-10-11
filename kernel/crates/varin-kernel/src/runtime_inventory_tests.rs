@@ -107,6 +107,23 @@ impl Fixture {
         assert_eq!(response["ok"], true, "{response}");
         response["result"].clone()
     }
+    fn blob(&mut self, params: Value, grant: &str) -> Result<Value, KernelError> {
+        self.begin("storage.getBlob", params, grant);
+        match self
+            .rx
+            .recv_timeout(WAIT)
+            .expect("blob reader did not drain")
+        {
+            WorkerRequest::BlobReadDone {
+                reply: BlobReadReply::Wire(request),
+                task,
+                result,
+            } => self
+                .kernel
+                .complete_blob_read(&request, &task, result, &self.revoked),
+            _ => panic!("unexpected worker completion"),
+        }
+    }
     fn params(&self, path: &str) -> Value {
         json!({"workspaceId":"workspace","rootId":self.root_id,"path":path})
     }

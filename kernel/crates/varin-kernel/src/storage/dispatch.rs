@@ -72,11 +72,9 @@ impl Storage {
                 authorized_params.get("workspaceId").and_then(Value::as_str),
                 grant_id.unwrap_or(""),
             ),
-            "storage.getBlob" => storage.get_blob(
-                authorized_params,
-                grant_id.unwrap_or(""),
-                authorized_grant.capabilities.contains("storage.admin"),
-            ),
+            // Real wire and native Tool readers are admitted by Kernel's shared worker path.
+            #[cfg(test)]
+            "storage.getBlob" => storage.read_blob_fixture(authorized_params, authorized_grant),
             "file.read.check" => storage.file_read_check(authorized_params, authorized_grant),
             "file.root.register" => storage.file_root_register(authorized_params, authorized_grant),
             "file.operation.list" => {

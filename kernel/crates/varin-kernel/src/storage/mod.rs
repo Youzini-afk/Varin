@@ -30,6 +30,7 @@ use crate::storage_schema::{
 };
 
 mod authority_store;
+pub(crate) mod blob_reads;
 mod branches;
 pub(crate) mod capture_resources;
 mod child_sources;
@@ -187,6 +188,7 @@ pub(crate) struct Storage {
     branch_builders: HashMap<String, BranchBuilder>,
     branch_write_builders: HashMap<String, BranchWriteBuilder>,
     verified_objects: BTreeSet<String>,
+    blob_read_roots: blob_reads::BlobReadRoots,
     file_roots: HashMap<String, FileRoot>,
     observation_reads: HashMap<String, file_observations::ActiveRead>,
     observation_hints: Option<Arc<dyn Fn(file_observations::Hint) + Send + Sync>>,

@@ -1236,7 +1236,7 @@ export class KernelClient {
 
   async getBlob(hash: string, source: KernelBlobReadSource, grant: KernelGrantHandle, options: { offset?: number; length?: number; signal?: AbortSignal | undefined } = {}): Promise<KernelObjectSlice> {
     const params: KernelGetBlobParams = { hash, ...source, ...(options.offset === undefined ? {} : { offset: options.offset }), ...(options.length === undefined ? {} : { length: options.length }) };
-    return this.requestRaw<KernelObjectSlice>("storage.getBlob", params, { signal: options.signal, grant });
+    return this.requestRaw<KernelObjectSlice>("storage.getBlob", params, { signal: options.signal, grant, settleCancellation: true });
   }
 
   async fileRootRegister(params: KernelMethodParams["file.root.register"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
