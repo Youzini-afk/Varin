@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 5;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 6;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -863,6 +863,13 @@ pub(crate) struct PermissionDecideParams {
 pub(crate) struct QuestionAnswerParams {
     pub(crate) operation_id: String,
     pub(crate) answer: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct OperationInspectParams {
+    pub(crate) operation_id: String,
+    pub(crate) allow_missing: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2158,6 +2165,50 @@ pub(crate) struct HostJobAccessParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpResourceBeginParams {
+    pub(crate) binding: varin_runtime::catalog::mcp_resources::McpResourceBinding,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpResourceAcceptParams {
+    pub(crate) binding: varin_runtime::catalog::mcp_resources::McpResourceBinding,
+    pub(crate) listener_id: String,
+    pub(crate) content: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpResourceListenerParams {
+    pub(crate) binding: varin_runtime::catalog::mcp_resources::McpResourceBinding,
+    pub(crate) expected_listener_id: RequiredNullable<String>,
+    pub(crate) listener_id: RequiredNullable<String>,
+    pub(crate) availability: varin_runtime::McpResourceAvailability,
+    pub(crate) local_released: bool,
+    pub(crate) remote_cleanup: varin_runtime::McpResourceCleanup,
+    pub(crate) problem: RequiredNullable<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpResourceNotifyParams {
+    pub(crate) binding: varin_runtime::catalog::mcp_resources::McpResourceBinding,
+    pub(crate) listener_id: String,
+    pub(crate) fact_id: String,
+    pub(crate) kind: varin_runtime::McpResourceFactKind,
+    pub(crate) notification: Option<Value>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpResourceAccessParams {
+    pub(crate) run_id: String,
+    pub(crate) target_operation_id: String,
+    pub(crate) control: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct HostToolErrorMarker {
     pub(crate) code: String,
     pub(crate) admission: Option<bool>,
@@ -3060,9 +3111,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.question.answer" => serde_json::from_value::<QuestionAnswerParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.operation.inspect" => serde_json::from_value::<OperationParams>(params.clone())
-            .map(|_| ())
-            .map_err(|error| error.to_string()),
+        "runtime.operation.inspect" => {
+            serde_json::from_value::<OperationInspectParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.operation.status" => serde_json::from_value::<OperationParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
@@ -3678,6 +3731,44 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         }
         "runtime.host_job.task.finish" => {
             serde_json::from_value::<HostJobBeginParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.mcp.resource.begin" => {
+            serde_json::from_value::<McpResourceBeginParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.mcp.resource.accept" => {
+            serde_json::from_value::<McpResourceAcceptParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.mcp.resource.listener" => {
+            serde_json::from_value::<McpResourceListenerParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.mcp.resource.notify" => {
+            serde_json::from_value::<McpResourceNotifyParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.mcp.resource.pending" => {
+            serde_json::from_value::<KernelEmptyParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.mcp.resource.context" => serde_json::from_value::<OperationParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.mcp.resource.access" => {
+            serde_json::from_value::<McpResourceAccessParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.mcp.resource.release_source" => {
+            serde_json::from_value::<RunParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

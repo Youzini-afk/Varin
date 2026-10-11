@@ -16,9 +16,11 @@ import { ConfigTextFileEditor, resolveConfigDocumentPath } from './config-text-f
 import { ConfigWatchManager } from './config-watch-manager.js';
 import { McpSessionExpiredError, McpError, type McpClient } from '@earendil-works/pi-mcp';
 import { serviceKind, validateServiceResult, validatePromptArguments, type McpAuthorityService, type McpAuthorityPrompt, type McpPromptDeclaration, type McpServiceKind, type McpServiceRequest, type McpServiceResult } from './mcp-native-protocol.js';
-import { taskCapabilities, taskSupport, requiresMcpTask, validateTaskResponse, validateTaskResult, object as taskObject, type McpTaskLease, type McpTaskEndpoint, type McpTaskSupport, type McpTaskResponse } from './mcp-tasks.js';
+import { taskCapabilities, taskSupport, requiresMcpTask, validateTaskResponse, validateTaskResult, object as taskObject, type McpTaskLease, type McpEndpoint, type McpTaskSupport, type McpTaskResponse } from './mcp-tasks.js';
+import type { McpResourceChange, McpResourceObserver, McpResourceRelease } from './mcp-resources.js';
+export type { McpResourceChange, McpResourceObserver, McpResourceCleanup, McpResourceRelease } from './mcp-resources.js';
 export { requiresMcpTask } from './mcp-tasks.js';
-export type { McpTaskLease, McpTaskEndpoint, McpTaskResponse } from './mcp-tasks.js';
+export type { McpTaskLease, McpEndpoint, McpTaskResponse } from './mcp-tasks.js';
 export type { McpAuthorityService, McpAuthorityPrompt, McpServiceKind, McpServiceRequest, McpServiceResult } from './mcp-native-protocol.js';
 
 export interface McpAuthorityScope {
@@ -114,7 +116,9 @@ export interface McpAuthorityLease {
   revocationSignal(name: string, schemaVersion: string): AbortSignal;
   validateArguments(name: string, schemaVersion: string, arguments_: unknown): void;
   callTool(name: string, arguments_: Record<string, unknown>, options: { schemaVersion: string; signal: AbortSignal; beforeDispatch?: () => void | Promise<void> }): ReturnType<McpServerConnection['callTool']>;
-  taskOwner(server: string, endpoint: McpTaskEndpoint | undefined, signal: AbortSignal): Promise<McpTaskLease>;
+  resourceEndpoint(service:McpAuthorityService):McpEndpoint;
+  observeResource(service:McpAuthorityService, uri:string, options:{signal:AbortSignal;beforeDispatch?:()=>void|Promise<void>;onChange:(change:McpResourceChange)=>void}):Promise<McpResourceObserver>;
+  taskOwner(server: string, endpoint: McpEndpoint | undefined, signal: AbortSignal): Promise<McpTaskLease>;
   release(): void;
 }
 /** A pre-dispatch rejection is safe to record as no effect; an entered transport is uncertain. */
@@ -140,10 +144,12 @@ interface ScopeRecord {
   connections: Map<string, ConnectionRecord>;
   released: boolean;
   inflight: number;
-  taskHolders: number;
+  retainedHolders: number;
   closeRequested: boolean;
   shutdown: AbortController;
 }
+interface ResourceHolder { active:boolean; scope:ScopeRecord; change:(change:McpResourceChange)=>void }
+interface ResourceGroup { client:McpClient; uri:string; holders:Set<ResourceHolder>; acknowledgement:Promise<Record<string,unknown>>; subscribed:boolean; closing?:Promise<McpResourceRelease> }
 interface ConnectionRecord {
   handle: string;
   generation: number;
@@ -171,6 +177,8 @@ interface ConnectionRecord {
   prompts: Map<string, McpPromptDeclaration>;
   promptRevision: number;
   taskListeners: Set<(taskId:string, unsupported?:boolean)=>void>;
+  resourceGroups:Map<string,ResourceGroup>;
+  nativeDisposers:Array<()=>void>;
 }
 function fail(code: string): never { throw new McpAuthorityError(code); }
 function stable(value: unknown): string {
@@ -287,7 +295,7 @@ export class McpAuthority {
     const configRevision = this.#configRevision(scope);
     const config = loadMcpConfig({ agentDir: scope.agentDir, cwd: scope.configCwd, projectTrusted: scope.projectTrusted });
     if (configRevision !== this.#configRevision(scope)) fail('mcp-config-changed');
-    const record: ScopeRecord = { handle: randomUUID(), scope, key, config, configRevision, entries: new Map(config.servers.map(entry => [entry.name, entry])), definitions: new Map(), connections: new Map(), released: false, inflight: 0, taskHolders: 0, closeRequested: false, shutdown: new AbortController() };
+    const record: ScopeRecord = { handle: randomUUID(), scope, key, config, configRevision, entries: new Map(config.servers.map(entry => [entry.name, entry])), definitions: new Map(), connections: new Map(), released: false, inflight: 0, retainedHolders: 0, closeRequested: false, shutdown: new AbortController() };
     for (const entry of record.entries.values()) record.definitions.set(entry.name, this.#configurationIdentity(record, entry));
     if (configRevision !== this.#configRevision(scope)) fail('mcp-config-changed');
     // Disable/removal is revocation, not an ordinary replacement that may keep old leases alive.
@@ -509,9 +517,14 @@ export class McpAuthority {
         assertCallable: (name, schemaVersion) => { assert(name, schemaVersion); },
         revocationSignal: (name, schemaVersion) => assert(name,schemaVersion).connection.shutdown.signal,
         validateArguments,
+        resourceEndpoint: service => this.#endpoint(record,serviceConnection(service)),
+        observeResource: async (service,uri,options) => {
+          const connection=await prepareServer(service.server, options.signal);
+          return this.#observeResource(record,connection,service,uri,options);
+        },
         taskOwner: async (server, endpoint, signal) => {
           const connection = await prepareServer(server, signal);
-          const actual = this.#taskEndpoint(record, connection);
+          const actual = this.#endpoint(record, connection);
           if (endpoint && stable(actual) !== stable(endpoint)) fail('mcp-task-owner-changed');
           return this.#taskLease(record, connection, actual);
         },
@@ -584,7 +597,7 @@ export class McpAuthority {
         });
         record = { handle: randomUUID(), generation: ++this.#generation, key, configIdentity: this.#configurationIdentity(scope, entry), scopeKey: scope.key, scope: scope.scope,
           entry, connection, references: 0, retired: false, revoked: false, shutdown: new AbortController(),
-          credentialRevision: 0, oauthGrant: this.#oauthGrant(scope.scope, connection), provider, providerGrant, validators: new Map(), prompts: new Map(), promptRevision: 0, taskListeners: new Set() };
+          credentialRevision: 0, oauthGrant: this.#oauthGrant(scope.scope, connection), provider, providerGrant, validators: new Map(), prompts: new Map(), promptRevision: 0, taskListeners: new Set(), resourceGroups:new Map(), nativeDisposers:[] };
         this.#pool.set(key, record);
         const selected = record;
         record.ready = connection.getClient().then(client => {
@@ -662,9 +675,29 @@ export class McpAuthority {
   }
   #observeNativeClient(record: ConnectionRecord, client: McpClient): void {
     if (record.nativeClient === client) return;
+    for(const dispose of record.nativeDisposers.splice(0))dispose();
+    for(const group of record.resourceGroups.values())for(const holder of group.holders)if(holder.active)holder.change({kind:"gap"});
+    record.resourceGroups.clear();
     record.nativeClient = client;
     record.prompts.clear();
     record.promptRevision++;
+    record.nativeDisposers.push(client.onNotification('notifications/resources/updated', params => {
+      if(record.nativeClient!==client||record.revoked||!taskObject(params)||typeof params.uri!=='string'||!params.uri)return;
+      // Capture only the listeners which actually existed on this client when it received the fact.
+      const targets=[...record.resourceGroups.values()].filter(group=>group.client===client)
+        .flatMap(group=>[...group.holders].filter(holder=>holder.active).map(holder=>({uri:group.uri,holder})));
+      // No body I/O or consumer code runs on the SDK's synchronous notification reader.
+      queueMicrotask(()=>{void (async()=>{
+        await this.#assertCredential(record);
+        if(record.nativeClient!==client||record.revoked)return;
+        for(const {uri,holder} of targets){
+          if(!holder.active)continue;
+          try{this.#assertConnection(holder.scope,record);holder.change(params.uri===uri?{kind:'updated',notification:params}:{kind:'unresolved_association'});}
+          catch{holder.change({kind:'unavailable',problem:'mcp-resource-owner-unavailable'});}
+        }
+      })().catch(()=>{if(record.nativeClient!==client)return;for(const {holder} of targets)if(holder.active)holder.change({kind:'unavailable',problem:'mcp-resource-owner-unavailable'});});});
+    }));
+    record.nativeDisposers.push(client.onClose(()=>{if(record.nativeClient!==client)return;for(const group of record.resourceGroups.values())for(const holder of group.holders)if(holder.active)holder.change({kind:'gap'});}));
     client.onNotification('notifications/tasks/status', params => {
       if (record.nativeClient !== client || !taskObject(params) || typeof params.taskId !== 'string') return;
       for (const listener of record.taskListeners) listener(params.taskId);
@@ -683,20 +716,20 @@ export class McpAuthority {
       record.promptRevision++;
     });
   }
-  #taskEndpoint(scope: ScopeRecord, record: ConnectionRecord): McpTaskEndpoint {
+  #endpoint(scope: ScopeRecord, record: ConnectionRecord): McpEndpoint {
     this.#assertConnection(scope, record);
     return {server:record.entry.name,resourceKey:this.#resourceKey(scope,record.entry),
       configurationVersion:record.configIdentity,
       credentialVersion:createHash('sha256').update(stable([record.oauthGrant,record.providerGrant ?? null])).digest('hex')};
   }
-  #taskLease(scope: ScopeRecord, record: ConnectionRecord, endpoint: McpTaskEndpoint): McpTaskLease {
-    scope.taskHolders++;
+  #taskLease(scope: ScopeRecord, record: ConnectionRecord, endpoint: McpEndpoint): McpTaskLease {
+    scope.retainedHolders++;
     let released = false;
     const listeners = new Set<(taskId:string, unsupported?:boolean)=>void>();
     const assert = async () => {
       if (released) fail('mcp-task-lease-released');
       await this.#assertCredential(record);
-      if (stable(this.#taskEndpoint(scope,record)) !== stable(endpoint)) fail('mcp-task-owner-changed');
+      if (stable(this.#endpoint(scope,record)) !== stable(endpoint)) fail('mcp-task-owner-changed');
     };
     const request = async (method:string, params:Record<string,unknown>, signal:AbortSignal,
       beforeDispatch?: (client:McpClient)=>void|Promise<void>) => {
@@ -756,15 +789,90 @@ export class McpAuthority {
       release: () => {
         if (released) return; released=true;
         for (const listener of listeners) record.taskListeners.delete(listener);
-        scope.taskHolders--;
-        if (scope.closeRequested && !scope.taskHolders) this.closeScope(scope.handle);
+        scope.retainedHolders--;
+        if (scope.closeRequested && !scope.retainedHolders) this.closeScope(scope.handle);
       },
     };
   }
+
+  async #observeResource(scope:ScopeRecord,record:ConnectionRecord,service:McpAuthorityService,uri:string,options:{signal:AbortSignal;beforeDispatch?:()=>void|Promise<void>;onChange:(change:McpResourceChange)=>void}):Promise<McpResourceObserver>{
+    if(record.retired)fail('mcp-resource-owner-retired');
+    if(service.kind!=='resources'||!uri)fail('mcp-resource-subscription-invalid');
+    const endpoint=this.#endpoint(scope,record);
+    scope.retainedHolders++;
+    let released=false,holder:ResourceHolder|undefined,group:ResourceGroup|undefined;
+    const release=()=>{if(released)return;released=true;scope.retainedHolders--;if(scope.closeRequested&&!scope.retainedHolders)this.closeScope(scope.handle);};
+    let cleanup:Promise<McpResourceRelease>|undefined;
+    const detach=():Promise<McpResourceRelease>=>{
+      if(cleanup)return cleanup;
+      if(holder){holder.active=false;group?.holders.delete(holder);}
+      record.shutdown.signal.removeEventListener('abort',revoked);
+      if(!group||group.holders.size){release();return cleanup=Promise.resolve({status:'shared'});}
+      const selected=group;
+      cleanup=(async():Promise<McpResourceRelease>=>{
+        try{
+          await selected.acknowledgement;
+          // Never reconnect to clean an old client or substitute a later account.
+          await this.#assertCredential(record);
+          if(record.nativeClient!==selected.client||record.revoked||selected.client.connectionState!=='connected')return {status:'unknown'};
+          const raw=await selected.client.request('resources/unsubscribe',{uri:selected.uri},{signal:record.shutdown.signal,timeoutMs:record.connection.timeoutMs});
+          return taskObject(raw)?{status:'acknowledged',acknowledgement:raw}:{status:'unknown'};
+        }catch{return {status:'unknown'};}
+        finally{if(record.resourceGroups.get(uri)===selected)record.resourceGroups.delete(uri);release();}
+      })();
+      selected.closing=cleanup;
+      return cleanup;
+    };
+    const revoked=()=>{if(holder?.active)options.onChange({kind:'unavailable',problem:'mcp-resource-owner-revoked'});};
+    try{
+      await this.#assertCredential(record);
+      await record.connection.requestOnce(async client=>{
+        this.#observeNativeClient(record,client);await this.#assertCredential(record);
+        await options.beforeDispatch?.();
+        await this.#assertCredential(record);
+        this.#assertConnection(scope,record);
+        if(this.#service(scope,record,'resources').schemaVersion!==service.schemaVersion)fail('mcp-service-generation-mismatch');
+        if(client.serverCapabilities?.resources?.subscribe!==true)fail('mcp-resource-subscribe-unsupported');
+        options.signal.throwIfAborted();
+        const previous=record.resourceGroups.get(uri);
+        if(previous?.closing){
+          await previous.closing;
+          // The old unsubscribe may be slow. Authorization belongs to this new holder's
+          // actual entry, not the earlier attempt which merely started waiting for it.
+          await options.beforeDispatch?.();
+          await this.#assertCredential(record);
+          if(this.#service(scope,record,'resources').schemaVersion!==service.schemaVersion)fail('mcp-service-generation-mismatch');
+          if(client.serverCapabilities?.resources?.subscribe!==true)fail('mcp-resource-subscribe-unsupported');
+        }
+        options.signal.throwIfAborted();this.#assertConnection(scope,record);
+        if(record.retired||record.nativeClient!==client)fail('mcp-resource-client-retired');
+        group=record.resourceGroups.get(uri);
+        if(!group||group.client!==client){
+          const fresh:ResourceGroup={client,uri,holders:new Set(),subscribed:false,acknowledgement:Promise.resolve({})};
+          group=fresh;record.resourceGroups.set(uri,fresh);
+          fresh.acknowledgement=Promise.resolve().then(()=>client.request('resources/subscribe',{uri},{signal:record.shutdown.signal,timeoutMs:record.connection.timeoutMs})).then(raw=>{if(!taskObject(raw))throw new McpAuthorityError('mcp-resource-subscribe-response-invalid',true);fresh.subscribed=true;return raw;});
+        }
+        holder={active:true,scope,change:options.onChange};group.holders.add(holder);
+        record.shutdown.signal.addEventListener('abort',revoked,{once:true});
+        return await new Promise<Record<string,unknown>>((resolve,reject)=>{
+          const abort=()=>{options.signal.removeEventListener("abort",abort);void detach();reject(new McpAuthorityError("mcp-resource-subscribe-interrupted",true));};
+          options.signal.addEventListener("abort",abort,{once:true});if(options.signal.aborted)abort();
+          group!.acknowledgement.then(value=>{options.signal.removeEventListener("abort",abort);resolve(value);},error=>{options.signal.removeEventListener("abort",abort);reject(error);});
+        });
+      });
+      const acknowledgement=await group!.acknowledgement;
+      return {endpoint,listenerId:randomUUID(),acknowledgement,detach};
+    }catch(error){
+      if(holder)void detach();else release();
+      if(error instanceof McpAuthorityError)throw error;
+      throw new McpAuthorityError('mcp-resource-subscribe-unavailable',!!group);
+    }
+  }
+
   #service(scope: ScopeRecord, record: ConnectionRecord, kind: McpServiceKind): McpAuthorityService {
     const client = record.nativeClient;
     if (!client?.serverCapabilities?.[kind]) return fail('mcp-service-unsupported');
-    return { server: record.entry.name, kind, resourceKey: this.#resourceKey(scope, record.entry),
+    return { ...(kind==='resources'?{subscribe:client.serverCapabilities.resources?.subscribe===true}:{}), server: record.entry.name, kind, resourceKey: this.#resourceKey(scope, record.entry),
       schemaVersion: createHash('sha256').update(stable([kind, client.protocolVersion, client.serverCapabilities[kind],
         record.configIdentity, record.oauthGrant, record.providerGrant ?? null])).digest('hex') };
   }
@@ -904,7 +1012,7 @@ export class McpAuthority {
   closeScope(handle: string): void {
     const scope = this.#scopes.get(handle); if (!scope || scope.released) return;
     scope.closeRequested = true;
-    if (scope.taskHolders > 0 && !this.#closed) return;
+    if (scope.retainedHolders > 0 && !this.#closed) return;
     scope.released = true; scope.shutdown.abort(); this.#scopes.delete(handle);
     this.#drainScope(scope);
   }

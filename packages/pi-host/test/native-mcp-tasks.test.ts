@@ -10,12 +10,12 @@ function fixture(support=true){
   writeFileSync(join(root,'mcp.json'),JSON.stringify({mcpServers:{peer:{url:'https://fixture.invalid/mcp',exposure:'direct',auth:{provider:'fixture'}}}}));
   let grant=1, description='original',invalidCreate=false, toolError=false,closed=0;
   const sent:Array<Record<string,unknown>>=[];
-  let receive:(value:Record<string,unknown>)=>void=()=>{};
   type Factory=NonNullable<McpAuthorityOptions['createTransport']>;
+  let receive:Parameters<ReturnType<Factory>['onMessage']>[0]=()=>{};
   const createTransport:Factory=()=>{
     type Transport=ReturnType<Factory>;
     const listeners=new Set<Parameters<Transport['onMessage']>[0]>();
-    receive=value=>{for(const listener of listeners)listener(value as Parameters<Parameters<Transport['onMessage']>[0]>[0]);};
+    receive=value=>{for(const listener of listeners)listener(value);};
     return {async start(){},async close(){closed++;},onMessage(listener){listeners.add(listener);return()=>{listeners.delete(listener);};},onError(){return()=>{};},onClose(){return()=>{};},
       async send(message){
         sent.push(message as unknown as Record<string,unknown>);

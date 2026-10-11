@@ -102,7 +102,7 @@ records typed dependencies in its manifests. Original publication protection spa
 the short identity/epoch/revision-checked commit. GC follows those dependencies from the existing
 history, input, operation, event, policy and request roots. Catalog retains only original metadata;
 byte reads, hash/base64 work and provider serialization stay outside its control lock. Catalog
-format **50**, content domain **4**, manifest **2** and Kernel wire **5** reject older internal
+format **51**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **6** reject older internal
 formats directly. These are distinct from policy service **4** and private script worker protocol **2**.
 
 `runtime.output.media.read` uses the original caller Thread/branch plus an actual history, queued
@@ -126,6 +126,23 @@ serialized wire projection. Summary preparation keeps images typed; image token 
 unmeasured. The Host MCP adapter now projects explicit protocol tool/resource/prompt content into
 this same body contract. Live provider acceptance, physical desktop capture and complete platform/IPC
 verification remain separate evidence.
+
+## MCP resource observation
+
+`catalog_mcp_resources` retains a typed observer facet on the original finite MCP Operation.
+The original RPC result/receipt stays immutable. Its accepted reference, exact endpoint/executor,
+source scope, listener incarnation, local release and remote cleanup status are short control facts;
+acknowledgement and notification bodies use the existing ContentStore/publication contract.
+Original listener/owner/source/cancel guards publish notifications into the existing passive input
+queue. ConversationItem IDs equal their canonical input/history IDs, so ordinary context head checks
+remain exact. Environment provenance does not activate a Run or imply resource-content permission.
+
+Tree and Goal termination include observers on completed member Runs. Workspace source retirement
+must withdraw and detach its exact listeners before delegated resources can be released. Already
+accepted input stays immutable; old listener/epoch publications cannot cross a later withdrawal.
+Reconnect uses a new local incarnation and leaves a gap fact rather than promising remote replay.
+The Host's original MCP authority owns actual shared-client/URI holders, current policy and credentials;
+Catalog does not create another client, inbox, scheduler or remote task owner.
 
 ## Instruction and skill checkpoint binding
 

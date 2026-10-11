@@ -87,6 +87,8 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
       validateServiceRequest: () => { throw new Error('fixture has no services'); },
       requestService: async () => { throw new Error('fixture has no services'); },
       taskOwner: async()=>{throw new Error('fixture has no Tasks');},
+      resourceEndpoint: () => { throw new Error('fixture has no resource observers'); },
+      observeResource: async () => { throw new Error('fixture has no resource observers'); },
       implementationIdentity:'fixture-implementation',
       binding: { reference: 'fixture-mcp-owner', generation: 1, provenance: { execution_scope: 'global', configuration: { agent_dir: root, config_cwd: root, project_trusted: false }, servers: { 'fixture-server': { definition_version: 'fixture-config', resource_key: 'fixture-server:effect' } } },
         serverSelections: [{ name: 'fixture-server', configurationVersion: 'fixture-config', hiddenTools: [] }],

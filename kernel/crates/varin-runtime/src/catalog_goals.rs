@@ -521,6 +521,12 @@ impl Catalog {
             d.blocked = None;
             d.reason_ref = None;
         }
+        if matches!(
+            action,
+            GoalControlAction::Cancel | GoalControlAction::Complete
+        ) {
+            cancel_resource_observers(&tx, id)?;
+        }
         d.revision += 1;
         d.generation += 1;
         put(&tx, "goals", id, &d)?;
@@ -540,6 +546,20 @@ impl Catalog {
         tx.commit()?;
         Ok(d.receipt())
     }
+}
+
+fn cancel_resource_observers(tx: &Transaction<'_>, goal_id: &str) -> Result<()> {
+    let runs = {
+        let mut q = tx.prepare("SELECT id FROM goal_runs WHERE goal_id=?1")?;
+        let rows = q
+            .query_map([goal_id], |r| r.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        rows
+    };
+    for run in runs {
+        super::mcp_resources::cancel_run(tx, &run, false)?;
+    }
+    Ok(())
 }
 
 pub(super) fn admit_mutation_tx(
@@ -1189,6 +1209,7 @@ impl Catalog {
         d.generation += 1;
         match p.input.state {
             GoalReportState::Complete => {
+                cancel_resource_observers(&tx, &d.id)?;
                 d.control = GoalControl::Complete;
                 d.blocked = None;
                 d.dependency_operation_id = None;

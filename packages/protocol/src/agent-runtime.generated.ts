@@ -1068,7 +1068,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 5; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 6; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -1288,7 +1288,7 @@ export interface McpProvenance {
   servers: Record<string, McpServerSelection>;
 }
 
-export type McpRoute = {kind:"direct"} | {kind:"server_argument";argument:string} | {kind:"discovery";argument:string} | {kind:"direct_task"} | {kind:"server_task_argument";argument:string} | {kind:"task_control";argument:string;action:McpTaskAction};
+export type McpRoute = {kind:"direct"} | {kind:"server_argument";argument:string} | {kind:"discovery";argument:string} | {kind:"direct_task"} | {kind:"server_task_argument";argument:string} | {kind:"task_control";argument:string;action:McpTaskAction} | {kind:"resource_subscribe";argument:string} | {kind:"resource_unsubscribe";argument:string};
 
 export interface McpBinding {
   routes: Record<string, McpRoute>;
@@ -1924,6 +1924,7 @@ export interface Operation {
   intent: unknown;
   result: OperationResult | null;
   managed_process?: ManagedProcess;
+  mcp_resource_subscription?: McpResourceSubscription;
 }
 
 export interface ProviderOriginal {
@@ -2338,14 +2339,7 @@ export interface FamilyRead {
 
 export interface FamilyItem { threadId: string; branchId: string; runId: string | null; headId: string | null; itemId: string; format: 'conversation_json'; text: string; offset: number; nextOffset: number | null; totalBytes: number }
 
-export interface McpTaskEndpoint {
-  server: string;
-  resourceKey: string;
-  configurationVersion: string;
-  credentialVersion: string;
-}
-
-export type HostJobSubject = {kind:'workspace';workspaceId:string;subjectId:string} | {kind:'mcp';endpoint:McpTaskEndpoint;dispatchId:string};
+export type HostJobSubject = {kind:'workspace';workspaceId:string;subjectId:string} | {kind:'mcp';endpoint:McpEndpoint;dispatchId:string};
 
 export type McpTaskStatus = 'working' | 'input_required' | 'completed' | 'failed' | 'cancelled';
 
@@ -2425,3 +2419,80 @@ export interface HostJobView extends HostJobLink {
 }
 
 export type McpTaskResultKind = 'response' | 'protocol_error';
+
+export interface McpResourceBinding {
+  operationId: string;
+  executionOwner: ExecutorOwner;
+  endpoint: McpEndpoint;
+  schemaVersion: string;
+  uri: string;
+}
+
+export interface McpResourceSubscription {
+  binding: McpResourceBinding;
+  sourceScope: McpExecutionScope;
+  acceptanceRef: unknown | null;
+  listenerId: string | null;
+  availability: McpResourceAvailability;
+  localReleased: boolean;
+  remoteCleanup: McpResourceCleanup;
+  lastEventCursor: number | null;
+  problem: string | null;
+}
+
+export interface McpResourcePending {
+  revision: number;
+  operationId: string;
+  runId: string;
+  threadId: string;
+  branchId: string;
+  cancelRequested: boolean;
+  subscription: McpResourceSubscription;
+}
+
+export type McpResourceAvailability = 'pending' | 'active' | 'gap' | 'unavailable' | 'closed';
+
+export type McpResourceCleanup = 'not_requested' | 'shared' | 'acknowledged' | 'unknown';
+
+export type McpResourceFactKind = 'updated' | 'unresolved_association' | 'gap';
+
+export interface McpResourceBeginParams {
+  binding: McpResourceBinding;
+}
+
+export interface McpResourceAcceptParams {
+  binding: McpResourceBinding;
+  listenerId: string;
+  content: unknown;
+}
+
+export interface McpResourceListenerParams {
+  binding: McpResourceBinding;
+  expectedListenerId: string | null;
+  listenerId: string | null;
+  availability: McpResourceAvailability;
+  localReleased: boolean;
+  remoteCleanup: McpResourceCleanup;
+  problem: string | null;
+}
+
+export interface McpResourceNotifyParams {
+  binding: McpResourceBinding;
+  listenerId: string;
+  factId: string;
+  kind: McpResourceFactKind;
+  notification?: unknown;
+}
+
+export interface McpResourceAccessParams {
+  runId: string;
+  targetOperationId: string;
+  control: boolean;
+}
+
+export interface McpEndpoint {
+  server: string;
+  resourceKey: string;
+  configurationVersion: string;
+  credentialVersion: string;
+}

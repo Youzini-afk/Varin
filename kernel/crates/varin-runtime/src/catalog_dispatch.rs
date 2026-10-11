@@ -965,6 +965,7 @@ impl Catalog {
             // those original registrations without changing the source Run's terminal fact.
             super::followups::cancel_tree_source_run(&tx, &run.id)?;
             super::goals::cancel_run(&tx, &run.id)?;
+            super::mcp_resources::cancel_run(&tx, &run.id, false)?;
         }
         let mut process_ids = Vec::new();
         for run in &runs {

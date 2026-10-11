@@ -42,11 +42,19 @@ const tasks = createMcpTaskRuntime({ kernel, runtime, recover: (pending, signal)
 }, onError: error => write({ kind: 'fixture-task-error', code: error.message }) });
 const bridge = new ToolBridge(() => epoch, async frame => { write(frame); },
   () => write({ kind: 'fixture-failed', code: 'original-tool-bridge-send-failed' }));
-let consumer: Awaited<ReturnType<typeof import('./mcp-task-consumer-host.test-helper.js').createTaskConsumers>> | undefined;
+let consumer: Awaited<ReturnType<typeof import('./mcp-consumer-host.test-helper.js').createMcpConsumers>> | undefined;
+let resource: Awaited<ReturnType<typeof import('./mcp-resource-host.test-helper.js').createResourceFixture>> | undefined;
 const pixel = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7h8AAAAASUVORK5CYII=';
 
 async function initialize(frame: Record<string, unknown>) {
   epoch = String(frame.epoch); root = String(frame.root);
+  if (frame.resources === true) {
+    const { createResourceFixture } = await import('./mcp-resource-host.test-helper.js');
+    resource = await createResourceFixture({ root, kernel, runtime, authority, compositions, bridge,
+      onError: error => write({ kind: 'fixture-resource-error', code: error.message }) });
+    write({ kind: 'fixture-prepared', ...await resource.prepare(frame) });
+    return;
+  }
   const agentDir = join(root, 'agent'), peer = join(root, 'task-peer.mjs');
   await mkdir(agentDir, { recursive: true });
   await writeFile(peer, `import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -109,8 +117,8 @@ createInterface({input:process.stdin}).on('line',line=>{const q=JSON.parse(line)
   const lease = createMcpLease({ lease: original, kernel, tasks,
     currentPolicy: async () => ({ mode: 'normal', rules: [] }) });
   if (frame.consumer === true) {
-    const { createTaskConsumers } = await import('./mcp-task-consumer-host.test-helper.js');
-    consumer = await createTaskConsumers({ root, agentDir, authority, kernel, tasks, bridge, parentMcp: lease });
+    const { createMcpConsumers } = await import('./mcp-consumer-host.test-helper.js');
+    consumer = await createMcpConsumers({ root, agentDir, authority, kernel, tasks, bridge, parentMcp: lease });
     write({ kind: 'fixture-prepared', names, ...consumer.prepared });
     return;
   }
@@ -120,7 +128,11 @@ createInterface({input:process.stdin}).on('line',line=>{const q=JSON.parse(line)
 }
 async function receive(frame: Record<string, unknown>) {
   if (frame.kind === 'fixture-initialize') return initialize(frame);
+  if (frame.kind === 'fixture-resource-prepare') {
+    assert(resource); write({ kind: 'fixture-prepared', ...await resource.prepare(frame) }); return;
+  }
   if (frame.kind === 'fixture-consumer-parent' || frame.kind === 'fixture-consumer-child') {
+    if (resource) { write({ kind: 'fixture-prepared', ...await resource.receive(frame) }); return; }
     assert(consumer); write({ kind: 'fixture-prepared', ...await consumer.receive(frame) }); return;
   }
   if (frame.kind === 'fixture-response') {
@@ -134,6 +146,10 @@ async function receive(frame: Record<string, unknown>) {
   if (frame.kind === 'fixture-event') { for (const listener of eventListeners) listener(frame.event); return; }
   if (frame.kind === 'fixture-ready') { for (const listener of readyListeners) listener(); return; }
   if (frame.kind === 'fixture-finish') {
+    if (resource) {
+      const result = await resource.finish(); bridge.close(); compositions.close(); await authority.close();
+      write({ kind: 'fixture-finished', ...result }); return;
+    }
     await tasks.dispose(); bridge.close(); await consumer?.close(); scope?.release(); compositions.close(); await authority.close();
     write({ kind: 'fixture-finished', requests: (await readFile(join(root, 'receiver-trace.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line)),
       tasks: JSON.parse(await readFile(join(root, 'receiver-tasks.json'), 'utf8')) }); return;
@@ -144,4 +160,4 @@ const lines = createInterface({ input: process.stdin });
 lines.on('line', line => { void receive(JSON.parse(line) as Record<string, unknown>).catch(error => {
   write({ kind: 'fixture-failed', code: error instanceof Error ? error.stack : String(error) });
 }); });
-lines.on('close', () => { void tasks.dispose(); bridge.close(); void consumer?.close(); scope?.release(); compositions.close(); void authority.close(); });
+lines.on('close', () => { void tasks.dispose(); void resource?.finish(); bridge.close(); void consumer?.close(); scope?.release(); compositions.close(); void authority.close(); });

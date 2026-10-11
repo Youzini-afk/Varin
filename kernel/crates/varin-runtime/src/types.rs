@@ -55,6 +55,8 @@ pub struct Operation<
     #[serde(skip_serializing_if = "Option::is_none")]
     pub host_job: Option<H>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub mcp_resource_subscription: Option<crate::catalog::mcp_resources::McpResourceSubscription>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub managed_process: Option<crate::catalog::managed_process::ManagedProcess>,
     pub external_receipt: Option<E>,
     pub call_completion: Option<C>,

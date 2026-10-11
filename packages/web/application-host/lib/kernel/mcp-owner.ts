@@ -26,6 +26,7 @@ import { compileToolJsonSchema } from '@varin/pi-host/tool-schema';
 import { projectMcpOutput } from './mcp-output.js';
 import { McpAuthorityError, requiresMcpTask } from '@varin/pi-host/mcp-authority';
 import type { McpTaskRuntime } from './mcp-task-runtime.js';
+import type { McpResourceRuntime } from './mcp-resource-runtime.js';
 import { HostToolAdmissionError } from './tool-admission.js';
 
 const builtins = new Map(MCP_CAPABILITIES.map(value => [value.name, { ...value, validate: compileToolJsonSchema(value.schema) }]));
@@ -44,6 +45,7 @@ const receipt = (
 export interface McpOwnerOptions {
   lease: McpAuthorityLease;
   tasks?: McpTaskRuntime;
+  resources?:McpResourceRuntime;
   kernel: KernelClient;
   /** Read current Host settings at authorization and dispatch, never a renderer's policy. */
   currentPolicy(): Promise<PermissionPolicy>;
@@ -53,10 +55,14 @@ export interface McpOwnerOptions {
   selection?: McpBinding;
   retarget?: boolean;
 }
-type Target = { kind: 'tool'; tool: McpAuthorityTool; args: Record<string, unknown>; task: boolean; ttl?:number }
+type Target = {kind:'subscribe';service:McpAuthorityService;uri:string;permissionName:string;args:Record<string,unknown>}
+  | {kind:'unsubscribe';operationId:string;permissionName:string;args:Record<string,unknown>}
+  | { kind: 'tool'; tool: McpAuthorityTool; args: Record<string, unknown>; task: boolean; ttl?:number }
   | { kind: 'service'; service: McpAuthorityService; request: McpServiceRequest; permissionName: string; args: Record<string, unknown> }
   | { kind:'control'; action:import('./protocol.generated.js').McpTaskAction; operationId:string; permissionName:string; args:Record<string,unknown> };
 type Selection =
+  | {kind:'unsubscribe';operationId:string}
+  | {kind:'subscribe';args:Record<string,unknown>}
   | { kind: 'control'; action:import('./protocol.generated.js').McpTaskAction; operationId:string }
   | { kind: 'discover'; server?: string; query: string }
   | {
@@ -68,7 +74,7 @@ type Selection =
       ttl?:number;
       args: Record<string, unknown>;
     }
-  | { kind: 'service'; operation: Exclude<McpBuiltinOperation, 'discover' | 'call' | 'start_task' | 'task_get' | 'task_wait' | 'task_cancel'>; args: Record<string, unknown> }
+  | { kind: 'service'; operation: Exclude<McpBuiltinOperation, 'discover' | 'call' | 'start_task' | 'task_get' | 'task_wait' | 'task_cancel' | 'subscribe_resource' | 'unsubscribe_resource'>; args: Record<string, unknown> }
   | { kind: 'direct'; target: Target };
 export function createMcpLease(options: McpOwnerOptions): McpToolLease {
   const { lease } = options;
@@ -111,7 +117,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
   const configured = servers.size > 0 || lease.binding.readiness.configErrorCount > 0 || Boolean(options.unavailableWorkspaceScope);
   for (const {route, operation: _operation, ...schema} of MCP_CAPABILITIES) {
     // Catalog-owned controls keep an accepted Job readable even after its server is removed.
-    if(!configured && !(route.kind === 'task_control' && options.tasks))continue;
+    if(!configured && !(route.kind === 'task_control' && options.tasks) && !(route.kind==='resource_unsubscribe' && options.resources))continue;
     binding.tools.push(structuredClone(schema));
     binding.routes[schema.name] = structuredClone(route);
   }
@@ -179,6 +185,8 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
     const builtin = builtins.get(call.name);
     if (builtin) {
       if (!builtin.validate(args) || (args.server !== undefined && !servers.has(String(args.server)))) throw new HostToolAdmissionError('mcp_arguments_invalid');
+      if(builtin.route.kind==='resource_subscribe')return {kind:'subscribe',args};
+      if(builtin.route.kind==='resource_unsubscribe')return {kind:'unsubscribe',operationId:args[builtin.route.argument] as string};
       if (builtin.route.kind === 'task_control') return {kind:'control',action:builtin.route.action,operationId:args[builtin.route.argument] as string};
       if (builtin.operation === 'discover') return { kind: 'discover', ...(typeof args.server === 'string' ? {server:args.server} : {}), query: String(args.query ?? '') };
       if (builtin.operation === 'call' || builtin.operation === 'start_task') return { kind: 'deferred', server: args.server as string, tool: args.tool as string,
@@ -190,20 +198,32 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
     return { kind: 'direct', target: { kind: 'tool', tool, args,task:binding.routes[call.name]?.kind === 'direct_task' } };
   };
   const validateTarget = (target: Target) => {
-    if (target.kind === 'control') return;
+    if (target.kind === 'control'||target.kind==='unsubscribe') return;
+    if(target.kind==='subscribe'){lease.assertService(target.service);if(!target.service.subscribe)throw new HostToolAdmissionError('mcp_resource_subscribe_unsupported');return;}
     if (target.kind === 'service') { lease.validateServiceRequest(target.service, target.request); return; }
     if (target.task && (!target.tool.taskCapable || target.tool.taskSupport === 'forbidden')) throw new HostToolAdmissionError('mcp_task_unsupported');
     if (!target.task && requiresMcpTask(target.tool)) throw new HostToolAdmissionError('mcp_task_required_use_mcp_start_task');
     lease.validateArguments(targetName(target.tool.name, target.tool.schemaVersion), target.tool.schemaVersion, target.args);
   };
   const assertTarget = (target: Target) => {
+    if(target.kind==='unsubscribe'){if(!options.resources||released)throw new HostToolAdmissionError('mcp_resource_owner_unavailable');return;}
+    if(target.kind==='subscribe'){lease.assertService(target.service);return;}
     if (target.kind === 'control') { if(!options.tasks || released)throw new HostToolAdmissionError('mcp_task_owner_unavailable');return; }
     if (target.kind === 'service') { lease.assertService(target.service); lease.validateServiceRequest(target.service,target.request); return; }
     lease.assertCallable(targetName(target.tool.name, target.tool.schemaVersion), target.tool.schemaVersion);
   };
-  const targetSignal = (target: Target) => target.kind === 'control' ? controlLifetime.signal : target.kind === 'service' ? lease.serviceRevocationSignal(target.service)
+  const targetSignal = (target: Target) => target.kind === 'control'||target.kind==='unsubscribe' ? controlLifetime.signal : target.kind === 'service'||target.kind==='subscribe' ? lease.serviceRevocationSignal(target.service)
     : lease.revocationSignal(targetName(target.tool.name, target.tool.schemaVersion), target.tool.schemaVersion);
   const prepareTarget = async (selected: Exclude<Selection, {kind:'discover'}>, call: HostToolCall, signal: AbortSignal): Promise<Target> => {
+    if(selected.kind==='unsubscribe'){
+      if(!options.resources)throw new HostToolAdmissionError('mcp_resource_owner_unavailable');
+      await options.kernel.agentRuntimeRequest('runtime.mcp.resource.access',{runId:call.runId,targetOperationId:selected.operationId,control:true},signal);
+      return {...selected,permissionName:call.name,args:call.arguments as Record<string,unknown>};
+    }
+    if(selected.kind==='subscribe'){
+      if(!options.resources)throw new HostToolAdmissionError('mcp_resource_owner_unavailable');
+      return {kind:'subscribe',service:await lease.prepareService(selected.args.server as string,'resources',selected.args.schemaVersion as string,signal),uri:selected.args.uri as string,permissionName:call.name,args:selected.args};
+    }
     if(selected.kind === 'control') {
       if(!options.tasks)throw new HostToolAdmissionError('mcp_task_owner_unavailable');
       await options.kernel.agentRuntimeRequest('runtime.host_job.access',{runId:call.runId,targetOperationId:selected.operationId,control:selected.action === 'cancel'},signal);
@@ -385,6 +405,13 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
           if (current.generation !== policyGeneration || decision(current.value, target).decision === 'deny') throw new HostToolAdmissionError('mcp_authorization_changed');
           assertTarget(target);
         };
+        if(target.kind==='unsubscribe'){await beforeDispatch();return await options.resources!.unsubscribe({call,operationId:target.operationId,signal});}
+        if(target.kind==='subscribe'){
+          const selected=target;
+          return await options.resources!.subscribe({call,owner,lease,service:target.service,uri:target.uri,signal,beforeDispatch,
+            checkObservation:async()=>{const current=await policy();if(decision(current.value,selected).decision==='deny')throw new McpAuthorityError('mcp-resource-permission-revoked');},
+          });
+        }
         if(target.kind === 'control') {
           await beforeDispatch();
           return await options.tasks!.control({call,owner,action:target.action,targetOperationId:target.operationId,signal});

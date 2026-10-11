@@ -38,7 +38,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 50;
+pub(crate) const FORMAT: i64 = 51;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -791,6 +791,7 @@ impl Catalog {
         }
         let op = Operation {
             host_job: None,
+            mcp_resource_subscription: None,
             managed_process: None,
             external_receipt: None,
             call_completion: None,
@@ -1755,6 +1756,7 @@ mod content_collection_tests;
 
 pub(super) fn request_cancel_run_in(tx: &Transaction<'_>, id: &str) -> Result<Run> {
     let mut run: Run = record(tx, "runs", id)?;
+    mcp_resources::cancel_run(tx, id, false)?;
     if run.state.terminal() || run.cancel_requested {
         return Ok(run);
     }
@@ -1798,7 +1800,8 @@ pub(super) fn request_cancel_operation_in(tx: &Transaction<'_>, key: &str) -> Re
             op.outcome,
             Some(Outcome::Indeterminate | Outcome::Cancelled)
         )
-        && !unproven_process)
+        && !unproven_process
+        && op.mcp_resource_subscription.is_none())
         || op.cancel_requested
     {
         return Ok(op);
@@ -1840,3 +1843,6 @@ pub mod computer_events;
 
 #[path = "catalog_managed_process.rs"]
 pub mod managed_process;
+
+#[path = "catalog_mcp_resources.rs"]
+pub mod mcp_resources;

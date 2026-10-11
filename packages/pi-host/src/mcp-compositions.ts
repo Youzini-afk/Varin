@@ -281,6 +281,8 @@ class Scope {
         const selected=await owner.lease.prepareTool(server,tool,version,signal);
         discovered.set(targetKey(selected.name,selected.schemaVersion),owner);return selected;
       },
+      resourceEndpoint: service => serverOwner(service.server).lease.resourceEndpoint(service),
+      observeResource: (service,uri,options) => serverOwner(service.server).lease.observeResource(service,uri,options),
       taskOwner: (server,endpoint,signal) => serverOwner(server).lease.taskOwner(server,endpoint,signal),
       discoverServices: (server,signal) => serverOwner(server).lease.discoverServices(server,signal),
       prepareService: (server,kind,version,signal) => serverOwner(server).lease.prepareService(server,kind,version,signal),

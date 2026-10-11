@@ -1,13 +1,13 @@
 /** Task protocol validation over the original client's request API. No transport or durable owner. */
-import type { McpTaskEndpoint, McpTaskState } from '@varin/protocol';
+import type { McpEndpoint, McpTaskState } from '@varin/protocol';
 import type { McpClient, Tool } from '@earendil-works/pi-mcp';
-export type { McpTaskEndpoint, McpTaskState } from '@varin/protocol';
+export type { McpEndpoint, McpTaskState } from '@varin/protocol';
 export type McpTaskSupport = 'forbidden' | 'optional' | 'required';
 /** Tool-level requirements apply only after the request capability is negotiated. */
 export const requiresMcpTask = (tool:{taskSupport:McpTaskSupport;taskCapable:boolean}):boolean => tool.taskCapable && tool.taskSupport === 'required';
 export interface McpTaskResponse { task: McpTaskState; result: Record<string, unknown> }
 export interface McpTaskLease {
-  readonly endpoint: McpTaskEndpoint;
+  readonly endpoint: McpEndpoint;
   start(name: string, arguments_: Record<string, unknown>, options: {schemaVersion:string;signal:AbortSignal;ttl?:number;beforeDispatch?:()=>void|Promise<void>}): Promise<McpTaskResponse>;
   get(taskId:string, signal:AbortSignal):Promise<McpTaskResponse>;
   result(taskId:string, signal:AbortSignal):Promise<Record<string,unknown>>;

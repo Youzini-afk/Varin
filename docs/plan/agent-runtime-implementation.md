@@ -19,6 +19,14 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-11 增量：原 MCP 资源观察
+
+- 原 schema 声明 subscribe/unsubscribe，finite Result/Thread 的原 Operation 保 observer facet；真实 McpAuthority/client/URI 共享 holder、配置/grant 与 Catalog/ContentStore/输入队列仍各有唯一 owner。Catalog **51**、input **7**、wire **6**直接拒旧，无第二任务库或兼容 reader。
+- 通知只成为被动 Environment 事实，不自动读 URI 或创建 Run。精确 URI 保原 params；无法归属的子资源通知只给当前 holder 短诊断，不扩散其他 URI/metadata。原模型、policy、无源 child 与安装 SDK nested 都用真实origin；共享 observer 一方退出不停止另一方。
+- 原 source 释放前先短 fence、同步 detach、确认本地元数据，慢正文/remote cleanup 不阻 unpin；原 tree/Goal Stop 包含终态 Run observer，首次创建复用原 FrozenGoal authority。已收 ACK、原 Unknown 交换、local release/远端 ACK/unknown 各自保留；同身份本地发布和 reopen gap 不冒称远端重放。
+- 实际通知进下一模型的 canonical history ID、普通配置换代旧 holder、清理后撤权重验、Goal 结束/显式新 Goal handoff、本地 begin 未派发、已知 ACK 自动对账/有限 RPC 停止证据及迟到 snapshot 清理倒退均已修后复验。独审接受有限两工具合同；真实资源四链与原 Tasks 三链、40条受影响runtime回归、Host34/UI77、完整types及fresh wire6二进制/Host/布局证据分别见[本片验收](../reviews/runtime-mcp-resources-2026-10-11.md)。历史Tasks的Pi生产build与full test types表述也已纠正，局部通过不代表两设计完成。
+- 接续 MCP 服务端交互，再沿两总设计推进环境/Web/材料/PDF/学术/Bot、来源/检索/上下文/provider 余能力。完整产品/外部部署/平台性能验收及用户负责最终迁移的边界不变。
+
 ## 2026-10-11 增量：原 MCP Tasks 与持久结果观察
 
 - 原 McpAuthority/installed client 与 Catalog Operation/HostJob 共同接 negotiated Tasks，无第二任务库、transport 或 grant owner。schema 单声明 required/optional/forbidden 双 gate 与 start/get/wait/cancel typed routes；HostJob subject 明确 Workspace/MCP，global/source-less 不伪造来源。Catalog **50**、wire **5**直接拒旧，其他正文/策略域保持。

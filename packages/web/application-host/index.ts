@@ -30,6 +30,8 @@ import { createPolicyModelPreparer } from './lib/kernel/policy-models.js';
 import { createAgentPolicy } from './lib/kernel/agent-policy.js';
 import { RunObservers } from './lib/kernel/run-observers.js';
 import { McpAuthority, McpCompositions, type McpCompositionScope, mcpHostAgentDir, mcpHostProjectTrusted, readMcpHostPermissionPolicy } from '@varin/pi-host/mcp-authority';
+import { createMcpResourceRuntime } from './lib/kernel/mcp-resource-runtime.js';
+import { createMcpResourceRecovery } from './lib/kernel/mcp-resource-recovery.js';
 import { createMcpTaskRuntime } from './lib/kernel/mcp-task-runtime.js';
 import { createMcpTaskRecovery } from './lib/kernel/mcp-task-recovery.js';
 import { createMcpLease } from './lib/kernel/mcp-owner.js';
@@ -2952,7 +2954,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const modelAuthority = createModelAuthority(hostCredentialAuthority);
   const liveSources = createLiveSourceOwner({ documents: documentsAuthority, kernel: kernelClient });
   kernelClient.setLanguageOwner(createLanguageOwner({ documents: documentsAuthority, supervisor: languageSupervisor, validateSource: liveSources.validate }));
-  const prepareChildMcp = createChildMcpPreparer({ authority: mcpAuthority, tasks:()=>mcpTaskRuntime, kernel: kernelClient, agentDir: mcpAgentDir, hostId,
+  const prepareChildMcp = createChildMcpPreparer({ authority: mcpAuthority, tasks:()=>mcpTaskRuntime, resources:()=>mcpResourceRuntime, kernel: kernelClient, agentDir: mcpAgentDir, hostId,
     inspectWorkspace: id => documentsAuthority.inspectWorkspace(id),
     projectTrusted: cwd => mcpHostProjectTrusted(mcpAgentDir, cwd),
     currentPolicy: async (cwd, trusted) => readMcpHostPermissionPolicy(mcpAgentDir, cwd, trusted),
@@ -2990,7 +2992,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const owner = await selected.ready;
     signal?.throwIfAborted();
     const lease = input.requiredBinding?await owner.restore(input.requiredBinding,signal):owner.snapshot();
-    try { return createMcpLease({ lease, kernel: kernelClient, tasks:mcpTaskRuntime,
+    try { return createMcpLease({ lease, kernel: kernelClient, tasks:mcpTaskRuntime,resources:mcpResourceRuntime,
       ...(input.requiredBinding ? { selection: input.requiredBinding } : {}),
       ...(input.source && !input.executionCwd ? { unavailableWorkspaceScope: {
         workspaceId: input.source.workspaceId,
@@ -3111,6 +3113,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }),
     onError:()=>console.error('[MCP] Original task reconciliation requires attention'),
   });
+  const mcpResourceRuntime=createMcpResourceRuntime({kernel:kernelClient,runtime:agentRuntime,
+    recover:createMcpResourceRecovery({kernel:kernelClient,authority:mcpAuthority,agentDir:mcpAgentDir,hostId,
+      inspectWorkspace:id=>documentsAuthority.inspectWorkspace(id),projectTrusted:cwd=>mcpHostProjectTrusted(mcpAgentDir,cwd),
+      currentPolicy:async(cwd,trusted)=>readMcpHostPermissionPolicy(mcpAgentDir,cwd,trusted),
+      validateLiveSource:async(source,signal)=>{if(source.mode!=='live_root'||!source.live_root)throw new Error('MCP resource original live source missing');
+        await liveSources.validate({workspaceId:source.workspace_id,executionWorkspaceId:source.execution_workspace_id,liveRoot:source.live_root},signal);},
+    }),onError:()=>console.error('[MCP] Original resource observation requires reconciliation'),
+  });
+  agentRuntime.setMcpResourceOwner(mcpResourceRuntime);
   const researchRuntime = createResearchRuntime({ kernel: kernelClient, runtime: agentRuntime,
     experiments: experimentService, resources: resourceService, sources: sourceService,
     onError: (_error: Error) => console.error('[Research] Original job reconciliation requires attention'),
@@ -4240,6 +4251,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const unregisterResearchCapability = extensionRuntime.capabilities.register(RESEARCH_CAPABILITY, researchRuntime.capability);
   researchRuntime.start();
   mcpTaskRuntime.start();
+  mcpResourceRuntime.start();
   const unregisterScheduleCapability = extensionRuntime.capabilities.register(SCHEDULE_CAPABILITY,
     createScheduleToolOwner({ service: scheduledTaskService, workspaceRoot: async workspaceId => (await documentsAuthority.inspectWorkspace(workspaceId)).root }));
   const unregisterChildIntegrationCapability = extensionRuntime.capabilities.register(CHILD_INTEGRATION_CAPABILITY,
@@ -4778,6 +4790,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       unregisterScriptCapability();
       unregisterResearchCapability();
       await researchRuntime.dispose();
+      await mcpResourceRuntime.dispose();
       await mcpTaskRuntime.dispose();
       await resourceService.dispose();
       experimentService.detachObservers();

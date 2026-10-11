@@ -33,6 +33,7 @@ import { ThreadQueuedInput } from './ThreadQueuedInput';
 import { ThreadChildReport } from './ThreadChildReport';
 
 const operationCancelLabel = (operation: ThreadSnapshot['operations'][number]): string => {
+  if (operation.mcp_resource_subscription) return 'Stop resource observation';
   if (operation.host_job?.mcpTask) return 'Request remote task cancellation';
   if (operation.executor === 'dispatch') return 'Cancel child task';
   if (operation.waiting_on?.startsWith('host-job-wait:')
@@ -67,7 +68,36 @@ function McpTaskStatus({ operation }: { operation: ThreadSnapshot['operations'][
   </section>;
 }
 
+function McpResourceStatus({ operation }: { operation: ThreadSnapshot['operations'][number] }) {
+  const subscription = operation.mcp_resource_subscription;
+  if (!subscription) return null;
+  const availability = {
+    pending: 'Subscription acknowledgement pending',
+    active: 'Resource observation active',
+    gap: 'Resource observation gap: some updates may have been missed',
+    unavailable: 'Resource observation unavailable',
+    closed: 'Resource observation closed',
+  }[subscription.availability];
+  const cleanup = {
+    not_requested: 'Remote cleanup not requested',
+    shared: 'Remote subscription retained for other observers',
+    acknowledged: 'Remote unsubscribe acknowledged',
+    unknown: 'Remote cleanup unconfirmed',
+  }[subscription.remoteCleanup];
+  return <section aria-label="MCP resource observation" className="space-y-1 text-xs text-muted-foreground">
+    <p>{subscription.binding.endpoint.server} · {subscription.binding.uri}</p>
+    <p>{availability}</p>
+    <p>{subscription.localReleased ? 'Local observation released' : 'Local observation retained'} · {cleanup}</p>
+    {subscription.availability === 'gap' && <p>Read the resource explicitly if you need its current contents.</p>}
+    {subscription.problem && <p role="status">{subscription.availability === 'closed' && subscription.localReleased
+      ? 'Observation has ended locally. Check the original service if remote cleanup needs attention.'
+      : 'Check the original MCP connection and resource access. Updates do not read the resource automatically.'}</p>}
+  </section>;
+}
+
 function canCancelOperation(operation: ThreadSnapshot['operations'][number], waitingOn?: string | null): boolean {
+  const subscription = operation.mcp_resource_subscription;
+  if (subscription) return subscription.availability !== 'closed' || !subscription.localReleased;
   const task = operation.host_job?.mcpTask;
   return task ? !operation.cancel_requested && (task.task.status === 'working' || task.task.status === 'input_required')
     : operation.phase !== 'terminal' && (operation.executor !== 'ask_user' || waitingOn === operation.waiting_on);
@@ -290,6 +320,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         {operation.executor === 'ask_user' && <ThreadQuestion operation={operation} enabled={!pending && run?.state === 'waiting' && run.waiting_on === operation.waiting_on} onAnswer={answer => act(() => api.answerQuestion({ ...identity, operationId: operation.id, answer }))} />}
         <div>Background operation · {operation.phase} · {operation.outcome ?? 'In progress'} · effect: {operation.effect}</div>
         <McpTaskStatus operation={operation} />
+        <McpResourceStatus operation={operation} />
         {operation.host_job?.mcpTaskResult && <details><summary>Remote task result</summary><ThreadOutput api={api} identity={identity}
           holder={{ kind: 'operation', operationId: operation.id, output: 'mcp_task_result' }} output={operation.host_job.mcpTaskResult} messageId={`${operation.id}:mcp-task-result`} /></details>}
         {api.processes && operation.executor === 'process_spawn' && operation.call_completion?.kind === 'job_accepted'

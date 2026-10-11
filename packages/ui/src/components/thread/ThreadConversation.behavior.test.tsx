@@ -2101,3 +2101,116 @@ it('keeps accepted remote task control after its Run ends and distinguishes canc
   expect(card().textContent).not.toContain('Executor stop confirmed');
   expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
 });
+
+function resourceObservation(): ThreadSnapshot['operations'][number] {
+  const id = 'operation:original-resource-subscribe';
+  return {
+    id, run_id: 'completed-source-run', epoch: 1, revision: 3, phase: 'terminal',
+    outcome: 'indeterminate', effect: 'unknown', cancel_requested: false, lifetime: 'thread',
+    handed_off: true, executor: 'mcp', waiting_on: null, intent: {}, result: null,
+    external_receipt: null, execution_owner: { kind: 'external', identity: 'original-mcp', epoch: 'original-owner' },
+    call_completion: { kind: 'result', outcome: 'indeterminate', effect: 'unknown',
+      content: { data: { original: 'subscribe-response' }, parts: [{ kind: 'text', text: 'Original subscribe RPC response' }] } },
+    mcp_resource_subscription: {
+      binding: { operationId: id, executionOwner: { kind: 'external', identity: 'original-mcp', epoch: 'original-owner' },
+        endpoint: { server: 'original-resource-server', resourceKey: 'original-resource-key', configurationVersion: 'frozen-config', credentialVersion: 'original-grant' },
+        schemaVersion: 'original-resources-schema', uri: 'file:///opaque/server-resource?revision=original' },
+      sourceScope: 'workspace', acceptanceRef: { content_object: 'resource-acceptance' }, listenerId: 'original-listener',
+      availability: 'active', localReleased: false, remoteCleanup: 'not_requested', lastEventCursor: 11, problem: null,
+    },
+  };
+}
+
+it('stops the original live resource observation after its subscribe RPC and Run ended, retaining the original Unknown result', async () => {
+  const f = fixture();
+  const operation = resourceObservation();
+  f.view.operations = [operation];
+  const cancel = vi.fn<ThreadsAPI['cancelOperation']>(async id => {
+    expect(id).toBe(operation.id);
+    operation.cancel_requested = true;
+    Object.assign(operation.mcp_resource_subscription!, {
+      availability: 'closed', localReleased: true, remoteCleanup: 'unknown',
+      problem: 'Remote error with private data: do not display this text',
+    });
+    return structuredClone(operation);
+  });
+  f.api.cancelOperation = cancel;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  const card = () => container.querySelector('[aria-label="MCP resource observation"]')!;
+  expect(card().textContent).toContain('original-resource-server · file:///opaque/server-resource?revision=original');
+  expect(card().querySelector('a')).toBeNull();
+  expect(card().textContent).toContain('Resource observation active');
+  expect(card().textContent).toContain('Local observation retained · Remote cleanup not requested');
+  expect(container.textContent).toContain('terminal · indeterminate · effect: unknown');
+  expect(container.textContent).toContain('Original subscribe RPC response');
+  await act(async () => button('Stop resource observation').click());
+  expect(cancel).toHaveBeenCalledExactlyOnceWith(operation.id);
+  expect(card().textContent).toContain('Resource observation closed');
+  expect(card().textContent).toContain('Local observation released · Remote cleanup unconfirmed');
+  expect(card().textContent).toContain('Check the original service');
+  expect(card().textContent).not.toContain('Remote error with private data');
+  expect(container.textContent).toContain('terminal · indeterminate · effect: unknown');
+  expect(container.textContent).toContain('Original subscribe RPC response');
+  expect(button('Stop resource observation')).toBeUndefined();
+  expect(f.cancelRun).not.toHaveBeenCalled();
+  expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
+  expect(f.api.mediaRead).not.toHaveBeenCalled();
+});
+
+it('keeps resource observation state separate from RPC completion and shows each local/remote cleanup outcome', async () => {
+  const f = fixture();
+  const operation = resourceObservation();
+  f.view.operations = [operation];
+  operation.outcome = 'succeeded'; operation.effect = 'confirmed';
+  operation.call_completion = { kind: 'result', outcome: 'succeeded', effect: 'confirmed', content: { data: {}, parts: [] } };
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  const card = () => container.querySelector('[aria-label="MCP resource observation"]')!;
+  for (const [index, [availability, text]] of ([
+    ['pending', 'Subscription acknowledgement pending'],
+    ['gap', 'Resource observation gap: some updates may have been missed'],
+    ['unavailable', 'Resource observation unavailable'],
+  ] as const).entries()) {
+    operation.mcp_resource_subscription!.availability = availability;
+    operation.mcp_resource_subscription!.localReleased = availability !== 'pending';
+    operation.mcp_resource_subscription!.problem = 'Do not disclose remote credentials or diagnostics';
+    await act(async () => f.emit({ cursor: index + 1, subject: operation.id, revision: index + 4, kind: 'mcp.resource_listener_changed', data: { subscription: operation.mcp_resource_subscription } }));
+    expect(card().textContent).toContain(text);
+    expect(card().textContent).toContain('Check the original MCP connection and resource access');
+    expect(card().textContent).not.toContain('Do not disclose');
+    expect(container.textContent).toContain('terminal · succeeded · effect: confirmed');
+    expect(button('Stop resource observation')).toBeDefined();
+  }
+  operation.mcp_resource_subscription!.localReleased = true;
+  operation.mcp_resource_subscription!.availability = 'closed';
+  for (const [index, [remoteCleanup, text]] of ([
+    ['shared', 'Remote subscription retained for other observers'],
+    ['acknowledged', 'Remote unsubscribe acknowledged'],
+  ] as const).entries()) {
+    operation.mcp_resource_subscription!.remoteCleanup = remoteCleanup;
+    await act(async () => f.emit({ cursor: index + 5, subject: operation.id, revision: index + 8, kind: 'mcp.resource_listener_changed', data: { subscription: operation.mcp_resource_subscription } }));
+    expect(card().textContent).toContain(`Local observation released · ${text}`);
+    expect(button('Stop resource observation')).toBeUndefined();
+  }
+  expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
+});
+
+it('allows retrying Stop until local resource observation is released, even if cancellation was already requested', async () => {
+  const f = fixture();
+  const operation = resourceObservation();
+  operation.cancel_requested = true;
+  f.view.operations = [operation];
+  const cancel = vi.fn<ThreadsAPI['cancelOperation']>()
+    .mockRejectedValueOnce(new ThreadRequestError(503, 'resource-release-unavailable'))
+    .mockImplementationOnce(async () => {
+      operation.mcp_resource_subscription!.localReleased = true;
+      operation.mcp_resource_subscription!.availability = 'closed';
+      return structuredClone(operation);
+    });
+  f.api.cancelOperation = cancel;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Stop resource observation').click());
+  expect(button('Stop resource observation')).toBeDefined();
+  await act(async () => button('Stop resource observation').click());
+  expect(cancel.mock.calls).toEqual([[operation.id], [operation.id]]);
+  expect(button('Stop resource observation')).toBeUndefined();
+});

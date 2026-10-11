@@ -38,6 +38,7 @@ pub(super) fn insert_occurrence(
     history: &Value,
 ) -> Result<QueuedInputMetadata> {
     let origin_name = match origin {
+        InputOrigin::McpResource { .. } => "mcp_resource",
         InputOrigin::Followup { .. } => "followup",
         InputOrigin::Calendar { .. } => "calendar",
         InputOrigin::ComputerRequest { .. } => "computer_request",
@@ -52,9 +53,10 @@ pub(super) fn insert_occurrence(
         InputOrigin::Followup { activation, .. } | InputOrigin::Calendar { activation, .. } | InputOrigin::ComputerRequest { activation, .. } | InputOrigin::ComputerEvent { activation, .. } => {
             activation.run_id().map(str::to_owned)
         }
+        InputOrigin::McpResource { .. } => None,
         _ => unreachable!(),
     };
-    let passive = matches!(&origin, InputOrigin::ComputerEvent { activation: activation::IngressActivationFact::Passive, .. });
+    let passive = matches!(&origin, InputOrigin::McpResource { .. }) || matches!(&origin, InputOrigin::ComputerEvent { activation: activation::IngressActivationFact::Passive, .. });
     let row = QueuedInputMetadata {
         id,
         thread_id: thread,

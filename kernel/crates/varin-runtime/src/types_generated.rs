@@ -193,6 +193,33 @@ pub enum McpTaskResultKind {
     ProtocolError,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum McpResourceAvailability {
+    Pending,
+    Active,
+    Gap,
+    Unavailable,
+    Closed,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum McpResourceCleanup {
+    NotRequested,
+    Shared,
+    Acknowledged,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum McpResourceFactKind {
+    Updated,
+    UnresolvedAssociation,
+    Gap,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ContentCollectionReport {
@@ -252,4 +279,6 @@ pub enum McpRoute {
     DirectTask,
     ServerTaskArgument { argument: String },
     TaskControl { argument: String, action: McpTaskAction },
+    ResourceSubscribe { argument: String },
+    ResourceUnsubscribe { argument: String },
 }
