@@ -4,8 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "vitest";
 import { KernelClientError, type KernelClient, type KernelScopedClient } from "../kernel/kernel-client.js";
-import { ExperimentPreparationError } from "./experiment-backend.js";
-import { materializeExperimentAttempt, reconcileExperimentPreparation, type ExperimentInputSnapshot } from "./experiment-workspace.js";
+import { createLocalExperimentBackend, ExperimentPreparationError } from "./experiment-backend.js";
+import { materializeExperimentAttempt, reconcileExperimentPreparation, openExperimentInputTransfer, type ExperimentInputSnapshot } from "./experiment-workspace.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -14,13 +14,13 @@ async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-preparation-proof-")); roots.push(root);
   const caller = { workspaceId: "ws", executionWorkspaceId: "exec" };
   const input: ExperimentInputSnapshot = {
-    schemaVersion: 1, branchId: "original-input", root: "sha256-original", sourceRoot: root,
+    schemaVersion: 2, source: {kind:"physical-capture"}, branchId: "original-input", root: "sha256-original", sourceRoot: root,
     workspaceId: "ws", executionWorkspaceId: "exec", captureScopes: [], capturedPathCount: 0, inventoryFingerprint: "empty",
     captureSemantics: { excludedDirectories: [".git", ".varin"], gitignore: "not-applied", ignoredFilesIncluded: true },
   };
   let receipt: Record<string, unknown> | null = { state: "committed", result: { root: input.root, status: "materialized" } };
   let leaseStatus = "busy";
-  let materializationError: Error = new Error("transport disconnected");
+  let materializationError: Error | undefined = new Error("transport disconnected");
   const calls: Array<{ operation: string; value?: unknown }> = [];
   const scoped = {
     async getOperation(operation: string) { calls.push({ operation: "get", value: operation }); return receipt; },
@@ -28,10 +28,11 @@ async function fixture() {
     async fileRootRegister() { return { rootId: "original-storage-root" }; },
     async fileLeaseAcquire(value: unknown) { calls.push({ operation: "lease", value }); return { status: leaseStatus }; },
     async fileLeaseRelease(value: unknown) { calls.push({ operation: "release", value }); return { released: true }; },
-    async fileMaterialize(value: unknown) { calls.push({ operation: "materialize", value }); throw materializationError; },
+    async fileMaterialize(value: unknown) { calls.push({ operation: "materialize", value }); if(materializationError)throw materializationError;await fs.mkdir(path.join(root,(value as {path:string}).path),{recursive:true});return {status:"materialized",root:input.root}; },
+    async processRelease(){calls.push({operation:"process-release"});return {};},
   } as unknown as KernelScopedClient;
-  const client = { handshake: { storageRoot: root }, start: async () => ({}), issueGrant: async () => ({}), scoped: () => scoped } as unknown as KernelClient;
-  return { caller, input, client, calls, setReceipt: (value: typeof receipt) => { receipt = value; }, setLease: (value: string) => { leaseStatus = value; }, failMaterialization: (error: Error) => { materializationError = error; } };
+  const client = { handshake: { storageRoot: root }, start: async () => ({}), issueGrant: async (grant:object) => grant, retireGrant: async (id:string) => {calls.push({operation:"retire",value:id});return {};}, scoped: () => scoped } as unknown as KernelClient;
+  return { caller, input, client, scoped, calls, setReceipt: (value: typeof receipt) => { receipt = value; }, setLease: (value: string) => { leaseStatus = value; }, failMaterialization: (error: Error | undefined) => { materializationError = error; } };
 }
 
 describe("local preparation drain proof with explicit kernel authority fixtures", () => {
@@ -59,8 +60,34 @@ describe("local preparation drain proof with explicit kernel authority fixtures"
   it("distinguishes a real cancellation acknowledgement from loss of the materialization connection", async () => {
     const f = await fixture();
     await assert.rejects(materializeExperimentAttempt(f.client, f.caller, "attempt", f.input), (error: unknown) => error instanceof ExperimentPreparationError && !error.drained);
+    assert.equal(f.calls.filter(c=>c.operation==="retire").length,0,"unknown physical writer retains its original grant for reconciliation");
     f.failMaterialization(new KernelClientError({ code: "cancelled", message: "native worker acknowledged cancellation" }));
     await assert.rejects(materializeExperimentAttempt(f.client, f.caller, "attempt", f.input), (error: unknown) => error instanceof ExperimentPreparationError && error.drained);
     assert.equal(f.calls.filter((call) => call.operation === "materialize").length, 2);
+    assert.equal(f.calls.filter(c=>c.operation==="retire").length,1,"acknowledged cancellation retires only its own completed helper grant");
   });
+});
+
+it('materialization hands its grant to the original backend until real readers and process bookkeeping release finish',async()=>{
+ const f=await fixture();f.failMaterialization(undefined);
+ const materialized=await materializeExperimentAttempt(f.client,f.caller,'successful',f.input);
+ assert.equal(f.calls.filter(c=>c.operation==='retire').length,0);
+ let finish:()=>void=()=>{};let entered:()=>void=()=>{};const gate=new Promise<void>(r=>{finish=r;}),started=new Promise<void>(r=>{entered=r;});
+ Object.assign(f.scoped,{processRead:async()=>{entered();await gate;return {chunks:[],nextCursor:0,endCursor:0,process:{status:'exited',writerActive:false}};}});
+ const backend=createLocalExperimentBackend(materialized.scoped,materialized.releaseAuthority);
+ const site={workspaceId:'ws',rootId:materialized.rootId,canonicalRoot:materialized.canonicalRoot,transport:materialized.scoped};
+ const reading=backend.read(site,'original',0);await started;
+ const releasing=backend.release(site,'original');await new Promise(r=>setImmediate(r));assert.equal(f.calls.filter(c=>c.operation==='retire').length,0);
+ finish();await reading;await releasing;await backend.release(site,'original');
+ assert.equal(f.calls.filter(c=>c.operation==='process-release').length,1);assert.equal(f.calls.filter(c=>c.operation==='retire').length,1);
+});
+it('transfer close waits for the actual content iterator and retires once without cancelling its reader',async()=>{
+ const f=await fixture();let finish:()=>void=()=>{};let entered:()=>void=()=>{};const gate=new Promise<void>(r=>{finish=r;}),started=new Promise<void>(r=>{entered=r;});
+ Object.assign(f.scoped,{readBranch:async()=>({workspaceId:'ws',root:f.input.root,currentRoot:f.input.root,entries:[{path:'input',state:{kind:'regular-file',objectHash:'sha256-bytes',byteLength:3,mode:420}}],nextCursor:null}),getBlob:async()=>{entered();await gate;return {bytesBase64:Buffer.from('abc').toString('base64'),nextOffset:3};}});
+ const transfer=await openExperimentInputTransfer(f.client,f.caller,f.input);
+ const reader=transfer.readObject('sha256-bytes',3)[Symbol.asyncIterator]();const first=reader.next();await started;
+ let closed=false;const closing=transfer.close().then(()=>{closed=true;});await new Promise(r=>setImmediate(r));assert.equal(closed,false);
+ finish();assert.equal(Buffer.from((await first).value!).toString(),'abc');assert.equal(closed,false);await reader.return?.();await closing;await transfer.close();
+ assert.equal(f.calls.filter(c=>c.operation==='retire').length,1);
+ await assert.rejects(async()=>{for await(const _ of transfer.readObject('sha256-bytes',3))void _;},/closed/);
 });

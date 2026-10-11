@@ -258,6 +258,8 @@ pub struct ToolMetadata {
     pub service_id: String,
     pub service_version: u64,
     pub completion: RegisteredToolCompletion,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lifetime: Option<Lifetime>,
     pub operation: ToolOperation,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub examples: Option<Vec<Value>>,
@@ -275,6 +277,7 @@ pub struct ToolSourceLocation {
 #[serde(rename_all = "snake_case")]
 pub enum RegisteredToolCompletion {
     Result,
+    Job,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -598,6 +601,8 @@ pub enum ToolCompletion {
         phase: String,
         effect: Effect,
         lifetime: Lifetime,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        content: Option<Value>,
     },
 }
 impl ToolCompletion {
@@ -1015,6 +1020,13 @@ pub enum ToolResume {
 }
 
 pub trait Persistence: Send + Sync {
+    /// Atomically consume the original canonical invocation completion. A trusted domain
+    /// acceptance may win a race with a cancelled/closed Host tool reader returning Unknown.
+    fn settle_tool(&self, context:&ToolExecutionContext, epoch:u64, receipt:ToolExecutionReceipt)->Result<ToolExecutionReceipt,ExecutionError>{
+        self.commit(&context.run_id,epoch,&ExecutionRecord::ToolSettled{context:context.clone(),completion:receipt.completion.clone(),executor_stopped:receipt.executor_stopped})?;
+        Ok(receipt)
+    }
+
     fn goal_tool_allowed(&self,_c:&ToolExecutionContext)->Result<bool,ExecutionError>{Ok(true)}
     fn goal_context(&self,_run:&str,_epoch:u64)->Result<Option<crate::catalog::goals::GoalContext>,ExecutionError>{Ok(None)}
     fn goal_boundary(&self,_run:&str,_epoch:u64)->Result<crate::catalog::goals::GoalBoundary,ExecutionError>{Ok(crate::catalog::goals::GoalBoundary::Continue)}
@@ -2918,15 +2930,8 @@ impl<
             }
         };
         let settled = if durable {
-            self.commit(
-                input,
-                ExecutionRecord::ToolSettled {
-                    context: context.clone(),
-                    completion: completion.clone(),
-                    executor_stopped,
-                },
-            )
-            .map(|_| completion)
+            self.persistence.settle_tool(context,input.owner_generation,ToolExecutionReceipt{completion,executor_stopped})
+                .map(|receipt|{executor_stopped=receipt.executor_stopped;receipt.completion})
         } else {
             Ok(completion)
         };
@@ -3047,8 +3052,7 @@ fn normalize_completion(
             operation_id,
             phase,
             effect,
-            lifetime,
-        } if contract.completion == CompletionKind::Job
+            lifetime, content,} if contract.completion == CompletionKind::Job
             && !operation_id.is_empty()
             && !phase.is_empty()
             && lifetime == contract.lifetime
@@ -3058,8 +3062,7 @@ fn normalize_completion(
                 operation_id,
                 phase,
                 effect,
-                lifetime,
-            }
+                lifetime, content,}
         }
         ToolCompletion::JobAccepted { effect, .. } => ToolCompletion::failure(
             "invalid_job_receipt",

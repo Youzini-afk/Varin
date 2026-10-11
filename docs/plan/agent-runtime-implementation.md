@@ -8,6 +8,15 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-11 增量：原生研究 Job 与真实消费者
+
+- 原 Catalog Operation 关联确切 domain/version/workspace/subject，Job 接受正文与 User 原意图沿 ContentStore；已计划不等已接受，调用接受与执行终态分开。普通已安装 research-tools 经真实 ModelStep/PolicyAction/ToolDirectory，User 命令同事务持久原意图与 subject，不伪装模型轮。Canonical settlement 在真实两执行路径消费同一原接受，不重写已交付 Unknown 或重放未知工作。
+- 原 Experiment/Source/Resource/backend 仍各自唯一拥有领域事实。精确 live/materialized/fixed 来源、family 读取/后代控制、历史 sourceRun 可见和实际权限同步贯穿。Operation-owned grant 保真实 Run 归因，普通 Run 结束不切断独立作业；恢复按原授权记录与实际 writer/reader 排空退役。Catalog **36**、Storage **12**，直接拒旧。
+- 原 durable Wait 只认实际 executor-stopped，历史 Unknown 不冒充停止；取消观察保作业，树停止依原受理顺序。认证 User API、shared application-client、ThreadConversation 和共享研究面板消费原受理/输出，未知 rerun 保原键意图，产物与日志按原游标读取。
+- 独审实证并修复 artifact I/O 拖住已停止执行/计算资源及日志 EOF 错依赖 collection 两条接缝。先短提交 terminal/pending，再独立收集；原 holder 单飞跨通知重入、detach/recreate 和手动 collect，真实 reader drain 后才释放授权。两原失败探针及额外持读重建探针最终全绿，无剩余确认阻断。
+- 最终 runtime **415/0、2 ignored**，kernel **110/0、11 ignored**，同源 fresh binary 原 guardian/Storage **3/3**；领域组合 **46/46**、公开/信用消费者 **11/11**、ToolInvocation **4/4**、extension-contract **103/103**、Pi **16/16**、UI **53/53**，类型/lint/all-targets/协议与实际 Host bundle 通过。源指纹、准确 binary、入口和证据边界见[研究作业验收](../reviews/runtime-research-jobs-2026-10-11.md)。新 source adapter→实际 Storage 字节和完整 Host IPC 尚未实跑，不能合称端到端通过。
+- 下一步先收口原 file.scan/measure 同步 metadata 遍历对 Storage 控制的占用，再继续其他领域事件、Computer/环境、Web/材料/Bot、MCP/script、语言/上下文/provider 与组合能力余项。两设计整体未完成；用户负责最终默认切换和全面迁移的边界保持。
+
 ## 2026-10-11 增量：研究实验短受理与独立准备
 
 - 原 ExperimentService 已把规范化请求、真实 caller 的 source/retry 授权和固定来源元数据短受理为 durable attempt，再独立 capture/spec/resource/prepare/spawn。原 Storage experiment/spec/job/artifact 与 ResourceService 继续唯一拥有领域事实；spec/specId 可为 null，cancelRequested 与真实排空分开。Pi 工具与现有 User/Research UI 展示原受理，未知 rerun 回应复用同键/原意图，取消不等全 workspace 恢复。

@@ -62,16 +62,7 @@ export interface FollowUpCaller {
   allowedThreadIds: readonly string[];
 }
 
-interface PersistedExperimentCaller {
-  workspaceId: string;
-  executionWorkspaceId: string;
-  sessionId: string;
-  threadId?: string;
-  runId?: string;
-  rootSessionId: string;
-  workspaceScope?: string[];
-  allowedThreadIds: string[];
-}
+type PersistedExperimentCaller = import("./research-identity.js").ExperimentCaller;
 
 interface DefinitionPayload {
   id: string;
@@ -3071,7 +3062,8 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     ...(caller.runId ? { runId: caller.runId } : {}),
     rootSessionId: caller.rootSessionId,
     ...(caller.workspaceScope ? { workspaceScope: [...caller.workspaceScope] } : {}),
-    allowedThreadIds: [...caller.allowedThreadIds],
+    owner: { runtime: "pi", rootSessionId: caller.rootSessionId, sessionId: caller.sessionId, threadId: caller.threadId, runId: caller.runId },
+    access: { kind: "family", readThreadIds: [...caller.allowedThreadIds], controlThreadIds: [...caller.allowedThreadIds] },
   });
 
   const activateDefinition = async (

@@ -430,8 +430,7 @@ impl ToolExecutor for ProcessWaitTools {
                 operation_id: c.operation_id.clone(),
                 phase: "awaiting_process".into(),
                 effect: Effect::None,
-                lifetime: Lifetime::Thread,
-            })
+                lifetime: Lifetime::Thread, content: None, })
         })();
         result.unwrap_or_else(|e| ToolCompletion::Result {
             outcome: Outcome::Failed,

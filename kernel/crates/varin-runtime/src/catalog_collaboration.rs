@@ -460,8 +460,7 @@ pub(super) fn pending_cancelled_observation(
         || !op.handed_off
         || op.waiting_on.as_deref() != Some(wait.id.as_str())
         || !matches!(&op.call_completion, Some(super::result_content::ToolCompletionMetadata::JobAccepted {
-            operation_id, phase, effect: Effect::None, lifetime: Lifetime::Thread,
-        }) if operation_id == &op.id && phase == "awaiting_child")
+            operation_id, phase, effect: Effect::None, lifetime: Lifetime::Thread, ..}) if operation_id == &op.id && phase == "awaiting_child")
     {
         return Ok(false);
     }

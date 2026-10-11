@@ -22,6 +22,7 @@ test('policy graph boundary distinguishes non-dispatch, committed results and ac
     { kind: 'result', outcome: 'cancelled', effect: 'partial', output: reference },
     { kind: 'result', outcome: 'indeterminate', effect: 'unknown', output: reference },
     { kind: 'job_accepted', operation_id: 'graph-a:node:save', phase: 'running', effect: 'dispatched', lifetime: 'environment' },
+    { kind: 'job_accepted', operation_id: 'graph-a:node:save', phase: 'accepted', effect: 'confirmed', lifetime: 'thread', output: reference },
   ]) {
     const raw = input(completion);
     assert.equal(validateInput([raw]), true, JSON.stringify(validateInput.errors));
@@ -36,7 +37,7 @@ test('policy graph boundary distinguishes non-dispatch, committed results and ac
     { kind: 'result', outcome: 'succeeded', effect: 'confirmed' },
     { kind: 'result', outcome: 'succeeded', output: reference },
     { kind: 'job_accepted', operation_id: 'operation', phase: 'running', effect: 'dispatched', lifetime: 'run', outcome: 'succeeded' },
-    { kind: 'job_accepted', operation_id: 'operation', phase: 'running', effect: 'dispatched', lifetime: 'run', output: reference },
+    { kind: 'job_accepted', operation_id: 'operation', phase: 'running', effect: 'dispatched', lifetime: 'run', output: null },
     { kind: 'job_accepted', operation_id: 'operation', phase: 'running', effect: 'dispatched', lifetime: 'extension' },
   ]) {
     assert.equal(validateInput([input(completion)]), false);

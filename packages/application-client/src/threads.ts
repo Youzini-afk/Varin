@@ -197,6 +197,7 @@ export interface ThreadProcessesAPI {
   openTerminal(input: ThreadIdentity & { operationId: string }): Promise<ThreadProcessTerminal>;
 }
 export interface ThreadsAPI {
+  research?: import('./research.js').ThreadResearchAPI;
   messages?: ThreadMessagesAPI;
   family?: ThreadFamilyAPI;
   processes?: ThreadProcessesAPI;

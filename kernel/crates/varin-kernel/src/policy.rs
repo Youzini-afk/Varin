@@ -745,7 +745,7 @@ fn event_view(event: &PolicyEvent) -> Value {
     match event {
         PolicyEvent::ToolsCompleted { results } => {
             json!({"kind":"tools_completed","results":results.iter().map(|result|{
-        let completion=match &result.completion{ToolCompletion::Result{outcome,effect,..}=>json!({"kind":"result","outcome":outcome,"effect":effect}),ToolCompletion::NotDispatched{..}=>json!({"kind":"not_dispatched"}),ToolCompletion::JobAccepted{operation_id,phase,effect,lifetime}=>json!({"kind":"job_accepted","operation_id":operation_id,"phase":phase,"effect":effect,"lifetime":lifetime})};
+        let completion=match &result.completion{ToolCompletion::Result{outcome,effect,..}=>json!({"kind":"result","outcome":outcome,"effect":effect}),ToolCompletion::NotDispatched{..}=>json!({"kind":"not_dispatched"}),ToolCompletion::JobAccepted{operation_id,phase,effect,lifetime, ..}=>json!({"kind":"job_accepted","operation_id":operation_id,"phase":phase,"effect":effect,"lifetime":lifetime})};
         json!({"request_id":result.request_id,"call_id":result.call_id,"completion":completion})}).collect::<Vec<_>>()})
         }
         _ => serde_json::to_value(event).expect("policy event serializes"),

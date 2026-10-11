@@ -110,6 +110,7 @@ export interface KernelGrantHandle {
   readonly sessionId: string | null;
   readonly threadId: string | null;
   readonly runId: string | null;
+  readonly operationId: string | null;
   readonly owningWorkspace: string | null;
   readonly executionWorkspace: string | null;
   readonly capabilities: readonly string[];
@@ -779,6 +780,7 @@ export class KernelClient {
       sessionId: typeof value.session_id === "string" ? value.session_id : null,
       threadId: typeof value.thread_id === "string" ? value.thread_id : null,
       runId: typeof value.run_id === "string" ? value.run_id : null,
+      operationId: typeof value.operation_id === "string" ? value.operation_id : null,
       owningWorkspace: typeof value.owning_workspace === "string" ? value.owning_workspace : null,
       executionWorkspace: typeof value.execution_workspace === "string" ? value.execution_workspace : null,
       capabilities: Object.freeze(Array.isArray(value.capabilities) ? value.capabilities.filter((entry): entry is string => typeof entry === "string") : []),
@@ -1598,6 +1600,7 @@ export class KernelClient {
       sessionId: params.sessionId ?? null,
       threadId: params.threadId ?? null,
       runId: params.runId ?? null,
+      operationId: params.operationId ?? null,
       owningWorkspace: params.owningWorkspace ?? null,
       executionWorkspace: params.executionWorkspace ?? null,
       storageIdentity: params.storageIdentity ?? this.handshakeResult!.storageRoot,
@@ -1639,8 +1642,17 @@ export class KernelClient {
   /** Durable Storage ownership also retires grants issued by an earlier Host generation. */
   async retireRunGrants(runId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
     if (!this.handshakeResult) await this.start();
-    for (const grant of this.issuedGrants.values()) if (grant.runId === runId) this.closeGrantCaller(grant.grantId);
+    for (const grant of this.issuedGrants.values()) if (grant.runId === runId && grant.operationId === null) this.closeGrantCaller(grant.grantId);
     return this.requestRaw<Record<string, unknown>>("authority.grant.retire", { target: { kind: "run", runId } }, { signal });
+  }
+
+  /** Trusted domain cleanup after the entire original operation has actually drained. */
+  async retireOperationGrants(operationId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    if (!this.handshakeResult) await this.start();
+    // Rust first verifies retained process owners. A refusal must not close a live caller.
+    const result = await this.requestRaw<Record<string, unknown>>("authority.grant.retire", { target: { kind: "operation", operationId } }, { signal });
+    for (const grant of this.issuedGrants.values()) if (grant.operationId === operationId) this.closeGrantCaller(grant.grantId);
+    return result;
   }
 
   async releaseBlob(ownerId: string, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {

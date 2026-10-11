@@ -56,7 +56,9 @@ export interface VarinExtensionToolDeclaration {
   description: string;
   inputSchema: JsonObject | boolean;
   outputSchema: JsonObject | boolean;
-  completion: "result";
+  completion: "result" | "job";
+  /** Independent jobs explicitly bind their accepted lifetime. */
+  lifetime?: "thread" | "environment";
   operation: "read" | "effect";
   examples?: JsonValue[];
   source?: { path: string; line?: number };

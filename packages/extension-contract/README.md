@@ -75,8 +75,9 @@ contains history count/head references and settlement metadata, not full histori
 The native core remains the authority for legal action admission and durable checkpoints.
 `tool_graph` nodes use the same trusted tool contracts as model calls. Each `tool_graph_completed`
 node carries exactly one tagged completion: `not_dispatched`, `result` (outcome, effect, required
-scoped output reference), or `job_accepted` (operation ID, phase, effect, lifetime). Job acceptance
-does not assert a terminal job outcome. Even a JSON-null result has a committed content reference.
+scoped output reference), or `job_accepted` (operation ID, phase, effect, lifetime, and an optional
+scoped acceptance-output reference). Job acceptance does not assert a terminal job outcome. Even a
+JSON-null result has a committed content reference; a retained JSON-null acceptance also stays null.
 Version 1 graph actions and receipt shapes are not accepted by version 2.
 
 `VARIN_RETRIEVAL_PLAN_CONTRACT` describes the declarative `varin.retrieval.plan@1` boundary.
@@ -87,7 +88,10 @@ the semantic backend/published-reader lease, and all Run-granted reads; the exte
 source text, root, filesystem or model capability through this contract.
 
 A service provision may carry a single `tool` declaration: name, description, input/output JSON
-Schema, `completion: result`, and `operation: read | effect`, with optional examples and source
-location. Its service ID/version remain the stable contract identity. Manifest parsing preserves and
+Schema, `completion: result | job`, and `operation: read | effect`, with optional examples and source
+location. Independent Job declarations require an explicit `lifetime: thread | environment`; Result
+declarations omit lifetime. A trusted domain adapter must durably accept the original operation before
+the extension can return that Job reference. A declaration or returned JSON alone cannot bind a domain
+subject or prove executor stop. Its service ID/version remain the stable contract identity. Manifest parsing preserves and
 validates this metadata; the executing Host compiles schemas before admitting calls. The declaration
 is inspectable metadata and never permission, trusted replay evidence, or a resource/execution receipt.

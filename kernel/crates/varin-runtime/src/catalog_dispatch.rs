@@ -850,6 +850,14 @@ impl Catalog {
                 process_ids.push(id);
             }
         }
+        for run in &runs {
+            let ids = {
+                let mut statement = tx.prepare("SELECT id FROM operations WHERE run_id=?1 AND json_extract(body,'$.execution_owner.kind')='external' AND json_extract(body,'$.lifetime') IN ('thread','environment') AND (json_extract(body,'$.host_job') IS NOT NULL OR json_extract(body,'$.intent.kind')='user_host_job' OR json_extract(body,'$.intent.contract.completion')='job') AND coalesce(json_extract(body,'$.external_receipt.executor_stopped'),0)=0 ORDER BY id")?;
+                let rows=statement.query_map([&run.id],|row|row.get::<_,String>(0))?;
+                rows.collect::<std::result::Result<Vec<_>,_>>()?
+            };
+            for id in ids { super::request_cancel_operation_in(&tx,&id)?; }
+        }
         for child in &children {
             super::request_cancel_operation_in(&tx, &child.operation_id)?;
             let executions: Vec<super::delegated::DelegatedExecution> = {

@@ -121,7 +121,8 @@ impl Fixture {
             executor_owner: ExecutorOwner::Kernel,
         });
         let completion = ToolCompletion::JobAccepted {
-            operation_id: PROCESS.into(),
+            content: None,
+                operation_id: PROCESS.into(),
             phase: "running".into(),
             effect: Effect::Dispatched,
             lifetime: Lifetime::Thread,
@@ -265,6 +266,7 @@ impl Fixture {
             request_id: request.clone(),
             call_id: "wait".into(),
             completion: ToolCompletion::JobAccepted {
+                content: None,
                 operation_id: context.operation_id,
                 phase: "awaiting_process".into(),
                 effect: Effect::None,
@@ -572,7 +574,8 @@ impl Fixture {
         });
         let wait = self.db.wait_for_process(&context, PROCESS).unwrap();
         let completion = ToolCompletion::JobAccepted {
-            operation_id: context.operation_id.clone(),
+            content: None,
+                operation_id: context.operation_id.clone(),
             phase: "awaiting_process".into(),
             effect: Effect::None,
             lifetime: Lifetime::Thread,

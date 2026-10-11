@@ -530,8 +530,14 @@ impl HostTools {
                 name: call.name.clone(),
                 schema_version: call.schema_version.clone(),
                 read_only: false,
-                completion: CompletionKind::Result,
-                lifetime: Lifetime::Run,
+                completion: match self.schema.metadata.as_ref().map(|m| &m.completion) {
+                    Some(RegisteredToolCompletion::Job) => CompletionKind::Job,
+                    _ => CompletionKind::Result,
+                },
+                lifetime: match self.schema.metadata.as_ref() {
+                    Some(metadata) if metadata.completion == RegisteredToolCompletion::Job => metadata.lifetime.filter(|l| matches!(l, Lifetime::Thread | Lifetime::Environment)).ok_or_else(|| failed("host_job_lifetime_required"))?,
+                    _ => Lifetime::Run,
+                },
                 resources: vec![],
             });
         }
@@ -685,7 +691,7 @@ impl ToolExecutor for HostTools {
                 (
                     Some(
                         completion @ (ToolCompletion::NotDispatched { .. }
-                        | ToolCompletion::Result { .. }),
+                        | ToolCompletion::Result { .. } | ToolCompletion::JobAccepted { .. }),
                     ),
                     Some(executor_stopped),
                 ) => ToolExecutionReceipt {
@@ -783,10 +789,13 @@ impl LateReceipt {
                 Effect::None,
                 json!({"not_dispatched":reason}),
             ),
-            ToolCompletion::JobAccepted { .. } => {
-                return Err(KernelError::Protocol(
-                    "this retained service does not issue Job receipts".into(),
-                ))
+            completion @ ToolCompletion::JobAccepted { .. } => {
+                let saved = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                    .host_job_acceptance(&operation.id).map_err(domain)?;
+                if self.receipt.executor_stopped || saved.load().map_err(domain)? != completion {
+                    return Err(KernelError::Authorization("Host job acceptance differs from its trusted domain receipt".into()));
+                }
+                return Ok(());
             }
         };
         let prepared = preparation
@@ -929,6 +938,7 @@ mod tests {
                 schema: json!({"type":"object"}),
                 output_schema: None,
                 metadata: Some(ToolMetadata {
+                    lifetime: None,
                     service_id: "helper.service".into(),
                     service_version: 1,
                     completion: RegisteredToolCompletion::Result,

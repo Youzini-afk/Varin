@@ -13,7 +13,7 @@ async function fixture() {
   roots.push(root);
   const source = await fs.realpath(await fs.mkdir(path.join(root, 'source')).then(() => path.join(root, 'source')));
   const other = await fs.realpath(await fs.mkdir(path.join(root, 'other')).then(() => path.join(root, 'other')));
-  const grant: KernelGrantHandle = { grantId: 'bounded', kernelEpoch: 'epoch', hostGeneration: 'generation', authorityInstanceId: null,
+  const grant: KernelGrantHandle = { operationId: null, grantId: 'bounded', kernelEpoch: 'epoch', hostGeneration: 'generation', authorityInstanceId: null,
     workerId: null, workerGeneration: null, sessionId: null, threadId: 'thread', runId: 'run', owningWorkspace: 'owner', executionWorkspace: 'execution',
     capabilities: ['storage.read', 'storage.write'], pathScopes: ['allowed'], storageIdentity: 'storage' };
   const client = { fileRootRegister: vi.fn(async () => ({ rootId: 'registered', canonicalRoot: source, pendingOperations: 0 })),

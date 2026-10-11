@@ -154,6 +154,11 @@ pub(super) fn hydrate_operation(
         operation.intent =
             serde_json::to_value(ToolIntent::from_operation(&operation)?.load(content)?)?;
     }
+    if operation.intent.get("kind").and_then(Value::as_str)==Some("user_host_job") {
+        let body=content.load(&operation.intent["request_ref"])?;
+        let intent=operation.intent.as_object_mut().ok_or_else(||RuntimeError::Invalid("User job intent malformed".into()))?;
+        intent.remove("request_ref");intent.insert("request".into(),body);
+    }
     let result = match operation.result {
         Some(OperationResultMetadata::Control { mut value }) => {
             if let Some(permission) = value.get_mut("permission") {
@@ -186,6 +191,7 @@ pub(super) fn hydrate_operation(
         })
         .transpose()?;
     Ok(crate::types::Operation {
+        host_job: operation.host_job,
         call_completion: operation
             .call_completion
             .map(|completion| completion.load(content))

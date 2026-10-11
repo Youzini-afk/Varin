@@ -57,6 +57,19 @@ Host/caller/target changes must discard old views. Anchors survive append/fork/r
 the runtime owner epoch. An empty scan page can still have a continuation cursor. Partial JSON is not
 a complete tool exchange. This API contains no target launch, source preparation or control method.
 
+`ThreadsAPI.research` projects the original experiment, source and resource owners for an actual
+Agent `ThreadIdentity`. `scopes` lists retained source Runs, including earlier branches; callers
+select an explicit `sourceRunId` for every domain request. `canSubmit` is separate from historical
+read/control access. The Host derives workspace, family and actor authority; these are not renderer
+arguments. Attempts carry the current caller's control permission. Logs and binary artifacts retain
+the original attempt, stream/artifact and byte offsets, and reads accept AbortSignal.
+
+Research `submit` requires a stable User request ID and exact intent. An uncertain response must
+retry that same pair. It admits an independent User command and original domain attempt without
+starting the historical source Run. `cancel` requests the original job's stop; closing a reader does
+not cancel a job. Collection remains a separate domain action. These APIs do not own a second
+experiment store or switch the Research workbench's default runtime.
+
 The desktop contract defines:
 
 - `VarinDesktopCommandMap` — typed `{ args, result }` for all 58 `desktop_*` commands

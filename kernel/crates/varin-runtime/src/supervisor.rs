@@ -857,6 +857,7 @@ impl RunSupervisor {
     /// never a running model/tool, before its durable report makes that same Run runnable.
     pub fn quiesce_observations(&self) -> Result<()> {
         self.quiesce_child_waits()?;
+        self.quiesce_waits(crate::catalog::host_jobs::WAIT_PREFIX)?;
         self.quiesce_process_waits()?;
         self.quiesce_waits("reply-wait:")
     }

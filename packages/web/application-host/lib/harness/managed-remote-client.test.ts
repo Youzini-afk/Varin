@@ -1,3 +1,4 @@
+import { piResearchCaller } from './research-caller.fixture.js';
 import { describe, expect, it, vi } from "vitest";
 import { createManagedRemoteTargetRegistry } from "./managed-remote-client.js";
 import { ExperimentPreparationError } from "./experiment-backend.js";
@@ -22,17 +23,17 @@ describe("managed remote target recovery", () => {
       return reply({ materialId: 'original-root', root: 'original-root', rootId: 'root', canonicalRoot: '/original/material', cwd: '', reused: false });
     });
     const registry = createManagedRemoteTargetRegistry({ coordinatorHostId: 'host',
-      kernel: { start: async () => ({}), issueGrant: async (grant: object) => grant,
+      kernel: { start: async () => ({}), issueGrant: async (grant: object) => grant, retireGrant: async () => ({}),
         scoped: () => ({ readBranch: async () => ({ workspaceId: 'workspace', root: 'original-root', currentRoot: 'original-root', entries: [], nextCursor: null }) }) } as never,
       resources: { listMachines: async () => [], registerMachine: async () => ({}) } as never,
       readSettings: async () => ({ desktopHosts: [{ id: 'remote', apiUrl: 'https://remote.example' }] }), fetch: fetchMock as typeof fetch,
     });
-    const input: ExperimentInputSnapshot = { schemaVersion: 1, branchId: 'input', root: 'original-root', sourceRoot: '/source',
+    const input: ExperimentInputSnapshot = { schemaVersion: 2, source: {kind:"physical-capture"}, branchId: 'input', root: 'original-root', sourceRoot: '/source',
       workspaceId: 'workspace', executionWorkspaceId: 'workspace', captureScopes: [], capturedPathCount: 0, inventoryFingerprint: 'inventory',
       captureSemantics: { excludedDirectories: ['.git', '.varin'], gitignore: 'not-applied', ignoredFilesIncluded: true } };
     const resolved = await registry.resolveBackend({} as never, 'managed:remote-host',
       { payloadJson: JSON.stringify({ backend: 'managed-remote' }) } as never,
-      { workspaceId: 'workspace', executionWorkspaceId: 'workspace', allowedThreadIds: [] });
+      piResearchCaller({ workspaceId: 'workspace', executionWorkspaceId: 'workspace', allowedThreadIds: [] }));
     expect(resolved).not.toBeNull();
     expect(await resolved!.reconcilePreparation!({ attemptId: 'attempt', input })).toBe('unknown');
     const controller = new AbortController(); let settled = false;
@@ -100,13 +101,13 @@ describe("managed remote target recovery", () => {
     const machine = {
       payloadJson: JSON.stringify({ backend: "managed-remote" }),
     } as never;
-    const caller = {
+    const caller = piResearchCaller({
       workspaceId: "workspace-a",
       executionWorkspaceId: "workspace-a",
       sessionId: "session-a",
       rootSessionId: "session-a",
       allowedThreadIds: [],
-    };
+    });
 
     await expect(registry.resolveBackend({} as never, "managed:remote-host", machine, caller)).resolves.toBeNull();
     reachable = true;

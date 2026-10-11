@@ -293,14 +293,14 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 35, input domain 6 and collaboration domain 7 store input intents/queue bodies and context-job ownership,
+Catalog version 36, input domain 6 and collaboration domain 7 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
 history, all model outputs (including rejected output), original command intents, queued-history references, context
 checkpoints, memory projections, summary recipes and source parts, policy action/checkpoint bodies,
 and indexed graph calls/receipts, follow-up and calendar instructions/intents, Goal objective/reason/creation-intent references, planning-model request/output references, ordinary tool arguments/results,
-external executor receipts and permission call/scope bodies, including historical receipt and completed
+external executor receipts, immutable Host Job acceptance and User command bodies, and permission call/scope bodies, including historical receipt and completed
 permission audit events and original invocation completions. It verifies each distinct live object
 before sweeping and preserves unknown files; it never deletes history or invokes system-kernel GC.
 
@@ -362,6 +362,34 @@ nothing; interrupted sweep reports already removed objects without pretending to
 Unknown files are preserved. There is no automatic timer, per-Run barrier or retry loop; repeated explicit
 maintenance can defer while the store is in use. Actual filesystem calls still have their ordinary cost
 and cancellation limits; off-lock execution is not a fixed latency or throughput guarantee.
+
+## Host-owned independent jobs
+
+Ordinary selected extension declarations specify Result or Job completion and the actual lifetime.
+`catalog_host_jobs` binds an existing ModelStep/PolicyAction operation, or atomically admits a real
+User operation, to one exact domain/version/workspace/subject and execution owner. The nullable
+acceptance reference distinguishes planned dispatch from actual domain acceptance. Full immutable
+acceptance and User request bodies are prepared outside Catalog, published through ContentStore, and
+retained by the same content collection roots. Extension-provided JSON cannot create this binding or
+claim physical executor stop.
+
+The execution engine consumes the canonical completion selected by `Persistence.settle_tool` in both
+model batches and policy graphs. A committed acceptance wins over a later cancelled callback's Unknown;
+an already delivered Unknown remains historical. Eventual domain outcome uses the original external
+receipt, never a second model ToolResult. The private pending projection includes short original
+identities and control facts without reading request or acceptance bodies.
+
+User commands retain a source Run for attribution without reopening or blocking that Run. Accepted
+Thread jobs survive ordinary Run completion/cancellation and extension retirement. Task-tree stop
+selects the actual accepted set; a later explicit User command is not permanently fenced by its old
+source Run. Domain cancellation and Catalog cancellation target the same original operation; neither
+is proof of physical stop. Unknown dispatch is reconciled by the original subject, not repeated.
+
+Job observation reuses the existing Wait/observation owner. Only the original executor-stopped fact
+satisfies its terminal condition; historical Unknown settlement does not. Ending an observation keeps
+the independent job running, and a terminal event that already won remains available across reopen.
+The existing research owner is the first installed domain adapter; its source, resource, log and
+artifact authorities remain separate. See [research integration evidence](../../../docs/reviews/runtime-research-jobs-2026-10-11.md).
 
 ## Execution and trust
 
@@ -1006,7 +1034,7 @@ original cancelled fact is delivered once, and the child remains independent. Wa
 their original tool origin are loaded on a worker; registration rechecks the same operation and graph
 admission before committing only metadata.
 
-Collaboration domain version 4 is required by the read-only existing-catalog preflight. An older,
+The current collaboration domain version recorded above is required by the read-only existing-catalog preflight. An older,
 missing or malformed domain is rejected before writable SQLite access or epoch advancement;
 there is no schema upgrade, fallback registry, or asset reset. New empty catalogs create the domain
 explicitly. Context scope uses the separate context domain version 4 contract.

@@ -111,7 +111,7 @@ pub(in crate::catalog) fn pending_cancelled(db: &Connection, r: &Run, w: &Wait) 
         && o.phase == OperationPhase::Waiting
         && o.handed_off
         && o.waiting_on.as_deref() == Some(&w.id)
-        && matches!(&o.call_completion,Some(result_content::ToolCompletionMetadata::JobAccepted{operation_id,phase,effect:Effect::Confirmed,lifetime:Lifetime::Thread}) if operation_id==id && phase=="awaiting_followup"))
+        && matches!(&o.call_completion,Some(result_content::ToolCompletionMetadata::JobAccepted{operation_id,phase,effect:Effect::Confirmed,lifetime:Lifetime::Thread, ..}) if operation_id==id && phase=="awaiting_followup"))
 }
 fn result(db: &Connection, w: &Wait) -> Result<ObservationResult> {
     Ok(ObservationResult {

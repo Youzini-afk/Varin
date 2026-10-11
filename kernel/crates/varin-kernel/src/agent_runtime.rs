@@ -16,6 +16,9 @@ use std::sync::{
 use std::thread::{self, JoinHandle};
 use varin_runtime::{model_session, supervisor::RunSupervisor, Catalog, SubmitInput};
 
+#[path = "agent_host_jobs.rs"]
+mod host_job_commands;
+
 #[path = "agent_policy.rs"]
 mod policy_commands;
 
@@ -861,6 +864,20 @@ pub(crate) fn spawn(
                             });
                             deferred = true;
                             return Ok(Value::Null);
+                        }
+                        if method.starts_with("runtime.host_job.") || method == "runtime.research.scopes" {
+                            let runtime = runtime.clone();
+                            let method = method.to_owned();
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            let cancelled = cancellation.clone();
+                            thread::spawn(move || {
+                                let result = host_job_commands::execute(runtime, &method, params, &cancelled);
+                                let response = match result { Ok(value) => response_ok(&response_id, value), Err(error) => response_error(&response_id, &error) };
+                                done(&response_id); let _ = response_sender.send(response);
+                            });
+                            deferred = true; return Ok(Value::Null);
                         }
                         if matches!(
                             method,

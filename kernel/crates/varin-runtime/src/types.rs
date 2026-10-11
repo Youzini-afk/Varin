@@ -47,6 +47,8 @@ impl ExecutorOwner {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Operation<E = ExternalReceipt, R = Value, C = crate::execution::ToolCompletion> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_job: Option<crate::catalog::host_jobs::HostJobLink>,
     pub external_receipt: Option<E>,
     pub call_completion: Option<C>,
     pub id: String,

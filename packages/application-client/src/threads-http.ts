@@ -26,6 +26,18 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     return result;
   };
   return {
+    research: {
+      scopes: (identity, signal) => post('research/scopes', identity, signal),
+      list: (selection, request = {}, signal) => post('research/list', { ...selection, request }, signal),
+      get: (selection, attemptId, signal) => post('research/get', { ...selection, attemptId }, signal),
+      logs: (selection, request, signal) => post('research/logs', { ...selection, request }, signal),
+      artifact: (selection, request, signal) => post('research/artifact', { ...selection, request }, signal),
+      cancel: (selection, attemptId) => post('research/cancel', { ...selection, attemptId }),
+      collect: (selection, attemptId) => post('research/collect', { ...selection, attemptId }),
+      submit: (selection, request) => post('research/submit', { ...selection, request }),
+      resources: (selection, signal) => post('research/resources', selection, signal),
+      sources: (selection, request = {}, signal) => post('research/sources', { ...selection, request }, signal),
+    },
     messages: {
       send: (identity, request, signal) => post('messages/send', { ...identity, request }, signal),
       list: (identity, request, signal) => post('messages/list', { ...identity, request }, signal),

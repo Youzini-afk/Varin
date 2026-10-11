@@ -2,7 +2,8 @@ import type { FamilyRunsParams, FamilyReadParams, FamilyItemParams, FollowupRegi
 import { PlanConflict } from './plan-service.js';
 import { parseThreadImages } from './thread-images.js';
 import type { Express, RequestHandler } from 'express';
-import type { ThreadIdentity, ThreadModel, ThreadSubmit, ThreadThinkingLevel } from '@varin/application-client';
+import type { ThreadIdentity, ThreadModel, ThreadSubmit, ThreadThinkingLevel, ThreadResearchAPI, ThreadResearchSelection } from '@varin/application-client';
+import { HarnessServiceError } from '../harness/service-error.js';
 import { KernelClientError } from './kernel-client.js';
 import { ThreadAdapter } from './thread-adapter.js';
 import { pendingThreadFollowupRegistrations, cancelThreadFollowupRegistration, controlThreadFollowup, getThreadFollowup, listThreadFollowups, registerThreadFollowup } from './thread-followups.js';
@@ -74,8 +75,18 @@ const modelSelection = (value: unknown): ThreadModel => {
 };
 
 /** Mounted in the existing authenticated Application Host, shared by Web and Electron. */
-export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requireAuth: RequestHandler): void {
+export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requireAuth: RequestHandler, research?: ThreadResearchAPI): void {
   const fields: Record<string, readonly string[]> = {
+    'research/scopes': ['runtime', 'threadId', 'branchId'],
+    'research/list': ['runtime', 'threadId', 'branchId', 'sourceRunId', 'request'],
+    'research/get': ['runtime', 'threadId', 'branchId', 'sourceRunId', 'attemptId'],
+    'research/logs': ['runtime', 'threadId', 'branchId', 'sourceRunId', 'request'],
+    'research/artifact': ['runtime', 'threadId', 'branchId', 'sourceRunId', 'request'],
+    'research/cancel': ['runtime', 'threadId', 'branchId', 'sourceRunId', 'attemptId'],
+    'research/collect': ['runtime', 'threadId', 'branchId', 'sourceRunId', 'attemptId'],
+    'research/submit': ['runtime', 'threadId', 'branchId', 'sourceRunId', 'request'],
+    'research/resources': ['runtime', 'threadId', 'branchId', 'sourceRunId'],
+    'research/sources': ['runtime', 'threadId', 'branchId', 'sourceRunId', 'request'],
     'process/terminal': ['runtime', 'threadId', 'branchId', 'operationId'],
     'model/select': ['runtime','threadId','branchId','runId','key','model'],
     'permission/decide': ['runtime', 'threadId', 'branchId', 'operationId', 'permissionId', 'decision'],
@@ -132,11 +143,38 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       catch (error) {
         // Errors from credentials/model services can contain upstream bodies. Do not echo them.
         const conflict = error instanceof PlanConflict || error instanceof KernelClientError && error.code === 'operation-error' && error.message.startsWith('operation error: conflict:');
-        const code = conflict ? 'thread-conflict' : error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'thread-request-failed';
-        response.status(code.includes('conflict') ? 409 : 400).json({ code, error: 'Thread request could not be completed' });
+        const code = conflict ? 'thread-conflict' : error instanceof HarnessServiceError ? error.harnessCode
+          : error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'thread-request-failed';
+        const status = code.includes('conflict') ? 409 : code === 'denied' || code === 'forbidden' ? 403
+          : code === 'not-found' ? 404 : code === 'unavailable' || code === 'timeout' ? 503 : 400;
+        response.status(status).json({ code, error: 'Thread request could not be completed' });
       } finally { response.removeListener('close', closed); }
     });
   };
+  if (research) {
+    const selection = (body: Record<string, unknown>): ThreadResearchSelection => ({ ...identity(body), sourceRunId: text(body.sourceRunId) });
+    const request = <T>(value: unknown, allowed: readonly string[]): T => {
+      const input = object(value);
+      if (Object.keys(input).some(key => !allowed.includes(key))) throw new Error('Unsupported research request field');
+      return input as T;
+    };
+    post('research/scopes', (body, signal) => research.scopes(identity(body), signal));
+    post('research/list', (body, signal) => research.list(selection(body), request(body.request, ['state', 'specId', 'limit']), signal));
+    post('research/get', (body, signal) => research.get(selection(body), text(body.attemptId), signal));
+    post('research/logs', (body, signal) => research.logs(selection(body), request(body.request, ['attemptId', 'stream', 'offset', 'maxBytes']), signal));
+    post('research/artifact', (body, signal) => research.artifact(selection(body), request(body.request, ['attemptId', 'artifactId', 'offset', 'maxBytes']), signal));
+    // Cancelling a response reader never requests job cancellation. These are explicit commands.
+    post('research/cancel', body => research.cancel(selection(body), text(body.attemptId)));
+    post('research/collect', body => research.collect(selection(body), text(body.attemptId)));
+    post('research/submit', body => {
+      const input = request<Parameters<ThreadResearchAPI['submit']>[1]>(body.request,
+        ['requestId', 'retryOfAttemptId', 'title', 'specId', 'command', 'args', 'cwd', 'env', 'inputs', 'resources', 'outputPaths', 'machineId']);
+      text(input.requestId);
+      return research.submit(selection(body), input);
+    });
+    post('research/resources', (body, signal) => research.resources(selection(body), signal));
+    post('research/sources', (body, signal) => research.sources(selection(body), request(body.request, ['kind']), signal));
+  }
   post('process/terminal', body => adapter.openProcessTerminal({ ...identity(body), operationId: text(body.operationId) }));
   post('plan/read', (body, signal) => adapter.readPlan(identity(body), signal));
   post('plan/update', (body, signal) => {

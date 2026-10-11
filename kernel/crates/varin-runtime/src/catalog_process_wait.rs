@@ -427,8 +427,8 @@ impl Catalog {
         let tx = self.db.transaction()?;
         let mut released = Vec::new();
         for mut operation in read_all::<Operation>(&tx, "operations")? {
-            if operation.executor.as_deref() != Some(WAIT_TOOL)
-                || operation.execution_owner != Some(ExecutorOwner::Kernel)
+            if (!(operation.executor.as_deref() == Some(WAIT_TOOL) && operation.execution_owner == Some(ExecutorOwner::Kernel))
+                && !operation.waiting_on.as_deref().is_some_and(|v|v.starts_with(super::host_jobs::WAIT_PREFIX)))
                 || operation.phase == OperationPhase::Terminal
             {
                 continue;
@@ -496,8 +496,7 @@ pub(super) fn pending_cancelled_observation(
         || !op.handed_off
         || op.waiting_on.as_deref() != Some(wait.id.as_str())
         || !matches!(&op.call_completion, Some(super::result_content::ToolCompletionMetadata::JobAccepted {
-            operation_id, phase, effect: Effect::None, lifetime: Lifetime::Thread,
-        }) if operation_id == &op.id && phase == "awaiting_process")
+            operation_id, phase, effect: Effect::None, lifetime: Lifetime::Thread, ..}) if operation_id == &op.id && phase == "awaiting_process")
     {
         return Ok(false);
     }

@@ -1,4 +1,5 @@
 import { runtimeFetch } from '@varin/application-client';
+import type { ThreadResearchAPI, ThreadResearchSelection } from '@varin/application-client';
 import type {
   ExperimentArtifactView,
   ExperimentAttemptView,
@@ -11,10 +12,9 @@ import type {
 } from '@varin/protocol';
 
 /**
- * Research facts loader (7F, D-300): the workbench reads the same durable
- * experiment/resource/source records the agent tools manage, through the
- * session-scoped harness routes — never through the Pi runtime `resource.list`
- * namespace, which is a different contract.
+ * Shared facts loader: actual Pi sessions use their harness routes; Agent Threads use
+ * the framework-neutral research API and explicit source selection. Both read the
+ * original experiment/resource/source owners, without a presentation-owned state store.
  */
 
 export interface ResearchFactsSnapshot {
@@ -46,6 +46,21 @@ export interface ResearchBatchRerunItem {
   text?: string;
   error?: string;
 }
+
+/** A string is an actual Pi session. Native selections always carry their distinct authority. */
+export type ResearchFactsOwner = string | {
+  api: ThreadResearchAPI;
+  selection: ThreadResearchSelection;
+  canSubmit: boolean;
+};
+
+const nativeAttempt = (value: unknown): ExperimentAttemptView => {
+  const attempt = parseAttempt(value);
+  if (!attempt || !isRecord(value) || !isRecord(value.permissions) || typeof value.permissions.control !== 'boolean') {
+    throw new Error('Research attempt or its permissions are malformed');
+  }
+  return attempt;
+};
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -128,9 +143,23 @@ const readJson = async (response: Response): Promise<unknown> => {
  * not exist yet.
  */
 export const loadResearchFacts = async (
-  sessionId: string,
+  sessionId: ResearchFactsOwner,
   signal?: AbortSignal,
 ): Promise<ResearchFactsSnapshot | null> => {
+  if (typeof sessionId !== 'string') {
+    const { api, selection } = sessionId;
+    const [attempts, resources, sources] = await Promise.all([
+      api.list(selection, {}, signal), api.resources(selection, signal), api.sources(selection, {}, signal),
+    ]);
+    if (!Array.isArray(attempts.attempts) || !Array.isArray(resources.machines) || !Array.isArray(sources.sources)
+      || typeof resources.generatedAt !== 'number') throw new Error('Research facts response is malformed');
+    return { attempts: attempts.attempts.map(nativeAttempt),
+      machines: resources.machines.map(value => {
+        const machine = parseMachine(value); if (!machine) throw new Error('Resource facts are malformed'); return machine;
+      }), sources: sources.sources.map(value => {
+        const source = parseSource(value); if (!source) throw new Error('Source facts are malformed'); return source;
+      }), generatedAt: resources.generatedAt };
+  }
   const base = `/api/harness/sessions/${encodeURIComponent(sessionId)}`;
   const init: RequestInit = { cache: 'no-store', ...(signal ? { signal } : {}) };
   const [experimentsBody, resourcesBody, sourcesBody] = await Promise.all([
@@ -160,10 +189,21 @@ export const loadResearchFacts = async (
 };
 
 export const loadResearchAttemptDetails = async (
-  sessionId: string,
+  sessionId: ResearchFactsOwner,
   attemptId: string,
   signal?: AbortSignal,
 ): Promise<ResearchAttemptDetails | null> => {
+  if (typeof sessionId !== 'string') {
+    const body = await sessionId.api.get(sessionId.selection, attemptId, signal);
+    const attempt = nativeAttempt(body.attempt);
+    if (attempt.attemptId !== attemptId || !Array.isArray(body.artifacts)) throw new Error('Research details belong to another attempt');
+    const job = body.job === undefined ? undefined : parseJob(body.job);
+    if (body.job !== undefined && (!job || job.attemptId !== attemptId)) throw new Error('Research job is malformed');
+    return { attempt, ...(job ? { job } : {}), artifacts: body.artifacts.map(value => {
+      const artifact = parseArtifact(value);
+      if (!artifact || artifact.attemptId !== attemptId) throw new Error('Research artifact is malformed'); return artifact;
+    }) };
+  }
   const response = await runtimeFetch(
     `/api/harness/sessions/${encodeURIComponent(sessionId)}/experiments/${encodeURIComponent(attemptId)}`,
     { cache: 'no-store', ...(signal ? { signal } : {}) },
@@ -180,11 +220,18 @@ export const loadResearchAttemptDetails = async (
 };
 
 export const loadResearchAttemptLogs = async (
-  sessionId: string,
+  sessionId: ResearchFactsOwner,
   attemptId: string,
   options: { stream: 'stdout' | 'stderr'; offset?: number; maxBytes?: number },
   signal?: AbortSignal,
 ): Promise<ExperimentLogsResult | null> => {
+  if (typeof sessionId !== 'string') {
+    const result = await sessionId.api.logs(sessionId.selection, { attemptId, ...options }, signal);
+    if (result.attemptId !== attemptId || result.stream !== options.stream || result.offset !== (options.offset ?? 0)
+      || typeof result.text !== 'string' || !Number.isSafeInteger(result.nextOffset) || result.nextOffset < result.offset
+      || typeof result.eof !== 'boolean') throw new Error('Research log page is malformed');
+    return result;
+  }
   const query = new URLSearchParams({ stream: options.stream });
   if (options.offset !== undefined) query.set('offset', String(options.offset));
   if (options.maxBytes !== undefined) query.set('maxBytes', String(options.maxBytes));
@@ -198,19 +245,42 @@ export const loadResearchAttemptLogs = async (
 };
 
 export const loadResearchArtifact = async (
-  sessionId: string,
+  sessionId: ResearchFactsOwner,
   attemptId: string,
   artifactId: string,
+  signal?: AbortSignal,
 ): Promise<Blob> => {
+  if (typeof sessionId !== 'string') {
+    const chunks: Uint8Array<ArrayBuffer>[] = [];
+    let offset = 0;
+    for (;;) {
+      signal?.throwIfAborted();
+      const page = await sessionId.api.artifact(sessionId.selection, { attemptId, artifactId, offset }, signal);
+      if (page.attemptId !== attemptId || page.artifactId !== artifactId || page.offset !== offset
+        || typeof page.bytesBase64 !== 'string' || typeof page.eof !== 'boolean') throw new Error('Research artifact page is malformed');
+      const bytes = Uint8Array.from(atob(page.bytesBase64), character => character.charCodeAt(0));
+      if (page.nextOffset !== offset + bytes.byteLength || (!page.eof && page.nextOffset === offset)) {
+        throw new Error('Research artifact cursor did not match its content');
+      }
+      chunks.push(bytes);
+      if (page.eof) return new Blob(chunks);
+      offset = page.nextOffset;
+    }
+  }
   const response = await runtimeFetch(
     `/api/harness/sessions/${encodeURIComponent(sessionId)}/experiments/${encodeURIComponent(attemptId)}/artifacts/${encodeURIComponent(artifactId)}`,
-    { cache: 'no-store' },
+    { cache: 'no-store', ...(signal ? { signal } : {}) },
   );
   if (!response.ok) throw new Error(`Artifact request failed (${response.status})`);
   return response.blob();
 };
 
-export const cancelResearchAttempt = async (sessionId: string, attemptId: string): Promise<void> => {
+export const cancelResearchAttempt = async (sessionId: ResearchFactsOwner, attemptId: string): Promise<void> => {
+  if (typeof sessionId !== 'string') {
+    const result = await sessionId.api.cancel(sessionId.selection, attemptId);
+    if (nativeAttempt(result.attempt).attemptId !== attemptId) throw new Error('Cancellation belongs to another attempt');
+    return;
+  }
   const response = await runtimeFetch(
     `/api/harness/sessions/${encodeURIComponent(sessionId)}/experiments/${encodeURIComponent(attemptId)}/cancel`,
     { method: 'POST', cache: 'no-store' },
@@ -226,9 +296,13 @@ const readJsonBody = async (response: Response, message: string): Promise<Record
 };
 
 export const cancelResearchAttempts = async (
-  sessionId: string,
+  sessionId: ResearchFactsOwner,
   attemptIds: string[],
 ): Promise<ResearchBatchCancelItem[]> => {
+  if (typeof sessionId !== 'string') return Promise.all(attemptIds.map(async attemptId => {
+    try { await cancelResearchAttempt(sessionId, attemptId); return { attemptId, ok: true }; }
+    catch (error) { return { attemptId, ok: false, error: error instanceof Error ? error.message : String(error) }; }
+  }));
   const response = await runtimeFetch(
     `/api/harness/sessions/${encodeURIComponent(sessionId)}/experiments/cancel-many`,
     {
@@ -253,10 +327,19 @@ export const cancelResearchAttempts = async (
 };
 
 export const rerunResearchAttempt = async (
-  sessionId: string,
+  sessionId: ResearchFactsOwner,
   attemptId: string,
-  intent: { requestId: string; machineId?: string },
+  intent: { requestId: string; machineId?: string; specId?: string },
 ): Promise<ExperimentSubmitResult> => {
+  if (typeof sessionId !== 'string') {
+    if (!sessionId.canSubmit) throw new Error('This historical research source is read/control only');
+    if (!intent.specId) throw new Error('Rerun needs its original immutable spec');
+    const result = await sessionId.api.submit(sessionId.selection, { requestId: intent.requestId, specId: intent.specId,
+      retryOfAttemptId: attemptId, ...(intent.machineId ? { machineId: intent.machineId } : {}) });
+    const attempt = nativeAttempt(result.attempt);
+    if (attempt.requestId !== intent.requestId || attempt.retryOfAttemptId !== attemptId) throw new Error('Rerun receipt belongs to another intent');
+    return { ...result, attempt };
+  }
   const response = await runtimeFetch(
     `/api/harness/sessions/${encodeURIComponent(sessionId)}/experiments/${encodeURIComponent(attemptId)}/rerun`,
     {
@@ -276,9 +359,15 @@ export const rerunResearchAttempt = async (
 };
 
 export const rerunResearchAttempts = async (
-  sessionId: string,
+  sessionId: ResearchFactsOwner,
   attempts: Array<Pick<ExperimentAttemptView, 'attemptId' | 'machineId'> & { specId: string; requestId: string }>,
 ): Promise<ResearchBatchRerunItem[]> => {
+  if (typeof sessionId !== 'string') return Promise.all(attempts.map(async (attempt, index) => {
+    try {
+      const result = await rerunResearchAttempt(sessionId, attempt.attemptId, attempt);
+      return { index, requestId: attempt.requestId, accepted: true, ...result };
+    } catch (error) { return { index, requestId: attempt.requestId, accepted: false, error: error instanceof Error ? error.message : String(error) }; }
+  }));
   const items = attempts.map((attempt) => ({
     requestId: attempt.requestId,
     retryOfAttemptId: attempt.attemptId,
@@ -315,7 +404,16 @@ export const rerunResearchAttempts = async (
   });
 };
 
-export const collectResearchAttempt = async (sessionId: string, attemptId: string): Promise<ExperimentCollectResult> => {
+export const collectResearchAttempt = async (sessionId: ResearchFactsOwner, attemptId: string): Promise<ExperimentCollectResult> => {
+  if (typeof sessionId !== 'string') {
+    const result = await sessionId.api.collect(sessionId.selection, attemptId);
+    const attempt = nativeAttempt(result.attempt);
+    if (attempt.attemptId !== attemptId || !Array.isArray(result.artifacts)) throw new Error('Collection receipt is malformed');
+    return { attempt, artifacts: result.artifacts.map(value => {
+      const artifact = parseArtifact(value);
+      if (!artifact || artifact.attemptId !== attemptId) throw new Error('Collected artifact is malformed'); return artifact;
+    }) };
+  }
   const response = await runtimeFetch(
     `/api/harness/sessions/${encodeURIComponent(sessionId)}/experiments/${encodeURIComponent(attemptId)}/collect`,
     { method: 'POST', cache: 'no-store' },

@@ -110,7 +110,9 @@ export function runToolDomainEffect(
     void work.catch(() => undefined);
   }
   return registration.effect.work.then(receipt => {
-    if (receipt.completion.kind !== 'result') throw new Error('tool_domain_result_unavailable');
-    return parseVarinToolJson(receipt.completion.content);
+    if (receipt.completion.kind !== 'result' && receipt.completion.kind !== 'job_accepted') throw new Error('tool_domain_result_unavailable');
+    return parseVarinToolJson(receipt.completion.kind === 'job_accepted' && receipt.completion.content === undefined
+      ? { operationId: authority.operationId, phase: receipt.completion.phase }
+      : receipt.completion.content);
   });
 }

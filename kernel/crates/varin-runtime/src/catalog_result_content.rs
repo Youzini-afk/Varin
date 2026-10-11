@@ -50,6 +50,8 @@ pub enum ToolCompletionMetadata {
         phase: String,
         effect: Effect,
         lifetime: Lifetime,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        content_ref: Option<Value>,
     },
 }
 impl ToolReceiptMetadata {
@@ -94,11 +96,13 @@ impl ToolCompletionMetadata {
                 phase,
                 effect,
                 lifetime,
+                content: body,
             } => ToolCompletionMetadata::JobAccepted {
                 operation_id: operation_id.clone(),
                 phase: phase.clone(),
                 effect: *effect,
                 lifetime: *lifetime,
+                content_ref: body.as_ref().map(|v| content.save(v)).transpose()?,
             },
         })
     }
@@ -121,11 +125,13 @@ impl ToolCompletionMetadata {
                 phase,
                 effect,
                 lifetime,
+                content_ref,
             } => ToolCompletion::JobAccepted {
                 operation_id,
                 phase,
                 effect,
                 lifetime,
+                content: content_ref.map(|v| content.load(&v)).transpose()?,
             },
         })
     }
@@ -252,6 +258,7 @@ pub(super) fn publish_job_acceptance(
         phase: phase.into(),
         effect: Effect::None,
         lifetime: Lifetime::Thread,
+        content_ref: None,
     };
     if op
         .call_completion

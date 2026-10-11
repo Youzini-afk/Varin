@@ -125,8 +125,25 @@ it('renders the composer and retries an uncertain send with the same request ide
 
 it('active-thread controls queue the chosen mode, save/cancel queued text, and stop the selected Run', async () => {
   const f = fixture(true);
+  const job: ThreadSnapshot['operations'][number] = { id: 'independent-research-job', run_id: 'ui-run', epoch: 1,
+    revision: 1, phase: 'running', outcome: null, effect: 'confirmed', cancel_requested: false,
+    lifetime: 'thread', handed_off: true, executor: 'research_submit', waiting_on: null,
+    intent: {}, result: null, external_receipt: null, call_completion: null,
+    execution_owner: { kind: 'external', identity: 'research-owner', epoch: 'owner-epoch' } };
+  const observation = { ...job, id: 'research-observer', executor: 'research_wait', phase: 'waiting' as const,
+    effect: 'none' as const, waiting_on: 'host-job-wait:research-observer' };
+  f.view.operations.push(job, observation);
+  const cancelOperation = vi.fn<ThreadsAPI['cancelOperation']>(async id => {
+    const operation = f.view.operations.find(item => item.id === id)!;
+    operation.cancel_requested = true; return operation;
+  });
+  f.api.cancelOperation = cancelOperation;
   f.view.inputs.push({ id: 'queued-existing', thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'ui-run', mode: 'boundary', state: 'queued', revision: 3, content: { text: 'original queued text' }, cursor: 1 });
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
+  expect(button('Cancel operation')).toBeDefined();
+  await act(async () => { button('Cancel observation wait').click(); });
+  expect(cancelOperation.mock.calls).toEqual([[observation.id]]);
+  expect(job.cancel_requested).toBe(false);
   await edit('[aria-label="Input delivery"]', 'interrupt', 'change');
   await edit('[aria-label="Message thread"]', 'new queued instructions');
   await submitForm(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.closest('form')!);

@@ -421,8 +421,7 @@ fn accepted(c: &ToolExecutionContext, phase: &str) -> ToolCompletion {
         operation_id: c.operation_id.clone(),
         phase: phase.into(),
         effect: Effect::None,
-        lifetime: Lifetime::Thread,
-    }
+        lifetime: Lifetime::Thread, content: None,}
 }
 #[cfg(test)]
 #[path = "collaboration_policy_review.rs"]

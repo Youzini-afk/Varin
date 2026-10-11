@@ -40,6 +40,7 @@ These use the ordinary installed brokered Host extension and project service-rou
 
 - [Stored material snapshot reader](material-snapshot-tool/README.md): bounded reads through the original material owner.
 - [Fixed child result integration](child-integration-tool/README.md): explicitly apply a published child result through the original Integration journal.
+- [Research experiment tools](research-tools/README.md): accept independent experiments, observe their original terminal facts and read/control the original research domain.
 
-Both use ordinary installed services and their reviewed Host capabilities. Their manifests supply the
+These use ordinary installed services and their reviewed Host capabilities. Their manifests supply the
 same tool declarations used by model/policy admission and inspection.

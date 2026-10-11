@@ -1,5 +1,82 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
 
+export interface HostJobBinding {
+  operationId: string;
+  executionOwner: ExecutorOwner;
+  domain: string;
+  domainVersion: number;
+  workspaceId: string;
+  subjectId: string;
+}
+
+export interface ResearchScope {
+  canSubmit: boolean;
+  rootThreadId: string;
+  threadId: string;
+  branchId: string;
+  sourceRunId: string;
+  source: LaunchSource;
+  readThreadIds: string[];
+  controlThreadIds: string[];
+}
+
+export interface ResearchScopeParams {
+  threadId: string;
+  branchId: string;
+  sourceRunId?: string;
+  operationId?: string;
+}
+
+export interface HostJobUserParams {
+  subjectId: string;
+  threadId: string;
+  branchId: string;
+  sourceRunId: string;
+  key: string;
+  domain: string;
+  domainVersion: number;
+  request: unknown;
+}
+
+export type HostJobOrigin = {kind:'tool';origin:ToolOrigin;call_id:string;tool_name:string;schema_version:string} | {kind:'user';key:string};
+
+export interface HostJobPending {
+  executorStopped: boolean;
+  binding: HostJobBinding;
+  runId: string;
+  accepted: boolean;
+  cancelRequested: boolean;
+  phase: OperationPhase;
+  origin: HostJobOrigin;
+}
+
+export interface HostJobLink {
+  binding: HostJobBinding;
+  acceptanceRef: unknown | null;
+}
+
+export interface HostJobBeginParams {
+  binding: HostJobBinding;
+}
+
+export interface HostJobAcceptParams {
+  binding: HostJobBinding;
+  content: unknown;
+}
+
+export interface HostJobTerminalParams {
+  binding: HostJobBinding;
+  outcome: Outcome;
+  effect: Effect;
+  content: unknown;
+  executorStopped: boolean;
+}
+
+export interface HostJobObserveParams {
+  operationId: string;
+  targetOperationId: string;
+}
+
 export type CalendarRule =
   | { kind: 'once'; date: string; time: string }
   | { kind: 'daily'; times: string[] }
@@ -781,7 +858,7 @@ export interface LaunchSource {
   live_root: LiveRoot | null;
 }
 
-export interface ToolMetadata { service_id: string; service_version: number; completion: 'result'; operation: 'read' | 'effect'; examples?: unknown[]; source?: {path: string; line?: number}; }
+export interface ToolMetadata { service_id: string; service_version: number; completion: 'result' | 'job'; lifetime?: 'thread' | 'environment'; operation: 'read' | 'effect'; examples?: unknown[]; source?: {path: string; line?: number}; }
 
 export interface HostToolCall {
   runId: string;
@@ -1511,9 +1588,10 @@ export interface Run {
 export type OperationCallCompletion =
   | { kind: 'not_dispatched'; reason: string }
   | { kind: 'result'; outcome: Outcome; effect: Effect; content: unknown }
-  | { kind: 'job_accepted'; operation_id: string; phase: string; effect: Effect; lifetime: Lifetime };
+  | { kind: 'job_accepted'; operation_id: string; phase: string; effect: Effect; lifetime: Lifetime; content?: unknown };
 
 export interface Operation {
+  host_job?: HostJobLink;
   execution_owner: ExecutorOwner | null;
   external_receipt: ExternalReceipt | null;
   call_completion: OperationCallCompletion | null;

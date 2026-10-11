@@ -114,6 +114,7 @@ impl Storage {
             session_id: parse_optional("sessionId")?,
             thread_id: parse_optional("threadId")?,
             run_id: parse_optional("runId")?,
+            operation_id: parse_optional("operationId")?,
             owning_workspace,
             execution_workspace,
             storage_identity: storage_identity.to_string(),
@@ -123,6 +124,11 @@ impl Storage {
             state: GrantState::Active,
             handoff_operation_id: None,
         };
+        if grant.operation_id.is_some() && (grant.thread_id.is_none() || grant.run_id.is_none()) {
+            return Err(KernelError::Authorization(
+                "operation-owned grant requires its actual Thread and source Run".into(),
+            ));
+        }
         let params_hash = hash_json(params)?;
         if let Some((stored_hash, stored_json)) = self
             .conn
@@ -236,6 +242,15 @@ impl Storage {
                 .ok_or_else(|| KernelError::Protocol("retire target is required".into()))?,
         )?;
         let ids = match target {
+            GrantRetireTarget::Operation { operation_id } => {
+                if operation_id.is_empty() {
+                    return Err(KernelError::Protocol("operationId is required".into()));
+                }
+                let mut q=self.conn.prepare("SELECT grant_id FROM grants WHERE state='active' AND host_id=?1 AND json_extract(grant_json,'$.operation_id')=?2 ORDER BY grant_id")?;
+                let rows =
+                    q.query_map(params![host_id, operation_id], |r| r.get::<_, String>(0))?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            }
             GrantRetireTarget::Grant { grant_id } => {
                 if grant_id.is_empty() {
                     return Err(KernelError::Protocol("grantId is required".into()));
@@ -246,7 +261,7 @@ impl Storage {
                 if run_id.is_empty() {
                     return Err(KernelError::Protocol("runId is required".into()));
                 }
-                let mut q=self.conn.prepare("SELECT grant_id FROM grants WHERE host_id=?1 AND json_extract(grant_json,'$.run_id')=?2 ORDER BY grant_id")?;
+                let mut q=self.conn.prepare("SELECT grant_id FROM grants WHERE host_id=?1 AND json_extract(grant_json,'$.run_id')=?2 AND json_extract(grant_json,'$.operation_id') IS NULL ORDER BY grant_id")?;
                 let rows = q.query_map(params![host_id, run_id], |r| r.get::<_, String>(0))?;
                 rows.collect::<Result<Vec<_>, _>>()?
             }
@@ -690,5 +705,52 @@ impl Storage {
             }
         }
         Ok((grant, authorized))
+    }
+}
+
+#[cfg(test)]
+mod operation_lifetime_tests {
+    use super::*;
+    #[test]
+    fn source_run_retirement_preserves_only_explicit_operation_owned_grants() {
+        let root = std::env::temp_dir().join(format!("operation-grant-{}", Uuid::new_v4()));
+        let mut storage = Storage::open(&root, "host").unwrap();
+        for (id, operation) in [
+            ("run-grant", None),
+            ("domain-grant", Some("original-operation")),
+            ("other-grant", Some("other-operation")),
+        ] {
+            storage.issue_grant(&json!({"grantId":id,"hostGeneration":"generation","threadId":"child-thread","runId":"source-run","operationId":operation,"owningWorkspace":"workspace","executionWorkspace":"execution","capabilities":["storage.read"],"pathScopes":[""]}),"host","generation",&storage.root.to_string_lossy().into_owned(),"epoch").unwrap();
+        }
+        let retired = storage
+            .retire_grants(
+                &json!({"target":{"kind":"run","runId":"source-run"}}),
+                "host",
+            )
+            .unwrap();
+        assert_eq!(retired["grantIds"], json!(["run-grant"]));
+        let owned = storage.load_grant("domain-grant").unwrap();
+        assert_eq!(owned.state, GrantState::Active);
+        assert_eq!(owned.run_id.as_deref(), Some("source-run"));
+        assert_eq!(owned.operation_id.as_deref(), Some("original-operation"));
+        drop(storage);
+        let mut storage = Storage::open(&root, "host").unwrap();
+        let retired = storage
+            .retire_grants(
+                &json!({"target":{"kind":"operation","operationId":"original-operation"}}),
+                "host",
+            )
+            .unwrap();
+        assert_eq!(retired["grantIds"], json!(["domain-grant"]));
+        assert_eq!(
+            storage.load_grant("other-grant").unwrap().state,
+            GrantState::Active
+        );
+        assert_eq!(
+            storage.load_grant("domain-grant").unwrap().state,
+            GrantState::Retired
+        );
+        drop(storage);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

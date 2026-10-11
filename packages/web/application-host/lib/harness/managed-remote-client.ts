@@ -519,18 +519,21 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
       },
       reconcilePreparation: async ({ input }) => {
         const transfer = await openExperimentInputTransfer(options.kernel, caller, input);
-        const probe = await client.json<ManagedRemoteMaterialProbe>("/materials/probe", {
-          coordinatorHostId: options.coordinatorHostId, materialId: transfer.materialId,
-          entries: transfer.entries, ...(transfer.cwd ? { cwd: transfer.cwd } : {}),
-        });
-        // Absence of the ready record cannot rule out an in-flight remote commit.
-        return probe.ready && probe.rootId && probe.canonicalRoot ? "drained" : "unknown";
+        try {
+          const probe = await client.json<ManagedRemoteMaterialProbe>("/materials/probe", {
+            coordinatorHostId: options.coordinatorHostId, materialId: transfer.materialId,
+            entries: transfer.entries, ...(transfer.cwd ? { cwd: transfer.cwd } : {}),
+          });
+          // Absence of the ready record cannot rule out an in-flight remote commit.
+          return probe.ready && probe.rootId && probe.canonicalRoot ? "drained" : "unknown";
+        } finally { await transfer.close(); }
       },
       prepare: async ({ attemptId, input, signal }) => {
+        let transfer: Awaited<ReturnType<typeof openExperimentInputTransfer>> | undefined;
         let commitDispatched = false;
         try {
           signal?.throwIfAborted();
-          const transfer = await openExperimentInputTransfer(options.kernel, caller, input, signal ? { signal } : {});
+          transfer = await openExperimentInputTransfer(options.kernel, caller, input, signal ? { signal } : {});
           const manifest: ManagedRemoteMaterialManifest = {
             coordinatorHostId: options.coordinatorHostId,
             materialId: transfer.materialId,
@@ -579,7 +582,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
           // writer. Uploaded objects remain with the shared content owner.
           if (!commitDispatched) throw new ExperimentPreparationError(error instanceof Error ? error.message : String(error), { drained: true, cause: error });
           throw error;
-        }
+        } finally { await transfer?.close(); }
       },
     };
   };

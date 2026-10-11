@@ -373,8 +373,7 @@ impl Catalog {
             || operation.executor.as_deref() != Some(QUESTION_TOOL)
             || !operation.handed_off
             || !matches!(&operation.call_completion, Some(super::result_content::ToolCompletionMetadata::JobAccepted {
-                operation_id: id, phase, effect: Effect::None, lifetime: Lifetime::Thread,
-            }) if id == operation_id && phase == "awaiting_user")
+                operation_id: id, phase, effect: Effect::None, lifetime: Lifetime::Thread, ..}) if id == operation_id && phase == "awaiting_user")
         {
             return Err(RuntimeError::Conflict(
                 "question has no accepted invocation in this Run".into(),

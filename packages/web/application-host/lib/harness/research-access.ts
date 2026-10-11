@@ -66,7 +66,8 @@ export async function resolveResearchCaller(
     executionWorkspaceId: input.executionWorkspaceId ?? input.workspaceId,
     sessionId: input.sessionId,
     rootSessionId,
-    allowedThreadIds: [...visible.keys()],
+    owner: { runtime: 'pi', rootSessionId, sessionId: input.sessionId, ...(binding ? { threadId: binding.threadId, runId: binding.runId } : {}) },
+    access: { kind: 'family', readThreadIds: [...visible.keys()], controlThreadIds: [...visible.keys()] },
     ...(binding ? { threadId: binding.threadId, runId: binding.runId } : {}),
     ...(input.workspaceScope ? { workspaceScope: input.workspaceScope } : {}),
   };

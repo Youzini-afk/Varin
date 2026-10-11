@@ -25,18 +25,19 @@ pub fn deadline_after(now: u64, duration: u64) -> Result<u64> {
         })
 }
 pub fn is_observation_id(id: &str) -> bool {
-    id.starts_with("child-wait:")
+    id.starts_with(super::host_jobs::WAIT_PREFIX)
+        || id.starts_with("child-wait:")
         || id.starts_with("process-wait:")
         || id.starts_with(messages::reply_wait::PREFIX)
         || id.starts_with(followups::observation::PREFIX)
 }
 fn waiting_runs(db: &Connection) -> Result<Vec<Run>> {
-    let mut q = db.prepare("SELECT body FROM runs WHERE json_extract(body,'$.state')='waiting' AND (json_extract(body,'$.waiting_on') GLOB 'child-wait:*' OR json_extract(body,'$.waiting_on') GLOB 'process-wait:*' OR json_extract(body,'$.waiting_on') GLOB 'reply-wait:*' OR json_extract(body,'$.waiting_on') GLOB 'followup-observation:*') ORDER BY rowid")?;
+    let mut q = db.prepare("SELECT body FROM runs WHERE json_extract(body,'$.state')='waiting' AND (json_extract(body,'$.waiting_on') GLOB 'host-job-wait:*' OR json_extract(body,'$.waiting_on') GLOB 'child-wait:*' OR json_extract(body,'$.waiting_on') GLOB 'process-wait:*' OR json_extract(body,'$.waiting_on') GLOB 'reply-wait:*' OR json_extract(body,'$.waiting_on') GLOB 'followup-observation:*') ORDER BY rowid")?;
     let rows = q.query_map([], |r| r.get::<_, String>(0))?;
     rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
 }
 pub(super) fn operations(db: &Connection, run: Option<&str>) -> Result<Vec<Operation>> {
-    let mut q = db.prepare("SELECT body FROM operations WHERE (?1 IS NULL OR run_id=?1) AND json_extract(body,'$.phase')!='terminal' AND json_extract(body,'$.execution_owner.kind')='kernel' AND json_extract(body,'$.executor') IN ('wait_child','wait_process','send','follow_up') AND json_extract(body,'$.waiting_on') IS NOT NULL ORDER BY rowid")?;
+    let mut q = db.prepare("SELECT body FROM operations WHERE (?1 IS NULL OR run_id=?1) AND json_extract(body,'$.phase')!='terminal' AND ((json_extract(body,'$.execution_owner.kind')='kernel' AND json_extract(body,'$.executor') IN ('wait_child','wait_process','send','follow_up')) OR json_extract(body,'$.waiting_on') GLOB 'host-job-wait:*') AND json_extract(body,'$.waiting_on') IS NOT NULL ORDER BY rowid")?;
     let rows = q.query_map([run], |r| r.get::<_, String>(0))?;
     let mut out = Vec::new();
     for raw in rows {
@@ -50,6 +51,10 @@ pub(super) fn operations(db: &Connection, run: Option<&str>) -> Result<Vec<Opera
 pub(super) fn ready(db: &Connection, op: &Operation, wait: &Wait) -> Result<bool> {
     if wait.cancelled {
         return Ok(true);
+    }
+    if wait.id.starts_with(super::host_jobs::WAIT_PREFIX) {
+        let target:Operation=record(db,"operations",&wait.subject)?;
+        return Ok(target.phase==OperationPhase::Terminal && target.external_receipt.as_ref().is_some_and(|r|r.executor_stopped));
     }
     match op.executor.as_deref() {
         Some(collaboration::WAIT_TOOL) => {
@@ -86,7 +91,7 @@ pub(super) fn next(db: &Connection, run: &str) -> Result<Option<String>> {
     Ok(pending)
 }
 pub(super) fn pending_cancelled(db: &Connection, run: &Run, wait: &Wait) -> Result<bool> {
-    if collaboration::pending_cancelled_observation(db, run, wait)?
+    if super::host_jobs::pending_cancelled(db,run,wait)? || collaboration::pending_cancelled_observation(db, run, wait)?
         || process_wait::pending_cancelled_observation(db, run, wait)?
     {
         return Ok(true);
@@ -127,7 +132,7 @@ impl Catalog {
         next(&self.db, run)
     }
     pub fn pending_observation_continuations(&self) -> Result<Vec<String>> {
-        let mut q=self.db.prepare("SELECT DISTINCT r.id FROM runs r JOIN operations o ON o.run_id=r.id JOIN run_launches l ON l.id=r.id WHERE json_extract(r.body,'$.state')='runnable' AND json_extract(r.body,'$.cancel_requested')=0 AND json_extract(l.body,'$.requires_rebind')=1 AND json_extract(o.body,'$.execution_owner.kind')='kernel' AND json_extract(o.body,'$.executor') IN ('wait_child','wait_process','send','follow_up') AND json_extract(o.body,'$.waiting_on') IS NOT NULL AND json_extract(o.body,'$.phase')='terminal' ORDER BY r.rowid")?;
+        let mut q=self.db.prepare("SELECT DISTINCT r.id FROM runs r JOIN operations o ON o.run_id=r.id JOIN run_launches l ON l.id=r.id WHERE json_extract(r.body,'$.state')='runnable' AND json_extract(r.body,'$.cancel_requested')=0 AND json_extract(l.body,'$.requires_rebind')=1 AND ((json_extract(o.body,'$.execution_owner.kind')='kernel' AND json_extract(o.body,'$.executor') IN ('wait_child','wait_process','send','follow_up')) OR json_extract(o.body,'$.waiting_on') GLOB 'host-job-wait:*') AND json_extract(o.body,'$.waiting_on') IS NOT NULL AND json_extract(o.body,'$.phase')='terminal' ORDER BY r.rowid")?;
         let rows = q
             .query_map([], |r| r.get(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -198,7 +203,7 @@ impl Catalog {
         if wait.trigger_cursor.is_some() {
             return Ok(op);
         }
-        if op.executor.as_deref() == Some(process_wait::WAIT_TOOL) {
+        if id.starts_with(super::host_jobs::WAIT_PREFIX) { self.cancel_host_job_wait(operation_id) } else if op.executor.as_deref() == Some(process_wait::WAIT_TOOL) {
             self.cancel_process_wait(operation_id)
         } else if op.executor.as_deref() == Some(followups::TOOL) {
             self.cancel_followup_observation(operation_id)

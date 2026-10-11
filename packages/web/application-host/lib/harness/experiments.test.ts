@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, it } from "vitest";
+import { afterEach, describe, it, vi } from "vitest";
 import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.js";
 import type { KernelRecordResult } from "../kernel/protocol.generated.js";
 import { createExperimentService, type ExperimentCaller } from "./experiments.js";
 import type { ExperimentBackend, ResolvedExperimentBackend } from "./experiment-backend.js";
 import type { ResourceService } from "./resources.js";
+import { piResearchCaller } from './research-caller.fixture.js';
 import { createSourceService } from "./sources.js";
 
 const deferred = <T = void>() => {
@@ -30,7 +31,7 @@ async function fixture() {
   const branches = new Map<string, { root: string; paths: string[] }>();
   const events: string[] = [];
   const errors: Error[] = [];
-  const caller: ExperimentCaller = { workspaceId: "ws", executionWorkspaceId: "exec", sessionId: "session", threadId: "thread", runId: "run", rootSessionId: "root", workspaceScope: [] };
+  const caller: ExperimentCaller = piResearchCaller({ workspaceId: "ws", executionWorkspaceId: "exec", sessionId: "session", threadId: "thread", runId: "run", rootSessionId: "root", workspaceScope: [] });
   let currentRoot = root;
   let backendAvailable = true;
   let beforeReadBranch: () => Promise<void> = async () => {};
@@ -53,6 +54,7 @@ async function fixture() {
   let resolveCalls = 0;
   let scanCalls = 0;
   let prepareCalls = 0;
+  let releasedPreparations = 0;
   let admissionCalls = 0;
   let admissionRecovery: "confirmed" | "not-admitted" | "unknown" = "unknown";
   let beforeAdmit: () => Promise<void> = async () => {};
@@ -98,9 +100,10 @@ async function fixture() {
       return result;
     },
     async getOperation(id: string) { return structuredClone(operations.get(id) ?? null); },
+    async putBlob(bytes: Buffer) { return { hash: `fixture-blob-${bytes.byteLength}`, ownerId: `fixture-blob-owner-${++sequence}` }; },
     async releaseBlob() {},
   } as unknown as KernelScopedClient;
-  const client = { start: async () => ({}), issueGrant: async () => ({}), scoped: () => scoped } as unknown as KernelClient;
+  const client = { start: async () => ({}), issueGrant: async (grant:object) => grant, retireGrant: async () => ({}), retireOperationGrants: async (operationId:string) => {events.push(`authority-retired:${operationId}`);return {};}, scoped: () => scoped } as unknown as KernelClient;
   const resources = {
     async listMachines() { return [{ machineId: "local", state: "available", connection: { status: "connected" }, capacity: { cpuCores: 64 }, commitments: [...committed].map((id) => ({ commitmentId: id, attemptId: id.slice(7), state: "confirmed", resources: {} })) }]; },
     async getMachineRecord(_workspace: string, machineId: string) { return machineId === "remote" ? { machineId: "remote" } : null; },
@@ -124,24 +127,24 @@ async function fixture() {
   const resolved: ResolvedExperimentBackend = {
     backend, site: { workspaceId: "ws", rootId: "execution-root", canonicalRoot: root, transport: null },
     async reconcilePreparation() { recoveryCalls++; return preparationRecovery; },
-    async prepare({ signal, input }) { prepareCalls++; await beforePrepare(signal); return { site: this.site, cwd: "", inputRoot: preparedRoot ?? input.root }; },
+    async prepare({ signal, input }) { prepareCalls++; await beforePrepare(signal); return { site: this.site, cwd: "", inputRoot: preparedRoot ?? input.root, releaseAuthority:async()=>{releasedPreparations++;} }; },
   };
   const sources = createSourceService({ client });
-  const makeService = () => {
-    const service = createExperimentService({ client, resources, sources, resolveWorkspaceRoot: async () => { resolveCalls++; return currentRoot; }, resolveBackend: () => backendAvailable ? resolved : null, onError: (error) => errors.push(error) });
+  const makeService = (sourceAuthority?: import("../kernel/research-source.js").ResearchSourceAuthority, kernelClient = client) => {
+    const service = createExperimentService({ ...(sourceAuthority ? {sourceAuthority}:{}), client: kernelClient, resources, sources, resolveWorkspaceRoot: async () => { resolveCalls++; return currentRoot; }, resolveBackend: () => backendAvailable ? resolved : null, onError: (error) => errors.push(error) });
     cleanup.push(() => service.dispose()); return service;
   };
   const service = makeService();
-  const snapshot = { schemaVersion: 1, branchId: "seed-branch", root: "sha256-seed", sourceRoot: root, workspaceId: "ws", executionWorkspaceId: "exec", captureScopes: [], capturedPathCount: 0, inventoryFingerprint: "seed", captureSemantics: { excludedDirectories: [".git", ".varin"], gitignore: "not-applied", ignoredFilesIncluded: true } };
-  records.set("experiment.spec:seed", { recordId: "experiment.spec:seed", workspaceId: "ws", recordType: "experiment.spec", state: "active", recordRevision: 1, payloadJson: JSON.stringify({ id: "seed", command: "fixture-command", args: [], inputs: [], outputPaths: [], inputSnapshot: snapshot, resources: { cpuCores: 1 } }), references: [], createdAt: 1, updatedAt: 1 });
-  return { root, caller, records, branches, operations, events, errors, service, makeService, committed, activeLeases, sources,
+  const snapshot = { schemaVersion: 2, source: {kind:"physical-capture"}, branchId: "seed-branch", root: "sha256-seed", sourceRoot: root, workspaceId: "ws", executionWorkspaceId: "exec", captureScopes: [], capturedPathCount: 0, inventoryFingerprint: "seed", captureSemantics: { excludedDirectories: [".git", ".varin"], gitignore: "not-applied", ignoredFilesIncluded: true } };
+  records.set("experiment.spec:seed", { recordId: "experiment.spec:seed", workspaceId: "ws", recordType: "experiment.spec", state: "active", recordRevision: 1, payloadJson: JSON.stringify({ researchOwner: {runtime:"pi",rootSessionId:"root",sessionId:"session"},executionWorkspaceId:"exec", id: "seed", command: "fixture-command", args: [], inputs: [], outputPaths: [], inputSnapshot: snapshot, resources: { cpuCores: 1 } }), references: [], createdAt: 1, updatedAt: 1 });
+  return { root, caller, client, resources, scoped, backend, records, branches, operations, events, errors, service, makeService, committed, activeLeases, sources,
     backendAvailable: (value: boolean) => { backendAvailable = value; },
     readBranch: (fn: typeof beforeReadBranch) => { beforeReadBranch = fn; },
     createAck: (fn: typeof beforeCreateAck) => { beforeCreateAck = fn; },
     loseDelete: () => { loseDeleteReply = true; },
     inspect: (fn: typeof beforeInspect) => { beforeInspect = fn; },
     failKills: (value: boolean) => { failKills = value; },
-    counters: () => ({ spawnCalls, resolveCalls, scanCalls, prepareCalls, recoveryCalls, captureCalls, admissionCalls }),
+    counters: () => ({ spawnCalls, releasedPreparations, resolveCalls, scanCalls, prepareCalls, recoveryCalls, captureCalls, admissionCalls }),
     admit: (fn: typeof beforeAdmit) => { beforeAdmit = fn; },
     recoverAdmission: (value: typeof admissionRecovery) => { admissionRecovery = value; },
     recoverPreparation: (value: typeof preparationRecovery) => { preparationRecovery = value; },
@@ -220,7 +223,7 @@ describe("durable experiment admission with explicit Storage/backend fixtures", 
     await f.service.cancel(f.caller, accepted.attempt.attemptId); await until(() => f.events.includes("kill"));
     assert.equal((await f.service.get(f.caller, accepted.attempt.attemptId)).attempt.state, "stopping"); assert.equal(f.committed.size, 1);
     gate.resolve(); assert.equal((await f.service.wait(f.caller, accepted.attempt.attemptId, 1500)).attempt.state, "cancelled");
-    assert.ok(f.events.filter((event) => event === "kill").length >= 2); assert.equal(f.counters().spawnCalls, 1); assert.equal(f.committed.size, 0);
+    assert.ok(f.events.filter((event) => event === "kill").length >= 2); assert.equal(f.counters().spawnCalls, 1); await until(() => f.committed.size === 0);
   });
 
   it("recovers a committed capture after a lost reply without touching the live source again", async () => {
@@ -239,7 +242,7 @@ describe("durable experiment admission with explicit Storage/backend fixtures", 
     f.service.detachObservers(); const restarted = f.makeService();
     const waiting = restarted.wait(f.caller, accepted.attempt.attemptId, 1000);
     f.observe("cancelled"); gate.resolve();
-    assert.equal((await waiting).attempt.state, "cancelled"); assert.equal(f.counters().spawnCalls, 1); assert.equal(f.committed.size, 0);
+    assert.equal((await waiting).attempt.state, "cancelled"); assert.equal(f.counters().spawnCalls, 1); await until(() => f.committed.size === 0);
   });
 
   it("requires an actual stopped backend state in addition to an idle writer", async () => {
@@ -257,6 +260,7 @@ describe("durable experiment admission with explicit Storage/backend fixtures", 
     const result = await f.service.wait(f.caller, accepted.attempt.attemptId, 1000);
     assert.equal(result.attempt.state, "failed"); assert.match(result.attempt.error ?? "", /frozen experiment snapshot/);
     await until(() => f.committed.size === 0); assert.equal(f.counters().spawnCalls, 0);
+    assert.equal(f.counters().releasedPreparations,1);
   });
 
   it("does not replay unknown spawn effects on response retry or service recreation", async () => {
@@ -351,7 +355,7 @@ describe("durable experiment admission with explicit Storage/backend fixtures", 
     f.scan(async () => { entered.resolve(); await gate.promise; });
     const first = await f.service.submit(f.caller, intent); await entered.promise;
     f.setRoot("/missing-new-source");
-    const resumed = { ...f.caller, runId: "new-run", executionWorkspaceId: "new-execution", allowedThreadIds: ["thread"] };
+    const resumed = piResearchCaller({ ...f.caller, runId: "new-run", executionWorkspaceId: "new-execution", allowedThreadIds: ["thread"] });
     const retry = await f.service.submit(resumed, intent);
     assert.equal(retry.attempt.attemptId, first.attempt.attemptId); assert.equal(retry.attempt.runId, "run");
     assert.equal(f.counters().resolveCalls, 1);
@@ -388,7 +392,7 @@ describe("durable experiment admission with explicit Storage/backend fixtures", 
     const f = await fixture();
     const first = await f.service.submit(f.caller, { ...intent, requestId: "first-candidate" });
     await until(() => f.counters().spawnCalls === 1);
-    const second = await f.service.submit({ ...f.caller, runId: "later-run" }, { ...intent, requestId: "duplicate-candidate" });
+    const second = await f.service.submit(piResearchCaller({ ...f.caller, runId: "later-run" }), { ...intent, requestId: "duplicate-candidate" });
     await until(() => f.counters().spawnCalls === 2);
     const a = await f.service.get(f.caller, first.attempt.attemptId); const b = await f.service.get(f.caller, second.attempt.attemptId);
     assert.equal(a.attempt.specId, b.attempt.specId); assert.equal(f.branches.size, 1);
@@ -399,8 +403,8 @@ describe("durable experiment admission with explicit Storage/backend fixtures", 
 
   it("keeps identical inline specs within each original creator's read boundary", async () => {
     const f = await fixture();
-    const firstCaller = { ...f.caller, threadId: "first-thread", allowedThreadIds: ["first-thread"] };
-    const secondCaller = { ...f.caller, threadId: "second-thread", allowedThreadIds: ["second-thread"] };
+    const firstCaller = piResearchCaller({ ...f.caller, threadId: "first-thread", allowedThreadIds: ["first-thread"] });
+    const secondCaller = piResearchCaller({ ...f.caller, threadId: "second-thread", allowedThreadIds: ["second-thread"] });
     const first = await f.service.submit(firstCaller, { ...intent, requestId: "first-owner" });
     await until(() => f.counters().spawnCalls === 1);
     const second = await f.service.submit(secondCaller, { ...intent, requestId: "second-owner" });
@@ -416,12 +420,13 @@ describe("durable experiment admission with explicit Storage/backend fixtures", 
   });
 
   it("authorizes source and retry metadata with the actual caller before admission", async () => {
-    const f = await fixture(); const caller = { ...f.caller, allowedThreadIds: ["thread"] };
-    const source = await f.sources.register("ws", { kind: "dataset", path: "input.txt" }, { sessionId: "foreign-session", threadId: "foreign-thread", runId: "foreign-run", workspaceScope: [] });
+    const f = await fixture(); const caller = piResearchCaller({ ...f.caller, allowedThreadIds: ["thread"] });
+    const source = await f.sources.register("ws", { kind: "dataset", path: "input.txt" }, piResearchCaller({workspaceId:"ws",executionWorkspaceId:"exec",sessionId: "foreign-session", threadId: "foreign-thread", runId: "foreign-run", workspaceScope: [] }));
     await assert.rejects(f.service.submit(caller, { ...intent, inputs: [{ sourceId: source.sourceId }] }), /outside the caller/);
     assert.equal([...f.records.values()].filter((record) => record.recordType === "experiment.attempt").length, 0);
-    const foreign = await f.service.submit({ ...f.caller, threadId: "foreign-thread" }, { requestId: "foreign-attempt", specId: "seed" });
-    await f.service.cancel(f.caller, foreign.attempt.attemptId); await f.service.wait(f.caller, foreign.attempt.attemptId, 1000);
+    const foreignCaller = piResearchCaller({...f.caller,threadId:"foreign-thread"});
+    const foreign = await f.service.submit(foreignCaller, { requestId: "foreign-attempt", specId: "seed" });
+    await f.service.cancel(foreignCaller, foreign.attempt.attemptId); await f.service.wait(foreignCaller, foreign.attempt.attemptId, 1000);
     const priorAttempts = [...f.records.values()].filter((record) => record.recordType === "experiment.attempt").length;
     await assert.rejects(f.service.submit(caller, { ...intent, retryOfAttemptId: foreign.attempt.attemptId }), /Unknown experiment attempt/);
     assert.equal([...f.records.values()].filter((record) => record.recordType === "experiment.attempt").length, priorAttempts);
@@ -464,4 +469,214 @@ describe("durable experiment admission with explicit Storage/backend fixtures", 
     const next = await f.service.submit(f.caller, { requestId: "new", specId: "seed" }); assert.notEqual(next.attempt.attemptId, first.attempt.attemptId);
     await f.service.cancel(f.caller, next.attempt.attemptId);
   });
+});
+
+it('installed ordinary research tools hand original model and policy invocations to the real experiment owner and recover a lost bind ACK', async () => {
+  const { createRequire } = await import('node:module');
+  const { fileURLToPath } = await import('node:url');
+  const { ApplicationExtensionRuntime } = await import('@varin/extension-host');
+  const { parseVarinExtensionManifest } = await import('@varin/extension-contract');
+  const { retainExtensionTool } = await import('../kernel/extension-tool-owner.js');
+  const { ToolBridge } = await import('../kernel/tool-bridge.js');
+  const { createResearchRuntime, RESEARCH_CAPABILITY } = await import('../kernel/research-runtime.js');
+  const { prepareExperimentInput } = await import('./experiment-workspace.js');
+  type Pending = import('../kernel/protocol.generated.js').HostJobPending;
+  type Call = import('../kernel/protocol.generated.js').HostToolCall;
+  const f=await fixture();
+  const source={workspace_id:'ws',execution_workspace_id:'exec',mode:'live_root' as const,branch_id:null,revision:null,live_root:{hostId:'fixture-host',canonicalRoot:f.root,rootId:'source-root'}};
+  const sourceAuthority:import("../kernel/research-source.js").ResearchSourceAuthority={
+    async admit(_caller,cwd){return {kind:'physical',selection:source,canonicalRoot:f.root,cwd:cwd??''};},
+    async capture(caller,admitted,options){assert.equal(admitted.kind,'physical');return prepareExperimentInput(f.client,caller,f.root,options);},
+    async release(){}, async reconcileUnaccepted(){return true;},
+  };
+  let experiments=f.makeService(sourceAuthority);
+  // Explicit management metadata seam: actual Catalog transactions are exercised in
+  // host_job_review.rs. This is the real installed SDK/ToolBridge/domain-service chain,
+  // with controlled Storage/backend ports, not a substitute claim of Host Unix IPC.
+  const ops=new Map<string,{call:Call;owner:import('../kernel/protocol.generated.js').ExecutorOwner;link?:Pending;accepted?:unknown}>();
+  let activeCall:Call|undefined;
+  let loseBindAck=false;
+  let bound=0;
+  const hints=new Set<()=>void>();
+  const notify=()=>{for(const hint of hints)hint();};
+  const kernel={agentRuntimeRequest:async(method:string,params:Record<string,unknown>)=>{
+    if(method==='runtime.run.inspect')return {id:'run',thread_id:'thread',branch_id:'branch',cancel_requested:false,state:'executing'};
+    if(method==='runtime.launch.inspect')return {run_id:'run',selection:{source}};
+    if(method==='runtime.research.scopes')return [{rootThreadId:'thread',threadId:'thread',branchId:'branch',sourceRunId:'run',source,readThreadIds:['thread'],controlThreadIds:['thread'],canSubmit:true}];
+    if(method==='runtime.operation.inspect'){
+      const saved=ops.get(String(params.operationId))!;assert.ok(saved);
+      return {id:saved.call.operationId,run_id:'run',phase:saved.link?.phase??'running',cancel_requested:saved.link?.cancelRequested??false,execution_owner:saved.owner,lifetime:'thread',
+        intent:{kind:'tool',origin:saved.call.origin,call:{call_id:saved.call.callId,name:saved.call.name,schema_version:saved.call.schemaVersion,arguments:saved.call.arguments},contract:{completion:'job',lifetime:'thread'}},host_job:saved.link?{binding:saved.link.binding,acceptanceRef:saved.link.accepted?'stored':null}:undefined};
+    }
+    if(method==='runtime.host_job.begin'){
+      const binding=params.binding as Pending['binding'],saved=ops.get(binding.operationId)!;
+      const original=[...ops.values()].find(op=>op.link?.binding.subjectId===binding.subjectId);
+      if(original)return structuredClone(original.link);
+      saved.link={binding,runId:'run',accepted:false,cancelRequested:false,phase:'running',executorStopped:false,origin:{kind:'tool',origin:saved.call.origin,call_id:saved.call.callId,tool_name:saved.call.name,schema_version:saved.call.schemaVersion}};return structuredClone(saved.link);
+    }
+    if(method==='runtime.host_job.accept'){
+      const saved=ops.get((params.binding as Pending['binding']).operationId)!;assert.deepEqual(saved.link!.binding,params.binding);
+      if(saved.accepted)assert.deepEqual(saved.accepted,params.content);else{saved.accepted=structuredClone(params.content);saved.link!.accepted=true;bound++;}
+      notify();if(loseBindAck){loseBindAck=false;throw new Error('Original bind ACK lost');}return structuredClone(saved.link);
+    }
+    if(method==='runtime.host_job.pending')return [...ops.values()].flatMap(op=>op.link&&!op.link.executorStopped?[structuredClone(op.link)]:[]);
+    if(method==='runtime.host_job.terminal'){
+      const saved=ops.get((params.binding as Pending['binding']).operationId)!;assert.equal(params.executorStopped,true);saved.link!.phase='terminal';saved.link!.executorStopped=true;notify();return structuredClone(saved.link);
+    }
+    throw new Error(`Unexpected research management seam ${method}`);
+  }} as unknown as KernelClient;
+  const runtime={
+    run:async()=>({id:'run',thread_id:'thread',branch_id:'branch'}),
+    launch:async()=>({run_id:'run',selection:{source}}),
+    onEvent:(fn:()=>void)=>{hints.add(fn);return()=>hints.delete(fn);},onReady:()=>()=>{},
+    cancelOperation:async(id:string)=>{ops.get(id)!.link!.cancelRequested=true;notify();},reconcileObservations:async()=>[],
+  } as unknown as import('../kernel/agent-runtime-client.js').AgentRuntimeClient;
+  let research=createResearchRuntime({kernel,runtime,experiments,sources:f.sources,resources:f.resources,onError:error=>f.errors.push(error)});
+  cleanup.push(()=>research.dispose());
+  const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../../../..');
+  const installed=path.join(f.root,'installed');await fs.mkdir(installed);
+  const example=path.join(repo,'examples/extensions/research-tools');
+  for(const file of ['package.json','varin.extension.json'])await fs.copyFile(path.join(example,file),path.join(installed,file));
+  const manifest=parseVarinExtensionManifest(JSON.parse(await fs.readFile(path.join(installed,'varin.extension.json'),'utf8')));
+  const {build}=createRequire(path.join(repo,'packages/extension-builtins/package.json'))('esbuild');
+  await build({entryPoints:[path.join(example,'host.ts')],bundle:true,platform:'node',format:'cjs',outfile:path.join(installed,'host.cjs'),alias:{'@varin/extension-sdk':path.join(repo,'packages/extension-sdk/dist/index.js')}});
+  const extension=await ApplicationExtensionRuntime.create({dataDir:path.join(f.root,'extension-state'),varinVersion:'0.9.25',brokerScript:path.join(repo,'packages/extension-host/broker/broker-child.mjs')});
+  cleanup.push(()=>extension.stop());
+  extension.capabilities.register(RESEARCH_CAPABILITY,research.capability);await extension.start();
+  await extension.installOrStage({source:{kind:'local',display:'Research tools',specifier:installed},expectedRevision:(await extension.catalog.snapshot()).revision});
+  await extension.reviewCapabilities({extensionId:manifest.id,expectedRevision:(await extension.catalog.snapshot()).revision,decisions:[{capability:RESEARCH_CAPABILITY,realm:'host',granted:true}]});
+  await extension.setEnabled(manifest.id,true,(await extension.catalog.snapshot()).revision);
+  const descriptor=manifest.provides!.services!.find(s=>s.id==='example.research.submit')!;
+  const selected=await extension.prepareService({serviceId:descriptor.id,version:descriptor.version,method:'execute',args:[],routing:{sessionId:'thread'}});
+  const retained=await retainExtensionTool({runtime:extension,kernel,currentPolicy:async()=>({mode:'normal',rules:[{tool:descriptor.tool!.name,decision:'allow'}]})},selected);
+  const frames:import('../kernel/tool-bridge.js').PrivateToolFrame[]=[];
+  const bridge=new ToolBridge(()=> 'epoch',async frame=>{frames.push(frame);if(frame.kind==='host-tool-receipt')queueMicrotask(()=>bridge.consume({v:1,kind:'host-tool-receipt-ack',kernelEpoch:'epoch',id:frame.id,accepted:true}));},()=>assert.fail('Tool transport failed'));
+  const waitFrame=async(id:string)=>{await vi.waitFor(()=>assert.ok(frames.some(frame=>frame.kind==='host-tool-response'&&frame.id===id)),{timeout:4000,interval:10});};
+  const live=bridge.register('run',retained.lease);
+  bridge.consume({v:1,kind:'host-tool-binding-retain',kernelEpoch:'epoch',runId:'run',ownerId:live.ownerId,holderId:'holder'});
+  for(const policy of [false,true]){
+    const tag=policy?'policy':'model';
+    const origin=policy?{kind:'policy_action' as const,action_id:'action',node_id:'node'}:{kind:'model_step' as const,request_id:'request'};
+    activeCall={runId:'run',operationId:policy?'action:node:node':'request:tool:call',origin,callId:policy?'node':'call',name:descriptor.tool!.name,schemaVersion:retained.binding.tool.version,arguments:{requestId:tag,command:'fixture-command'}};
+    const owner={kind:'external' as const,identity:retained.binding.providerKey,epoch:live.ownerId};ops.set(activeCall.operationId,{call:activeCall,owner});
+    const send=(phase:string)=>bridge.consume({v:1,kind:'host-tool-request',id:`${tag}:${phase}`,kernelEpoch:'epoch',phase,binding:{ownerId:live.ownerId,reference:retained.binding.providerKey,generation:retained.generation,holderId:'holder'},call:activeCall});
+    send('authorize');await waitFrame(`${tag}:authorize`);
+    loseBindAck=policy;send('execute');await waitFrame(`${tag}:execute`);
+    const frame=frames.find(frame=>frame.kind==='host-tool-response'&&frame.id===`${tag}:execute`)!;
+    assert.equal(frame.kind,'host-tool-response');if(frame.kind!=='host-tool-response')throw new Error('response missing');
+    assert.equal(frame.completion?.kind,policy?'result':'job_accepted');assert.equal(frame.executor_stopped,false);
+    const saved=ops.get(activeCall.operationId)!;assert.ok(saved.link!.accepted);
+    const domain=await experiments.nativeReceipt('ws',saved.link!.binding.subjectId);assert.ok(domain);assert.deepEqual(domain.owner.actor,{kind:'tool',origin,callId:activeCall.callId,toolName:activeCall.name,schemaVersion:activeCall.schemaVersion});assert.deepEqual(domain.accepted,saved.accepted);
+  }
+  const before=f.counters().spawnCalls;await research.reconcile();assert.equal(bound,2);assert.equal(f.counters().resolveCalls,0,'native source never consults cwd/Pi root fallback');
+  await vi.waitFor(()=>assert.equal(f.counters().spawnCalls,2,JSON.stringify({errors:f.errors.map(e=>e.message),events:f.events})),{timeout:4000,interval:10});assert.ok(before<=2);
+  // Detach both observers while the domain backend still runs. The next real service
+  // instance reconnects those original attempts; it may never dispatch replacement work.
+  await research.dispose();experiments.detachObservers();experiments=f.makeService(sourceAuthority);
+  research=createResearchRuntime({kernel,runtime,experiments,sources:f.sources,resources:f.resources,onError:error=>f.errors.push(error)});
+  await research.reconcile();
+  const selection={runtime:'agent' as const,threadId:'thread',branchId:'branch',sourceRunId:'run'};
+  const rows=await research.user.list(selection);assert.equal(rows.attempts.length,2);assert.ok(rows.attempts.every(attempt=>attempt.permissions?.control));
+  const sibling:ExperimentCaller={workspaceId:'ws',executionWorkspaceId:'exec',threadId:'sibling',runId:'sibling-run',owner:{runtime:'agent',actor:{kind:'reader'},rootThreadId:'thread',threadId:'sibling',branchId:'sibling-branch',runId:'sibling-run',source},access:{kind:'family',readThreadIds:['thread','sibling'],controlThreadIds:['sibling']}};
+  const visible=await experiments.get(sibling,rows.attempts[0]!.attemptId);assert.equal(visible.attempt.permissions!.control,false);
+  await assert.rejects(experiments.cancel(sibling,rows.attempts[0]!.attemptId),/not authorized|not allowed|not accessible|denied|control/i);
+  if(sibling.owner.runtime!=='agent')throw new Error('native fixture identity');
+  assert.equal((await experiments.list({...sibling,owner:{...sibling.owner,rootThreadId:'other'}},{})).attempts.length,0);
+  for(const attempt of rows.attempts)await research.user.cancel(selection,attempt.attemptId);
+  await research.reconcile();assert.ok([...ops.values()].every(op=>op.link!.cancelRequested));
+  await vi.waitFor(async()=>{await research.reconcile();assert.ok([...f.records.values()].filter(record=>record.recordType==='experiment.attempt').every(record=>record.state==='cancelled'),JSON.stringify({errors:f.errors.map(e=>e.message),events:f.events}));},{timeout:4000,interval:10});
+  await research.reconcile();assert.ok([...ops.values()].every(op=>op.link!.executorStopped));assert.equal(f.counters().spawnCalls,2);
+  assert.equal(f.committed.size,0);
+  await vi.waitFor(()=>assert.ok([...ops.keys()].every(id=>f.events.includes(`authority-retired:${id}`))),{timeout:4000,interval:10});
+});
+
+
+it("publishes drained execution before slow collection and preserves its reader through reentrant observer replacement", async () => {
+  const f = await fixture();
+  const { prepareExperimentInput } = await import("./experiment-workspace.js");
+  const source = {
+    workspace_id: "ws", execution_workspace_id: "exec", mode: "live_root" as const,
+    branch_id: null, revision: null,
+    live_root: { hostId: "fixture-host", canonicalRoot: f.root, rootId: "source-root" },
+  };
+  const caller: ExperimentCaller = {
+    workspaceId: "ws", executionWorkspaceId: "exec", threadId: "thread", runId: "run", workspaceScope: [],
+    owner: { runtime: "agent", actor: { kind: "user", key: "slow-collection" }, rootThreadId: "thread",
+      threadId: "thread", branchId: "branch", runId: "run", operationId: "slow-collection-op",
+      executionOwner: { kind: "external", identity: "research.experiment", epoch: "original" }, source },
+    access: { kind: "family", readThreadIds: ["thread"], controlThreadIds: ["thread"] },
+  };
+  const sourceAuthority: import("../kernel/research-source.js").ResearchSourceAuthority = {
+    async admit(_caller, cwd) { return { kind: "physical", selection: source, canonicalRoot: f.root, cwd: cwd ?? "" }; },
+    async capture(owner, _source, options) { return prepareExperimentInput(f.client, owner, f.root, options); },
+    async release() {}, async reconcileUnaccepted() { return true; },
+  };
+  let service = f.makeService(sourceAuthority);
+  const gate = deferred(); const entered = deferred(); let reads = 0;
+  cleanup.push(() => gate.resolve());
+  f.backend.collectFile = async () => {
+    reads++; entered.resolve(); await gate.promise;
+    throw new Error("controlled output collection failure");
+  };
+  const joins: Promise<import("@varin/protocol").ExperimentCollectResult>[] = [];
+  let replaced = false;
+  const unsubscribe = service.subscribeAttempts((_workspace, attemptId, view) => {
+    if (view?.collection !== "pending" || replaced) return;
+    replaced = true;
+    service.detachObservers();
+    service = f.makeService(sourceAuthority);
+    // Synchronous terminal notification: this can enter before the automatic
+    // collector has reached its first backend read, but must join that holder.
+    joins.push(service.collect(caller, attemptId), service.collect(caller, attemptId));
+  });
+  cleanup.push(unsubscribe);
+  const accepted = await service.submit(caller, {
+    requestId: "slow-collection", command: "fixture-command", resources: { cpuCores: 1 }, outputPaths: ["result.bin"],
+  });
+  await until(() => f.counters().spawnCalls === 1);
+  f.observe("cancelled");
+  await entered.promise;
+  const id = accepted.attempt.attemptId;
+  assert.equal(replaced, true);
+  assert.equal((await service.nativeReceipt("ws", id))!.executorStopped, true);
+  assert.equal((await service.wait(caller, id, 0)).attempt.collection, "pending");
+  assert.equal((await service.cancel(caller, id)).state, "cancelled");
+  assert.equal(f.committed.size, 0);
+  assert.equal(reads, 1);
+  assert.equal(f.events.includes("backend-release"), false);
+  assert.equal(f.events.includes("authority-retired:slow-collection-op"), false);
+  assert.equal((await service.logs(caller, { attemptId: id })).eof, true);
+  gate.resolve();
+  const collected = await Promise.all(joins);
+  assert.ok(collected.every(result => result.attempt.collection === "failed"));
+  assert.equal(reads, 1);
+  assert.equal((await service.logs(caller, { attemptId: id })).eof, true);
+  assert.equal(f.events.includes("backend-release"), false);
+
+  // A process restart loses only in-memory holders. Reconnect from the original
+  // terminal job receipt and retry collection, never spawn or reacquire compute.
+  service.detachObservers();
+  const attemptRecord = f.records.get(`experiment.attempt:${id}`)!;
+  const payload = JSON.parse(attemptRecord.payloadJson);
+  await f.scoped.putRecord({ ...attemptRecord, expectedRecordRevision: attemptRecord.recordRevision,
+    operationId: "fixture-collection-recovery", ownerIds: [], payloadJson: JSON.stringify({ ...payload, collection: "pending" }) });
+  const retryGate = deferred(); const retryEntered = deferred();
+  cleanup.push(() => retryGate.resolve());
+  f.backend.collectFile = async () => { reads++; retryEntered.resolve(); await retryGate.promise; return Buffer.from("result"); };
+  service = f.makeService(sourceAuthority, { ...f.client } as KernelClient);
+  const retry = service.collect(caller, id);
+  const duplicate = service.collect(caller, id);
+  await retryEntered.promise;
+  assert.equal(reads, 2);
+  assert.equal(f.counters().spawnCalls, 1);
+  assert.equal(f.counters().admissionCalls, 1);
+  assert.equal(f.events.includes("backend-release"), false);
+  retryGate.resolve();
+  const retried = await Promise.all([retry, duplicate]);
+  assert.ok(retried.every(result => result.attempt.collection === "done"));
+  assert.equal(f.events.filter(event => event === "backend-release").length, 1);
+  assert.ok(f.events.includes("authority-retired:slow-collection-op"));
+  assert.equal(reads, 2);
+  assert.equal((await service.collect(caller, id)).attempt.collection, "done");
+  assert.equal(reads, 2, "completed collection reuses durable artifacts");
 });

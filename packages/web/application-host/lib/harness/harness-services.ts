@@ -1004,7 +1004,7 @@ export function createZone2StatusService(host: HarnessServiceHost): HarnessServi
             sessionId: ctx.sessionId, workspaceId,
             executionWorkspaceId: ctx.workspaceId ?? workspaceId,
           });
-          const teammateIds = (access.allowedThreadIds ?? []).filter((id) => id !== observer?.threadId);
+          const teammateIds = (access.access.kind === 'family' ? access.access.readThreadIds : []).filter((id) => id !== observer?.threadId);
           const { rows } = await projector.build(workspaceId, parent, null, teammateIds, true);
           if (rows.length === 0) return { status: "empty", content: null };
           const lines = [
@@ -1347,7 +1347,7 @@ export function registerHarnessServices(
         ...(caller.runId ? { runId: caller.runId } : {}),
         rootSessionId: caller.rootSessionId ?? caller.sessionId,
         ...(caller.workspaceScope ? { workspaceScope: caller.workspaceScope } : {}),
-        allowedThreadIds: caller.allowedThreadIds ?? [],
+        allowedThreadIds: caller.access.kind === 'family' ? [...caller.access.readThreadIds] : [],
       };
     };
     router.register("followup.register", {
@@ -1466,12 +1466,7 @@ export function registerHarnessServices(
       handle: async (params, ctx) => {
         const caller = await experimentCaller(ctx);
         return {
-          source: await sources.register(caller.workspaceId, params, {
-            ...(caller.sessionId ? { sessionId: caller.sessionId } : {}),
-            ...(caller.threadId ? { threadId: caller.threadId } : {}),
-            ...(caller.runId ? { runId: caller.runId } : {}),
-            ...(caller.workspaceScope ? { workspaceScope: caller.workspaceScope } : {}),
-          }),
+          source: await sources.register(caller.workspaceId, params, caller),
         };
       },
     });

@@ -1636,6 +1636,7 @@ impl ToolExecutor for EffectOwner {
         .unwrap();
         if contract.completion == CompletionKind::Job {
             ToolCompletion::JobAccepted {
+                content: None,
                 operation_id: context.operation_id.clone(),
                 phase: "running".into(),
                 effect: if contract.read_only {

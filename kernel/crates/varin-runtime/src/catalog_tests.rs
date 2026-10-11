@@ -942,8 +942,7 @@ fn early_external_terminal_and_model_job_acceptance_converge() {
             operation_id: operation_id.into(),
             phase: "accepted".into(),
             effect: Effect::Dispatched,
-            lifetime: Lifetime::Thread,
-        },
+            lifetime: Lifetime::Thread, content: None,},
     };
     db.commit_execution(&r.run_id, epoch, &{
         let result = result.clone();

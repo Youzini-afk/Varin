@@ -6,6 +6,7 @@ import { ThreadChildProfiles } from './ThreadChildProfiles';
 import { ThreadPlan } from './ThreadPlan';
 import { ThreadGoal } from './ThreadGoal';
 import { ThreadFollowups } from './ThreadFollowups';
+import { ThreadResearch } from './ThreadResearch';
 import { ThreadMemory } from './ThreadMemory';
 import { ThreadResources } from './ThreadResources';
 import { ThreadSkillMaterials } from './ThreadSkillMaterials';
@@ -23,6 +24,16 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { ThreadProjection, historyText, historyImages } from '@/lib/agent-runtime/thread-projection';
+
+const operationCancelLabel = (operation: ThreadSnapshot['operations'][number]): string => {
+  if (operation.executor === 'dispatch') return 'Cancel child task';
+  if (operation.waiting_on?.startsWith('host-job-wait:')
+    || (operation.execution_owner?.kind === 'kernel' && (operation.executor === 'wait_child'
+      || operation.executor === 'wait_process' || (operation.executor === 'send' && operation.waiting_on !== null)))) {
+    return 'Cancel observation wait';
+  }
+  return 'Cancel operation';
+};
 
 const resourceErrorMessages = new Map([
   ['resource-missing', 'This skill or resource is missing from the current snapshot. Refresh instructions and skills, then try again.'],
@@ -193,6 +204,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       {api.family && <ThreadFamily api={api.family} identity={identity} />}
       {api.messages && <ThreadMessages api={api.messages} family={api.family} identity={identity} eventCursor={snapshot?.eventCursor} cancelObservation={pending ? undefined : operationId => act(() => api.cancelOperation(operationId), true)} />}
       {api.plan && <ThreadPlan api={api.plan} identity={identity} contextRevision={snapshot?.context.checkpoint?.revision} />}
+      {api.research && <ThreadResearch key={`${host}:${identity.threadId}:${identity.branchId}`} api={api.research} identity={identity} sourceRunId={run?.id} />}
       {visibleHistory.map(item => <article key={item.id} className="mx-auto max-w-3xl">
         <div className="mb-1 text-xs text-muted-foreground">{item.source}</div>
         <MarkdownRenderer messageId={item.id} content={historyText(item.content)} />
@@ -241,7 +253,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           && (operation.intent as { call?: { arguments?: { mode?: string } } } | null)?.call?.arguments?.mode === 'pty'
           && <Button variant="outline" size="sm" disabled={pending} onClick={() => void act(() => openProcessTerminal(operation.id))}>Open process terminal</Button>}
         {operation.external_receipt && <div className="text-xs text-muted-foreground">{operation.external_receipt.executor} · {operation.external_receipt.outcome}</div>}
-        {operation.phase !== 'terminal' && (operation.executor !== 'ask_user' || run?.waiting_on === operation.waiting_on) && <Button variant="ghost" size="sm" onClick={() => void act(() => api.cancelOperation(operation.id), true)}>{operation.executor === 'dispatch' ? 'Cancel child task' : operation.execution_owner?.kind === 'kernel' && (operation.executor === 'wait_child' || operation.executor === 'wait_process' || (operation.executor === 'send' && operation.waiting_on !== null)) ? 'Cancel observation wait' : 'Cancel operation'}</Button>}
+        {operation.phase !== 'terminal' && (operation.executor !== 'ask_user' || run?.waiting_on === operation.waiting_on) && <Button variant="ghost" size="sm" onClick={() => void act(() => api.cancelOperation(operation.id), true)}>{operationCancelLabel(operation)}</Button>}
       </div>)}
       {snapshot?.inputs.filter(input => input.state === 'queued').map(input => <div key={input.id} className="mx-auto max-w-3xl rounded border p-2 text-sm">
         <form onSubmit={event => { event.preventDefault(); const edited = new FormData(event.currentTarget).get('text');

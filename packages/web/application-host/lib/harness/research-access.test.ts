@@ -25,13 +25,13 @@ describe("research relationship access", () => {
     expect(caller.workspaceId).toBe("owning");
     expect(caller.executionWorkspaceId).toBe("execution");
     expect(caller.rootSessionId).toBe("s-root");
-    expect(new Set(caller.allowedThreadIds)).toEqual(new Set(["root", "a", "b", "a-child"]));
+    expect(new Set((caller.access.kind === 'family' ? caller.access.readThreadIds : []))).toEqual(new Set(["root", "a", "b", "a-child"]));
   });
 
   it("lets the user's research root inspect its complete tree, including after the live binding disappears", async () => {
     const caller = await resolveResearchCaller(registry(null), { sessionId: "s-root", workspaceId: "owning", user: true });
-    expect(new Set(caller.allowedThreadIds)).toEqual(new Set(["root", "a", "b", "a-child", "b-child"]));
+    expect(new Set((caller.access.kind === 'family' ? caller.access.readThreadIds : []))).toEqual(new Set(["root", "a", "b", "a-child", "b-child"]));
     const other = await resolveResearchCaller(registry(null), { sessionId: "s-other", workspaceId: "owning", user: true });
-    expect(other.allowedThreadIds).toEqual(["unrelated"]);
+    expect((other.access.kind === 'family' ? other.access.readThreadIds : [])).toEqual(["unrelated"]);
   });
 });

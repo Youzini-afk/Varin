@@ -121,7 +121,8 @@ fn second_process(f: &mut Fixture) -> String {
         executor_owner: ExecutorOwner::Kernel,
     });
     let completion = ToolCompletion::JobAccepted {
-        operation_id: operation.clone(),
+        content: None,
+                operation_id: operation.clone(),
         phase: "running".into(),
         effect: Effect::Dispatched,
         lifetime: Lifetime::Thread,

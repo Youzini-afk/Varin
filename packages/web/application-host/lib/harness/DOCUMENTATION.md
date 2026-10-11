@@ -196,8 +196,10 @@ and the full research evaluation remain separate delivery slices.
 
 ### Research execution and facts (7B–7F acceptance)
 
-`research-access.ts` derives the model/UI caller from durable session bindings and actual Thread
-relationships. Sharing a workspace does not authorize one root to inspect or cancel another root's
+`research-access.ts` derives Pi model/UI callers from durable session bindings; the Agent adapter
+derives its callers from Catalog Thread/branch/source and actual family relationships.
+`research-identity.ts` records these distinct runtime owners and explicit family or maintenance access.
+Sharing a workspace does not authorize one root to inspect or cancel another root's
 attempts. A user root can view its research tree; a worker sees its own related parent, siblings and
 children. Read/resource/source capabilities do not grant experiment process control.
 
@@ -253,8 +255,22 @@ Normal Run settlement and archive do not terminate an experiment. Host shutdown 
 the backend owns execution and reconnection facts. Backend uncertainty is not observed termination.
 Local and managed-remote adapters have implementations; registration alone does not prove a reachable
 backend, and injected transport/Storage tests do not establish a real remote-machine or Slurm run.
-The native runtime's research actor authorization, ordinary-tool Job/Wait and child/source integration
-remain a separate next slice; this admission foundation does not claim those consumers are complete.
+The Agent adapter in `kernel/research-runtime.ts` uses these same original domain records. Catalog
+owns the actual tool/User invocation and exact domain subject association, immutable acceptance and
+subsequent execution receipts; it does not mirror experiment state. A selected ordinary Job tool
+returns acceptance only after the original domain attempt exists. An independent native observation
+uses Catalog Wait, rather than retaining an `experiments.wait()` Promise. Native User submit admits
+a real User command with its stable key, never a fake model call or Pi session. The authenticated
+Thread research API and shared facts view read the same attempt, logs, artifacts and permissions.
+
+`kernel/research-source.ts` binds the original live, materialized or exact fixed-revision source.
+Fixed input owns its original persistent pin until capture publishes or drains; physical capture uses
+the actual registered root. Source/transfer grants retain true Run attribution and their independent
+Operation lifetime, so ordinary Run retirement cannot cut off an accepted Thread job. Explicit
+revocation and original job cancellation still prevent new work. Tree stop selects original Catalog
+operations at its acceptance boundary and forwards cancellation to the original domain owner; later
+domain acceptance/cancellation is reconciled back through that same association.
+
 Full desktop restart and real-model research quality require their own evidence. D-301/7G request preparation and D-302/7H tool execution
 use the shared context and shell paths described below.
 
