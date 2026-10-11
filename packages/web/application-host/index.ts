@@ -1183,7 +1183,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const kernelStorageAdapter = new KernelStorageAdapter({
     client: kernelClient,
     hostId: extensionRuntime.services.hostId,
-    hostGeneration: `${extensionRuntime.services.hostId}:${process.pid}`,
     storageRoot: path.join(VARIN_DATA_DIR, 'kernel', extensionRuntime.services.hostId),
     resolveWorkspaceRoot: async (workspaceId) => workspaceId === SOURCE_VIEW_STORAGE_SCOPE
       ? sourceViewStorageRoot

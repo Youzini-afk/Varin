@@ -243,6 +243,8 @@ it('registers a process follow-up through an uncertain reply and preserves the a
   followup.wait.state = 'consumed';
   await act(async () => f.emit({ cursor: 6, subject: followup.id, revision: 5, kind: 'followup.changed', data: {} }));
   expect(container.querySelector('[aria-label="Pending follow-up"]')).toBeNull(); expect(button('Cancel follow-up')).toBeUndefined();
+  expect(container.querySelector('[aria-label="Past follow-up"]')).toBeNull();
+  await act(async () => button('Past follow-ups (1)').click());
   expect(container.textContent).toContain('run continuation:run'); expect(f.cancelRun).not.toHaveBeenCalled();
   f.view.followups = [{ ...followup, goal_id: 'goal-owner', actor: { kind: 'goal', goal_id: 'goal-owner' }, occurrence: null }];
   await act(async () => f.emit({ cursor: 7, subject: followup.id, revision: 6, kind: 'followup.changed', data: {} }));
@@ -1297,7 +1299,10 @@ it('keeps repeating controls after delivery and reads each historical occurrence
   await act(async () => button('Resume follow-up').click());
   await act(async () => button('Cancel follow-up').click());
   expect(control.mock.calls.map(([input]) => input.action)).toEqual(['resume', 'pause', 'resume', 'cancel']);
-  expect(button('Cancel follow-up')).toBeUndefined(); expect(history().textContent).toContain('input:first');
+  expect(button('Cancel follow-up')).toBeUndefined(); expect(history()).toBeNull();
+  await act(async () => button('Past follow-ups (1)').click());
+  await act(async () => button('Read occurrence history').click());
+  expect(history().textContent).toContain('input:first');
   expect(container.textContent).toContain('Repeating authorization cancelled');
   expect(f.cancelRun).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
 });

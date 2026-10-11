@@ -3225,8 +3225,8 @@ export interface KernelHandshakeResult {
 
 export type KernelBranchState =
   | { kind: "regular-file"; objectHash: string; byteLength: number; mode: number }
-  | { kind: "directory"; mode?: number }
-  | { kind: "symlink"; symlinkTarget: string; mode?: number }
+  | { kind: "directory"; mode?: number | null }
+  | { kind: "symlink"; symlinkTarget: string; mode?: number | null }
   | { kind: "missing" }
   | { kind: "unsupported" };
 

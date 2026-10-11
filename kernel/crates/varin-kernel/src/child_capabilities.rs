@@ -1,5 +1,5 @@
 //! Child availability projects actual owning declarations, never a second tool registry.
-use crate::tools::{KernelToolExecutor, ToolKind};
+use crate::tools::ToolKind;
 use std::collections::BTreeSet;
 use varin_runtime::catalog::dispatch::{ChildCapabilityDescriptor, ChildSourceRequirement};
 use varin_runtime::execution::ToolSchema;
@@ -17,20 +17,7 @@ pub(crate) fn schemas() -> Vec<ToolSchema> {
         ToolKind::ProcessWrite,
         ToolKind::ProcessResize,
     ]);
-    let mut tools = crate::process_wait::schemas(KernelToolExecutor::selected_schemas(&source));
-    tools.extend([
-        crate::agent_resources::schema(),
-        crate::questions::schema(),
-        crate::questions::status_schema(),
-        crate::memory::schema(true),
-        crate::plan::schema(),
-    ]);
-    tools = crate::collaboration::schemas(tools, true);
-    tools.extend(crate::family_tools::schemas());
-    tools.push(crate::message_tools::schema());
-    tools.push(crate::followup_tools::schema());
-    tools.sort_by(|a, b| a.name.cmp(&b.name));
-    tools
+    crate::run_tools::builtin_schemas(&source, true, true, false)
 }
 pub(crate) fn descriptors() -> Vec<ChildCapabilityDescriptor> {
     schemas()

@@ -6,7 +6,7 @@ import type { KernelClient } from './kernel-client.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { LaunchIntent, RunStartReceipt } from './protocol.generated.js';
 import type { ExistingHostCredentialOwner } from './credential-owner.js';
-import { canonicalizePathIdentity, isPathWithinRoot } from '../workspace/path-safety.js';
+import { canonicalizePathIdentity, isPathWithinRoot, normalizePathIdentity } from '../workspace/path-safety.js';
 
 /** Explicit Host-selected source. Live identity is revalidated through Documents before binding. */
 export type SourceLaunch = Omit<ThreadSource, 'mode' | 'branchId' | 'revision' | 'liveRoot' | 'tools'> & {
@@ -160,7 +160,8 @@ export async function admitRunSourceAuthority(
       const registered = await actor.fileRootRegister({ workspaceId: selection.workspaceId,
         executionWorkspaceId: selection.executionWorkspaceId, canonicalRoot: selection.liveRoot.canonicalRoot }, signal);
       signal?.throwIfAborted();
-      if (registered.rootId !== selection.liveRoot.rootId || registered.canonicalRoot !== selection.liveRoot.canonicalRoot) throw new Error('Live source root changed');
+      if (registered.rootId !== selection.liveRoot.rootId || typeof registered.canonicalRoot !== 'string'
+        || normalizePathIdentity(registered.canonicalRoot) !== normalizePathIdentity(selection.liveRoot.canonicalRoot)) throw new Error('Live source root changed');
       rootId = selection.liveRoot.rootId;
       executionCwd = selection.liveRoot.canonicalRoot;
     }

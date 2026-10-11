@@ -244,18 +244,9 @@ impl RunAssembly {
             start.binding.tools = crate::tools::KernelToolExecutor::selected_schemas(&kinds);
             start.binding.tools.push(crate::agent_resources::schema());
             if !is_child {
-                start.binding.tools = crate::questions::schemas(start.binding.tools);
-                start.binding.tools.extend(crate::family_tools::schemas());
-                start.binding.tools.push(crate::message_tools::schema());
-                start.binding.tools.push(crate::followup_tools::schema());
-                start.binding.tools.push(crate::agent_goals::schema());
-                start.binding.tools =
-                    crate::collaboration::schemas(start.binding.tools, selected.source.0.is_some());
-                start.binding.tools = crate::process_wait::schemas(start.binding.tools);
-                start.binding.tools.push(crate::memory::schema(true));
-                if plan_eligible {
-                    start.binding.tools.push(crate::plan::schema());
-                }
+                start.binding.tools = crate::run_tools::builtin_schemas(
+                    &kinds, selected.source.0.is_some(), plan_eligible, true,
+                );
             }
             start
                 .binding

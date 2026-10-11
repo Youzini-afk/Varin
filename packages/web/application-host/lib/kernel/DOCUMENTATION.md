@@ -810,6 +810,8 @@ is not a prohibition on explicitly selected note/plan mutations. Bot/context-job
 A child uses the ordinary AgentPolicy lifecycle after durable task admission. `preparePolicy` resolves
 its actual Thread/project routing scope, then commits the original artifact and generation through the
 same launch preparation. It neither copies the parent's private checkpoint nor acquires additional tools.
+The built-in loop remains the default until an explicit matching route or registry selection chooses
+an extension policy. Installing a single provider does not select it for unrelated tasks or children.
 Policy candidates may change at closed decision boundaries while the child ToolDirectory remains static.
 Declared planning roles bind credentials and model Operations to that child Run/generation; saved roles
 restore their exact original configuration. Planning usage remains attributed to the original delegated

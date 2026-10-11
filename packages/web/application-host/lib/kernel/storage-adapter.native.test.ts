@@ -513,6 +513,7 @@ it.skipIf(!hasReleaseKernel)("reconciles a branch CAS after the terminal respons
     assert.ok(pending);
     kernelRecoveryStore.completeOperation = originalComplete;
     const restartedCoordinator = new IntegrationCoordinator({ workingStates: access, resolveDocumentWorkspaceId: async () => documentWorkspaceId });
+    await restartedCoordinator.recoverIntegration({ workspaceId, operationId: "selected-native-once", threadId: "reconcile-thread", branchId: "reconcile-child", resultRevision: result.resultRevision, parentAuthority: { kind: "branch", branchId: "reconcile-parent" }, executorStopped: true });
     await restartedCoordinator.mergeResult({ workspaceId, operationId: "selected-native-once", threadId: "reconcile-thread", branchId: "reconcile-child", resultRevision: result.resultRevision, parentAuthority: { kind: "branch", branchId: "reconcile-parent" } });
     const reconciled = await kernelRecoveryStore.getOperation(workspaceId, String(pending?.operationId));
     assert.equal(reconciled?.state, "complete");

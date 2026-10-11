@@ -209,23 +209,7 @@ pub(super) fn selected_launch(
         } else {
             0
         },
-        tools: {
-            let mut tools = crate::collaboration::schemas(
-                crate::questions::schemas(crate::tools::KernelToolExecutor::selected_schemas(
-                    &kinds,
-                )),
-                source.is_some(),
-            );
-            tools = crate::process_wait::schemas(tools);
-            tools.push(crate::memory::schema(true));
-            tools.push(crate::agent_resources::schema());
-            tools.push(crate::agent_goals::schema());
-            if plan_eligible {
-                tools.push(crate::plan::schema());
-            }
-            tools.sort_by(|left, right| left.name.cmp(&right.name));
-            tools
-        },
+        tools: crate::run_tools::builtin_schemas(&kinds, source.is_some(), plan_eligible, true),
         policy: crate::observations::default_policy_identity(),
         source,
     })

@@ -105,7 +105,7 @@ export interface RecoveryFileStore {
 }
 
 const parseOptionalMode = (value: unknown): number | undefined => {
-  if (value === undefined) return undefined;
+  if (value === undefined || value === null) return undefined;
   if (!Number.isSafeInteger(value) || (value as number) < 0) {
     throw new RecoveryPrimitiveError('storage-malformed', 'Recovery file mode is malformed', { origin: 'storage' });
   }

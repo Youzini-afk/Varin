@@ -81,7 +81,7 @@ impl Fixture {
         self.short(
             "authority.grant.issue",
             json!({"grantId":id,"hostGeneration":GENERATION,
-            "capabilities":capabilities,"pathScopes":scopes,"storageIdentity":self.directory.0.join("store"),"owningWorkspace":"workspace",
+            "capabilities":capabilities,"pathScopes":scopes,"storageIdentity":fs::canonicalize(self.directory.0.join("store")).unwrap(),"owningWorkspace":"workspace",
             "executionWorkspace":"workspace"}),
             None,
         );

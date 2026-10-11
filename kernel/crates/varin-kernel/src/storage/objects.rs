@@ -135,9 +135,11 @@ impl Storage {
             ))
         })?;
         let source_grant = self.load_grant(&source_grant_id)?;
-        if !source_grant.capabilities.contains("recovery.maintenance") {
+        if !source_grant.capabilities.contains("recovery.maintenance")
+            && !source_grant.capabilities.contains("storage.maintenance")
+        {
             return Err(KernelError::Authorization(
-                "temporary object owner was not created by recovery maintenance".to_string(),
+                "temporary object owner was not created by Host storage or recovery maintenance".to_string(),
             ));
         }
         self.conn.execute(

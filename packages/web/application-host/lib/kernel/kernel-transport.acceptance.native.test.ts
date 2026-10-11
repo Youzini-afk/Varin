@@ -156,15 +156,17 @@ it('Run inspection streams large configuration while cancellation returns a cont
   const receipt = await runtime.submit({ key:'large-config', threadId:'large-config', branchId:'large-config-branch',
     expectedHead:null, input:{text:'preserve configuration'}, configuration });
   const data = f.probe.socket('data'); data.pause();
-  const read = runtime.run(receipt.run_id); void read.catch(() => undefined);
+  const reads = Array.from({ length: KERNEL_REQUEST_WINDOW }, () => runtime.run(receipt.run_id));
+  for (const read of reads) void read.catch(() => undefined);
+  const cancel = runtime.cancelRun(receipt.run_id); void cancel.catch(() => undefined);
   try {
-    await expect.poll(() => f.probe.incomingStreams()).toBe(1);
-    const cancelled = await runtime.cancelRun(receipt.run_id);
+    await expect.poll(() => f.probe.incomingStreams()).toBe(KERNEL_REQUEST_WINDOW);
+    const cancelled = await cancel;
     expect(cancelled).toMatchObject({id:receipt.run_id, cancel_requested:true});
     expect(cancelled).not.toHaveProperty('configuration');
     expect((await runtime.status()).epoch).toBeGreaterThan(0);
   } finally { data.resume(); }
-  expect((await read).configuration).toEqual(configuration);
+  for (const read of await Promise.all(reads)) expect(read.configuration).toEqual(configuration);
 }, 30_000);
 
 it('cancelling an input upload releases its arrival reservation before later input admission', async () => {

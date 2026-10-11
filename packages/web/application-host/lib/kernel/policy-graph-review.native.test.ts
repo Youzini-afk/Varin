@@ -97,9 +97,28 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
     if (query.action === 'tool' && ['save', 'delete'].includes(query.arguments?.action ?? '') && result.status === 'ready') await memoryControl.afterMutation?.();
     return result;
   });
-  const decisions: unknown[]=[]; let pins=0;
-  const originalPrepare=extensions.prepareService.bind(extensions);
-  extensions.prepareService=async(...args)=>{const binding=await originalPrepare(...args); if(args[0] && typeof args[0]==='object' && 'serviceId' in args[0] && args[0].serviceId==='varin.agent.policy') return {...binding,pin:()=>{const pin=binding.pin();pins++;let released=false;return {...pin,invoke:(method,args,signal)=>{if(method==='decide') decisions.push(structuredClone(args[0]));return pin.invoke(method,args,signal)},release:()=>{if(!released){released=true;pins--;}pin.release()}}}};return binding};
+  const decisions: unknown[] = [];
+  let pins = 0;
+  // Observe fresh selection and recovery of an exact retained binding at their common boundary.
+  const observeBinding = (binding: ReturnType<typeof extensions.services.bind>): typeof binding => {
+    if (binding.descriptor.id !== 'varin.agent.policy') return binding;
+    return { ...binding, pin: () => {
+      const pin = binding.pin();
+      pins++;
+      let released = false;
+      return { ...pin, invoke: (method, args, signal, invocation) => {
+        if (method === 'decide') decisions.push(structuredClone(args[0]));
+        return pin.invoke(method, args, signal, invocation);
+      }, release: () => {
+        if (!released) { released = true; pins--; }
+        pin.release();
+      } };
+    } };
+  };
+  const bind = extensions.services.bind.bind(extensions.services);
+  const bindPinned = extensions.services.bindPinned.bind(extensions.services);
+  extensions.services.bind = (...args) => observeBinding(bind(...args));
+  extensions.services.bindPinned = (...args) => observeBinding(bindPinned(...args));
   let closed = false; let crashed = false;
   const close = async () => { if (closed) return; closed = true; await extensions.stop(); if (!crashed) await storage.dispose(); await documents.dispose(); await kernel.close(); };
   cleanups.push(close);
@@ -337,7 +356,7 @@ const memoryGraphPolicy = (content: string, includeMemoryEvidence = true) => pol
   if (input.event.kind === 'tool_graph_completed') {
     if (input.event.receipts.some(receipt => receipt.completion.kind !== 'result' || receipt.completion.outcome !== 'succeeded'))
       return { action: { kind: 'fail', reason: 'Memory graph did not settle' }, state: null };
-    return { action: { kind: 'request_model_with_evidence', evidence: input.event.receipts.filter(receipt => ${includeMemoryEvidence} || receipt.node_id !== 'save').map(receipt => receipt.completion.output) }, state: null };
+    return { action: { kind: 'request_model_with_evidence', evidence: input.event.receipts${includeMemoryEvidence ? '' : ".filter(receipt => receipt.node_id !== 'save')"}.map(receipt => receipt.completion.output) }, state: null };
   }
   return { action: { kind: 'complete' }, state: null };
 `);
@@ -383,7 +402,8 @@ async function assertPendingMutation(f: Awaited<ReturnType<typeof fixture>>, run
   expect(catalog.memories).toHaveLength(1);
   expect(catalog.memories[0]!.content).toBe(content);
   expect(f.memoryWrites).toHaveLength(1);
-  expect(f.memoryWrites[0]!.expectedRecordRevision).toBe(0);
+  // An absent record uses create-only semantics; updates require the actual record revision.
+  expect(f.memoryWrites[0]!.expectedRecordRevision).toBeUndefined();
   return { query, operationId, actionId: intent.origin.action_id };
 }
 
@@ -487,10 +507,11 @@ it('reopening a graph after the memory domain CAS but before ToolSettled reconci
     expect(reopened.memoryQueries.filter(query => query.action === 'receipt')).toMatchObject([{ origin: query.origin, arguments: query.arguments }]);
     expect(reopened.memoryQueries.some(query => query.action === 'tool')).toBe(false);
     expect(reopened.memoryWrites).toEqual([]);
-    expect(await reopened.runtime.operation(operationId)).toMatchObject({ outcome: 'succeeded', effect: 'confirmed', call_completion: { kind: 'result', outcome: 'succeeded', effect: 'confirmed' } });
+    expect(await reopened.runtime.operation(operationId)).toMatchObject({ outcome: 'succeeded', effect: 'confirmed', call_completion: null });
     expect((await reopened.personalization.catalog()).revision).toBe(1);
     await reopened.adapter.retryPreparation(run.run_id);
     await expect.poll(async () => (await reopened.runtime.run(run.run_id)).state).toBe('completed');
+    expect(await reopened.runtime.operation(operationId)).toMatchObject({ call_completion: { kind: 'result', outcome: 'succeeded', effect: 'confirmed' } });
     expect(graphReceipts(reopened).find(receipt => receipt.node_id === 'save')?.completion).toMatchObject({ kind: 'result', outcome: 'succeeded', effect: 'confirmed', output: { action_id: actionId, node_id: 'save' } });
     expect(reopened.memoryQueries.some(query => query.action === 'tool' && query.arguments?.action === 'save')).toBe(false);
     expect(reopened.memoryWrites).toEqual([]);
