@@ -4,11 +4,13 @@ import type { McpAuthority } from '@varin/pi-host/mcp-authority';
 import type { PermissionPolicy } from '@varin/protocol';
 import type { McpPreparation } from './agent-runtime-client.js';
 import type { KernelClient } from './kernel-client.js';
+import type { McpTaskRuntime } from './mcp-task-runtime.js';
 import type { McpToolLease } from './tool-bridge.js';
 import { createMcpLease } from './mcp-owner.js';
 
 export function createChildMcpPreparer(owners: {
   authority: McpAuthority;
+  tasks?:()=>McpTaskRuntime;
   kernel: KernelClient;
   agentDir: string;
   hostId: string;
@@ -55,7 +57,7 @@ export function createChildMcpPreparer(owners: {
     assertTrust();
     const directResources = new Set(
       selection.tools
-        .filter(tool => selection.routes[tool.name]?.kind === 'direct')
+        .filter(tool => ['direct','direct_task'].includes(selection.routes[tool.name]?.kind ?? ''))
         .map((tool) => selection.resources[tool.name])
         .filter(Boolean),
     );
@@ -86,6 +88,7 @@ export function createChildMcpPreparer(owners: {
       return createMcpLease({
         lease,
         kernel: owners.kernel,
+        ...(owners.tasks?{tasks:owners.tasks()}:{}),
         selection,
         retarget: Boolean(input.delegatedBinding),
         currentPolicy: async () => {

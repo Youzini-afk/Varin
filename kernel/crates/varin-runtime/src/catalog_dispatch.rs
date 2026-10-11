@@ -92,7 +92,7 @@ impl ChildModelBinding {
             None => {
                 return Err(RuntimeError::Invalid(
                     "child model has no admitted credential owner".into(),
-                ))
+                ));
             }
         }
         .map_err(|error| RuntimeError::Invalid(error.to_string()))
@@ -245,7 +245,8 @@ pub struct ChildSelectedProfile {
 #[serde(deny_unknown_fields)]
 pub struct FrozenChildDispatch {
     pub source: Option<super::launches::SourceSelection>,
-    pub catalog_ref: Value,
+    /// Optional child directory. The same frozen composition also serves non-delegating MCP/extension calls.
+    pub catalog_ref: Option<Value>,
     pub parent_model: ChildModelBinding,
     pub allowed_delegation: Vec<ToolSchema>,
     pub tool_schema_generation: u64,
@@ -517,7 +518,9 @@ impl ChildDispatchSelection {
         Ok(ResolvedChildSelection {
             process,
             frozen_reference: self.reference.clone(),
-            catalog_ref: self.frozen.catalog_ref.clone(),
+            catalog_ref: self.frozen.catalog_ref.clone().ok_or_else(|| {
+                RuntimeError::Invalid("child delegation directory is unavailable".into())
+            })?,
             model,
             tool_schema_generation: self.frozen.tool_schema_generation,
             parent_tools_ref: self.frozen.tools_ref.clone(),
@@ -546,7 +549,9 @@ impl ChildDispatchRead {
         let frozen: FrozenChildDispatch =
             serde_json::from_value(self.content.load(&self.reference)?)?;
         let catalog: ChildDispatchCatalog =
-            serde_json::from_value(self.content.load(&frozen.catalog_ref)?)?;
+            serde_json::from_value(self.content.load(frozen.catalog_ref.as_ref().ok_or_else(
+                || RuntimeError::Invalid("child delegation directory is unavailable".into()),
+            )?)?)?;
         catalog.validate()?;
         frozen.parent_model.connection_identity()?;
         if let Some(source) = &frozen.source {
@@ -667,14 +672,21 @@ impl ChildDispatchPreparation {
                 "delegation differs from its selected tool generation".into(),
             ));
         }
-        let reference = self
-            .selection
-            .child_dispatch_ref
-            .clone()
-            .map(|catalog_ref| {
-                let catalog: ChildDispatchCatalog =
-                    serde_json::from_value(self.content.load(&catalog_ref)?)?;
-                catalog.validate()?;
+        let catalog_ref = self.selection.child_dispatch_ref.clone();
+        if let Some(reference) = &catalog_ref {
+            let catalog: ChildDispatchCatalog =
+                serde_json::from_value(self.content.load(reference)?)?;
+            catalog.validate()?;
+        }
+        let extensions: Vec<super::launches::ExtensionToolBinding> =
+            serde_json::from_value(self.content.load(&self.selection.extension_bindings_ref)?)?;
+        // A native MCP-only Run may intentionally have no child directory. Retain its actual
+        // composition anyway; task identity must not depend on enabling a delegation capability.
+        let reference = if catalog_ref.is_some()
+            || self.selection.mcp_binding_ref.is_some()
+            || !extensions.is_empty()
+        {
+            Some(
                 self.content
                     .save(&serde_json::to_value(FrozenChildDispatch {
                         source: self.selection.source.clone(),
@@ -685,9 +697,11 @@ impl ChildDispatchPreparation {
                         tools_ref: self.selection.tools_ref.clone(),
                         mcp_binding_ref: self.selection.mcp_binding_ref.clone(),
                         extension_bindings_ref: self.selection.extension_bindings_ref.clone(),
-                    })?)
-            })
-            .transpose()?;
+                    })?)?,
+            )
+        } else {
+            None
+        };
         Ok(PreparedChildDispatch {
             reference,
             selection: self.selection,

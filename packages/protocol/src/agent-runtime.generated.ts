@@ -4,7 +4,7 @@ export interface MediaReadChunk { media:StoredMedia;partIndex:number;chunkIndex:
 
 export interface MediaReadParams { threadId:string;branchId:string;holder:OutputMediaHolder;partIndex:number;chunkIndex:number;expectedContentRef:string }
 
-export type OutputMediaHolder = {kind:'history';itemId:string} | {kind:'input';inputId:string;expectedRevision:number} | {kind:'operation';operationId:string;output:'completion'|'result'|'external_receipt'} | {kind:'event';cursor:number;output:'completion'|'result'|'external_receipt'} | {kind:'policy_evidence';reference:OutputEvidenceRef} | {kind:'child_report';operationId:string;executionId?:string;itemId:string} | {kind:'family';threadId:string;branchId:string;runId?:string;anchor:string;itemId:string};
+export type OutputMediaHolder = {kind:'history';itemId:string} | {kind:'input';inputId:string;expectedRevision:number} | {kind:'operation';operationId:string;output:'completion'|'result'|'external_receipt' | 'mcp_task_result'} | {kind:'event';cursor:number;output:'completion'|'result'|'external_receipt' | 'mcp_task_result'} | {kind:'policy_evidence';reference:OutputEvidenceRef} | {kind:'child_report';operationId:string;executionId?:string;itemId:string} | {kind:'family';threadId:string;branchId:string;runId?:string;anchor:string;itemId:string};
 
 export type OperationResult = {kind:'control';value:unknown} | {kind:'output';output:OutputBody};
 
@@ -156,8 +156,7 @@ export interface HostJobBinding {
   executionOwner: ExecutorOwner;
   domain: string;
   domainVersion: number;
-  workspaceId: string;
-  subjectId: string;
+  subject: HostJobSubject;
 }
 
 export interface ResearchScope {
@@ -199,10 +198,11 @@ export interface HostJobPending {
   cancelRequested: boolean;
   phase: OperationPhase;
   origin: HostJobOrigin;
+  mcpTask?: McpTaskLink;
 }
 
 export interface HostJobSource {
-  observationKinds: ('job_stopped' | 'artifact' | 'collection' | 'log_literal' | 'log_end')[];
+  observationKinds: ('job_stopped' | 'job_result' | 'artifact' | 'collection' | 'log_literal' | 'log_end')[];
   binding: HostJobBinding;
   sourceRunId: string;
   threadId: string;
@@ -211,11 +211,13 @@ export interface HostJobSource {
   phase: OperationPhase;
   executorStopped: boolean;
   origin: HostJobOrigin;
+  mcpTask?: McpTaskLink;
 }
 
 export interface HostJobLink {
   binding: HostJobBinding;
   acceptanceRef: unknown | null;
+  mcpTask?: McpTaskLink;
 }
 
 export interface HostJobBeginParams {
@@ -225,6 +227,7 @@ export interface HostJobBeginParams {
 export interface HostJobAcceptParams {
   binding: HostJobBinding;
   content: OutputBody<IncomingMedia>;
+  task?: McpTaskState;
 }
 
 export interface HostJobTerminalParams {
@@ -238,6 +241,7 @@ export interface HostJobTerminalParams {
 export interface HostJobObserveParams {
   operationId: string;
   targetOperationId: string;
+  mode?: HostJobWaitMode;
 }
 
 export type CalendarRule =
@@ -1064,7 +1068,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 4; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 5; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -1284,7 +1288,7 @@ export interface McpProvenance {
   servers: Record<string, McpServerSelection>;
 }
 
-export type McpRoute = {kind:"direct"} | {kind:"server_argument";argument:string} | {kind:"discovery";argument:string};
+export type McpRoute = {kind:"direct"} | {kind:"server_argument";argument:string} | {kind:"discovery";argument:string} | {kind:"direct_task"} | {kind:"server_task_argument";argument:string} | {kind:"task_control";argument:string;action:McpTaskAction};
 
 export interface McpBinding {
   routes: Record<string, McpRoute>;
@@ -1901,9 +1905,9 @@ export type OperationCallCompletion<M = StoredMedia> =
   | { kind: 'job_accepted'; operation_id: string; phase: string; effect: Effect; lifetime: Lifetime; content?: OutputBody<M> };
 
 export interface Operation {
-  host_job?: HostJobLink;
+  host_job?: HostJobView;
   execution_owner: ExecutorOwner | null;
-  external_receipt: ExternalReceipt | null;
+  external_receipt: ExternalReceiptView | null;
   call_completion: OperationCallCompletion | null;
   id: string;
   run_id: string;
@@ -2333,3 +2337,91 @@ export interface FamilyRead {
 }
 
 export interface FamilyItem { threadId: string; branchId: string; runId: string | null; headId: string | null; itemId: string; format: 'conversation_json'; text: string; offset: number; nextOffset: number | null; totalBytes: number }
+
+export interface McpTaskEndpoint {
+  server: string;
+  resourceKey: string;
+  configurationVersion: string;
+  credentialVersion: string;
+}
+
+export type HostJobSubject = {kind:'workspace';workspaceId:string;subjectId:string} | {kind:'mcp';endpoint:McpTaskEndpoint;dispatchId:string};
+
+export type McpTaskStatus = 'working' | 'input_required' | 'completed' | 'failed' | 'cancelled';
+
+export interface McpTaskState {
+  taskId: string;
+  status: McpTaskStatus;
+  createdAt: string;
+  lastUpdatedAt: string;
+  ttl: number | null;
+  pollInterval?: number;
+}
+
+export interface McpTaskLink {
+  task: McpTaskState;
+  observationRef: unknown;
+  availability: McpTaskAvailability;
+  resultReady: boolean;
+  problem?: McpTaskProblem;
+  revision: number;
+  resultRef?: unknown;
+  resultOutcome?: Outcome;
+  resultEffect?: Effect;
+  resultKind?: McpTaskResultKind;
+}
+
+export interface HostJobTaskUpdateParams {
+  binding: HostJobBinding;
+  expectedRevision: number;
+  task: McpTaskState;
+  availability: McpTaskAvailability;
+  content: unknown;
+  problem?: McpTaskProblem;
+  result?: McpTaskResultInput;
+}
+
+export interface HostJobAccessParams {
+  runId: string;
+  targetOperationId: string;
+  control?: boolean;
+}
+
+export type McpTaskAvailability = 'available' | 'unavailable';
+
+export type HostJobWaitMode = 'stopped' | 'result';
+
+export type McpTaskAction = 'get' | 'wait' | 'cancel';
+
+export type McpTaskProblemKind = 'transport' | 'protocol' | 'expired' | 'owner' | 'unsupported';
+
+export type McpTaskStage = 'status' | 'result' | 'cancel' | 'interaction' | 'rebind';
+
+export interface McpTaskProblem {
+  kind: McpTaskProblemKind;
+  stage: McpTaskStage;
+  rpcCode?: number;
+}
+
+export interface ExternalReceiptView {
+  executor: string;
+  identity: string;
+  epoch: string;
+  outcome: Outcome;
+  effect: Effect;
+  result: OutputBody;
+  executor_stopped: boolean;
+}
+
+export interface McpTaskResultInput {
+  outcome: Outcome;
+  effect: Effect;
+  content: OutputBody<IncomingMedia>;
+  kind: McpTaskResultKind;
+}
+
+export interface HostJobView extends HostJobLink {
+  mcpTaskResult?: OutputBody;
+}
+
+export type McpTaskResultKind = 'response' | 'protocol_error';

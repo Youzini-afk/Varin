@@ -1556,6 +1556,14 @@ diff --git a/dist/extensions/mcp/runtime.js b/dist/extensions/mcp/runtime.js
                      continue;
                  }
                  if (!this.needsSignIn(error))
+@@ -297,6 +309,7 @@
+             name: "pi",
+             version: VERSION,
+             requestTimeoutMs: this.timeoutMs,
++            capabilities: { tasks: {} },
+             roots: [{ uri: pathToFileURL(this.cwd).href, name: basename(this.cwd) }],
+         });
+         const log = this.log;
 diff --git a/dist/extensions/mcp/runtime.d.ts b/dist/extensions/mcp/runtime.d.ts
 --- a/dist/extensions/mcp/runtime.d.ts
 +++ b/dist/extensions/mcp/runtime.d.ts

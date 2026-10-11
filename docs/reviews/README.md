@@ -8,6 +8,7 @@ Last updated: 2026-10-11
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [原 MCP Tasks 与持久结果观察（2026-10-11）](runtime-mcp-tasks-2026-10-11.md) | 原 authority/Task/权限/取消/恢复与真实 stdio、child/nested/Wait 消费；受理/结果/停止独立 |
 | [原 MCP 内容、资源与提示（2026-10-11）](runtime-mcp-content-2026-10-11.md) | 单 authority、typed routes/parts、原授权和真实 stdio 模型/策略/恢复消费者；完整协议能力边界 |
 | [原工具与脚本 typed media（2026-10-11）](runtime-typed-media-2026-10-11.md) | 原 producer/typed body/ContentStore/provider 与 family/child/UI 消费，原效果和恢复的跨层验收 |
 | [受管持久 JavaScript 环境（2026-10-11）](runtime-managed-scripts-2026-10-11.md) | 原 Node/Host/guardian、嵌套回执、精确取消、Run 生命周期与共享 Pi evaluator；实际组合及平台边界 |

@@ -95,6 +95,25 @@ diff --git a/dist/client.js b/dist/client.js
              transport.onClose(() => this.handleTransportClose()),
          ];
          try {
+@@ -335,8 +343,16 @@
+         const controller = new AbortController();
+         this.incoming.set(message.id, controller);
+         try {
+-            const result = await handler(message.params, { signal: controller.signal });
+-            await transport.send({ jsonrpc: "2.0", id: message.id, result: result ?? {} });
++            let result = (await handler(message.params, { signal: controller.signal })) ?? {};
++            // A supported server request remains associated with its original Task. Preserve
++            // only that protocol correlation, never forward arbitrary request metadata.
++            const requestMeta = isObject(message.params) && isObject(message.params._meta) ? message.params._meta : undefined;
++            const relatedTask = requestMeta?.["io.modelcontextprotocol/related-task"];
++            if (isObject(result) && isObject(relatedTask) && typeof relatedTask.taskId === "string") {
++                result = { ...result, _meta: { ...(isObject(result._meta) ? result._meta : {}),
++                    "io.modelcontextprotocol/related-task": { taskId: relatedTask.taskId } } };
++            }
++            await transport.send({ jsonrpc: "2.0", id: message.id, result });
+         }
+         catch (error) {
+             const responseError = error instanceof McpError
 diff --git a/dist/index.js b/dist/index.js
 --- a/dist/index.js
 +++ b/dist/index.js
@@ -111,3 +130,15 @@ diff --git a/dist/index.d.ts b/dist/index.d.ts
  export type { AuthProvider, McpFetch, UnauthorizedContext } from "./auth-provider.ts";
  export { McpClient, type McpClientOptions, type McpRequestOptions } from "./client.ts";
  export { type AudioContent, type BlobResourceContents, type CallToolResult, type ContentAnnotations, type ContentBlock, type EmbeddedResourceContent, type ImageContent, type LlmContent, type ResourceLinkContent, type TextContent, type TextResourceContents, toLlmContent, } from "./protocol/content.ts";
+diff --git a/dist/protocol/types.d.ts b/dist/protocol/types.d.ts
+--- a/dist/protocol/types.d.ts
++++ b/dist/protocol/types.d.ts
+@@ -17,6 +17,8 @@
+     name?: string;
+ }
+ export interface ClientCapabilities {
++    /** Task-result observation without advertising sampling or elicitation support. */
++    tasks?: Record<string, never>;
+     experimental?: Record<string, unknown>;
+     roots?: {
+         listChanged?: boolean;

@@ -11,7 +11,7 @@ import type { SourceService } from '../harness/sources.js';
 import type { ResourceService } from '../harness/resources.js';
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(yes => { resolve = yes; }); return { promise, resolve }; };
 const source = { workspace_id: 'observer-workspace', execution_workspace_id: 'observer-execution', mode: 'fixed_branch' as const, branch_id: 'fixed', revision: 3, live_root: null };
-const binding: HostJobBinding = { operationId: 'original-job', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'target-workspace', subjectId: 'attempt' };
+const binding = { operationId: 'original-job', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, domain: 'research.experiment', domainVersion: 1, subject: { kind: 'workspace', workspaceId: 'target-workspace', subjectId: 'attempt' } } satisfies HostJobBinding;
 const observer: FollowupResearchWork['observer'] = { rootThreadId: 'parent', threadId: 'child', branchId: 'child-branch', sourceRunId: 'child-source', source, canSubmit: true, readThreadIds: ['parent', 'child'], controlThreadIds: ['child'] };
 const work = (kind: 'artifact' | 'collection'): FollowupResearchWork => ({ key: { followupId: kind, generation: 1, sourceIndex: 0, definitionRevision: 1, ownerEpoch: 1 }, binding, observer, log: null, source: { kind, operation_id: binding.operationId } });
 
@@ -34,7 +34,7 @@ it('continues original research leaves after Job pending is empty and preserves 
   } } as unknown as KernelClient;
   const experiments = { subscribeAttempts: (fn: () => void) => { hints = fn; subscribed = true; return () => { subscribed = false; }; },
     readArtifactObservation: async (caller: ExperimentCaller) => {
-      assert.equal(caller.workspaceId, binding.workspaceId); assert.equal(caller.owner.runtime, 'agent');
+      assert.equal(caller.workspaceId, binding.subject.workspaceId); assert.equal(caller.owner.runtime, 'agent');
       if (caller.owner.runtime !== 'agent') throw new Error('actual native reader required');
       assert.deepEqual(caller.owner.source, source);
       assert.equal(caller.runId, observer.sourceRunId); assert.deepEqual(caller.access, { kind: 'family', readThreadIds: observer.readThreadIds, controlThreadIds: [] });
@@ -55,9 +55,9 @@ it('continues original research leaves after Job pending is empty and preserves 
 
 it('keeps original cancellation responsive while an independent artifact metadata reply is held', async () => {
   const entered = deferred(), held = deferred(); let event = () => {}; let requested = false, cancelled = false;
-  const other = { ...binding, operationId: 'other-job', subjectId: 'other-attempt' };
+  const other = { ...binding, operationId: 'other-job', subject: { ...binding.subject, subjectId: 'other-attempt' } };
   const job: HostJobPending = { binding: other, runId: 'other-run', accepted: true, cancelRequested: true, phase: 'running', executorStopped: false, origin: { kind: 'user', key: 'other' } };
-  const caller: ExperimentCaller = { workspaceId: other.workspaceId, executionWorkspaceId: 'exec', owner: { runtime: 'agent', actor: { kind: 'user', key: 'other' }, rootThreadId: 'parent', threadId: 'parent', branchId: 'branch', runId: 'other-run', operationId: other.operationId, executionOwner: other.executionOwner, source }, access: { kind: 'family', readThreadIds: ['parent'], controlThreadIds: ['parent'] } };
+  const caller: ExperimentCaller = { workspaceId: other.subject.workspaceId, executionWorkspaceId: 'exec', owner: { runtime: 'agent', actor: { kind: 'user', key: 'other' }, rootThreadId: 'parent', threadId: 'parent', branchId: 'branch', runId: 'other-run', operationId: other.operationId, executionOwner: other.executionOwner, source }, access: { kind: 'family', readThreadIds: ['parent'], controlThreadIds: ['parent'] } };
   const errors: unknown[] = [];
   const research = createResearchRuntime({
     kernel: { agentRuntimeRequest: async (method: string) => {
@@ -68,7 +68,7 @@ it('keeps original cancellation responsive while an independent artifact metadat
     } } as unknown as KernelClient,
     runtime: { onReady: () => () => {}, onEvent: (fn: () => void) => { event = fn; return () => {}; }, reconcileObservations: async () => [] } as unknown as AgentRuntimeClient,
     experiments: { subscribeAttempts: () => () => {}, readArtifactObservation: async () => { entered.resolve(); await held.promise; return { attempt: { state: 'running' }, completion: null, artifacts: [], counts: { available: 0, failed: 0, expired: 0, pending: 0 } }; },
-      nativeReceipt: async () => ({ caller, owner: caller.owner, accepted: {}, attempt: { attemptId: other.subjectId, state: 'running', cancelRequested: false }, executorStopped: false, recordRevision: 1 }),
+      nativeReceipt: async () => ({ caller, owner: caller.owner, accepted: {}, attempt: { attemptId: other.subject.subjectId, state: 'running', cancelRequested: false }, executorStopped: false, recordRevision: 1 }),
       cancel: async () => { cancelled = true; } } as unknown as ExperimentService,
     sources: {} as SourceService, resources: { subscribeSamples: () => () => {} } as unknown as ResourceService, onError: e => errors.push(e),
   });

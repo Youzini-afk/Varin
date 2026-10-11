@@ -268,16 +268,21 @@ fn research_observation_rejects_mismatched_owner_entity_and_unaccepted_target() 
     let b = job(&mut f, "legal", true);
     register(&mut f, "target", &b, FollowupRepeat::Each, false);
     let mut bad = b.clone();
-    bad.workspace_id = "other".into();
+    match &mut bad.subject {
+        varin_runtime::catalog::host_jobs::HostJobSubject::Workspace { workspace_id, .. } => {
+            *workspace_id = "other".into()
+        }
+        _ => panic!("research fixture requires workspace"),
+    }
     let w = work(&f, "target", 0);
-    assert!(f
-        .db
-        .prepare_research_observation(FollowupResearchObservation {
+    assert!(
+        f.db.prepare_research_observation(FollowupResearchObservation {
             key: w.key,
             evidence: evidence(&bad, "a", 1),
             content: json!({})
         })
-        .is_err());
+        .is_err()
+    );
     let b = job(&mut f, "planned", false);
     let p =
         f.db.prepare_followup_registration(
@@ -358,15 +363,17 @@ fn research_metadata_continues_a_completed_root_in_a_new_run_after_reopen() {
             Some(&runs[0])
         );
         let history = f.db.execution_history("branch").unwrap();
-        assert!(serde_json::to_string(&history)
-            .unwrap()
-            .contains("original metadata after root completed"));
-        assert!(f
-            .db
-            .operation(&binding.operation_id)
-            .unwrap()
-            .external_receipt
-            .is_none());
+        assert!(
+            serde_json::to_string(&history)
+                .unwrap()
+                .contains("original metadata after root completed")
+        );
+        assert!(
+            f.db.operation(&binding.operation_id)
+                .unwrap()
+                .external_receipt
+                .is_none()
+        );
         f.cleanup();
     }
 }

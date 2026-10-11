@@ -585,14 +585,30 @@ impl HostTools {
             .get(&call.name)
             .ok_or_else(|| failed("mcp_route_unbound"))?;
         let (target, discovery, local) = match route {
-            varin_runtime::McpRoute::Direct => (Some(call.name.clone()), false, false),
-            varin_runtime::McpRoute::ServerArgument { argument } => {
+            varin_runtime::McpRoute::Direct | varin_runtime::McpRoute::DirectTask => {
+                (Some(call.name.clone()), false, false)
+            }
+            varin_runtime::McpRoute::ServerArgument { argument }
+            | varin_runtime::McpRoute::ServerTaskArgument { argument } => {
                 let server = call
                     .arguments
                     .get(argument)
                     .and_then(Value::as_str)
                     .ok_or_else(|| failed("mcp_target_required"))?;
                 (Some(format!("server:{server}")), false, false)
+            }
+            varin_runtime::McpRoute::TaskControl { argument, .. } => {
+                if call
+                    .arguments
+                    .get(argument)
+                    .and_then(Value::as_str)
+                    .is_none_or(str::is_empty)
+                {
+                    return Err(failed("mcp_task_operation_required"));
+                }
+                // Management may reopen the original remote owner and issue tasks/get. Keep its
+                // ordinary Result durable for the existing permission rendezvous, with no claim.
+                (None, false, true)
             }
             varin_runtime::McpRoute::Discovery { argument } => {
                 if let Some(server) = call.arguments.get(argument) {
@@ -619,14 +635,27 @@ impl HostTools {
                 access: Access::Write,
             }],
         };
+        let job = matches!(
+            route,
+            varin_runtime::McpRoute::DirectTask
+                | varin_runtime::McpRoute::ServerTaskArgument { .. }
+                | varin_runtime::McpRoute::TaskControl {
+                    action: varin_runtime::McpTaskAction::Wait,
+                    ..
+                }
+        );
         Ok(ToolContract {
             name: call.name.clone(),
             schema_version: call.schema_version.clone(),
             // Selected-server discovery is a durable preparation Operation. A catalog listing
             // without a server is purely local and needs no effectful Operation.
             read_only: discovery && local,
-            completion: CompletionKind::Result,
-            lifetime: Lifetime::Run,
+            completion: if job {
+                CompletionKind::Job
+            } else {
+                CompletionKind::Result
+            },
+            lifetime: if job { Lifetime::Thread } else { Lifetime::Run },
             resources,
         })
     }

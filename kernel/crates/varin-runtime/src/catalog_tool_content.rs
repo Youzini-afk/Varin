@@ -142,6 +142,22 @@ impl ModelStepRead {
     }
 }
 impl OperationRead {
+    pub fn load_mcp_task(self) -> Result<Value> {
+        let task = self
+            .operation
+            .host_job
+            .as_ref()
+            .and_then(|link| link.mcp_task.as_ref())
+            .ok_or_else(|| RuntimeError::NotFound("Accepted MCP task".into()))?;
+        let result = task
+            .result_ref
+            .as_ref()
+            .map(|reference| self.content.load_output(reference))
+            .transpose()?;
+        let observation = self.content.load_output(&task.observation_ref)?.data;
+        Ok(json!({"operation":self.load()?,"result":result,"observation":observation}))
+    }
+
     /// An internal domain preserves the exact captured receipt, including its typed media.
     pub fn load_with_external_receipt(
         self,
@@ -212,18 +228,35 @@ pub(super) fn hydrate_operation(
     let external_receipt = operation
         .external_receipt
         .map(|receipt| {
-            Ok::<_, RuntimeError>(ExternalReceipt {
-                executor: receipt.executor,
-                identity: receipt.identity,
-                epoch: receipt.epoch,
-                outcome: receipt.outcome,
-                effect: receipt.effect,
-                result: content.load_stored_output(&receipt.result_ref)?,
+            Ok::<_, RuntimeError>(crate::types::ExternalReceiptView {
+                executor_stopped: receipt.executor_stopped,
+                receipt: ExternalReceipt {
+                    executor: receipt.executor,
+                    identity: receipt.identity,
+                    epoch: receipt.epoch,
+                    outcome: receipt.outcome,
+                    effect: receipt.effect,
+                    result: content.load_stored_output(&receipt.result_ref)?,
+                },
             })
         })
         .transpose()?;
     Ok(crate::types::Operation {
-        host_job: operation.host_job,
+        host_job: operation
+            .host_job
+            .map(|link| {
+                let mcp_task_result = link
+                    .mcp_task
+                    .as_ref()
+                    .and_then(|task| task.result_ref.as_ref())
+                    .map(|reference| content.load_stored_output(reference))
+                    .transpose()?;
+                Ok::<_, RuntimeError>(super::host_jobs::HostJobView {
+                    link,
+                    mcp_task_result,
+                })
+            })
+            .transpose()?,
         managed_process: operation.managed_process,
         call_completion: operation
             .call_completion
@@ -453,6 +486,22 @@ pub struct ToolInvocationSnapshot {
     _publication: crate::content::ContentPublication,
 }
 impl ToolInvocationRead {
+    /// Load the original frozen MCP contribution on a body worker, never in a Catalog transaction.
+    pub fn load_mcp(&self) -> Result<(ToolInvocationSnapshot, super::launches::HostToolBinding)> {
+        let snapshot = self.load()?;
+        let reference = snapshot.frozen.child_dispatch.as_ref().ok_or_else(|| {
+            RuntimeError::Conflict("MCP invocation has no original composition".into())
+        })?;
+        let dispatch: super::dispatch::FrozenChildDispatch =
+            serde_json::from_value(self.content.load(reference)?)?;
+        let reference = dispatch.mcp_binding_ref.ok_or_else(|| {
+            RuntimeError::Conflict("MCP invocation has no original MCP binding".into())
+        })?;
+        let binding: super::launches::HostToolBinding =
+            serde_json::from_value(self.content.load(&reference)?)?;
+        binding.validate()?;
+        Ok((snapshot, binding))
+    }
     pub fn load(&self) -> Result<ToolInvocationSnapshot> {
         use crate::execution::{RequestOrigin, RequestSnapshot};
         let call = match &self.call {

@@ -2419,23 +2419,24 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     selector: { artifactId?: string; name?: string },
     signal?: AbortSignal,
   ) => {
-    if (caller.access.kind !== "family" || caller.workspaceId !== binding.workspaceId || binding.domain !== "research.experiment" || binding.domainVersion !== 1) {
+    const subject = binding.subject;
+    if (subject.kind !== "workspace" || caller.access.kind !== "family" || caller.workspaceId !== subject.workspaceId || binding.domain !== "research.experiment" || binding.domainVersion !== 1) {
       throw new HarnessServiceError("denied", "Artifact observation requires its actual family reader and original research binding");
     }
     for (;;) {
       signal?.throwIfAborted();
-      const before = await requireAttempt(caller, binding.subjectId);
+      const before = await requireAttempt(caller, subject.subjectId);
       const original = researchOwner(before.record);
       if (original.runtime !== "agent" || original.operationId !== binding.operationId
         || !isDeepStrictEqual(original.executionOwner, binding.executionOwner)) {
         throw new HarnessServiceError("denied", "Artifact observation target differs from its original accepted owner");
       }
       const artifacts: ExperimentArtifactView[] = [];
-      const selectedId = selector.artifactId ?? (selector.name ? artifactIdFor(binding.subjectId, selector.name) : undefined);
+      const selectedId = selector.artifactId ?? (selector.name ? artifactIdFor(subject.subjectId, selector.name) : undefined);
       const accept = (record: KernelRecordResult) => {
         assertRecordAllowed(caller, record, `experiment artifact: ${record.recordId}`);
         const artifact = artifactView(record), owner = researchOwner(record);
-        if (!artifact || artifact.attemptId !== binding.subjectId || payloadOf(record).internalLogChunk === true
+        if (!artifact || artifact.attemptId !== subject.subjectId || payloadOf(record).internalLogChunk === true
           || owner.runtime !== "agent" || owner.operationId !== binding.operationId || !isDeepStrictEqual(owner.executionOwner, binding.executionOwner)) {
           throw new HarnessServiceError("unavailable", "Original artifact metadata or provenance is unreadable");
         }
@@ -2455,13 +2456,13 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
         let after: string | undefined;
         do {
           signal?.throwIfAborted();
-          const page = await before.ctx.scoped.experimentArtifacts({ workspaceId: caller.workspaceId, attemptId: binding.subjectId, ...(after ? { after } : {}) }, signal);
+          const page = await before.ctx.scoped.experimentArtifacts({ workspaceId: caller.workspaceId, attemptId: subject.subjectId, ...(after ? { after } : {}) }, signal);
           for (const record of page.records) accept(record);
           if (page.nextCursor !== null && (page.nextCursor === after || page.nextCursor.length === 0)) throw new HarnessServiceError("unavailable", "Artifact metadata cursor did not advance");
           after = page.nextCursor ?? undefined;
         } while (after !== undefined);
       }
-      const after = await requireAttempt(caller, binding.subjectId);
+      const after = await requireAttempt(caller, subject.subjectId);
       const stamp = (view: ExperimentAttemptView) => JSON.stringify([view.collection, view.collectionCompletion ?? null]);
       if (stamp(before.view) !== stamp(after.view)) continue;
       const completion = after.view.collectionCompletion;
@@ -2617,11 +2618,12 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     signal?: AbortSignal,
   ) => {
     signal?.throwIfAborted();
-    if (caller.access.kind !== "family" || caller.workspaceId !== binding.workspaceId || binding.domain !== "research.experiment" || binding.domainVersion !== 1) {
+    const subject = binding.subject;
+    if (subject.kind !== "workspace" || caller.access.kind !== "family" || caller.workspaceId !== subject.workspaceId || binding.domain !== "research.experiment" || binding.domainVersion !== 1) {
       throw new HarnessServiceError("denied", "Log observation requires its actual family reader and original research Job");
     }
     if (!Number.isSafeInteger(input.offset) || input.offset < 0) throw new HarnessServiceError("invalid-params", "Log byte offset must be a nonnegative safe integer");
-    const { ctx, record, view } = await requireAttempt(caller, binding.subjectId);
+    const { ctx, record, view } = await requireAttempt(caller, subject.subjectId);
     const requireOriginal = (record: KernelRecordResult) => {
       assertRecordAllowed(caller, record, `experiment log owner: ${record.recordId}`);
       const owner = researchOwner(record);
@@ -2630,12 +2632,12 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
       }
     };
     requireOriginal(record);
-    const job = await ctx.scoped.getRecord(caller.workspaceId, recordIdFor.job(jobIdFor(binding.subjectId)), signal);
+    const job = await ctx.scoped.getRecord(caller.workspaceId, recordIdFor.job(jobIdFor(subject.subjectId)), signal);
     if (job) requireOriginal(job);
     const payload = job ? payloadOf(job) : null;
     const publishedBytes = payload ? payload[`${input.stream}Bytes`] ?? 0 : 0;
     if (!Number.isSafeInteger(publishedBytes) || (publishedBytes as number) < 0
-      || (payload && payload.attemptId !== binding.subjectId)
+      || (payload && payload.attemptId !== subject.subjectId)
       || (payload && payload[`${input.stream}Bytes`] === undefined && (num(payload.outputCursor) ?? 0) > 0)) {
       throw new HarnessServiceError("unavailable", "Original published log byte cursor is unreadable; retry after the research owner reconnects");
     }
@@ -2643,7 +2645,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     const maxBytes = input.maxBytes ?? 64 * 1024;
     if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new HarnessServiceError("invalid-params", "Log read size must be a positive safe integer");
     const range = input.offset < end
-      ? await readLogRange(ctx, caller.workspaceId, binding.subjectId, input.stream, input.offset, maxBytes, signal, end, caller)
+      ? await readLogRange(ctx, caller.workspaceId, subject.subjectId, input.stream, input.offset, maxBytes, signal, end, caller)
       : { bytes: Buffer.alloc(0), nextOffset: input.offset };
     signal?.throwIfAborted();
     return { bytes: range.bytes, offset: input.offset, nextOffset: range.nextOffset, publishedBytes: end,

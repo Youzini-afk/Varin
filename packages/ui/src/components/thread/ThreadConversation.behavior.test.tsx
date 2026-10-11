@@ -1204,7 +1204,7 @@ it('discovers retained unconfirmed file resources and retries their explicit can
 it.each(['job_stopped', 'any', 'all'] as const)('registers %s from accepted family jobs outside visible operations using current work and stable retry', async kind => {
   const f = fixture(true);
   const job: Awaited<ReturnType<ThreadsAPI['followups']['jobSources']>>[number] = {
-    observationKinds: ['job_stopped', 'artifact', 'collection'], binding: { operationId: 'user-job:original', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original-domain' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'workspace', subjectId: 'attempt:historical' },
+    observationKinds: ['job_stopped', 'artifact', 'collection'], binding: { operationId: 'user-job:original', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original-domain' }, domain: 'research.experiment', domainVersion: 1, subject: { kind: 'workspace', workspaceId: 'workspace', subjectId: 'attempt:historical' } },
     sourceRunId: 'old-completed-run', threadId: 'thread:family-child', branchId: 'branch:family-child', cancelRequested: false, phase: 'terminal', executorStopped: true, origin: { kind: 'user', key: 'submit-original' },
   };
   f.api.followups.jobSources = vi.fn(async () => [job]);
@@ -1245,7 +1245,7 @@ it('discards a late accepted-job query from the previous work Run and keeps a fa
   await edit('[aria-label="Follow-up trigger"]', 'job_stopped', 'change');
   f.view.activeRun = { ...f.view.activeRun!, id: 'new-work' };
   await act(async () => f.emit({ cursor: 2, subject: 'new-work', revision: 1, kind: 'run.accepted', data: {} }));
-  await act(async () => release!([{ observationKinds: ['job_stopped', 'artifact', 'collection'], binding: { operationId: 'late-job', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'old' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'ws', subjectId: 'late-attempt' }, sourceRunId: 'old-work', threadId: identity.threadId, branchId: identity.branchId, phase: 'running', executorStopped: false, cancelRequested: false, origin: { kind: 'user', key: 'old' } }]));
+  await act(async () => release!([{ observationKinds: ['job_stopped', 'artifact', 'collection'], binding: { operationId: 'late-job', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'old' }, domain: 'research.experiment', domainVersion: 1, subject: { kind: 'workspace', workspaceId: 'ws', subjectId: 'late-attempt' } }, sourceRunId: 'old-work', threadId: identity.threadId, branchId: identity.branchId, phase: 'running', executorStopped: false, cancelRequested: false, origin: { kind: 'user', key: 'old' } }]));
   await edit('[aria-label="Follow-up trigger"]', 'job_stopped', 'change');
   await edit('[aria-label="Follow-up instruction"]', 'Wait for a real candidate');
   expect(container.textContent).toContain('Accepted jobs could not be read');
@@ -1413,7 +1413,7 @@ it('offers the original definition retry when an older occurrence failed and the
 
 function researchJob(): Awaited<ReturnType<ThreadsAPI['followups']['jobSources']>>[number] {
   return { observationKinds: ['job_stopped', 'artifact', 'collection'],
-    binding: { operationId: 'job:research-original', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'workspace:original', subjectId: 'attempt:historical-research' },
+    binding: { operationId: 'job:research-original', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, domain: 'research.experiment', domainVersion: 1, subject: { kind: 'workspace', workspaceId: 'workspace:original', subjectId: 'attempt:historical-research' } },
     sourceRunId: 'run:historical-child', threadId: 'thread:child', branchId: 'branch:child', phase: 'running', executorStopped: false, cancelRequested: false, origin: { kind: 'user', key: 'user-accepted' } };
 }
 function researchOccurrence(id: string, accepted: number): NonNullable<ThreadSnapshot['followups'][number]['occurrence']> {
@@ -1434,14 +1434,14 @@ it.each(['any', 'artifactId', 'name', 'collection'] as const)('registers exact r
   const f = fixture(true); const job = researchJob();
   const repeat = selector === 'any' ? 'once' : 'each';
   const registerLabel = repeat === 'once' ? 'Register one-time follow-up' : 'Register repeating follow-up';
-  const unsupported = { ...job, observationKinds: ['job_stopped'] as const, binding: { ...job.binding, operationId: 'job:unsupported-version', domainVersion: 99, subjectId: 'unsupported-research-attempt' } };
+  const unsupported = { ...job, observationKinds: ['job_stopped'] as const, binding: { ...job.binding, operationId: 'job:unsupported-version', domainVersion: 99, subject: { kind: 'workspace' as const, workspaceId: 'workspace:original', subjectId: 'unsupported-research-attempt' } } };
   f.api.followups.jobSources = vi.fn(async () => [job, { ...unsupported, observationKinds: [...unsupported.observationKinds] }]);
   const register = vi.fn<ThreadsAPI['followups']['register']>().mockRejectedValue(new Error('acceptance reply lost')); f.api.followups.register = register;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   await act(async () => button('Schedule a follow-up').click());
   await edit('[aria-label="Follow-up trigger"]', selector === 'collection' ? 'collection' : 'artifact', 'change');
   const picker = container.querySelector('[aria-label="Follow-up job"]')!;
-  expect(picker.textContent).toContain(job.binding.subjectId); expect(picker.textContent).not.toContain('unsupported-research-attempt');
+  expect(picker.textContent).toContain('attempt:historical-research'); expect(picker.textContent).not.toContain('unsupported-research-attempt');
   await edit('[aria-label="Follow-up job"]', job.binding.operationId, 'change');
   await edit('[aria-label="Follow-up repetition"]', repeat, 'change');
   if (selector !== 'collection') {
@@ -1589,7 +1589,7 @@ function logOccurrence(id: string, accepted: number): ReturnType<typeof repeated
 // Controlled application API: these tests exercise the real React consumer, not Host/Rust IPC.
 it('registers exact log bytes on accepted task-family work and preserves the complete uncertain intent', async () => {
   const f = fixture(true); const job = logJob(); const unsupported = researchJob();
-  unsupported.binding = { ...unsupported.binding, operationId: 'job:without-log-observation', subjectId: 'no-log-support' };
+  unsupported.binding = { ...unsupported.binding, operationId: 'job:without-log-observation', subject: { kind: 'workspace', workspaceId: 'workspace:original', subjectId: 'no-log-support' } };
   f.api.followups.jobSources = vi.fn(async () => [job, unsupported]);
   const followup = logFollowup(); const get = vi.fn<ThreadsAPI['followups']['get']>(async () => ({ followup, instruction: 'Use the matching output.',
     registration_trigger: { kind: 'log_literal', operationId: job.binding.operationId, stream: 'stderr', literal: ' A中\nA ', fromOffset: 50000 } }));
@@ -1604,7 +1604,7 @@ it('registers exact log bytes on accepted task-family work and preserves the com
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   await act(async () => button('Schedule a follow-up').click());
   await edit('[aria-label="Follow-up trigger"]', 'log_literal', 'change');
-  expect(container.querySelector('[aria-label="Follow-up job"]')?.textContent).toContain(job.binding.subjectId);
+  expect(container.querySelector('[aria-label="Follow-up job"]')?.textContent).toContain('attempt:historical-research');
   expect(container.querySelector('[aria-label="Follow-up job"]')?.textContent).not.toContain('no-log-support');
   await edit('[aria-label="Follow-up job"]', job.binding.operationId, 'change');
   await edit('[aria-label="Follow-up repetition"]', 'each', 'change');
@@ -2042,7 +2042,7 @@ it('reads actual operation completion, result and external receipt images throug
   f.view.operations = [{ id: 'media-operation', run_id: 'ui-run', epoch: 1, revision: 2, phase: 'terminal', outcome: 'failed', effect: 'partial',
     cancel_requested: false, lifetime: 'run', handed_off: true, executor: 'script', waiting_on: null, intent: {}, execution_owner: null,
     call_completion: { kind: 'result', outcome: 'failed', effect: 'partial', content: output }, result: { kind: 'output', output },
-    external_receipt: { executor: 'script', identity: 'receipt', epoch: 'epoch', outcome: 'failed', effect: 'partial', result: output } }];
+    external_receipt: { executor: 'script', identity: 'receipt', epoch: 'epoch', outcome: 'failed', effect: 'partial', result: output, executor_stopped: true } }];
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   expect(f.api.mediaRead).not.toHaveBeenCalled();
   expect(container.textContent).toContain('failed'); expect(container.textContent).toContain('partial');
@@ -2051,4 +2051,53 @@ it('reads actual operation completion, result and external receipt images throug
   }
   expect(vi.mocked(f.api.mediaRead).mock.calls.map(([input]) => input.holder)).toEqual(['completion', 'result', 'external_receipt'].map(output => ({ kind: 'operation', operationId: 'media-operation', output })));
   expect(container.querySelectorAll('img')).toHaveLength(3);
+});
+
+it('keeps accepted remote task control after its Run ends and distinguishes cancellation, result and executor stop', async () => {
+  const f = fixture();
+  const operation: ThreadSnapshot['operations'][number] = {
+    id: 'local:original-dispatch', run_id: 'completed-source-run', epoch: 1, revision: 3,
+    phase: 'terminal', outcome: 'indeterminate', effect: 'unknown', cancel_requested: false,
+    lifetime: 'thread', handed_off: true, executor: 'mcp', waiting_on: null, intent: {}, result: null,
+    external_receipt: null, call_completion: { kind: 'job_accepted', operation_id: 'local:original-dispatch', phase: 'accepted', effect: 'confirmed', lifetime: 'thread' },
+    execution_owner: { kind: 'external', identity: 'original-mcp', epoch: 'original-owner' },
+    host_job: { binding: { operationId: 'local:original-dispatch', executionOwner: { kind: 'external', identity: 'original-mcp', epoch: 'original-owner' },
+      domain: 'mcp', domainVersion: 1, subject: { kind: 'mcp', dispatchId: 'local:original-dispatch',
+        endpoint: { server: 'original-server', resourceKey: 'original-server-resource', configurationVersion: 'configuration', credentialVersion: 'opaque-grant' } } },
+      acceptanceRef: 'original-acceptance', mcpTask: { revision: 1, task: { taskId: 'remote:receiver-task', status: 'working', createdAt: '2026-10-11T18:00:00Z', lastUpdatedAt: '2026-10-11T18:00:01Z', ttl: null },
+        observationRef: 'original-observation', availability: 'available', resultReady: false } },
+  };
+  f.view.operations = [operation];
+  const cancel = vi.fn<ThreadsAPI['cancelOperation']>(async id => {
+    expect(id).toBe('local:original-dispatch');
+    operation.cancel_requested = true;
+    operation.host_job!.mcpTask!.task.status = 'cancelled';
+    operation.host_job!.mcpTask!.resultReady = true;
+    operation.host_job!.mcpTaskResult = { data: { isError: true, original: 'receiver-result' }, parts: [
+      { kind: 'text', text: 'Original remote task output' }, { kind: 'media', media: storedImage },
+    ] };
+    return structuredClone(operation);
+  }); f.api.cancelOperation = cancel;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  const card = () => container.querySelector('[aria-label="Remote MCP task"]')!;
+  expect(card().textContent).toContain('original-server · remote task remote:receiver-task');
+  expect(card().textContent).toContain('Result not received');
+  expect(card().textContent).toContain('Executor stop unconfirmed');
+  await act(async () => button('Request remote task cancellation').click());
+  expect(cancel).toHaveBeenCalledExactlyOnceWith('local:original-dispatch');
+  expect(card().textContent).toContain('Remote status: cancelled · Result stored');
+  expect(card().textContent).toContain('Executor stop unconfirmed · Cancellation requested');
+  expect(card().textContent).toContain('does not prove execution has stopped');
+  expect(container.textContent).toContain('Original remote task output');
+  await act(async () => button('View image').click());
+  expect(f.api.mediaRead).toHaveBeenCalledExactlyOnceWith({ ...identity, holder: { kind: 'operation', operationId: 'local:original-dispatch', output: 'mcp_task_result' },
+    partIndex: 1, chunkIndex: 0, expectedContentRef: storedImage.content_ref.content_object }, expect.any(AbortSignal));
+  expect(button('Request remote task cancellation')).toBeUndefined();
+  operation.host_job!.mcpTask!.availability = 'unavailable';
+  operation.host_job!.mcpTask!.problem = { kind: 'owner', stage: 'rebind' };
+  await act(async () => f.emit({ cursor: 1, subject: operation.id, revision: 4, kind: 'operation.changed', data: {} }));
+  expect(card().textContent).toContain('Restore that connection to observe this task');
+  expect(card().textContent).toContain('Current task observation unavailable');
+  expect(card().textContent).not.toContain('Executor stop confirmed');
+  expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
 });

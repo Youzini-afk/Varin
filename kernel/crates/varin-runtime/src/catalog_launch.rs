@@ -136,10 +136,14 @@ impl HostToolBinding {
                     || !(tool.schema.is_object() || tool.schema.is_boolean())
                     || !names.insert(&tool.name)
                     || match self.routes.get(&tool.name) {
-                        Some(crate::McpRoute::Direct) => !self.resources.contains_key(&tool.name),
+                        Some(crate::McpRoute::Direct | crate::McpRoute::DirectTask) => {
+                            !self.resources.contains_key(&tool.name)
+                        }
                         Some(
                             crate::McpRoute::ServerArgument { argument }
-                            | crate::McpRoute::Discovery { argument },
+                            | crate::McpRoute::Discovery { argument }
+                            | crate::McpRoute::ServerTaskArgument { argument }
+                            | crate::McpRoute::TaskControl { argument, .. },
                         ) => {
                             argument.is_empty()
                                 || tool
@@ -170,9 +174,12 @@ impl HostToolBinding {
         if tools.is_empty() {
             return None;
         }
-        let gateway = tools
-            .iter()
-            .any(|tool| !matches!(self.routes.get(&tool.name), Some(crate::McpRoute::Direct)));
+        let gateway = tools.iter().any(|tool| {
+            !matches!(
+                self.routes.get(&tool.name),
+                Some(crate::McpRoute::Direct | crate::McpRoute::DirectTask)
+            )
+        });
         let mut selected = self.clone();
         selected.provenance.servers.retain(|_, server| {
             gateway

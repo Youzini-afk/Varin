@@ -28,7 +28,7 @@ if(request.method==='initialize')result={protocolVersion:request.params.protocol
 else if(request.method==='resources/list')result={resources:[]};
 else if(request.method==='resources/templates/list')result={resourceTemplates:[]};
 else if(request.method==='resources/read')result={contents:[{uri:request.params.uri,text:JSON.stringify({cwd:process.cwd(),marker:fs.readFileSync('marker','utf8')})},{uri:request.params.uri,blob:Buffer.from('resource-bytes').toString('base64'),mimeType:'application/octet-stream'}]};
-else if(request.method==='tools/list')result={tools:[{name:'read',description:'Read the actual working view',inputSchema:{type:'object',additionalProperties:false}}]};
+else if(request.method==='tools/list')result={tools:[{name:'read',description:'Read the actual working view',inputSchema:{type:'object',additionalProperties:false},execution:{taskSupport:'required'}}]};
 else if(request.method==='tools/call'){const value={cwd:process.cwd(),marker:fs.readFileSync('marker','utf8')};fs.appendFileSync(${JSON.stringify(calls)},JSON.stringify(value)+'\\n');result={content:[{type:'text',text:JSON.stringify(value)}]};}
 else return;process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result})+'\\n');});`,
   );
@@ -73,6 +73,8 @@ else return;process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,res
       (value) => value.name !== 'mcp_call' && value.name !== 'mcp_discover',
     )!;
     allowedTool = tool.name;
+    // A tool hint alone cannot turn a server without negotiated Tasks into a Job route.
+    expect(parent.binding.routes[tool.name]).toEqual({kind:'direct'});
     const selected: McpBinding = {
       ...structuredClone(parent.binding),
       tools: [tool],
@@ -316,3 +318,23 @@ else return;process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,res
     await fs.rm(root, { recursive: true, force: true });
   }
 }, 20_000);
+
+it('keeps Catalog Task controls after server removal and still requires original family access', async () => {
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'varin-task-controls-'));
+  const authority=new McpAuthority();
+  const reads:Array<{method:string;params:unknown}>=[];
+  const kernel={agentRuntimeRequest:async(method:string,params:unknown)=>{reads.push({method,params});throw new Error('original_job_family_required');}} as unknown as KernelClient;
+  const {createMcpTaskRuntime}=await import('./mcp-task-runtime.js');
+  const tasks=createMcpTaskRuntime({kernel,runtime:{onReady:()=>()=>{},onEvent:()=>()=>{},reconcileObservations:async()=>[]},recover:async()=>{throw new Error('no endpoint may be invented');}});
+  const owner=await authority.acquire({agentDir:root,configCwd:root,executionCwd:root,environmentId:'host:global',executionScope:'global',projectTrusted:false,sessionId:'agent:reader'},{servers:[]});
+  const lease=createMcpLease({lease:owner,kernel,tasks,currentPolicy:async()=>({mode:'normal',rules:[]})});
+  try{
+    expect(owner.inspect().connectedServerCount).toBe(0);
+    const controls=MCP_CAPABILITIES.filter(entry=>entry.route.kind==='task_control');
+    expect(lease.binding.tools.map(tool=>tool.name)).toEqual(controls.map(tool=>tool.name));
+    const selected=controls.find(entry=>entry.route.kind==='task_control'&&entry.route.action==='get')!;
+    await expect(lease.authorize({runId:'reader-run',operationId:'reader-call',origin:{kind:'policy_action',action_id:'read',node_id:'task'},callId:'task',name:selected.name,schemaVersion:selected.version,arguments:{operationId:'arbitrary-remote-id'}},new AbortController().signal)).rejects.toThrow('original_job_family_required');
+    expect(reads).toEqual([{method:'runtime.host_job.access',params:{runId:'reader-run',targetOperationId:'arbitrary-remote-id',control:false}}]);
+    expect(owner.inspect().connectedServerCount).toBe(0);
+  }finally{lease.release();await tasks.dispose();await authority.close();await fs.rm(root,{recursive:true,force:true});}
+});

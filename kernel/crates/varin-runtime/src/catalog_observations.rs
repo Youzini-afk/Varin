@@ -25,7 +25,8 @@ pub fn deadline_after(now: u64, duration: u64) -> Result<u64> {
         })
 }
 pub fn is_observation_id(id: &str) -> bool {
-    id.starts_with(super::computer_wait::PREFIX) || id.starts_with(super::host_jobs::WAIT_PREFIX)
+    id.starts_with(super::computer_wait::PREFIX)
+        || id.starts_with(super::host_jobs::WAIT_PREFIX)
         || id.starts_with("child-wait:")
         || id.starts_with("process-wait:")
         || id.starts_with(messages::reply_wait::PREFIX)
@@ -52,10 +53,19 @@ pub(super) fn ready(db: &Connection, op: &Operation, wait: &Wait) -> Result<bool
     if wait.cancelled {
         return Ok(true);
     }
-    if wait.id.starts_with(super::computer_wait::PREFIX) { return super::computer_wait::ready(db,wait); }
+    if wait.id.starts_with(super::computer_wait::PREFIX) {
+        return super::computer_wait::ready(db, wait);
+    }
     if wait.id.starts_with(super::host_jobs::WAIT_PREFIX) {
-        let target:Operation=record(db,"operations",&wait.subject)?;
-        return Ok(target.phase==OperationPhase::Terminal && target.external_receipt.as_ref().is_some_and(|r|r.executor_stopped));
+        if wait.kind == super::host_jobs::RESULT_EVENT {
+            return Ok(wait.trigger_cursor.is_some());
+        }
+        let target: Operation = record(db, "operations", &wait.subject)?;
+        return Ok(target.phase == OperationPhase::Terminal
+            && target
+                .external_receipt
+                .as_ref()
+                .is_some_and(|r| r.executor_stopped));
     }
     match op.executor.as_deref() {
         Some(collaboration::WAIT_TOOL) => {
@@ -92,7 +102,9 @@ pub(super) fn next(db: &Connection, run: &str) -> Result<Option<String>> {
     Ok(pending)
 }
 pub(super) fn pending_cancelled(db: &Connection, run: &Run, wait: &Wait) -> Result<bool> {
-    if super::computer_wait::pending_cancelled(db,run,wait)? || super::host_jobs::pending_cancelled(db,run,wait)? || collaboration::pending_cancelled_observation(db, run, wait)?
+    if super::computer_wait::pending_cancelled(db, run, wait)?
+        || super::host_jobs::pending_cancelled(db, run, wait)?
+        || collaboration::pending_cancelled_observation(db, run, wait)?
         || process_wait::pending_cancelled_observation(db, run, wait)?
     {
         return Ok(true);
@@ -204,7 +216,11 @@ impl Catalog {
         if wait.trigger_cursor.is_some() {
             return Ok(op);
         }
-        if id.starts_with(super::computer_wait::PREFIX) { self.cancel_computer_wait(operation_id) } else if id.starts_with(super::host_jobs::WAIT_PREFIX) { self.cancel_host_job_wait(operation_id) } else if op.executor.as_deref() == Some(process_wait::WAIT_TOOL) {
+        if id.starts_with(super::computer_wait::PREFIX) {
+            self.cancel_computer_wait(operation_id)
+        } else if id.starts_with(super::host_jobs::WAIT_PREFIX) {
+            self.cancel_host_job_wait(operation_id)
+        } else if op.executor.as_deref() == Some(process_wait::WAIT_TOOL) {
             self.cancel_process_wait(operation_id)
         } else if op.executor.as_deref() == Some(followups::TOOL) {
             self.cancel_followup_observation(operation_id)

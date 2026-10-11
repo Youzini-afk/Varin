@@ -24,7 +24,8 @@ import type {
 import { MCP_CAPABILITIES, type McpBinding, type McpBuiltinOperation } from './protocol.generated.js';
 import { compileToolJsonSchema } from '@varin/pi-host/tool-schema';
 import { projectMcpOutput } from './mcp-output.js';
-import { McpAuthorityError } from '@varin/pi-host/mcp-authority';
+import { McpAuthorityError, requiresMcpTask } from '@varin/pi-host/mcp-authority';
+import type { McpTaskRuntime } from './mcp-task-runtime.js';
 import { HostToolAdmissionError } from './tool-admission.js';
 
 const builtins = new Map(MCP_CAPABILITIES.map(value => [value.name, { ...value, validate: compileToolJsonSchema(value.schema) }]));
@@ -42,6 +43,7 @@ const receipt = (
 ): ToolExecutionReceipt => ({ completion, executor_stopped });
 export interface McpOwnerOptions {
   lease: McpAuthorityLease;
+  tasks?: McpTaskRuntime;
   kernel: KernelClient;
   /** Read current Host settings at authorization and dispatch, never a renderer's policy. */
   currentPolicy(): Promise<PermissionPolicy>;
@@ -51,18 +53,22 @@ export interface McpOwnerOptions {
   selection?: McpBinding;
   retarget?: boolean;
 }
-type Target = { kind: 'tool'; tool: McpAuthorityTool; args: Record<string, unknown> }
-  | { kind: 'service'; service: McpAuthorityService; request: McpServiceRequest; permissionName: string; args: Record<string, unknown> };
+type Target = { kind: 'tool'; tool: McpAuthorityTool; args: Record<string, unknown>; task: boolean; ttl?:number }
+  | { kind: 'service'; service: McpAuthorityService; request: McpServiceRequest; permissionName: string; args: Record<string, unknown> }
+  | { kind:'control'; action:import('./protocol.generated.js').McpTaskAction; operationId:string; permissionName:string; args:Record<string,unknown> };
 type Selection =
+  | { kind: 'control'; action:import('./protocol.generated.js').McpTaskAction; operationId:string }
   | { kind: 'discover'; server?: string; query: string }
   | {
       kind: 'deferred';
       server: string;
       tool: string;
       schemaVersion: string;
+      task:boolean;
+      ttl?:number;
       args: Record<string, unknown>;
     }
-  | { kind: 'service'; operation: Exclude<McpBuiltinOperation, 'discover' | 'call'>; args: Record<string, unknown> }
+  | { kind: 'service'; operation: Exclude<McpBuiltinOperation, 'discover' | 'call' | 'start_task' | 'task_get' | 'task_wait' | 'task_cancel'>; args: Record<string, unknown> }
   | { kind: 'direct'; target: Target };
 export function createMcpLease(options: McpOwnerOptions): McpToolLease {
   const { lease } = options;
@@ -81,7 +87,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
     provenance: structuredClone(lease.binding.provenance),
     reference: lease.binding.reference,
     generation: lease.binding.generation,
-    routes: Object.fromEntries(lease.binding.tools.filter(tool => tool.exposure === 'direct').map(tool => [tool.name, { kind: 'direct' as const }])),
+    routes: Object.fromEntries(lease.binding.tools.filter(tool => tool.exposure === 'direct').map(tool => [tool.name, { kind: requiresMcpTask(tool) ? 'direct_task' as const : 'direct' as const }])),
     resources: Object.fromEntries([
       ...lease.binding.tools
         .filter((tool) => tool.exposure === 'direct')
@@ -102,15 +108,13 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
         schema: structuredClone(tool.inputSchema),
       })),
   };
-  if (
-    servers.size ||
-    lease.binding.readiness.configErrorCount > 0 ||
-    options.unavailableWorkspaceScope
-  )
-    for (const {route, operation: _operation, ...schema} of MCP_CAPABILITIES) {
-      binding.tools.push(structuredClone(schema));
-      binding.routes[schema.name] = structuredClone(route);
-    }
+  const configured = servers.size > 0 || lease.binding.readiness.configErrorCount > 0 || Boolean(options.unavailableWorkspaceScope);
+  for (const {route, operation: _operation, ...schema} of MCP_CAPABILITIES) {
+    // Catalog-owned controls keep an accepted Job readable even after its server is removed.
+    if(!configured && !(route.kind === 'task_control' && options.tasks))continue;
+    binding.tools.push(structuredClone(schema));
+    binding.routes[schema.name] = structuredClone(route);
+  }
   if (options.selection) {
     const selected = options.selection;
     if (binding.provenance.execution_scope !== selected.provenance.execution_scope || !isDeepStrictEqual(binding.provenance.configuration, selected.provenance.configuration)) throw new HostToolAdmissionError('mcp_configuration_source_changed');
@@ -135,7 +139,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
       aliases.set(JSON.stringify([original.name, original.version]), target.name);
       entries.set(original.name, { ...target, name: original.name });
       binding.resources[original.name] = target.resourceKey;
-      binding.routes[original.name] = { kind: 'direct' };
+      binding.routes[original.name] = { kind: requiresMcpTask(target) ? 'direct_task' : 'direct' };
       return { ...actual, name: original.name };
     });
     binding.routes = Object.fromEntries(Object.entries(binding.routes).filter(([name]) => binding.tools.some(tool => tool.name === name)));
@@ -149,6 +153,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
     string,
     { identity: string; policy: string; target: Target }
   >();
+  const controlLifetime = new AbortController();
   let released = false;
   const policy = async () => {
     const current = await options.currentPolicy();
@@ -174,28 +179,38 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
     const builtin = builtins.get(call.name);
     if (builtin) {
       if (!builtin.validate(args) || (args.server !== undefined && !servers.has(String(args.server)))) throw new HostToolAdmissionError('mcp_arguments_invalid');
+      if (builtin.route.kind === 'task_control') return {kind:'control',action:builtin.route.action,operationId:args[builtin.route.argument] as string};
       if (builtin.operation === 'discover') return { kind: 'discover', ...(typeof args.server === 'string' ? {server:args.server} : {}), query: String(args.query ?? '') };
-      if (builtin.operation === 'call') return { kind: 'deferred', server: args.server as string, tool: args.tool as string,
-        schemaVersion: args.schemaVersion as string, args: args.arguments as Record<string, unknown> };
-      return { kind: 'service', operation: builtin.operation, args };
+      if (builtin.operation === 'call' || builtin.operation === 'start_task') return { kind: 'deferred', server: args.server as string, tool: args.tool as string,
+        schemaVersion: args.schemaVersion as string, args: args.arguments as Record<string, unknown>,task:builtin.route.kind === 'server_task_argument',...(typeof args.ttl === 'number'?{ttl:args.ttl}:{}) };
+      return { kind: 'service', operation: builtin.operation as Extract<Selection,{kind:'service'}>['operation'], args };
     }
     const tool = entries.get(call.name);
     if (!tool) throw new HostToolAdmissionError('mcp_tool_unavailable');
-    return { kind: 'direct', target: { kind: 'tool', tool, args } };
+    return { kind: 'direct', target: { kind: 'tool', tool, args,task:binding.routes[call.name]?.kind === 'direct_task' } };
   };
   const validateTarget = (target: Target) => {
+    if (target.kind === 'control') return;
     if (target.kind === 'service') { lease.validateServiceRequest(target.service, target.request); return; }
+    if (target.task && (!target.tool.taskCapable || target.tool.taskSupport === 'forbidden')) throw new HostToolAdmissionError('mcp_task_unsupported');
+    if (!target.task && requiresMcpTask(target.tool)) throw new HostToolAdmissionError('mcp_task_required_use_mcp_start_task');
     lease.validateArguments(targetName(target.tool.name, target.tool.schemaVersion), target.tool.schemaVersion, target.args);
   };
   const assertTarget = (target: Target) => {
+    if (target.kind === 'control') { if(!options.tasks || released)throw new HostToolAdmissionError('mcp_task_owner_unavailable');return; }
     if (target.kind === 'service') { lease.assertService(target.service); lease.validateServiceRequest(target.service,target.request); return; }
     lease.assertCallable(targetName(target.tool.name, target.tool.schemaVersion), target.tool.schemaVersion);
   };
-  const targetSignal = (target: Target) => target.kind === 'service' ? lease.serviceRevocationSignal(target.service)
+  const targetSignal = (target: Target) => target.kind === 'control' ? controlLifetime.signal : target.kind === 'service' ? lease.serviceRevocationSignal(target.service)
     : lease.revocationSignal(targetName(target.tool.name, target.tool.schemaVersion), target.tool.schemaVersion);
   const prepareTarget = async (selected: Exclude<Selection, {kind:'discover'}>, call: HostToolCall, signal: AbortSignal): Promise<Target> => {
+    if(selected.kind === 'control') {
+      if(!options.tasks)throw new HostToolAdmissionError('mcp_task_owner_unavailable');
+      await options.kernel.agentRuntimeRequest('runtime.host_job.access',{runId:call.runId,targetOperationId:selected.operationId,control:selected.action === 'cancel'},signal);
+      return {...selected,permissionName:call.name,args:call.arguments as Record<string,unknown>};
+    }
     if (selected.kind === 'direct') return selected.target;
-    if (selected.kind === 'deferred') return { kind:'tool', tool:await lease.prepareTool(selected.server, selected.tool, selected.schemaVersion, signal), args:selected.args };
+    if (selected.kind === 'deferred') return { kind:'tool', tool:await lease.prepareTool(selected.server, selected.tool, selected.schemaVersion, signal), args:selected.args,task:selected.task,...(selected.ttl === undefined?{}:{ttl:selected.ttl}) };
     const args = selected.args;
     if (selected.operation === 'get_prompt') {
       const prompt = await lease.preparePrompt(args.server as string, args.name as string, args.schemaVersion as string, signal);
@@ -282,7 +297,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
         ? targetSignal(target)
         : new AbortController().signal;
     },
-    async execute(call, signal) {
+    async execute(call, signal, owner) {
       let target: Target;
       let policyGeneration: string;
       try {
@@ -323,6 +338,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
                     description: tool.description,
                     inputSchema: tool.inputSchema,
                     schemaVersion: tool.schemaVersion,
+                    taskSupport: tool.taskSupport, taskCapable: tool.taskCapable,
                   })),
               }, parts: [] },
             },
@@ -369,12 +385,22 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
           if (current.generation !== policyGeneration || decision(current.value, target).decision === 'deny') throw new HostToolAdmissionError('mcp_authorization_changed');
           assertTarget(target);
         };
+        if(target.kind === 'control') {
+          await beforeDispatch();
+          return await options.tasks!.control({call,owner,action:target.action,targetOperationId:target.operationId,signal});
+        }
         if (target.kind === 'service') {
           const response = await lease.requestService(target.service, target.request, {signal,beforeDispatch});
           const content = target.request.operation === 'resources/read' ? projectMcpOutput(response.result,'resource')
             : target.request.operation === 'prompts/get' ? projectMcpOutput(response.result,'prompt')
             : { data:{server:target.service.server,schemaVersion:target.service.schemaVersion,...response},parts:[] };
           return receipt({kind:'result',outcome:'succeeded',effect:'confirmed',content},true);
+        }
+        if(target.task) {
+          if(!options.tasks)return noEffect('mcp_task_owner_unavailable');
+          const taskLease=await lease.taskOwner(target.tool.server,undefined,signal);
+          return await options.tasks.submit({call,owner,lease:taskLease,tool:target.tool,args:target.args,signal,beforeDispatch,
+            ...(target.ttl === undefined?{}:{ttl:target.ttl})});
         }
         const result = await lease.callTool(targetName(target.tool.name, target.tool.schemaVersion), target.args, {
           schemaVersion: target.tool.schemaVersion, signal, beforeDispatch,
@@ -391,10 +417,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
         );
       } catch (error) {
         if (
-          error &&
-          typeof error === 'object' &&
-          'dispatched' in error &&
-          error.dispatched === false
+          error instanceof McpAuthorityError && !error.dispatched
         )
           return noEffect('mcp_not_dispatched');
         return receipt(
@@ -413,6 +436,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
     release() {
       if (!released) {
         released = true;
+        controlLifetime.abort();
         approved.clear();
         lease.release();
       }

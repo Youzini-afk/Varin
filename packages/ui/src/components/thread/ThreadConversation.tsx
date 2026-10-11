@@ -33,6 +33,7 @@ import { ThreadQueuedInput } from './ThreadQueuedInput';
 import { ThreadChildReport } from './ThreadChildReport';
 
 const operationCancelLabel = (operation: ThreadSnapshot['operations'][number]): string => {
+  if (operation.host_job?.mcpTask) return 'Request remote task cancellation';
   if (operation.executor === 'dispatch') return 'Cancel child task';
   if (operation.waiting_on?.startsWith('host-job-wait:')
     || (operation.execution_owner?.kind === 'kernel' && (operation.executor === 'wait_child'
@@ -41,6 +42,36 @@ const operationCancelLabel = (operation: ThreadSnapshot['operations'][number]): 
   }
   return 'Cancel operation';
 };
+
+function McpTaskStatus({ operation }: { operation: ThreadSnapshot['operations'][number] }) {
+  const job = operation.host_job;
+  const link = job?.mcpTask;
+  if (!link || job.binding.subject.kind !== 'mcp') return null;
+  const problem = link.problem;
+  const problemText = problem?.kind === 'owner' ? 'The original MCP connection or account is unavailable. Restore that connection to observe this task.'
+    : problem?.kind === 'expired' ? 'The remote task retention period has elapsed. Its execution may still be running.'
+    : problem?.kind === 'unsupported' ? problem.stage === 'cancel' ? 'This server does not support task cancellation. Check the original service.'
+      : problem.stage === 'interaction' ? 'This task needs an interaction that this client does not support. Check the original service.'
+      : 'The original service does not support this task operation. Check its task capabilities before retrying.'
+    : problem?.kind === 'protocol' ? 'The server could not provide a valid task response. Check the original service; the task identity is retained.'
+    : problem?.kind === 'transport' ? 'The original MCP connection could not be reached. Check its connection; observation can resume when it is available.' : null;
+  return <section aria-label="Remote MCP task" className="space-y-1 text-xs text-muted-foreground">
+    <p>{job.binding.subject.endpoint.server} · remote task {link.task.taskId}</p>
+    <p>Remote status: {link.task.status.replaceAll('_', ' ')} · {link.resultReady ? 'Result stored' : 'Result not received'}</p>
+    <p>{operation.external_receipt?.executor_stopped ? 'Executor stop confirmed' : 'Executor stop unconfirmed'}
+      {operation.cancel_requested && ' · Cancellation requested'}</p>
+    {link.task.status === 'cancelled' && !operation.external_receipt?.executor_stopped && <p>The server acknowledged cancellation. This does not prove execution has stopped.</p>}
+    {link.task.status === 'input_required' && <p>The server is waiting for an interaction on the original task result stream.</p>}
+    {link.availability === 'unavailable' && <p>Current task observation unavailable</p>}
+    {problemText && <p role="status">{problemText} · {problem!.stage}{problem!.rpcCode !== undefined ? ` · RPC ${problem!.rpcCode}` : ''}</p>}
+  </section>;
+}
+
+function canCancelOperation(operation: ThreadSnapshot['operations'][number], waitingOn?: string | null): boolean {
+  const task = operation.host_job?.mcpTask;
+  return task ? !operation.cancel_requested && (task.task.status === 'working' || task.task.status === 'input_required')
+    : operation.phase !== 'terminal' && (operation.executor !== 'ask_user' || waitingOn === operation.waiting_on);
+}
 
 const resourceErrorMessages = new Map([
   ['resource-missing', 'This skill or resource is missing from the current snapshot. Refresh instructions and skills, then try again.'],
@@ -258,6 +289,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         <ThreadPermission operation={operation} enabled={!pending && operation.run_id === run?.id && !run?.cancel_requested} onDecide={(permissionId, decision) => act(() => api.decidePermission({ ...identity, operationId: operation.id, permissionId, decision }))} />
         {operation.executor === 'ask_user' && <ThreadQuestion operation={operation} enabled={!pending && run?.state === 'waiting' && run.waiting_on === operation.waiting_on} onAnswer={answer => act(() => api.answerQuestion({ ...identity, operationId: operation.id, answer }))} />}
         <div>Background operation · {operation.phase} · {operation.outcome ?? 'In progress'} · effect: {operation.effect}</div>
+        <McpTaskStatus operation={operation} />
+        {operation.host_job?.mcpTaskResult && <details><summary>Remote task result</summary><ThreadOutput api={api} identity={identity}
+          holder={{ kind: 'operation', operationId: operation.id, output: 'mcp_task_result' }} output={operation.host_job.mcpTaskResult} messageId={`${operation.id}:mcp-task-result`} /></details>}
         {api.processes && operation.executor === 'process_spawn' && operation.call_completion?.kind === 'job_accepted'
           && (operation.intent as { call?: { arguments?: { mode?: string } } } | null)?.call?.arguments?.mode === 'pty'
           && <Button variant="outline" size="sm" disabled={pending} onClick={() => void act(() => openProcessTerminal(operation.id))}>Open process terminal</Button>}
@@ -269,7 +303,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           holder={{ kind: 'operation', operationId: operation.id, output: 'result' }} output={operation.result.output} messageId={`${operation.id}:result`} /></details>}
         {operation.external_receipt && <details><summary>External receipt output</summary><ThreadOutput api={api} identity={identity}
           holder={{ kind: 'operation', operationId: operation.id, output: 'external_receipt' }} output={operation.external_receipt.result} messageId={`${operation.id}:external-receipt`} /></details>}
-        {operation.phase !== 'terminal' && (operation.executor !== 'ask_user' || run?.waiting_on === operation.waiting_on) && <Button variant="ghost" size="sm" onClick={() => void act(() => api.cancelOperation(operation.id), true)}>{operationCancelLabel(operation)}</Button>}
+        {canCancelOperation(operation, run?.waiting_on) && <Button variant="ghost" size="sm" onClick={() => void act(() => api.cancelOperation(operation.id), true)}>{operationCancelLabel(operation)}</Button>}
       </div>)}
       {snapshot?.inputs.filter(input => input.state === 'queued').map(input => <ThreadQueuedInput key={`${host}:${identity.threadId}:${identity.branchId}:${input.id}:${input.revision}`}
         api={api} identity={identity} input={input} pending={pending}

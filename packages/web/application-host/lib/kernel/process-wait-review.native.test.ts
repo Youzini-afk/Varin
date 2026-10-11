@@ -249,7 +249,7 @@ it('original research log bytes and drained stderr jointly resume one new Run an
     await expect.poll(async () => (await f.api.research!.logs(selection, { attemptId: accepted.attempt.attemptId })).text,
       { timeout: 15_000 }).toBe('λab');
     const jobs = await f.api.followups.jobSources(identity, original.run_id);
-    const job = jobs.find(item => item.binding.subjectId === accepted.attempt.attemptId)!;
+    const job = jobs.find(item => item.binding.subject.kind === 'workspace' && item.binding.subject.subjectId === accepted.attempt.attemptId)!;
     expect(job).toBeDefined();
     expect(job.observationKinds).toEqual(expect.arrayContaining(['log_literal', 'log_end']));
     const command = { ...identity, key: 'both-original-log-facts', runId: original.run_id,

@@ -247,7 +247,9 @@ impl ContentCollection {
             let frozen: crate::catalog::dispatch::FrozenChildDispatch =
                 serde_json::from_value(self.load_body(&dispatch)?)?;
             references.push(reference);
-            references.push(serde_json::from_value(frozen.catalog_ref)?);
+            if let Some(reference) = frozen.catalog_ref {
+                references.push(serde_json::from_value(reference)?);
+            }
             references.push(serde_json::from_value(frozen.tools_ref)?);
             references.push(serde_json::from_value(frozen.extension_bindings_ref)?);
             if let Some(reference) = frozen.mcp_binding_ref {
@@ -347,6 +349,10 @@ impl ContentCollection {
              UNION ALL SELECT intent FROM commands".to_string();
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.claim.reasonRef') FROM computer_requests WHERE json_extract(body,'$.claim.reasonRef') IS NOT NULL UNION ALL SELECT json_extract(data,'$.detailRef') FROM events WHERE kind='computer.request_decided' AND json_extract(data,'$.detailRef') IS NOT NULL UNION ALL SELECT json_extract(data,'$.claim.reasonRef') FROM events WHERE kind='computer.request_decided' AND json_extract(data,'$.claim.reasonRef') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.requestRef') FROM computer_requests UNION ALL SELECT json_extract(body,'$.detailRef') FROM computer_requests WHERE json_extract(body,'$.detailRef') IS NOT NULL");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.host_job.mcpTask.resultRef') FROM operations WHERE json_extract(body,'$.host_job.mcpTask.resultRef') IS NOT NULL");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.host_job.mcpTask.observationRef') FROM operations WHERE json_extract(body,'$.host_job.mcpTask.observationRef') IS NOT NULL");
+        roots.push_str(" UNION ALL SELECT json_extract(data,'$.task.observationRef') FROM events WHERE kind IN ('host_job.task_observed','host_job.result_observed') AND json_extract(data,'$.task.observationRef') IS NOT NULL");
+        roots.push_str(" UNION ALL SELECT json_extract(data,'$.result_ref') FROM events WHERE kind='host_job.result_observed' AND json_extract(data,'$.result_ref') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.host_job.acceptanceRef') FROM operations WHERE json_extract(body,'$.host_job.acceptanceRef') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.intent.request_ref') FROM operations WHERE json_extract(body,'$.intent.kind')='user_host_job'");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.objective_ref') FROM goals UNION ALL SELECT json_extract(body,'$.start_intent') FROM goals UNION ALL SELECT json_extract(body,'$.reason_ref') FROM goals WHERE json_extract(body,'$.reason_ref') IS NOT NULL");

@@ -6,13 +6,89 @@ use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct McpTaskEndpoint {
+    pub server: String,
+    pub resource_key: String,
+    pub configuration_version: String,
+    pub credential_version: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum HostJobSubject {
+    Workspace {
+        workspace_id: String,
+        subject_id: String,
+    },
+    Mcp {
+        endpoint: McpTaskEndpoint,
+        dispatch_id: String,
+    },
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum McpTaskStatus {
+    Working,
+    InputRequired,
+    Completed,
+    Failed,
+    Cancelled,
+}
+impl McpTaskStatus {
+    pub fn terminal(self) -> bool {
+        matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct McpTaskState {
+    pub task_id: String,
+    pub status: McpTaskStatus,
+    pub created_at: String,
+    pub last_updated_at: String,
+    pub ttl: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub poll_interval: Option<u64>,
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct McpTaskProblem {
+    pub kind: crate::McpTaskProblemKind,
+    pub stage: crate::McpTaskStage,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "rpcCode")]
+    pub rpc_code: Option<i64>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct McpTaskLink {
+    pub revision: u64,
+    pub task: McpTaskState,
+    pub observation_ref: Value,
+    pub availability: crate::McpTaskAvailability,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub problem: Option<McpTaskProblem>,
+    pub result_ready: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_ref: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_kind: Option<crate::McpTaskResultKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_outcome: Option<Outcome>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_effect: Option<Effect>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HostJobBinding {
     pub operation_id: String,
     pub execution_owner: ExecutorOwner,
     pub domain: String,
     pub domain_version: u64,
-    pub workspace_id: String,
-    pub subject_id: String,
+    pub subject: HostJobSubject,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -20,6 +96,23 @@ pub struct HostJobLink {
     pub binding: HostJobBinding,
     /// Null is a dispatched domain intent, never an acceptance or a stopped receipt.
     pub acceptance_ref: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mcp_task: Option<McpTaskLink>,
+}
+/// Public body projection. Durable records retain only the original content references.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HostJobView {
+    #[serde(flatten)]
+    pub link: HostJobLink,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mcp_task_result: Option<crate::output::OutputBody<crate::output::StoredMedia>>,
+}
+impl std::ops::Deref for HostJobView {
+    type Target = HostJobLink;
+    fn deref(&self) -> &Self::Target {
+        &self.link
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -37,6 +130,8 @@ pub enum HostJobOrigin {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostJobPending {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mcp_task: Option<McpTaskLink>,
     pub binding: HostJobBinding,
     pub run_id: String,
     pub accepted: bool,
@@ -49,6 +144,8 @@ pub struct HostJobPending {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HostJobSource {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mcp_task: Option<McpTaskLink>,
     pub observation_kinds: Vec<String>,
     pub binding: HostJobBinding,
     pub source_run_id: String,
@@ -78,6 +175,7 @@ impl HostJobPending {
             HostJobOrigin::User { key: intent.key }
         };
         Ok(Self {
+            mcp_task: link.mcp_task,
             binding: link.binding,
             run_id: op.run_id,
             accepted: link.acceptance_ref.is_some(),
@@ -256,7 +354,7 @@ impl Catalog {
             }
             return Ok(old);
         }
-        let existing:Option<String>=tx.query_row("SELECT id FROM operations WHERE json_extract(body,'$.host_job.binding.domain')=?1 AND json_extract(body,'$.host_job.binding.workspaceId')=?2 AND json_extract(body,'$.host_job.binding.subjectId')=?3 LIMIT 1",params![domain,scope.source.workspace_id,subject],|r|r.get(0)).optional()?;
+        let existing:Option<String>=tx.query_row("SELECT id FROM operations WHERE json_extract(body,'$.host_job.binding.domain')=?1 AND json_extract(body,'$.host_job.binding.subject.workspaceId')=?2 AND json_extract(body,'$.host_job.binding.subject.subjectId')=?3 LIMIT 1",params![domain,scope.source.workspace_id,subject],|r|r.get(0)).optional()?;
         if let Some(existing) = existing {
             return Err(RuntimeError::Conflict(format!(
                 "Submission identity already belongs to original Operation {existing}"
@@ -276,10 +374,13 @@ impl Catalog {
                     },
                     domain: domain.into(),
                     domain_version: version,
-                    workspace_id: scope.source.workspace_id,
-                    subject_id: subject.into(),
+                    subject: HostJobSubject::Workspace {
+                        workspace_id: scope.source.workspace_id,
+                        subject_id: subject.into(),
+                    },
                 },
                 acceptance_ref: None,
+                mcp_task: None,
             }),
             external_receipt: None,
             call_completion: None,
@@ -317,10 +418,51 @@ impl Catalog {
         Ok(op)
     }
     pub fn begin_host_job(&mut self, binding: HostJobBinding) -> Result<Operation> {
+        self.begin_host_job_bound(binding, None)
+    }
+    pub fn begin_mcp_host_job(
+        &mut self,
+        binding: HostJobBinding,
+        snapshot: &tool_content::ToolInvocationSnapshot,
+        frozen: &launches::HostToolBinding,
+    ) -> Result<Operation> {
+        self.validate_tool_invocation(snapshot, true)?;
+        if snapshot.context.operation_id != binding.operation_id {
+            return Err(RuntimeError::Conflict("MCP task invocation changed".into()));
+        }
+        let HostJobSubject::Mcp { endpoint, .. } = &binding.subject else {
+            return Err(RuntimeError::Conflict(
+                "MCP dispatch needs an MCP subject".into(),
+            ));
+        };
+        let key = match frozen.routes.get(&snapshot.call.name) {
+            Some(crate::McpRoute::DirectTask) => frozen.resources.get(&snapshot.call.name),
+            Some(crate::McpRoute::ServerTaskArgument { argument })
+                if snapshot
+                    .call
+                    .arguments
+                    .get(argument)
+                    .and_then(Value::as_str)
+                    == Some(endpoint.server.as_str()) =>
+            {
+                frozen.resources.get(&format!("server:{}", endpoint.server))
+            }
+            _ => None,
+        };
+        if key != Some(&endpoint.resource_key) {
+            return Err(RuntimeError::Conflict(
+                "Task server differs from the selected invocation".into(),
+            ));
+        }
+        self.begin_host_job_bound(binding, Some(frozen))
+    }
+    fn begin_host_job_bound(
+        &mut self,
+        binding: HostJobBinding,
+        frozen: Option<&launches::HostToolBinding>,
+    ) -> Result<Operation> {
         if binding.domain.is_empty()
             || binding.domain_version == 0
-            || binding.workspace_id.is_empty()
-            || binding.subject_id.is_empty()
             || !matches!(&binding.execution_owner, ExecutorOwner::External { .. })
             || !binding.execution_owner.validate()
         {
@@ -357,28 +499,74 @@ impl Catalog {
             }
             None
         };
-        let launch: launch_content::LaunchMetadata = record(&tx, "run_launches", &op.run_id)?;
-        if launch
-            .selection
-            .source
-            .as_ref()
-            .map(|s| s.workspace_id.as_str())
-            != Some(binding.workspace_id.as_str())
-        {
-            return Err(RuntimeError::Conflict(
-                "Host job workspace differs from its original source".into(),
-            ));
+        match &binding.subject {
+            HostJobSubject::Workspace {
+                workspace_id,
+                subject_id,
+            } => {
+                let launch: launch_content::LaunchMetadata =
+                    record(&tx, "run_launches", &op.run_id)?;
+                if workspace_id.is_empty()
+                    || subject_id.is_empty()
+                    || launch.selection.source.as_ref().map(|s| &s.workspace_id)
+                        != Some(workspace_id)
+                {
+                    return Err(RuntimeError::Conflict(
+                        "Host job workspace differs from its original source".into(),
+                    ));
+                }
+                let existing: Option<String> = tx.query_row("SELECT body FROM operations WHERE json_extract(body,'$.host_job.binding.domain')=?1 AND json_extract(body,'$.host_job.binding.subject.workspaceId')=?2 AND json_extract(body,'$.host_job.binding.subject.subjectId')=?3 LIMIT 1", params![binding.domain,workspace_id,subject_id],|r|r.get(0)).optional()?;
+                if let Some(existing) = existing {
+                    let existing: Operation = serde_json::from_str(&existing)?;
+                    if existing.id != op.id {
+                        return Ok(existing);
+                    }
+                }
+            }
+            HostJobSubject::Mcp {
+                endpoint,
+                dispatch_id,
+            } => {
+                let intent = tool.as_ref().ok_or_else(|| {
+                    RuntimeError::Conflict("MCP task requires its original tool invocation".into())
+                })?;
+                // The complete frozen invocation is the authority for server and dispatch mode.
+                let frozen = frozen.ok_or_else(|| {
+                    RuntimeError::Conflict("MCP task lacks its original frozen binding".into())
+                })?;
+                let selected = frozen.provenance.servers.get(&endpoint.server);
+                if binding.domain != "mcp.task"
+                    || binding.domain_version != 1
+                    || dispatch_id != &op.id
+                    || endpoint.credential_version.is_empty()
+                    || intent.contract().resources
+                        != vec![crate::execution::ResourceClaim {
+                            key: endpoint.resource_key.clone(),
+                            access: crate::execution::Access::Write,
+                        }]
+                    || selected.is_none_or(|s| {
+                        s.definition_version != endpoint.configuration_version
+                            || s.resource_key != endpoint.resource_key
+                    })
+                    || !matches!(
+                        frozen.routes.get(&intent.call().name),
+                        Some(
+                            crate::McpRoute::DirectTask
+                                | crate::McpRoute::ServerTaskArgument { .. }
+                        )
+                    )
+                {
+                    return Err(RuntimeError::Conflict(
+                        "MCP task differs from its original dispatch binding".into(),
+                    ));
+                }
+            }
         }
-        let _ = tool;
         if let Some(prior) = &op.host_job {
             if prior.binding != binding {
                 return Err(RuntimeError::Conflict("Host domain intent changed".into()));
             }
             return Ok(op);
-        }
-        let existing:Option<String>=tx.query_row("SELECT body FROM operations WHERE json_extract(body,'$.host_job.binding.domain')=?1 AND json_extract(body,'$.host_job.binding.workspaceId')=?2 AND json_extract(body,'$.host_job.binding.subjectId')=?3 LIMIT 1",params![binding.domain,binding.workspace_id,binding.subject_id],|r|r.get(0)).optional()?;
-        if let Some(existing) = existing {
-            return Ok(serde_json::from_str(&existing)?);
         }
         if op.cancel_requested
             || op.phase != OperationPhase::Running
@@ -391,6 +579,7 @@ impl Catalog {
         op.host_job = Some(HostJobLink {
             binding,
             acceptance_ref: None,
+            mcp_task: None,
         });
         op.revision += 1;
         put(&tx, "operations", &op.id, &op)?;
@@ -409,6 +598,14 @@ impl Catalog {
         binding: HostJobBinding,
         prepared: result_content::PreparedOperationResult,
     ) -> Result<Operation> {
+        self.accept_host_job_task(binding, prepared, None)
+    }
+    pub fn accept_host_job_task(
+        &mut self,
+        binding: HostJobBinding,
+        prepared: result_content::PreparedOperationResult,
+        task: Option<McpTaskState>,
+    ) -> Result<Operation> {
         let tx = self.db.transaction()?;
         let mut op: Operation = record(&tx, "operations", &binding.operation_id)?;
         let linked = op.host_job.as_ref().ok_or_else(|| {
@@ -421,8 +618,26 @@ impl Catalog {
                 "Host job original domain subject changed".into(),
             ));
         }
+        match (&binding.subject, &task) {
+            (HostJobSubject::Workspace { .. }, None) => {}
+            (HostJobSubject::Mcp { .. }, Some(task))
+                if !task.task_id.is_empty()
+                    && !task.created_at.is_empty()
+                    && task.status == McpTaskStatus::Working => {}
+            _ => {
+                return Err(RuntimeError::Conflict(
+                    "Host job acceptance lacks its original subject identity".into(),
+                ));
+            }
+        }
         if let Some(original) = &linked.acceptance_ref {
-            if original != &prepared.reference {
+            if original != &prepared.reference
+                || linked
+                    .mcp_task
+                    .as_ref()
+                    .map(|link| (&link.task.task_id, &link.task.created_at))
+                    != task.as_ref().map(|task| (&task.task_id, &task.created_at))
+            {
                 return Err(RuntimeError::Conflict(
                     "Host job accepted body changed".into(),
                 ));
@@ -465,6 +680,25 @@ impl Catalog {
                 }
             }
         }
+        if let Some(task) = task {
+            op.host_job.as_mut().expect("checked link").mcp_task = Some(McpTaskLink {
+                revision: 1,
+                task,
+                observation_ref: prepared.reference.clone(),
+                availability: crate::McpTaskAvailability::Available,
+                problem: None,
+                result_ready: false,
+                result_ref: None,
+                result_kind: None,
+                result_outcome: None,
+                result_effect: None,
+            });
+            // This proves the originating tools/call dispatch ended, not that its remote Job stopped.
+            tx.execute(
+                "DELETE FROM resource_occupancy WHERE operation_id=?1",
+                [&op.id],
+            )?;
+        }
         op.host_job.as_mut().expect("checked link").acceptance_ref =
             Some(prepared.reference.clone());
         op.handed_off = true;
@@ -488,10 +722,191 @@ impl Catalog {
             serde_json::to_value(&op)?,
         )?;
         tx.commit()?;
+        self.release_unoccupied_resource_owner(&op.id)?;
         Ok(op)
     }
+    pub fn update_mcp_task(
+        &mut self,
+        binding: &HostJobBinding,
+        expected_revision: u64,
+        task: McpTaskState,
+        availability: crate::McpTaskAvailability,
+        problem: Option<McpTaskProblem>,
+        result: Option<(
+            crate::McpTaskResultKind,
+            result_content::PreparedExternalReceipt,
+        )>,
+        prepared: result_content::PreparedOperationResult,
+    ) -> Result<Operation> {
+        let tx = self.db.transaction()?;
+        let mut op: Operation = record(&tx, "operations", &binding.operation_id)?;
+        let link = op
+            .host_job
+            .as_mut()
+            .filter(|link| &link.binding == binding)
+            .ok_or_else(|| RuntimeError::Conflict("MCP task original binding changed".into()))?;
+        let current = link.mcp_task.as_mut().ok_or_else(|| {
+            RuntimeError::Conflict("MCP task has no accepted remote identity".into())
+        })?;
+        if current.revision != expected_revision {
+            return Ok(op);
+        }
+        if task.task_id != current.task.task_id
+            || task.created_at != current.task.created_at
+            || (current.task.status.terminal() && current.task.status != task.status)
+            || (result.is_some() && !task.status.terminal())
+            || result.as_ref().is_some_and(|(kind, result)| {
+                current.result_ref.as_ref().is_some_and(|old| {
+                    old != &result.receipt.result_ref
+                        || current.result_kind != Some(*kind)
+                        || current.result_outcome != Some(result.receipt.outcome)
+                        || current.result_effect != Some(result.receipt.effect)
+                })
+            })
+        {
+            return Err(RuntimeError::Conflict(
+                "MCP task observation changed its original identity or terminal result".into(),
+            ));
+        }
+        let result_ready = current.result_ref.is_some() || result.is_some();
+        if current.task == task
+            && current.availability == availability
+            && current.problem == problem
+            && current.result_ready == result_ready
+            && current.observation_ref == prepared.reference
+        {
+            tx.commit()?;
+            return self.finish_mcp_task(binding);
+        }
+        current.task = task;
+        current.availability = availability;
+        current.problem = problem;
+        current.result_ready = result_ready;
+        if let Some((kind, result)) = &result {
+            if result.receipt.effect == Effect::Unknown
+                && result.receipt.outcome != Outcome::Indeterminate
+            {
+                return Err(RuntimeError::Invalid(
+                    "Unknown task result effect requires indeterminate outcome".into(),
+                ));
+            }
+            current.result_ref = Some(result.receipt.result_ref.clone());
+            current.result_kind = Some(*kind);
+            current.result_outcome = Some(result.receipt.outcome);
+            current.result_effect = Some(result.receipt.effect);
+        }
+        current.observation_ref = prepared.reference;
+        current.revision += 1;
+        op.revision += 1;
+        put(&tx, "operations", &op.id, &op)?;
+        event(
+            &tx,
+            &op.id,
+            op.revision,
+            "host_job.task_observed",
+            json!({"operationId":op.id,"task":op.host_job.as_ref().expect("checked link").mcp_task}),
+        )?;
+        let task = op
+            .host_job
+            .as_ref()
+            .and_then(|link| link.mcp_task.as_ref())
+            .expect("accepted task");
+        if task.result_ready || task.availability == crate::McpTaskAvailability::Unavailable {
+            let receipt = op.external_receipt.as_ref();
+            event(
+                &tx,
+                &op.id,
+                op.revision,
+                RESULT_EVENT,
+                serde_json::to_value(McpResultFact {
+                    task: task.clone(),
+                    result_ref: task.result_ref.clone(),
+                    outcome: task.result_outcome,
+                    effect: task.result_effect.unwrap_or(Effect::Unknown),
+                    executor_stopped: receipt.is_some_and(|r| r.executor_stopped),
+                })?,
+            )?;
+        }
+        tx.commit()?;
+        let op = self.finish_mcp_task(binding)?;
+        self.reconcile_waits()?;
+        Ok(op)
+    }
+    /// Protocol completion proves stop independently of retrieving the business result.
+    /// Reopening can publish either durable fact without another remote request.
+    pub fn finish_mcp_task(&mut self, binding: &HostJobBinding) -> Result<Operation> {
+        let op = self.operation(&binding.operation_id)?;
+        let link = op
+            .host_job
+            .as_ref()
+            .filter(|link| &link.binding == binding)
+            .ok_or_else(|| RuntimeError::Conflict("Task binding changed".into()))?;
+        let Some(task) = &link.mcp_task else {
+            return Ok(op);
+        };
+        let stopped = matches!(
+            task.task.status,
+            McpTaskStatus::Completed | McpTaskStatus::Failed
+        );
+        if !stopped && task.result_ref.is_none() {
+            return Ok(op);
+        }
+        let (reference, outcome, effect) = if let Some(reference) = &task.result_ref {
+            (
+                reference,
+                task.result_outcome
+                    .ok_or_else(|| RuntimeError::Invalid("Task result outcome missing".into()))?,
+                task.result_effect
+                    .ok_or_else(|| RuntimeError::Invalid("Task result effect missing".into()))?,
+            )
+        } else {
+            (
+                &task.observation_ref,
+                Outcome::Indeterminate,
+                Effect::Unknown,
+            )
+        };
+        let ExecutorOwner::External { epoch, .. } = &binding.execution_owner else {
+            return Err(RuntimeError::Conflict("Task executor owner changed".into()));
+        };
+        let prepared = result_content::PreparedExternalReceipt {
+            receipt: ExternalReceiptMetadata {
+                executor_stopped: false,
+                executor: op
+                    .executor
+                    .clone()
+                    .ok_or_else(|| RuntimeError::Invalid("Task executor missing".into()))?,
+                identity: op.id.clone(),
+                epoch: epoch.clone(),
+                outcome,
+                effect,
+                result_ref: reference.clone(),
+            },
+            _publication: self.content.begin_publication(),
+        };
+        self.record_host_job_terminal(binding, prepared, stopped)
+    }
+    /// A control caller may act only on its own Thread subtree. Reads use the original family.
+    pub fn access_host_job(
+        &self,
+        run_id: &str,
+        target_id: &str,
+        control: bool,
+    ) -> Result<Operation> {
+        let target = self.require_host_job_observation(run_id, target_id)?;
+        if control {
+            let run = self.run(run_id)?;
+            let source = self.run(&target.run_id)?;
+            if !descendants(&self.db, &run.thread_id)?.contains(&source.thread_id) {
+                return Err(RuntimeError::Conflict(
+                    "Job control is outside the caller's Thread subtree".into(),
+                ));
+            }
+        }
+        Ok(target)
+    }
     pub fn pending_host_jobs(&self) -> Result<Vec<Operation>> {
-        let mut query=self.db.prepare("SELECT body FROM operations WHERE json_extract(body,'$.host_job') IS NOT NULL AND (coalesce(json_extract(body,'$.external_receipt.executor_stopped'),0)=0 OR json_extract(body,'$.phase')!='terminal') ORDER BY rowid")?;
+        let mut query=self.db.prepare("SELECT body FROM operations WHERE json_extract(body,'$.host_job') IS NOT NULL AND (coalesce(json_extract(body,'$.external_receipt.executor_stopped'),0)=0 OR json_extract(body,'$.phase')!='terminal' OR (json_extract(body,'$.host_job.mcpTask') IS NOT NULL AND json_extract(body,'$.host_job.mcpTask.resultRef') IS NULL)) ORDER BY rowid")?;
         let rows = query.query_map([], |r| r.get::<_, String>(0))?;
         rows.map(|raw| Ok(serde_json::from_str(&raw?)?)).collect()
     }
@@ -508,6 +923,18 @@ impl Catalog {
             return Err(RuntimeError::Conflict(
                 "Host job terminal does not match its original binding".into(),
             ));
+        }
+        let mut prepared = prepared;
+        // The first uncertain business receipt is historical. A later uncertain MCP result has
+        // its own immutable Task resultRef; only independently proven stop refines this receipt.
+        if matches!(binding.subject, HostJobSubject::Mcp { .. })
+            && prepared.receipt.effect == Effect::Unknown
+        {
+            if let Some(previous) = &op.external_receipt {
+                if previous.effect == Effect::Unknown {
+                    prepared.receipt = previous.clone();
+                }
+            }
         }
         self.record_external_receipt_prepared(&op.id, prepared, stopped)
     }
@@ -546,6 +973,9 @@ impl Catalog {
 
 pub(super) fn observation_kinds(binding: &HostJobBinding) -> Vec<String> {
     let mut kinds = vec!["job_stopped".into()];
+    if matches!(binding.subject, HostJobSubject::Mcp { .. }) {
+        kinds.push("job_result".into());
+    }
     if binding.domain == "research.experiment" && binding.domain_version == 1 {
         kinds.extend([
             "artifact".into(),
@@ -633,6 +1063,15 @@ pub(super) fn stop_receipt(
     Ok(stop.receipt)
 }
 pub const WAIT_PREFIX: &str = "host-job-wait:";
+pub const RESULT_EVENT: &str = "host_job.result_observed";
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpResultFact {
+    pub task: McpTaskLink,
+    pub result_ref: Option<Value>,
+    pub outcome: Option<Outcome>,
+    pub effect: Effect,
+    pub executor_stopped: bool,
+}
 impl Catalog {
     pub fn host_job_sources(&self, run_id: &str) -> Result<Vec<HostJobSource>> {
         let run = self.run(run_id)?;
@@ -651,6 +1090,7 @@ impl Catalog {
                 let source: Run = serde_json::from_str(&source)?;
                 let pending = HostJobPending::from_operation(op)?;
                 out.push(HostJobSource {
+                    mcp_task: pending.mcp_task.clone(),
                     observation_kinds: observation_kinds(&pending.binding),
                     binding: pending.binding,
                     source_run_id: pending.run_id,
@@ -669,15 +1109,39 @@ impl Catalog {
         require_observation(&self.db, &self.run(run_id)?, target_id)
     }
     pub fn wait_for_host_job(&mut self, operation_id: &str, target_id: &str) -> Result<Operation> {
+        self.wait_for_host_job_mode(operation_id, target_id, crate::HostJobWaitMode::Stopped)
+    }
+    pub fn wait_for_host_job_mode(
+        &mut self,
+        operation_id: &str,
+        target_id: &str,
+        mode: crate::HostJobWaitMode,
+    ) -> Result<Operation> {
         let current = self.operation(operation_id)?;
-        self.require_host_job_observation(&current.run_id, target_id)?;
+        let target = self.require_host_job_observation(&current.run_id, target_id)?;
+        if mode == crate::HostJobWaitMode::Result
+            && target
+                .host_job
+                .as_ref()
+                .and_then(|link| link.mcp_task.as_ref())
+                .is_none()
+        {
+            return Err(RuntimeError::Conflict(
+                "Job has no negotiated result observation".into(),
+            ));
+        }
+        let kind = if mode == crate::HostJobWaitMode::Result {
+            RESULT_EVENT
+        } else {
+            "operation.executor_stopped"
+        };
         let tx = self.db.transaction()?;
         let mut op: Operation = record(&tx, "operations", operation_id)?;
         let run: Run = record(&tx, "runs", &op.run_id)?;
         let admitted = tool_content::ToolIntent::from_operation(&op)?;
         let id = format!("{WAIT_PREFIX}{}", op.id);
         if let Some(prior) = optional_record::<Wait>(&tx, "waits", &id)? {
-            if prior.subject != target_id || prior.run_id != run.id {
+            if prior.subject != target_id || prior.run_id != run.id || prior.kind != kind {
                 return Err(RuntimeError::Conflict(
                     "Job observation target changed".into(),
                 ));
@@ -697,13 +1161,36 @@ impl Catalog {
                 "Job observation requires its original active selected invocation".into(),
             ));
         }
-        let trigger_cursor=tx.query_row("SELECT cursor FROM events WHERE subject=?1 AND kind='operation.executor_stopped' ORDER BY cursor DESC LIMIT 1",[target_id],|r|read_number(r,0)).optional()?;
+        // A new result observer consumes the current result/unavailability, not an obsolete
+        // transient failure that recovered before registration. Existing triggered waits above
+        // retain their original event. A final result remains immediately consumable.
+        let current_ready = mode != crate::HostJobWaitMode::Result
+            || target
+                .host_job
+                .as_ref()
+                .and_then(|link| link.mcp_task.as_ref())
+                .is_some_and(|task| {
+                    task.result_ready
+                        || task.availability == crate::McpTaskAvailability::Unavailable
+                });
+        let after_cursor = if current_ready {
+            0
+        } else {
+            tx.query_row("SELECT coalesce(max(cursor),0) FROM events", [], |r| {
+                read_number(r, 0)
+            })?
+        };
+        let trigger_cursor = if current_ready {
+            tx.query_row("SELECT cursor FROM events WHERE subject=?1 AND kind=?2 ORDER BY cursor DESC LIMIT 1",params![target_id,kind],|r|read_number(r,0)).optional()?
+        } else {
+            None
+        };
         let wait = Wait {
             id: id.clone(),
             run_id: run.id.clone(),
             subject: target_id.into(),
-            kind: "operation.executor_stopped".into(),
-            after_cursor: 0,
+            kind: kind.into(),
+            after_cursor,
             deadline_at_ms: None,
             trigger_cursor,
             cancelled: false,

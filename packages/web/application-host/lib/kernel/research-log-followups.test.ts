@@ -7,7 +7,7 @@ import type { ExperimentService } from '../harness/experiments.js';
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(yes => { resolve = yes; }); return { promise, resolve }; };
 function fixture(bytes: Buffer, literal='aba', maxBytes=65536) {
   const source = {workspace_id:'workspace',execution_workspace_id:'execution',mode:'fixed_branch' as const,branch_id:'fixed',revision:1,live_root:null};
-  const binding = {operationId:'accepted',executionOwner:{kind:'external' as const,identity:'research.experiment',epoch:'original'},domain:'research.experiment',domainVersion:1,workspaceId:'workspace',subjectId:'attempt'};
+  const binding = {operationId:'accepted',executionOwner:{kind:'external' as const,identity:'research.experiment',epoch:'original'},domain:'research.experiment',domainVersion:1,subject:{kind:'workspace' as const,workspaceId:'workspace',subjectId:'attempt'}};
   let cursor:FollowupLogState={offset:0,matched_prefix:0,ended:false,failure_code:null},revision=1,active=true;
   let reads=0,details=0,loseAck=false;
   let held:Promise<void>|undefined;let entered=()=>{};

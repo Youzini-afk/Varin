@@ -1643,7 +1643,7 @@ impl Catalog {
                         ));
                     }
                     tx.commit()?;
-                    self.release_stopped_resource_owner(&key)?;
+                    self.release_unoccupied_resource_owner(&key)?;
                     return Ok(());
                 }
                 // Settle the permission rendezvous even when cancellation prevented a decision.
@@ -1961,7 +1961,7 @@ impl Catalog {
         }
         tx.commit()?;
         if let ExecutionRecord::ToolSettled { context, .. } = record {
-            self.release_stopped_resource_owner(&context.operation_id)?;
+            self.release_unoccupied_resource_owner(&context.operation_id)?;
         }
         if matches!(
             record,
@@ -2453,7 +2453,7 @@ impl Catalog {
                     )?;
                 }
                 tx.commit()?;
-                self.release_stopped_resource_owner(operation_id)?;
+                self.release_unoccupied_resource_owner(operation_id)?;
                 self.reconcile_waits()?;
                 return Ok(op);
             }
@@ -2512,7 +2512,7 @@ impl Catalog {
             )?;
         }
         tx.commit()?;
-        self.release_stopped_resource_owner(operation_id)?;
+        self.release_unoccupied_resource_owner(operation_id)?;
         self.reconcile_waits()?;
         Ok(op)
     }
@@ -2558,11 +2558,11 @@ impl Catalog {
         }
         tx.commit()?;
         for operation in &operations {
-            self.release_stopped_resource_owner(&operation.id)?;
+            self.release_unoccupied_resource_owner(&operation.id)?;
         }
         Ok(())
     }
-    fn release_stopped_resource_owner(&self, owner: &str) -> Result<()> {
+    pub(super) fn release_unoccupied_resource_owner(&self, owner: &str) -> Result<()> {
         let occupied: bool = self.db.query_row(
             "SELECT EXISTS(SELECT 1 FROM resource_occupancy WHERE operation_id=?1)",
             [owner],

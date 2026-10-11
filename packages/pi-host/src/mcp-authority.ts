@@ -14,8 +14,11 @@ import {
 import type { McpOwnerConfig, McpOwnerConnectionSnapshot, McpOwnerEntry, McpConfiguration, McpProvenance } from '@varin/protocol';
 import { ConfigTextFileEditor, resolveConfigDocumentPath } from './config-text-file-editor.js';
 import { ConfigWatchManager } from './config-watch-manager.js';
-import { McpSessionExpiredError, type McpClient } from '@earendil-works/pi-mcp';
+import { McpSessionExpiredError, McpError, type McpClient } from '@earendil-works/pi-mcp';
 import { serviceKind, validateServiceResult, validatePromptArguments, type McpAuthorityService, type McpAuthorityPrompt, type McpPromptDeclaration, type McpServiceKind, type McpServiceRequest, type McpServiceResult } from './mcp-native-protocol.js';
+import { taskCapabilities, taskSupport, requiresMcpTask, validateTaskResponse, validateTaskResult, object as taskObject, type McpTaskLease, type McpTaskEndpoint, type McpTaskSupport, type McpTaskResponse } from './mcp-tasks.js';
+export { requiresMcpTask } from './mcp-tasks.js';
+export type { McpTaskLease, McpTaskEndpoint, McpTaskResponse } from './mcp-tasks.js';
 export type { McpAuthorityService, McpAuthorityPrompt, McpServiceKind, McpServiceRequest, McpServiceResult } from './mcp-native-protocol.js';
 
 export interface McpAuthorityScope {
@@ -42,6 +45,8 @@ export interface McpAuthorityTool {
   server: string;
   tool: string;
   schemaVersion: string;
+  taskSupport: McpTaskSupport;
+  taskCapable: boolean;
   resourceKey: string;
   configurationScope: 'global' | 'project' | 'extension';
   executionScope: 'global' | 'workspace';
@@ -109,12 +114,17 @@ export interface McpAuthorityLease {
   revocationSignal(name: string, schemaVersion: string): AbortSignal;
   validateArguments(name: string, schemaVersion: string, arguments_: unknown): void;
   callTool(name: string, arguments_: Record<string, unknown>, options: { schemaVersion: string; signal: AbortSignal; beforeDispatch?: () => void | Promise<void> }): ReturnType<McpServerConnection['callTool']>;
+  taskOwner(server: string, endpoint: McpTaskEndpoint | undefined, signal: AbortSignal): Promise<McpTaskLease>;
   release(): void;
 }
 /** A pre-dispatch rejection is safe to record as no effect; an entered transport is uncertain. */
 export class McpAuthorityError extends Error {
   constructor(readonly code: string, readonly dispatched = false,
     readonly settlement: 'unknown' | 'session_expired' = 'unknown') { super(code); this.name = 'McpAuthorityError'; }
+}
+export class McpTaskRequestError extends McpAuthorityError {
+  constructor(code:string, dispatched:boolean, readonly kind:'protocol'|'transport'|'unsupported'|'owner',
+    readonly rpcCode?:number, readonly protocolError?:Record<string,unknown>, settlement:'unknown'|'session_expired'='unknown') { super(code,dispatched,settlement); }
 }
 type ConfigPatch = { enabled?: boolean; exposure?: 'direct' | 'codemode' | 'deferred' | 'hidden' };
 interface SourceWatch { keys: Set<string>; ready: Promise<string> }
@@ -130,6 +140,8 @@ interface ScopeRecord {
   connections: Map<string, ConnectionRecord>;
   released: boolean;
   inflight: number;
+  taskHolders: number;
+  closeRequested: boolean;
   shutdown: AbortController;
 }
 interface ConnectionRecord {
@@ -158,6 +170,7 @@ interface ConnectionRecord {
   nativeClient?: McpClient;
   prompts: Map<string, McpPromptDeclaration>;
   promptRevision: number;
+  taskListeners: Set<(taskId:string, unsupported?:boolean)=>void>;
 }
 function fail(code: string): never { throw new McpAuthorityError(code); }
 function stable(value: unknown): string {
@@ -274,7 +287,7 @@ export class McpAuthority {
     const configRevision = this.#configRevision(scope);
     const config = loadMcpConfig({ agentDir: scope.agentDir, cwd: scope.configCwd, projectTrusted: scope.projectTrusted });
     if (configRevision !== this.#configRevision(scope)) fail('mcp-config-changed');
-    const record: ScopeRecord = { handle: randomUUID(), scope, key, config, configRevision, entries: new Map(config.servers.map(entry => [entry.name, entry])), definitions: new Map(), connections: new Map(), released: false, inflight: 0, shutdown: new AbortController() };
+    const record: ScopeRecord = { handle: randomUUID(), scope, key, config, configRevision, entries: new Map(config.servers.map(entry => [entry.name, entry])), definitions: new Map(), connections: new Map(), released: false, inflight: 0, taskHolders: 0, closeRequested: false, shutdown: new AbortController() };
     for (const entry of record.entries.values()) record.definitions.set(entry.name, this.#configurationIdentity(record, entry));
     if (configRevision !== this.#configRevision(scope)) fail('mcp-config-changed');
     // Disable/removal is revocation, not an ordinary replacement that may keep old leases alive.
@@ -355,7 +368,7 @@ export class McpAuthority {
           if (!validate) { validate = compile(tool); connection.validators.set(schemaVersion, validate); }
           const descriptor: McpAuthorityTool = freeze({ name, server: connection.entry.name, tool: tool.name, schemaVersion,
             resourceKey: this.#resourceKey(record, connection.entry), configurationScope: connection.entry.scope ?? 'global',
-            executionScope: connection.scope.executionScope, inputSchema: structuredClone(tool.inputSchema),
+            executionScope: connection.scope.executionScope, inputSchema: structuredClone(tool.inputSchema), taskSupport: taskSupport(tool), taskCapable: taskCapabilities(connection.nativeClient).call,
             description: tool.description ?? '', exposure,
             ...(tool.outputSchema ? { outputSchema: structuredClone(tool.outputSchema) } : {}),
             ...(tool.annotations ? { annotations: { ...tool.annotations } } : {}) });
@@ -496,6 +509,12 @@ export class McpAuthority {
         assertCallable: (name, schemaVersion) => { assert(name, schemaVersion); },
         revocationSignal: (name, schemaVersion) => assert(name,schemaVersion).connection.shutdown.signal,
         validateArguments,
+        taskOwner: async (server, endpoint, signal) => {
+          const connection = await prepareServer(server, signal);
+          const actual = this.#taskEndpoint(record, connection);
+          if (endpoint && stable(actual) !== stable(endpoint)) fail('mcp-task-owner-changed');
+          return this.#taskLease(record, connection, actual);
+        },
         callTool: async (name, args, options) => {
           validateArguments(name, options.schemaVersion, args);
           const target = assert(name, options.schemaVersion);
@@ -565,10 +584,11 @@ export class McpAuthority {
         });
         record = { handle: randomUUID(), generation: ++this.#generation, key, configIdentity: this.#configurationIdentity(scope, entry), scopeKey: scope.key, scope: scope.scope,
           entry, connection, references: 0, retired: false, revoked: false, shutdown: new AbortController(),
-          credentialRevision: 0, oauthGrant: this.#oauthGrant(scope.scope, connection), provider, providerGrant, validators: new Map(), prompts: new Map(), promptRevision: 0 };
+          credentialRevision: 0, oauthGrant: this.#oauthGrant(scope.scope, connection), provider, providerGrant, validators: new Map(), prompts: new Map(), promptRevision: 0, taskListeners: new Set() };
         this.#pool.set(key, record);
         const selected = record;
-        record.ready = connection.getClient().then(() => {
+        record.ready = connection.getClient().then(client => {
+          this.#observeNativeClient(selected, client);
           if (selected.revoked) return;
           const selectionKey = stable([selected.scopeKey, selected.entry.name]);
           const previous = this.#selected.get(selectionKey);
@@ -603,6 +623,7 @@ export class McpAuthority {
     const scope = this.#scope(scopeHandle); const record = this.#connection(scope, handle);
     this.#assertConnection(scope, record, tool, schemaVersion);
     const definition = record.connection.tools.find(candidate => candidate.name === tool)!;
+    if (requiresMcpTask({taskSupport:taskSupport(definition),taskCapable:taskCapabilities(record.nativeClient).call})) fail('mcp-task-required-use-mcp-start-task');
     let validate = record.validators.get(schemaVersion);
     if (!validate) { validate = compile(definition); record.validators.set(schemaVersion, validate); }
     if (validate(args) !== true) fail('mcp-arguments-invalid');
@@ -611,7 +632,7 @@ export class McpAuthority {
     try {
     await this.#assertCredential(record);
     // getClient may reconnect. Revalidate the exact declaration after it settles, before dispatch.
-    try { await record.connection.getClient(); } catch { fail('mcp-connection-unavailable'); }
+    try { await this.#nativeClient(record); } catch { fail('mcp-connection-unavailable'); }
     this.#assertConnection(scope, record, tool, schemaVersion);
     if (signal.aborted) fail('mcp-call-cancelled');
     let dispatched = false;
@@ -644,11 +665,101 @@ export class McpAuthority {
     record.nativeClient = client;
     record.prompts.clear();
     record.promptRevision++;
+    client.onNotification('notifications/tasks/status', params => {
+      if (record.nativeClient !== client || !taskObject(params) || typeof params.taskId !== 'string') return;
+      for (const listener of record.taskListeners) listener(params.taskId);
+    });
+    for (const method of ['elicitation/create','sampling/createMessage']) client.setRequestHandler(method, params => {
+      const meta = taskObject(params) && taskObject(params._meta) ? params._meta : undefined;
+      const related = meta && taskObject(meta['io.modelcontextprotocol/related-task']) ? meta['io.modelcontextprotocol/related-task'] : undefined;
+      if (record.nativeClient === client && related && typeof related.taskId === 'string') {
+        for (const listener of record.taskListeners) listener(related.taskId, true);
+      }
+      throw new McpError(-32601, 'Client capability is not supported');
+    });
     client.onNotification('notifications/prompts/list_changed', () => {
       if (record.nativeClient !== client) return;
       record.prompts.clear();
       record.promptRevision++;
     });
+  }
+  #taskEndpoint(scope: ScopeRecord, record: ConnectionRecord): McpTaskEndpoint {
+    this.#assertConnection(scope, record);
+    return {server:record.entry.name,resourceKey:this.#resourceKey(scope,record.entry),
+      configurationVersion:record.configIdentity,
+      credentialVersion:createHash('sha256').update(stable([record.oauthGrant,record.providerGrant ?? null])).digest('hex')};
+  }
+  #taskLease(scope: ScopeRecord, record: ConnectionRecord, endpoint: McpTaskEndpoint): McpTaskLease {
+    scope.taskHolders++;
+    let released = false;
+    const listeners = new Set<(taskId:string, unsupported?:boolean)=>void>();
+    const assert = async () => {
+      if (released) fail('mcp-task-lease-released');
+      await this.#assertCredential(record);
+      if (stable(this.#taskEndpoint(scope,record)) !== stable(endpoint)) fail('mcp-task-owner-changed');
+    };
+    const request = async (method:string, params:Record<string,unknown>, signal:AbortSignal,
+      beforeDispatch?: (client:McpClient)=>void|Promise<void>) => {
+      let dispatched = false;
+      scope.inflight++;
+      try {
+        await assert();
+        return await record.connection.requestOnce(async client => {
+          this.#observeNativeClient(record,client);
+          await assert();
+          const capability = taskCapabilities(client);
+          if (!(method === 'tools/call' ? capability.call : capability.supported) || method === 'tasks/cancel' && !capability.cancel) throw new McpTaskRequestError('mcp-task-capability-unsupported',false,'unsupported');
+          await beforeDispatch?.(client);
+          await assert();
+          signal.throwIfAborted();
+          dispatched = true;
+          return await client.request(method,params,{signal:AbortSignal.any([signal,scope.shutdown.signal,record.shutdown.signal]),
+            timeoutMs:method === 'tasks/result' ? 0 : record.connection.timeoutMs});
+        });
+      } catch (error) {
+        if (error instanceof McpTaskRequestError) throw error;
+        if (error instanceof McpSessionExpiredError) throw new McpTaskRequestError('mcp-session-expired',dispatched,'transport',undefined,undefined,'session_expired');
+        if (error instanceof McpAuthorityError && !dispatched) throw error;
+        if (error instanceof McpError) throw new McpTaskRequestError('mcp-task-protocol-error',dispatched,'protocol',error.code,
+          {code:error.code,message:error.message,...(error.data === undefined ? {} : {data:error.data})});
+        throw new McpTaskRequestError('mcp-task-request-unavailable',dispatched,'transport');
+      } finally { scope.inflight--; this.#drainScope(scope); }
+    };
+    const taskResponse = (raw:unknown, taskId?:string, creation=false) => {
+      let response: McpTaskResponse;
+      try { response = validateTaskResponse(raw,creation); } catch { throw new McpTaskRequestError('mcp-task-response-invalid',true,'protocol'); }
+      if (taskId !== undefined && response.task.taskId !== taskId) throw new McpTaskRequestError('mcp-task-identity-changed',true,'protocol');
+      return response;
+    };
+    return {
+      endpoint,
+      start: async (name,args,options) => taskResponse(await request('tools/call',{name,arguments:args,task:options.ttl === undefined ? {} : {ttl:options.ttl}},options.signal,async () => {
+        this.#assertConnection(scope,record,name,options.schemaVersion);
+        const tool = record.connection.tools.find(tool=>tool.name === name)!;
+        if (taskSupport(tool) === 'forbidden') throw new McpTaskRequestError('mcp-task-forbidden',false,'unsupported');
+        const validate = record.validators.get(options.schemaVersion) ?? compile(tool);
+        if (!validate(args)) fail('mcp-arguments-invalid');
+        await options.beforeDispatch?.();
+        this.#assertConnection(scope,record,name,options.schemaVersion);
+      }),undefined,true),
+      get: async (taskId,signal) => taskResponse(await request('tasks/get',{taskId},signal),taskId),
+      result: async (taskId,signal) => {
+        const raw = await request('tasks/result',{taskId},signal);
+        try { return validateTaskResult(raw,taskId); } catch { throw new McpTaskRequestError('mcp-task-result-invalid',true,'protocol'); }
+      },
+      cancel: async (taskId,signal) => {
+        const response=taskResponse(await request('tasks/cancel',{taskId},signal),taskId);
+        if(response.task.status!=='cancelled')throw new McpTaskRequestError('mcp-task-cancel-response-invalid',true,'protocol');
+        return response;
+      },
+      onChange: listener => { listeners.add(listener);record.taskListeners.add(listener);return ()=>{listeners.delete(listener);record.taskListeners.delete(listener);}; },
+      release: () => {
+        if (released) return; released=true;
+        for (const listener of listeners) record.taskListeners.delete(listener);
+        scope.taskHolders--;
+        if (scope.closeRequested && !scope.taskHolders) this.closeScope(scope.handle);
+      },
+    };
   }
   #service(scope: ScopeRecord, record: ConnectionRecord, kind: McpServiceKind): McpAuthorityService {
     const client = record.nativeClient;
@@ -792,6 +903,8 @@ export class McpAuthority {
   }
   closeScope(handle: string): void {
     const scope = this.#scopes.get(handle); if (!scope || scope.released) return;
+    scope.closeRequested = true;
+    if (scope.taskHolders > 0 && !this.#closed) return;
     scope.released = true; scope.shutdown.abort(); this.#scopes.delete(handle);
     this.#drainScope(scope);
   }
@@ -868,7 +981,7 @@ export class McpAuthority {
   }
   #toolVersion(record: ConnectionRecord, tool: McpTool): string {
     // Persisted target versions bind the declaration AND opaque credential grant, never a token.
-    return createHash('sha256').update(stable([tool, record.configIdentity, record.oauthGrant, record.providerGrant ?? null])).digest('hex');
+    return createHash('sha256').update(stable([tool, taskCapabilities(record.nativeClient), record.nativeClient?.protocolVersion ?? null, record.configIdentity, record.oauthGrant, record.providerGrant ?? null])).digest('hex');
   }
   async #assertCredential(record: ConnectionRecord): Promise<void> {
     if (record.oauthGrant !== this.#oauthGrant(record.scope, record.connection)) { this.#revoke(record, 'mcp-credential-revoked'); fail('mcp-credential-revoked'); }
