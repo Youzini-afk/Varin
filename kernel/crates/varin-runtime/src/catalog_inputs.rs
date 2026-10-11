@@ -46,6 +46,11 @@ pub enum InputOrigin {
         generation: u64,
         activation: super::activation::IngressActivationFact,
     },
+    ComputerRequest {
+        request_id: String,
+        requester: super::computer_requests::ComputerExecution,
+        activation: super::activation::IngressActivationFact,
+    },
     Message {
         identity: super::messages::MessageIdentity,
         command_key: String,
@@ -58,7 +63,7 @@ impl InputOrigin {
     }
     pub(super) fn history_source(&self) -> HistorySource {
         match self {
-            Self::Followup { .. } | Self::Calendar { .. } => HistorySource::Environment,
+            Self::Followup { .. } | Self::Calendar { .. } | Self::ComputerRequest { .. } => HistorySource::Environment,
             Self::Message { identity, .. }
                 if matches!(identity.actor, super::messages::MessageActor::Agent { .. }) =>
             {

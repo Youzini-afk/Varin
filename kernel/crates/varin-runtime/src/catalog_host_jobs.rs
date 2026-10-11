@@ -516,7 +516,7 @@ impl Catalog {
             && !op
                 .waiting_on
                 .as_deref()
-                .is_some_and(|v| v.starts_with(WAIT_PREFIX))
+                .is_some_and(|v| v.starts_with(WAIT_PREFIX) || v.starts_with(super::computer_wait::PREFIX))
         {
             return Err(RuntimeError::Conflict(
                 "Host job has no trusted acceptance".into(),

@@ -34,7 +34,40 @@ it('reads original idle cleanup and submits the exact displayed execution throug
   } finally { globalThis.fetch = original; }
 });
 
-it('rejects late computer reads and stop responses after abort or Host change', async () => {
+it('decides the original request revision from idle root work through the real client and shared decoder', async () => {
+  const original = globalThis.fetch;
+  const child = { ...identity, threadId: 'child' };
+  const request = { id: 'request-1', revision: 4, desktopId: 'desktop', access: 'control' as const,
+    actor: { execution: { work: child, runId: 'child-run' }, rootWork: identity, rootExecution: null,
+      registry: null, roleAccess: { kind: 'tool-invocation' as const }, label: 'Child' },
+    reason: 'Review the requested window', createdAt: 'now', status: 'granting' as const };
+  const state = { ...projection.state, requests: [request] };
+  const command = { requestId: request.id, expectedRevision: 3, decision: 'grant' as const, key: 'original-decision' };
+  let response: unknown = { state };
+  let status = 200;
+  const calls: Array<{ path: string; body: unknown; signal: AbortSignal | null | undefined }> = [];
+  globalThis.fetch = async (input, init) => {
+    calls.push({ path: String(input), body: JSON.parse(String(init?.body)), signal: init?.signal });
+    return Response.json(response, { status });
+  };
+  try {
+    const api = createThreadsHttpAPI().computer;
+    const controller = new AbortController();
+    assert.deepEqual(await api.decide(identity, command, controller.signal), { state });
+    assert.deepEqual(calls[0], { path: '/api/threads/computer/decide', body: { ...identity, ...command }, signal: controller.signal });
+    // A lost original assignment remains visible as unavailable, never successful release.
+    response = { state: { ...state, requests: [{ ...request, revision: 5, status: 'unavailable', assignmentId: 'original-assignment', detail: 'Original owner is offline' }] } };
+    assert.deepEqual(await api.decide(identity, command), response);
+    assert.deepEqual(calls[1]!.body, calls[0]!.body);
+    response = { state: { ...state, requests: [{ ...request, revision: undefined }] } };
+    await assert.rejects(api.decide(identity, command), /computer_request_invalid/);
+    response = { code: 'computer-execution-stale' }; status = 409;
+    await assert.rejects(api.decide(identity, command), error => error instanceof ThreadRequestError
+      && error.status === 409 && error.code === 'computer-execution-stale');
+  } finally { globalThis.fetch = original; }
+});
+
+it('rejects late computer reads, decisions and stop responses after abort or Host change', async () => {
   const original = globalThis.fetch;
   let release!: (value: unknown) => void;
   globalThis.fetch = async input => String(input).includes('/auth/')
@@ -47,6 +80,11 @@ it('rejects late computer reads and stop responses after abort or Host change', 
     await new Promise(resolve => setImmediate(resolve));
     controller.abort(); release(projection);
     await assert.rejects(read, { name: 'AbortError' });
+    const deciding = new AbortController();
+    const decision = api.decide(identity, { requestId: 'request', expectedRevision: 1, decision: 'deny', key: 'decision-key' }, deciding.signal);
+    await new Promise(resolve => setImmediate(resolve));
+    deciding.abort(); release({ state: projection.state });
+    await assert.rejects(decision, { name: 'AbortError' });
     const stop = api.stop(identity, { runId: 'old-run' });
     await new Promise(resolve => setImmediate(resolve));
     switchRuntimeEndpoint({ apiBaseUrl: 'http://next-computer-host.test', runtimeKey: 'next-computer-host' });

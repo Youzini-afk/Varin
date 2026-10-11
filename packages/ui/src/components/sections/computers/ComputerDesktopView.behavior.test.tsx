@@ -40,7 +40,7 @@ it('routes a foreign operator through the pinned desktop and retains ownerless u
   const work = { runtime: 'agent' as const, threadId: 'child', branchId: 'branch' };
   const rootWork = { ...work, threadId: 'root' };
   const operator: ComputerActor = { execution: { work, runId: 'child-run' }, rootWork, rootExecution: { work: rootWork, runId: 'root-run' },
-    registry: null, label: 'Child', readOnly: false };
+    registry: null, label: 'Child', roleAccess: { kind: 'tool-invocation' } };
   mocks.stop.mockResolvedValue({ control: { ...control(operator), workStatus: 'cancel-unconfirmed' }, released: false });
   await emit(0, control(operator));
   await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'computer.automation.stop')!.click());
@@ -64,7 +64,7 @@ it('ignores a late physical Stop response after a newer control epoch or Host re
   const container = document.createElement('div'); document.body.append(container);
   await act(async () => { root = createRoot(container); root.render(<ComputerDesktopPane desktop={desktop} />); });
   const work = { runtime: 'agent' as const, threadId: 'same-as-local', branchId: 'same-as-local' };
-  const operator: ComputerActor = { execution: { work, runId: 'same-run' }, rootWork: work, rootExecution: { work, runId: 'same-run' }, registry: null, label: 'Remote Agent', readOnly: false };
+  const operator: ComputerActor = { execution: { work, runId: 'same-run' }, rootWork: work, rootExecution: { work, runId: 'same-run' }, registry: null, label: 'Remote Agent', roleAccess: { kind: 'tool-invocation' } };
   const pending: Array<(result: { control: ComputerControlState; released: boolean }) => void> = [];
   mocks.stop.mockImplementation(() => new Promise(resolve => pending.push(resolve)));
   await emit(0, control(operator));

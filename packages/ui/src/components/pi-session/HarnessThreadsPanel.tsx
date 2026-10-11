@@ -463,7 +463,7 @@ export const HarnessThreadsPanel: React.FC<{
       : computer.state?.status !== 'enabled' ? t(`computer.automation.${computer.state?.status ?? 'enabled'}`)
         : computer.activities.find(entry => entry.activity.status === 'running')?.activity.app ?? computer.state?.leases.length),
     ...(computer.error || computerRequests || computer.state?.status === 'cancel-unconfirmed' ? { tone: 'attention' as const } : {}),
-    ...(computer.state?.active && (computer.state.currentRootExecution || computer.state.currentExecution) ? { action: { label: t('computer.automation.stop'), disabled: computer.busy || computer.state.status === 'cancelling', run: () => void computer.stop() } } : {}) });
+    ...(computer.state?.active && computer.state.currentExecution ? { action: { label: t('computer.automation.stop'), disabled: computer.busy || computer.state.status === 'cancelling', run: () => void computer.stop() } } : {}) });
   const planProgress = { done: planSummary.done, total: planSummary.total };
   if (blockGroups.plan) peekRows.push({
     id: 'plan', section: 'plan',

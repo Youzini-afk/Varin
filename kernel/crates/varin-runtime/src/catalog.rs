@@ -38,7 +38,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 42;
+pub(crate) const FORMAT: i64 = 43;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -1595,6 +1595,9 @@ CREATE TABLE commands(id TEXT PRIMARY KEY,intent TEXT NOT NULL,receipt TEXT NOT 
 CREATE TABLE operations(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs(id),body TEXT NOT NULL);
 CREATE UNIQUE INDEX host_job_subject ON operations(json_extract(body,'$.host_job.binding.domain'),json_extract(body,'$.host_job.binding.workspaceId'),json_extract(body,'$.host_job.binding.subjectId')) WHERE json_extract(body,'$.host_job') IS NOT NULL;
 CREATE INDEX operations_run ON operations(run_id);
+CREATE TABLE computer_requests(id TEXT PRIMARY KEY,requester_run_id TEXT NOT NULL REFERENCES runs(id),root_thread_id TEXT NOT NULL REFERENCES threads(id),root_branch_id TEXT NOT NULL REFERENCES branches(id),body TEXT NOT NULL);
+CREATE INDEX computer_requests_root ON computer_requests(root_thread_id,root_branch_id);
+CREATE INDEX computer_requests_run ON computer_requests(requester_run_id);
 CREATE TABLE model_steps(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs(id),state TEXT NOT NULL,body TEXT NOT NULL);
 CREATE INDEX model_steps_run ON model_steps(run_id,state);
 CREATE TABLE model_selections(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs(id),revision INTEGER NOT NULL,status TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 0,body TEXT NOT NULL,UNIQUE(run_id,revision));
@@ -1818,6 +1821,11 @@ mod ingress;
 
 #[path = "catalog_host_jobs.rs"]
 pub mod host_jobs;
+
+#[path = "catalog_computer_requests.rs"]
+pub mod computer_requests;
+#[path = "catalog_computer_wait.rs"]
+pub mod computer_wait;
 
 #[path = "catalog_computer.rs"]
 pub mod computer;

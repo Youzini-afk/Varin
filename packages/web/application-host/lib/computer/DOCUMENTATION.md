@@ -16,8 +16,9 @@ ancestors. Attached Agent, research and Bot roots retain their main-agent role e
 kind is `discussion`. Retrieval presets and ordinary discussion children receive observation only.
 The caller cannot supply a parent, Run or role to the model-facing API.
 
-Native root calls use the shipped `varin.builtin.computer` ordinary extension. Its single declaration
-owns `computer_list/apps/observe/act/cancel/release`, their schemas, and read/effect classification.
+Native calls use the shipped `varin.builtin.computer` ordinary extension. Its single declaration
+owns the eleven `computer_list/apps/observe/act/cancel/release/request/access/grant/deny/wait` tools,
+their schemas, completion modes and read/effect classification.
 The original extension capability review, immutable binding and ToolInvocationAuthority remain in
 force. `computer.use` dispatches through this service, not a separate desktop backend. Actual global
 and trusted-project Computer settings can disable dispatch. The original tool binding freezes the
@@ -27,10 +28,33 @@ An invalid captured Computer default makes that service candidate unavailable th
 tool-preparation projection. Unrelated tools can still prepare, even when the Computer provider was
 already active. Required saved Computer bindings remain exact; errors do not become a null default.
 
-Native child discovery is connected, but desktop request/grant/Wait and trusted handback continuation
-are not yet connected. A child without an actual assignment receives an explicit failure before input.
-Native persistent Computer scripts are also pending. These gaps are independent of the existing Pi
-capabilities described below; selected tools alone never grant a desktop assignment.
+Native source-bearing child tasks request a desktop through their real ModelStep or PolicyAction
+Operation. Catalog owns the request, original decision and durable Wait; reasons and notification
+bodies use ContentStore. Acceptance queues one typed Environment input for the root in the same
+commit. A root parked on the requesting child's actual dependency chain can end that observation
+without cancelling or reporting the child complete; unrelated observations remain intact. An idle
+root resumes through the normal launch capture, Goal, pause and question admission boundaries.
+A terminal requester invalidates an undelivered notification instead of waking an obsolete task.
+
+Root tool decisions and authenticated user decisions share that request owner. The user can decide
+from an idle root without inventing a Run. A stable command key binds the original choice/reason;
+changing either is a conflict. Grant reserves the original physical assignment before publishing
+`granted`. Cancellation that wins publication releases that exact reservation. Lost publication
+reconciles the same claim; Host restart or an absent original reservation never silently reissues it.
+Short claim reconciliation and original terminal cleanup do not load request reasons. Public detail
+reads still report missing/corrupt content instead of silently replacing it.
+
+`computer_wait` is a distinct Job observation: acceptance releases its slot, and an original decision
+adds one Environment fact after recovery. Cancelling this Wait leaves the request and assignment
+alone. `granted` records the earlier ready assignment; `released`/`unavailable` reflect the current
+physical projection, not a rewrite of the decision. Each Native child assignment belongs to its own
+Run, so a root's natural completion does not terminate independent child work. Native actors carry
+per-tool invocation policy; Pi keeps its own read-only role rules. Neither adds a second grant list.
+
+This slice uses the existing real file-source-bearing ChildTask admission. General source-less
+pure-capability child admission remains unfinished, as do trusted handback continuation and persistent
+Computer scripts. Source-less root Computer is already supported. These limits are independent of
+the existing Pi capabilities below; selected tools alone never grant a desktop assignment.
 
 Pi workers and retrieval threads have the `computer` tool when Computer Use is enabled. A child calls
 `computer` with `action:"request"`, desktopId, access (`observe` or `control`) and reason. The Host wakes
@@ -55,8 +79,9 @@ reservation requires explicit human takeover on the target; there is no speculat
 
 ## Cancel work and transfer control
 
-The conversation overview captures an exact execution and cancels its family's computer work. Native
-uses `ThreadsAPI.computer` through the authenticated `/api/threads/computer/state` and `/stop` routes;
+The conversation overview captures an exact execution: explicit root Stop captures its current Computer
+family, while child Stop targets that child. An idle root can stop a displayed live child assignment. Native
+uses `ThreadsAPI.computer` through the authenticated `/api/threads/computer/state`, `/decide` and `/stop` routes;
 Pi retains `automation/stop` with its actual session and displayed Run. Old cleanup is addressed by
 its own work and Run, including when shown under an idle root. Known accepted cleanup starts before
 waiting for a new identity projection; stale work cannot stop a replacement execution.
@@ -73,8 +98,8 @@ Old scripts and observation bindings cannot resume through that new assignment.
 Native terminal cleanup is also a product consumer, not a requirement for the model to call release.
 Original runtime/owner notifications wake reconciliation of Computer's already accepted executions;
 the original Catalog must confirm completed/failed/cancelled before `finishExecution` runs. A tool
-binding update or kernel channel reset alone is not terminal evidence. Reconciliation has no timer,
-second execution ledger or full Catalog scan; original physical release rules still apply.
+binding update or kernel channel reset alone is not terminal evidence. Reconciliation has no timer or
+second execution ledger; original physical release rules still apply.
 
 Pi receives its existing passive user-cancellation notification; native trusted notification delivery
 is a remaining integration. The operation reports any known partial
@@ -111,7 +136,7 @@ readback confirms `set_value`. Tool text contains the short result and relevant 
 internal trace. Explicit `app_post` text requires a native Edit/RichEdit handle in the selected window;
 it cannot silently route browser input through unsupported Win32 edit messages.
 
-The original desktop record's `runtimeVersion:2` stores discriminated work/usage and a short
+The original desktop record's `runtimeVersion:3` stores discriminated work/usage and a short
 `physicalControl` marker before input. It identifies the Host control generation, original input
 helper and actual assignment or human holder. Malformed or obsolete nonempty runtime metadata remains
 an actionable fenced state; desktop configuration and external assets are not migrated or erased.
@@ -128,6 +153,14 @@ an ended callback or repeat unknown input. An input supervisor never respawns a 
 same physical-owner identity; capture helpers may still restart independently.
 
 ## Feedback and presentation
+
+Native request decisions and physical changes emit the original family's short projection invalidation,
+not a partial state assembled from Pi's ephemeral requests. The shared event parser routes it to the
+current work's existing state reader; request-detail errors appear in the overview. In-flight reads
+finish and coalesce a trailing refresh, while original Host/selection/control fences reject late
+replies. This presentation work never blocks request acceptance or physical Stop. Pi keeps its original
+full-state notification path.
+
 
 Observations keep the native tree on the owning Host and return a display page (100 lines by default,
 `textLimit:"max"` to expand). `observationId` plus `offset` reads the same retained tree without capturing

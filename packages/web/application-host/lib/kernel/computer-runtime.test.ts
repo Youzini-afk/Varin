@@ -7,11 +7,11 @@ import { parseVarinToolJson } from '@varin/extension-contract';
 import { COMPUTER_TOOL_DECLARATIONS } from '@varin/extension-builtins';
 import { createComputerService } from '../computer/computer-service.js';
 import type { ComputerDriverSession, DriverResponse } from '../computer/driver-host.js';
-import type { ComputerWorkRef } from '@varin/protocol';
+import { parseComputerAutomationInvalidation, type ComputerWorkRef, type ComputerAutomationInvalidation } from '@varin/protocol';
 import { createComputerRuntime } from './computer-runtime.js';
 import { withToolInvocation } from './tool-invocation.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
-import type { KernelRecordResult, ToolOrigin } from './protocol.generated.js';
+import type { KernelRecordResult, ToolOrigin, ComputerRequestRecord } from './protocol.generated.js';
 
 const work = (threadId = 'root'): ComputerWorkRef => ({ runtime: 'agent', threadId, branchId: `${threadId}-branch` });
 const owner = { extensionId: 'varin.builtin.computer', extensionVersion: '1.0.0', entrypointId: 'host', generation: 1 };
@@ -21,6 +21,8 @@ async function fixture(records = new Map<string, KernelRecordResult>()) {
   const dataDir = await mkdtemp(join(tmpdir(), 'varin-computer-domain-'));
   let enabled = true, releases = 0, failClear = false, blockInput = false, idle = false, deliveries = 0, terminal = false, releaseSucceeds = true, failList = false;
   const failedRuns = new Set<string>();
+  const requestFacts: ComputerRequestRecord[] = [], invalidations: ComputerAutomationInvalidation[] = [];
+  let requestBodyFailure = false, requestBodyReads = 0;
   const toolReleased = new Set<() => void>(), ready = new Set<() => void>(), events = new Set<(event: { stream: 'durable'; cursor: number }) => void>();
   const observe = <T>(set: Set<T>, listener: T) => { set.add(listener); return () => { set.delete(listener); }; };
   const input = deferred<DriverResponse>(), started = deferred<void>();
@@ -52,6 +54,9 @@ async function fixture(records = new Map<string, KernelRecordResult>()) {
   };
   const kernel = { onToolReleased: (listener: () => void) => observe(toolReleased, listener), issueGrant: async () => ({ grantId: 'controlled' }), scoped: () => storage,
     async agentRuntimeRequest(method: string, params: { threadId: string; branchId: string; runId?: string }) {
+      if (method === 'runtime.computer.request.list') { requestBodyReads++; if (requestBodyFailure) throw new Error('controlled request body failure'); return requestFacts.map(request => ({ request: structuredClone(request), reason: 'Original request reason', detail: null })); }
+      if (method === 'runtime.computer.request.reconcile') return structuredClone(requestFacts);
+      if (method === 'runtime.computer.request.cancel') return null;
       if (method === 'runtime.run.inspect') return runRecord(params.runId!);
       assert.equal(method, 'runtime.computer.scope');
       assert.equal(params.branchId, `${params.threadId}-branch`);
@@ -68,8 +73,9 @@ async function fixture(records = new Map<string, KernelRecordResult>()) {
 
   const computers = createComputerService({ client: kernel as never, hostId: 'host', platform: 'windows', dataDir, createDriver: () => driver,
     onHandback: async () => { deliveries++; },
+    onAutomationInvalidated: event => { invalidations.push(parseComputerAutomationInvalidation(event)); },
     resolveActor: async ref => ref.runtime === 'agent' ? (await computer.resolve(ref)).actor : {
-      execution: { work: ref, runId: 'pi-run' }, rootWork: ref, rootExecution: { work: ref, runId: 'pi-run' }, registry: { scopeId: 'scope', threadId: 'pi' }, label: 'Pi', readOnly: false },
+      execution: { work: ref, runId: 'pi-run' }, rootWork: ref, rootExecution: { work: ref, runId: 'pi-run' }, registry: { scopeId: 'scope', threadId: 'pi' }, label: 'Pi', roleAccess: { kind: 'pi-role', readOnly: false } },
     resolveScope: async ref => ref.runtime === 'agent' ? (await computer.resolve(ref)).scope : null,
   });
   const computer = createComputerRuntime({ kernel: kernel as never, runtime: runtime as never, computers, enabled: async () => enabled });
@@ -87,6 +93,8 @@ async function fixture(records = new Map<string, KernelRecordResult>()) {
     return { content, receipt };
   }
   return { computer, computers, calls, records, invoke, started, dataDir, releases: () => releases,
+    requestFacts, invalidations, failRequestBody: () => { requestBodyFailure = true; }, requestBodyReads: () => requestBodyReads,
+    durable: () => { for (const listener of events) listener({ stream: 'durable', cursor: 1 }); },
     failRestore: () => { failList = true; },
     failRun: (id: string) => { failedRuns.add(id); }, failRelease: () => { releaseSucceeds = false; },
     terminal: () => { idle = true; terminal = true; for (const listener of events) listener({ stream: 'durable', cursor: 1 }); },
@@ -103,7 +111,7 @@ test('obsolete desktop stays visible and fenced without poisoning healthy work r
     const payload = JSON.parse(original.payloadJson);
     for (const [id, runtime] of [
       ['obsolete', { runtimeVersion: 1, usage: { sessionId: 'legacy', at: '2026-10-11' } }],
-      ['malformed', { runtimeVersion: 2, interrupted: { id: 'old', actor: { sessionId: 'legacy' } } }],
+      ['malformed', { runtimeVersion: 3, interrupted: { id: 'old', actor: { sessionId: 'legacy' } } }],
     ] as const) f.records.set(`computer.desktop:${id}`, { ...structuredClone(original), recordId: `computer.desktop:${id}`,
       payloadJson: JSON.stringify({ ...payload, id, label: id, ...runtime }) });
     const catalog = await f.computers.list();
@@ -349,5 +357,34 @@ test('release false receipt ends this release attempt without clearing the old p
     if (receipt.completion.kind === 'result') { assert.equal(receipt.completion.effect, 'unknown'); assert.equal(receipt.completion.outcome, 'indeterminate'); }
     assert.equal((content as { released: boolean }).released, false);
     assert.ok(JSON.parse(f.records.get('computer.desktop:local-console')!.payloadJson).physicalControl);
+  } finally { await f.cleanup(); }
+});
+
+
+test('Native request durable changes and recovery invalidate the original root projection without hydrating request bodies', async () => {
+  const f = await fixture();
+  try {
+    const request: ComputerRequestRecord = { id: 'request', operationId: 'request-tool', executionOwner: { kind: 'external', identity: 'original-computer-tool', epoch: 'tool-epoch' },
+      requester: { threadId: 'child', branchId: 'child-branch', runId: 'child-run' }, rootThreadId: 'root', rootBranchId: 'root-branch', desktopId: 'local-console',
+      access: 'control', revision: 1, status: 'pending', createdAtMs: 1, requestRef: null, detailRef: null, claim: null };
+    f.requestFacts.push(request);
+    f.computer.start();
+    await f.computer.reconcileExecutions();
+    assert.ok(f.invalidations.some(event => JSON.stringify(event.work) === JSON.stringify(work())));
+    assert.equal(f.requestBodyReads(), 0, 'startup recovery publishes a short invalidation, never a body-dependent state');
+    assert.equal((await f.computer.user.state(work() as never)).state.requests[0]?.status, 'pending');
+    request.claim = { actor: { kind: 'user', threadId: 'root', branchId: 'root-branch', key: 'original-grant' }, manager: null, hostEpoch: f.computers.controlOwnerEpoch, assignmentId: 'original-assignment', approved: true, reasonRef: null };
+    for (const status of ['granting', 'cancelled'] as const) {
+      f.invalidations.length = 0; request.status = status; request.revision++;
+      const reads = f.requestBodyReads();
+      f.durable(); await f.computer.reconcileExecutions();
+      assert.ok(f.invalidations.some(event => JSON.stringify(event.work) === JSON.stringify(work())));
+      assert.equal(f.requestBodyReads(), reads);
+    }
+    f.requestFacts.push({ ...request, id: 'denied-request', operationId: 'second-request-tool', status: 'denied', revision: 2, claim: { ...request.claim, actor: { kind: 'user', threadId: 'root', branchId: 'root-branch', key: 'original-denial' }, approved: false } });
+    f.failRequestBody(); f.invalidations.length = 0;
+    f.durable(); await f.computer.reconcileExecutions();
+    assert.ok(f.invalidations.length > 0, 'a bad body cannot hide its root invalidation');
+    await assert.rejects(f.computer.user.state(work() as never), /controlled request body failure/);
   } finally { await f.cleanup(); }
 });

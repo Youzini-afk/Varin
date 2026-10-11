@@ -51,6 +51,6 @@ export async function resolvePiComputerWork(registry: ThreadRegistry, sessionId:
     actor: execution ? { execution, rootWork, rootExecution,
       registry: { scopeId: owner.owningScopeId, threadId: thread.id },
       label: sessionId === rootWork.sessionId ? 'Main agent' : thread.brief.split(/\r?\n/u)[0]?.trim() || 'Worker',
-      readOnly: thread.preset === 'retrieval' || thread.kind === 'discussion' && !isAttachedRootPurpose(thread.purpose) } : null,
+      roleAccess: { kind: 'pi-role', readOnly: thread.preset === 'retrieval' || thread.kind === 'discussion' && !isAttachedRootPurpose(thread.purpose) } } : null,
   };
 }

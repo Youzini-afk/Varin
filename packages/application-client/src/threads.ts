@@ -208,6 +208,9 @@ export interface ThreadComputerAPI {
   state(identity: ThreadIdentity, signal?: AbortSignal): Promise<ComputerAutomationProjection>;
   /** Stop only the displayed execution; transport cancellation does not undo acceptance. */
   stop(identity: ThreadIdentity, request: { runId: string; desktopId?: string }, signal?: AbortSignal): Promise<{ state: ComputerAutomationState }>;
+  /** Root-work decision on the displayed request revision, including while the root is idle.
+   * An uncertain retry keeps the original key and decision; no Run is created by this command. */
+  decide(identity: ThreadIdentity, request: { requestId: string; expectedRevision: number; decision: 'grant' | 'deny'; key: string; reason?: string }, signal?: AbortSignal): Promise<{ state: ComputerAutomationState }>;
 }
 export interface ThreadsAPI {
   computer: ThreadComputerAPI;

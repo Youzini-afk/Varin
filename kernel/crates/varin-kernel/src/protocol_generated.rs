@@ -9,6 +9,8 @@ pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 1;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
+    "runtime.computer.request.cancel",
+    "runtime.computer.request.reconcile",
     "runtime.followup.registrations.pending",
     "runtime.followup.registration.cancel",
     "runtime.operation.status",
@@ -51,6 +53,8 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.calendar.calculation.retry",
 ];
 pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
+    "runtime.computer.request.cancel",
+    "runtime.computer.request.reconcile",
     "runtime.followup.registrations.pending",
     "runtime.followup.registration.cancel",
     "runtime.operation.status",
@@ -99,6 +103,62 @@ pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &["runtime.history.body"
 #[derive(Clone, Debug, Deserialize)]
 #[serde(transparent)]
 pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ComputerRequestCreateParams {
+    pub(crate) operation_id: String,
+    pub(crate) desktop_id: String,
+    pub(crate) access: varin_runtime::catalog::computer_requests::ComputerAccess,
+    pub(crate) reason: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ComputerRequestListParams {
+    pub(crate) root_thread_id: Option<String>,
+    pub(crate) root_branch_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ComputerDecisionBeginParams {
+    pub(crate) request_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) actor: varin_runtime::catalog::computer_requests::ComputerDecisionActor,
+    pub(crate) approved: bool,
+    pub(crate) host_epoch: String,
+    pub(crate) assignment_id: String,
+    pub(crate) reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ComputerDecisionSettleParams {
+    pub(crate) request_id: String,
+    pub(crate) claim: varin_runtime::catalog::computer_requests::ComputerDecisionClaim,
+    pub(crate) status: varin_runtime::catalog::computer_requests::ComputerRequestStatus,
+    pub(crate) reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ComputerRequestCancelParams {
+    pub(crate) target: varin_runtime::catalog::computer_requests::ComputerRequestCancelTarget,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ComputerRequestReconcileParams {
+    pub(crate) host_epoch: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ComputerRequestWaitParams {
+    pub(crate) operation_id: String,
+    pub(crate) request_id: String,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -2453,6 +2513,41 @@ pub(crate) struct KernelVerificationInputIdentity {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "runtime.computer.request.create" => {
+            serde_json::from_value::<ComputerRequestCreateParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.computer.request.list" => {
+            serde_json::from_value::<ComputerRequestListParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.computer.decision.begin" => {
+            serde_json::from_value::<ComputerDecisionBeginParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.computer.decision.settle" => {
+            serde_json::from_value::<ComputerDecisionSettleParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.computer.request.cancel" => {
+            serde_json::from_value::<ComputerRequestCancelParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.computer.request.reconcile" => {
+            serde_json::from_value::<ComputerRequestReconcileParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.computer.request.wait" => {
+            serde_json::from_value::<ComputerRequestWaitParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.computer.scope" => serde_json::from_value::<ComputerScopeParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

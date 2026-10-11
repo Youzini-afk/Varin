@@ -1,7 +1,7 @@
 import { getRuntimeUrlResolver } from '@varin/application-client';
 import { subscribeRuntimeEndpointChanged } from '@varin/application-client';
-import { parseComputerAutomationState, parseComputerActivity } from '@varin/protocol';
-import type { Thread, ThreadParent, ThreadRun, ComputerActivityEntry, ComputerAutomationState } from '@varin/protocol';
+import { parseComputerAutomationInvalidation, parseComputerAutomationState, parseComputerActivity } from '@varin/protocol';
+import type { Thread, ThreadParent, ThreadRun, ComputerActivityEntry, ComputerAutomationInvalidation, ComputerAutomationState } from '@varin/protocol';
 import { bindClientSurfaceSession, clientSurfaceQuery, handleClientSettingsRequest } from '@/lib/client-settings-bridge';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 
@@ -72,6 +72,7 @@ export type VarinEvent = StreamReadyEvent | ScheduledTaskRanEvent | SessionCreat
   | { type: 'ssh-instance-status'; status: unknown }
   | { type: 'bot-changed'; botId: string }
   | ({ type: 'computer-activity' } & ComputerActivityEntry)
+  | ({ type: 'computer-automation-invalidated' } & ComputerAutomationInvalidation)
   | { type: 'computer-automation'; state: ComputerAutomationState };
 type Listener = (event: VarinEvent) => void;
 
@@ -246,6 +247,13 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     return;
   }
 
+  if (envelope.type === 'varin:computer-automation-invalidated') {
+    try {
+      const invalidation = parseComputerAutomationInvalidation(envelope.properties);
+      for (const listener of listeners) listener({ type: 'computer-automation-invalidated', ...invalidation });
+    } catch { /* Ignore malformed owner identities. */ }
+    return;
+  }
   if (envelope.type === 'varin:computer-automation') {
     try {
       const state = parseComputerAutomationState(envelope.properties);
@@ -411,9 +419,11 @@ const connect = () => {
   // client-owned settings requests (Stage S).
   const source = new EventSource(getRuntimeUrlResolver().sse('/api/varin/events', clientSurfaceQuery()));
   source.onopen = () => {
+    if (eventSource !== source) return;
     resetHeartbeatTimer();
   };
   source.onmessage = (event) => {
+    if (eventSource !== source) return;
     resetHeartbeatTimer();
     const envelope = parseEnvelope(event.data);
     if (!envelope) {
@@ -423,6 +433,7 @@ const connect = () => {
   };
 
   source.onerror = () => {
+    if (eventSource !== source) return;
     cleanupSource();
     boundSessionId = null;
     surfaceBindingGeneration += 1;

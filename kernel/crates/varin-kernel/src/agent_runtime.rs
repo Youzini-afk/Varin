@@ -876,7 +876,7 @@ pub(crate) fn spawn(
                         }
                         if method.starts_with("runtime.host_job.")
                             || method == "runtime.research.scopes"
-                            || method == "runtime.computer.scope"
+                            || method.starts_with("runtime.computer.")
                         {
                             let runtime = runtime.clone();
                             let method = method.to_owned();
@@ -885,7 +885,7 @@ pub(crate) fn spawn(
                             let done = finished.clone();
                             let cancelled = cancellation.clone();
                             thread::spawn(move || {
-                                let result = if method == "runtime.computer.scope" { computer_commands::execute(runtime, params, &cancelled) }
+                                let result = if method.starts_with("runtime.computer.") { computer_commands::execute(runtime, &method, params, &cancelled) }
                                 else { host_job_commands::execute(runtime, &method, params, &cancelled) };
                                 let response = match result {
                                     Ok(value) => response_ok(&response_id, value),

@@ -14,14 +14,19 @@ const action = schema({ kind: { enum: ['click', 'type', 'key', 'scroll', 'drag',
   direction: { enum: ['up', 'down', 'left', 'right'] }, pages: number, text: { type: 'string' }, key: string,
   value: { type: 'string' }, action: string, returnState: { enum: ['none', 'tree', 'screenshot'] },
 }, ['kind', 'app']);
-const declaration = (method: string, operation: 'read' | 'effect', description: string, inputSchema: JsonObject): VarinExtensionServiceProvision => ({
+const declaration = (method: string, operation: 'read' | 'effect', description: string, inputSchema: JsonObject, job = false): VarinExtensionServiceProvision => ({
   id: `varin.computer.${method}`, version: 1,
-  tool: { name: `computer_${method}`, description, completion: 'result', operation, inputSchema, outputSchema: { type: 'object' } },
+  tool: { name: `computer_${method}`, description, completion: job ? 'job' : 'result', ...(job ? { lifetime: 'thread' as const } : {}), operation, inputSchema, outputSchema: { type: 'object' } },
 });
 /** Product manifest, Host decoder and Tool directory consume this same declaration. */
 export const COMPUTER_TOOL_DECLARATIONS = [
-  declaration('list', 'read', 'Discover real computers, desktops and reported capabilities. Child executions can discover capabilities, but desktop assignment requests are not connected yet. Desktop discovery may probe the original owner.', schema({})),
-  declaration('apps', 'read', 'List applications on an assigned desktop. Root executions can use an enabled desktop; child executions require an assignment, currently unavailable.', schema(desktop)),
+  declaration('request', 'effect', 'Ask the root work for a desktop assignment. Returns an accepted pending request, never a grant. Continue other work or explicitly call computer_wait for its decision.', schema({ ...desktop, access: { enum: ['observe', 'control'] }, reason: string }, ['access', 'reason'])),
+  declaration('access', 'read', 'Read the original desktop requests and current assignments for this task family. A past granted request alone does not prove its assignment is still available.', schema({})),
+  declaration('grant', 'effect', 'As the root work, grant a pending child desktop request through the original physical owner. Other controllers must release first. This does not bypass the child’s tool permissions.', schema({ requestId: string }, ['requestId'])),
+  declaration('deny', 'effect', 'As the root work, deny a pending child desktop request with an optional reason.', schema({ requestId: string, reason: string }, ['requestId'])),
+  declaration('wait', 'read', 'Explicitly observe this execution’s original Computer request decision. Returns a JobAccepted receipt, parks on the durable event, and delivers the decision once. Cancelling this observation does not cancel the request or release an assignment.', schema({ requestId: string }, ['requestId']), true),
+  declaration('list', 'read', 'Discover real computers, desktops and reported capabilities. Child executions can discover capabilities and request a desktop assignment from their root. Desktop discovery may probe the original owner.', schema({})),
+  declaration('apps', 'read', 'List applications on an assigned desktop. Root executions can use an enabled desktop; child executions require their original desktop assignment.', schema(desktop)),
   declaration('observe', 'read', 'Observe one app/window through the original desktop owner. Keep observationId for element or screenshot-coordinate actions. Human handback requires a fresh observation. Automatic Agent handback input is not connected.', schema({ ...desktop, app: string, window: { anyOf: [number, string] }, includeScreenshot: { type: 'boolean' }, observationId: string,
     offset: { type: 'integer', minimum: 0 }, textLimit: { anyOf: [{ type: 'integer', minimum: 1 }, { const: 'max' }] },
     maxTreeNodes: { type: 'integer', minimum: 1 }, maxTreeDepth: { type: 'integer', minimum: 1 } }, ['app'])),

@@ -129,7 +129,7 @@ afterEach(() => {
 const piWork = (sessionId: string) => ({ runtime: 'pi' as const, sessionId });
 const piActor = (sessionId: string, runId = `${sessionId}:run`, rootSessionId = sessionId, rootRunId = runId): ComputerActor => ({
   execution: { work: piWork(sessionId), runId }, rootWork: piWork(rootSessionId), rootExecution: { work: piWork(rootSessionId), runId: rootRunId },
-  registry: { scopeId: 'scope', threadId: sessionId }, label: sessionId, readOnly: false,
+  registry: { scopeId: 'scope', threadId: sessionId }, label: sessionId, roleAccess: { kind: 'pi-role', readOnly: false },
 });
 const directActions = new WeakMap<ReturnType<typeof createOwner>, ReturnType<typeof createOwner>['act']>();
 const createComputerService = (options: ComputerServiceOptions) => {
@@ -229,7 +229,7 @@ describe("computer service (BC4)", () => {
     }
   });
   it('keeps observations isolated per execution, fences old app epochs, and allows fresh work after user cancellation', async () => {
-    const actors = new Map<string, ComputerActor>(['main', 'lookup'].map(id => [id, { ...piActor(id, `${id}:run`, 'main', 'main:run'), readOnly: id === 'lookup' }]));
+    const actors = new Map<string, ComputerActor>(['main', 'lookup'].map(id => [id, { ...piActor(id, `${id}:run`, 'main', 'main:run'), roleAccess: { kind: 'pi-role', readOnly: id === 'lookup' } }]));
     const driver = makeDriver(async op => op.tool === 'get_app_state' ? okResponse({ snapshot: appSnapshot() }) : okResponse());
     const { service } = makeService(driver, { resolveActor: async ref => actors.get(ref.runtime === 'pi' ? ref.sessionId : '') ?? null, notifyActor: async () => {} });
     const c = service.automation;

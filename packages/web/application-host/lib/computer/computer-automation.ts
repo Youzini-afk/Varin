@@ -27,10 +27,15 @@ export function createComputerAutomation(options: {
   bindDesktop(actor: ComputerActor, desktopId: string): Promise<void>;
   cancelWork?(actor: ComputerActor, desktopId?: string): Promise<void>;
   onChange(state: ComputerAutomationState): void;
+  onInvalidate?(work: ComputerWorkRef): void;
 }) {
   const context = new AsyncLocalStorage<ComputerAdmission>();
   const leases = new Map<string, ComputerLease>();
+  // Pi owns its existing ephemeral requests. Native metadata is read from the Catalog port.
   const requests = new Map<string, ComputerAccessRequest>();
+  let nativeRequests: { snapshot(scope: ComputerWorkScope): Promise<ComputerAccessRequest[]>; cancel(actor: ComputerActor, desktopId: string | undefined, family: boolean): Promise<void> } | undefined;
+  const releasedAssignments = new Set<string>();
+  const pendingAssignments = new Set<string>();
   const controllers = new Map<string, { actor: ComputerActor; abort: AbortController; desktopId?: string; access: ComputerAccess }>();
   const cancellations = new Map<string, Promise<ComputerAutomationState>>();
   const cancellationState = new Map<string, Exclude<ComputerAutomationState['status'], 'enabled'>>();
@@ -51,7 +56,7 @@ export function createComputerAutomation(options: {
   const revokedClaims = new Set<string>();
   const delegationFor = (actor: ComputerActor) => [...peerClaims.values()].find(entry => entry.actor === actor);
   const originFor = (actor: ComputerActor) => { const entry = delegationFor(actor); return entry ? JSON.stringify([entry.origin, entry.assignmentId]) : undefined; };
-  const roundKey = (actor: ComputerActor) => JSON.stringify([originFor(actor) ?? null, actor.rootExecution ? computerExecutionKey(actor.rootExecution) : computerWorkKey(actor.rootWork)]);
+  const roundKey = (actor: ComputerActor) => JSON.stringify([originFor(actor) ?? null, actor.execution.work.runtime === 'agent' ? computerExecutionKey(actor.execution) : actor.rootExecution ? computerExecutionKey(actor.rootExecution) : computerWorkKey(actor.rootWork)]);
   const workKey = (actor: ComputerActor, desktopId?: string) => desktopId ? `${roundKey(actor)}\0${desktopId}` : roundKey(actor);
   const statusFor = (actor: ComputerActor, desktopId?: string) => {
     const prefixes = [roundKey(actor), `execution:${actorKey(actor)}`];
@@ -60,7 +65,7 @@ export function createComputerAutomation(options: {
   };
   const actorKey = (actor: ComputerActor) => JSON.stringify([originFor(actor) ?? null, computerExecutionKey(actor.execution)]);
   const rootActor = (actor: ComputerActor) => sameComputerWork(actor.execution.work, actor.rootWork);
-  const hasEnded = (actor: ComputerActor) => !originFor(actor) && (ended.has(computerExecutionKey(actor.execution)) || Boolean(actor.rootExecution && ended.has(computerExecutionKey(actor.rootExecution))));
+  const hasEnded = (actor: ComputerActor) => !originFor(actor) && (ended.has(computerExecutionKey(actor.execution)) || Boolean(actor.execution.work.runtime === 'pi' && actor.rootExecution && ended.has(computerExecutionKey(actor.rootExecution))));
   const fenceKeys = (actor: ComputerActor, desktopId?: string) => { const keys = [roundKey(actor), `execution:${actorKey(actor)}`]; return desktopId ? [...keys, ...keys.map(key => `${key}\0${desktopId}`)] : keys; };
   const sameFamily = (left: ComputerActor, right: ComputerActor) => originFor(left) === originFor(right) && sameComputerWork(left.rootWork, right.rootWork);
   const scopeFor = (actor: ComputerActor): ComputerWorkScope => ({ work: actor.execution.work, rootWork: actor.rootWork,
@@ -77,7 +82,7 @@ export function createComputerAutomation(options: {
       if (status) add(actor, undefined, status);
     }
     for (const lease of leases.values()) {
-      if (!scope.currentRootExecution || !lease.actor.rootExecution || !sameComputerExecution(lease.actor.rootExecution, scope.currentRootExecution)) add(lease.actor, lease.desktopId, 'cancel-unconfirmed');
+      if (lease.actor.execution.work.runtime === 'pi' ? !scope.currentRootExecution || !lease.actor.rootExecution || !sameComputerExecution(lease.actor.rootExecution, scope.currentRootExecution) : ended.has(computerExecutionKey(lease.actor.execution)) || sameComputerWork(lease.actor.execution.work, scope.work) && (!scope.currentExecution || !sameComputerExecution(lease.actor.execution, scope.currentExecution))) add(lease.actor, lease.desktopId, 'cancel-unconfirmed');
     }
     for (const lease of failedReleases.values()) add(lease.actor, lease.desktopId, 'cancel-unconfirmed');
     for (const entry of options.pendingReleases?.() ?? []) add(entry.actor, entry.desktopId, 'cancel-unconfirmed');
@@ -87,7 +92,7 @@ export function createComputerAutomation(options: {
     const cleanups = cleanupsFor(scope);
     const current = scope.currentRootExecution;
     const currentRound = (candidate: ComputerActor) => !originFor(candidate) && sameComputerWork(candidate.rootWork, scope.rootWork)
-      && (current ? Boolean(candidate.rootExecution && sameComputerExecution(candidate.rootExecution, current)) : candidate.rootExecution === null);
+      && (candidate.execution.work.runtime === 'agent' ? !hasEnded(candidate) && (!sameComputerWork(candidate.execution.work, scope.work) || Boolean(scope.currentExecution && sameComputerExecution(candidate.execution, scope.currentExecution))) : current ? Boolean(candidate.rootExecution && sameComputerExecution(candidate.rootExecution, current)) : candidate.rootExecution === null);
     const currentLeases = [...leases.values()].filter(lease => currentRound(lease.actor));
     const currentRequests = [...requests.values()].filter(request => sameComputerWork(request.actor.rootWork, scope.rootWork)
       && (request.status === 'granted' && currentRound(request.actor) || request.status === 'pending' && !hasEnded(request.actor)));
@@ -95,9 +100,14 @@ export function createComputerAutomation(options: {
       status: cleanups.some(cleanup => cleanup.status === 'cancelling') ? 'cancelling' : cleanups.length ? 'cancel-unconfirmed' : 'enabled',
       leases: currentLeases, requests: currentRequests, cleanups };
   };
+  const invalidate = (work: ComputerWorkRef) => {
+    // Projection consumers read their own current state; no request body or result is cached here.
+    try { options.onInvalidate?.(work); } catch { /* presentation does not authorize operations */ }
+  };
   const publish = (actor: ComputerActor) => {
     lastActors.set(actorKey(actor), actor);
     if (originFor(actor)) return;
+    if (actor.execution.work.runtime === 'agent') { invalidate(actor.rootWork); return; }
     try { options.onChange(structuredClone(stateFor(actor))); } catch { /* presentation does not authorize operations */ }
   };
   const wake = (id: string) => { for (const listener of waiters.get(id) ?? []) listener(); };
@@ -115,18 +125,18 @@ export function createComputerAutomation(options: {
     }
   };
   const owner = (desktopId: string) => [...leases.values()].find(lease => lease.desktopId === desktopId && lease.access === 'control');
-  const issue = async (actor: ComputerActor, desktopId: string, access: ComputerAccess) => {
+  const issue = async (actor: ComputerActor, desktopId: string, access: ComputerAccess, assignmentId?: string) => {
     assertRound(actor, desktopId);
     if (access === 'control') {
-      if (actor.readOnly) throw new HarnessServiceError('forbidden', 'This retrieval/discussion thread can only observe assigned desktops');
+      if ((actor.roleAccess.kind === 'pi-role' && actor.roleAccess.readOnly)) throw new HarnessServiceError('forbidden', 'This retrieval/discussion thread can only observe assigned desktops');
       if (transfers.has(desktopId) || unconfirmed.has(desktopId) || !options.controlAvailable(desktopId)) throw new HarnessServiceError('forbidden', 'Desktop control is changing, held by a human, or its previous input release is unconfirmed');
       const holder = owner(desktopId);
       if (holder && actorKey(holder.actor) !== actorKey(actor)) throw new HarnessServiceError('forbidden', `Desktop is reserved by ${holder.actor.label}; the main thread must coordinate its release first`);
-      if (holder) { await ready.get(holder.id); return holder; }
+      if (holder) { if (assignmentId && holder.id !== assignmentId) throw new HarnessServiceError('forbidden', 'Release the existing assignment before granting another request'); await ready.get(holder.id); return holder; }
     }
     const same = [...leases.values()].find(lease => lease.desktopId === desktopId && actorKey(lease.actor) === actorKey(actor) && lease.access === access);
-    if (same) { await ready.get(same.id); return same; }
-    const lease: ComputerLease = { id: randomUUID(), desktopId, actor, access, grantedAt: new Date().toISOString() };
+    if (same) { if (assignmentId && same.id !== assignmentId) throw new HarnessServiceError('forbidden', 'An existing assignment belongs to a different request'); await ready.get(same.id); return same; }
+    const lease: ComputerLease = { id: assignmentId ?? randomUUID(), desktopId, actor, access, grantedAt: new Date().toISOString() };
     leases.set(lease.id, lease);
     const abort = new AbortController(); reservationAborts.set(lease.id, abort);
     const reservation = Promise.resolve().then(() => options.reserve?.(lease, abort.signal)); ready.set(lease.id, reservation);
@@ -138,13 +148,13 @@ export function createComputerAutomation(options: {
     const sequence = context.getStore()?.sequence ?? ++admissionSequence;
     const actor = await resolve(work, desktopId, sequence, expected);
     assertRound(actor, desktopId);
-    if (access === 'control' && actor.readOnly) throw new HarnessServiceError('forbidden', 'This thread has read-only Computer Use access');
+    if (access === 'control' && (actor.roleAccess.kind === 'pi-role' && actor.roleAccess.readOnly)) throw new HarnessServiceError('forbidden', 'This thread has read-only Computer Use access');
     let lease: ComputerLease | undefined;
     if (!rootActor(actor) && (desktopId || access === 'control')) {
       lease = [...leases.values()].find(item => item.desktopId === desktopId && actorKey(item.actor) === actorKey(actor)
         && roundKey(item.actor) === roundKey(actor) && (item.access === 'control' || access === 'observe'));
-      if (!lease || (access === 'control' && lease.access !== 'control')) throw new HarnessServiceError('forbidden', actor.execution.work.runtime === 'agent'
-        ? 'assignment-unavailable: Child Computer Use assignments are not connected; only catalog discovery is available'
+      if (!lease || pendingAssignments.has(lease.id) || (access === 'control' && lease.access !== 'control')) throw new HarnessServiceError('forbidden', actor.execution.work.runtime === 'agent'
+        ? 'assignment-unavailable: Request a desktop assignment with computer_request, then explicitly computer_wait if you need its decision before continuing'
         : 'Request a desktop assignment from the main thread with computer.request before using Computer Use');
     } else if (desktopId) lease = await issue(actor, desktopId, access);
     const abort = new AbortController();
@@ -168,16 +178,16 @@ export function createComputerAutomation(options: {
       reservationAborts.get(lease.id)?.abort(new Error('Desktop assignment was revoked'));
       reservationAborts.delete(lease.id);
       const reservation = ready.get(lease.id);
-      leases.delete(lease.id);
+      leases.delete(lease.id); pendingAssignments.delete(lease.id);
       ready.delete(lease.id);
-      for (const request of requests.values()) if (request.desktopId === lease.desktopId && actorKey(request.actor) === actorKey(lease.actor) && request.status === 'granted') { request.status = 'released'; wake(request.id); }
+      for (const request of requests.values()) if (request.desktopId === lease.desktopId && actorKey(request.actor) === actorKey(lease.actor) && request.status === 'granted') { request.status = 'released'; request.revision += 1; wake(request.id); }
       publish(lease.actor);
       foreign.delete(lease.id);
       if (lease.access === 'control') transfers.add(lease.desktopId);
       try {
         await reservation?.catch(() => undefined);
         if (!(await context.exit(() => options.release(lease))).released) throw new ComputerReleaseUnconfirmed();
-        failedReleases.delete(lease.id); if (lease.access === 'control') unconfirmed.delete(lease.desktopId);
+        releasedAssignments.add(lease.id); failedReleases.delete(lease.id); if (lease.access === 'control') unconfirmed.delete(lease.desktopId);
       }
       catch (error) { failedReleases.set(lease.id, lease); if (lease.access === 'control') unconfirmed.add(lease.desktopId); throw error; }
       finally { if (lease.access === 'control') transfers.delete(lease.desktopId); }
@@ -189,13 +199,13 @@ export function createComputerAutomation(options: {
     const sequence = ++admissionSequence;
     const actor = await resolve(work, desktopId, sequence); assertRound(actor, desktopId);
     if (work.runtime === 'agent') throw new HarnessServiceError('unavailable', 'Computer assignment requests are not connected for Agent executions');
-    if (actor.readOnly && access === 'control') throw new HarnessServiceError('forbidden', 'Retrieval/discussion threads can request observation only');
+    if ((actor.roleAccess.kind === 'pi-role' && actor.roleAccess.readOnly) && access === 'control') throw new HarnessServiceError('forbidden', 'Retrieval/discussion threads can request observation only');
     if (!reason.trim()) throw new HarnessServiceError('invalid-params', 'Describe the work requiring this desktop');
     const pending = [...requests.values()].find(request => actorKey(request.actor) === actorKey(actor) && request.desktopId === desktopId && request.access === access && request.status === 'pending');
     if (pending) return structuredClone(pending);
     const desktopLabel = await options.describeDesktop?.(desktopId);
     await resolve(work, desktopId, sequence); assertRound(actor, desktopId);
-    const request: ComputerAccessRequest = { id: randomUUID(), desktopId, actor, access, reason, status: 'pending', createdAt: new Date().toISOString(), ...(desktopLabel ? { desktopLabel } : {}) };
+    const request: ComputerAccessRequest = { id: randomUUID(), desktopId, actor, access, reason, status: 'pending', revision: 1, createdAt: new Date().toISOString(), ...(desktopLabel ? { desktopLabel } : {}) };
     requests.set(request.id, request); publish(actor);
     try {
       await options.notify(actor, `Computer Use request ${request.id} from ${actor.label}: ${access} access to desktop ${desktopId}. Task: ${reason}\nCoordinate the desktop and decide with computer.grant or computer.deny using this requestId.`, true, request.id, 'root');
@@ -205,7 +215,7 @@ export function createComputerAutomation(options: {
   const decide = async (work: ComputerWorkRef, requestId: string, approved: boolean, detail?: string) => {
     const manager = await resolve(work); assertRound(manager);
     if (work.runtime === 'agent') throw new HarnessServiceError('unavailable', 'Computer assignment decisions are not connected for Agent executions');
-    if (!rootActor(manager) || manager.readOnly) throw new HarnessServiceError('forbidden', 'Only the main thread can decide desktop requests');
+    if (!rootActor(manager) || (manager.roleAccess.kind === 'pi-role' && manager.roleAccess.readOnly)) throw new HarnessServiceError('forbidden', 'Only the main thread can decide desktop requests');
     const request = requests.get(requestId);
     if (!request || !sameComputerWork(request.actor.rootWork, manager.execution.work)) throw new HarnessServiceError('not-found', 'Desktop request does not belong to this task family');
     if (request.status !== 'pending') return structuredClone(request);
@@ -222,7 +232,7 @@ export function createComputerAutomation(options: {
       catch (error) { await removeLease(lease); throw error; }
       request.actor = lease.actor;
     }
-    request.status = approved ? 'granted' : 'denied';
+    request.status = approved ? 'granted' : 'denied'; request.revision += 1;
     if (detail) request.detail = detail;
     publish(manager); wake(request.id);
     await options.notify(request.actor, approved ? `Computer Use request ${request.id} granted: ${request.access} on ${request.desktopId}. Observe the current scene before acting. Release the assignment when this work segment is complete.`
@@ -246,32 +256,51 @@ export function createComputerAutomation(options: {
   };
   const release = async (work: ComputerWorkRef, desktopId?: string) => {
     const actor = await resolve(work);
-    const own = [...leases.values()].filter(lease => (actorKey(lease.actor) === actorKey(actor)
+    const own = [...leases.values(), ...failedReleases.values()].filter(lease => (actorKey(lease.actor) === actorKey(actor)
       || rootActor(actor) && sameFamily(lease.actor, actor)) && (!desktopId || lease.desktopId === desktopId));
     for (const lease of own) await removeLease(lease);
   };
   const cancelWork = async (actor: ComputerActor, desktopId?: string, exact = false) => {
     const key = exact ? `execution:${actorKey(actor)}${desktopId ? `\0${desktopId}` : ''}` : workKey(actor, desktopId);
-    const belongs = (candidate: ComputerActor, target?: string) => (exact ? actorKey(candidate) === actorKey(actor) : roundKey(candidate) === roundKey(actor)) && (!desktopId || target === desktopId);
+    const accepted = [...leases.values(), ...failedReleases.values(), ...controllers.values(), ...(options.pendingReleases?.() ?? [])];
+    const captured = new Set(accepted.filter(entry => actor.execution.work.runtime === 'agent' && rootActor(actor) && sameFamily(entry.actor, actor)).map(entry => actorKey(entry.actor)));
+    const belongs = (candidate: ComputerActor, target?: string) => (exact ? actorKey(candidate) === actorKey(actor) : actor.execution.work.runtime === 'agent' ? actorKey(candidate) === actorKey(actor) || captured.has(actorKey(candidate)) : roundKey(candidate) === roundKey(actor)) && (!desktopId || target === desktopId);
     const ongoing = cancellations.get(key);
     if (ongoing) return ongoing;
     const cancellationId = randomUUID();
     cancelledThrough.set(key, admissionSequence);
     revisions.set(key, (revisions.get(key) ?? 0) + 1);
     cancellationState.set(key, 'cancelling');
+    // Fence only executions captured by this Stop. New work segments in the same Run remain allowed.
+    for (const candidate of accepted) if (belongs(candidate.actor, candidate.desktopId)) {
+      const ownKey = `execution:${actorKey(candidate.actor)}${desktopId ? `\0${desktopId}` : ''}`;
+      cancelledThrough.set(ownKey, admissionSequence); revisions.set(ownKey, (revisions.get(ownKey) ?? 0) + 1);
+    }
+    const requestCancellation = actor.execution.work.runtime === 'agent' ? nativeRequests?.cancel(actor, desktopId, !exact && rootActor(actor)) : undefined;
     const affected = [...leases.values(), ...failedReleases.values()].filter(lease => belongs(lease.actor, lease.desktopId));
-    const participants = [...affected.map(lease => lease.actor), ...[...controllers.values()].filter(entry => belongs(entry.actor, entry.desktopId)).map(entry => entry.actor)];
+    const participants = accepted.filter(entry => belongs(entry.actor, entry.desktopId)).map(entry => entry.actor);
     const recipients = new Map([[actorKey(actor), actor], ...participants.map(caller => [actorKey(caller), caller] as const)]);
     for (const { actor: caller, abort, desktopId: target } of controllers.values()) if (belongs(caller, target)) abort.abort(new Error('User cancelled the current computer work'));
-    for (const request of requests.values()) if (belongs(request.actor, request.desktopId) && request.status === 'pending') { request.status = 'denied'; request.detail = 'User cancelled the current computer work'; recipients.set(actorKey(request.actor), request.actor); wake(request.id); }
+    for (const request of requests.values()) if (belongs(request.actor, request.desktopId) && request.status === 'pending') { request.status = 'denied'; request.revision += 1; request.detail = 'User cancelled the current computer work'; recipients.set(actorKey(request.actor), request.actor); wake(request.id); }
     publish(actor);
     const cancelled = (async () => {
-      const results = await Promise.allSettled([
-        ...affected.map(removeLease), ...[...new Map(participants.map(participant => [actorKey(participant), participant])).values()].map(async recipient => {
+      // Original physical cleanup starts independently of Catalog cancellation or identity reads.
+      // Drain live leases first, then retry only the already-captured physical marker owners.
+      const physical = (async () => {
+        const results = await Promise.allSettled(affected.map(removeLease));
+        if (options.cancelWork) results.push(...await Promise.allSettled(
+          (actor.execution.work.runtime === 'agent' ? [...recipients.values()] : [actor])
+            .map(recipient => options.cancelWork!(recipient, desktopId)),
+        ));
+        return results;
+      })();
+      const metadata = Promise.allSettled([
+        ...(requestCancellation ? [requestCancellation] : []),
+        ...[...new Map(participants.map(participant => [actorKey(participant), participant])).values()].map(async recipient => {
           if (await isCurrent(recipient)) await options.revokeSession(recipient);
         }),
       ]);
-      if (options.cancelWork) results.push(...await Promise.allSettled([options.cancelWork(actor, desktopId)]));
+      const results = [...await physical, ...await metadata];
       const unconfirmed = results.some(result => result.status === 'rejected');
       cancellations.delete(key);
       if (unconfirmed) cancellationState.set(key, 'cancel-unconfirmed');
@@ -309,10 +338,11 @@ export function createComputerAutomation(options: {
   const finishRun = async (execution: ComputerExecutionRef) => {
     ended.add(computerExecutionKey(execution));
     const belongs = (actor: ComputerActor) => !originFor(actor) && (sameComputerExecution(actor.execution, execution)
-      || Boolean(actor.rootExecution && sameComputerExecution(actor.rootExecution, execution)));
+      || Boolean(actor.execution.work.runtime === 'pi' && actor.rootExecution && sameComputerExecution(actor.rootExecution, execution)));
     for (const { actor, abort } of controllers.values()) if (belongs(actor)) abort.abort(new Error('Computer Use execution ended'));
-    for (const request of requests.values()) if (belongs(request.actor) && request.status === 'pending') { request.status = 'denied'; request.detail = 'Execution ended'; wake(request.id); }
+    for (const request of requests.values()) if (belongs(request.actor) && request.status === 'pending') { request.status = 'denied'; request.revision += 1; request.detail = 'Execution ended'; wake(request.id); }
     const results = await Promise.allSettled([
+      ...(execution.work.runtime === 'agent' ? [...lastActors.values()].filter(actor => sameComputerExecution(actor.execution, execution)).map(actor => nativeRequests?.cancel(actor, undefined, false)) : []),
       ...[...leases.values(), ...failedReleases.values()].filter(lease => belongs(lease.actor)).map(removeLease),
       ...[...lastActors.values()].filter(belongs).map(actor => options.revokeSession(actor)),
     ]);
@@ -331,12 +361,47 @@ export function createComputerAutomation(options: {
     const scope = await options.resolveScope(work);
     if (!scope) throw new ComputerError('computer-work-not-found', 'The selected Computer Use work no longer exists; reopen the conversation');
     const actor = await options.resolveActor(work) ?? [...lastActors.values()].find(actor => !originFor(actor) && sameComputerWork(actor.rootWork, scope.rootWork));
-    if (actor) return structuredClone(stateFor(actor, scope));
     const cleanups = cleanupsFor(scope);
-    return { ...scope, active: cleanups.length > 0, status: cleanups.length ? 'cancel-unconfirmed' : 'enabled', leases: [], requests: [], cleanups };
+    const state: ComputerAutomationState = actor ? structuredClone(stateFor(actor, scope))
+      : { ...scope, active: cleanups.length > 0, status: cleanups.length ? 'cancel-unconfirmed' : 'enabled', leases: [], requests: [], cleanups };
+    if (scope.work.runtime === 'agent' && nativeRequests) {
+      state.requests = await nativeRequests.snapshot(scope);
+      state.active ||= state.requests.some(request => request.status === 'pending' || request.status === 'granting');
+    }
+    return state;
   };
   return {
-    context, authorize, request: accessRequest, decide, wait, release, stop, finishRun, snapshot, isCurrent,
+    attachRequests(authority: NonNullable<typeof nativeRequests>) { if (nativeRequests) throw new Error('Computer request authority already attached'); nativeRequests = authority; },
+    assignment(id: string) { return leases.get(id); },
+    assignmentState(id: string): 'active' | 'released' | 'unavailable' { return leases.has(id) ? 'active' : releasedAssignments.has(id) ? 'released' : 'unavailable'; },
+    async grantRequest(execution: ComputerExecutionRef, rootWork: ComputerWorkRef, manager: ComputerExecutionRef | null, desktopId: string, access: ComputerAccess, assignmentId: string, signal?: AbortSignal) {
+      signal?.throwIfAborted();
+      const target = await resolve(execution.work, desktopId, undefined, execution);
+      if (!sameComputerWork(target.rootWork, rootWork) || sameComputerWork(target.execution.work, rootWork)) throw new HarnessServiceError('forbidden', 'Request belongs to another root work');
+      signal?.throwIfAborted();
+      const holder = owner(desktopId);
+      if (access === 'control' && holder && sameComputerWork(holder.actor.execution.work, rootWork)) await removeLease(holder);
+      signal?.throwIfAborted();
+      pendingAssignments.add(assignmentId);
+      const lease = await issue({ ...target, rootExecution: manager }, desktopId, access, assignmentId);
+      return structuredClone(lease);
+    },
+    confirmRequest(assignmentId: string) { if (leases.has(assignmentId)) pendingAssignments.delete(assignmentId); },
+    async releaseRequest(assignmentId: string) { const lease = leases.get(assignmentId) ?? failedReleases.get(assignmentId); if (lease) await removeLease(lease); },
+    async manage<T>(work: ComputerWorkRef, expected: ComputerExecutionRef, task: (signal: AbortSignal) => Promise<T>, desktopId?: string): Promise<T> {
+      const actor = await resolve(work, desktopId, undefined, expected); assertRound(actor);
+      const abort = new AbortController(), id = randomUUID();
+      controllers.set(id, { actor, abort, access: 'observe', ...(desktopId ? { desktopId } : {}) });
+      try { return await task(abort.signal); } finally { controllers.delete(id); }
+    },
+    async cancelAssigned(work: ComputerWorkRef, execution: ComputerExecutionRef, desktopId: string) {
+      const actor = await resolve(work, desktopId, undefined, execution);
+      const controller = owner(desktopId)?.actor;
+      if (controller && !(sameComputerExecution(controller.execution, execution) || rootActor(actor) && sameFamily(controller, actor))) throw new HarnessServiceError('forbidden', 'This work cannot cancel another desktop controller');
+      if (!controller && ![...leases.values(), ...failedReleases.values()].some(lease => lease.desktopId === desktopId && sameComputerExecution(lease.actor.execution, execution))) throw new HarnessServiceError('forbidden', 'This execution has no assignment to cancel');
+      await cancelWork(actor, desktopId, !rootActor(actor));
+    },
+    context, invalidate, authorize, request: accessRequest, decide, wait, release, stop, finishRun, snapshot, isCurrent,
     async cancelDesktop(desktopId: string) {
       const actor = owner(desktopId)?.actor ?? [...failedReleases.values()].find(lease => lease.desktopId === desktopId)?.actor;
       if (!actor) return;
@@ -380,7 +445,7 @@ export function createComputerAutomation(options: {
     resetDesktop(desktopId: string) {
       for (const lease of leases.values()) if (lease.desktopId === desktopId) {
         leases.delete(lease.id); foreign.delete(lease.id);
-        for (const request of requests.values()) if (request.desktopId === desktopId && request.status === 'granted') { request.status = 'released'; wake(request.id); }
+        for (const request of requests.values()) if (request.desktopId === desktopId && request.status === 'granted') { request.status = 'released'; request.revision += 1; wake(request.id); }
         publish(lease.actor);
       }
       unconfirmed.delete(desktopId);

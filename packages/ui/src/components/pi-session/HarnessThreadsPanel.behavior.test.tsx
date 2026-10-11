@@ -492,7 +492,7 @@ describe('work overview presentation', () => {
     const execution = { work, runId: 'run' };
     mocks.computer.state = { work, rootWork: work, currentExecution: execution, currentRootExecution: execution,
       active: true, status: 'enabled', requests: [], cleanups: [], leases: [{ id: 'lease', desktopId: 'desktop', access: 'control', grantedAt: 'now', actor: {
-        execution, rootWork: work, rootExecution: execution, registry: { scopeId: 'workspace-1', threadId: 'root' }, label: 'Main', readOnly: false,
+        execution, rootWork: work, rootExecution: execution, registry: { scopeId: 'workspace-1', threadId: 'root' }, label: 'Main', roleAccess: { kind: 'pi-role', readOnly: false },
       } }] };
     await act(async () => root.render(<HarnessThreadStateContext.Provider value={state}><HarnessThreadsPanel workspaceId="workspace-1" parentSessionId="parent-1" fallbackCwd="/parent" /></HarnessThreadStateContext.Provider>));
     await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="harness.overview.peek"]')!.click());

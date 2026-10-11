@@ -19,6 +19,14 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-11 增量：Native child Computer 请求与持久观察
+
+- 本片贯穿**原真实有文件来源的 ChildTask**，两调用 origin 的 request/access/grant/deny/Wait 共用发行工具与原执行权限。请求受理不是授权；原 Catalog 短请求/决定/Operation/Wait 与原 Computer 物理 assignment、input/release 仍各有唯一权威，reason/history 先锁外持久化。Catalog **43**、desktop runtime **3**直接拒旧，外部资产保留。
+- 原 typed Environment input 与请求同事务受理，idle root 沿真实 launch/Goal/pause/question 入口新 Run；只中断实际观察请求 child 的依赖 Wait，不取消 child 或误报完成，也不破坏无关等待。请求 child 先结束会撤销未交付唤醒。显式 Computer Wait 独立释放调用槽、恢复一次交付；结束观察不撤销真实桌面。
+- root tool 与认证 User 决定共享原 revision/key/choice/reason，idle root 不造 Run。先实际 reservation 再发布 grant，取消赢发布则释放原 assignment；丢回应只对账原 claim，不因新 Host/缺失 assignment 重发。Native child 跟自身 Run 生命周期，root 自然终态不停止独立 child；精确 Stop 与三种自然终态沿原物理 owner 排空。
+- 实际 client/认证 route/UI 可决定请求、idle root 可停止明确 child assignment。独审已修概览漏 Stop、正文故障阻清理、原 claim 恢复读正文与 pending marker 等 Catalog 才停止的接缝；新请求投影通知沿短 invalidation→真实 parser/hook→原 state API 闭合，坏正文显式错误不堵受理；旧 Host SSE 回调不再串到新连接。原失败链已复验，独审接受；原生组合253、最后Host23、owner87/1明确排除、最后UI24与实际发行包/broker/认证route链分层通过。fresh binary、实际bundle、同源证据与准确范围见[本片验收](../reviews/runtime-computer-requests-2026-10-11.md)。
+- **无文件来源的纯能力 child 仍缺真实受理，是紧接优先片**；不靠假目录、伪文件源或控制端手插记录冒称支持。可信人工 handback 接续、持久 Computer scripts 和两设计其他环境/领域能力仍继续。完整 IPC/实际桌面/平台与性能验收独立，用户最后默认切换/Pi 与资产迁移边界保持。
+
 ## 2026-10-11 增量：Native Root Computer 与原物理 owner
 
 - 发行 `varin.builtin.computer` 的六个普通单调用工具接原 SDK/broker、真实 ModelStep/PolicyAction、原 ToolBridge/回执和 ComputerService；无文件来源也可执行。共享声明拥有 schema，原配置/权限与 immutable binding 仍生效，默认桌面按 Run 冻结。坏 Computer 默认配置只让该 service candidate 不可用，不阻断无依赖的普通工具，required 原绑定不降级。
