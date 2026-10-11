@@ -16,6 +16,17 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 详见[整合验收](../reviews/runtime-2026-10-11.md)。分层通过记录不等于完整交付或性能目标已达成；
 两设计余项与用户负责最终切换的分工保持。
 
+用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
+本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
+
+## 2026-10-11 增量：真实运行时预设与独立设置入口
+
+- 原 settings.json、SettingsManager 和 revision CAS 继续唯一拥有配置。原工具数组保持显式用户选择；同一字段可分别选择 Pi/Agent，空数组、缺失运行时、自定义和发行默认各有明确语义。Rust owning declarations 同时投影实际 schema、来源要求和默认成员，删除 Native 设置依赖 Pi provider 的入口错位，没有新增工具白名单、配置库或 grant。
+- application-client、认证 Host 和共享设置页贯穿同一 owner；新建用所选 runtime 的实际 retrieval 默认，显式自定义不静默换名。模型/指令等共享字段与删除范围清楚显示，冲突保草稿，旧 Host/runtime 的迟到结果不覆盖当前选择。原 frozen child 仍拥有实际可用性与受理配置，设置显示 configured 而不假称任意 Run 均 available。
+- 已受理 child 保原配置与来源，后续编辑/坏配置不重写其重开回执。Catalog **40** 直接拒旧，外部旧数组及既有 legacy profile 归一化资产保留。跨 owner 核查闭合旧 profile 读写身份错位、外部 CAS 后活动 Pi 下一 prompt 读取新配置、旧 SDK setter/flush 不覆盖新配置，以及 pending reload 中 compact 可取消且不派发的实际窗口。
+- Runtime **436/0、2 ignored**、kernel **142/0、11 ignored**，最终 capability **5/5**、fresh guardian/固定结果 **1/1**；Protocol/Pi **22/22**、Host **7/7**、client **2/2**、UI **26/26**，类型、all-targets、协议、lint 与实际 Host bundle 通过。独立真实 owner→compiler→提交捕获→Catalog 的选择、取消迟到与重开探针通过；真实 IPC 三条产品用例已改用新设置 API，但本环境未运行，具体证据边界见[验收与复跑](../reviews/runtime-agent-profiles-2026-10-11.md)。
+- 接着推进原日志条件及两设计其余领域；用户基线 Windows78 与本轮分层证据分别成立。完整 Host/产品/平台/性能验收和用户最后全面迁移仍独立，不能按测试或提交数量推算设计完成度。
+
 ## 2026-10-11 增量：共享 immutable object reader；完成本片后暂停
 
 - 原 getBlob 与 fixed-source file_read 共享已有 file worker：短 admission/finish、同句柄 cold 全 hash/range 读取与正文转换锁外；原四种 source/grant 仍独占访问权威。短暂 exact-hash 引用只保原 GC/删除生命周期，不增加权限、持久读 Operation 或格式。

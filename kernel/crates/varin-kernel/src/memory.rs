@@ -39,6 +39,12 @@ fn args(call: &ToolCall, mutations: bool) -> Result<Arguments, ExecutionError> {
     }
     Ok(args)
 }
+pub(crate) fn builtin_schema() -> crate::run_tools::BuiltinSchema {
+    use varin_runtime::catalog::dispatch::{
+        ChildPresetDefault::Worker, ChildSourceRequirement::None,
+    };
+    crate::run_tools::BuiltinSchema::child(schema(true), None, &[Worker])
+}
 pub(crate) fn schema(mutations: bool) -> ToolSchema {
     ToolSchema { description: "Read or explicitly maintain ordinary persistent notes. Reads return the current catalog revision; writes require that revision. Scopes are resolved from this conversation's admitted identity. Saved notes commit immediately; system memory snapshots change only at successful compaction.".into(), output_schema: None, metadata: None,
         name: TOOL.into(),

@@ -3490,6 +3490,7 @@ export interface ChildCapabilityDescriptor {
   name: string;
   version: string;
   source_requirement: 'none' | 'source' | 'physical';
+  default_presets: ('worker' | 'retrieval')[];
 }
 
 export type ChildWorkMode = 'read_only' | 'isolated_write';

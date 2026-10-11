@@ -202,3 +202,57 @@ fn normal_child_inherits_actual_parent_note_and_plan_declarations() {
     drop(f);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn shipped_defaults_resolve_actual_declarations_with_their_required_sources() {
+    use varin_runtime::catalog::dispatch::{ChildModelSource, ChildPreset, ChildPresetDefault, ChildWorkMode};
+    let directory = schemas();
+    let metadata = descriptors();
+    let get = |name: &str| directory.iter().find(|tool| tool.name == name).unwrap().clone();
+    let f = fixture::Fixture::new_with_schemas(0, get("file_read"), get("dispatch"));
+    let mut selected = f.db.capture_child_dispatch_invocation(&f.context).unwrap().load().unwrap();
+    selected.catalog.native_capabilities = metadata.clone();
+    for (id, member, mode) in [
+        ("worker", ChildPresetDefault::Worker, ChildWorkMode::IsolatedWrite),
+        ("retrieval", ChildPresetDefault::Retrieval, ChildWorkMode::ReadOnly),
+    ] {
+        // The profile owner projects these members; no second available-name list.
+        let tools: Vec<_> = metadata.iter().filter(|tool| tool.default_presets.contains(&member))
+            .map(|tool| tool.name.clone()).collect();
+        assert!(!tools.is_empty());
+        selected.catalog.presets.push(ChildPreset { id: id.into(), name: id.into(), instructions: String::new(),
+            tools: tools.clone(), work_mode: mode, model_source: ChildModelSource::Inherit,
+            inherit_base: None, model: None, unavailable: None });
+        let mut input = f.input.clone();
+        input.preset = Some(id.into());
+        input.tools = None;
+        input.work_mode = None;
+        let (resolved, executable) = crate::collaboration::resolve_selection(&selected, &input).unwrap();
+        assert_eq!(resolved.profile.work_mode, mode);
+        assert_eq!(executable.len(), tools.len());
+        assert!(executable.iter().all(|tool| directory.contains(tool)));
+        assert!(resolved.source_delegation().configured_preset);
+        if member == ChildPresetDefault::Worker {
+            assert!(executable.contains(&get("file_write")));
+            assert!(executable.contains(&get("file_edit")));
+            assert!(resolved.source_delegation().process);
+            input.work_mode = Some(ChildWorkMode::ReadOnly);
+            assert!(crate::collaboration::resolve_selection(&selected, &input).is_err());
+        } else {
+            assert!(!resolved.source_delegation().process);
+            assert!(metadata.iter().filter(|tool| tools.contains(&tool.name))
+                .all(|tool| tool.source_requirement != ChildSourceRequirement::Physical));
+        }
+    }
+    selected.catalog.presets[0].tools = vec!["read".into(), "bash".into()];
+    let mut input = f.input.clone();
+    input.preset = Some("worker".into());
+    input.tools = None;
+    input.work_mode = None;
+    assert!(crate::collaboration::resolve_selection(&selected, &input).is_err());
+    assert_eq!(selected.catalog.presets[0].tools, vec!["read", "bash"]);
+    let root = f.root.clone();
+    drop(selected);
+    drop(f);
+    std::fs::remove_dir_all(root).unwrap();
+}

@@ -293,7 +293,7 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 39, input domain 6 and collaboration domain 7 store input intents/queue bodies and context-job ownership,
+Catalog version 40, input domain 6 and collaboration domain 7 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
@@ -942,6 +942,13 @@ is rejected. The existing Host `harness.models[role].agent`, `harness.agents` an
 resolver remain the configuration authority. Host prepares immutable `ChildDispatchCatalog` content
 with explicit inheritance/selection, original model configuration and credential scope. Original input
 or model-selection admission commits its reference atomically; retries keep the first accepted snapshot.
+
+Runtime-specific tool selections are resolved before that snapshot is admitted. Existing user arrays
+remain exact choices; the original settings owner also accepts separate `pi`/`agent` selections.
+Native worker/retrieval defaults project `default_presets` from the owning builtin declarations,
+not a Host name list or Pi alias map. These descriptors are retained in Catalog 40's frozen content.
+An unconfigured custom runtime is unavailable; an explicit empty list is a valid no-tools choice.
+Changing settings does not rewrite an accepted selection or alter configured-preset source authority.
 
 `catalog_dispatch` retains these content references through Launch/ModelSelection, actual request and
 policy-node binding, and selected ChildTask content. The same closed-boundary preparation freezes the

@@ -18,12 +18,19 @@ pub enum ChildSourceRequirement {
     Source,
     Physical,
 }
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChildPresetDefault {
+    Worker,
+    Retrieval,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildCapabilityDescriptor {
     pub name: String,
     pub version: String,
     pub source_requirement: ChildSourceRequirement,
+    pub default_presets: Vec<ChildPresetDefault>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

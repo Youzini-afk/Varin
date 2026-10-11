@@ -43,6 +43,10 @@
     "./mcp-authority": {
       "types": "./dist/mcp-authority.d.ts",
       "import": "./dist/mcp-authority.js"
+    },
+    "./settings-authority": {
+      "types": "./dist/settings-authority.d.ts",
+      "import": "./dist/settings-authority.js"
     }
   },
   "scripts": {

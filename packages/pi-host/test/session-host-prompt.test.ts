@@ -354,7 +354,10 @@ describe("SessionHost prompt streaming", () => {
         assert.equal(await host.abort(snapshot.sessionId), false);
         assert.equal(abortSignals, 1);
         let finishCompaction!: () => void;
+        let enteredCompaction!: () => void;
+        const compactionEntered = new Promise<void>(resolve => { enteredCompaction = resolve; });
         mutableSession.compact = () => new Promise((resolve) => {
+          enteredCompaction();
           finishCompaction = () => {
             // Pi emits this only after its compaction controller exists. A stop
             // accepted during Pi's initial await must be signalled again here.
@@ -363,7 +366,7 @@ describe("SessionHost prompt streaming", () => {
           };
         });
         const compacting = host.compact(snapshot.sessionId);
-        await new Promise<void>((resolve) => setImmediate(resolve));
+        await compactionEntered;
         const activityId = host.snapshot().runId;
         assert.ok(activityId, "the first manual compaction has an observable stop identity");
         assert.equal(host.snapshot().busy, true);
@@ -464,9 +467,11 @@ describe("SessionHost prompt streaming", () => {
       agent.abort = () => { activityAbortSignals += 1; originalAgentAbort(); };
       try {
         let finishCompaction!: () => void;
-        session.compact = () => new Promise((resolve) => { finishCompaction = () => resolve({}); });
+        let enteredCompaction!: () => void;
+        const compactionEntered = new Promise<void>(resolve => { enteredCompaction = resolve; });
+        session.compact = () => new Promise((resolve) => { enteredCompaction(); finishCompaction = () => resolve({}); });
         const compacting = host.compact(sessionId);
-        await new Promise<void>((resolve) => setImmediate(resolve));
+        await compactionEntered;
         const compactionId = host.snapshot().runId;
         assert.ok(compactionId);
         assert.notEqual(compactionId, staleRunId);

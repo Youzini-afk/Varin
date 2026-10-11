@@ -1,14 +1,17 @@
 import React from 'react';
 import type { LaunchSelection } from '@varin/protocol';
+import { useUIStore } from '@/stores/useUIStore';
+import { selectAgentProfilesRuntime } from '@/components/sections/agents/agent-profiles-store';
 
 const reasons: Record<string, string> = {
   'child-worker-disabled': 'Normal child delegation is disabled in agent settings',
-  'child-settings-invalid': 'Agent settings are invalid',
-  'child-settings-unavailable': 'Agent settings could not be read',
+  'child-settings-invalid': 'Agent settings are invalid. Review the saved configuration.',
+  'child-settings-unavailable': 'Agent settings could not be read. Check access to the settings file.',
   'child-profile-disabled': 'Disabled in agent settings',
-  'child-profile-unconfigured': 'No configured model',
+  'child-profile-unconfigured': 'Choose a model for this profile in Agent settings.',
+  'child-profile-runtime_unconfigured': 'Select tools for this profile in Agent settings.',
   'child-profile-scope_unavailable': 'Not available in this work focus',
-  'child-capability-unsupported': 'Selected capabilities are not available for this child runtime',
+  'child-capability-unsupported': 'Edit the Agent profile to replace these unsupported tools',
   'child-physical-source-required': 'These capabilities require a private physical working copy',
   'child-model-unconfigured': 'No configured model',
   'child-model-unavailable': 'The configured model or its original account is unavailable',
@@ -22,7 +25,13 @@ export function ThreadChildProfiles({ launch }: { launch: LaunchSelection }) {
   const names = new Set([...catalog.native_capabilities.map(tool => tool.name), ...hostNames]);
   return <details className="mx-auto max-w-3xl rounded border p-3 text-sm">
     <summary className="cursor-pointer">Child execution choices</summary>
-    <p className="mt-2 text-xs text-muted-foreground">Frozen for this launch. New inputs or an explicit model selection prepare current agent settings. A private working directory is not an OS sandbox.</p>
+    <p className="mt-2 text-xs text-muted-foreground">Accepted tasks keep these choices. Changes apply to future tasks.</p>
+    <button type="button" className="mt-1 text-xs underline" onClick={() => {
+      selectAgentProfilesRuntime('agent');
+      const settings = useUIStore.getState();
+      settings.setSettingsPage('agents');
+      settings.setSettingsDialogOpen(true);
+    }}>Configure Agent profiles</button>
     {catalog.normal_unavailable && <p>{reasons[catalog.normal_unavailable.code] ?? catalog.normal_unavailable.code}</p>}
     {catalog.presets.map(preset => {
       const unsupported = preset.tools.filter(name => !names.has(name));

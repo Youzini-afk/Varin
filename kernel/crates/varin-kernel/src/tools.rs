@@ -83,7 +83,7 @@ impl ToolKind {
             Self::CodeRetrieval=>"Retrieve code context from the admitted source using the selected retrieval service.",
         }
     }
-    fn from_name(name: &str) -> Option<Self> {
+    pub(crate) fn all() -> impl Iterator<Item = Self> {
         [
             Self::FileRead,
             Self::FileList,
@@ -101,7 +101,9 @@ impl ToolKind {
             Self::CodeRetrieval,
         ]
         .into_iter()
-        .find(|kind| kind.name() == name)
+    }
+    fn from_name(name: &str) -> Option<Self> {
+        Self::all().find(|kind| kind.name() == name)
     }
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1109,6 +1111,36 @@ impl KernelToolExecutor {
             .cloned()
             .map(|schema| {
                 varin_runtime::composition::tools::ToolDeclaration::new(schema, endpoint.clone())
+            })
+            .collect()
+    }
+    pub(crate) fn selected_builtin_schemas(
+        enabled: &BTreeSet<ToolKind>,
+    ) -> Vec<crate::run_tools::BuiltinSchema> {
+        use varin_runtime::catalog::dispatch::{
+            ChildPresetDefault::{Retrieval, Worker},
+            ChildSourceRequirement::{Physical, Source},
+        };
+        Self::selected_schemas(enabled)
+            .into_iter()
+            .zip(enabled)
+            .map(|(schema, kind)| match kind {
+                ToolKind::FileRead | ToolKind::FileList | ToolKind::FileSearch => {
+                    crate::run_tools::BuiltinSchema::child(schema, Source, &[Worker, Retrieval])
+                }
+                ToolKind::FileWrite
+                | ToolKind::FileEdit
+                | ToolKind::ProcessSpawn
+                | ToolKind::ProcessInspect
+                | ToolKind::ProcessRead
+                | ToolKind::ProcessWrite
+                | ToolKind::ProcessResize => {
+                    crate::run_tools::BuiltinSchema::child(schema, Physical, &[Worker])
+                }
+                ToolKind::LanguageDefinition
+                | ToolKind::LanguageReferences
+                | ToolKind::LanguageDiagnostics
+                | ToolKind::CodeRetrieval => crate::run_tools::BuiltinSchema::main_only(schema),
             })
             .collect()
     }

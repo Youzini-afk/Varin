@@ -126,6 +126,18 @@ fn failed_initial_install_leaves_no_partial_catalog_and_can_reopen() {
     assert_eq!(db.history("main").unwrap().len(), 1);
 }
 #[test]
+fn pre_default_membership_catalog_is_rejected_before_recovery() {
+    let f = Fixture::new();
+    drop(f.open());
+    let raw = Connection::open(f.0.join("conversation.sqlite")).unwrap();
+    let epoch: i64 = raw.query_row("SELECT epoch FROM runtime_meta WHERE id=1", [], |row| row.get(0)).unwrap();
+    raw.pragma_update(None, "user_version", 39).unwrap();
+    assert!(matches!(Catalog::open(&f.0), Err(RuntimeError::Format(39))));
+    assert_eq!(raw.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 39);
+    assert_eq!(raw.query_row("SELECT epoch FROM runtime_meta WHERE id=1", [], |row| row.get::<_, i64>(0)).unwrap(), epoch);
+}
+
+#[test]
 fn single_writer_and_unknown_formats_preserve_assets() {
     let f = Fixture::new();
     let db = f.open();

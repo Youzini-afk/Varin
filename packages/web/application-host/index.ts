@@ -39,6 +39,8 @@ import { createThreadProcesses } from './lib/kernel/thread-processes.js';
 import { createResearchRuntime, createResearchSourceAuthority, RESEARCH_CAPABILITY } from './lib/kernel/research-runtime.js';
 import { ThreadAdapter } from './lib/kernel/thread-adapter.js';
 import { registerThreadRoutes } from './lib/kernel/thread-routes.js';
+import { createAgentProfilesAPI } from './lib/kernel/agent-profiles.js';
+import { registerAgentProfileRoutes } from './lib/kernel/agent-profile-routes.js';
 import { registerRuntimeMaintenanceRoutes } from './lib/kernel/runtime-maintenance-routes.js';
 import { createModelAuthority } from './lib/kernel/model-authority.js';
 import 'reflect-metadata';
@@ -3054,6 +3056,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (_error: Error) => console.error('[Research] Original job reconciliation requires attention'),
   });
   registerThreadRoutes(app, threads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), researchRuntime.user);
+  registerAgentProfileRoutes(app, createAgentProfilesAPI({ settings: hostCredentialAuthority.globalSettingsAuthority,
+    capabilities: signal => agentRuntime.childCapabilities(signal),
+    onChanged: () => {
+      for (const client of uiVarinEventClients) {
+        try { writeSseEvent(client, { type: 'varin:settings-changed', properties: { owner: 'pi-settings' } }); }
+        catch { uiVarinEventClients.delete(client); }
+      }
+    },
+  }), uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
   registerRuntimeMaintenanceRoutes(app, agentRuntime, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
   registerHarnessThreadRoutes(app, {
     registry: threadRegistry,

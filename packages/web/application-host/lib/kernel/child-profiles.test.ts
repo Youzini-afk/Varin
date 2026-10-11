@@ -15,10 +15,10 @@ async function fixture() {
   const resolved = await models.resolveModel({ providerId: 'provider', modelId: 'model', thinkingLevel: 'high' });
   const parent: ChildModelBinding = { configuration: resolved.configuration, credential_scope: await resolved.credentialOwner.scope() };
   const capabilities: ChildCapabilityDescriptor[] = [
-    { name: 'file_read', version: '1', source_requirement: 'source' },
-    { name: 'file_write', version: '1', source_requirement: 'physical' },
-    { name: 'process_spawn', version: '1', source_requirement: 'physical' },
-    { name: 'ask_user', version: '1', source_requirement: 'none' },
+    { name: 'file_read', version: '1', source_requirement: 'source', default_presets: ['worker', 'retrieval'] },
+    { name: 'file_write', version: '1', source_requirement: 'physical', default_presets: ['worker'] },
+    { name: 'process_spawn', version: '1', source_requirement: 'physical', default_presets: ['worker'] },
+    { name: 'ask_user', version: '1', source_requirement: 'none', default_presets: ['worker'] },
   ];
   return { parent, models, capabilities, changeDefaults() { defaults = 0.9; } };
 }
@@ -72,4 +72,93 @@ it('keeps missing configuration defaults distinct from invalid or unreadable set
   expect((await compiler(async () => ({}))({ parent: f.parent })).normal_unavailable).toBeNull();
   expect((await compiler(async () => ({ harness: { agents: { bad: { enabled: true } } } }))({ parent: f.parent })).normal_unavailable?.code).toBe('child-settings-invalid');
   expect((await compiler(async () => { throw new Error('source unavailable'); })({ parent: f.parent })).normal_unavailable?.code).toBe('child-settings-unavailable');
+});
+
+it('prepares defaults and explicitly saved runtime profiles from the original settings file and retains the accepted snapshot', async () => {
+  const { mkdtemp, writeFile, readFile, rm } = await import('node:fs/promises');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const { GlobalSettingsAuthority } = await import('@varin/pi-host/settings-authority');
+  const { createAgentProfilesAPI } = await import('./agent-profiles.js');
+  const root = await mkdtemp(join(tmpdir(), 'profile-owner-'));
+  try {
+    const path = join(root, 'settings.json');
+    await writeFile(path, JSON.stringify({ unchanged: { keep: true }, harness: { unrelated: 'asset', agents: {
+      pi: agent({ tools: ['read'] }), native: agent({ tools: ['file_read'] }),
+    } } }));
+    const f = await fixture();
+    const settings = new GlobalSettingsAuthority(root);
+    const profiles = createAgentProfilesAPI({ settings, capabilities: async () => f.capabilities });
+    const prepare = createChildProfilePreparer({ settings: async () => (await settings.read()).document,
+      models: f.models, capabilities: async () => f.capabilities });
+    let view = await profiles.read({ runtime: 'agent' });
+    const retrieval = view.profiles.find(profile => profile.id === 'varin:builtin:retrievalAgent')!;
+    expect(retrieval.config.kind).toBe('builtin');
+    if (retrieval.config.kind !== 'builtin') throw new Error('fixture profile');
+    view = (await profiles.save({ runtime: 'agent', expectedRevision: view.revision, id: retrieval.id,
+      config: { ...retrieval.config, binding: { providerId: 'provider', modelId: 'model' } } })).snapshot;
+    const frozen = await prepare({ parent: f.parent });
+    expect(frozen.presets.find(p => p.id === 'worker')?.tools).toEqual(['file_read', 'file_write', 'process_spawn', 'ask_user']);
+    expect(frozen.presets.find(p => p.id === 'retrieval')).toMatchObject({ tools: ['file_read'], unavailable: null });
+    expect(frozen.presets.find(p => p.id === 'custom:pi')?.tools).toEqual(['read']);
+    expect(frozen.presets.find(p => p.id === 'custom:native')?.tools).toEqual(['file_read']);
+    const custom = view.profiles.find(profile => profile.id === 'varin:custom:pi')!;
+    await profiles.save({ runtime: 'agent', expectedRevision: view.revision, id: custom.id, config: custom.config, tools: ['file_read'] });
+    expect(frozen.presets.find(p => p.id === 'custom:pi')?.tools).toEqual(['read']);
+    expect((await prepare({ parent: f.parent })).presets.find(p => p.id === 'custom:pi')?.tools).toEqual(['file_read']);
+    const disk = JSON.parse(await readFile(path, 'utf8'));
+    expect(disk.harness.agents.pi.tools).toEqual({ pi: ['read'], agent: ['file_read'] });
+    expect(disk.unchanged).toEqual({ keep: true });
+    expect(disk.harness.unrelated).toBe('asset');
+    expect(custom.config).not.toHaveProperty('agent.tools');
+    await expect(profiles.save({ runtime: 'agent', expectedRevision: view.revision, id: custom.id, config: custom.config, tools: [] })).rejects.toMatchObject({ code: 'config_conflict' });
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+it('distinguishes runtime-unconfigured, explicit empty tools, invalid settings and unavailable settings', async () => {
+  const f = await fixture();
+  const compiler = (value: unknown) => createChildProfilePreparer({ models: f.models, capabilities: async () => f.capabilities,
+    settings: async () => value });
+  for (const field of ['models', 'agents']) {
+    expect((await compiler({ harness: { [field]: [] } })({ parent: f.parent })).normal_unavailable?.code).toBe('child-settings-invalid');
+  }
+  const prepared = await compiler({ harness: { agents: { absent: agent({ tools: { pi: ['read'] } }), empty: agent({ tools: { agent: [] } }) } } })({ parent: f.parent });
+  expect(prepared.presets.find(p => p.id === 'custom:absent')?.unavailable?.code).toBe('child-profile-runtime_unconfigured');
+  expect(prepared.presets.find(p => p.id === 'custom:empty')).toMatchObject({ tools: [], unavailable: null });
+});
+
+it('edits and removes original retained legacy profiles through the existing normalized owner', async () => {
+  const { mkdtemp, writeFile, readFile, rm } = await import('node:fs/promises');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const { GlobalSettingsAuthority } = await import('@varin/pi-host/settings-authority');
+  const { createAgentProfilesAPI } = await import('./agent-profiles.js');
+  const root = await mkdtemp(join(tmpdir(), 'profile-legacy-'));
+  const path = join(root, 'settings.json');
+  const original = JSON.stringify({ untouched: ['user asset'], harness: { unrelated: 'kept', models: {
+    review: { agent: { name: 'Review asset', tools: ['file_read'], instructions: 'Original instructions' } },
+  } } });
+  try {
+    await writeFile(path, original);
+    const profiles = createAgentProfilesAPI({ settings: new GlobalSettingsAuthority(root), capabilities: async () => [] });
+    const view = await profiles.read({ runtime: 'agent' });
+    expect(await readFile(path, 'utf8')).toBe(original);
+    const retained = view.profiles.find(profile => profile.id === 'varin:custom:saved-review')!;
+    if (retained.config.kind !== 'custom') throw new Error('expected retained user profile');
+    const saved = await profiles.save({ runtime: 'agent', expectedRevision: view.revision, id: retained.id,
+      config: { ...retained.config, agent: { ...retained.config.agent, name: 'Edited review' } } });
+    const disk = JSON.parse(await readFile(path, 'utf8'));
+    expect(disk.harness.models).not.toHaveProperty('review');
+    expect(disk.harness.agents['saved-review']).toMatchObject({ name: 'Edited review', tools: ['file_read'], instructions: 'Original instructions' });
+    expect(disk.untouched).toEqual(['user asset']);
+    expect(disk.harness.unrelated).toBe('kept');
+    expect(saved.snapshot.profiles.find(profile => profile.id === retained.id)?.tools).toEqual({ source: 'explicit', names: ['file_read'] });
+    await profiles.remove({ runtime: 'agent', expectedRevision: saved.snapshot.revision, id: retained.id });
+    expect((await profiles.read({ runtime: 'agent' })).profiles.some(profile => profile.id === retained.id)).toBe(false);
+    // Deleting the original projected profile must also work before any save normalization.
+    await writeFile(path, original);
+    const reloaded = await profiles.read({ runtime: 'agent' });
+    await profiles.remove({ runtime: 'agent', expectedRevision: reloaded.revision, id: retained.id });
+    expect((await profiles.read({ runtime: 'agent' })).profiles.some(profile => profile.id === retained.id)).toBe(false);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

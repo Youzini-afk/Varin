@@ -8,6 +8,7 @@ import {
   mergeHarnessSettings,
   customizeHarnessAgent,
   resolvePresets,
+  resolveAgentTools,
   isPresetId,
   resolveHarnessModelSlot,
   type ExecutionPreset,
@@ -329,6 +330,9 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       if (params.preset?.startsWith("custom:") && liveSettings) {
         const key = params.preset.slice("custom:".length);
         const definition = Object.hasOwn(liveSettings.agents, key) ? liveSettings.agents[key] : undefined;
+        if (definition && resolveAgentTools(definition.tools, 'pi').source === 'unconfigured') {
+          throw new HarnessServiceError("unavailable", `Agent tools are not configured for Pi: ${params.preset}. Select tools in Agent settings.`);
+        }
         if (definition && (!definition.enabled || (definition.workFocus.length && !definition.workFocus.includes(owner?.execution.workFocus ?? "code")))) {
           throw new HarnessServiceError("unavailable", `Agent is disabled or unavailable in this work focus: ${params.preset}`);
         }

@@ -97,7 +97,7 @@ export const resolveResearchCapabilityOptions = (
 ): ResearchCapabilityOption[] => RESEARCH_CAPABILITIES.flatMap((capability) => {
   const base = RESEARCH_CAPABILITY_DEFINITIONS[capability];
   if (slots[base.slot]?.enabled === false) return [];
-  const definition = customizeHarnessAgent(base, slots[base.slot]?.agent);
+  const definition = customizeHarnessAgent(base, slots[base.slot]?.agent, 'pi');
   const model = resolveHarnessModelSlot(definition.slot, slots, null);
   return [{ capability, model, definition }];
 });

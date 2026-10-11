@@ -1,7 +1,7 @@
 /** Existing user-owned execution presets -> immutable native dispatch choices.
  * This reads no secrets, prepares no child and owns no configuration or execution state. */
 import { createHash } from 'node:crypto';
-import { mergeHarnessSettings, observePresets, type HarnessSettingsInput, type WorkFocusId } from '@varin/protocol';
+import { HarnessSettingsValidationError, agentPresetTools, mergeHarnessSettings, observePresets, type HarnessSettingsInput, type WorkFocusId } from '@varin/protocol';
 import type { ThreadModelAuthority } from './thread-adapter.js';
 import type { ThreadThinkingLevel } from '@varin/application-client';
 import type { ChildCapabilityDescriptor, ChildCapabilityFailure, ChildDispatchCatalog, ChildModelBinding, ChildPreset } from './protocol.generated.js';
@@ -32,12 +32,14 @@ export function createChildProfilePreparer(owners: {
       settings = mergeHarnessSettings((raw.harness ?? {}) as HarnessSettingsInput, {});
     } catch (error) {
       signal?.throwIfAborted();
-      return freeze([], unavailable(error instanceof Error && /invalid|malformed/i.test(error.message) ? 'child-settings-invalid' : 'child-settings-unavailable'));
+      const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+      return freeze([], unavailable(error instanceof HarnessSettingsValidationError || code === 'inference-settings-invalid'
+        || code === 'invalid_config_file' ? 'child-settings-invalid' : 'child-settings-unavailable'));
     }
     const descriptors = await waitWithSignal(owners.capabilities(signal), signal);
     const parent = input.parent;
     const main = parent.configuration.providerId ? { providerId: parent.configuration.providerId, modelId: parent.configuration.model } : null;
-    const observations = observePresets(settings.models, main, settings.agents, input.workFocus);
+    const observations = observePresets(settings.models, main, settings.agents, input.workFocus, 'agent', agentPresetTools(descriptors));
     const presets = await Promise.all(observations.map(async (entry): Promise<ChildPreset> => {
       const definition = entry.definition;
       const profile: ChildPreset = { id: entry.id, name: definition.name ?? entry.id, instructions: definition.systemPromptFragment,

@@ -29,6 +29,19 @@ fn validate(call: &ToolCall) -> Result<(), ExecutionError> {
     }
     Ok(())
 }
+pub(crate) fn builtin_schemas(
+    mut tools: Vec<crate::run_tools::BuiltinSchema>,
+) -> Vec<crate::run_tools::BuiltinSchema> {
+    use varin_runtime::catalog::dispatch::{
+        ChildPresetDefault::Worker, ChildSourceRequirement::None,
+    };
+    tools.extend(
+        schemas(Vec::new())
+            .into_iter()
+            .map(|schema| crate::run_tools::BuiltinSchema::child(schema, None, &[Worker])),
+    );
+    tools
+}
 pub fn schema() -> ToolSchema {
     ToolSchema { description: "Ask the user a clarification and wait for their real answer. Answers do not grant tool permissions.".into(), output_schema: None, metadata: None,
         name: QUESTION_TOOL.into(),

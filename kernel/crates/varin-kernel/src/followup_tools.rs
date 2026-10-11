@@ -7,6 +7,13 @@ use varin_runtime::{Catalog, Effect, Lifetime, Outcome};
 fn error(e: impl ToString) -> ExecutionError {
     ExecutionError::new("follow_up", e.to_string())
 }
+pub(crate) fn builtin_schema() -> crate::run_tools::BuiltinSchema {
+    use varin_runtime::catalog::dispatch::{
+        ChildPresetDefault::{Retrieval, Worker},
+        ChildSourceRequirement::None,
+    };
+    crate::run_tools::BuiltinSchema::child(schema(), None, &[Worker, Retrieval])
+}
 pub(crate) fn schema() -> ToolSchema {
     let text = json!({"type":"string","minLength":1});
     let leaf = json!({"oneOf":[
