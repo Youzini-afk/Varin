@@ -41,6 +41,11 @@ enum WorkerRequest {
         task: Arc<crate::storage::result_publication::ResultPublicationTask>,
         result: Result<crate::storage::result_publication::PreparedWorkingResult, KernelError>,
     },
+    InventoryDone {
+        request: Value,
+        task: crate::storage::file_inventory::InventoryTask,
+        result: Result<crate::storage::file_inventory::InventoryResult, KernelError>,
+    },
     CaptureDone {
         request: Value,
         task: crate::storage::capture_resources::CaptureTask,
@@ -145,6 +150,8 @@ struct Kernel {
     storage: Option<Storage>,
     handshaken: bool,
     file_workers: Vec<(Arc<AtomicBool>, thread::JoinHandle<()>)>,
+    #[cfg(test)]
+    inventory_traversal_hold: Option<Box<dyn FnOnce() + Send>>,
     pending_root_registrations: HashMap<String, PendingRootRegistration>,
     active_materializations: usize,
     agent_control: crate::agent_runtime::AgentControl,
@@ -172,6 +179,8 @@ impl Kernel {
             storage: None,
             handshaken: false,
             file_workers: Vec::new(),
+            #[cfg(test)]
+            inventory_traversal_hold: None,
             pending_root_registrations: HashMap::new(),
             active_materializations: 0,
             agent_control: crate::agent_runtime::AgentControl::default(),
@@ -481,6 +490,51 @@ impl Kernel {
                 }
             }
         }
+        if matches!(method, "file.scan" | "file.measure") {
+            let task = storage.prepare_file_inventory(
+                method,
+                &authorized_params,
+                &authorized_grant,
+                cancellation.clone(),
+            )?;
+            #[cfg(test)]
+            let task = {
+                let mut task = task;
+                if let Some(hold) = self.inventory_traversal_hold.take() {
+                    task.hold_traversal(hold);
+                }
+                task
+            };
+            let lease_id = task.lease_id().map(str::to_owned);
+            let request = request.clone();
+            let completed = completions.clone();
+            self.file_workers
+                .retain(|(_, worker)| !worker.is_finished());
+            let worker = thread::Builder::new()
+                .name("file-inventory".into())
+                .spawn(move || {
+                    let result =
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| task.run()))
+                            .unwrap_or_else(|_| {
+                                Err(KernelError::Storage("inventory worker panicked".into()))
+                            });
+                    let _ = completed.send(WorkerRequest::InventoryDone {
+                        request,
+                        task,
+                        result,
+                    });
+                });
+            match worker {
+                Ok(worker) => self.file_workers.push((cancellation, worker)),
+                Err(error) => {
+                    if let Some(id) = lease_id {
+                        storage.finish_retained_file_lease(&id);
+                    }
+                    return Err(error.into());
+                }
+            }
+            return Ok(None);
+        }
         if method == "file.captureBatch" {
             let task = storage.prepare_capture_batch(
                 &authorized_params,
@@ -622,6 +676,41 @@ impl Kernel {
         let result = storage.dispatch(method, &authorized_params, grant_id, &authorized_grant);
         storage.clear_cancellation();
         Ok(Some(response_ok(id, result?)))
+    }
+
+    fn complete_file_inventory(
+        &mut self,
+        request: &Value,
+        task: &crate::storage::file_inventory::InventoryTask,
+        result: Result<crate::storage::file_inventory::InventoryResult, KernelError>,
+        revoked_grants: &Mutex<HashSet<String>>,
+    ) -> Result<Value, KernelError> {
+        let completed = (|| {
+            let storage = self
+                .storage
+                .as_ref()
+                .ok_or_else(|| KernelError::Authorization("kernel stopped".into()))?;
+            let (grant, _) = storage.authorize(
+                request["grantId"].as_str(),
+                &self.epoch,
+                self.host_id.as_deref().unwrap_or(""),
+                self.host_generation.as_deref().unwrap_or(""),
+                request["method"].as_str().unwrap_or(""),
+                &request["params"],
+            )?;
+            if revoked_grants
+                .lock()
+                .map(|revoked| revoked.contains(&grant.grant_id))
+                .unwrap_or(true)
+            {
+                return Err(KernelError::Authorization("grant is revoked".into()));
+            }
+            storage.finish_file_inventory(task, result?, &grant)
+        })();
+        if let (Some(storage), Some(id)) = (self.storage.as_mut(), task.lease_id()) {
+            storage.finish_retained_file_lease(id);
+        }
+        completed
     }
 
     fn spawn_materialization(
@@ -1131,6 +1220,31 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     continue;
                 }
+                WorkerRequest::InventoryDone {
+                    request,
+                    task,
+                    result,
+                } => {
+                    let id = request["id"].as_str().unwrap_or("");
+                    let completed = kernel.complete_file_inventory(
+                        &request,
+                        &task,
+                        result,
+                        &worker_revoked_grants,
+                    );
+                    worker_cancellations
+                        .lock()
+                        .ok()
+                        .map(|mut active| active.remove(id));
+                    let response = match completed {
+                        Ok(value) => response_ok(id, value),
+                        Err(error) => response_error(id, &error),
+                    };
+                    if worker_response_tx.send(response).is_err() {
+                        break;
+                    }
+                    continue;
+                }
                 WorkerRequest::CaptureDone {
                     request,
                     task,
@@ -1315,6 +1429,8 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                         matches!(
                             method,
                             "file.captureBatch"
+                                | "file.scan"
+                                | "file.measure"
                                 | "working.result.publish"
                                 | "file.materialize"
                                 | "file.root.register"
@@ -1888,3 +2004,7 @@ mod tests {
         assert_eq!(admission_revoke_target(&stale, Some("epoch")), None);
     }
 }
+
+#[cfg(test)]
+#[path = "runtime_inventory_tests.rs"]
+mod file_inventory_tests;

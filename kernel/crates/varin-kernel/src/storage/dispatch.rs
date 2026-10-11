@@ -91,8 +91,6 @@ impl Storage {
             "file.mkdir" => storage.file_mkdir(authorized_params, authorized_grant),
             "file.remove" => storage.file_remove(authorized_params, authorized_grant),
             "file.rename" => storage.file_rename(authorized_params, authorized_grant),
-            "file.scan" => storage.file_scan(authorized_params, authorized_grant),
-            "file.measure" => storage.file_measure(authorized_params, authorized_grant),
             "storage.record.put" => idempotent(storage, method, authorized_params, |storage| {
                 storage.domain_record_put(authorized_params, grant_id.unwrap_or(""))
             }),

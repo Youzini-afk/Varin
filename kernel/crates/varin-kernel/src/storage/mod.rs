@@ -36,6 +36,7 @@ mod child_sources;
 mod compute_resources;
 mod core;
 mod dispatch;
+pub(crate) mod file_inventory;
 pub(crate) mod file_mutations;
 pub(crate) mod file_observations;
 mod file_reconciliation;

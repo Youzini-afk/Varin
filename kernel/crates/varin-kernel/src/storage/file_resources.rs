@@ -6,9 +6,9 @@
 //! Documents-authorized canonical root after every kernel restart.
 use super::*;
 use crate::protocol_generated::{
-    KernelFileApplyParams, KernelFileCaptureParams, KernelFileMeasureParams, KernelFileMkdirParams,
+    KernelFileApplyParams, KernelFileCaptureParams, KernelFileMkdirParams,
     KernelFileOperationListParams, KernelFileOperationReconcileParams, KernelFileRemoveParams,
-    KernelFileRenameParams, KernelFileRootRegisterParams, KernelFileScanParams,
+    KernelFileRenameParams, KernelFileRootRegisterParams,
 };
 use serde::de::DeserializeOwned;
 use std::path::{Component, Path};
@@ -372,7 +372,7 @@ impl Storage {
         Ok(())
     }
 
-    pub(super) fn registered_file_root(
+    pub(super) fn admitted_file_root(
         &self,
         root_id: &str,
         grant: &Grant,
@@ -392,6 +392,15 @@ impl Storage {
                 "grant workspace identity does not own file root".to_string(),
             ));
         }
+        Ok(root)
+    }
+
+    pub(super) fn registered_file_root(
+        &self,
+        root_id: &str,
+        grant: &Grant,
+    ) -> Result<FileRoot, KernelError> {
+        let root = self.admitted_file_root(root_id, grant)?;
         // A registered pathname is not permanent authorization. A junction or
         // ancestor may have been replaced since admission.
         let current = fs::canonicalize(&root.canonical_root)?;
@@ -701,159 +710,6 @@ impl Storage {
             }
             _ => false,
         }
-    }
-
-    fn scan_directory_paths(
-        &self,
-        root_id: &str,
-        grant: &Grant,
-        base_path: &str,
-        directory: &Path,
-        prefix: &str,
-        output: &mut Vec<String>,
-    ) -> Result<(), KernelError> {
-        self.check_cancelled()?;
-        let mut entries = fs::read_dir(directory)?.collect::<Result<Vec<_>, _>>()?;
-        entries.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
-        for entry in entries {
-            let name = entry.file_name().into_string().map_err(|_| {
-                KernelError::Operation("filesystem inventory contains a non-UTF-8 path".to_string())
-            })?;
-            if name == ".git" || name == ".varin" {
-                continue;
-            }
-            let relative = if prefix.is_empty() {
-                name.clone()
-            } else {
-                format!("{prefix}/{name}")
-            };
-            let full = if base_path.is_empty() {
-                relative.clone()
-            } else {
-                format!("{base_path}/{relative}")
-            };
-            let allowed = path_allowed(grant, &full);
-            let may_contain_allowed = grant.path_scopes.iter().any(|scope| {
-                scope.is_empty() || scope == &full || scope.starts_with(&(full.clone() + "/"))
-            });
-            if !allowed && !may_contain_allowed {
-                continue;
-            }
-            let resource = self.resolve_file_resource(root_id, &full, grant, false)?;
-            let metadata = match fs::symlink_metadata(&resource.absolute) {
-                Ok(metadata) => metadata,
-                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-                Err(error) => return Err(error.into()),
-            };
-            if allowed {
-                output.push(relative.clone());
-            }
-            if metadata.is_dir() && !metadata.file_type().is_symlink() {
-                self.scan_directory_paths(
-                    root_id,
-                    grant,
-                    base_path,
-                    &resource.absolute,
-                    &relative,
-                    output,
-                )?;
-            }
-        }
-        Ok(())
-    }
-
-    fn scan_paths(
-        &self,
-        root_id: &str,
-        base: &ResolvedFileResource,
-        scopes: Option<&[String]>,
-        grant: &Grant,
-    ) -> Result<Vec<String>, KernelError> {
-        let mut output = Vec::new();
-        let effective_scopes = scopes
-            .filter(|values| !values.is_empty())
-            .map(|values| values.to_vec())
-            .unwrap_or_else(|| vec![String::new()]);
-        for raw_scope in effective_scopes {
-            let (scope, _) = normalized_relative_path(&raw_scope, true)?;
-            if scope.is_empty() {
-                self.scan_directory_paths(
-                    root_id,
-                    grant,
-                    &base.path,
-                    &base.absolute,
-                    "",
-                    &mut output,
-                )?;
-                continue;
-            }
-            let full = if base.path.is_empty() {
-                scope.clone()
-            } else {
-                format!("{}/{}", base.path, scope)
-            };
-            if !path_allowed(grant, &full) {
-                return Err(KernelError::Authorization(format!(
-                    "scan scope is outside grant scope: {full}"
-                )));
-            }
-            let resource = self.resolve_file_resource(root_id, &full, grant, false)?;
-            let metadata = match fs::symlink_metadata(&resource.absolute) {
-                Ok(metadata) => metadata,
-                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-                Err(error) => return Err(error.into()),
-            };
-            output.push(scope.clone());
-            if metadata.is_dir() && !metadata.file_type().is_symlink() {
-                self.scan_directory_paths(
-                    root_id,
-                    grant,
-                    &base.path,
-                    &resource.absolute,
-                    &scope,
-                    &mut output,
-                )?;
-            }
-        }
-        output.sort();
-        output.dedup();
-        Ok(output)
-    }
-
-    fn measure_directory(
-        &self,
-        directory: &Path,
-        logical: &mut u64,
-        allocated: &mut u64,
-    ) -> Result<(), KernelError> {
-        self.check_cancelled()?;
-        let entries = fs::read_dir(directory)?.collect::<Result<Vec<_>, _>>()?;
-        for entry in entries {
-            self.check_cancelled()?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)?;
-            if metadata.is_dir() && !metadata.file_type().is_symlink() {
-                self.measure_directory(&path, logical, allocated)?;
-                continue;
-            }
-            *logical = logical.checked_add(metadata.len()).ok_or_else(|| {
-                KernelError::Storage("materialized logical size overflow".to_string())
-            })?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::MetadataExt;
-                *allocated = allocated
-                    .checked_add(metadata.blocks().saturating_mul(512))
-                    .ok_or_else(|| {
-                        KernelError::Storage("materialized allocated size overflow".to_string())
-                    })?;
-            }
-            #[cfg(not(unix))]
-            {
-                let _ = allocated;
-            }
-        }
-        Ok(())
     }
 
     fn file_operation_record(
@@ -1518,86 +1374,6 @@ impl Storage {
             "canonicalRoot": canonical,
             "reconciledOperations": reconciled_operations,
             "pendingOperations": pending_operations,
-        }))
-    }
-
-    pub(super) fn file_scan(
-        &mut self,
-        params_value: &Value,
-        grant: &Grant,
-    ) -> Result<Value, KernelError> {
-        let params: KernelFileScanParams = parse_file_params(params_value)?;
-        let base = self.resolve_file_resource(&params.root_id, &params.path, grant, true)?;
-        let paths = self.scan_paths(&params.root_id, &base, params.scopes.as_deref(), grant)?;
-        let fingerprint = hash_json(&json!(paths))?;
-        let cursor = params.cursor.unwrap_or(0) as usize;
-        if (cursor > 0 && params.expected_fingerprint.is_none())
-            || params
-                .expected_fingerprint
-                .as_ref()
-                .is_some_and(|expected| expected != &fingerprint)
-        {
-            return Err(KernelError::Operation(
-                "file scan inventory changed or continuation fingerprint is missing".to_string(),
-            ));
-        }
-        let page_size = params.page_size.unwrap_or(512).clamp(1, 4096) as usize;
-        if cursor > paths.len() {
-            return Err(KernelError::Operation(
-                "file scan cursor is out of range".to_string(),
-            ));
-        }
-        let end = (cursor + page_size).min(paths.len());
-        let page = paths[cursor..end].to_vec();
-        Ok(json!({
-            "paths": page,
-            "fingerprint": fingerprint,
-            "cursor": cursor,
-            "nextCursor": if end < paths.len() { Some(end) } else { None },
-            "total": paths.len(),
-        }))
-    }
-
-    pub(super) fn file_measure(
-        &mut self,
-        params_value: &Value,
-        grant: &Grant,
-    ) -> Result<Value, KernelError> {
-        let params: KernelFileMeasureParams = parse_file_params(params_value)?;
-        let resource = self.resolve_file_resource(&params.root_id, &params.path, grant, true)?;
-        let metadata = match fs::symlink_metadata(&resource.absolute) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                return Ok(json!({
-                    "logicalBytes": Value::Null,
-                    "allocatedBytes": Value::Null,
-                    "unknown": true,
-                    "missing": true,
-                }));
-            }
-            Err(error) => return Err(error.into()),
-        };
-        let mut logical = 0u64;
-        let mut allocated = 0u64;
-        if metadata.is_dir() && !metadata.file_type().is_symlink() {
-            self.measure_directory(&resource.absolute, &mut logical, &mut allocated)?;
-        } else {
-            logical = metadata.len();
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::MetadataExt;
-                allocated = metadata.blocks().saturating_mul(512);
-            }
-        }
-        #[cfg(unix)]
-        let allocated_value = json!(allocated);
-        #[cfg(not(unix))]
-        let allocated_value = Value::Null;
-        Ok(json!({
-            "logicalBytes": logical,
-            "allocatedBytes": allocated_value,
-            "unknown": false,
-            "missing": false,
         }))
     }
 

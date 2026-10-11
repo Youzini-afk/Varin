@@ -60,6 +60,20 @@ Managed directory reclaim/delete also runs through the kernel. Git remains a sem
 index/filter behavior, and linked-worktree metadata; it does not become another workspace-body writer.
 There is no arbitrary SQL or arbitrary filesystem-write method on the wire.
 
+`file.scan` and `file.measure` are finite metadata workers on the same `file_workers` lifecycle.
+Storage captures the original grant/root registration and later rechecks current authority; directory
+reads, stat calls, sorting, inventory hashing and result construction run outside its actor. Cancellation
+keeps the request registered until actual completion, and shutdown joins the reader before releasing
+Storage ownership. Scan fingerprints identify sorted paths, not file bytes or an atomic OS snapshot;
+pages still rescan and verify the original continuation fingerprint.
+
+An optional scan `leaseId` retains only a lease the caller already owns. Experiment preparation passes
+its existing source lease through both inventory passes and capture, so a lost response cannot falsely
+prove that source readers drained. Ordinary metadata reads acquire no new lease. Explicit release,
+revocation and retirement defer that retained lease's physical removal until the worker stops. Single-file
+`file.capture` body I/O remains a separate synchronous path; metadata isolation does not claim all file
+operations are off the actor. See [inventory acceptance](../docs/reviews/runtime-file-inventory-2026-10-11.md).
+
 R5 adds read-only `compute.start/read/cancel/release` and grammar-recipe registration over those admitted
 resources. A job reads exactly one source class: an immutable WorkingState pin, a registered live root, or
 explicit fixed objects. Pinned jobs clone a short-lived reader pin; live records carry the revision actually

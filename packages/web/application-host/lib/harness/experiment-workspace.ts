@@ -226,6 +226,8 @@ const scanInventory = async (
   workspaceId: string,
   rootId: string,
   scopes: readonly string[],
+  leaseId: string,
+  observe: <T>(read: () => Promise<T>) => Promise<T>,
   signal?: AbortSignal,
 ): Promise<{ paths: string[]; fingerprint: string }> => {
   const paths: string[] = [];
@@ -233,15 +235,16 @@ const scanInventory = async (
   let fingerprint: string | undefined;
   do {
     signal?.throwIfAborted();
-    const page = await scoped.fileScan({
+    const page = await observe(() => scoped.fileScan({
       workspaceId,
       rootId,
+      leaseId,
       path: "",
       pageSize: 1024,
       ...(scopes.length > 0 ? { scopes: [...scopes] } : {}),
       ...(cursor === undefined ? {} : { cursor }),
       ...(fingerprint === undefined ? {} : { expectedFingerprint: fingerprint }),
-    }, signal);
+    }, signal));
     if (!Array.isArray(page.paths) || !page.paths.every((entry) => typeof entry === "string")) {
       throw new Error("Kernel returned an invalid experiment input scan page");
     }
@@ -381,21 +384,27 @@ export async function prepareExperimentInput(
       await waitWithSignal(new Promise<void>((resolve) => setTimeout(resolve, 250)), options.signal);
     }
     try {
-      const capturePath = async (relative: string, store: boolean): Promise<Record<string, unknown>> => {
+      // All source workers share the caller's existing lease and actual-response
+      // drain tracking. A disconnected transport is not a stopped reader receipt.
+      const observe = async <T>(read: () => Promise<T>): Promise<T> => {
         options.signal?.throwIfAborted();
         captureDrained = false;
         try {
-          const result = await scoped.fileCaptureBatch({ operationId: `experiment-input-${store ? "capture" : "verify"}:${randomUUID()}`,
-            workspaceId: caller.workspaceId, rootId: sourceRootId, paths: [relative], store, leaseId }, options.signal);
+          const result = await read();
           captureDrained = true;
-          if (!Array.isArray(result.entries) || result.entries.length !== 1 || !result.entries[0] || typeof result.entries[0] !== "object") throw new Error("Kernel returned an invalid experiment input capture batch");
-          return result.entries[0] as Record<string, unknown>;
+          return result;
         } catch (error) {
           if (error instanceof KernelClientError && error.code === "cancelled") captureDrained = true;
           throw error;
         }
       };
-      const inventory = await scanInventory(scoped, caller.workspaceId, sourceRootId, scopes, options.signal);
+      const capturePath = async (relative: string, store: boolean): Promise<Record<string, unknown>> => {
+        const result = await observe(() => scoped.fileCaptureBatch({ operationId: `experiment-input-${store ? "capture" : "verify"}:${randomUUID()}`,
+          workspaceId: caller.workspaceId, rootId: sourceRootId, paths: [relative], store, leaseId }, options.signal));
+        if (!Array.isArray(result.entries) || result.entries.length !== 1 || !result.entries[0] || typeof result.entries[0] !== "object") throw new Error("Kernel returned an invalid experiment input capture batch");
+        return result.entries[0] as Record<string, unknown>;
+      };
+      const inventory = await scanInventory(scoped, caller.workspaceId, sourceRootId, scopes, leaseId, observe, options.signal);
       if (cwd !== undefined) await validateCwd(sourceRoot, cwd, inventory.paths);
 
       const entries: CapturedEntry[] = [];
@@ -411,7 +420,7 @@ export async function prepareExperimentInput(
 
         // The list fingerprint protects scan pagination, while this fresh scan
         // catches additions/removals during the capture window.
-        const afterInventory = await scanInventory(scoped, caller.workspaceId, sourceRootId, scopes, options.signal);
+        const afterInventory = await scanInventory(scoped, caller.workspaceId, sourceRootId, scopes, leaseId, observe, options.signal);
         if (afterInventory.fingerprint !== inventory.fingerprint
           || afterInventory.paths.length !== inventory.paths.length
           || afterInventory.paths.some((entry, index) => entry !== inventory.paths[index])) {
