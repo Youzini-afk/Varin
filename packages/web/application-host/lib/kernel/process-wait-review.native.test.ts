@@ -21,7 +21,7 @@ import { ExistingHostCredentialOwner } from './credential-owner.js';
 import { ThreadAdapter } from './thread-adapter.js';
 import { registerThreadRoutes } from './thread-routes.js';
 import { registerCommonRequestMiddleware } from '../platform/core-routes.js';
-import { createResourceService } from '../harness/resources.js';
+import { createResourceService, type LocalMachineProbe } from '../harness/resources.js';
 import { createSourceService } from '../harness/sources.js';
 import { createExperimentService } from '../harness/experiments.js';
 import { createResearchRuntime, createResearchSourceAuthority } from './research-runtime.js';
@@ -47,7 +47,8 @@ async function listen(server: Server) {
   cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
   return `http://127.0.0.1:${address.port}`;
 }
-async function fixture(reply: (body: Record<string, unknown>, response: ServerResponse) => void, existingRoot?: string, withResearch = false) {
+async function fixture(reply: (body: Record<string, unknown>, response: ServerResponse) => void, existingRoot?: string, withResearch = false,
+  resourceOptions: { probeLocal?: () => LocalMachineProbe; sampleIntervalMs?: number } = {}) {
   await fs.access(kernelPath);
   const root = existingRoot ?? await fs.mkdtemp(path.join(os.tmpdir(), 'varin-http-review-'));
   const kernel = createKernelClient({ hostId: 'http-review', storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
@@ -81,10 +82,11 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const context = contextOwner(kernel, resources);
   let research: ReturnType<typeof createResearchRuntime> | undefined;
   let experiments: ReturnType<typeof createExperimentService> | undefined;
+  let computeResources: ReturnType<typeof createResourceService> | undefined;
   let closed = false; let kernelClosed = false;
   const closeKernel = async () => { kernelClosed = true; await kernel.close(); };
   const close = async () => { if (closed) return; closed = true;
-    await research?.dispose(); await experiments?.dispose();
+    await research?.dispose(); await experiments?.dispose(); await computeResources?.dispose();
     try { if (!kernelClosed) await storage.dispose(); } finally { await documents.dispose(); await closeKernel(); } };
   cleanups.push(close);
 
@@ -96,7 +98,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
     rebindModel: async () => owner,
   }, async source => { await documents.inspectWorkspace(source.workspaceId); await documents.inspectWorkspace(source.executionWorkspaceId); }, (_runId, error) => { launchErrors.push(error); }, prepare, context.prepareContext);
   if (withResearch) {
-    const computeResources = createResourceService({ client: kernel,
+    computeResources = createResourceService({ client: kernel, ...resourceOptions,
       probeLocalGpu: async () => ({ status: 'unavailable', reason: 'no-device' }),
       onError: error => { launchErrors.push(error); } });
     const sources = createSourceService({ client: kernel });
@@ -296,6 +298,60 @@ it('original research log bytes and drained stderr jointly resume one new Run an
     expect(await fs.readFile(spawnCount, 'utf8')).toBe('1');
     expect(reopened.launchErrors).toEqual([]);
   } finally { await fs.writeFile(release, 'finish cleanup'); }
+}, 60_000);
+
+it('samples a registered machine condition without opening resources and resumes one original Thread across restart', async () => {
+  // Only physical measurements are controlled. HTTP, source admission, Storage,
+  // Catalog, automatic sampling demand and subsequent Run delivery are real.
+  let usedMemoryMb = 50;
+  let probes = 0;
+  const probeLocal = () => {
+    probes++;
+    return { cpuCores: 4, memoryMb: 1_024, usedMemoryMb, cpuPercent: 10 };
+  };
+  const inputs: string[] = [];
+  const f = await fixture((body, response) => { inputs.push(JSON.stringify(body.input)); done(response); },
+    undefined, true, { probeLocal, sampleIntervalMs: 20 });
+  const identity = await f.api.create('automatic-resource-condition');
+  const prepared = await f.api.prepareSource({ ...identity, key: 'metric-source', path: f.workspace, mode: 'materialized' });
+  const original = await f.api.submit({ ...identity, key: 'metric-owner', expectedHead: null,
+    text: 'Prepare this work for an original machine observation.', model, source: prepared.source });
+  await expect.poll(async () => (await f.runtime.run(original.run_id)).state, { timeout: 15_000 }).toBe('completed');
+  f.collaboration.stop();
+  const command = { ...identity, key: 'automatic-memory-crossing', runId: original.run_id,
+    trigger: { kind: 'metric' as const, machineId: 'local', metric: 'memory_mb' as const,
+      predicate: 'above' as const, threshold: 100 },
+    instruction: 'Continue the original work using the observed memory condition.' };
+  const registered = await f.api.followups.register(command);
+  // No resources list, manual sample, or research reconcile initiates the probe.
+  await expect.poll(() => probes, { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
+  expect((await f.api.followups.list(identity)).find(item => item.id === registered.id)?.occurrence).toBeNull();
+  usedMemoryMb = 150;
+  await expect.poll(async () => Boolean((await f.api.followups.list(identity)).find(item => item.id === registered.id)?.occurrence?.delivery?.run_id),
+    { timeout: 15_000 }).toBe(true);
+  const occurrence = (await f.api.followups.list(identity)).find(item => item.id === registered.id)!.occurrence!;
+  const delivery = occurrence.delivery!;
+  expect(occurrence.evidence).toMatchObject({ kind: 'metric', fact: { value: 150 } });
+  expect(delivery.run_id).not.toBe(original.run_id);
+  await f.adapter.recover();
+  await expect.poll(async () => (await f.runtime.run(delivery.run_id!)).state, { timeout: 15_000 }).toBe('completed');
+  expect(inputs).toHaveLength(2);
+  expect(inputs[1]).toContain(command.instruction);
+  expect(inputs[1]).toContain('metric');
+  expect((await f.runtime.history(identity.branchId)).filter(item => item.id === delivery.input_id)).toHaveLength(1);
+  expect(f.launchErrors).toEqual([]);
+  await f.close();
+
+  const reopened = await fixture((_body, response) => done(response), f.root, true, { probeLocal, sampleIntervalMs: 20 });
+  await reopened.adapter.recover();
+  await reopened.research!.reconcile();
+  const retained = await reopened.api.followups.register(command);
+  expect(retained.occurrence?.id).toBe(occurrence.id);
+  expect(retained.occurrence?.delivery).toMatchObject({ input_id: delivery.input_id, run_id: delivery.run_id, state: 'delivered' });
+  expect((await reopened.api.followups.occurrences(identity, registered.id)).occurrences).toHaveLength(1);
+  expect((await reopened.runtime.history(identity.branchId)).filter(item => item.id === delivery.input_id)).toHaveLength(1);
+  expect(reopened.requests).toHaveLength(0);
+  expect(reopened.launchErrors).toEqual([]);
 }, 60_000);
 
 it('reopens a parked wait after kernel shutdown and delivers the original stopped process fact without respawn', async () => {

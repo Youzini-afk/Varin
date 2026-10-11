@@ -1141,6 +1141,32 @@ retries without resetting cursor or intent. Log reads share the metadata flight,
 research cancellation/terminal reconciliation. An exhausted combination releases unrelated original
 watch resources while preserving already accepted occurrences and the optional Wait result.
 
+Native machine `metric` conditions use `metric-followups.ts` and the same ResourceService as research
+reads and Pi metric observers. Subscription alone does not sample. Active local demand starts one
+shared flight immediately; subsequent flights use the owner's configurable 5-second default cadence
+after the preceding flight. Additional consumers do not reset that cadence. No active local demand
+means no timer; remote-only demand does not probe the local machine. There is no remote metric writer
+in this slice, so registered remote machines expose unsupported observation rather than fake values.
+
+ResourceService publishes the original sample record revision, measurement time and machine/Host
+provenance only after its existing Storage CAS. GPU selection uses the original UUID. Probe work is
+outside the machine commitment lock; admission commits against the actual current inventory and
+commitments without a second probe under the lock or a stale-GPU fallback. Resource release remains
+independent. The fixed `nvidia-smi` probe has an abortable, configurable observation budget and resolves
+only after its actual child close; cancellation intent alone does not prove process drainage.
+Service disposal stops/drains observation production while preserving original accepted-job cleanup.
+Scoped handles are rebuilt after kernel epochs, but an in-flight old probe retains its captured actor
+and cannot borrow that new authority to publish old measurements.
+
+The Native adapter subscribes before each new leaf's first snapshot and retains per-leaf callbacks
+until the original Catalog cursor confirms them, including lost replies. Work/demand discovery remains
+independent of slow sample observation, so Pause/Cancel releases demand without waiting for a held read.
+Only Catalog evaluates the threshold and atomically retains cursor/last-known predicate/edge; delivery
+uses the existing occurrence, Wait and ingress owners. Same-timestamp revisions remain distinct;
+missing/stale/disconnected values never mean false or zero. Reconnection checks current facts and
+reports a gap, not invented sample history. Existing Pi watcher groups retain/release the same sampler
+without changing their separate Pi observation and delivery ownership.
+
 The following `followups.ts` service describes the still-supported Pi runtime path.
 
 Run settlement clears execution yield and live input/stall attention. A retained follow-up wait has

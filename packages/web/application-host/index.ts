@@ -2714,6 +2714,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return (state?.activeWriters?.length ?? 0) > 0;
     },
     subscribeResourceSamples: (listener) => resourceService.subscribeSamples(listener),
+    retainResourceSampling: (machineId) => resourceService.retainSampling(machineId),
     getResourceSample: (machineId) => resourceService.getMachineSample(machineId),
     // Desktop source (EE §8.3): the computer catalog is authoritative for
     // status (remote mirrors included); file revision checks delegate to the
@@ -4708,6 +4709,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       piSessionTitles.stop();
       unregisterResearchCapability();
       await researchRuntime.dispose();
+      await resourceService.dispose();
       experimentService.detachObservers();
       brokerUnsubscribe();
       harnessRouter.dispose();

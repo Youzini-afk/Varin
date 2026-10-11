@@ -87,6 +87,8 @@ export type KernelMethod =
   | "runtime.model.select"
   | "runtime.model.inspect"
   | "runtime.status"
+  | "runtime.followup.metrics"
+  | "runtime.followup.metric.observe"
   | "runtime.followup.research"
   | "runtime.followup.research.observe"
   | "runtime.followup.log.observe"
@@ -599,6 +601,77 @@ export interface FollowupLogState {
 
 export type FollowupLogEvidence = { kind: 'log_literal'; binding: HostJobBinding; stream: LogStream; start_offset: number; end_offset: number; published_bytes: number; job_revision: number } | { kind: 'log_end'; binding: HostJobBinding; stream: LogStream; published_bytes: number; job_revision: number | null; attempt_revision: number };
 
+export type MetricKind = 'cpu_percent' | 'memory_mb' | 'gpu_percent' | 'gpu_memory_mb';
+
+export type MetricPredicate = 'above' | 'below';
+
+export type MetricAvailability = 'available' | 'missing' | 'stale' | 'unavailable';
+
+export interface MetricMachineIdentity {
+  host_id: string;
+  machine_id: string;
+  kind: string;
+  backend: string | null;
+  target_host_id: string | null;
+}
+
+export interface FollowupMetricState {
+  identity: MetricMachineIdentity | null;
+  sample_revision: number | null;
+  observed_at_ms: number | null;
+  status: MetricAvailability;
+  failure_code: string | null;
+  holding: boolean | null;
+  value: number | null;
+  gap: boolean;
+}
+
+export interface FollowupMetricSnapshot {
+  identity: MetricMachineIdentity | null;
+  machine_revision: number | null;
+  sample_revision: number | null;
+  observed_at_ms: number | null;
+  status: MetricAvailability;
+  failure_code: string | null;
+  value: number | null;
+}
+
+export interface FollowupMetricEvidence {
+  identity: MetricMachineIdentity;
+  machine_revision: number;
+  sample_revision: number;
+  observed_at_ms: number;
+  metric: MetricKind;
+  gpu_uuid: string | null;
+  predicate: MetricPredicate;
+  threshold: number;
+  value: number;
+  gap: boolean;
+}
+
+export interface FollowupMetricWork {
+  key: FollowupResearchKey;
+  observer: ResearchScope;
+  source: FollowupSource;
+  metric: FollowupMetricState;
+}
+
+export interface FollowupMetricWorksParams {
+  after?: string;
+}
+
+export interface FollowupMetricWorksResult {
+  works: FollowupMetricWork[];
+  nextCursor: string | null;
+}
+
+export interface FollowupMetricObserveParams {
+  key: FollowupResearchKey;
+  expected: FollowupMetricState;
+  snapshot: FollowupMetricSnapshot;
+  gap: boolean;
+}
+
 export interface FollowupLogObserveParams {
   key: FollowupResearchKey;
   binding: HostJobBinding;
@@ -853,9 +926,9 @@ export type FileObservationOwnerResult = { ok: false; code: string } | { ok: tru
 
 export type FileObservationOwnerHint = {v: 1; kind: 'file-observation-invalidated'; kernelEpoch: string} & ({scope: 'root'; rootId: string; canonicalRoot: string} | {scope: 'receipt'; receiptId: string});
 
-export type FollowupSource = { kind: 'at'; at_ms: number } | { kind: 'process_stopped'; operation_id: string } | { kind: 'job_stopped'; operation_id: string } | { kind: 'file'; path: string; condition: FileCondition } | { kind: 'artifact'; operation_id: string; artifact_id?: string; name?: string } | { kind: 'collection'; operation_id: string } | { kind: 'log_literal'; operation_id: string; stream: LogStream; from_offset: number; literal_bytes: number } | { kind: 'log_end'; operation_id: string; stream: LogStream };
+export type FollowupSource = { kind: 'at'; at_ms: number } | { kind: 'process_stopped'; operation_id: string } | { kind: 'job_stopped'; operation_id: string } | { kind: 'file'; path: string; condition: FileCondition } | { kind: 'artifact'; operation_id: string; artifact_id?: string; name?: string } | { kind: 'collection'; operation_id: string } | { kind: 'log_literal'; operation_id: string; stream: LogStream; from_offset: number; literal_bytes: number } | { kind: 'log_end'; operation_id: string; stream: LogStream } | { kind: 'metric'; machine_id: string; metric: MetricKind; gpu_uuid?: string; predicate: MetricPredicate; threshold: number };
 
-export type FollowupLeafEvidence = { kind: 'at'; at_ms: number; observed_at_ms: number } | { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string } | { kind: 'job_stopped'; binding: HostJobBinding; outcome: Outcome; effect: Effect; receipt_identity: string; receipt_epoch: string } | FollowupFileEvidence | FollowupArtifactEvidence | FollowupCollectionEvidence | FollowupLogEvidence;
+export type FollowupLeafEvidence = { kind: 'at'; at_ms: number; observed_at_ms: number } | { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string } | { kind: 'job_stopped'; binding: HostJobBinding; outcome: Outcome; effect: Effect; receipt_identity: string; receipt_epoch: string } | FollowupFileEvidence | FollowupArtifactEvidence | FollowupCollectionEvidence | FollowupLogEvidence | { kind: 'metric'; fact: FollowupMetricEvidence };
 
 export interface FollowupSourceObservation {
   accepted_cursor: number;
@@ -870,6 +943,7 @@ export interface FollowupSourceState {
   observed: FollowupSourceObservation | null;
   file: FollowupFileSourceState | null;
   log: FollowupLogState | null;
+  metric: FollowupMetricState | null;
 }
 
 export interface FollowupSourceEvidence {
@@ -1937,7 +2011,7 @@ export interface FollowupOccurrencesResult {
 
 export type FollowupControlAction = 'pause' | 'resume' | 'cancel';
 
-export type FollowupRegistrationSource = { kind: 'at'; atMs: number } | { kind: 'process_stopped'; operationId: string } | { kind: 'job_stopped'; operationId: string } | { kind: 'file'; path: string; condition: FileCondition } | { kind: 'artifact'; operationId: string; artifactId?: string; name?: string } | { kind: 'collection'; operationId: string } | { kind: 'log_literal'; operationId: string; stream: LogStream; literal: string; fromOffset?: number } | { kind: 'log_end'; operationId: string; stream: LogStream };
+export type FollowupRegistrationSource = { kind: 'at'; atMs: number } | { kind: 'process_stopped'; operationId: string } | { kind: 'job_stopped'; operationId: string } | { kind: 'file'; path: string; condition: FileCondition } | { kind: 'artifact'; operationId: string; artifactId?: string; name?: string } | { kind: 'collection'; operationId: string } | { kind: 'log_literal'; operationId: string; stream: LogStream; literal: string; fromOffset?: number } | { kind: 'log_end'; operationId: string; stream: LogStream } | { kind: 'metric'; machineId: string; metric: MetricKind; gpuUuid?: string; predicate: MetricPredicate; threshold: number };
 
 export type FollowupRegistrationTrigger = FollowupRegistrationSource | { kind: 'any' | 'all'; sources: FollowupRegistrationSource[] };
 
@@ -1988,7 +2062,7 @@ export interface FollowupControlParams {
 
 export interface FollowupWait {
   id: string;
-  kind: 'process_stopped' | 'job_stopped' | 'run_completed' | 'goal_requested' | 'at' | 'any' | 'all' | 'file' | 'artifact' | 'collection' | 'log_literal' | 'log_end';
+  kind: FollowupTrigger['kind'];
   after_cursor: number;
   trigger_cursor: number | null;
   state: 'waiting' | 'observed' | 'consumed' | 'cancelled';
@@ -3860,6 +3934,8 @@ export type KernelMethodParams = {
   "runtime.followup.registration.cancel": FollowupRegistrationCancelParams;
   "runtime.followup.register": FollowupRegisterAdmissionParams;
   "runtime.followup.files": FollowupFilesParams;
+  "runtime.followup.metrics": FollowupMetricWorksParams;
+  "runtime.followup.metric.observe": FollowupMetricObserveParams;
   "runtime.followup.research": FollowupResearchWorksParams;
   "runtime.followup.research.observe": FollowupResearchObserveParams;
   "runtime.followup.log.observe": FollowupLogObserveParams;
@@ -4342,6 +4418,24 @@ export type KernelRequest =
       id: string;
       method: "runtime.followup.files";
       params: FollowupFilesParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.metrics";
+      params: FollowupMetricWorksParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.metric.observe";
+      params: FollowupMetricObserveParams;
       epoch?: string;
       grantId?: string;
     }

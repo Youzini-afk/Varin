@@ -701,6 +701,8 @@ pub(crate) fn spawn(
                                 | "runtime.followup.get"
                                 | "runtime.followup.occurrences"
                                 | "runtime.followup.occurrence"
+                                | "runtime.followup.metrics"
+                                | "runtime.followup.metric.observe"
                                 | "runtime.followup.research"
                                 | "runtime.followup.research.observe"
                                 | "runtime.followup.log.observe"

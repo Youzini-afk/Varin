@@ -1209,3 +1209,6 @@ mod artifacts;
 
 #[path = "fixtures/followup_logs.rs"]
 mod logs;
+
+#[path = "fixtures/followup_metrics.rs"]
+mod metrics;

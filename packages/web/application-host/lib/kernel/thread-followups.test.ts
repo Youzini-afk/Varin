@@ -18,7 +18,7 @@ const instruction = '  Read the original process output.\nDo not start it again.
 const definition: Followup = { repeat: 'once', pending_occurrences: 0, exhausted: false, id: 'followup:process', revision: 1, generation: 1,
   thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: run.id,
   actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1_700_000_000_000, observation: null,
-  goal_id: null, trigger: { kind: 'process_stopped', operation_id: operationId }, sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 4, observed: null, file: null, log: null }], state: 'active',
+  goal_id: null, trigger: { kind: 'process_stopped', operation_id: operationId }, sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 4, observed: null, file: null, log: null, metric: null }], state: 'active',
   wait: { id: 'wait:process', kind: 'process_stopped', after_cursor: 4, trigger_cursor: null, state: 'waiting' }, occurrence: null };
 
 /** These are transport contract tests: real HTTP/client/admission functions, with a controlled RPC boundary.
@@ -437,4 +437,22 @@ it('reads only the exact original occurrence metadata through the public API and
   await expect(f.api.followups.occurrence(identity, definition.id, first.occurrence.id)).rejects.toMatchObject({ code: 'storage-error' });
   f.facts.occurrenceDetailError = false;
   expect(await f.api.followups.occurrence(identity, definition.id, first.occurrence.id)).toEqual(first);
+});
+
+it('public metric and composite registrations reach the original decoder with exact UUID, decimals and retry identity', async () => {
+  const f = fixture();
+  const cpu = { kind: 'metric' as const, machineId: 'local', metric: 'cpu_percent' as const, predicate: 'above' as const, threshold: 90.125 };
+  const gpu = { kind: 'metric' as const, machineId: 'local', metric: 'gpu_memory_mb' as const, gpuUuid: 'GPU-original', predicate: 'below' as const, threshold: -0.25 };
+  const triggers: FollowupRegistrationTrigger[] = [cpu, gpu, { kind: 'any', sources: [cpu, gpu] }, { kind: 'all', sources: [cpu, gpu] }];
+  let loseReply = true;
+  vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+    const response = await f.request(new URL(url, 'http://fixture.invalid').pathname, JSON.parse(String(init.body)));
+    if (loseReply) { loseReply = false; throw new Error('metric acceptance reply lost'); } return response;
+  });
+  const inputs = triggers.map((trigger, index) => ({ ...identity, key: `metric-${index}`, runId: run.id, trigger, instruction, repeat: 'each' as const }));
+  await expect(f.api.followups.register(inputs[0]!)).rejects.toThrow('metric acceptance reply lost');
+  for (const input of inputs) await f.api.followups.register(input);
+  expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.followup.register').map(([, params]) => params))
+    .toEqual([inputs[0]!, ...inputs].map(({ key, runId, trigger, instruction, repeat }) => ({ key, runId, trigger, instruction, repeat })));
+  expect(f.issueGrant).not.toHaveBeenCalled(); expect(f.models.resolveModel).not.toHaveBeenCalled();
 });

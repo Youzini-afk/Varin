@@ -124,6 +124,8 @@ async function fixture() {
   } as unknown as KernelScopedClient;
   const client = { start: async () => ({}), issueGrant: async (grant:object) => grant, retireGrant: async () => ({}), retireOperationGrants: async (operationId:string) => {events.push(`authority-retired:${operationId}`);return {};}, scoped: () => scoped } as unknown as KernelClient;
   const resources = {
+    // This controlled resource port has no metric definitions or sample producer.
+    subscribeSamples() { return () => {}; },
     async listMachines() { return [{ machineId: "local", state: "available", connection: { status: "connected" }, capacity: { cpuCores: 64 }, commitments: [...committed].map((id) => ({ commitmentId: id, attemptId: id.slice(7), state: "confirmed", resources: {} })) }]; },
     async getMachineRecord(_workspace: string, machineId: string) { return machineId === "remote" ? { machineId: "remote" } : null; },
     async admit(_ws: string, _machine: string, _request: unknown, attemptId: string) { admissionCalls++; await beforeAdmit(); committed.add(`commit-${attemptId}`); events.push("admitted"); return { status: "confirmed", commitmentId: `commit-${attemptId}` }; },
@@ -518,7 +520,7 @@ it('installed ordinary research tools hand original model and policy invocations
   const hints=new Set<()=>void>();
   const notify=()=>{for(const hint of hints)hint();};
   const kernel={agentRuntimeRequest:async(method:string,params:Record<string,unknown>)=>{
-    if (method === "runtime.followup.research") return { works: [], nextCursor: null };
+    if (method === "runtime.followup.research" || method === "runtime.followup.metrics") return { works: [], nextCursor: null };
     if(method==='runtime.run.inspect')return {id:'run',thread_id:'thread',branch_id:'branch',cancel_requested:false,state:'executing'};
     if(method==='runtime.launch.inspect')return {run_id:'run',selection:{source}};
     if(method==='runtime.research.scopes')return [{rootThreadId:'thread',threadId:'thread',branchId:'branch',sourceRunId:'run',source,readThreadIds:['thread'],controlThreadIds:['thread'],canSubmit:true}];

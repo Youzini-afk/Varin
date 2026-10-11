@@ -13,6 +13,15 @@ use crate::execution::{
     deny_unknown_fields
 )]
 pub enum FollowupRegistrationSource {
+    Metric {
+        machine_id: String,
+        metric: MetricKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        gpu_uuid: Option<String>,
+        predicate: MetricPredicate,
+        threshold: serde_json::Number,
+    },
+
     LogLiteral {
         operation_id: String,
         stream: LogStream,
@@ -52,6 +61,10 @@ pub enum FollowupRegistrationSource {
 impl FollowupRegistrationSource {
     fn source(&self) -> FollowupSource {
         match self {
+            Self::Metric { machine_id, metric, gpu_uuid, predicate, threshold } => FollowupSource::Metric {
+                machine_id: machine_id.clone(), metric: *metric, gpu_uuid: gpu_uuid.clone(), predicate: *predicate, threshold: threshold.clone(),
+            },
+
             Self::LogLiteral { operation_id, stream, literal, from_offset } => FollowupSource::LogLiteral {
                 operation_id: operation_id.clone(), stream: *stream, from_offset: from_offset.unwrap_or(0), literal_bytes: literal.len() as u64,
             },
@@ -90,6 +103,15 @@ impl FollowupRegistrationSource {
     deny_unknown_fields
 )]
 pub enum FollowupRegistrationTrigger {
+    Metric {
+        machine_id: String,
+        metric: MetricKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        gpu_uuid: Option<String>,
+        predicate: MetricPredicate,
+        threshold: serde_json::Number,
+    },
+
     LogLiteral {
         operation_id: String,
         stream: LogStream,
@@ -149,6 +171,10 @@ impl FollowupRegistrationTrigger {
     }
     fn trigger(&self) -> FollowupTrigger {
         match self {
+            Self::Metric { machine_id, metric, gpu_uuid, predicate, threshold } => FollowupTrigger::Metric {
+                machine_id: machine_id.clone(), metric: *metric, gpu_uuid: gpu_uuid.clone(), predicate: *predicate, threshold: threshold.clone(),
+            },
+
             Self::LogLiteral { operation_id, stream, literal, from_offset } => FollowupTrigger::LogLiteral {
                 operation_id: operation_id.clone(), stream: *stream, from_offset: from_offset.unwrap_or(0), literal_bytes: literal.len() as u64,
             },
@@ -197,6 +223,7 @@ impl FollowupRegistrationTrigger {
             .filter_map(|source| match source {
                 FollowupSource::ProcessStopped { operation_id } => Some(operation_id),
                 FollowupSource::At { .. }
+                | FollowupSource::Metric { .. }
                 | FollowupSource::File { .. }
                 | FollowupSource::JobStopped { .. }
                 | FollowupSource::Artifact { .. }
@@ -241,13 +268,14 @@ impl FollowupRegistration {
             };
             if !valid {
                 return Err(RuntimeError::Invalid(
-                    "each requires repeatable log matches, artifact, collection or changed-file facts; every All leaf must emit new edges"
+                    "each requires repeatable metric crossings, log matches, artifact, collection or changed-file facts; every All leaf must emit new edges"
                         .into(),
                 ));
             }
         }
         for source in sources {
             match source {
+                FollowupSource::Metric { machine_id, metric, gpu_uuid, threshold, .. } => metrics::validate_source(&machine_id, metric, gpu_uuid.as_deref(), &threshold)?,
                 FollowupSource::LogLiteral { operation_id, literal_bytes, from_offset, .. } => {
                     artifacts::validate_source(&operation_id, None, None)?;
                     if from_offset > 9_007_199_254_740_991 { return Err(RuntimeError::Invalid("Log byte offset exceeds the exact JSON integer representation".into())); }
@@ -482,6 +510,7 @@ impl Catalog {
         }
         for source in p.input.trigger.trigger().sources() {
             match source {
+                FollowupSource::Metric { .. } => { metrics::scope(&self.db, &p.run, p.source.as_ref())?; }
                 FollowupSource::ProcessStopped { operation_id } => {
                     require_process(&self.db, &p.run, &operation_id)?
                 }
@@ -534,6 +563,7 @@ impl Catalog {
         let run: Run = record(&tx, "runs", &p.run.id)?;
         for source in p.input.trigger.trigger().sources() {
             match source {
+                FollowupSource::Metric { .. } => { metrics::scope(&tx, &run, p.source.as_ref())?; }
                 FollowupSource::ProcessStopped { operation_id } => {
                     require_process(&tx, &run, &operation_id)?
                 }

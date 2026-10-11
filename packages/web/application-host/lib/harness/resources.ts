@@ -32,7 +32,8 @@ const SAMPLE_PREFIX = "resource.sample:";
 const LOCAL_MACHINE_ID = "local";
 /** Host-local catalog namespace shared by every owning workspace. */
 const RESOURCE_WORKSPACE_ID = "__varin_host_resources__";
-const SAMPLE_STALE_MS = 120_000;
+export const RESOURCE_SAMPLE_STALE_MS = 120_000;
+const DEFAULT_SAMPLE_INTERVAL_MS = 5_000;
 
 export interface LocalMachineProbe {
   cpuCores: number;
@@ -130,6 +131,24 @@ export interface ResourceMachineRegistration {
   target?: ResourceMachineView["target"];
 }
 
+export interface ResourceSample {
+  machineId: string;
+  recordRevision: number;
+  observedAt: number;
+  source: string;
+  identity: { hostId: string; machineId: string; kind: string; backend: string | null; targetHostId: string | null };
+  machineRevision: number;
+  usage: { memoryMb?: number; cpuPercent?: number; gpus?: Array<{ index?: number; uuid?: string; utilizationPercent?: number; usedMemoryMb?: number; memoryMb?: number }> };
+  gpuProbe?: { status: string; reason?: string; detail?: string };
+}
+export interface ResourceMachineObservation {
+  identity: ResourceSample['identity'] | null;
+  machineRevision: number | null;
+  state: string | null;
+  connection: string | null;
+  sample: ResourceSample | null;
+  stale: boolean;
+}
 interface ResourceServiceDeps {
   client: KernelClient;
   /** Monotonic clock injection for tests. */
@@ -141,7 +160,11 @@ interface ResourceServiceDeps {
   /** Capacity was returned; Host may reconcile queued attempts in each known workspace. */
   onCapacityAvailable?: (workspaceId: string) => void | Promise<void>;
   /** On-demand host GPU facts; the default is a fixed nvidia-smi probe. */
-  probeLocalGpu?: () => Promise<GpuProbeResult>;
+  probeLocalGpu?: (signal?: AbortSignal) => Promise<GpuProbeResult>;
+  /** Shared observation cadence, not a per-definition timer or trigger restriction. */
+  sampleIntervalMs?: number;
+  /** Budget for the original fixed GPU probe; expiry is unknown, never zero usage. */
+  gpuProbeTimeoutMs?: number;
   /** Resolve the target-side allocator for managed machines. */
   resolveExternalAuthority?: (
     machineId: string,
@@ -235,9 +258,13 @@ const gpuDevices = (capacity: Record<string, unknown>): GpuDeviceFact[] => {
     if (index === undefined || !Number.isInteger(index) || !uuid) return [];
     const memoryMb = nonNegative(entry.memoryMb);
     const name = str(entry.name);
+    const usedMemoryMb = nonNegative(entry.usedMemoryMb);
+    const utilizationPercent = percent(entry.utilizationPercent);
     return [{
       index,
       uuid,
+      ...(usedMemoryMb === undefined ? {} : { usedMemoryMb }),
+      ...(utilizationPercent === undefined ? {} : { utilizationPercent }),
       ...(name ? { name } : {}),
       ...(memoryMb === undefined ? {} : { memoryMb }),
     }];
@@ -393,12 +420,24 @@ export function createResourceService(deps: ResourceServiceDeps) {
   const report = (error: unknown) => {
     if (deps.onError) deps.onError(error instanceof Error ? error : new Error(String(error)));
   };
-  const observeGpu = async (): Promise<GpuProbeResult> => {
-    try {
-      return await probeGpu();
-    } catch (error) {
-      return { status: "unavailable", reason: "error", detail: error instanceof Error ? error.message : String(error) };
-    }
+  const sampleIntervalMs = deps.sampleIntervalMs ?? DEFAULT_SAMPLE_INTERVAL_MS;
+  const gpuProbeTimeoutMs = deps.gpuProbeTimeoutMs ?? DEFAULT_SAMPLE_INTERVAL_MS;
+  if (!Number.isFinite(sampleIntervalMs) || sampleIntervalMs <= 0 || !Number.isFinite(gpuProbeTimeoutMs) || gpuProbeTimeoutMs <= 0) {
+    throw new Error("Resource sampling intervals must be finite positive durations");
+  }
+  let disposed = false, generation = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const demands = new Map<string, number>();
+  let localFlight: { controller: AbortController; explicit: number; promise: Promise<{ machine: KernelRecordResult; sample: KernelRecordResult }> } | undefined;
+  const observeGpu = async (signal: AbortSignal): Promise<GpuProbeResult> => {
+    const controller = new AbortController();
+    const stop = () => controller.abort(signal.reason);
+    signal.addEventListener('abort', stop, { once: true });
+    if (signal.aborted) stop();
+    const timeout = setTimeout(() => controller.abort(new Error('GPU observation timed out')), gpuProbeTimeoutMs);
+    try { return await probeGpu(controller.signal); }
+    catch (error) { return { status: "unavailable", reason: "error", detail: error instanceof Error ? error.message : String(error) }; }
+    finally { clearTimeout(timeout); signal.removeEventListener('abort', stop); }
   };
   const rememberWorkspace = (workspaceId: string) => {
     if (workspaceId && workspaceId !== RESOURCE_WORKSPACE_ID) knownWorkspaces.add(workspaceId);
@@ -408,45 +447,49 @@ export function createResourceService(deps: ResourceServiceDeps) {
    * Committed `resource.sample` facts — observers (follow-up metric waits)
    * react to durable samples rather than probing machines themselves.
    */
-  const sampleListeners = new Set<(sample: {
-    machineId: string;
-    observedAt: number;
-    usage: {
-      memoryMb?: number;
-      cpuPercent?: number;
-      gpus?: Array<{ index?: number; utilizationPercent?: number; usedMemoryMb?: number; memoryMb?: number }>;
-    };
-  }) => void>();
-  const emitSample = (record: KernelRecordResult) => {
-    const payload = payloadOf(record);
-    const machineId = str(payload.machineId);
-    const usage = payload.usage && typeof payload.usage === "object" && !Array.isArray(payload.usage)
-      ? payload.usage as { memoryMb?: number; cpuPercent?: number; gpus?: Array<{ index?: number; utilizationPercent?: number; usedMemoryMb?: number; memoryMb?: number }> }
-      : {};
-    if (!machineId) return;
-    const sample = { machineId, observedAt: num(payload.observedAt) ?? now(), usage };
-    for (const listener of sampleListeners) {
-      try { listener(sample); } catch { /* observers must not break sampling */ }
-    }
+  const sampleListeners = new Set<(sample: ResourceSample) => void>();
+  const machineIdentity = (record: KernelRecordResult): ResourceSample['identity'] => {
+    const payload = payloadOf(record), target = payload.target as Record<string, unknown> | undefined;
+    const hostId = deps.client.handshake?.hostId;
+    if (!hostId) throw new Error('Original resource Host identity is unavailable');
+    return { hostId, machineId: record.recordId.slice(MACHINE_PREFIX.length), kind: str(payload.kind) ?? 'unknown',
+      backend: str(payload.backend) ?? null, targetHostId: str(target?.hostId) ?? null };
   };
-  const subscribeSamples = (listener: (sample: {
-    machineId: string;
-    observedAt: number;
-    usage: { memoryMb?: number; cpuPercent?: number; gpus?: Array<{ index?: number; utilizationPercent?: number; usedMemoryMb?: number; memoryMb?: number }> };
-  }) => void): (() => void) => {
+  const sampleFact = (record: KernelRecordResult, machine: KernelRecordResult): ResourceSample => {
+    const payload = payloadOf(record);
+    const observedAt = num(payload.observedAt);
+    if (observedAt === undefined) throw new Error('Original resource sample has no observation time');
+    const identity = payload.identity as ResourceSample['identity'] | undefined;
+    const machineRevision = num(payload.machineRevision);
+    if (!identity || machineRevision === undefined) throw new Error('Original resource sample provenance is unavailable');
+    return { machineId: machine.recordId.slice(MACHINE_PREFIX.length), recordRevision: record.recordRevision,
+      observedAt, source: str(payload.source) ?? 'unknown', identity, machineRevision,
+      usage: payload.usage && typeof payload.usage === 'object' && !Array.isArray(payload.usage) ? payload.usage as ResourceSample['usage'] : {},
+      ...(payload.gpuProbe && typeof payload.gpuProbe === 'object' ? { gpuProbe: payload.gpuProbe as NonNullable<ResourceSample['gpuProbe']> } : {}) };
+  };
+  const emitSample = (record: KernelRecordResult, machine: KernelRecordResult) => {
+    const sample = sampleFact(record, machine);
+    for (const listener of sampleListeners) { try { listener(sample); } catch { /* A consumer never blocks sampling. */ } }
+  };
+  const subscribeSamples = (listener: (sample: ResourceSample) => void): (() => void) => {
     sampleListeners.add(listener);
     return () => { sampleListeners.delete(listener); };
   };
-  const getMachineSample = async (machineId: string) => {
+  const observeMachine = async (machineId: string, signal?: AbortSignal): Promise<ResourceMachineObservation> => {
     const scoped = await globalContext();
-    const record = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordIdFor.sample(machineId)).catch(() => null);
-    if (!record) return null;
-    const payload = payloadOf(record);
-    const usage = payload.usage && typeof payload.usage === "object" && !Array.isArray(payload.usage)
-      ? payload.usage as { memoryMb?: number; cpuPercent?: number; gpus?: Array<{ index?: number; utilizationPercent?: number; usedMemoryMb?: number; memoryMb?: number }> }
-      : {};
-    return { machineId, observedAt: num(payload.observedAt) ?? record.updatedAt ?? now(), usage };
+    signal?.throwIfAborted();
+    const machine = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordIdFor.machine(machineId), signal);
+    if (!machine) return { identity: null, machineRevision: null, state: null, connection: null, sample: null, stale: false };
+    const record = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordIdFor.sample(machineId), signal);
+    const sample = record ? sampleFact(record, machine) : null;
+    const payload = payloadOf(machine), connection = payload.connection as Record<string, unknown> | undefined;
+    return { identity: machineIdentity(machine), machineRevision: machine.recordRevision, state: machine.state,
+      connection: str(connection?.status) ?? 'unknown', sample, stale: !!sample && now() - sample.observedAt > RESOURCE_SAMPLE_STALE_MS };
   };
+  const sampleObservation = (sample: ResourceSample): ResourceMachineObservation => ({ identity: sample.identity,
+    machineRevision: sample.machineRevision, state: 'available', connection: 'connected', sample,
+    stale: now() - sample.observedAt > RESOURCE_SAMPLE_STALE_MS });
+  const getMachineSample = async (machineId: string): Promise<ResourceSample | null> => (await observeMachine(machineId)).sample;
   const changed = (workspaceId: string) => {
     rememberWorkspace(workspaceId);
     for (const target of knownWorkspaces) {
@@ -464,43 +507,25 @@ export function createResourceService(deps: ResourceServiceDeps) {
     }
   };
 
-  const context = (workspaceId: string): Promise<KernelScopedClient> => {
+  let contextEpoch: string | null | undefined;
+  const context = async (workspaceId: string): Promise<KernelScopedClient> => {
+    await deps.client.start();
+    const epoch = deps.client.kernelEpoch;
+    if (contextEpoch !== epoch) { contexts.clear(); contextEpoch = epoch; }
     const existing = contexts.get(workspaceId);
     if (existing) return existing;
     const creating = (async () => {
-      const grant = await deps.client.issueGrant({
-        grantId: `resource:${randomUUID()}`,
-        owningWorkspace: workspaceId,
-        executionWorkspace: workspaceId,
-        capabilities: ["storage.read", "storage.write", "storage.maintenance"],
-        pathScopes: [""],
-      });
+      const grant = await deps.client.issueGrant({ grantId: `resource:${randomUUID()}`,
+        owningWorkspace: workspaceId, executionWorkspace: workspaceId,
+        capabilities: ["storage.read", "storage.write", "storage.maintenance"], pathScopes: [""] });
+      if (epoch !== deps.client.kernelEpoch) throw new Error('Resource authority changed');
       return deps.client.scoped(grant);
     })();
     contexts.set(workspaceId, creating);
     void creating.catch(() => { if (contexts.get(workspaceId) === creating) contexts.delete(workspaceId); });
     return creating;
   };
-
-  const globalContext = (): Promise<KernelScopedClient> => {
-    const existing = contexts.get(RESOURCE_WORKSPACE_ID);
-    if (existing) return existing;
-    const creating = (async () => {
-      const grant = await deps.client.issueGrant({
-        grantId: `resource-host:${randomUUID()}`,
-        owningWorkspace: RESOURCE_WORKSPACE_ID,
-        executionWorkspace: RESOURCE_WORKSPACE_ID,
-        capabilities: ["storage.read", "storage.write", "storage.maintenance"],
-        pathScopes: [""],
-      });
-      return deps.client.scoped(grant);
-    })();
-    contexts.set(RESOURCE_WORKSPACE_ID, creating);
-    void creating.catch(() => {
-      if (contexts.get(RESOURCE_WORKSPACE_ID) === creating) contexts.delete(RESOURCE_WORKSPACE_ID);
-    });
-    return creating;
-  };
+  const globalContext = (): Promise<KernelScopedClient> => context(RESOURCE_WORKSPACE_ID);
 
   const allRecords = async (
     scoped: KernelScopedClient,
@@ -532,10 +557,11 @@ export function createResourceService(deps: ResourceServiceDeps) {
       runId?: string;
       expectedRecordRevision?: number;
     },
+    capturedScope?: KernelScopedClient,
   ): Promise<KernelRecordResult> => {
-    const scoped = workspaceId === RESOURCE_WORKSPACE_ID
+    const scoped = capturedScope ?? (workspaceId === RESOURCE_WORKSPACE_ID
       ? await globalContext()
-      : await context(workspaceId);
+      : await context(workspaceId));
     return scoped.putRecord({
       operationId: `${input.recordType}:${randomUUID()}`,
       recordId: input.recordId,
@@ -552,16 +578,13 @@ export function createResourceService(deps: ResourceServiceDeps) {
     });
   };
 
-  const putGlobalRecord = async (input: Parameters<typeof putRecord>[1]): Promise<KernelRecordResult> => (
-    putRecord(RESOURCE_WORKSPACE_ID, input)
+  const putGlobalRecord = async (input: Parameters<typeof putRecord>[1], capturedScope?: KernelScopedClient): Promise<KernelRecordResult> => (
+    putRecord(RESOURCE_WORKSPACE_ID, input, capturedScope)
   );
 
-  const ensureLocalMachineUnsafe = async (): Promise<KernelRecordResult> => {
+  const ensureLocalMachineUnsafe = async (observed: LocalMachineProbe, gpu: GpuProbeResult, scoped: KernelScopedClient): Promise<KernelRecordResult> => {
     const recordId = recordIdFor.machine(LOCAL_MACHINE_ID);
-    const scoped = await globalContext();
     const existing = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordId);
-    const observed = probe();
-    const gpu = await observeGpu();
     const cpuCores = nonNegative(observed.cpuCores);
     const memoryMb = nonNegative(observed.memoryMb);
     if (cpuCores === undefined || memoryMb === undefined) {
@@ -607,7 +630,7 @@ export function createResourceService(deps: ResourceServiceDeps) {
           gpuProbe: nextGpuProbe,
           connection: { status: "connected", checkedAt: checkedAt },
         },
-      });
+      }, scoped);
     }
     return putGlobalRecord({
       recordId,
@@ -621,46 +644,97 @@ export function createResourceService(deps: ResourceServiceDeps) {
         gpuProbe: gpuProbeRecord(gpu, checkedAt),
         connection: { status: "connected", checkedAt: checkedAt },
       },
+    }, scoped);
+  };
+
+  const observeLocalMachine = (explicit: boolean): Promise<{ machine: KernelRecordResult; sample: KernelRecordResult }> => {
+    if (disposed) return Promise.reject(new Error('Resource service is detached'));
+    if (!localFlight) {
+      const controller = new AbortController();
+      const captured = generation;
+      const flight = { controller, explicit: 0, promise: undefined as unknown as Promise<{ machine: KernelRecordResult; sample: KernelRecordResult }> };
+      localFlight = flight;
+      flight.promise = (async () => {
+        await deps.client.start();
+        const epoch = deps.client.kernelEpoch;
+        const observed = probe(), observedAt = now();
+        const gpu = await observeGpu(controller.signal);
+        controller.signal.throwIfAborted();
+        return withMachineLock(deps.client, LOCAL_MACHINE_ID, async () => {
+          controller.signal.throwIfAborted();
+          if (disposed || captured !== generation || epoch !== deps.client.kernelEpoch) throw new Error('Resource observation owner changed');
+          const scoped = await globalContext();
+          if (epoch !== deps.client.kernelEpoch) throw new Error('Resource observation epoch changed');
+          const machine = await ensureLocalMachineUnsafe(observed, gpu, scoped);
+          controller.signal.throwIfAborted();
+          const existing = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordIdFor.sample(LOCAL_MACHINE_ID));
+          const usedMemoryMb = nonNegative(observed.usedMemoryMb);
+          if (usedMemoryMb === undefined) throw new Error('Local machine probe returned invalid memory usage');
+          if (disposed || captured !== generation || epoch !== deps.client.kernelEpoch) throw new Error('Resource observation owner changed');
+          const sample = await putGlobalRecord({ recordId: recordIdFor.sample(LOCAL_MACHINE_ID), recordType: 'resource.sample', state: 'observed',
+            ...(existing ? { expectedRecordRevision: existing.recordRevision } : {}),
+            payload: { machineId: LOCAL_MACHINE_ID, observedAt, source: 'host-os', identity: machineIdentity(machine), machineRevision: machine.recordRevision,
+              usage: { memoryMb: usedMemoryMb,
+                ...(percent(observed.cpuPercent) === undefined ? {} : { cpuPercent: percent(observed.cpuPercent) }),
+                ...(gpuUsageForProbe(gpu) ? { gpus: gpuUsageForProbe(gpu) } : {}) }, gpuProbe: gpuProbeRecord(gpu, observedAt) } }, scoped);
+          // A committed old-epoch sample remains a domain fact, but cannot enter a new live observer.
+          if (!disposed && captured === generation && epoch === deps.client.kernelEpoch) emitSample(sample, machine);
+          return { machine, sample };
+        });
+      })().finally(() => { if (localFlight === flight) localFlight = undefined; });
+    }
+    const flight = localFlight;
+    if (explicit) flight.explicit++;
+    return flight.promise.finally(() => { if (explicit) flight.explicit--; });
+  };
+  const ensureLocalMachine = async (workspaceId: string): Promise<KernelRecordResult> => {
+    rememberWorkspace(workspaceId); return (await observeLocalMachine(true)).machine;
+  };
+  const sampleLocalMachine = async (workspaceId: string): Promise<KernelRecordResult> => {
+    rememberWorkspace(workspaceId); return (await observeLocalMachine(true)).sample;
+  };
+  const stopTimer = () => { if (timer !== undefined) clearTimeout(timer); timer = undefined; };
+  let sampling: Promise<void> | undefined;
+  const runSampling = () => {
+    stopTimer();
+    if (disposed || !demands.has(LOCAL_MACHINE_ID) || sampling) return;
+    sampling = observeLocalMachine(false).then(() => undefined, error => {
+      if (!disposed && demands.has(LOCAL_MACHINE_ID) && !localFlight?.controller.signal.aborted) report(error);
+    }).finally(() => {
+      sampling = undefined;
+      if (!disposed && demands.has(LOCAL_MACHINE_ID) && deps.client.kernelEpoch) {
+        timer = setTimeout(runSampling, sampleIntervalMs);
+        timer.unref?.();
+      }
     });
   };
-
-  const ensureLocalMachine = (_workspaceId: string): Promise<KernelRecordResult> => {
-    rememberWorkspace(_workspaceId);
-    return withMachineLock(deps.client, LOCAL_MACHINE_ID, ensureLocalMachineUnsafe);
+  const retainSampling = (machineId: string): (() => void) => {
+    if (disposed) throw new Error('Resource service is detached');
+    const previous = demands.get(machineId) ?? 0;
+    demands.set(machineId, previous + 1);
+    if (machineId === LOCAL_MACHINE_ID && previous === 0) runSampling();
+    let released = false;
+    return () => {
+      if (released) return; released = true;
+      const count = (demands.get(machineId) ?? 1) - 1;
+      if (count) demands.set(machineId, count); else demands.delete(machineId);
+      if (!demands.has(LOCAL_MACHINE_ID)) {
+        stopTimer();
+        if (localFlight && localFlight.explicit === 0) localFlight.controller.abort(new Error('Resource sampling demand ended'));
+      }
+    };
   };
-
-  const sampleLocalMachineUnsafe = async (): Promise<KernelRecordResult> => {
-    const recordId = recordIdFor.sample(LOCAL_MACHINE_ID);
-    const scoped = await globalContext();
-    const existing = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordId);
-    const observed = probe();
-    const gpu = await observeGpu();
-    const usedMemoryMb = nonNegative(observed.usedMemoryMb);
-    if (usedMemoryMb === undefined) throw new Error("local machine probe returned invalid memory usage");
-    const record = await putGlobalRecord({
-      recordId,
-      recordType: "resource.sample",
-      state: "observed",
-      ...(existing ? { expectedRecordRevision: existing.recordRevision } : {}),
-      payload: {
-        machineId: LOCAL_MACHINE_ID,
-        observedAt: now(),
-        source: "host-os",
-        usage: {
-          memoryMb: usedMemoryMb,
-          ...(percent(observed.cpuPercent) === undefined ? {} : { cpuPercent: percent(observed.cpuPercent) }),
-          ...(gpuUsageForProbe(gpu) ? { gpus: gpuUsageForProbe(gpu) } : {}),
-        },
-        gpuProbe: gpuProbeRecord(gpu, now()),
-      },
-    });
-    emitSample(record);
-    return record;
-  };
-
-  const sampleLocalMachine = (_workspaceId: string): Promise<KernelRecordResult> => {
-    rememberWorkspace(_workspaceId);
-    return withMachineLock(deps.client, LOCAL_MACHINE_ID, sampleLocalMachineUnsafe);
+  const unsubscribeExit = deps.client.subscribeExit(() => {
+    generation++; contexts.clear(); contextEpoch = undefined; stopTimer();
+    localFlight?.controller.abort(new Error('Resource kernel disconnected'));
+  });
+  const unsubscribeReady = deps.client.subscribeReady(() => { if (demands.has(LOCAL_MACHINE_ID)) runSampling(); });
+  const dispose = async () => {
+    if (disposed) return; disposed = true; generation++; stopTimer(); demands.clear();
+    unsubscribeExit(); unsubscribeReady(); sampleListeners.clear();
+    localFlight?.controller.abort(new Error('Resource service detached'));
+    await Promise.allSettled([...(localFlight ? [localFlight.promise] : []), ...(sampling ? [sampling] : [])]);
+    contexts.clear();
   };
 
   const commitmentFact = (record: KernelRecordResult): CommitmentFact | null => {
@@ -823,7 +897,7 @@ export function createResourceService(deps: ResourceServiceDeps) {
           ...(usageGpus ? { gpus: usageGpus } : {}),
           observedAt,
           source: str(samplePayload?.source) ?? "unknown",
-          stale: now() - observedAt > SAMPLE_STALE_MS,
+          stale: now() - observedAt > RESOURCE_SAMPLE_STALE_MS,
         },
       } : {}),
       commitments,
@@ -882,8 +956,8 @@ export function createResourceService(deps: ResourceServiceDeps) {
     if (!workspaceId || !machineId || !attemptId) throw new Error("resource admission identity is required");
     rememberWorkspace(workspaceId);
     const normalized = validateResources(resources);
+    if (machineId === LOCAL_MACHINE_ID) await ensureLocalMachine(workspaceId);
     return withMachineLock(deps.client, machineId, async () => {
-      if (machineId === LOCAL_MACHINE_ID) await ensureLocalMachineUnsafe();
       const scoped = await globalContext();
       const machine = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordIdFor.machine(machineId));
       if (!machine || machine.state !== "available") {
@@ -993,10 +1067,11 @@ export function createResourceService(deps: ResourceServiceDeps) {
       const gpuRequested = (normalized.gpuCount ?? 0) > 0 || (normalized.gpuMemoryMb ?? 0) > 0;
       let gpuAllocation: GpuAllocation | undefined;
       if (gpuRequested) {
-        const freshGpu = machineId === LOCAL_MACHINE_ID ? await observeGpu() : null;
-        const inventory = freshGpu?.status === "available"
-          ? freshGpu.devices
-          : gpuDevices(capacity);
+        const currentSample = machineId === LOCAL_MACHINE_ID
+          ? await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordIdFor.sample(machineId)) : null;
+        const samplePayload = currentSample ? payloadOf(currentSample) : null;
+        const inventory = machineId === LOCAL_MACHINE_ID
+          ? gpuDevices((samplePayload?.usage ?? {}) as Record<string, unknown>) : gpuDevices(capacity);
         const allocation = allocateGpuDevices(
           inventory,
           commitments.map((fact) => ({
@@ -1078,7 +1153,6 @@ export function createResourceService(deps: ResourceServiceDeps) {
 
   const listMachines = async (workspaceId: string): Promise<ResourceMachineView[]> => {
     rememberWorkspace(workspaceId);
-    await ensureLocalMachine(workspaceId).catch(report);
     await sampleLocalMachine(workspaceId).catch(report);
     const scoped = await context(workspaceId);
     const resourceScoped = await globalContext();
@@ -1292,6 +1366,10 @@ export function createResourceService(deps: ResourceServiceDeps) {
     getMachineRecord,
     getMachineSample,
     subscribeSamples,
+    observeMachine,
+    sampleObservation,
+    retainSampling,
+    dispose,
     getCommitmentAllocation,
     registerMachine,
     list,

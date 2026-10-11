@@ -1323,3 +1323,6 @@ fn original_artifact_and_collection_facts_reach_real_child_observations_from_bot
 
 #[path = "log_followup_review.rs"]
 mod log_followups;
+
+#[path = "metric_followup_review.rs"]
+mod metric_followups;
