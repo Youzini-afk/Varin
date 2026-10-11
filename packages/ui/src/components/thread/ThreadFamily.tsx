@@ -7,6 +7,12 @@ import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { historyText } from '@/lib/agent-runtime/thread-projection';
 
 type Props = { api: ThreadFamilyAPI; identity: ThreadIdentity };
+/** A follow-up's actual bound Run uses the same read-only history and original-record reader. */
+export function ThreadRunHistory({ api, identity, runId }: Props & { runId: string }) {
+  const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
+  return <FamilyHistory key={JSON.stringify([host, identity.threadId, identity.branchId, runId])}
+    api={api} identity={identity} host={host} threadId={identity.threadId} branchId={identity.branchId} fixedRunId={runId} />;
+}
 /** Other agents' persisted conversation is data. This panel never activates or controls their Runs. */
 export function ThreadFamily(props: Props) {
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
@@ -57,12 +63,12 @@ function FamilyConversation({ api, identity, host, member }: Props & { host: num
     {branchId ? <FamilyHistory key={branchId} api={api} identity={identity} host={host} threadId={member.threadId} branchId={branchId} /> : <p>No branches.</p>}
   </div>;
 }
-function FamilyHistory({ api, identity, host, threadId, branchId }: Props & { host: number; threadId: string; branchId: string }) {
+function FamilyHistory({ api, identity, host, threadId, branchId, fixedRunId }: Props & { host: number; threadId: string; branchId: string; fixedRunId?: string }) {
   const [runs, setRuns] = React.useState<FamilyRuns>();
   const [runCursor, setRunCursor] = React.useState<string>();
   const [runsRevision, setRunsRevision] = React.useState(0);
   const [runsError, setRunsError] = React.useState(false);
-  const [runId, setRunId] = React.useState('');
+  const [runId, setRunId] = React.useState(fixedRunId ?? '');
   const [text, setText] = React.useState('');
   const [read, setRead] = React.useState<{ query: FamilyReadQuery; anchor?: string; cursor?: string; revision: number }>({ query: { kind: 'recent' }, revision: 0 });
   const [page, setPage] = React.useState<FamilyRead>();
@@ -71,12 +77,13 @@ function FamilyHistory({ api, identity, host, threadId, branchId }: Props & { ho
   const [itemId, setItemId] = React.useState<string>();
   const runScope = runId ? { runId } : {};
   React.useEffect(() => {
+    if (fixedRunId) return;
     const controller = new AbortController(); setRunsError(false);
     void api.runs(identity, { threadId, branchId, cursor: runCursor }, controller.signal).then(result => {
       if (!controller.signal.aborted && host === getRuntimeEndpointGeneration()) setRuns(previous => ({ ...result, runs: runCursor ? [...(previous?.runs ?? []), ...result.runs] : result.runs }));
     }, () => { if (!controller.signal.aborted && host === getRuntimeEndpointGeneration()) setRunsError(true); });
     return () => controller.abort();
-  }, [api, identity, host, threadId, branchId, runCursor, runsRevision]);
+  }, [api, identity, host, threadId, branchId, runCursor, runsRevision, fixedRunId]);
   React.useEffect(() => {
     const controller = new AbortController(); setLoading(true); setError(false); setPage(undefined); setItemId(undefined);
     void api.read(identity, { threadId, branchId, ...(runId ? { runId } : {}), query: read.query, anchor: read.anchor, cursor: read.cursor }, controller.signal).then(result => {
@@ -86,10 +93,10 @@ function FamilyHistory({ api, identity, host, threadId, branchId }: Props & { ho
   }, [api, identity, host, threadId, branchId, runId, read]);
   const latest = () => setRead(value => ({ query: { kind: 'recent' }, revision: value.revision + 1 }));
   return <div aria-label="Family conversation history" className="space-y-2">
-    <label>Run <select aria-label="Family Run" value={runId} onChange={event => { setRunId(event.target.value); latest(); }}>
+    {fixedRunId ? <p className="text-xs break-all">Run {fixedRunId} · saved conversation</p> : <label>Run <select aria-label="Family Run" value={runId} onChange={event => { setRunId(event.target.value); latest(); }}>
       <option value="">All Runs in this branch</option>
       {runs?.runs.map(run => <option key={run.runId} value={run.runId}>{run.runId} · {run.state}</option>)}
-    </select></label>
+    </select></label>}
     {runs?.nextCursor && <Button size="sm" variant="ghost" onClick={() => setRunCursor(runs.nextCursor!)}>Load earlier Runs</Button>}
     {runsError && <p role="alert">Could not read the Run directory. <Button size="sm" variant="ghost" onClick={() => setRunsRevision(value => value + 1)}>Retry Run directory</Button></p>}
     <div className="flex flex-wrap gap-2">

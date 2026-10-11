@@ -8,6 +8,14 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-11 增量：明确重复授权与原发生项
+
+- 普通 follow_up **版本5** 和 User/API/UI 明确 repeat once/each，默认仍once。首条真实可重复source是原文件changed；each Any每accepted leafedge一次且有限叶不重放，each All按FIFO保留未配对事实。原事件accepted cursor与因果trigger cursor分开，与叶消费和原occurrence同事务，无新队列/Host调度器。
+- Catalog **38**直接拒旧。所有prepare/failure/Wait/Goal/ingress/交付按exact occurrence；O2进度不撤销已冻结O1，真正控制/来源/epoch仍有栅栏。持续定义保观察，Pause保已受理事实，Cancel撤销未来与所有未消费项但保已交付结果；当前Run明确Stop围住既有brancheach，历史或晚到终态不扩大取消范围。
+- 原短latest/pending与独立历史分页供SDK/Host/UI读取，控制revision不冒充历史新鲜度。旧失败不会被最新成功遮住显式重试；历史Run复用原只读family消费者。原Storage实际文件两次读取→active root输入、两origin原Wait O1，以及Job→At真实idle/active child组合分别有证据，不宣称固定来源文件变化。
+- 最终同源 runtime **430/0、2 ignored**、kernel **133/0、11 ignored**、all-targets、准确fresh binary原guardian **1/1**、Host组合 **19/19**、UI **48/48**、类型/lint/协议/实际bundle通过；独立通知接缝probe **1/1**。独立审查接受、无确认阻断，1,391项广输入指纹一致，完整边界见[重复发生项验收](../reviews/runtime-repeated-followups-2026-10-11.md)。
+- 下一片继续原产物/日志/指标领域事实及两设计余项。各层证据不合并冒称完整Host IPC、平台或性能通过；用户最终全面迁移分工保持。
+
 ## 2026-10-11 增量：原 accepted Job 停止事件与续接
 
 - 普通 follow_up **版本4** 与 User/API/UI 接入 job_stopped 独立或 flat Any/All。原 Catalog 已接受 HostJobBinding 是唯一目标身份；jobs/jobSources 短查询沿实际家系索引覆盖历史、独立User及child/sibling工作，不依赖active operations或一页历史。目标sourceRunId只归因，续接始终使用当前实际调用/所选工作来源。

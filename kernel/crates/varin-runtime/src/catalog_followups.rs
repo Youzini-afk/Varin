@@ -1,4 +1,4 @@
-//! Durable one-shot intent and trigger facts. Ingress owns delivery; Runs and delegated
+//! Durable explicit intent and trigger facts. Ingress owns delivery; Runs and delegated
 //! executions own work. The native continuation worker is the only wake consumer.
 use super::*;
 use crate::execution::{Content, ConversationItem, Provenance, ToolOrigin};
@@ -22,6 +22,13 @@ pub use sources::*;
 mod files;
 pub use files::*;
 
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FollowupRepeat {
+    #[default]
+    Once,
+    Each,
+}
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum FollowupState {
@@ -172,6 +179,7 @@ pub struct FollowupDelivery {
 #[serde(deny_unknown_fields)]
 pub struct FollowupOccurrence {
     pub id: String,
+    pub accepted_cursor: u64,
     pub generation: u64,
     pub trigger_cursor: u64,
     pub evidence: TriggerEvidence,
@@ -184,6 +192,7 @@ pub struct FollowupOccurrence {
 #[serde(deny_unknown_fields)]
 struct Occurrence {
     id: String,
+    accepted_cursor: u64,
     generation: u64,
     trigger_cursor: u64,
     evidence: TriggerEvidence,
@@ -194,6 +203,8 @@ struct Occurrence {
 #[serde(deny_unknown_fields)]
 pub struct Followup {
     pub id: String,
+    pub repeat: FollowupRepeat,
+    pub pending_occurrences: u64,
     pub revision: u64,
     pub generation: u64,
     pub thread_id: String,
@@ -214,6 +225,7 @@ pub struct Followup {
 #[serde(deny_unknown_fields)]
 struct Definition {
     id: String,
+    repeat: FollowupRepeat,
     revision: u64,
     generation: u64,
     thread_id: String,
@@ -241,23 +253,65 @@ pub(super) fn initialize_new(tx: &Transaction<'_>) -> Result<()> {
       CREATE INDEX followups_thread ON followups(thread_id);
       CREATE INDEX followups_source ON followups(source_run_id);
       CREATE INDEX followups_wait_state ON followups(json_extract(body,'$.wait.state'));
-      CREATE TABLE followup_occurrences(id TEXT PRIMARY KEY,followup_id TEXT NOT NULL UNIQUE REFERENCES followups(id),input_id TEXT UNIQUE REFERENCES input_queue(id),body TEXT NOT NULL);")?;
+      CREATE TABLE followup_occurrences(id TEXT PRIMARY KEY,followup_id TEXT NOT NULL REFERENCES followups(id),accepted_cursor INTEGER NOT NULL, input_id TEXT UNIQUE REFERENCES input_queue(id),body TEXT NOT NULL);
+      CREATE INDEX followup_occurrences_order ON followup_occurrences(followup_id,accepted_cursor);
+      CREATE INDEX followup_occurrences_unprepared ON followup_occurrences(followup_id,accepted_cursor) WHERE input_id IS NULL;
+      CREATE INDEX followup_inputs_pending ON input_queue(json_extract(body,'$.origin.followup_id'),state) WHERE origin='followup';
+      CREATE INDEX followup_source_edges ON events(subject,json_extract(data,'$.generation'),json_extract(data,'$.source_index'),cursor) WHERE kind='followup.source_observed';")?;
     Ok(())
 }
 pub(super) fn check_format(db: &Connection) -> Result<()> {
     db.prepare("SELECT id,thread_id,source_run_id,body FROM followups")?;
-    db.prepare("SELECT id,followup_id,input_id,body FROM followup_occurrences")?;
+    db.prepare("SELECT id,followup_id,accepted_cursor,input_id,body FROM followup_occurrences")?;
     Ok(())
 }
-fn occurrence(db: &Connection, id: &str) -> Result<Option<Occurrence>> {
+fn latest_occurrence(db: &Connection, id: &str) -> Result<Option<Occurrence>> {
     db.query_row(
-        "SELECT body FROM followup_occurrences WHERE followup_id=?1",
+        "SELECT body FROM followup_occurrences WHERE followup_id=?1 ORDER BY accepted_cursor DESC LIMIT 1",
         [id],
         |r| r.get::<_, String>(0),
     )
     .optional()?
     .map(|s| Ok(serde_json::from_str(&s)?))
     .transpose()
+}
+fn occurrence(db: &Connection, followup: &str, id: &str) -> Result<Occurrence> {
+    let raw: String = db.query_row(
+        "SELECT body FROM followup_occurrences WHERE id=?1 AND followup_id=?2",
+        params![id, followup],
+        |r| r.get(0),
+    )?;
+    Ok(serde_json::from_str(&raw)?)
+}
+fn pending_occurrence_count(db: &Connection, d: &Definition) -> Result<u64> {
+    if d.state == FollowupState::Cancelled {
+        return Ok(0);
+    }
+    Ok(db.query_row(
+        "SELECT (SELECT count(*) FROM followup_occurrences WHERE followup_id=?1 AND input_id IS NULL)
+            +(SELECT count(*) FROM input_queue WHERE origin='followup'
+                AND json_extract(body,'$.origin.followup_id')=?1 AND state='queued')",
+        [&d.id],
+        |r| read_number(r, 0),
+    )?)
+}
+/// Source progress and delivery may advance while the body is prepared. They do not
+/// revoke a different, already frozen occurrence's authorization.
+fn same_authorization(left: &Definition, right: &Definition) -> bool {
+    left.id == right.id
+        && left.revision == right.revision
+        && left.generation == right.generation
+        && left.repeat == right.repeat
+        && left.thread_id == right.thread_id
+        && left.branch_id == right.branch_id
+        && left.source_run_id == right.source_run_id
+        && left.goal_id == right.goal_id
+        && left.actor == right.actor
+        && left.instruction_ref == right.instruction_ref
+        && left.trigger == right.trigger
+        && left.state == right.state
+        && left.source == right.source
+        && left.scope == right.scope
 }
 pub(super) fn normalized_source(
     mut source: Option<launches::SourceSelection>,
@@ -331,9 +385,10 @@ fn source_matches(db: &Connection, d: &Definition, run: &Run) -> Result<bool> {
 fn dependency_check_eligible(
     db: &Connection,
     d: &Definition,
+    v: &Occurrence,
     goal: &goals::Definition,
 ) -> Result<bool> {
-    if !occurrence(db, &d.id)?.is_some_and(|v| v.evidence.has_at())
+    if !v.evidence.has_at()
         || d.autonomous()
         || goal.blocked != Some(goals::GoalBlockReason::Dependency)
     {
@@ -360,7 +415,7 @@ fn dependency_check_eligible(
             && matches!(process.call_completion,Some(result_content::ToolCompletionMetadata::JobAccepted{operation_id,..}) if operation_id==process.id),
     )
 }
-fn goal_hold(db: &Connection, d: &Definition) -> Result<Option<HoldReason>> {
+fn goal_hold(db: &Connection, d: &Definition, v: &Occurrence) -> Result<Option<HoldReason>> {
     let Some(goal) = effective_goal(db, d)? else {
         return Ok(None);
     };
@@ -375,7 +430,7 @@ fn goal_hold(db: &Connection, d: &Definition) -> Result<Option<HoldReason>> {
         return Ok(Some(HoldReason::GoalBudget));
     }
     if goals::usage_unknown(&goal, &usage)
-        || (goal.blocked.is_some() && !dependency_check_eligible(db, d, &goal)?)
+        || (goal.blocked.is_some() && !dependency_check_eligible(db, d, v, &goal)?)
     {
         return Ok(Some(HoldReason::GoalBlocked));
     }
@@ -384,12 +439,13 @@ fn goal_hold(db: &Connection, d: &Definition) -> Result<Option<HoldReason>> {
 fn eligibility(
     db: &Connection,
     d: &Definition,
+    v: &Occurrence,
     target: Option<&Run>,
 ) -> Result<Option<HoldReason>> {
     if d.state == FollowupState::Paused {
         return Ok(Some(HoldReason::ControlPaused));
     }
-    if let Some(reason) = goal_hold(db, d)? {
+    if let Some(reason) = goal_hold(db, d, v)? {
         return Ok(Some(reason));
     }
     let source: Run = record(db, "runs", &d.source_run_id)?;
@@ -420,19 +476,27 @@ fn eligibility(
             return Ok(Some(HoldReason::BranchActive));
         }
     }
-    if let Some(v) = occurrence(db, &d.id)? {
-        if !sources::evidence_settled(db, &v.evidence)? {
-            return Ok(Some(HoldReason::SourceUnsettled));
-        }
+    if !sources::evidence_settled(db, &v.evidence)? {
+        return Ok(Some(HoldReason::SourceUnsettled));
     }
     Ok(None)
 }
 fn observe(tx: &Transaction<'_>, d: &mut Definition, now: u64) -> Result<bool> {
+    let mut changed = false;
+    while observe_one(tx, d, now)? {
+        changed = true;
+        if d.repeat == FollowupRepeat::Once {
+            break;
+        }
+    }
+    Ok(changed)
+}
+fn observe_one(tx: &Transaction<'_>, d: &mut Definition, now: u64) -> Result<bool> {
     if d.state == FollowupState::Cancelled || d.wait.state != NextRunWaitState::Waiting {
         return Ok(false);
     }
     let run: Run = record(tx, "runs", &d.source_run_id)?;
-    let (cursor, evidence) = match &d.trigger {
+    let (accepted_cursor, cursor, evidence) = match &d.trigger {
         FollowupTrigger::At { .. }
         | FollowupTrigger::ProcessStopped { .. }
         | FollowupTrigger::JobStopped { .. }
@@ -457,6 +521,7 @@ fn observe(tx: &Transaction<'_>, d: &mut Definition, now: u64) -> Result<bool> {
             };
             (
                 *cursor,
+                *cursor,
                 TriggerEvidence::RunCompleted {
                     run_revision: run.revision,
                 },
@@ -468,6 +533,7 @@ fn observe(tx: &Transaction<'_>, d: &mut Definition, now: u64) -> Result<bool> {
             };
             (
                 *cursor,
+                *cursor,
                 TriggerEvidence::GoalRequested {
                     run_revision: run.revision,
                 },
@@ -475,7 +541,8 @@ fn observe(tx: &Transaction<'_>, d: &mut Definition, now: u64) -> Result<bool> {
         }
     };
     let v = Occurrence {
-        id: format!("{}:{}:{cursor}", d.id, d.generation),
+        id: format!("{}:{}:{accepted_cursor}", d.id, d.generation),
+        accepted_cursor,
         generation: d.generation,
         trigger_cursor: cursor,
         evidence,
@@ -483,18 +550,20 @@ fn observe(tx: &Transaction<'_>, d: &mut Definition, now: u64) -> Result<bool> {
         preparation_failed: false,
     };
     tx.execute(
-        "INSERT INTO followup_occurrences(id,followup_id,input_id,body) VALUES(?1,?2,NULL,?3)",
-        params![v.id, d.id, encode(&v)?],
+        "INSERT INTO followup_occurrences(id,followup_id,accepted_cursor,input_id,body) VALUES(?1,?2,?3,NULL,?4)",
+        params![v.id, d.id, sql_number(accepted_cursor)?, encode(&v)?],
     )?;
     d.wait.trigger_cursor = Some(cursor);
-    d.wait.state = NextRunWaitState::Observed;
+    if d.repeat == FollowupRepeat::Once {
+        d.wait.state = NextRunWaitState::Observed;
+    }
     put(tx, "followups", &d.id, d)?;
     event(
         tx,
         &d.id,
         d.revision,
         "followup.observed",
-        json!({"occurrence_id":v.id,"trigger_cursor":cursor}),
+        json!({"occurrence_id":v.id,"accepted_cursor":accepted_cursor,"trigger_cursor":cursor}),
     )?;
     Ok(true)
 }
@@ -507,7 +576,7 @@ fn project_occurrence(
     let mut hold = if v.preparation_failed {
         Some(HoldReason::PreparationFailed)
     } else {
-        eligibility(db, d, None)?
+        eligibility(db, d, &v, None)?
     };
     let mut delivery = None;
     if let Some(id) = &v.input_id {
@@ -590,6 +659,7 @@ fn project_occurrence(
     }
     Ok(FollowupOccurrence {
         id: v.id,
+        accepted_cursor: v.accepted_cursor,
         generation: v.generation,
         trigger_cursor: v.trigger_cursor,
         evidence: v.evidence,
@@ -599,7 +669,7 @@ fn project_occurrence(
     })
 }
 fn project(db: &Connection, d: Definition) -> Result<Followup> {
-    let occurrence = occurrence(db, &d.id)?
+    let occurrence = latest_occurrence(db, &d.id)?
         .map(|v| project_occurrence(db, &d, v))
         .transpose()?;
     let observation = d
@@ -607,7 +677,10 @@ fn project(db: &Connection, d: Definition) -> Result<Followup> {
         .as_ref()
         .map(|id| observation::project(db, id))
         .transpose()?;
+    let pending_occurrences = pending_occurrence_count(db, &d)?;
     Ok(Followup {
+        repeat: d.repeat,
+        pending_occurrences,
         id: d.id,
         revision: d.revision,
         generation: d.generation,
@@ -658,11 +731,14 @@ fn cancel_definition(tx: &Transaction<'_>, d: &mut Definition) -> Result<()> {
     d.revision += 1;
     d.wait.state = NextRunWaitState::Cancelled;
     put(tx, "followups", &d.id, d)?;
-    if let Some(v) = occurrence(tx, &d.id)? {
-        if let Some(id) = v.input_id {
-            let mut row = record(tx, "input_queue", &id)?;
-            activation::cancel_row(tx, &mut row)?;
-        }
+    let input_ids = {
+        let mut q = tx.prepare("SELECT id FROM input_queue WHERE origin='followup' AND json_extract(body,'$.origin.followup_id')=?1 AND state='queued'")?;
+        let rows = q.query_map([&d.id], |r| r.get::<_, String>(0))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()?
+    };
+    for id in input_ids {
+        let mut row = record(tx, "input_queue", &id)?;
+        activation::cancel_row(tx, &mut row)?;
     }
     observation::cancel_definition(tx, d)?;
     event(tx, &d.id, d.revision, "followup.cancelled", Value::Null)?;
@@ -685,6 +761,33 @@ fn cancel_source_registrations(tx: &Transaction<'_>, run: &str, goals: bool) -> 
         if goals || !d.autonomous() {
             cancel_definition(tx, &mut d)?;
         }
+    }
+    Ok(())
+}
+/// Only the original explicit Stop admission may cancel continuing authorization
+/// for the current branch. Late terminal receipts keep their exact source-Run scope.
+pub(super) fn cancel_current_repeating(tx: &Transaction<'_>, run: &Run) -> Result<()> {
+    let current: Option<String> = tx.query_row(
+        "SELECT active_run FROM branches WHERE id=?1",
+        [&run.branch_id],
+        |r| r.get(0),
+    )?;
+    if current.as_deref() != Some(&run.id) {
+        return Ok(());
+    }
+    let definitions = {
+        let mut q = tx.prepare(
+            "SELECT body FROM followups WHERE thread_id=?1 AND json_extract(body,'$.branch_id')=?2
+            AND json_extract(body,'$.repeat')='each' AND json_extract(body,'$.state')!='cancelled'",
+        )?;
+        let rows = q.query_map(params![run.thread_id, run.branch_id], |r| {
+            r.get::<_, String>(0)
+        })?;
+        rows.map(|r| Ok(serde_json::from_str::<Definition>(&r?)?))
+            .collect::<Result<Vec<_>>>()?
+    };
+    for mut d in definitions {
+        cancel_definition(tx, &mut d)?;
     }
     Ok(())
 }
@@ -713,6 +816,7 @@ fn definition_for_run(
             source_index,
             after_cursor: cursor,
             observed: None,
+            consumed_cursor: 0,
             file: None,
         })
         .collect();
@@ -727,6 +831,7 @@ fn definition_for_run(
         FollowupTrigger::GoalRequested { .. } => "goal_requested",
     };
     Ok(Definition {
+        repeat: FollowupRepeat::Once,
         id: key.into(),
         revision: 1,
         generation: 1,
@@ -876,8 +981,7 @@ pub(super) fn ingress_hold(
         return Ok(None);
     };
     let d: Definition = record(db, "followups", followup_id)?;
-    let v = occurrence(db, followup_id)?
-        .ok_or_else(|| RuntimeError::Invalid("follow-up occurrence missing".into()))?;
+    let v = occurrence(db, followup_id, occurrence_id)?;
     if d.generation != *generation
         || v.id != *occurrence_id
         || v.input_id.as_deref() != Some(&row.id)
@@ -892,7 +996,7 @@ pub(super) fn ingress_hold(
     if d.state == FollowupState::Paused {
         return Ok(Some(HoldReason::ControlPaused));
     }
-    if let Some(reason) = goal_hold(db, &d)? {
+    if let Some(reason) = goal_hold(db, &d, &v)? {
         return Ok(Some(reason));
     }
     let run = target
@@ -936,6 +1040,7 @@ pub(super) fn dependency_check_for_run(
         let row: QueuedInputMetadata = serde_json::from_str(&raw?)?;
         let InputOrigin::Followup {
             followup_id,
+            occurrence_id,
             goal: binding,
             ..
         } = &row.origin
@@ -948,9 +1053,10 @@ pub(super) fn dependency_check_for_run(
             continue;
         }
         let d: Definition = record(db, "followups", followup_id)?;
+        let v = occurrence(db, followup_id, occurrence_id)?;
         if d.goal_id.as_deref() == Some(&goal.id)
             && d.state == FollowupState::Active
-            && dependency_check_eligible(db, &d, goal)?
+            && dependency_check_eligible(db, &d, &v, goal)?
             && ingress_hold(db, &row, Some(&record(db, "runs", run)?))?.is_none()
         {
             return Ok(true);
@@ -959,22 +1065,40 @@ pub(super) fn dependency_check_for_run(
     Ok(false)
 }
 pub(super) fn delivered(tx: &Transaction<'_>, row: &QueuedInputMetadata) -> Result<()> {
-    let InputOrigin::Followup { followup_id, .. } = &row.origin else {
+    let InputOrigin::Followup {
+        followup_id,
+        occurrence_id,
+        generation,
+        ..
+    } = &row.origin
+    else {
         return Ok(());
     };
     let mut d: Definition = record(tx, "followups", followup_id)?;
-    if d.wait.state != NextRunWaitState::Consumed {
+    let v = occurrence(tx, followup_id, occurrence_id)?;
+    if v.input_id.as_deref() != Some(&row.id) || v.generation != *generation {
+        return Err(RuntimeError::Conflict(
+            "follow-up delivery identity changed".into(),
+        ));
+    }
+    if d.repeat == FollowupRepeat::Once {
         d.wait.state = NextRunWaitState::Consumed;
         put(tx, "followups", &d.id, &d)?;
-        event(
-            tx,
-            &d.id,
-            d.revision,
-            "followup.delivered",
-            json!({"input_id":row.id,"run_id":row.run_id,"delivered_cursor":row.delivered_cursor}),
-        )?;
     }
+    event(
+        tx,
+        &d.id,
+        d.revision,
+        "followup.delivered",
+        json!({"occurrence_id":v.id,"input_id":row.id,"run_id":row.run_id,"delivered_cursor":row.delivered_cursor}),
+    )?;
     Ok(())
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FollowupOccurrencesResult {
+    pub occurrences: Vec<FollowupOccurrence>,
+    #[serde(rename = "nextCursor")]
+    pub next_cursor: Option<u64>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FollowupView {
@@ -1015,6 +1139,31 @@ impl Catalog {
             .map(|r| project(&self.db, serde_json::from_str(&r?)?))
             .collect();
         result
+    }
+    pub fn followup_occurrences(
+        &self,
+        id: &str,
+        after: Option<u64>,
+    ) -> Result<FollowupOccurrencesResult> {
+        let d: Definition = record(&self.db, "followups", id)?;
+        // Page size bounds a response, never the number of retained occurrences.
+        let mut q = self.db.prepare(
+            "SELECT body FROM followup_occurrences WHERE followup_id=?1
+            AND accepted_cursor>?2 ORDER BY accepted_cursor LIMIT 65",
+        )?;
+        let rows = q.query_map(params![id, sql_number(after.unwrap_or(0))?], |r| {
+            r.get::<_, String>(0)
+        })?;
+        let mut occurrences = rows
+            .map(|r| project_occurrence(&self.db, &d, serde_json::from_str(&r?)?))
+            .collect::<Result<Vec<_>>>()?;
+        let more = occurrences.len() > 64;
+        occurrences.truncate(64);
+        let next_cursor = more.then(|| occurrences.last().expect("page").accepted_cursor);
+        Ok(FollowupOccurrencesResult {
+            occurrences,
+            next_cursor,
+        })
     }
     pub fn capture_followup(&self, id: &str) -> Result<FollowupRead> {
         let d: Definition = record(&self.db, "followups", id)?;
@@ -1107,8 +1256,15 @@ fn control_tx(
             } else {
                 FollowupState::Active
             };
-            if let Some(mut v) = occurrence(tx, id)? {
-                if action == FollowupControlAction::Resume {
+            if action == FollowupControlAction::Resume {
+                let unfinished = {
+                    let mut q = tx.prepare("SELECT o.body FROM followup_occurrences o LEFT JOIN input_queue i ON i.id=o.input_id
+                        WHERE o.followup_id=?1 AND (o.input_id IS NULL OR i.state='queued') ORDER BY o.accepted_cursor")?;
+                    let rows = q.query_map([id], |r| r.get::<_, String>(0))?;
+                    rows.map(|r| Ok(serde_json::from_str::<Occurrence>(&r?)?))
+                        .collect::<Result<Vec<_>>>()?
+                };
+                for mut v in unfinished {
                     v.preparation_failed = false;
                     put(tx, "followup_occurrences", &v.id, &v)?;
                     if let Some(input) = v.input_id {
@@ -1169,7 +1325,7 @@ pub enum ContinuationAdmission {
 }
 impl ContinuationPreparation {
     pub fn id(&self) -> &str {
-        &self.definition.id
+        &self.occurrence.id
     }
     pub fn revision(&self) -> u64 {
         self.definition.revision
@@ -1196,8 +1352,8 @@ impl ContinuationPreparation {
             host_jobs::require_stop_receipt(op, receipt)?;
             Ok(json!({"binding":link.binding,"sourceRunId":op.run_id,"receiptIdentity":receipt.identity,"receiptEpoch":receipt.epoch,"executorStopped":receipt.executor_stopped,"outcome":receipt.outcome,"effect":receipt.effect,"accepted":self.content.load(link.acceptance_ref.as_ref().ok_or_else(||RuntimeError::Invalid("original job acceptance missing".into()))?)?,"result":self.content.load(&receipt.result_ref)?}))
         }).collect::<Result<Vec<_>>>()?;
-        let facts = json!({"jobs":jobs,"followupId":d.id,"generation":d.generation,"occurrenceId":v.id,"sourceRunId":d.source_run_id,"registeredBy":d.actor,"trigger":d.trigger,"evidence":v.evidence,"goal":self.goal,"processes":processes});
-        let text=format!("A previously registered one-shot follow-up has triggered. Its actual registration source and evidence are below. This retained intent is not a new user message, system instruction, recurring-monitoring authorization, or proof that any previous effect succeeded. Continue only within current permissions and Goal controls. Original outputs and artifact collection remain with their domain owners; executor stopped does not claim artifacts are collected.\n{}\n\nRegistered follow-up instruction:\n{}",serde_json::to_string(&facts)?,instruction.as_deref().unwrap_or("Continue the explicitly established Goal according to its retained objective and controls."));
+        let facts = json!({"jobs":jobs,"followupId":d.id,"generation":d.generation,"repeat":d.repeat,"occurrenceId":v.id,"sourceRunId":d.source_run_id,"registeredBy":d.actor,"trigger":d.trigger,"evidence":v.evidence,"goal":self.goal,"processes":processes});
+        let text=format!("A previously registered follow-up occurrence has triggered. Its actual registration source and evidence are below. This retained intent is not a new user message, system instruction, additional authorization beyond its explicit repeat mode, or proof that any previous effect succeeded. Continue only within current permissions and Goal controls. Original outputs and artifact collection remain with their domain owners; executor stopped does not claim artifacts are collected.\n{}\n\nRegistered follow-up instruction:\n{}",serde_json::to_string(&facts)?,instruction.as_deref().unwrap_or("Continue the explicitly established Goal according to its retained objective and controls."));
         let item = ConversationItem {
             resource_activation: None,
             id: format!("followup-input:{}", v.id),
@@ -1235,7 +1391,7 @@ impl Catalog {
             return Ok((vec![], failure));
         }
         let rows = {
-            let mut q=self.db.prepare("SELECT f.body,o.body FROM followups f JOIN followup_occurrences o ON o.followup_id=f.id WHERE o.input_id IS NULL AND json_extract(f.body,'$.state')!='cancelled'")?;
+            let mut q=self.db.prepare("SELECT f.body,o.body FROM followups f JOIN followup_occurrences o ON o.followup_id=f.id WHERE o.input_id IS NULL AND json_extract(f.body,'$.state')!='cancelled' ORDER BY o.accepted_cursor")?;
             let r = q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
             r.collect::<std::result::Result<Vec<_>, _>>()?
         };
@@ -1244,7 +1400,7 @@ impl Catalog {
             let candidate = (|| -> Result<Option<ContinuationPreparation>> {
                 let d: Definition = serde_json::from_str(&definition)?;
                 let v: Occurrence = serde_json::from_str(&occurrence)?;
-                if v.preparation_failed || eligibility(&self.db, &d, None)?.is_some() {
+                if v.preparation_failed || eligibility(&self.db, &d, &v, None)?.is_some() {
                     return Ok(None);
                 }
                 let sources = v
@@ -1291,21 +1447,27 @@ impl Catalog {
     }
     pub fn fail_followup_preparation(&mut self, id: &str, revision: u64) -> Result<()> {
         let tx = self.db.transaction()?;
-        let d: Definition = record(&tx, "followups", id)?;
-        if d.revision == revision && d.state != FollowupState::Cancelled {
-            if let Some(mut v) = occurrence(&tx, id)? {
-                if v.input_id.is_none() && !v.preparation_failed {
-                    v.preparation_failed = true;
-                    put(&tx, "followup_occurrences", &v.id, &v)?;
-                    event(
-                        &tx,
-                        id,
-                        revision,
-                        "followup.preparation_failed",
-                        json!({"occurrence_id":v.id}),
-                    )?;
-                }
-            }
+        let followup: String = tx.query_row(
+            "SELECT followup_id FROM followup_occurrences WHERE id=?1",
+            [id],
+            |r| r.get(0),
+        )?;
+        let d: Definition = record(&tx, "followups", &followup)?;
+        let mut v = occurrence(&tx, &followup, id)?;
+        if d.revision == revision
+            && d.state != FollowupState::Cancelled
+            && v.input_id.is_none()
+            && !v.preparation_failed
+        {
+            v.preparation_failed = true;
+            put(&tx, "followup_occurrences", id, &v)?;
+            event(
+                &tx,
+                &followup,
+                revision,
+                "followup.preparation_failed",
+                json!({"occurrence_id":id}),
+            )?;
         }
         tx.commit()?;
         Ok(())
@@ -1326,12 +1488,11 @@ impl Catalog {
         }
         let tx = self.db.transaction()?;
         let d: Definition = record(&tx, "followups", &c.definition.id)?;
-        let mut v = occurrence(&tx, &d.id)?
-            .ok_or_else(|| RuntimeError::Invalid("follow-up occurrence disappeared".into()))?;
+        let mut v = occurrence(&tx, &d.id, &c.occurrence.id)?;
         if let Some(id) = v.input_id {
             return Ok(ContinuationAdmission::Admitted(id));
         }
-        if d != c.definition
+        if !same_authorization(&d, &c.definition)
             || v != c.occurrence
             || effective_goal(&tx, &d)?.map(|d| d.binding()) != c.goal
             || c.sources
@@ -1343,7 +1504,7 @@ impl Catalog {
         {
             return Ok(ContinuationAdmission::Stale);
         }
-        if d.state == FollowupState::Cancelled || eligibility(&tx, &d, None)?.is_some() {
+        if d.state == FollowupState::Cancelled || eligibility(&tx, &d, &v, None)?.is_some() {
             return Ok(ContinuationAdmission::Held);
         }
         let input_id = format!("followup-input:{}", v.id);
@@ -1437,10 +1598,16 @@ pub fn reconcile(catalog: &Mutex<Catalog>) -> Result<Vec<String>> {
 }
 
 pub(super) fn pending_dependency_check(db: &Connection, row: &QueuedInputMetadata) -> Result<bool> {
-    let InputOrigin::Followup { followup_id, .. } = &row.origin else {
+    let InputOrigin::Followup {
+        followup_id,
+        occurrence_id,
+        ..
+    } = &row.origin
+    else {
         return Ok(false);
     };
     let d: Definition = record(db, "followups", followup_id)?;
+    let v = occurrence(db, followup_id, occurrence_id)?;
     let Some(goal) = effective_goal(db, &d)? else {
         return Ok(false);
     };
@@ -1448,6 +1615,6 @@ pub(super) fn pending_dependency_check(db: &Connection, row: &QueuedInputMetadat
     Ok(goal.control == goals::GoalControl::Active
         && !goals::budget_limited(&goal, &usage)
         && !goals::usage_unknown(&goal, &usage)
-        && dependency_check_eligible(db, &d, &goal)?
+        && dependency_check_eligible(db, &d, &v, &goal)?
         && ingress_hold(db, row, None)?.is_none())
 }

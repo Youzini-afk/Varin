@@ -5,7 +5,7 @@ import { createThreadsHttpAPI } from '@varin/application-client';
 import type { ThreadIdentity } from '@varin/application-client';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { KernelClientError, type KernelClient } from './kernel-client.js';
-import type { HostJobSource, FollowupPendingRegistration, Followup, Run } from './protocol.generated.js';
+import type { HostJobSource, FollowupPendingRegistration, Followup, FollowupOccurrencesResult, Run } from './protocol.generated.js';
 import { ThreadAdapter } from './thread-adapter.js';
 import { registerThreadRoutes } from './thread-routes.js';
 
@@ -15,16 +15,17 @@ const run: Run = { id: 'run:source', thread_id: identity.threadId, branch_id: id
 const operationId = 'operation:process';
 const trigger = { kind: 'process_stopped' as const, operationId };
 const instruction = '  Read the original process output.\nDo not start it again.  ';
-const definition: Followup = { id: 'followup:process', revision: 1, generation: 1,
+const definition: Followup = { repeat: 'once', pending_occurrences: 0, id: 'followup:process', revision: 1, generation: 1,
   thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: run.id,
   actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1_700_000_000_000, observation: null,
-  goal_id: null, trigger: { kind: 'process_stopped', operation_id: operationId }, sources: [{ source_index: 0, after_cursor: 4, observed: null, file: null }], state: 'active',
+  goal_id: null, trigger: { kind: 'process_stopped', operation_id: operationId }, sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 4, observed: null, file: null }], state: 'active',
   wait: { id: 'wait:process', kind: 'process_stopped', after_cursor: 4, trigger_cursor: null, state: 'waiting' }, occurrence: null };
 
 /** These are transport contract tests: real HTTP/client/admission functions, with a controlled RPC boundary.
  * Catalog durability, process-stop proof and atomic occurrence consumption are native suite obligations. */
 function fixture() {
   const facts = { reply: structuredClone(definition), list: [structuredClone(definition)], conflict: false,
+    occurrencePages: new Map<number | undefined, FollowupOccurrencesResult>(), occurrenceError: false,
     source: structuredClone(run), jobs: [] as HostJobSource[], registerError: false, pendingError: false, pending: [] as FollowupPendingRegistration[],
     liveInvalid: false, launch: { selection: { source: { mode: 'materialized', workspace_id: 'workspace:original',
       execution_workspace_id: 'execution:original', branch_id: 'files:original', revision: 3, live_root: null } } } };
@@ -46,6 +47,10 @@ function fixture() {
       }
       case 'runtime.host_job.sources': return facts.jobs;
       case 'runtime.followup.list': return facts.list;
+      case 'runtime.followup.occurrences': {
+        if (facts.occurrenceError) throw new KernelClientError({ code: 'storage-error', message: 'original occurrence rows cannot be read' });
+        return facts.occurrencePages.get(params.after as number | undefined) ?? { occurrences: [], nextCursor: null };
+      }
       case 'runtime.followup.registrations.pending': {
         if (facts.pendingError) throw new KernelClientError({ code: 'storage-error', message: 'original acceptance metadata cannot be read' });
         return { registrations: facts.pending, nextCursor: null };
@@ -119,7 +124,7 @@ it('the public management client preserves registration keys, revisions and orig
     }]);
   }
   f.facts.reply = { ...accepted, revision: 7, wait: { ...accepted.wait, trigger_cursor: 9, state: 'consumed' }, occurrence: {
-    id: 'occurrence:process', generation: 1, trigger_cursor: 9,
+    accepted_cursor: 9, id: 'occurrence:process', generation: 1, trigger_cursor: 9,
     evidence: { kind: 'process_stopped', receipt_identity: 'process:receipt', receipt_epoch: 'process-epoch:one' },
     state: 'admitted', hold_reason: null, delivery: { state: 'delivered', activation_state: 'bound',
       run_id: 'run:continued', input_id: 'environment:process', delivered_cursor: 10, execution_id: null, failure_code: null },
@@ -157,7 +162,7 @@ it('list and snapshot expose only the selected branch and controls reject anothe
 it('management routes enforce authentication, exact fields and revision conflict without exposing private errors', async () => {
   const f = fixture();
   const register = { ...identity, key: 'register', runId: run.id, trigger, instruction };
-  for (const method of ['register', 'list', 'get', 'control', 'registrations/pending', 'registration/cancel']) {
+  for (const method of ['register', 'list', 'get', 'occurrences', 'control', 'registrations/pending', 'registration/cancel']) {
     expect((await f.request(`/api/threads/followup/${method}`, identity, false)).status).toBe(401);
   }
   expect(f.requests).not.toHaveBeenCalled();
@@ -172,6 +177,7 @@ it('management routes enforce authentication, exact fields and revision conflict
     { ...register, trigger: { kind: 'all', sources: [{ kind: 'any', sources: [{ kind: 'at', atMs: 0 }] }] } },
     { ...register, trigger: { kind: 'all', sources: [{ kind: 'process_stopped', operationId: 'one', actor: 'user' }] } },
     { ...register, trigger: { kind: 'any', sources: [{ kind: 'at', atMs: 0 }], repeat: true } },
+    { ...register, repeat: true }, { ...register, repeat: 'daily' }, { ...register, repeat: null },
   ]) expect((await f.request('/api/threads/followup/register', body)).status).toBe(400);
   const control = { ...identity, followupId: definition.id, expectedRevision: 1, action: 'cancel' };
   for (const body of [
@@ -277,4 +283,56 @@ it('accepted-job discovery and explicit job conditions use the observer work ide
   await expect(f.api.followups.jobSources(identity, run.id)).rejects.toMatchObject({ status: 400 });
   expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.host_job.sources')).toHaveLength(before);
   expect(f.models.resolveModel).not.toHaveBeenCalled();
+});
+
+it('preserves repeating authorization through original file admission and an uncertain HTTP retry', async () => {
+  const f = fixture();
+  const original = { ...identity, key: 'standing-user-key', runId: run.id, repeat: 'each' as const,
+    trigger: { kind: 'any' as const, sources: [{ kind: 'file' as const, path: 'results/out.txt', condition: 'changed' as const }, { kind: 'job_stopped' as const, operationId: 'job:original' }] }, instruction };
+  f.facts.reply = { ...definition, repeat: 'each' };
+  let loseReply = true;
+  vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+    const response = await f.request(new URL(url, 'http://fixture.invalid').pathname, JSON.parse(String(init.body)));
+    if (loseReply) { loseReply = false; throw new Error('acceptance reply lost'); }
+    return response;
+  });
+  await expect(f.api.followups.register(original)).rejects.toThrow('acceptance reply lost');
+  expect(await f.api.followups.register(original)).toEqual(f.facts.reply);
+  const calls = f.requests.mock.calls.filter(([method]) => method === 'runtime.followup.register');
+  expect(calls).toHaveLength(2);
+  for (const [, params] of calls) expect(params).toMatchObject({ key: original.key, runId: run.id, repeat: 'each', trigger: original.trigger, instruction });
+  expect(f.retireGrant).toHaveBeenCalledTimes(2); expect(f.revokeGrant).not.toHaveBeenCalled();
+  expect(f.models.resolveModel).not.toHaveBeenCalled();
+});
+
+it('pages original occurrence rows by accepted cursor without hydrating instructions, draining all history or widening branch access', async () => {
+  const f = fixture();
+  const rows = Array.from({ length: 130 }, (_, index) => ({ accepted_cursor: index + 10, id: `occurrence:${index}`, generation: 1,
+    trigger_cursor: 1_000 - index, state: 'completed' as const, hold_reason: null,
+    evidence: { kind: 'process_stopped' as const, receipt_identity: `receipt:${index}`, receipt_epoch: 'original' },
+    delivery: { input_id: `input:${index}`, state: 'delivered' as const, activation_state: 'bound' as const,
+      run_id: `run:${index}`, execution_id: index % 2 ? `execution:${index}` : null, delivered_cursor: index + 200, failure_code: null } }));
+  f.facts.occurrencePages.set(undefined, { occurrences: rows.slice(0, 64), nextCursor: 73 });
+  f.facts.occurrencePages.set(73, { occurrences: rows.slice(64, 128), nextCursor: 137 });
+  f.facts.occurrencePages.set(137, { occurrences: rows.slice(128), nextCursor: null });
+  const first = await f.api.followups.occurrences(identity, definition.id);
+  expect(first.occurrences).toEqual(rows.slice(0, 64));
+  expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.followup.occurrences')).toHaveLength(1);
+  const second = await f.api.followups.occurrences(identity, definition.id, first.nextCursor!);
+  const third = await f.api.followups.occurrences(identity, definition.id, second.nextCursor!);
+  expect([...first.occurrences, ...second.occurrences, ...third.occurrences]).toEqual(rows); expect(third.nextCursor).toBeNull();
+  expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.followup.occurrences').map(([, params]) => params))
+    .toEqual([{ followupId: definition.id }, { followupId: definition.id, after: 73 }, { followupId: definition.id, after: 137 }]);
+  expect(f.requests.mock.calls.some(([method]) => ['runtime.followup.get', 'runtime.input.submit', 'runtime.run.start'].includes(method))).toBe(false);
+  const count = f.requests.mock.calls.filter(([method]) => method === 'runtime.followup.occurrences').length;
+  await expect(f.api.followups.occurrences({ ...identity, branchId: 'branch:other' }, definition.id)).rejects.toMatchObject({ status: 400 });
+  await expect(f.api.followups.occurrences(identity, 'unknown-definition')).rejects.toMatchObject({ status: 400 });
+  expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.followup.occurrences')).toHaveLength(count);
+  for (const body of [{ after: -1 }, { after: 0.5 }, { after: '73' }, { after: null }, { after: Number.MAX_SAFE_INTEGER + 1 }, { limit: 999 }, { runId: run.id }]) {
+    expect((await f.request('/api/threads/followup/occurrences', { ...identity, followupId: definition.id, ...body })).status).toBe(400);
+  }
+  f.facts.occurrenceError = true;
+  await expect(f.api.followups.occurrences(identity, definition.id, 137)).rejects.toMatchObject({ code: 'storage-error' });
+  f.facts.occurrenceError = false;
+  expect((await f.api.followups.occurrences(identity, definition.id, 137)).occurrences).toEqual(rows.slice(128));
 });

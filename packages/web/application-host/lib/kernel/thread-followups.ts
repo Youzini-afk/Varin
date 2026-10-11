@@ -26,7 +26,8 @@ export async function registerThreadFollowup(owner: FollowupOwner,
   }
   // Catalog validates the trigger, original accepted operation evidence (when selected), and registration
   // identity atomically. Registration never hydrates process output or starts work in the Host.
-  return owner.runtime.registerFollowup({ key: input.key, runId: run.id, trigger: input.trigger, instruction: input.instruction }, signal);
+  return owner.runtime.registerFollowup({ key: input.key, runId: run.id, trigger: input.trigger, instruction: input.instruction,
+    ...(input.repeat === undefined ? {} : { repeat: input.repeat }) }, signal);
 }
 
 export async function getThreadFollowup(owner: FollowupOwner,
@@ -36,6 +37,16 @@ export async function getThreadFollowup(owner: FollowupOwner,
     throw new Error('Follow-up does not belong to the selected Thread branch');
   }
   return owner.runtime.followup(followupId, signal);
+}
+
+export async function listThreadFollowupOccurrences(owner: FollowupOwner,
+  identity: ThreadIdentity, followupId: string, after?: number, signal?: AbortSignal) {
+  const followups = await listThreadFollowups(owner, identity, signal);
+  if (!followups.some(followup => followup.id === followupId)) {
+    throw new Error('Follow-up does not belong to the selected Thread branch');
+  }
+  // Authorize from short definition metadata, without hydrating the original instruction.
+  return owner.runtime.followupOccurrences(followupId, after, signal);
 }
 
 export async function controlThreadFollowup(owner: FollowupOwner,

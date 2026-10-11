@@ -6,6 +6,7 @@ pub(super) fn register(f: &mut Fixture, key: &str, trigger: FollowupRegistration
             key,
             &f.run,
             FollowupRegistration {
+                repeat: varin_runtime::catalog::followups::FollowupRepeat::Once,
                 trigger,
                 instruction: "Act once on these original conditions".into(),
                 wait: None,
@@ -301,6 +302,7 @@ fn register_rechecks_multiple_original_receipts_and_all_needs_both_real_stops() 
             "all",
             &f.run,
             FollowupRegistration {
+                repeat: varin_runtime::catalog::followups::FollowupRepeat::Once,
                 trigger: FollowupRegistrationTrigger::All {
                     sources: vec![process_source(&process), process_source(&second)],
                 },
@@ -360,6 +362,7 @@ fn every_composite_leaf_is_validated_and_authorized_even_when_at_is_already_due(
                     &format!("invalid-{n}"),
                     &f.run,
                     FollowupRegistration {
+                        repeat: varin_runtime::catalog::followups::FollowupRepeat::Once,
                         trigger,
                         instruction: "Never accept".into(),
                         wait: None,
@@ -557,6 +560,7 @@ fn a_due_any_branch_does_not_authorize_a_foreign_thread_process_leaf() {
             "foreign-source",
             &f.run,
             FollowupRegistration {
+                repeat: varin_runtime::catalog::followups::FollowupRepeat::Once,
                 trigger: FollowupRegistrationTrigger::Any {
                     sources: vec![at_source(0), process_source(&foreign_process)],
                 },

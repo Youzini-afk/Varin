@@ -133,6 +133,8 @@ pub struct FollowupWaitOptions {}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FollowupRegistration {
+    #[serde(default)]
+    pub repeat: FollowupRepeat,
     pub trigger: FollowupRegistrationTrigger,
     pub instruction: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -150,6 +152,19 @@ impl FollowupRegistration {
             return Err(RuntimeError::Invalid(
                 "follow-up sources cannot be empty".into(),
             ));
+        }
+        if self.repeat == FollowupRepeat::Each {
+            let repeatable = sources.iter().filter(|source| source.repeatable()).count();
+            let valid = match self.trigger {
+                FollowupRegistrationTrigger::Any { .. } => repeatable > 0,
+                _ => repeatable == sources.len(),
+            };
+            if !valid {
+                return Err(RuntimeError::Invalid(
+                    "each requires a changed file; every All leaf must emit new repeatable edges"
+                        .into(),
+                ));
+            }
         }
         for source in sources {
             match source {
@@ -183,6 +198,8 @@ impl FollowupRegistration {
 )]
 pub enum FollowupToolInput {
     Register {
+        #[serde(default)]
+        repeat: FollowupRepeat,
         trigger: FollowupRegistrationTrigger,
         instruction: String,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -190,6 +207,10 @@ pub enum FollowupToolInput {
     },
     List,
     Jobs,
+    Occurrences {
+        followup_id: String,
+        after: Option<u64>,
+    },
     Get {
         followup_id: String,
     },
@@ -202,12 +223,14 @@ pub enum FollowupToolInput {
 impl FollowupToolInput {
     pub fn registration(&self) -> Option<FollowupRegistration> {
         if let Self::Register {
+            repeat,
             trigger,
             instruction,
             wait,
         } = self
         {
             Some(FollowupRegistration {
+                repeat: *repeat,
                 trigger: trigger.clone(),
                 instruction: instruction.clone(),
                 wait: wait.clone(),
@@ -425,6 +448,7 @@ impl Catalog {
             goal.map(|g| g.id),
             observations::wall_time_ms()?,
         )?;
+        d.repeat = p.input.repeat;
         d.instruction_ref = Some(p.instruction);
         if p.input.wait.is_some() {
             d.observation_operation_id = p.operation.as_ref().map(|o| o.id.clone());
@@ -695,6 +719,21 @@ impl Catalog {
         self.validate_tool_invocation(&p.invocation, true)?;
         self.host_job_sources(&p.invocation.context.run_id)
     }
+    pub fn list_tool_followup_occurrences(
+        &self,
+        p: PreparedFollowupToolRead,
+        id: &str,
+        after: Option<u64>,
+    ) -> Result<FollowupOccurrencesResult> {
+        self.validate_tool_invocation(&p.invocation, true)?;
+        let d: Definition = record(&self.db, "followups", id)?;
+        if d.thread_id != p.thread || d.branch_id != p.branch {
+            return Err(RuntimeError::Conflict(
+                "follow-up belongs to another Thread or branch".into(),
+            ));
+        }
+        self.followup_occurrences(id, after)
+    }
     pub fn list_tool_followups(&self, p: PreparedFollowupToolRead) -> Result<Vec<Followup>> {
         self.validate_tool_invocation(&p.invocation, true)?;
         Ok(self
@@ -782,7 +821,7 @@ impl Catalog {
         }
         require_invocation(&tx, self.epoch, &c.operation, &p.invocation, false)?;
         let current: Definition = record(&tx, "followups", &c.id)?;
-        if current != c.definition {
+        if !same_authorization(&current, &c.definition) {
             return Err(RuntimeError::Conflict(
                 "follow-up changed during control preparation".into(),
             ));

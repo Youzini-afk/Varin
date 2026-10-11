@@ -1095,6 +1095,14 @@ collection. Cancellation of an observation or follow-up does not cancel the obse
 native instance of the Pi FollowUpService or extra Host polling owner. Native root/child activation,
 Goal/question/pause gates and occurrence/history delivery remain the original runtime owners.
 
+Explicit native `repeat: each` uses the original Catalog occurrence rows and accepted source cursors.
+The existing file observation service keeps only transient watch handles/flights/wake coalescing;
+first delivery does not end repeated monitoring. Pause suspends reads and preserves pending facts;
+Cancel releases the original receipt after actual readers drain. It does not reconstruct coalesced or
+offline writes. The authenticated `POST /api/threads/followup/occurrences` route checks the selected
+Thread/branch using short metadata and pages original occurrences without loading the instruction.
+History/latest/UI state never becomes another execution or cancellation owner.
+
 The following `followups.ts` service describes the still-supported Pi runtime path.
 
 Run settlement clears execution yield and live input/stall attention. A retained follow-up wait has

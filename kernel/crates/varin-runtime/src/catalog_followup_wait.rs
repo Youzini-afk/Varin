@@ -116,7 +116,23 @@ pub(in crate::catalog) fn pending_cancelled(db: &Connection, r: &Run, w: &Wait) 
 fn result(db: &Connection, w: &Wait) -> Result<ObservationResult> {
     Ok(ObservationResult {
         followup_id: w.subject.clone(),
-        occurrence_id: occurrence(db, &w.subject)?.map(|v| v.id),
+        occurrence_id: w
+            .trigger_cursor
+            .map(|cursor| {
+                let raw: String = db.query_row(
+                    "SELECT data FROM events WHERE cursor=?1 AND subject=?2 AND kind=?3",
+                    params![sql_number(cursor)?, w.subject, EVENT],
+                    |r| r.get(0),
+                )?;
+                let data: Value = serde_json::from_str(&raw)?;
+                data["occurrence_id"]
+                    .as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| {
+                        RuntimeError::Invalid("follow-up observation occurrence missing".into())
+                    })
+            })
+            .transpose()?,
         wait_id: w.id.clone(),
         state: state(w),
     })

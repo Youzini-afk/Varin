@@ -315,6 +315,7 @@ pub(crate) struct FollowupRegistrationCancelParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct FollowupRegisterAdmissionParams {
+    pub(crate) repeat: Option<varin_runtime::catalog::followups::FollowupRepeat>,
     pub(crate) key: String,
     pub(crate) run_id: String,
     pub(crate) trigger: varin_runtime::catalog::followups::FollowupRegistrationTrigger,
@@ -353,6 +354,13 @@ pub(crate) struct FollowupFileReleaseParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct FollowupGetParams {
     pub(crate) followup_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupOccurrencesParams {
+    pub(crate) followup_id: String,
+    pub(crate) after: Option<i64>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2503,6 +2511,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.followup.get" => serde_json::from_value::<FollowupGetParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.followup.occurrences" => {
+            serde_json::from_value::<FollowupOccurrencesParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.followup.control" => {
             serde_json::from_value::<FollowupControlParams>(params.clone())
                 .map(|_| ())

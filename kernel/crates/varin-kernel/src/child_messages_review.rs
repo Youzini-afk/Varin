@@ -349,6 +349,7 @@ fn explicit_followup_uses_both_real_origins_and_separates_registration_from_wait
         "any",
         "all",
         "file",
+        "repeating_file",
         "job_stopped",
         "any_job",
         "all_job",
@@ -362,7 +363,7 @@ fn explicit_followup_uses_both_real_origins_and_separates_registration_from_wait
                 vec![crate::followup_tools::schema()],
                 vec!["follow_up".into()],
             );
-            if trigger_kind == "file" {
+            if matches!(trigger_kind, "file" | "repeating_file") {
                 enable_fixed_file_reader(&mut f);
             }
             let deadline = varin_runtime::catalog::observations::wall_time_ms().unwrap() + 60_000;
@@ -377,10 +378,14 @@ fn explicit_followup_uses_both_real_origins_and_separates_registration_from_wait
                 } else {
                     json!({"kind":if trigger_kind == "any_job" {"any"} else {"all"},"sources":[leaf,{"kind":"at","atMs":deadline}]})
                 };
-            } else if trigger_kind == "file" {
+            } else if matches!(trigger_kind, "file" | "repeating_file") {
                 args["trigger"] = json!({"kind":"all","sources":[{"kind":"file","path":"result.txt","condition":"exists"},{"kind":"file","path":"result.txt","condition":"changed"}]});
             } else if trigger_kind != "at" {
                 args["trigger"] = json!({"kind":trigger_kind,"sources":[{"kind":"at","atMs":deadline},{"kind":"at","atMs":deadline+1}]});
+            }
+            if trigger_kind == "repeating_file" {
+                args["repeat"] = json!("each");
+                args["trigger"] = json!({"kind":"file","path":"result.txt","condition":"changed"});
             }
             if wait {
                 args["wait"] = json!({});
@@ -401,6 +406,14 @@ fn explicit_followup_uses_both_real_origins_and_separates_registration_from_wait
             let followups = db.followups(&f.run.thread_id).unwrap();
             assert_eq!(followups.len(), 1);
             let value = &followups[0];
+            if trigger_kind == "repeating_file" {
+                assert_eq!(
+                    value.repeat,
+                    varin_runtime::catalog::followups::FollowupRepeat::Each
+                );
+                assert!(value.sources[0].observed.is_none());
+                assert!(value.sources[0].file.as_ref().unwrap().immutable);
+            }
             if trigger_kind == "file" {
                 assert!(value.sources[0].observed.is_some());
                 assert!(value.sources[1].observed.is_none());
@@ -556,6 +569,7 @@ fn followup_get_list_and_control_consume_real_retained_user_instruction_from_bot
                 "user-instruction",
                 &f.run.id,
                 FollowupRegistration {
+                    repeat: varin_runtime::catalog::followups::FollowupRepeat::Once,
                     trigger: FollowupRegistrationTrigger::At { at_ms },
                     instruction: "User retained original instruction".into(),
                     wait: None,
@@ -570,7 +584,7 @@ fn followup_get_list_and_control_consume_real_retained_user_instruction_from_bot
             .admit_followup_registration(prepared)
             .unwrap();
         let job = accepted_family_job(&f, "discover-family");
-        let calls=[json!({"action":"get","followupId":"user-instruction"}),json!({"action":"list"}),json!({"action":"jobs"}),json!({"action":"control","followupId":"user-instruction","expectedRevision":1,"control":"cancel"})].into_iter().enumerate().map(|(n,arguments)|ToolCall{call_id:format!("manage-{n}"),name:"follow_up".into(),schema_version:crate::followup_tools::schema().version,arguments}).collect();
+        let calls=[json!({"action":"get","followupId":"user-instruction"}),json!({"action":"list"}),json!({"action":"jobs"}),json!({"action":"occurrences","followupId":"user-instruction"}),json!({"action":"control","followupId":"user-instruction","expectedRevision":1,"control":"cancel"})].into_iter().enumerate().map(|(n,arguments)|ToolCall{call_id:format!("manage-{n}"),name:"follow_up".into(),schema_version:crate::followup_tools::schema().version,arguments}).collect();
         execute(&f, model, calls, &mut OwnerReplies::default(), false);
         let read = rusqlite::Connection::open(f.root.join("conversation.sqlite")).unwrap();
         let mut values = Vec::new();
@@ -647,7 +661,7 @@ fn followup_get_list_and_control_consume_real_retained_user_instruction_from_bot
                 values.push((node_id, serde_json::from_slice(&bytes).unwrap()));
             }
         }
-        assert_eq!(values.len(), 4);
+        assert_eq!(values.len(), 5);
         let jobs = &values.iter().find(|(id, _)| id == "manage-2").unwrap().1;
         assert_eq!(jobs[0]["binding"]["operationId"], job.operation_id);
         assert_ne!(jobs[0]["sourceRunId"], f.run.id);
@@ -855,13 +869,14 @@ fn accepted_job_stop_wakes_original_followup_observation_and_active_child_ingres
 }
 
 #[test]
-fn stopped_family_job_reopens_a_completed_child_as_one_real_delegated_execution() {
+fn repeating_family_job_then_time_uses_real_idle_and_active_child_occurrences() {
     use varin_runtime::catalog::{delegated::DelegatedTrigger, followups::*};
-    let f = Fixture::with_tools(
+    let mut f = Fixture::with_tools(
         false,
         vec![crate::followup_tools::schema()],
         vec!["follow_up".into()],
     );
+    enable_fixed_file_reader(&mut f);
     let job = accepted_family_job(&f, "cold-child-job");
     execute(
         &f,
@@ -870,7 +885,7 @@ fn stopped_family_job_reopens_a_completed_child_as_one_real_delegated_execution(
             call_id: "after-job".into(),
             name: "follow_up".into(),
             schema_version: crate::followup_tools::schema().version,
-            arguments: json!({"action":"register","trigger":{"kind":"job_stopped","operationId":job.operation_id},"instruction":"Continue the child's original work after the family experiment stops"}),
+            arguments: json!({"action":"register","repeat":"each","trigger":{"kind":"any","sources":[{"kind":"job_stopped","operationId":job.operation_id},{"kind":"at","atMs":varin_runtime::catalog::observations::MAX_DEADLINE_MS},{"kind":"file","path":"result.txt","condition":"changed"}]},"instruction":"Continue the child's original work after the family experiment stops"}),
         }],
         &mut OwnerReplies::default(),
         false,
@@ -972,6 +987,50 @@ fn stopped_family_job_reopens_a_completed_child_as_one_real_delegated_execution(
     assert_eq!(db.run(&f.run.id).unwrap().state, RunState::Completed);
     let history = db.execution_history(&f.run.branch_id).unwrap();
     assert!(history.iter().any(|item|matches!(&item.content,Content::Text {text} if text.contains("accepted original family experiment"))));
+    // A later accepted edge keeps the same definition and enters the actual new
+    // child Run; it cannot borrow the earlier occurrence's input or execution ID.
+    let epoch=db.epoch();
+    db.commit_execution(
+        &next,
+        epoch,
+        &ExecutionRecord::StateChanged {
+            state: RunState::Runnable,
+            waiting_on: None,
+        },
+    )
+    .unwrap();
+    db.reconcile_followup_facts_at(varin_runtime::catalog::observations::MAX_DEADLINE_MS)
+        .unwrap();
+    let definition_id = value.id.clone();
+    drop(db);
+    reconcile(&owner).unwrap();
+    let mut db = owner.lock().unwrap();
+    let page = db.followup_occurrences(&definition_id, None).unwrap();
+    assert_eq!(page.occurrences.len(), 2);
+    assert_ne!(page.occurrences[0].id, page.occurrences[1].id);
+    assert_eq!(
+        page.occurrences[1]
+            .delivery
+            .as_ref()
+            .unwrap()
+            .run_id
+            .as_deref(),
+        Some(next.as_str())
+    );
+    let p = db
+        .prepare_input_delivery(
+            &next,
+            db.epoch(),
+            db.head(&f.run.branch_id).unwrap().as_deref(),
+        )
+        .unwrap()
+        .load()
+        .unwrap();
+    assert_eq!(db.admit_input_delivery(p).unwrap().unwrap().items.len(), 1);
+    assert_eq!(
+        db.followup(&definition_id).unwrap().wait.state,
+        NextRunWaitState::Waiting
+    );
     drop(db);
     reconcile(&owner).unwrap();
     assert_eq!(
@@ -1006,6 +1065,7 @@ fn stopped_job_cannot_answer_a_real_child_question_or_clear_its_recovered_wait()
             "question-followup",
             &f.run.id,
             FollowupRegistration {
+                repeat: varin_runtime::catalog::followups::FollowupRepeat::Once,
                 trigger: FollowupRegistrationTrigger::JobStopped {
                     operation_id: job.operation_id.clone(),
                 },
@@ -1058,4 +1118,60 @@ fn stopped_job_cannot_answer_a_real_child_question_or_clear_its_recovered_wait()
     drop(db);
     drop(owner);
     f.finish();
+}
+
+#[test]
+fn repeating_tool_wait_returns_first_occurrence_even_when_later_edges_precede_wait_delivery() {
+    use varin_runtime::catalog::followups::*;
+    for model in [true, false] {
+        let mut f = Fixture::with_tools(
+            false,
+            vec![crate::followup_tools::schema()],
+            vec!["follow_up".into()],
+        );
+        enable_fixed_file_reader(&mut f);
+        let deadline = varin_runtime::catalog::observations::wall_time_ms().unwrap() + 60_000;
+        wait_review::waiting(
+            &f,
+            model,
+            vec![ToolCall {
+                call_id: "await-first".into(),
+                name: "follow_up".into(),
+                schema_version: crate::followup_tools::schema().version,
+                arguments: json!({"action":"register","repeat":"each","trigger":{"kind":"any","sources":[{"kind":"at","atMs":deadline},{"kind":"at","atMs":deadline+1},{"kind":"file","path":"result.txt","condition":"changed"}]},"instruction":"Continue for each observed edge","wait":{}}),
+            }],
+        );
+        let owner = f.catalog();
+        let mut db = owner.lock().unwrap();
+        db.reconcile_followup_facts_at(deadline + 1).unwrap();
+        db.reconcile_waits().unwrap();
+        let d = db.followups(&f.run.thread_id).unwrap().remove(0);
+        let history = db.followup_occurrences(&d.id, None).unwrap().occurrences;
+        assert_eq!(history.len(), 2);
+        assert_eq!(d.occurrence.unwrap().id, history[1].id);
+        let waits = db.capture_followup_waits().unwrap();
+        assert_eq!(waits.len(), 1);
+        assert!(db
+            .admit_followup_wait(waits.into_iter().next().unwrap().load().unwrap())
+            .unwrap());
+        let item = db
+            .execution_history(&f.run.branch_id)
+            .unwrap()
+            .into_iter()
+            .find(|item| item.id.starts_with("followup-observation-result:"))
+            .unwrap();
+        let Content::Text { text } = item.content else {
+            panic!("observation fact")
+        };
+        assert!(text.contains(&history[0].id));
+        assert!(!text.contains(&history[1].id));
+        assert_eq!(
+            db.followup(&d.id).unwrap().wait.state,
+            NextRunWaitState::Waiting
+        );
+        assert_eq!(db.followup(&d.id).unwrap().pending_occurrences, 2);
+        drop(db);
+        drop(owner);
+        f.finish();
+    }
 }

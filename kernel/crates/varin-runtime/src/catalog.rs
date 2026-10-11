@@ -38,7 +38,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 37;
+pub(crate) const FORMAT: i64 = 38;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -1742,6 +1742,7 @@ pub(super) fn request_cancel_run_in(tx: &Transaction<'_>, id: &str) -> Result<Ru
     activation::cancel_run(tx, id)?;
     calendar::cancel_branch_pending(tx, &run.thread_id, &run.branch_id)?;
     followups::cancel_source_run(tx, id)?;
+    followups::cancel_current_repeating(tx, &run)?;
     goals::cancel_run(tx, id)?;
     if run.state == RunState::Waiting {
         questions::cancel_run_questions(tx, id)?;

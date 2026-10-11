@@ -1,4 +1,4 @@
-//! Flat one-shot conditions retain each leaf's cursor and receipt binding in the Catalog.
+//! Flat explicit conditions retain each leaf's cursor and receipt binding in the Catalog.
 //! A reconciliation observes one current snapshot; it does not reconstruct which event
 //! historically won a race while this owner was offline.
 use super::*;
@@ -52,6 +52,7 @@ pub enum FollowupLeafEvidence {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct FollowupSourceObservation {
+    pub accepted_cursor: u64,
     pub trigger_cursor: u64,
     pub evidence: FollowupLeafEvidence,
 }
@@ -60,6 +61,7 @@ pub struct FollowupSourceObservation {
 pub struct FollowupSourceState {
     pub source_index: usize,
     pub after_cursor: u64,
+    pub consumed_cursor: u64,
     pub observed: Option<FollowupSourceObservation>,
     pub file: Option<FollowupFileSourceState>,
 }
@@ -67,8 +69,20 @@ pub struct FollowupSourceState {
 #[serde(deny_unknown_fields)]
 pub struct FollowupSourceEvidence {
     pub source_index: usize,
+    pub accepted_cursor: u64,
     pub trigger_cursor: u64,
     pub evidence: FollowupLeafEvidence,
+}
+impl FollowupSource {
+    pub(super) fn repeatable(&self) -> bool {
+        matches!(
+            self,
+            Self::File {
+                condition: FileCondition::Changed,
+                ..
+            }
+        )
+    }
 }
 impl FollowupTrigger {
     pub fn sources(&self) -> Vec<FollowupSource> {
@@ -156,7 +170,7 @@ fn observe_leaf(
     index: usize,
     source: &FollowupSource,
     now: u64,
-) -> Result<Option<FollowupSourceObservation>> {
+) -> Result<Option<(u64, FollowupLeafEvidence)>> {
     let (trigger_cursor, evidence) = match source {
         FollowupSource::File { .. } => return Ok(None),
         FollowupSource::At { at_ms } => {
@@ -226,16 +240,80 @@ fn observe_leaf(
             )
         }
     };
-    Ok(Some(FollowupSourceObservation {
-        trigger_cursor,
+    Ok(Some((trigger_cursor, evidence)))
+}
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AcceptedSourceFact {
+    generation: u64,
+    source_index: usize,
+    // File facts are accepted directly here; other domains retain their original receipt cursor.
+    trigger_cursor: Option<u64>,
+    evidence: FollowupLeafEvidence,
+}
+/// This is a short Catalog receipt for an observed source fact, not the transient
+/// watcher notification. The original source cursor retains its own provenance.
+pub(super) fn accept_observation(
+    tx: &Transaction<'_>,
+    d: &mut Definition,
+    index: usize,
+    trigger_cursor: Option<u64>,
+    evidence: FollowupLeafEvidence,
+) -> Result<()> {
+    let accepted_cursor = event(
+        tx,
+        &d.id,
+        d.revision,
+        "followup.source_observed",
+        serde_json::to_value(AcceptedSourceFact {
+            generation: d.generation,
+            source_index: index,
+            trigger_cursor,
+            evidence: evidence.clone(),
+        })?,
+    )?;
+    d.sources[index].observed = Some(FollowupSourceObservation {
+        accepted_cursor,
+        trigger_cursor: trigger_cursor.unwrap_or(accepted_cursor),
         evidence,
-    }))
+    });
+    Ok(())
+}
+fn next_observation(
+    db: &Connection,
+    d: &Definition,
+    index: usize,
+) -> Result<Option<FollowupSourceEvidence>> {
+    let row: Option<(u64, String)> = db
+        .query_row(
+            "SELECT cursor,data FROM events WHERE subject=?1 AND kind='followup.source_observed'
+         AND json_extract(data,'$.generation')=?2 AND json_extract(data,'$.source_index')=?3
+         AND cursor>?4 ORDER BY cursor LIMIT 1",
+            params![
+                d.id,
+                sql_number(d.generation)?,
+                sql_number(index as u64)?,
+                sql_number(d.sources[index].consumed_cursor)?
+            ],
+            |r| Ok((read_number(r, 0)?, r.get(1)?)),
+        )
+        .optional()?;
+    row.map(|(accepted_cursor, raw)| {
+        let data: AcceptedSourceFact = serde_json::from_str(&raw)?;
+        Ok(FollowupSourceEvidence {
+            source_index: index,
+            accepted_cursor,
+            trigger_cursor: data.trigger_cursor.unwrap_or(accepted_cursor),
+            evidence: data.evidence,
+        })
+    })
+    .transpose()
 }
 pub(super) fn observe_sources(
     tx: &Transaction<'_>,
     d: &mut Definition,
     now: u64,
-) -> Result<Option<(u64, TriggerEvidence)>> {
+) -> Result<Option<(u64, u64, TriggerEvidence)>> {
     let sources = d.trigger.sources();
     if sources.is_empty()
         || d.sources.len() != sources.len()
@@ -251,8 +329,8 @@ pub(super) fn observe_sources(
     let mut changed = false;
     for (index, source) in sources.iter().enumerate() {
         if d.sources[index].observed.is_none() {
-            if let Some(observed) = observe_leaf(tx, d, index, source, now)? {
-                d.sources[index].observed = Some(observed);
+            if let Some((cursor, evidence)) = observe_leaf(tx, d, index, source, now)? {
+                accept_observation(tx, d, index, Some(cursor), evidence)?;
                 changed = true;
             }
         }
@@ -267,27 +345,50 @@ pub(super) fn observe_sources(
             json!({"sources":d.sources}),
         )?;
     }
-    let observed = d
-        .sources
-        .iter()
-        .filter_map(|s| {
-            s.observed.as_ref().map(|o| FollowupSourceEvidence {
-                source_index: s.source_index,
-                trigger_cursor: o.trigger_cursor,
-                evidence: o.evidence.clone(),
+    let mut observed = if d.repeat == FollowupRepeat::Each {
+        (0..sources.len())
+            .map(|index| next_observation(tx, d, index))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+    } else {
+        d.sources
+            .iter()
+            .filter_map(|s| {
+                s.observed.as_ref().map(|o| FollowupSourceEvidence {
+                    source_index: s.source_index,
+                    accepted_cursor: o.accepted_cursor,
+                    trigger_cursor: o.trigger_cursor,
+                    evidence: o.evidence.clone(),
+                })
             })
-        })
-        .collect::<Vec<_>>();
+            .collect::<Vec<_>>()
+    };
     if observed.is_empty()
         || (matches!(d.trigger, FollowupTrigger::All { .. }) && observed.len() != sources.len())
     {
         return Ok(None);
     }
+    if d.repeat == FollowupRepeat::Each && matches!(d.trigger, FollowupTrigger::Any { .. }) {
+        observed.sort_by_key(|o| o.accepted_cursor);
+        observed.truncate(1); // Each accepted leaf edge is an independent occurrence.
+    }
+    let accepted_cursor = observed
+        .iter()
+        .map(|s| s.accepted_cursor)
+        .max()
+        .expect("observed source");
     let cursor = observed
         .iter()
         .map(|s| s.trigger_cursor)
         .max()
         .expect("observed source");
+    if d.repeat == FollowupRepeat::Each {
+        for source in &observed {
+            d.sources[source.source_index].consumed_cursor = source.accepted_cursor;
+        }
+    }
     let evidence = match &d.trigger {
         FollowupTrigger::Any { .. } => TriggerEvidence::Any { sources: observed },
         FollowupTrigger::All { .. } => TriggerEvidence::All { sources: observed },
@@ -340,7 +441,7 @@ pub(super) fn observe_sources(
             },
         },
     };
-    Ok(Some((cursor, evidence)))
+    Ok(Some((accepted_cursor, cursor, evidence)))
 }
 fn process_settled(db: &Connection, identity: &str, epoch: &str) -> Result<bool> {
     let op: Operation = record(db, "operations", identity)?;

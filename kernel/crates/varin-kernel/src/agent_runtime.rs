@@ -699,6 +699,7 @@ pub(crate) fn spawn(
                             method,
                             "runtime.followup.register"
                                 | "runtime.followup.get"
+                                | "runtime.followup.occurrences"
                                 | "runtime.followup.files"
                                 | "runtime.followup.registrations.pending"
                                 | "runtime.followup.registration.cancel"

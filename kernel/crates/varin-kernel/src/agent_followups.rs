@@ -16,6 +16,7 @@ pub(super) fn execute(
             let p: FollowupRegisterAdmissionParams = serde_json::from_value(params)?;
             let processes = p.trigger.process_operation_ids();
             let input = varin_runtime::catalog::followups::FollowupRegistration {
+                repeat: p.repeat.unwrap_or_default(),
                 trigger: p.trigger,
                 instruction: p.instruction,
                 wait: None,
@@ -129,6 +130,19 @@ pub(super) fn execute(
                 }
                 Ok(json!({"released":released}))
             }
+        }
+        "runtime.followup.occurrences" => {
+            let p: FollowupOccurrencesParams = serde_json::from_value(params)?;
+            let after = p.after.map(u64::try_from).transpose().map_err(|_| {
+                KernelError::Protocol("follow-up occurrence cursor must be nonnegative".into())
+            })?;
+            let value = runtime
+                .catalog()
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                .followup_occurrences(&p.followup_id, after)
+                .map_err(domain)?;
+            Ok(serde_json::to_value(value)?)
         }
         "runtime.followup.get" => {
             let p: FollowupGetParams = serde_json::from_value(params)?;
