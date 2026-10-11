@@ -1,5 +1,31 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
 
+export interface MediaReadChunk { media:StoredMedia;partIndex:number;chunkIndex:number;chunkCount:number;totalBytes:number;bytesBase64:string }
+
+export interface MediaReadParams { threadId:string;branchId:string;holder:OutputMediaHolder;partIndex:number;chunkIndex:number;expectedContentRef:string }
+
+export type OutputMediaHolder = {kind:'history';itemId:string} | {kind:'input';inputId:string;expectedRevision:number} | {kind:'operation';operationId:string;output:'completion'|'result'|'external_receipt'} | {kind:'event';cursor:number;output:'completion'|'result'|'external_receipt'} | {kind:'policy_evidence';reference:OutputEvidenceRef} | {kind:'child_report';operationId:string;executionId?:string;itemId:string} | {kind:'family';threadId:string;branchId:string;runId?:string;anchor:string;itemId:string};
+
+export type OperationResult = {kind:'control';value:unknown} | {kind:'output';output:OutputBody};
+
+export interface OutputBody<M = StoredMedia> { data: unknown; parts: OutputPart<M>[] }
+
+export type OutputPart<M = StoredMedia> = {kind:'text';text:string} | {kind:'media';media:M};
+
+export interface ResolvedMedia { media_type: string; source: OutputSource; data_base64: string }
+
+export interface StoredMedia { media_type: string; source: OutputSource; content_ref: ContentRef }
+
+export interface IncomingMedia { media_type: string; data_base64: string }
+
+export interface ContentRef { content_object: string }
+
+export type OutputSource = {kind:'conversation';provenance:ContentProvenance} | {kind:'tool';context:{run_id:string;origin:ToolOrigin;operation_id:string}} | {kind:'operation';operation_id:string};
+
+export type ContentProvenance = {kind:'system_instruction';source:string} | {kind:'goal_instruction';goal_id:string;generation:number} | {kind:'user_instruction';input_id:string} | {kind:'assistant'} | {kind:'policy_output';action_id:string;identity:{name:string;version:string}} | {kind:'tool_data';call_id:string} | {kind:'policy_tool_data';reference:OutputEvidenceRef} | {kind:'external_data';source:string} | {kind:'agent_message';thread_id:string} | {kind:'environment_fact';event_id:string};
+
+export interface OutputEvidenceRef { action_id: string; node_id: string; content_ref: string }
+
 export interface ManagedProcess { purpose: ManagedProcessKind; kernel_epoch: string | null; }
 
 export type ManagedProcessKind = {kind:'process_job'} | {kind:'script_environment';node:NodeBinding};
@@ -198,14 +224,14 @@ export interface HostJobBeginParams {
 
 export interface HostJobAcceptParams {
   binding: HostJobBinding;
-  content: unknown;
+  content: OutputBody<IncomingMedia>;
 }
 
 export interface HostJobTerminalParams {
   binding: HostJobBinding;
   outcome: Outcome;
   effect: Effect;
-  content: unknown;
+  content: OutputBody<IncomingMedia>;
   executorStopped: boolean;
 }
 
@@ -1038,7 +1064,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 2; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 3; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -1086,7 +1112,7 @@ export interface NestedToolInput {
 
 export interface NestedToolReceipt {
   operationId: string;
-  completion: OperationCallCompletion;
+  completion: OperationCallCompletion<ResolvedMedia>;
 }
 
 export interface HostToolCall {
@@ -1142,7 +1168,7 @@ export interface AgentPolicyArtifactBinding {
   extensionId: string;
   extensionVersion: string;
   serviceId: 'varin.agent.policy';
-  serviceVersion: 3;
+  serviceVersion: 4;
   artifactIntegrity: string;
   configurationIdentity: string;
   declaredIdentity: LaunchPolicy;
@@ -1392,7 +1418,7 @@ export interface ExternalReceipt {
   epoch: string;
   outcome: Outcome;
   effect: Effect;
-  result: unknown;
+  result: OutputBody;
 }
 
 export interface BranchForkParams {
@@ -1866,10 +1892,10 @@ export interface Run {
   cancel_requested: boolean;
 }
 
-export type OperationCallCompletion =
+export type OperationCallCompletion<M = StoredMedia> =
   | { kind: 'not_dispatched'; reason: string }
-  | { kind: 'result'; outcome: Outcome; effect: Effect; content: unknown }
-  | { kind: 'job_accepted'; operation_id: string; phase: string; effect: Effect; lifetime: Lifetime; content?: unknown };
+  | { kind: 'result'; outcome: Outcome; effect: Effect; content: OutputBody<M> }
+  | { kind: 'job_accepted'; operation_id: string; phase: string; effect: Effect; lifetime: Lifetime; content?: OutputBody<M> };
 
 export interface Operation {
   host_job?: HostJobLink;
@@ -1889,7 +1915,7 @@ export interface Operation {
   executor: string | null;
   waiting_on: string | null;
   intent: unknown;
-  result: unknown;
+  result: OperationResult | null;
   managed_process?: ManagedProcess;
 }
 
@@ -2085,7 +2111,8 @@ export interface ChildReportReadParams {
   maxBytes?: number;
 }
 
-export interface ChildTextPage {
+export interface ChildReportPage {
+  format: 'text' | 'output_body';
   operation_id: string;
   item_id: string;
   offset: number;

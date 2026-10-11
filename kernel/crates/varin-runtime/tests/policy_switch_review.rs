@@ -4,7 +4,7 @@ mod content_collection;
 #[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use varin_runtime::{
     catalog::{inputs::EnqueueInput, launches::LaunchSelection, policy_switch::*},
@@ -18,7 +18,7 @@ fn target(version: &str) -> PolicyTarget {
             extension_id: "fixture".into(),
             extension_version: version.into(),
             service_id: "varin.agent.policy".into(),
-            service_version: 3,
+            service_version: 4,
             artifact_integrity: format!("artifact-{version}"),
             configuration_identity: "configuration".into(),
             declared_identity: PolicyIdentity {
@@ -59,7 +59,8 @@ impl Fixture {
             .unwrap();
         let binding = RequestBinding {
             child_dispatch: None,
-            goal: None, resource_activations: Vec::new(),
+            goal: None,
+            resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "main-original".into(),
             provider_family: "fixture".into(),
@@ -274,7 +275,7 @@ fn resumed_cut_survives_activation_then_pending_decision_crash_and_gc() {
     let run = f.run.clone();
     let delivered = f.control(
         PolicyAction::Deliver {
-            text: "already delivered".into(),
+            output: varin_runtime::output::OutputBody::text("already delivered"),
         },
         json!({"old":"delivered"}),
     );
@@ -296,24 +297,27 @@ fn resumed_cut_survives_activation_then_pending_decision_crash_and_gc() {
     };
     let selection = f.ready("new", PolicyStateMode::RestartState);
     let epoch = f.db().epoch();
-    assert!(f
-        .db()
-        .capture_policy_activation(&run, epoch, &selection.selection_id, selection.generation)
-        .unwrap()
-        .is_none());
+    assert!(
+        f.db()
+            .capture_policy_activation(&run, epoch, &selection.selection_id, selection.generation)
+            .unwrap()
+            .is_none()
+    );
     f.enqueue("new actual instruction");
-    assert!(f
-        .db()
-        .capture_policy_activation(&run, epoch, &selection.selection_id, selection.generation)
-        .unwrap()
-        .is_none());
+    assert!(
+        f.db()
+            .capture_policy_activation(&run, epoch, &selection.selection_id, selection.generation)
+            .unwrap()
+            .is_none()
+    );
     let resume = f.db().resume_policy_pause(&run, &wait_id, epoch).unwrap();
     assert_eq!(resume.action_id, action_id);
-    assert!(f
-        .db()
-        .capture_policy_activation(&run, epoch, &selection.selection_id, selection.generation)
-        .unwrap()
-        .is_none());
+    assert!(
+        f.db()
+            .capture_policy_activation(&run, epoch, &selection.selection_id, selection.generation)
+            .unwrap()
+            .is_none()
+    );
     let head = f.db().head("main").unwrap();
     f.db().consume_inputs(&run, epoch, head.as_deref()).unwrap();
     let event = PolicyEvent::Resumed {
@@ -422,11 +426,12 @@ fn pending_decision_input_and_superseded_candidates_cannot_be_overwritten() {
         )
         .unwrap();
     let a = f.ready("a", PolicyStateMode::RestartState);
-    assert!(f
-        .db()
-        .capture_policy_activation(&run, epoch, "a", a.generation)
-        .unwrap()
-        .is_none());
+    assert!(
+        f.db()
+            .capture_policy_activation(&run, epoch, "a", a.generation)
+            .unwrap()
+            .is_none()
+    );
     let b = f.ready("b", PolicyStateMode::Preserve);
     let retry = f
         .db()
@@ -449,17 +454,18 @@ fn pending_decision_input_and_superseded_candidates_cannot_be_overwritten() {
             .selection_id,
         "b"
     );
-    assert!(f
-        .db()
-        .select_policy(
-            &run,
-            "stale",
-            0,
-            Some("a".into()),
-            target("stale"),
-            PolicyStateMode::RestartState
-        )
-        .is_err());
+    assert!(
+        f.db()
+            .select_policy(
+                &run,
+                "stale",
+                0,
+                Some("a".into()),
+                target("stale"),
+                PolicyStateMode::RestartState
+            )
+            .is_err()
+    );
     f.db()
         .fail_policy_selection(&run, "b", "policy_state_incompatible")
         .unwrap();
@@ -617,7 +623,7 @@ fn input_winning_pending_completion_preserves_committed_activation_live_and_afte
             let event = match control {
                 "delivered" => match f.control(
                     PolicyAction::Deliver {
-                        text: "original delivery".into(),
+                        output: varin_runtime::output::OutputBody::text("original delivery"),
                     },
                     json!({"old":"delivered"}),
                 ) {
@@ -695,9 +701,15 @@ fn input_winning_pending_completion_preserves_committed_activation_live_and_afte
                         .len(),
                     1
                 );
-                content_collection::collect(|| f.db().prepare_content_collection(Default::default())).unwrap();
+                content_collection::collect(|| {
+                    f.db().prepare_content_collection(Default::default())
+                })
+                .unwrap();
                 f.reopen();
-                content_collection::collect(|| f.db().prepare_content_collection(Default::default())).unwrap();
+                content_collection::collect(|| {
+                    f.db().prepare_content_collection(Default::default())
+                })
+                .unwrap();
             }
             let binding = f.binding.clone();
             let (input, recovery) = f

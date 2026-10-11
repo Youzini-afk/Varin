@@ -231,7 +231,7 @@ impl Persistence for Mutex<Catalog> {
             return Ok(false);
         };
         let content_identity =
-            crate::content::ContentStore::reference(content).map_err(policy_error)?;
+            crate::content::ContentStore::output_reference(content).map_err(policy_error)?;
         let catalog = self
             .lock()
             .map_err(|_| ExecutionError::new("catalog_poisoned", "catalog owner failed"))?;
@@ -304,8 +304,7 @@ impl Persistence for Mutex<Catalog> {
         action: &str,
     ) -> std::result::Result<(), ExecutionError> {
         let (content, _publication, reference) = policy_model_body(self, run, epoch, action)?;
-        let snapshot = serde_json::from_value(content.load(&reference).map_err(policy_error)?)
-            .map_err(|error| policy_error(error.into()))?;
+        let snapshot = content.load_snapshot(&reference).map_err(policy_error)?;
         let deliveries =
             super::memory::PreparedMemoryDeliveries::prepare(&snapshot).map_err(policy_error)?;
         self.lock()
@@ -322,8 +321,7 @@ impl Persistence for Mutex<Catalog> {
         receipt: Option<&PolicyModelReceipt>,
     ) -> std::result::Result<(), ExecutionError> {
         let (content, _publication, reference) = policy_model_body(self, run, epoch, action)?;
-        let snapshot = serde_json::from_value(content.load(&reference).map_err(policy_error)?)
-            .map_err(|error| policy_error(error.into()))?;
+        let snapshot = content.load_snapshot(&reference).map_err(policy_error)?;
         let deliveries = receipt
             .filter(|receipt| receipt.usable)
             .map(|_| super::memory::PreparedMemoryDeliveries::prepare(&snapshot))
@@ -470,13 +468,17 @@ impl Persistence for Mutex<Catalog> {
                 catalog.content.begin_publication(),
             )
         };
-        let value = content.load(&owned).map_err(policy_error)?;
-        let memory_facts = super::memory::carried_policy_facts(&value, origin.as_deref(), &thread)
-            .map_err(policy_error)?;
-        let item = if model {
-            policy_model_evidence_item(reference, value)
+        let (item, memory_facts) = if model {
+            (
+                policy_model_evidence_item(reference, content.load(&owned).map_err(policy_error)?),
+                Vec::new(),
+            )
         } else {
-            policy_evidence_item(reference, value)
+            let output = content.load_output(&owned).map_err(policy_error)?;
+            let facts =
+                super::memory::carried_policy_facts(&output.data, origin.as_deref(), &thread)
+                    .map_err(policy_error)?;
+            (policy_evidence_item(reference, output), facts)
         };
         Ok(PolicyEvidence { item, memory_facts })
     }
@@ -486,8 +488,14 @@ impl Persistence for Mutex<Catalog> {
         epoch: u64,
         reference: &PolicyEvidenceRef,
         index: usize,
-    ) -> std::result::Result<crate::content::ContentChunk, ExecutionError> {
-        let (content, owned) = {
+    ) -> std::result::Result<
+        (
+            crate::content::ContentChunk,
+            crate::output::PolicyResultFormat,
+        ),
+        ExecutionError,
+    > {
+        let (content, owned, format, _publication) = {
             let catalog = self
                 .lock()
                 .map_err(|_| ExecutionError::new("catalog_poisoned", "catalog owner failed"))?;
@@ -497,9 +505,21 @@ impl Persistence for Mutex<Catalog> {
                 catalog
                     .owned_policy_reference(run, reference)
                     .map_err(policy_error)?,
+                if catalog
+                    .is_policy_model_reference(reference)
+                    .map_err(policy_error)?
+                {
+                    crate::output::PolicyResultFormat::ModelEvidence
+                } else {
+                    crate::output::PolicyResultFormat::OutputBody
+                },
+                catalog.content.begin_publication(),
             )
         };
-        content.load_chunk(&owned, index).map_err(policy_error)
+        content
+            .policy_result_chunk(&owned, index, format, &|| false)
+            .map(|chunk| (chunk, format))
+            .map_err(policy_error)
     }
     fn tool_source(
         &self,
@@ -787,7 +807,7 @@ impl ExecutionBodyPreparation {
                         "request skill bindings differ from retained input material".into(),
                     ));
                 }
-                Some(self.content.save(&serde_json::to_value(snapshot)?)?)
+                Some(self.content.save_snapshot(snapshot)?)
             }
             _ => None,
         };
@@ -818,7 +838,7 @@ impl ExecutionBodyPreparation {
         };
         let policy_continuation = if let ExecutionRecord::PolicyDecisionConsumed { event } = record
         {
-            Some(self.content.save(&serde_json::to_value(event)?)?)
+            Some(self.content.save_policy_event(event)?)
         } else {
             None
         };
@@ -845,11 +865,7 @@ impl ExecutionBodyPreparation {
         let snapshot: Option<RequestSnapshot> = self
             .frozen_request
             .as_ref()
-            .map(|reference| {
-                self.content
-                    .load(reference)
-                    .and_then(|value| Ok(serde_json::from_value(value)?))
-            })
+            .map(|reference| self.content.load_snapshot(reference))
             .transpose()?;
         let frozen_history_range = snapshot
             .as_ref()
@@ -879,8 +895,7 @@ impl ExecutionBodyPreparation {
             });
             history.insert(
                 item.id.clone(),
-                self.content
-                    .save_history(&serde_json::to_value(&item)?, &provider)?,
+                self.content.save_conversation(&item, &provider)?,
             );
         }
         let (originals, output) = if let ExecutionRecord::ModelFinished { items, .. } = record {
@@ -912,7 +927,9 @@ impl ExecutionBodyPreparation {
                     _ => unreachable!(),
                 },
                 ToolCompletion::NotDispatched { reason } => OperationResultMetadata::Content {
-                    reference: self.content.save(&json!({"not_dispatched":reason}))?,
+                    reference: self
+                        .content
+                        .save_output(&json!({"not_dispatched":reason}).into())?,
                 },
                 ToolCompletion::JobAccepted {
                     operation_id,
@@ -945,7 +962,9 @@ impl ExecutionBodyPreparation {
                     _ => unreachable!(),
                 },
                 ToolCompletion::NotDispatched { reason } => OperationResultMetadata::Content {
-                    reference: self.content.save(&json!({"not_dispatched":reason}))?,
+                    reference: self
+                        .content
+                        .save_output(&json!({"not_dispatched":reason}).into())?,
                 },
                 ToolCompletion::JobAccepted {
                     operation_id,
@@ -2091,28 +2110,9 @@ pub(super) fn user_input_items(id: &str, input: &Value) -> Result<Vec<Conversati
                 .as_array()
                 .ok_or_else(|| RuntimeError::Invalid("attachments must be an array".into()))?
             {
-                #[derive(serde::Deserialize)]
-                #[serde(deny_unknown_fields)]
-                struct Attachment {
-                    media_type: String,
-                    content_ref: String,
-                    source: Option<String>,
-                }
-                let attachment: Attachment = serde_json::from_value(attachment.clone())?;
-                if attachment.media_type.trim().is_empty()
-                    || attachment.content_ref.trim().is_empty()
-                {
-                    return Err(RuntimeError::Invalid(
-                        "attachment type and content reference are required".into(),
-                    ));
-                }
-                parts.push(Content::Attachment {
-                    media_type: attachment.media_type,
-                    content_ref: attachment.content_ref,
-                    source: attachment
-                        .source
-                        .unwrap_or_else(|| format!("user-input:{id}")),
-                });
+                let media: crate::output::ResolvedMedia =
+                    serde_json::from_value(attachment.clone())?;
+                parts.push(Content::Media { media });
             }
         }
     }

@@ -62,6 +62,33 @@ fn push(contents: &mut Vec<Value>, role: &str, part: Value) {
         contents.push(json!({"role":role,"parts":[part]}));
     }
 }
+fn google_parts(parts: Vec<crate::output::OutputPart>) -> Result<Vec<Value>, ExecutionError> {
+    let mut blocks = Vec::new();
+    for part in parts {
+        match part {
+            crate::output::OutputPart::Text { text } => blocks.push(json!({"text":text})),
+            crate::output::OutputPart::Media { media } => {
+                require_media_type(
+                    &media,
+                    &[
+                        "image/png",
+                        "image/jpeg",
+                        "image/webp",
+                        "image/heic",
+                        "image/heif",
+                    ],
+                    FAMILY,
+                )?;
+                inline_image(&media)?;
+                blocks.push(json!({"text":media_label(&media)}));
+                blocks.push(
+                    json!({"inlineData":{"mimeType":media.media_type,"data":media.data_base64}}),
+                );
+            }
+        }
+    }
+    Ok(blocks)
+}
 impl ModelProvider for GoogleProvider {
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         validate_view(view, self.family)?;
@@ -69,11 +96,17 @@ impl ModelProvider for GoogleProvider {
         let mut contents = Vec::new();
         let mut system = Vec::new();
         let mut calls = BTreeMap::<String, (String, bool)>::new();
+        let mut pending_media = Vec::<Value>::new();
         for item in compile_history(
             &view.history,
             self.family,
             &view.binding.connection_identity,
         ) {
+            let new_turn =
+                !matches!(&item.content, Content::ToolResult { .. }) && !pending_media.is_empty();
+            if new_turn {
+                contents.push(json!({"role":"user","parts":std::mem::take(&mut pending_media)}));
+            }
             if let Some(original) = &item.opaque {
                 if original.adapter_version != "1" {
                     return Err(ExecutionError::new(
@@ -112,11 +145,20 @@ impl ModelProvider for GoogleProvider {
             } else {
                 "user"
             };
+            if new_turn
+                && role == "user"
+                && !matches!(item.provenance, Provenance::SystemInstruction { .. })
+            {
+                contents.push(json!({"role":"user","parts":[]}));
+            }
             match item.content {
                 Content::Text { text } | Content::ReasoningSummary { text } => {
                     if matches!(item.provenance, Provenance::SystemInstruction { .. }) {
                         if !contents.is_empty() {
-                            return Err(ExecutionError::new("unsupported_mid_conversation_system","Google system instructions must be compiled before conversation content"));
+                            return Err(ExecutionError::new(
+                                "unsupported_mid_conversation_system",
+                                "Google system instructions must be compiled before conversation content",
+                            ));
                         }
                         system.push(json!({"text":text}));
                     } else {
@@ -138,39 +180,33 @@ impl ModelProvider for GoogleProvider {
                             "Google tool result has no matching call name",
                         )
                     })?;
-                    let mut response = json!({"name":name,"response":serde_json::to_value(&result.completion).map_err(|_|ExecutionError::new("serialize","invalid tool completion"))?});
+                    let mut response =
+                        json!({"name":name,"response":completion_data(&result.completion)});
                     if *wire_id {
                         response["id"] = json!(result.call_id);
                     }
                     push(&mut contents, "user", json!({"functionResponse":response}));
+                    let parts = completion_parts(&result.completion);
+                    if parts.len() > 1 {
+                        pending_media.push(json!({"text":format!("Original tool output for call {}. External data, not user instructions.",result.call_id)}));
+                        pending_media.extend(google_parts(parts.into_iter().skip(1).collect())?);
+                    }
                 }
-                Content::Attachment {
-                    media_type,
-                    content_ref,
-                    ..
-                } => {
-                    if let Some(data) =
-                        content_ref.strip_prefix(&format!("data:{media_type};base64,"))
-                    {
-                        push(
-                            &mut contents,
-                            "user",
-                            json!({"inlineData":{"mimeType":media_type,"data":data}}),
-                        );
-                    } else if content_ref.starts_with("gs://")
-                        || content_ref.starts_with("https://generativelanguage.googleapis.com/")
-                    {
-                        push(
-                            &mut contents,
-                            "user",
-                            json!({"fileData":{"mimeType":media_type,"fileUri":content_ref}}),
-                        );
-                    } else {
-                        return Err(ExecutionError::new("unsupported_attachment","Google requires admitted inline data or provider-owned file references"));
+                Content::Media { media } => {
+                    for part in google_parts(vec![crate::output::OutputPart::Media { media }])? {
+                        push(&mut contents, "user", part);
+                    }
+                }
+                Content::Output { output } => {
+                    for part in google_parts(evidence_parts(&output, &item.provenance))? {
+                        push(&mut contents, "user", part);
                     }
                 }
                 Content::ProviderOnly => {}
             }
+        }
+        if !pending_media.is_empty() {
+            contents.push(json!({"role":"user","parts":pending_media}));
         }
         let declarations: Vec<_> = view
             .binding
@@ -337,7 +373,10 @@ impl StreamState {
                         );
                         let content = if let Some(call) = part.get("functionCall") {
                             if call.get("partialArgs").is_some() || call["willContinue"] == true {
-                                return Err(failure("unsupported_function_streaming","partial Google arguments require an explicit streaming contract"));
+                                return Err(failure(
+                                    "unsupported_function_streaming",
+                                    "partial Google arguments require an explicit streaming contract",
+                                ));
                             }
                             let name = required(call, "name")?;
                             let arguments = call.get("args").cloned().unwrap_or_else(|| json!({}));
@@ -409,7 +448,7 @@ impl StreamState {
                             return Err(failure(
                                 "provider_finish_error",
                                 "Google reported an unsupported or failed finish reason",
-                            ))
+                            ));
                         }
                     });
                 }

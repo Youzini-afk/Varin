@@ -24,10 +24,12 @@ fn source_free_dispatch_executes_ordinary_effects_through_both_origins_and_file_
         }];
         let mut owner = OwnerReplies::default();
         execute(&f, model, calls, &mut owner, false);
-        assert!(owner
-            .host_calls
-            .iter()
-            .any(|frame| frame["phase"] == "authorize"));
+        assert!(
+            owner
+                .host_calls
+                .iter()
+                .any(|frame| frame["phase"] == "authorize")
+        );
         assert_eq!(
             owner
                 .host_calls
@@ -244,9 +246,11 @@ fn source_free_handback_prepares_and_admits_a_real_environment_child_run_once() 
             .count(),
         1
     );
-    assert!(!items
-        .iter()
-        .any(|item| item.source == varin_runtime::HistorySource::User));
+    assert!(
+        !items
+            .iter()
+            .any(|item| item.source == varin_runtime::HistorySource::User)
+    );
     let retry = db.prepare_computer_event(command).unwrap().load().unwrap();
     assert_eq!(db.admit_computer_event(retry).unwrap(), received);
     assert!(db.capture_request_activations().unwrap().is_empty());

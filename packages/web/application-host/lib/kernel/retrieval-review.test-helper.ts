@@ -1,3 +1,4 @@
+import { responsesMetadataText } from './responses-wire.test-helper.js';
 import express from 'express';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import { once } from 'node:events';
@@ -25,7 +26,7 @@ export function responseDone(response: ServerResponse) {
 }
 export function latestOutput(body: Record<string, unknown>): Record<string, unknown> | undefined {
   const item = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
-  return item ? JSON.parse(String(item.output)) as Record<string, unknown> : undefined;
+  return item ? JSON.parse(responsesMetadataText(item.output)) as Record<string, unknown> : undefined;
 }
 export const deferred = <T = void>() => {
   let resolve!: (value: T) => void;

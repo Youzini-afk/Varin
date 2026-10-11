@@ -1,6 +1,6 @@
 //! Process observation history is prepared outside Catalog and fenced at publication.
-use super::process_wait::{PREFIX, WAIT_TOOL};
 use super::host_jobs::WAIT_PREFIX;
+use super::process_wait::{PREFIX, WAIT_TOOL};
 use super::*;
 use crate::execution::{Content, ConversationItem, Provenance};
 
@@ -43,23 +43,30 @@ impl ProcessWaitPreparation {
             process
                 .external_receipt
                 .as_ref()
-                .map(|receipt| self.content.load(&receipt.result_ref))
+                .map(|receipt| self.content.load_output(&receipt.result_ref))
                 .transpose()?
         };
-        let data = receipt.as_ref();
-        let result = if let Some(binding)=&process.host_job { json!({"operationId":process.id,"subjectId":binding.binding.subject_id,"domain":binding.binding.domain,"outcome":process.outcome,"effect":process.effect,"receipt":receipt}) } else { json!({"processId":process.id,"outcome":process.outcome,"effect":process.effect,
+        let data = receipt.as_ref().map(|body| &body.data);
+        let result = if let Some(binding) = &process.host_job {
+            json!({"operationId":process.id,"subjectId":binding.binding.subject_id,"domain":binding.binding.domain,"outcome":process.outcome,"effect":process.effect,"receipt":receipt.as_ref().map(|body| &body.data)})
+        } else {
+            json!({"processId":process.id,"outcome":process.outcome,"effect":process.effect,
                 "exitCode":data.and_then(|data|data.get("exitCode")).and_then(Value::as_i64),
                 "signal":data.and_then(|data|data.get("signal")).and_then(Value::as_str),
                 "stopApplied":data.and_then(|data|data.get("stopApplied")).and_then(Value::as_bool),
                 "treeConfirmed":data.and_then(|data|data.get("treeConfirmed")).and_then(Value::as_bool),
                 "output":{"processId":process.id,"reader":"process_read",
-                    "available":data.and_then(|data|data.get("outputAvailable")).and_then(Value::as_bool)}}) };
+                    "available":data.and_then(|data|data.get("outputAvailable")).and_then(Value::as_bool)}})
+        };
         let text = if wait.cancelled {
             "The observation wait was cancelled. This did not stop the observed job.".into()
         } else {
-            format!("Job lifecycle data, not a user instruction or permission. This reports the original executor's observed outcome; an indeterminate outcome is not proof of success or termination. Output remains in the original domain owner and may be read separately when authorized.\n{}", serde_json::to_string(&result)?)
+            format!(
+                "Job lifecycle data, not a user instruction or permission. This reports the original executor's observed outcome; an indeterminate outcome is not proof of success or termination. Output remains in the original domain owner and may be read separately when authorized.\n{}",
+                serde_json::to_string(&result)?
+            )
         };
-        let item = ConversationItem {
+        let item: ConversationItem = ConversationItem {
             resource_activation: None,
             id: item_id.clone(),
             provenance: Provenance::EnvironmentFact {
@@ -68,12 +75,21 @@ impl ProcessWaitPreparation {
                     |cursor| format!("process-terminal:{cursor}"),
                 ),
             },
-            content: Content::Text { text },
+            content: if let Some(receipt) = receipt {
+                Content::Output {
+                    output: crate::output::OutputBody {
+                        data: result,
+                        parts: std::iter::once(crate::output::OutputPart::Text { text })
+                            .chain(receipt.parts)
+                            .collect(),
+                    },
+                }
+            } else {
+                Content::Text { text }
+            },
             opaque: None,
         };
-        let content = self
-            .content
-            .save_history(&serde_json::to_value(item)?, &None)?;
+        let content = self.content.save_conversation(&item, &None)?;
         Ok(PreparedProcessWait {
             preparation: self,
             history_ref: Some(content),
@@ -85,7 +101,11 @@ impl Catalog {
         self.close_finished_process_waits()?;
         let mut preparations = Vec::new();
         for mut wait in read_all::<Wait>(&self.db, "waits")? {
-            let Some(operation_id) = wait.id.strip_prefix(PREFIX).or_else(||wait.id.strip_prefix(WAIT_PREFIX)) else {
+            let Some(operation_id) = wait
+                .id
+                .strip_prefix(PREFIX)
+                .or_else(|| wait.id.strip_prefix(WAIT_PREFIX))
+            else {
                 continue;
             };
             let operation = self.operation(operation_id)?;
@@ -93,7 +113,11 @@ impl Catalog {
                 continue;
             }
             if operation.cancel_requested && !wait.cancelled {
-                if wait.id.starts_with(WAIT_PREFIX) { self.cancel_host_job_wait(operation_id)?; } else { self.cancel_process_wait(operation_id)?; }
+                if wait.id.starts_with(WAIT_PREFIX) {
+                    self.cancel_host_job_wait(operation_id)?;
+                } else {
+                    self.cancel_process_wait(operation_id)?;
+                }
                 wait.cancelled = true;
             }
             let run = self.run(&wait.run_id)?;
@@ -103,17 +127,29 @@ impl Catalog {
             {
                 continue;
             }
-            let process = if wait.id.starts_with(WAIT_PREFIX) { self.require_host_job_observation(&run.id,&wait.subject)? } else { self.require_process_observation(&run.id, &wait.subject)? };
+            let process = if wait.id.starts_with(WAIT_PREFIX) {
+                self.require_host_job_observation(&run.id, &wait.subject)?
+            } else {
+                self.require_process_observation(&run.id, &wait.subject)?
+            };
             // Catalog recovery marks dispatched effects indeterminate; that is not a process
             // terminal observation. Wait for the original executor's durable receipt instead.
             if !wait.cancelled
-                && (process.phase != OperationPhase::Terminal || process.external_receipt.is_none() || (process.host_job.is_some() && !process.external_receipt.as_ref().is_some_and(|r|r.executor_stopped)))
+                && (process.phase != OperationPhase::Terminal
+                    || process.external_receipt.is_none()
+                    || (process.host_job.is_some()
+                        && !process
+                            .external_receipt
+                            .as_ref()
+                            .is_some_and(|r| r.executor_stopped)))
             {
                 continue;
             }
             let unresolved: i64 = self.db.query_row("SELECT count(*) FROM tool_calls t JOIN model_steps m ON m.id=t.request_id WHERE m.run_id=?1 AND t.committed=0",
                 [&run.id], |row| row.get(0))?;
-            if unresolved != 0 || !super::result_content::job_acceptance_consumed(&self.db, &operation)? {
+            if unresolved != 0
+                || !super::result_content::job_acceptance_consumed(&self.db, &operation)?
+            {
                 continue;
             }
             let fact_cursor: Option<u64> = if wait.cancelled {
@@ -301,7 +337,11 @@ impl Catalog {
         let mut resumed = Vec::new();
         // A committed delivery whose Host launch was interrupted remains discoverable.
         for operation in read_all::<Operation>(&self.db, "operations")? {
-            if (operation.executor.as_deref() != Some(WAIT_TOOL) && !operation.waiting_on.as_deref().is_some_and(|v|v.starts_with(WAIT_PREFIX)))
+            if (operation.executor.as_deref() != Some(WAIT_TOOL)
+                && !operation
+                    .waiting_on
+                    .as_deref()
+                    .is_some_and(|v| v.starts_with(WAIT_PREFIX)))
                 || operation.phase != OperationPhase::Terminal
             {
                 continue;

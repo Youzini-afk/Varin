@@ -24,6 +24,7 @@ import {
 } from './tool-bridge.js';
 import type { KernelClient } from './kernel-client.js';
 import { createComputerRuntime } from './computer-runtime.js';
+import { createNestedToolOwner, VARIN_RUNTIME_TOOLS_CAPABILITY } from './nested-tool-owner.js';
 
 it('installed SDK declaration reaches shared bridge, compiled schemas, validated model/policy scope and real material adapter', async () => {
   const repository = path.resolve(
@@ -273,7 +274,7 @@ it('installed SDK declaration reaches shared bridge, compiled schemas, validated
           completion: {
             kind: 'result',
             outcome: 'succeeded',
-            content: { text: 'Aé', nextOffset: 3 },
+            content: { data: { text: 'Aé', nextOffset: 3 }, parts: [] },
           },
         });
     }
@@ -369,6 +370,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
         displayName: label,
         version: '1.0.0',
         engines: { varin: '*' },
+        capabilities: { host: [VARIN_RUNTIME_TOOLS_CAPABILITY] },
         entrypoints: {
           host: {
             file: 'host.cjs',
@@ -410,7 +412,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
         label === 'A' ? { provider: 'A' } : { original: ['B', 42] };
       await build({
         stdin: {
-          contents: `import { defineHostExtension, provideTool } from '@varin/extension-sdk'; export default defineHostExtension({activate(ctx){provideTool(ctx,${JSON.stringify(manifest.provides.services[0])},async()=>(${JSON.stringify(output)}));}});`,
+          contents: `import { defineHostExtension, provideTool } from '@varin/extension-sdk'; export default defineHostExtension({activate(ctx){provideTool(ctx,${JSON.stringify(manifest.provides.services[0])},async(_input,call)=>{if(${JSON.stringify(label)}==='B'){await call.output({kind:'text',text:'before invalid result'});await call.output({kind:'media',media:{media_type:'image/png',data_base64:'aW1hZ2U='}});let rejected=false;try{await call.output({kind:'media',media:{media_type:'image/png',data_base64:'AB=='}});}catch{rejected=true;}if(!rejected)throw new Error('SDK accepted noncanonical media');await call.output({kind:'text',text:'invalid media rejected'});}return ${JSON.stringify(output)};});}});`,
           resolveDir: repository,
         },
         bundle: true,
@@ -428,6 +430,8 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
         source: { kind: 'local', display: label, specifier: dir },
         expectedRevision: (await runtime!.catalog.snapshot()).revision,
       });
+      await runtime!.reviewCapabilities({ extensionId: manifest.id, expectedRevision: (await runtime!.catalog.snapshot()).revision,
+        decisions: [{ capability: VARIN_RUNTIME_TOOLS_CAPABILITY, realm: 'host', granted: true }] });
       await runtime!.setEnabled(
         manifest.id,
         true,
@@ -443,6 +447,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
         'packages/extension-host/broker/broker-child.mjs',
       ),
     });
+    runtime.capabilities.register(VARIN_RUNTIME_TOOLS_CAPABILITY, createNestedToolOwner({ agentRuntimeRequest() { throw new Error('This fixture must only emit output, never invoke another tool'); } } as unknown as KernelClient));
     await runtime.start();
     const a = await install('A'),
       b = await install('B');
@@ -659,10 +664,10 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
         kind: 'result',
         outcome: 'indeterminate',
         effect: 'unknown',
-        content: {
+        content: { data: {
           error: 'extension_tool_output_schema_invalid',
           output: { original: ['B', 42] },
-        },
+        }, parts: [{ kind: 'text', text: 'before invalid result' }, { kind: 'media', media: { media_type: 'image/png', data_base64: 'aW1hZ2U=' } }, { kind: 'text', text: 'invalid media rejected' }] },
       },
     });
     await runtime.setEnabled(

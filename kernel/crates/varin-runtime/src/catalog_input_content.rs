@@ -11,6 +11,7 @@ pub struct QueuePreparation {
     publication: crate::content::ContentPublication,
 }
 pub(super) struct QueueIdentity {
+    pub input_id: String,
     pub key: String,
     pub thread_id: String,
     pub branch_id: String,
@@ -37,8 +38,12 @@ impl QueuePreparation {
         let Some((intent, receipt)) = &self.existing else {
             return Ok(None);
         };
-        if crate::content::ContentStore::reference(&serde_json::to_value(&self.command)?)?
-            != *intent
+        if queue_intent(&self.command).and_then(|(value, dependencies)| {
+            crate::content::ContentStore::payload_reference(
+                &serde_json::to_vec(&value)?,
+                dependencies,
+            )
+        })? != *intent
         {
             return Err(RuntimeError::Conflict(
                 "input key has different content or mode".into(),
@@ -62,6 +67,10 @@ impl QueuePreparation {
                 "input idempotency key cannot be empty".into(),
             ));
         }
+        let input_id = existing
+            .as_ref()
+            .map(|(_, receipt)| receipt.input_id.clone())
+            .unwrap_or_else(id);
         let (history, intent, checkpoint) = if duplicate {
             (
                 Value::Null,
@@ -93,13 +102,17 @@ impl QueuePreparation {
                 current.as_ref(),
             )?;
             (
-                content.save_history(&material, &None)?,
-                content.save(&serde_json::to_value(&command)?)?,
+                content.save_user_history(&input_id, &material)?,
+                {
+                    let (intent, dependencies) = queue_intent(&command)?;
+                    content.save_with_dependencies(&intent, dependencies)?
+                },
                 input_preparation.as_ref().map(|_| current_id),
             )
         };
         Ok(PreparedQueueInput {
             identity: QueueIdentity {
+                input_id,
                 key: command.key,
                 thread_id: command.thread_id,
                 branch_id: command.branch_id,
@@ -123,7 +136,9 @@ pub struct QueuedInputRead {
 }
 impl QueuedInputRead {
     pub fn load(self) -> Result<QueuedInput> {
-        let (content, provider) = self.content.load_history_payload(&self.reference)?;
+        let (content, provider) = self
+            .content
+            .load_stored_history_payload(&self.reference, &|| false)?;
         if provider.is_some() {
             return Err(RuntimeError::Invalid(
                 "queued input contains a provider original".into(),
@@ -207,7 +222,17 @@ impl InputEditPreparation {
                     self.input_preparation.as_ref().map(|_| current_id),
                 )
             };
-        let reference = self.content.save_history(&material, &None)?;
+        let mut stored = self.content.store_user_input(&self.id, &material)?;
+        // Omission preserves the exact captured revision. Only the owner can reuse these refs.
+        if self.value.get("attachments").is_none() {
+            if let Some(attachments) = previous.content.get("attachments") {
+                if stored.is_string() {
+                    stored = json!({"text":stored});
+                }
+                stored["attachments"] = attachments.clone();
+            }
+        }
+        let reference = self.content.save_stored_user_history(&stored)?;
         Ok(PreparedInputEdit {
             id: self.id,
             revision: self.revision,
@@ -468,4 +493,12 @@ pub(super) fn validate_delivery(
         ));
     }
     Ok(run)
+}
+
+fn queue_intent(command: &EnqueueInput) -> Result<(Value, Vec<String>)> {
+    let input = crate::content::ContentStore::normalized_user_input(&command.key, &command.input)?;
+    let dependencies = crate::output::incoming_input_dependencies(&input)?;
+    let mut value = serde_json::to_value(command)?;
+    value["input"] = input;
+    Ok((value, dependencies))
 }

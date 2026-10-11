@@ -344,7 +344,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
               kind: 'result',
               outcome: 'succeeded',
               effect: selected.server ? 'confirmed' : 'none',
-              content: {
+              content: { data: {
                 servers: readiness.servers,
                 readiness,
                 ...(options.unavailableWorkspaceScope
@@ -367,7 +367,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
                     inputSchema: tool.inputSchema,
                     schemaVersion: tool.schemaVersion,
                   })),
-              },
+              }, parts: [] },
             },
             true,
           );
@@ -403,7 +403,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
               kind: 'result',
               outcome: signal.aborted ? 'indeterminate' : 'failed',
               effect: signal.aborted ? 'unknown' : 'confirmed',
-              content: { error: 'mcp_discovery_failed' },
+              content: { data: { error: 'mcp_discovery_failed' }, parts: [] },
             },
             !signal.aborted,
           );
@@ -432,7 +432,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
             kind: 'result',
             outcome: result.isError ? 'indeterminate' : 'succeeded',
             effect: result.isError ? 'unknown' : 'confirmed',
-            content: result,
+            content: { data: result, parts: [] },
           },
           true,
         );
@@ -449,7 +449,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
             kind: 'result',
             outcome: 'indeterminate',
             effect: 'unknown',
-            content: { error: 'mcp_effect_unknown' },
+            content: { data: { error: 'mcp_effect_unknown' }, parts: [] },
           },
           false,
         );

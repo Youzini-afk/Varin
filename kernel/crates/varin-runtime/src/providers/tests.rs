@@ -92,7 +92,7 @@ fn pi_messages_fragmented_signed_thinking_and_tool_exchange_roundtrip() {
                 completion: ToolCompletion::Result {
                     outcome: crate::Outcome::Succeeded,
                     effect: crate::Effect::None,
-                    content: json!({"text":"source"}),
+                    content: json!({"text":"source"}).into(),
                 },
             },
         },
@@ -283,9 +283,11 @@ fn anthropic_signature_and_server_tool_remain_opaque() {
         })
         .collect();
     assert_eq!(items.len(), 2);
-    assert!(items
-        .iter()
-        .all(|i| matches!(i.content, Content::ProviderOnly)));
+    assert!(
+        items
+            .iter()
+            .all(|i| matches!(i.content, Content::ProviderOnly))
+    );
     let mut v = view(anthropic::FAMILY);
     v.history = items
         .into_iter()
@@ -344,7 +346,10 @@ fn loopback_response(response: Vec<u8>) -> (String, std::thread::JoinHandle<()>)
 #[test]
 fn http_status_preserves_retry_and_request_id_without_echoing_body() {
     let body = "secret prompt must not enter failure";
-    let response=format!("HTTP/1.1 429 Too Many Requests\r\nContent-Length: {}\r\nRetry-After: 2\r\nX-Request-ID: server-123\r\nConnection: close\r\n\r\n{body}",body.len());
+    let response = format!(
+        "HTTP/1.1 429 Too Many Requests\r\nContent-Length: {}\r\nRetry-After: 2\r\nX-Request-ID: server-123\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
     let (endpoint, server) = loopback_response(response.into_bytes());
     let transport = ReqwestTransport::new(|| reqwest::Client::builder().no_proxy());
     let error = transport
@@ -415,7 +420,10 @@ fn actual_http_sse_reaches_responses_adapter() {
         "data: {}\n\n",
         json!({"type":"response.completed","response":{"output":[{"id":"message","type":"message","content":[{"type":"output_text","text":"local transport"}]}]}})
     );
-    let response=format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{data}",data.len());
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{data}",
+        data.len()
+    );
     let (endpoint, server) = loopback_response(response.into_bytes());
     let p = responses::ResponsesProvider::new(Connection::new(
         endpoint,
@@ -628,9 +636,11 @@ fn chat_truncated_after_finish_does_not_emit_complete_items_and_multiple_choices
     let p = chat::ChatProvider::new(chat_connection(vec![event], false));
     let (result, events) = generate(&p, chat::FAMILY);
     assert_eq!(result.unwrap_err().code, "stream_interrupted");
-    assert!(!events
-        .iter()
-        .any(|e| matches!(e, ProviderEvent::ItemCompleted { .. })));
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, ProviderEvent::ItemCompleted { .. }))
+    );
     let p = chat::ChatProvider::new(chat_connection(
         vec![
             json!({"id":"chat-1","choices":[{"index":0,"delta":{},"finish_reason":"stop"},{"index":1,"delta":{},"finish_reason":"stop"}]}),
@@ -746,7 +756,7 @@ fn google_signed_parts_replay_in_place_and_optional_call_ids_pair_by_name() {
                 completion: ToolCompletion::Result {
                     outcome: crate::Outcome::Succeeded,
                     effect: crate::Effect::None,
-                    content: json!("bytes"),
+                    content: json!("bytes").into(),
                 },
             },
         },
@@ -759,18 +769,21 @@ fn google_signed_parts_replay_in_place_and_optional_call_ids_pair_by_name() {
     assert_eq!(response["name"], "read");
     assert!(response.get("id").is_none());
     v.binding.model = "another-model".into();
-    assert!(!p
-        .serialize(&v)
-        .unwrap()
-        .to_string()
-        .contains("thoughtSignature"));
+    assert!(
+        !p.serialize(&v)
+            .unwrap()
+            .to_string()
+            .contains("thoughtSignature")
+    );
     let vertex = google::GoogleProvider::vertex(connection(vec![], 1)).unwrap();
     v.binding.provider_family = google::VERTEX_FAMILY.into();
-    assert!(!vertex
-        .serialize(&v)
-        .unwrap()
-        .to_string()
-        .contains("thoughtSignature"));
+    assert!(
+        !vertex
+            .serialize(&v)
+            .unwrap()
+            .to_string()
+            .contains("thoughtSignature")
+    );
 }
 #[test]
 fn google_requires_terminal_evidence_and_rejects_partial_functions() {
@@ -810,7 +823,10 @@ fn google_accepts_actual_http_eof_only_after_finish_reason() {
         "data: {}\n\n",
         json!({"responseId":"g","candidates":[{"content":{"role":"model","parts":[{"text":"EOF answer"}]},"finishReason":"STOP"}]})
     );
-    let response=format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{data}",data.len());
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{data}",
+        data.len()
+    );
     let (endpoint, server) = loopback_response(response.into_bytes());
     let p = google::GoogleProvider::new(Connection::new(
         endpoint,
@@ -853,16 +869,18 @@ fn same_protocol_other_connection_never_receives_opaque_history() {
             }
         })
         .collect();
-    assert!(v
-        .history
-        .iter()
-        .all(|item| item.opaque.as_ref().unwrap().connection_identity
-            == v.binding.connection_identity));
-    assert!(p
-        .serialize(&v)
-        .unwrap()
-        .to_string()
-        .contains("connection-owned"));
+    assert!(
+        v.history
+            .iter()
+            .all(|item| item.opaque.as_ref().unwrap().connection_identity
+                == v.binding.connection_identity)
+    );
+    assert!(
+        p.serialize(&v)
+            .unwrap()
+            .to_string()
+            .contains("connection-owned")
+    );
     v.binding.connection_identity = "different-tenant".into();
     let changed = p.serialize(&v).unwrap().to_string();
     assert!(!changed.contains("connection-owned"));
@@ -912,7 +930,7 @@ fn mistral_wire_id_collision_keeps_both_tool_result_pairs() {
                     completion: ToolCompletion::Result {
                         outcome: crate::Outcome::Succeeded,
                         effect: crate::Effect::None,
-                        content: json!("ok"),
+                        content: json!("ok").into(),
                     },
                 },
             },
@@ -1154,10 +1172,17 @@ fn explicit_model_image_capability_rejects_attachment_before_request_serializati
         provenance: Provenance::UserInstruction {
             input_id: "input".into(),
         },
-        content: Content::Attachment {
-            media_type: "image/png".into(),
-            content_ref: "data:image/png;base64,ZmFrZQ==".into(),
-            source: "user upload".into(),
+        content: Content::Media {
+            media: crate::output::IncomingMedia {
+                media_type: "image/png".into(),
+                data_base64: "ZmFrZQ==".into(),
+            }
+            .admit(crate::output::OutputSource::Conversation {
+                provenance: Provenance::UserInstruction {
+                    input_id: "input".into(),
+                },
+            })
+            .unwrap(),
         },
         opaque: None,
     });
@@ -1243,8 +1268,7 @@ fn bedrock_fragmented_binary_preserves_reasoning_tool_and_trailing_usage() {
         .collect();
     assert_eq!(items.len(), 2);
     assert_eq!(
-        items[0].opaque.as_ref().unwrap().value["block"]["reasoningContent"]["reasoningText"]
-            ["signature"],
+        items[0].opaque.as_ref().unwrap().value["block"]["reasoningContent"]["reasoningText"]["signature"],
         "opaque-signature"
     );
     assert!(
@@ -1463,6 +1487,283 @@ fn policy_output_is_assistant_history_in_every_provider_family() {
         assert_eq!(
             output["role"], role,
             "policy output must remain the same agent's output for {family}"
+        );
+    }
+}
+
+const MEDIA_PNG: &str =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+fn media_provider(family: &str, accepts: bool) -> Box<dyn ModelProvider> {
+    let mut conn = connection(vec![], 1);
+    conn.accepts_images = Some(accepts);
+    match family {
+        responses::FAMILY => Box::new(responses::ResponsesProvider::new(conn)),
+        codex::FAMILY => Box::new(codex::CodexProvider::new(conn)),
+        chat::FAMILY => Box::new(chat::ChatProvider::new(conn)),
+        mistral::FAMILY => Box::new(mistral::MistralProvider::new(conn)),
+        anthropic::FAMILY => Box::new(anthropic::AnthropicProvider::new(conn, 128)),
+        bedrock::FAMILY => Box::new(bedrock::BedrockProvider::new(conn)),
+        google::FAMILY => Box::new(google::GoogleProvider::new(conn).unwrap()),
+        google::VERTEX_FAMILY => Box::new(google::GoogleProvider::vertex(conn).unwrap()),
+        pi_messages::FAMILY => Box::new(pi_messages::PiMessagesProvider {
+            connection: conn,
+            max_output_tokens: None,
+            reasoning: None,
+            cache_retention: None,
+        }),
+        _ => unreachable!(),
+    }
+}
+fn paired_media_view(family: &str, mime: &str) -> RequestView {
+    let mut request = view(family);
+    for call_id in ["first", "second"] {
+        request.history.push(ConversationItem {
+            resource_activation: None,
+            id: format!("call:{call_id}"),
+            provenance: Provenance::Assistant,
+            content: Content::ToolCall {
+                call: ToolCall {
+                    call_id: call_id.into(),
+                    name: "read".into(),
+                    schema_version: "1".into(),
+                    arguments: json!({}),
+                },
+            },
+            opaque: None,
+        });
+    }
+    for call_id in ["first", "second"] {
+        let mut output:crate::output::OutputBody=json!({"receipt":"complete","imageBase64":"ordinary-json-remains-data","type":"image","image":{"unrelated":true}}).into();
+        if call_id == "first" {
+            let source = crate::output::OutputSource::Tool {
+                context: ToolExecutionContext {
+                    run_id: "run".into(),
+                    origin: ToolOrigin::ModelStep {
+                        request_id: "request".into(),
+                    },
+                    operation_id: "request:tool:first".into(),
+                },
+            };
+            output.parts = vec![
+                crate::output::OutputPart::Text {
+                    text: "before image".into(),
+                },
+                crate::output::OutputPart::Media {
+                    media: crate::output::IncomingMedia {
+                        media_type: mime.into(),
+                        data_base64: MEDIA_PNG.into(),
+                    }
+                    .admit(source)
+                    .unwrap(),
+                },
+                crate::output::OutputPart::Text {
+                    text: "after image".into(),
+                },
+            ];
+        }
+        request.history.push(ConversationItem {
+            resource_activation: None,
+            id: format!("result:{call_id}"),
+            provenance: Provenance::ToolData {
+                call_id: call_id.into(),
+            },
+            content: Content::ToolResult {
+                result: ToolResult {
+                    request_id: "request".into(),
+                    call_id: call_id.into(),
+                    completion: ToolCompletion::Result {
+                        outcome: crate::Outcome::Failed,
+                        effect: crate::Effect::Partial,
+                        content: output,
+                    },
+                },
+            },
+            opaque: None,
+        });
+    }
+    // Forces the buffered adapters to flush at the next semantic item, rather than only at EOF.
+    request.history.push(ConversationItem {
+        resource_activation: None,
+        id: "next-input".into(),
+        provenance: Provenance::UserInstruction {
+            input_id: "next-input".into(),
+        },
+        content: Content::Text {
+            text: "next real user instruction".into(),
+        },
+        opaque: None,
+    });
+    crate::execution::validate_history_pairs(&request.history).unwrap();
+    request
+}
+#[test]
+fn typed_parallel_tool_output_reaches_each_actual_provider_without_pair_or_json_inference() {
+    for family in [
+        responses::FAMILY,
+        codex::FAMILY,
+        chat::FAMILY,
+        mistral::FAMILY,
+        anthropic::FAMILY,
+        bedrock::FAMILY,
+        google::FAMILY,
+        google::VERTEX_FAMILY,
+        pi_messages::FAMILY,
+    ] {
+        let wire = media_provider(family, true)
+            .serialize(&paired_media_view(family, "image/png"))
+            .unwrap();
+        let encoded = wire.to_string();
+        assert_eq!(
+            encoded.matches(MEDIA_PNG).count(),
+            1,
+            "{family}: image bytes are sent once, outside the JSON receipt text"
+        );
+        assert!(encoded.contains("ordinary-json-remains-data"), "{family}");
+        match family {
+            responses::FAMILY | codex::FAMILY => {
+                let input = wire["input"].as_array().unwrap();
+                let outputs: Vec<_> = input
+                    .iter()
+                    .filter(|item| item["type"] == "function_call_output")
+                    .collect();
+                assert_eq!(outputs.len(), 2);
+                assert_eq!(outputs[0]["call_id"], "first");
+                assert_eq!(outputs[1]["call_id"], "second");
+                assert_eq!(outputs[0]["output"][1]["text"], "before image");
+                assert_eq!(outputs[0]["output"][3]["type"], "input_image");
+                assert_eq!(outputs[0]["output"][4]["text"], "after image");
+            }
+            chat::FAMILY | mistral::FAMILY => {
+                let messages = wire["messages"].as_array().unwrap();
+                assert_eq!(messages[0]["tool_calls"].as_array().unwrap().len(), 2);
+                assert_eq!(messages[1]["role"], "tool");
+                assert_eq!(messages[2]["role"], "tool");
+                assert_eq!(messages[3]["role"], "user");
+                assert_eq!(messages[4]["content"], "next real user instruction");
+                assert!(!messages[1].to_string().contains(MEDIA_PNG));
+                assert_eq!(messages[3]["content"][1]["text"], "before image");
+                let image = &messages[3]["content"][3]["image_url"];
+                assert!(if family == mistral::FAMILY {
+                    image.is_string()
+                } else {
+                    image["url"].is_string()
+                });
+                assert_eq!(messages[3]["content"][4]["text"], "after image");
+            }
+            google::FAMILY | google::VERTEX_FAMILY => {
+                let contents = wire["contents"].as_array().unwrap();
+                assert_eq!(contents[0]["parts"].as_array().unwrap().len(), 2);
+                assert_eq!(contents[1]["parts"].as_array().unwrap().len(), 2);
+                assert!(contents[1]["parts"][0].get("functionResponse").is_some());
+                assert!(contents[1]["parts"][1].get("functionResponse").is_some());
+                assert!(!contents[1].to_string().contains(MEDIA_PNG));
+                assert_eq!(contents[2]["parts"][1]["text"], "before image");
+                assert_eq!(contents[2]["parts"][3]["inlineData"]["data"], MEDIA_PNG);
+                assert_eq!(contents[2]["parts"][4]["text"], "after image");
+                assert_eq!(
+                    contents[3]["parts"][0]["text"],
+                    "next real user instruction"
+                );
+            }
+            anthropic::FAMILY => {
+                let results = wire["messages"][1]["content"].as_array().unwrap();
+                assert_eq!(results[0]["type"], "tool_result");
+                assert_eq!(results[1]["type"], "tool_result");
+                assert_eq!(results[0]["is_error"], true);
+                assert_eq!(results[0]["content"][3]["source"]["data"], MEDIA_PNG);
+                assert_eq!(results[0]["content"][4]["text"], "after image");
+            }
+            bedrock::FAMILY => {
+                let results = wire["messages"][1]["content"].as_array().unwrap();
+                assert_eq!(results[0]["toolResult"]["status"], "error");
+                assert!(results[1].get("toolResult").is_some());
+                assert_eq!(
+                    results[0]["toolResult"]["content"][3]["image"]["source"]["bytes"],
+                    MEDIA_PNG
+                );
+            }
+            pi_messages::FAMILY => {
+                let messages = wire["context"]["messages"].as_array().unwrap();
+                let results: Vec<_> = messages
+                    .iter()
+                    .filter(|m| m["role"] == "toolResult")
+                    .collect();
+                assert_eq!(results.len(), 2);
+                assert_eq!(results[0]["isError"], true);
+                assert_eq!(results[0]["content"][3]["data"], MEDIA_PNG);
+            }
+            _ => unreachable!(),
+        }
+        for mime in ["image/svg+xml", "audio/wav"] {
+            assert_eq!(
+                media_provider(family, true)
+                    .serialize(&paired_media_view(family, mime))
+                    .unwrap_err()
+                    .code,
+                "unsupported_media",
+                "{family}: {mime}"
+            );
+        }
+        assert_eq!(
+            media_provider(family, false)
+                .serialize(&paired_media_view(family, "image/png"))
+                .unwrap_err()
+                .code,
+            "unsupported_model_image",
+            "{family}"
+        );
+    }
+}
+#[test]
+fn policy_deliver_media_projects_as_labelled_data_in_each_protocol() {
+    for family in [
+        responses::FAMILY,
+        chat::FAMILY,
+        anthropic::FAMILY,
+        bedrock::FAMILY,
+        google::FAMILY,
+        pi_messages::FAMILY,
+    ] {
+        let mut request = paired_media_view(family, "image/png");
+        let Content::ToolResult { result } = &request.history[2].content else {
+            unreachable!()
+        };
+        let ToolCompletion::Result { content, .. } = &result.completion else {
+            unreachable!()
+        };
+        request.history = vec![ConversationItem {
+            resource_activation: None,
+            id: "delivery".into(),
+            provenance: Provenance::PolicyOutput {
+                action_id: "original-policy-action".into(),
+                identity: PolicyIdentity {
+                    name: "policy".into(),
+                    version: "1".into(),
+                },
+            },
+            content: Content::Output {
+                output: content.clone(),
+            },
+            opaque: None,
+        }];
+        let wire = media_provider(family, true).serialize(&request).unwrap();
+        assert_eq!(wire.to_string().matches(MEDIA_PNG).count(), 1);
+        assert!(wire.to_string().contains("original-policy-action"));
+        let messages = match family {
+            responses::FAMILY => &wire["input"],
+            google::FAMILY => &wire["contents"],
+            pi_messages::FAMILY => &wire["context"]["messages"],
+            _ => &wire["messages"],
+        };
+        assert_eq!(
+            messages
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|message| message["role"] != "system")
+                .unwrap()["role"],
+            "user",
+            "{family}"
         );
     }
 }

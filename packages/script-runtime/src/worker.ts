@@ -1,6 +1,6 @@
 import type { NestedToolReceipt } from "@varin/protocol";
 import { createNodeReplSession, type NodeReplSession } from "./core/index.js";
-import { encodeScriptFrame, parseScriptHostFrame, ScriptFrameDecoder, ScriptProtocolError, type ScriptHostFrame, type ScriptWorkerFrame } from "./frames.js";
+import { SCRIPT_PROTOCOL_VERSION, encodeScriptFrame, parseScriptHostFrame, ScriptFrameDecoder, ScriptProtocolError, type ScriptHostFrame, type ScriptWorkerFrame } from "./frames.js";
 
 // This entry point evaluates inside the process already owned by the guardian.
 // It does not create a second worker/process or report physical-stop evidence.
@@ -46,19 +46,20 @@ function receive(frame: ScriptHostFrame): void {
         const requestId = String(++nextRequestId);
         return new Promise<NestedToolReceipt>((resolve, reject) => {
           pending.set(requestId, { cellId, resolve, reject });
-          try { send({ v: 1, type: "invoke", environmentId, cellId, requestId, input }); }
+          try { send({ v: SCRIPT_PROTOCOL_VERSION, type: "invoke", environmentId, cellId, requestId, input }); }
           catch (error) { pending.delete(requestId); reject(error); }
         });
       },
-      output(cellId, text) { send({ v: 1, type: "output", environmentId, cellId, text }); },
+      outputPart(cellId, part) { send({ v: SCRIPT_PROTOCOL_VERSION, type: "output", environmentId, cellId, part }); },
+      output(cellId, text) { send({ v: SCRIPT_PROTOCOL_VERSION, type: "output", environmentId, cellId, part: { kind: "text", text } }); },
     });
-    send({ v: 1, type: "ready", environmentId, bindingIdentity: frame.bindingIdentity });
+    send({ v: SCRIPT_PROTOCOL_VERSION, type: "ready", environmentId, bindingIdentity: frame.bindingIdentity });
     return;
   }
   if (frame.environmentId !== session.environmentId || frame.type === "initialize") throw new ScriptProtocolError();
   if (frame.type === "eval") {
     void session.evaluate(frame).then((result) => {
-      if (!ended) send({ v: 1, type: "completed", environmentId: frame.environmentId, cellId: frame.cellId, ...result });
+      if (!ended) send({ v: SCRIPT_PROTOCOL_VERSION, type: "completed", environmentId: frame.environmentId, cellId: frame.cellId, ...result });
     }).catch(() => disconnect(true));
     return;
   }

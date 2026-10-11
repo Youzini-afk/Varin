@@ -1,3 +1,4 @@
+import { responsesMetadataText } from './responses-wire.test-helper.js';
 import { createServer, type ServerResponse } from 'node:http';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
@@ -26,7 +27,7 @@ function call(response: ServerResponse, name: string, args: Record<string, unkno
 }
 function output(body: Record<string, unknown>): Record<string, unknown> | undefined {
   const item = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
-  return item ? JSON.parse(String(item.output)) as Record<string, unknown> : undefined;
+  return item ? JSON.parse(responsesMetadataText(item.output)) as Record<string, unknown> : undefined;
 }
 async function fixture(reply: (body: Record<string, unknown>, response: ServerResponse) => void) {
   if (!kernelPath) throw new Error('Independent language acceptance requires explicit VARIN_TEST_KERNEL_PATH');
@@ -140,7 +141,7 @@ it('revalidates every returned resource under the Run grant and records each tar
   const durableTool = page.items.find(item => item.source === 'tool');
   expect(durableTool).toBeDefined();
   const restored = await f.runtime.historyItem(durableTool!);
-  expect(restored.content).toMatchObject({ content: { kind: 'tool_result', result: { completion: { content: result.content } } } });
+  expect(restored.content).toMatchObject({ content: { kind: 'tool_result', result: { completion: { content: { data: result.content, parts: [] } } } } });
 }, 20_000);
 
 it('denies the queried input before dispatching to the Host language owner', async () => {

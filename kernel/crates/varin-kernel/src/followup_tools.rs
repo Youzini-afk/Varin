@@ -378,7 +378,7 @@ impl ToolExecutor for FollowupTools {
                     Ok(ToolCompletion::Result {
                         outcome: Outcome::Succeeded,
                         effect: Effect::None,
-                        content: value,
+                        content: value.into(),
                     })
                 }
             }

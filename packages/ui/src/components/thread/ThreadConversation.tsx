@@ -25,7 +25,12 @@ import type { ThreadIdentity, ThreadModelInfo, ThreadThinkingLevel, ThreadSnapsh
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
-import { ThreadProjection, historyText, historyImages } from '@/lib/agent-runtime/thread-projection';
+import { ThreadProjection } from '@/lib/agent-runtime/thread-projection';
+import { historyParts } from '@/lib/agent-runtime/thread-content';
+import { ThreadContent } from './ThreadContent';
+import { ThreadOutput } from './ThreadMedia';
+import { ThreadQueuedInput } from './ThreadQueuedInput';
+import { ThreadChildReport } from './ThreadChildReport';
 
 const operationCancelLabel = (operation: ThreadSnapshot['operations'][number]): string => {
   if (operation.executor === 'dispatch') return 'Cancel child task';
@@ -205,14 +210,13 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       </div>
       {snapshot && <ThreadGoal api={api.goals} identity={identity} goals={snapshot.goals} sourceRunId={run?.id} refresh={async () => { await projection.current?.refresh(); }} />}
       {launch && <ThreadChildProfiles launch={launch.selection} />}
-      {api.family && <ThreadFamily api={api.family} identity={identity} />}
+      {api.family && <ThreadFamily api={api.family} mediaRead={api.mediaRead} identity={identity} />}
       {api.messages && <ThreadMessages api={api.messages} family={api.family} identity={identity} eventCursor={snapshot?.eventCursor} cancelObservation={pending ? undefined : operationId => act(() => api.cancelOperation(operationId), true)} />}
       {api.plan && <ThreadPlan api={api.plan} identity={identity} contextRevision={snapshot?.context.checkpoint?.revision} />}
       {api.research && <ThreadResearch key={`${host}:${identity.threadId}:${identity.branchId}`} api={api.research} identity={identity} sourceRunId={run?.id} />}
       {visibleHistory.map(item => <article key={item.id} className="mx-auto max-w-3xl">
         <div className="mb-1 text-xs text-muted-foreground">{item.source}</div>
-        <MarkdownRenderer messageId={item.id} content={historyText(item.content)} />
-        <ImageAttachmentStrip images={historyImages(item.content)} />
+        <ThreadContent api={api} identity={identity} holder={{ kind: 'history', itemId: item.id }} parts={historyParts(item.content, item.source)} messageId={item.id} />
         <ThreadSkillMaterials content={item.content} />
         <details className="mt-2 text-xs text-muted-foreground">
           <summary className="cursor-pointer">Summarize through this message</summary>
@@ -242,12 +246,12 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         <div className="text-xs text-muted-foreground">{child.child_thread_id}</div>
         <p>{child.input.task}</p>
         {child.report && <><div className="text-xs text-muted-foreground">Report · {child.report.outcome}</div><MarkdownRenderer messageId={`child:${child.operation_id}`} content={child.report.detail ?? "Report stored in child history."} /></>}
-        {child.report?.history_ids.map(itemId => <ChildReportPage key={itemId} api={api} identity={identity} operationId={child.operation_id} itemId={itemId} />)}
+        {child.report?.history_ids.map(itemId => <ThreadChildReport key={itemId} api={api} identity={identity} operationId={child.operation_id} itemId={itemId} />)}
         <ChildExecutions key={`${host}:${identity.threadId}:${identity.branchId}:${child.operation_id}`} api={api} identity={identity} operationId={child.operation_id} />
         {api.collaboration && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelChild(identity, child.operation_id))}>Stop child subtree</Button>}
       </div>)}
       {api.collaboration && <Button variant="outline" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelTree(identity))}>Stop task and children</Button>}
-      {snapshot && <ThreadFollowups key={`${host}:${identity.threadId}:${identity.branchId}`} api={api.followups} family={api.family} research={api.research} identity={identity}
+      {snapshot && <ThreadFollowups key={`${host}:${identity.threadId}:${identity.branchId}`} api={api.followups} family={api.family} mediaRead={api.mediaRead} research={api.research} identity={identity}
         run={run ?? undefined} operations={snapshot.operations} followups={snapshot.followups} pending={pending} act={act}
         cancelObservation={operationId => act(() => api.cancelOperation(operationId))} />}
       {snapshot?.operations.filter(operation => operation.id !== pause?.action_id).map(operation => <div key={operation.id} className="mx-auto max-w-3xl rounded border p-2 text-sm">
@@ -258,19 +262,19 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           && (operation.intent as { call?: { arguments?: { mode?: string } } } | null)?.call?.arguments?.mode === 'pty'
           && <Button variant="outline" size="sm" disabled={pending} onClick={() => void act(() => openProcessTerminal(operation.id))}>Open process terminal</Button>}
         {operation.external_receipt && <div className="text-xs text-muted-foreground">{operation.external_receipt.executor} · {operation.external_receipt.outcome}</div>}
+        {operation.call_completion && operation.call_completion.kind !== 'not_dispatched' && operation.call_completion.content && <details>
+          <summary>Call output</summary><ThreadOutput api={api} identity={identity} holder={{ kind: 'operation', operationId: operation.id, output: 'completion' }} output={operation.call_completion.content} messageId={`${operation.id}:completion`} />
+        </details>}
+        {operation.result?.kind === 'output' && <details><summary>Operation output</summary><ThreadOutput api={api} identity={identity}
+          holder={{ kind: 'operation', operationId: operation.id, output: 'result' }} output={operation.result.output} messageId={`${operation.id}:result`} /></details>}
+        {operation.external_receipt && <details><summary>External receipt output</summary><ThreadOutput api={api} identity={identity}
+          holder={{ kind: 'operation', operationId: operation.id, output: 'external_receipt' }} output={operation.external_receipt.result} messageId={`${operation.id}:external-receipt`} /></details>}
         {operation.phase !== 'terminal' && (operation.executor !== 'ask_user' || run?.waiting_on === operation.waiting_on) && <Button variant="ghost" size="sm" onClick={() => void act(() => api.cancelOperation(operation.id), true)}>{operationCancelLabel(operation)}</Button>}
       </div>)}
-      {snapshot?.inputs.filter(input => input.state === 'queued').map(input => <div key={input.id} className="mx-auto max-w-3xl rounded border p-2 text-sm">
-        <form onSubmit={event => { event.preventDefault(); const edited = new FormData(event.currentTarget).get('text');
-          if (typeof edited === 'string') void act(() => api.editInput(input.id, input.revision, edited)); }}>
-          <label className="text-xs text-muted-foreground">{input.mode}</label>
-          <ImageAttachmentStrip images={historyImages(input.content)} />
-          <ThreadSkillMaterials content={input.content} />
-          <Textarea key={`${input.id}:${input.revision}`} name="text" aria-label="Edit queued input" defaultValue={historyText(input.content)} />
-          <Button type="submit" variant="ghost" size="sm">Save queued input</Button>
-        </form>
-        <Button variant="ghost" size="sm" onClick={() => void act(() => api.cancelInput(input.id, input.revision), true)}>Cancel queued input</Button>
-      </div>)}
+      {snapshot?.inputs.filter(input => input.state === 'queued').map(input => <ThreadQueuedInput key={`${host}:${identity.threadId}:${identity.branchId}:${input.id}:${input.revision}`}
+        api={api} identity={identity} input={input} pending={pending}
+        onSave={(text, images) => act(() => images === undefined ? api.editInput(input.id, input.revision, text) : api.editInput(input.id, input.revision, text, images))}
+        onCancel={() => act(() => api.cancelInput(input.id, input.revision), true)} />)}
     </div>
     {snapshot?.context.checkpoint?.personalization && <ThreadMemory key={identity.threadId} identity={identity} basis={snapshot.context.checkpoint.personalization} />}
     {snapshot?.context.checkpoint && <ThreadResources checkpoint={snapshot.context.checkpoint} pending={pending}
@@ -371,13 +375,4 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       </div>
     </form>
   </section>;
-}
-
-function ChildReportPage({api, identity, operationId, itemId}: {api: ThreadsAPI; identity: ThreadIdentity; operationId: string; itemId: string}) {
-  const [page, setPage] = React.useState<Awaited<ReturnType<NonNullable<ThreadsAPI['collaboration']>['readReport']>> | null>(null);
-  const [error, setError] = React.useState('');
-  const read = (offset: number) => { void api.collaboration?.readReport(identity, operationId, itemId, offset).then(setPage).catch(e => setError(String(e))); };
-  return <div><div className="text-xs">Other-agent report data · {itemId}</div>{error && <p>{error}</p>}{page && <><MarkdownRenderer messageId={`${itemId}:${page.offset}`} content={page.text} /><p>Bytes {page.offset}–{page.offset + new TextEncoder().encode(page.text).length} of {page.total_bytes}</p></>}
-    {!page ? <Button variant="ghost" size="sm" onClick={() => read(0)}>Read report</Button> : page.next_offset !== null && <Button variant="ghost" size="sm" onClick={() => read(page.next_offset!)}>Read next page</Button>}
-  </div>;
 }

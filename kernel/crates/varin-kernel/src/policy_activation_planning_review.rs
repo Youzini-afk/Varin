@@ -31,11 +31,11 @@ fn configuration(
 }
 fn artifact(version: u64) -> AgentPolicyArtifactBinding {
     AgentPolicyArtifactBinding {
-        provider_key: "planning-policy:host:varin.agent.policy@3".into(),
+        provider_key: "planning-policy:host:varin.agent.policy@4".into(),
         extension_id: "planning-policy".into(),
         extension_version: version.to_string(),
         service_id: "varin.agent.policy".into(),
-        service_version: 3,
+        service_version: 4,
         artifact_integrity: format!("artifact-{version}"),
         configuration_identity: "configuration".into(),
         declared_identity: PolicyIdentity {
@@ -304,7 +304,7 @@ fn activated_planning_generation_uses_its_exact_model_and_private_credential_own
                             1,
                             "ready must not interrupt this original decision"
                         );
-                        json!({"state":{"step":2},"action":{"kind":"deliver","text":"first planner result"}})
+                        json!({"state":{"step":2},"action":{"kind":"deliver","output":{"data":null,"parts":[{"kind":"text","text":"first planner result"}]}}})
                     }
                     (2, "delivered") => {
                         assert_eq!(frame["input"]["state"], json!({"step":2,"version":2}));

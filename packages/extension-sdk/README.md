@@ -74,7 +74,7 @@ callback, or DOM access. `@varin/extension-sdk/testing` also exports
 `runEditorExtensionConformance` and a real mock document controller covering incremental failures and
 mount abort/disposal.
 
-`provideAgentPolicy` implements `varin.agent.policy@3` at committed execution boundaries. Its
+`provideAgentPolicy` implements `varin.agent.policy@4` at committed execution boundaries. Its
 immutable declared configuration and versioned private JSON state are distinct from core history;
 the Host pins exact package/configuration identity for each committed policy generation. Declare auxiliary
 model duties with `modelRoles`. Optional `transitionState` returns only compatible private state or an
@@ -102,11 +102,19 @@ queries, while explicit disable/crash revokes their bindings. See the
 so cold discovery and activation use one declaration. `execute(input, call)` receives normal JSON,
 cooperative cancellation and `call.capabilities`, a client bound to that invocation. Schema compilation
 and admission remain with the executing Host; the SDK never owns history, Operations or resource facts.
-Return the tool's JSON result directly. Null and empty results are valid; missing/non-JSON results fail.
+Return the tool's JSON data directly. Null and empty results are valid; missing/non-JSON results fail.
+For Result callbacks, use `await call.output({ kind: 'text', text })` or
+`await call.output({ kind: 'media', media: { media_type, data_base64 } })` for explicit ordered
+presentation parts. The original completion retains one `{ data, parts }` body; a returned
+JSON object that resembles a media descriptor remains ordinary data. Accepted parts survive
+callback or output-schema failure with the actual failure receipt. Producers cannot author
+storage references, source identity, outcome, effect or stop evidence through this callback.
 Declarations support `completion: result` and independent `completion: job` with an explicit
 `lifetime: thread | environment`. A Job needs a trusted domain adapter that durably accepts the original
 invocation and owns its cancellation/recovery; returned extension JSON cannot create an execution owner
-or assert physical stop. The ordinary [research example](../../examples/extensions/research-tools/README.md)
+or assert physical stop. A Job callback cannot append parts through `call.output`: its
+owning domain must include them in the original durable acceptance or terminal body. Changing an
+already accepted Job's content would break its canonical receipt identity. The ordinary [research example](../../examples/extensions/research-tools/README.md)
 uses that boundary for accepted experiments and observation waits. This is not a generic extension-owned
 durable job store. A declared read operation
 still needs its ordinary capability grants and the Host's current invocation authority.
@@ -115,6 +123,10 @@ Tool callbacks can compose other selected tools with
 `await call.tools.invoke({ callId: 'memory', name: 'memory', arguments: { action: 'read' } })`.
 Declare `runtime.tools` in the Host entrypoint's capabilities. The returned `NestedToolReceipt`
 contains `operationId` and the original `completion` (`not_dispatched`, `result`, or `job_accepted`).
+Result and optional accepted-Job content use `{ data, parts }`; nested media is resolved for
+this original caller. It is not automatically copied to the outer completion. Forward a
+selected part through `call.output`, passing only its incoming byte fields; the runtime
+assigns the outer source and preserves the inner operation's separate receipt.
 The native owner derives the schema version and binds the call to the original invocation's frozen
 selected directory, source, context and generation. Every inner tool performs its own ordinary
 permission and resource admission; the composition does not enable an unselected tool.

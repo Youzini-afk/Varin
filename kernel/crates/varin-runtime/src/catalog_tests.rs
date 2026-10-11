@@ -44,11 +44,12 @@ fn admission_is_durable_and_idempotent() {
         Err(RuntimeError::Conflict(_))
     ));
     assert_eq!(db.run(&receipt.run_id).unwrap().state, RunState::Accepted);
-    assert!(db
-        .events_after(0, 100)
-        .unwrap()
-        .iter()
-        .any(|e| e.kind == "run.accepted" && e.cursor == receipt.cursor));
+    assert!(
+        db.events_after(0, 100)
+            .unwrap()
+            .iter()
+            .any(|e| e.kind == "run.accepted" && e.cursor == receipt.cursor)
+    );
     drop(db);
     let mut db = f.open();
     assert_eq!(receipt, db.submit(&command()).unwrap());
@@ -76,8 +77,8 @@ fn branch_cas_and_opaque_history_survive_restart() {
             Some(original.clone()),
         )
         .unwrap();
-    assert!(db
-        .append_history(
+    assert!(
+        db.append_history(
             &receipt.run_id,
             epoch,
             Some(&receipt.input_id),
@@ -85,7 +86,8 @@ fn branch_cas_and_opaque_history_survive_restart() {
             Value::Null,
             None
         )
-        .is_err());
+        .is_err()
+    );
     db.fork_branch("main", "fork", Some(&receipt.input_id))
         .unwrap();
     assert_eq!(db.history("fork").unwrap().len(), 1);
@@ -215,26 +217,29 @@ fn cancellation_is_a_request_and_dispatched_unknown_is_not_replayed() {
     assert!(cancelled.cancel_requested);
     assert_eq!(cancelled.outcome, None);
     assert_eq!(cancelled.effect, Effect::Dispatched);
-    assert!(db
-        .settle_operation("op", epoch, Outcome::Cancelled, Effect::None, Value::Null)
-        .is_err());
+    assert!(
+        db.settle_operation("op", epoch, Outcome::Cancelled, Effect::None, Value::Null)
+            .is_err()
+    );
     drop(db);
     let mut db = f.open();
     let recovered = db.operation("op").unwrap();
     assert_eq!(recovered.outcome, Some(Outcome::Indeterminate));
     assert_eq!(recovered.effect, Effect::Unknown);
-    assert!(db
-        .dispatch_operation("op", db.epoch(), "desktop-1", true)
-        .is_err());
-    assert!(db
-        .settle_operation(
+    assert!(
+        db.dispatch_operation("op", db.epoch(), "desktop-1", true)
+            .is_err()
+    );
+    assert!(
+        db.settle_operation(
             "op",
             epoch,
             Outcome::Succeeded,
             Effect::Confirmed,
             Value::Null
         )
-        .is_err());
+        .is_err()
+    );
 }
 #[test]
 fn accepted_operations_can_resume_but_old_epoch_cannot_dispatch() {
@@ -269,9 +274,10 @@ fn foreground_must_settle_but_explicit_thread_job_can_outlive_run() {
         .unwrap();
     db.admit_operation("op", &r.run_id, epoch, Lifetime::Thread, Value::Null)
         .unwrap();
-    assert!(db
-        .transition_run(&r.run_id, epoch, run.revision, RunState::Completed)
-        .is_err());
+    assert!(
+        db.transition_run(&r.run_id, epoch, run.revision, RunState::Completed)
+            .is_err()
+    );
     db.handoff_operation("op", epoch).unwrap();
     db.transition_run(&r.run_id, epoch, run.revision, RunState::Completed)
         .unwrap();
@@ -397,9 +403,10 @@ fn delivery_cannot_commit_a_fact_before_send() {
     let f = Fixture::new();
     let mut db = f.open();
     let r = submit(&mut db);
-    assert!(db
-        .set_delivery("model", r.cursor, "request", DeliveryState::Committed)
-        .is_err());
+    assert!(
+        db.set_delivery("model", r.cursor, "request", DeliveryState::Committed)
+            .is_err()
+    );
     db.set_delivery("model", r.cursor, "request", DeliveryState::Selected)
         .unwrap();
     db.set_delivery("model", r.cursor, "request", DeliveryState::Sent)
@@ -408,9 +415,10 @@ fn delivery_cannot_commit_a_fact_before_send() {
         .unwrap();
     db.set_delivery("model", r.cursor, "request", DeliveryState::Committed)
         .unwrap();
-    assert!(db
-        .set_delivery("model", r.cursor, "request", DeliveryState::Selected)
-        .is_err());
+    assert!(
+        db.set_delivery("model", r.cursor, "request", DeliveryState::Selected)
+            .is_err()
+    );
 }
 
 fn request_snapshot(receipt: &Receipt) -> crate::execution::RequestSnapshot {
@@ -593,17 +601,25 @@ fn structured_user_attachment_cannot_silently_disappear_from_execution_history()
     let mut db = f.open();
     db.create_thread("thread", "main").unwrap();
     let mut input = command();
-    input.input = json!({"text":"inspect this image","attachments":[{"media_type":"image/png","content_ref":"content:example"}]});
-    db.submit(&input).unwrap();
-    match db.execution_history("main") {
-        Err(_) => {} // A typed unsupported input failure is acceptable until attachment binding exists.
-        Ok(items) => assert!(
-            items
-                .iter()
-                .any(|item| matches!(item.content, crate::execution::Content::Attachment { .. })),
-            "accepted attachment was silently reduced to text before request compilation"
-        ),
-    }
+    input.input = json!({"text":"inspect this image","attachments":[{"media_type":"image/png","data_base64":"Y29udGVudDpleGFtcGxl"}]});
+    let receipt = db.submit(&input).unwrap();
+    let items = db.execution_history("main").unwrap();
+    let media = items
+        .iter()
+        .find_map(|item| match &item.content {
+            crate::execution::Content::Media { media } => Some(media),
+            _ => None,
+        })
+        .expect("accepted attachment remains typed before request compilation");
+    assert_eq!(media.data_base64, "Y29udGVudDpleGFtcGxl");
+    assert_eq!(
+        media.source,
+        crate::output::OutputSource::Conversation {
+            provenance: crate::execution::Provenance::UserInstruction {
+                input_id: receipt.input_id
+            }
+        }
+    );
 }
 
 #[test]
@@ -675,7 +691,7 @@ fn tool_batch_receipt_cannot_cross_between_two_active_runs() {
             completion: ToolCompletion::Result {
                 outcome: Outcome::Succeeded,
                 effect: Effect::None,
-                content: json!("belongs to first run"),
+                content: json!("belongs to first run").into(),
             },
         }],
     };
@@ -744,11 +760,12 @@ fn unfinished_model_tool_exchange_cannot_complete_a_run() {
         },
     )
     .unwrap();
-    assert!(db
-        .transition_run(&r.run_id, epoch, run.revision, RunState::Completed)
-        .is_err());
-    assert!(db
-        .commit_execution(
+    assert!(
+        db.transition_run(&r.run_id, epoch, run.revision, RunState::Completed)
+            .is_err()
+    );
+    assert!(
+        db.commit_execution(
             &r.run_id,
             epoch,
             &ExecutionRecord::StateChanged {
@@ -756,7 +773,8 @@ fn unfinished_model_tool_exchange_cannot_complete_a_run() {
                 waiting_on: None
             }
         )
-        .is_err());
+        .is_err()
+    );
     assert_eq!(db.run(&r.run_id).unwrap().state, RunState::Runnable);
 }
 
@@ -767,7 +785,7 @@ fn external(op: &str, outcome: Outcome, effect: Effect) -> ExternalReceipt {
         epoch: "resource-epoch".into(),
         outcome,
         effect,
-        result: json!({"exitCode":0}),
+        result: json!({"exitCode":0}).into(),
     }
 }
 #[test]
@@ -813,7 +831,7 @@ fn external_receipts_are_idempotent_and_only_same_epoch_unknown_can_refine() {
     let mut unknown = external("job", Outcome::Indeterminate, Effect::Unknown);
     let unknown_body =
         json!({"permission":{"opaque":true},"unknown":"lost-reply-original".repeat(20000)});
-    unknown.result = unknown_body.clone();
+    unknown.result = unknown_body.clone().into();
     let observed = db.record_external_receipt("job", unknown.clone()).unwrap();
     assert_eq!(
         db.record_external_receipt("job", unknown).unwrap(),
@@ -824,7 +842,7 @@ fn external_receipts_are_idempotent_and_only_same_epoch_unknown_can_refine() {
     assert!(db.record_external_receipt("job", foreign).is_err());
     let mut confirmed = external("job", Outcome::Succeeded, Effect::Confirmed);
     let confirmed_body = json!({"exitCode":0,"opaque":"confirmed-original".repeat(20000)});
-    confirmed.result = confirmed_body.clone();
+    confirmed.result = confirmed_body.clone().into();
     let settled = db
         .record_external_receipt("job", confirmed.clone())
         .unwrap();
@@ -835,7 +853,7 @@ fn external_receipts_are_idempotent_and_only_same_epoch_unknown_can_refine() {
         settled
     );
     let mut conflicting = confirmed;
-    conflicting.result = json!({"exitCode":7});
+    conflicting.result = json!({"exitCode":7}).into();
     assert!(db.record_external_receipt("job", conflicting).is_err());
     let mut wrong = external("other-job", Outcome::Succeeded, Effect::Confirmed);
     assert!(db.record_external_receipt("job", wrong.clone()).is_err());
@@ -847,13 +865,15 @@ fn external_receipts_are_idempotent_and_only_same_epoch_unknown_can_refine() {
     assert!(serde_json::to_vec(&metadata).unwrap().len() < 2048);
     assert_eq!(
         db.capture_operation_read(metadata).load().unwrap().result,
-        Some(confirmed_body.clone())
+        Some(crate::output::OperationResult::Output {
+            output: confirmed_body.clone().into()
+        })
     );
     let events = db.capture_events_read(0, 1000).unwrap().load().unwrap();
     assert!(
         events
             .iter()
-            .any(|event| event.data["external_receipt"]["result"] == unknown_body),
+            .any(|event| event.data["external_receipt"]["result"]["data"] == unknown_body),
         "refinement must retain the original uncertain executor evidence"
     );
     drop(db);
@@ -864,12 +884,16 @@ fn external_receipts_are_idempotent_and_only_same_epoch_unknown_can_refine() {
             .load()
             .unwrap()
             .result,
-        Some(confirmed_body)
+        Some(crate::output::OperationResult::Output {
+            output: confirmed_body.into()
+        })
     );
     let events = db.capture_events_read(0, 1000).unwrap().load().unwrap();
-    assert!(events
-        .iter()
-        .any(|event| event.data["external_receipt"]["result"] == unknown_body));
+    assert!(
+        events
+            .iter()
+            .any(|event| event.data["external_receipt"]["result"]["data"] == unknown_body)
+    );
 }
 #[test]
 fn early_external_terminal_and_model_job_acceptance_converge() {
@@ -1058,7 +1082,7 @@ fn later_external_confirmation_resolves_lost_acceptance_receipt_without_handoff(
             )
             .unwrap();
             let mut receipt = external("job", outcome, effect);
-            receipt.result = json!({"original":"executor evidence", "outcome":outcome,"opaque":[null,"原始",17]});
+            receipt.result = json!({"original":"executor evidence", "outcome":outcome,"opaque":[null,"原始",17]}).into();
             if persisted_before_crash {
                 // The executor fact committed, but the model's ToolSettled/handoff did not.
                 let early = db.record_external_receipt("job", receipt.clone()).unwrap();
@@ -1096,13 +1120,16 @@ fn later_external_confirmation_resolves_lost_acceptance_receipt_without_handoff(
                     .load()
                     .unwrap()
                     .result,
-                Some(receipt.result.clone())
+                Some(crate::output::OperationResult::Output {
+                    output: receipt.result.data.clone().into()
+                })
             );
-            assert!(db
-                .pending_resumptions()
-                .unwrap()
-                .iter()
-                .any(|wait| wait == "receipt-wait"));
+            assert!(
+                db.pending_resumptions()
+                    .unwrap()
+                    .iter()
+                    .any(|wait| wait == "receipt-wait")
+            );
             // Replaying an applied fact is genuinely idempotent, including its event cursor.
             let cursor = db.event_cursor().unwrap();
             assert_eq!(
@@ -1326,12 +1353,14 @@ fn queued_input_is_durable_editable_and_only_enters_a_closed_model_boundary() {
         .edit_queued_input(&queued.input_id, 1, json!({"text":"actual correction"}))
         .unwrap();
     assert_eq!(edited.revision, 2);
-    assert!(db
-        .edit_queued_input(&queued.input_id, 1, json!({"text":"stale"}))
-        .is_err());
-    assert!(db
-        .consume_inputs(&r.run_id, epoch, Some(&r.input_id))
-        .is_err());
+    assert!(
+        db.edit_queued_input(&queued.input_id, 1, json!({"text":"stale"}))
+            .is_err()
+    );
+    assert!(
+        db.consume_inputs(&r.run_id, epoch, Some(&r.input_id))
+            .is_err()
+    );
     db.settle_model_step(
         "active-step",
         epoch,
@@ -1364,13 +1393,15 @@ fn queued_input_is_durable_editable_and_only_enters_a_closed_model_boundary() {
         db.queued_input(&queued.input_id).unwrap().state,
         InputState::Delivered
     );
-    assert!(db
-        .edit_queued_input(&queued.input_id, 2, json!({"text":"too late"}))
-        .is_err());
-    assert!(db
-        .consume_inputs(&r.run_id, epoch, Some(&queued.input_id))
-        .unwrap()
-        .is_empty());
+    assert!(
+        db.edit_queued_input(&queued.input_id, 2, json!({"text":"too late"}))
+            .is_err()
+    );
+    assert!(
+        db.consume_inputs(&r.run_id, epoch, Some(&queued.input_id))
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(
         db.model_step("active-step")
             .unwrap()
@@ -1399,9 +1430,10 @@ fn boundary_input_cannot_be_lost_to_run_completion_and_next_run_skips_cancelled_
             configuration: None,
         })
         .unwrap();
-    assert!(db
-        .transition_run(&r.run_id, epoch, run.revision, RunState::Completed)
-        .is_err());
+    assert!(
+        db.transition_run(&r.run_id, epoch, run.revision, RunState::Completed)
+            .is_err()
+    );
     db.consume_inputs(&r.run_id, epoch, Some(&r.input_id))
         .unwrap();
     let queued = |key: &str| EnqueueInput {
@@ -1430,8 +1462,8 @@ fn boundary_input_cannot_be_lost_to_run_completion_and_next_run_skips_cancelled_
     let history = db.history("main").unwrap();
     assert!(history.iter().any(|i| i.id == boundary.input_id));
     assert!(!history.iter().any(|i| i.id == removed.input_id));
-    assert!(db
-        .prepare_execution(
+    assert!(
+        db.prepare_execution(
             &next.run_id,
             request_snapshot(&r).view.binding,
             crate::execution::PolicyIdentity {
@@ -1440,7 +1472,8 @@ fn boundary_input_cannot_be_lost_to_run_completion_and_next_run_skips_cancelled_
             },
             Value::Null
         )
-        .is_ok());
+        .is_ok()
+    );
 }
 
 #[test]
@@ -1532,15 +1565,16 @@ fn missing_request_content_does_not_mark_unsent_public_dispatch_as_dispatched() 
     assert!(db.dispatch_model_step("missing-content", epoch).is_err());
     let after: ModelStep = record(&db.db, "model_steps", "missing-content").unwrap();
     assert_eq!(after.state, ModelStepState::Prepared);
-    assert!(db
-        .settle_model_step(
+    assert!(
+        db.settle_model_step(
             "missing-content",
             epoch,
             ModelStepState::Interrupted,
             vec![],
             None
         )
-        .is_err());
+        .is_err()
+    );
     let after_settle: ModelStep = record(&db.db, "model_steps", "missing-content").unwrap();
     assert_eq!(after_settle.state, ModelStepState::Prepared);
 }
@@ -1695,12 +1729,13 @@ fn missing_launch_tool_content_does_not_break_source_or_cancellation_control() {
     )
     .unwrap();
     std::fs::remove_file(path).unwrap();
-    assert!(db
-        .capture_launch(&receipt.run_id)
-        .unwrap()
-        .unwrap()
-        .load()
-        .is_err());
+    assert!(
+        db.capture_launch(&receipt.run_id)
+            .unwrap()
+            .unwrap()
+            .load()
+            .is_err()
+    );
     assert_eq!(
         db.launch_metadata(&receipt.run_id)
             .unwrap()
@@ -1714,11 +1749,12 @@ fn missing_launch_tool_content_does_not_break_source_or_cancellation_control() {
             .unwrap()
             .cancel_requested
     );
-    assert!(db
-        .events_after(0, 64)
-        .unwrap()
-        .iter()
-        .any(|event| event.kind == "run.cancel_requested"));
+    assert!(
+        db.events_after(0, 64)
+            .unwrap()
+            .iter()
+            .any(|event| event.kind == "run.cancel_requested")
+    );
 }
 
 #[test]
@@ -1976,9 +2012,10 @@ fn model_activation_after_a_closed_exchange_survives_reopen_without_rewriting_it
         .is_err(),
         "a changed binding requires a committed activation"
     );
-    assert!(db
-        .activate_model_selection(&selection, db.epoch(), &bound.binding)
-        .unwrap());
+    assert!(
+        db.activate_model_selection(&selection, db.epoch(), &bound.binding)
+            .unwrap()
+    );
     let step = db.model_step("model-1").unwrap();
     assert_eq!(step.request["view"]["binding"]["model"], "old");
     let launch = db
@@ -2002,10 +2039,11 @@ fn model_activation_after_a_closed_exchange_survives_reopen_without_rewriting_it
             .id,
         "next-choice"
     );
-    assert!(input
-        .history
-        .iter()
-        .any(|item| matches!(&item.content,Content::Text{text} if text=="completed old output")));
+    assert!(
+        input.history.iter().any(
+            |item| matches!(&item.content,Content::Text{text} if text=="completed old output")
+        )
+    );
 }
 
 #[test]
@@ -2027,13 +2065,14 @@ fn independent_model_finished_retry_is_exactly_idempotent_and_conflicting_retry_
     assert_eq!(db.history("main").unwrap(), history);
     assert_eq!(db.model_output("model-1").unwrap(), output);
     assert_eq!(db.events_after(0, 1000).unwrap(), events);
-    assert!(db
-        .commit_execution(
+    assert!(
+        db.commit_execution(
             &receipt.run_id,
             epoch,
             &independent_finish("model-1", "conflicting replacement")
         )
-        .is_err());
+        .is_err()
+    );
     assert_eq!(db.history("main").unwrap(), history);
     assert_eq!(db.model_output("model-1").unwrap(), output);
     assert_eq!(
@@ -2158,10 +2197,12 @@ fn tool_activation_retains_its_exact_composition_through_collection_and_reopen()
         .prepare_recovered_execution(&receipt.run_id, next_binding, policy, Value::Null)
         .unwrap();
     assert!(recovery.is_some());
-    assert!(input
-        .history
-        .iter()
-        .any(|item| matches!(&item.content,Content::Text{text} if text=="old request output")));
+    assert!(
+        input
+            .history
+            .iter()
+            .any(|item| matches!(&item.content,Content::Text{text} if text=="old request output"))
+    );
     let stale = db
         .capture_tool_update(&receipt.run_id, db.epoch())
         .unwrap()
@@ -2311,9 +2352,10 @@ fn independent_recovery_uses_the_saved_contiguous_row_identity_and_rejects_chang
             params![encode(&damaged).unwrap(), damaged.id],
         )
         .unwrap();
-    assert!(db
-        .prepare_recovered_execution(&receipt.run_id, snapshot.view.binding, policy, Value::Null)
-        .is_err());
+    assert!(
+        db.prepare_recovered_execution(&receipt.run_id, snapshot.view.binding, policy, Value::Null)
+            .is_err()
+    );
 }
 
 #[test]
@@ -2354,7 +2396,7 @@ fn independent_recovery_rejects_corrupted_branch_anchor_and_foreign_suffix_owner
                         epoch,
                         db.head("main").unwrap().as_deref(),
                         HistorySource::Environment,
-                        serde_json::to_value(ConversationItem {
+                        serde_json::to_value(ConversationItem::<crate::output::ResolvedMedia> {
                             resource_activation: None,
                             id: "later-environment".into(),
                             provenance: Provenance::EnvironmentFact {
@@ -2518,7 +2560,7 @@ fn dispatched_no_effect_requires_exact_durable_executor_evidence() {
     let completion = ToolCompletion::Result {
         outcome: Outcome::Failed,
         effect: Effect::None,
-        content: content.clone(),
+        content: content.clone().into(),
     };
     let settlement = |completion| {
         let result = ToolResult {
@@ -2541,12 +2583,16 @@ fn dispatched_no_effect_requires_exact_durable_executor_evidence() {
         }
     };
     // A tool's no-effect claim alone must neither bypass normalization nor settle a dispatch.
-    assert!(!owner
-        .confirms_no_effect(&context, epoch, &completion)
-        .unwrap());
-    assert!(owner
-        .commit(&run.run_id, epoch, &settlement(completion.clone()))
-        .is_err());
+    assert!(
+        !owner
+            .confirms_no_effect(&context, epoch, &completion)
+            .unwrap()
+    );
+    assert!(
+        owner
+            .commit(&run.run_id, epoch, &settlement(completion.clone()))
+            .is_err()
+    );
     let op = owner
         .lock()
         .unwrap()
@@ -2565,7 +2611,7 @@ fn dispatched_no_effect_requires_exact_durable_executor_evidence() {
             epoch: "opaque-owner-epoch".into(),
             outcome: Outcome::Failed,
             effect: Effect::None,
-            result: content.clone(),
+            result: content.clone().into(),
         },
         true,
     )
@@ -2574,30 +2620,40 @@ fn dispatched_no_effect_requires_exact_durable_executor_evidence() {
     let changed = ToolCompletion::Result {
         outcome: Outcome::Failed,
         effect: Effect::None,
-        content: json!({"status":"conflict","currentRef":"forged"}),
+        content: json!({"status":"conflict","currentRef":"forged"}).into(),
     };
     assert!(!owner.confirms_no_effect(&context, epoch, &changed).unwrap());
-    assert!(owner
-        .commit(&run.run_id, epoch, &settlement(changed))
-        .is_err());
+    assert!(
+        owner
+            .commit(&run.run_id, epoch, &settlement(changed))
+            .is_err()
+    );
     let mut foreign = context.clone();
     foreign.operation_id = "model-1:tool:other".into();
-    assert!(!owner
-        .confirms_no_effect(&foreign, epoch, &completion)
-        .unwrap());
+    assert!(
+        !owner
+            .confirms_no_effect(&foreign, epoch, &completion)
+            .unwrap()
+    );
     foreign = context.clone();
     foreign.origin = ToolOrigin::ModelStep {
         request_id: "other-request".into(),
     };
-    assert!(!owner
-        .confirms_no_effect(&foreign, epoch, &completion)
-        .unwrap());
-    assert!(owner
-        .confirms_no_effect(&context, epoch + 1, &completion)
-        .is_err());
-    assert!(owner
-        .confirms_no_effect(&context, epoch, &completion)
-        .unwrap());
+    assert!(
+        !owner
+            .confirms_no_effect(&foreign, epoch, &completion)
+            .unwrap()
+    );
+    assert!(
+        owner
+            .confirms_no_effect(&context, epoch + 1, &completion)
+            .is_err()
+    );
+    assert!(
+        owner
+            .confirms_no_effect(&context, epoch, &completion)
+            .unwrap()
+    );
     owner
         .commit(&run.run_id, epoch, &settlement(completion))
         .unwrap();
@@ -2615,13 +2671,22 @@ fn dispatched_no_effect_requires_exact_durable_executor_evidence() {
         )
     );
     let read = owner.lock().unwrap().capture_operation_read(op);
-    assert_eq!(read.load().unwrap().result, Some(content.clone()));
+    assert_eq!(
+        read.load().unwrap().result,
+        Some(crate::output::OperationResult::Output {
+            output: content.clone().into()
+        })
+    );
     let events = owner.lock().unwrap().capture_events_read(0, 1000).unwrap();
-    assert!(events
-        .load()
-        .unwrap()
-        .iter()
-        .any(|event| event.kind == "operation.settled" && event.data["result"] == content));
+    assert!(
+        events
+            .load()
+            .unwrap()
+            .iter()
+            .any(|event| event.kind == "operation.settled"
+                && event.data["result"]
+                    == json!({"kind":"output","output":{"data":content,"parts":[]}}))
+    );
     let db = owner.lock().unwrap();
     let receipt: String = db
         .db
@@ -2650,7 +2715,7 @@ fn dispatched_no_effect_requires_exact_durable_executor_evidence() {
 #[test]
 fn recovery_preparation_hydrates_without_catalog_and_rechecks_its_actual_boundary() {
     use crate::execution::{CancellationToken, PolicyIdentity};
-    use std::sync::{mpsc, Arc, Mutex};
+    use std::sync::{Arc, Mutex, mpsc};
     for change in ["unrelated", "head", "cancel"] {
         let f = Fixture::new();
         let mut catalog = f.open();
@@ -2871,7 +2936,7 @@ fn recovery_preparation_discards_stale_failure_after_a_real_tool_receipt_arrives
                 completion: ToolCompletion::Result {
                     outcome: Outcome::Succeeded,
                     effect: Effect::Confirmed,
-                    content: json!("actual receipt"),
+                    content: json!("actual receipt").into(),
                 },
             };
             ExecutionRecord::ToolSettled {
@@ -2911,14 +2976,14 @@ fn recovery_preparation_discards_stale_failure_after_a_real_tool_receipt_arrives
         ToolCompletion::Result {
             outcome: Outcome::Succeeded,
             effect: Effect::Confirmed,
-            content: json!("actual receipt"),
+            content: json!("actual receipt").into(),
         }
     );
 }
 
 #[test]
 fn result_publication_stages_without_catalog_and_gc_protects_until_commit() {
-    use std::sync::{mpsc, Mutex};
+    use std::sync::{Mutex, mpsc};
     let f = Fixture::new();
     let mut db = f.open();
     let run = submit(&mut db);
@@ -2945,11 +3010,13 @@ fn result_publication_stages_without_catalog_and_gc_protects_until_commit() {
         .recv_timeout(std::time::Duration::from_secs(10))
         .unwrap()
         .unwrap();
-    assert!(catalog
-        .operation("result-publication")
-        .unwrap()
-        .result
-        .is_none());
+    assert!(
+        catalog
+            .operation("result-publication")
+            .unwrap()
+            .result
+            .is_none()
+    );
     drop(catalog);
     worker.join().unwrap();
     assert_eq!(
@@ -2979,7 +3046,12 @@ fn result_publication_stages_without_catalog_and_gc_protects_until_commit() {
     })
     .unwrap();
     let read = owner.lock().unwrap().capture_operation_read(operation);
-    assert_eq!(read.load().unwrap().result, Some(expected));
+    assert_eq!(
+        read.load().unwrap().result,
+        Some(crate::output::OperationResult::Output {
+            output: expected.into()
+        })
+    );
 }
 
 #[test]
@@ -3070,7 +3142,7 @@ fn external_result_outlives_kernel_until_original_stop_receipt() {
         let unknown = ToolCompletion::Result {
             outcome: Outcome::Indeterminate,
             effect: Effect::Unknown,
-            content: json!({"error":"observer_cancelled"}),
+            content: json!({"error":"observer_cancelled"}).into(),
         };
         if settled {
             db.commit_execution(
@@ -3107,7 +3179,7 @@ fn external_result_outlives_kernel_until_original_stop_receipt() {
             epoch: "original-owner-epoch".into(),
             outcome: Outcome::Succeeded,
             effect: Effect::Confirmed,
-            result: json!({"actual":"original worker result"}),
+            result: json!({"actual":"original worker result"}).into(),
         };
         let mut forged = receipt.clone();
         forged.epoch = "replacement-owner-epoch".into();
@@ -3115,9 +3187,10 @@ fn external_result_outlives_kernel_until_original_stop_receipt() {
             .prepare_result_content()
             .write_external_receipt(forged)
             .unwrap();
-        assert!(db
-            .record_external_receipt_prepared(&context.operation_id, prepared, true)
-            .is_err());
+        assert!(
+            db.record_external_receipt_prepared(&context.operation_id, prepared, true)
+                .is_err()
+        );
         assert_eq!(
             db.resource_admission
                 .inspect(&context.operation_id)
@@ -3135,14 +3208,16 @@ fn external_result_outlives_kernel_until_original_stop_receipt() {
             (result.outcome, result.effect),
             (Some(Outcome::Succeeded), Effect::Confirmed)
         );
-        assert!(db
-            .resource_admission
-            .inspect(&context.operation_id)
-            .is_none());
+        assert!(
+            db.resource_admission
+                .inspect(&context.operation_id)
+                .is_none()
+        );
         let hydrated = db.capture_operation_read(result).load().unwrap();
         assert_eq!(
             hydrated.call_completion,
-            settled.then_some(unknown),
+            settled
+                .then(|| serde_json::from_value(serde_json::to_value(unknown).unwrap()).unwrap()),
             "late evidence must not rewrite the original invocation completion"
         );
         let prepared = db
@@ -3159,7 +3234,7 @@ fn external_result_outlives_kernel_until_original_stop_receipt() {
 
 #[test]
 fn reply_deadline_short_facts_recheck_clock_and_catch_up_without_replacing_a_winner() {
-    use messages::reply_wait::{resolve, REPLY_EVENT};
+    use messages::reply_wait::{REPLY_EVENT, resolve};
     let fixture = Fixture::new();
     let mut db = fixture.open();
     let receipt = submit(&mut db);
@@ -3238,3 +3313,129 @@ fn reply_deadline_short_facts_recheck_clock_and_catch_up_without_replacing_a_win
 
 #[path = "catalog_computer_tests.rs"]
 mod computer;
+
+#[test]
+fn queued_typed_media_text_edit_preserves_exact_owner_bytes_and_ref_ingress_is_rejected() {
+    use crate::output::*;
+    let f = Fixture::new();
+    let mut db = f.open();
+    submit(&mut db);
+    let queued=db.enqueue_input(&inputs::EnqueueInput{key:"queued-media".into(),thread_id:"thread".into(),branch_id:"main".into(),mode:InputMode::Boundary,input:json!({"text":"first","attachments":[{"media_type":"image/png","data_base64":"b3JpZ2luYWw="}]}),configuration:None}).unwrap();
+    let before = db.queued_input(&queued.input_id).unwrap();
+    let media: StoredMedia =
+        serde_json::from_value(before.content["attachments"][0].clone()).unwrap();
+    assert_eq!(
+        media.source,
+        OutputSource::Conversation {
+            provenance: crate::execution::Provenance::UserInstruction {
+                input_id: queued.input_id.clone()
+            }
+        }
+    );
+    let request = MediaReadParams {
+        thread_id: "thread".into(),
+        branch_id: "main".into(),
+        holder: OutputMediaHolder::Input {
+            input_id: queued.input_id.clone(),
+            expected_revision: before.revision,
+        },
+        part_index: 0,
+        chunk_index: 0,
+        expected_content_ref: media.content_ref.content_object.clone(),
+    };
+    assert_eq!(
+        db.capture_media_read(&request)
+            .unwrap()
+            .chunk(&|| false)
+            .unwrap()
+            .bytes_base64,
+        "b3JpZ2luYWw="
+    );
+    let edited = db
+        .edit_queued_input(
+            &queued.input_id,
+            before.revision,
+            json!({"text":"corrected"}),
+        )
+        .unwrap();
+    assert_eq!(
+        db.queued_input(&queued.input_id).unwrap().content["attachments"],
+        before.content["attachments"]
+    );
+    assert!(
+        db.capture_media_read(&request).is_err(),
+        "stale revision cannot authorize media access"
+    );
+    let current = MediaReadParams {
+        holder: OutputMediaHolder::Input {
+            input_id: queued.input_id.clone(),
+            expected_revision: edited.revision,
+        },
+        ..request
+    };
+    assert!(matches!(
+        db.capture_media_read(&current).unwrap().chunk(&|| true),
+        Err(RuntimeError::DispatchCancelled)
+    ));
+    assert!(
+        db.edit_queued_input(
+            &queued.input_id,
+            edited.revision,
+            json!({"text":"forged","attachments":[media]})
+        )
+        .is_err(),
+        "a public stored descriptor does not grant ingress by hash"
+    );
+    db.create_thread("foreign", "foreign-branch").unwrap();
+    assert!(
+        db.capture_media_read(&MediaReadParams {
+            thread_id: "foreign".into(),
+            branch_id: "foreign-branch".into(),
+            ..current.clone()
+        })
+        .is_err()
+    );
+    assert!(
+        db.capture_media_read(&MediaReadParams {
+            expected_content_ref: "sha256-unrelated".into(),
+            ..current.clone()
+        })
+        .unwrap()
+        .chunk(&|| false)
+        .is_err()
+    );
+    content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
+    drop(db);
+    let mut db = f.open();
+    assert_eq!(
+        db.capture_media_read(&current)
+            .unwrap()
+            .chunk(&|| false)
+            .unwrap()
+            .bytes_base64,
+        "b3JpZ2luYWw="
+    );
+    let cleared = db
+        .edit_queued_input(
+            &queued.input_id,
+            edited.revision,
+            json!({"text":"removed","attachments":[]}),
+        )
+        .unwrap();
+    assert_eq!(
+        db.queued_input(&queued.input_id).unwrap().content["attachments"],
+        json!([])
+    );
+    assert!(
+        db.capture_media_read(&MediaReadParams {
+            holder: OutputMediaHolder::Input {
+                input_id: queued.input_id,
+                expected_revision: cleared.revision
+            },
+            ..current
+        })
+        .unwrap()
+        .chunk(&|| false)
+        .is_err()
+    );
+}

@@ -8,10 +8,10 @@ const owner = { extensionId: 'example.integration', extensionVersion: '1.0.0', e
 const authority: ToolInvocationAuthority = {
   callId: 'merge', executorOwner: { kind: 'kernel' }, invocationId: 'invocation', runId: 'run', threadId: 'thread', operationId: 'action:node:merge',
   origin: { kind: 'policy_action', action_id: 'action', node_id: 'merge' }, source: null,
-  toolName: 'integrate_child', operation: 'effect', arguments: { childOperationId: 'child', resultRevision: 2 },
+  toolName: 'integrate_child', completion: 'result', operation: 'effect', arguments: { childOperationId: 'child', resultRevision: 2 },
 };
 const input = { operation: 'effect' as const, domain: 'collaboration.integrations', toolName: 'integrate_child', arguments: authority.arguments as { childOperationId: string; resultRevision: number } };
-const receipt: ToolExecutionReceipt = { completion: { kind: 'result', outcome: 'indeterminate', effect: 'partial', content: { status: 'conflict', appliedPaths: ['a'] } }, executor_stopped: true };
+const receipt: ToolExecutionReceipt = { completion: { kind: 'result', outcome: 'indeterminate', effect: 'partial', content: { data: { status: 'conflict', appliedPaths: ['a'] }, parts: [] } }, executor_stopped: true };
 
 test('a returned broker callback cannot retire its still-running domain effect or forge its receipt', async () => {
   const signal = new AbortController().signal;
@@ -66,13 +66,13 @@ test('lost domain transport remains unknown and occupied after the broker callba
     return { pretendSuccess: true };
   });
   assert.equal(observed?.executor_stopped, false);
-  assert.deepEqual(observed?.completion, { kind: 'result', outcome: 'indeterminate', effect: 'unknown', content: { error: 'host_tool_effect_unknown' } });
+  assert.deepEqual(observed?.completion, { kind: 'result', outcome: 'indeterminate', effect: 'unknown', content: { data: { error: 'host_tool_effect_unknown' }, parts: [] } });
 });
 
 test('domain result and accepted job preserve JSON null; only a bodyless job projects its handle', async () => {
   for (const completion of [
-    { kind:'result' as const,outcome:'succeeded' as const,effect:'confirmed' as const,content:null },
-    { kind:'job_accepted' as const,operation_id:authority.operationId,phase:'accepted',effect:'confirmed' as const,lifetime:'thread' as const,content:null },
+    { kind:'result' as const,outcome:'succeeded' as const,effect:'confirmed' as const,content:{data:null,parts:[]} },
+    { kind:'job_accepted' as const,operation_id:authority.operationId,phase:'accepted',effect:'confirmed' as const,lifetime:'thread' as const,content:{data:null,parts:[]} },
     { kind:'job_accepted' as const,operation_id:authority.operationId,phase:'awaiting_job',effect:'none' as const,lifetime:'thread' as const },
   ]) {
     const signal=new AbortController().signal;
@@ -113,5 +113,24 @@ test('actual live nested ancestry attaches Computer use only to its own cell and
     await withToolInvocation({ authority: { ...authority, invocationId: 'later', callId: 'later', operationId: toolOperationId(origin, 'later'), origin }, owner, signal }, async invocation => {
       assert.doesNotThrow(() => assertNoScriptComputerStopCycle({ owner, signal, invocation }, 'desktop-1'));
     });
+  });
+});
+
+
+test('explicit output retains accepted order on callback failure and job output remains with its owning domain', async () => {
+  const { emitToolOutput } = await import('./tool-invocation.js');
+  const signal = new AbortController().signal;
+  const parts: unknown[] = [];
+  const image = { kind: 'media', media: { media_type: 'image/png', data_base64: 'aW1hZ2U=' } };
+  await assert.rejects(withToolInvocation({ authority, owner, signal, onOutput: value => parts.push(...value) }, async invocation => {
+    const context = { owner, signal, invocation };
+    emitToolOutput(context, { kind: 'text', text: 'before' });
+    emitToolOutput(context, image);
+    assert.throws(() => emitToolOutput(context, { kind: 'media', media: { media_type: 'image/png', content_ref: { content_object: 'arbitrary' } } }), /media|output/i);
+    throw new Error('outer callback failed');
+  }), /outer callback failed/);
+  assert.deepEqual(parts, [{ kind: 'text', text: 'before' }, image]);
+  await withToolInvocation({ authority: { ...authority, completion: 'job' }, owner, signal, onOutput: value => assert.deepEqual(value, []) }, async invocation => {
+    assert.throws(() => emitToolOutput({ owner, signal, invocation }, image), /owning domain.*acceptance or terminal/);
   });
 });

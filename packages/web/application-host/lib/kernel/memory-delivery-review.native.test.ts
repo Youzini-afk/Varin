@@ -420,16 +420,16 @@ it('actual model tools share UI notes, keep reads cheap, enforce revision CAS an
   type ToolResult = { call_id: string; completion: { kind: string; outcome?: string; effect?: string; content?: Record<string, unknown> } };
   const results = history.filter(item => item.source === 'tool').map(item => (item.content as { content: { result: ToolResult } }).content.result);
   expect(results.map(result => result.call_id)).toEqual(['memory-read-empty', 'memory-save', 'memory-read-saved', 'memory-stale-write', 'memory-delete']);
-  expect(results[0]!.completion).toMatchObject({ kind: 'result', outcome: 'succeeded', effect: 'none', content: { revision: 0, notes: [] } });
-  expect(results[1]!.completion).toMatchObject({ kind: 'result', outcome: 'succeeded', effect: 'confirmed', content: {
+  expect(results[0]!.completion).toMatchObject({ kind: 'result', outcome: 'succeeded', effect: 'none', content: { data: { revision: 0, notes: [] }, parts: [] } });
+  expect(results[1]!.completion).toMatchObject({ kind: 'result', outcome: 'succeeded', effect: 'confirmed', content: { data: {
     memoryReceipt: { revision: 1, changes: [{ id: 1, scope: { kind: 'session', id: identity.threadId }, note: { content: 'REAL_NATIVE_MEMORY' } }] },
-  } });
-  expect(results[2]!.completion).toMatchObject({ kind: 'result', outcome: 'succeeded', effect: 'none', content: { revision: 1,
-    notes: [{ id: 1, content: 'REAL_NATIVE_MEMORY', scope: { kind: 'session', id: identity.threadId } }] } });
+  }, parts: [] } });
+  expect(results[2]!.completion).toMatchObject({ kind: 'result', outcome: 'succeeded', effect: 'none', content: { data: { revision: 1,
+    notes: [{ id: 1, content: 'REAL_NATIVE_MEMORY', scope: { kind: 'session', id: identity.threadId } }] }, parts: [] } });
   expect(results[3]!.completion).toMatchObject({ kind: 'not_dispatched' });
-  expect(results[4]!.completion).toMatchObject({ kind: 'result', outcome: 'succeeded', effect: 'confirmed', content: {
+  expect(results[4]!.completion).toMatchObject({ kind: 'result', outcome: 'succeeded', effect: 'confirmed', content: { data: {
     memoryReceipt: { revision: 2, changes: [{ id: 1, scope: { kind: 'session', id: identity.threadId }, note: null }] },
-  } });
+  }, parts: [] } });
   for (const request of f.requests) expect(JSON.stringify(system(request.body))).not.toContain('REAL_NATIVE_MEMORY');
   expect(history.filter(item => item.source === 'environment' && JSON.stringify(item).includes('REAL_NATIVE_MEMORY'))).toEqual([]);
   const toolQueries = f.memoryQueries.filter(query => query.action === 'tool');

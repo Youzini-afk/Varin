@@ -2,10 +2,11 @@
 #[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::{
+    Arc, Mutex,
     atomic::{AtomicUsize, Ordering},
-    mpsc, Arc, Mutex,
+    mpsc,
 };
 use varin_runtime::execution::*;
 use varin_runtime::{Catalog, Effect, ExecutorOwner, Lifetime, Outcome, SubmitInput};
@@ -203,7 +204,7 @@ impl ToolExecutor for Tools {
                     completion: ToolCompletion::Result {
                         outcome: Outcome::Succeeded,
                         effect: Effect::Confirmed,
-                        content: json!({"operationId":inner.operation_id}),
+                        content: json!({"operationId":inner.operation_id}).into(),
                     },
                 };
             }
@@ -229,12 +230,16 @@ impl ToolExecutor for Tools {
                 );
                 let mut changed = input("effect", "effect");
                 changed.arguments = json!({"changed":true});
-                assert!(registry
-                    .invoke(&context.operation_id, &owner(), changed)
-                    .is_err());
-                assert!(registry
-                    .invoke(&context.operation_id, &owner(), input("hidden", "disabled"))
-                    .is_err());
+                assert!(
+                    registry
+                        .invoke(&context.operation_id, &owner(), changed)
+                        .is_err()
+                );
+                assert!(
+                    registry
+                        .invoke(&context.operation_id, &owner(), input("hidden", "disabled"))
+                        .is_err()
+                );
                 let direct = registry
                     .invoke(&context.operation_id, &owner(), input("x:nested:y", "read"))
                     .unwrap();
@@ -248,7 +253,7 @@ impl ToolExecutor for Tools {
                 };
                 assert_ne!(
                     direct.operation_id,
-                    content["operationId"].as_str().unwrap()
+                    content.data["operationId"].as_str().unwrap()
                 );
             }
             // Deliberately omit inner receipt/output. Its original Operation must remain reconcilable after the outer callback finishes.
@@ -257,7 +262,7 @@ impl ToolExecutor for Tools {
                 completion: ToolCompletion::Result {
                     outcome: Outcome::Succeeded,
                     effect: Effect::Confirmed,
-                    content: json!({"caught":true}),
+                    content: json!({"caught":true}).into(),
                 },
             }
         } else {
@@ -279,7 +284,7 @@ impl ToolExecutor for Tools {
                         completion: ToolCompletion::Result {
                             outcome: Outcome::Cancelled,
                             effect: Effect::Partial,
-                            content: json!({"actual":"stopped after partial work"}),
+                            content: json!({"actual":"stopped after partial work"}).into(),
                         },
                     };
                 }
@@ -297,7 +302,7 @@ impl ToolExecutor for Tools {
                     } else {
                         Effect::Unknown
                     },
-                    content: json!({"original":call.name}),
+                    content: json!({"original":call.name}).into(),
                 },
             }
         }
@@ -401,14 +406,16 @@ fn model_and_policy_nested_calls_share_original_catalog_without_inner_model_pair
         let outer_operation = db.lock().unwrap().operation(&outer.operation_id).unwrap();
         assert_eq!(outer_operation.effect, Effect::Confirmed);
         assert_eq!(outer_operation.outcome, Some(Outcome::Succeeded));
-        assert!(db
-            .resource_admission()
-            .inspect(&child.operation_id)
-            .is_some());
-        assert!(db
-            .resource_admission()
-            .inspect(&outer.operation_id)
-            .is_none());
+        assert!(
+            db.resource_admission()
+                .inspect(&child.operation_id)
+                .is_some()
+        );
+        assert!(
+            db.resource_admission()
+                .inspect(&outer.operation_id)
+                .is_none()
+        );
         assert!(
             db.lock()
                 .unwrap()
@@ -426,17 +433,19 @@ fn model_and_policy_nested_calls_share_original_catalog_without_inner_model_pair
             .collect();
         assert_eq!(paired, if policy { vec![] } else { vec!["outer"] });
         let registry = db.lock().unwrap().nested_tools();
-        assert!(registry
-            .invoke(
-                &outer.operation_id,
-                &owner(),
-                NestedToolInput {
-                    call_id: "late".into(),
-                    name: "read".into(),
-                    arguments: json!({})
-                }
-            )
-            .is_err());
+        assert!(
+            registry
+                .invoke(
+                    &outer.operation_id,
+                    &owner(),
+                    NestedToolInput {
+                        call_id: "late".into(),
+                        name: "read".into(),
+                        arguments: json!({})
+                    }
+                )
+                .is_err()
+        );
         drop(engine);
         drop(tools);
         drop(db);
@@ -445,18 +454,20 @@ fn model_and_policy_nested_calls_share_original_catalog_without_inner_model_pair
             reopened.operation(&child.operation_id).unwrap().effect,
             Effect::Unknown
         );
-        assert!(reopened
-            .nested_tools()
-            .invoke(
-                &outer.operation_id,
-                &owner(),
-                NestedToolInput {
-                    call_id: "effect".into(),
-                    name: "effect".into(),
-                    arguments: json!({})
-                }
-            )
-            .is_err());
+        assert!(
+            reopened
+                .nested_tools()
+                .invoke(
+                    &outer.operation_id,
+                    &owner(),
+                    NestedToolInput {
+                        call_id: "effect".into(),
+                        name: "effect".into(),
+                        arguments: json!({})
+                    }
+                )
+                .is_err()
+        );
         reopened
             .record_external_receipt_with_stop(
                 &child.operation_id,
@@ -466,7 +477,7 @@ fn model_and_policy_nested_calls_share_original_catalog_without_inner_model_pair
                     epoch: "epoch".into(),
                     outcome: Outcome::Succeeded,
                     effect: Effect::Confirmed,
-                    result: json!({"original":"effect","reconciled":true}),
+                    result: json!({"original":"effect","reconciled":true}).into(),
                 },
                 true,
             )
@@ -483,10 +494,12 @@ fn model_and_policy_nested_calls_share_original_catalog_without_inner_model_pair
             reopened.operation(&outer.operation_id).unwrap().effect,
             Effect::Confirmed
         );
-        assert!(reopened
-            .resource_admission()
-            .inspect(&child.operation_id)
-            .is_none());
+        assert!(
+            reopened
+                .resource_admission()
+                .inspect(&child.operation_id)
+                .is_none()
+        );
         drop(reopened);
         std::fs::remove_dir_all(path).unwrap();
     }
@@ -541,19 +554,21 @@ fn nested_exact_operation_alias_and_parent_cancel_wait_for_actual_executor_recei
             !worker.is_finished(),
             "cancellation notification cannot settle an executing callback"
         );
-        assert!(db
-            .resource_admission()
-            .inspect(&child.operation_id)
-            .is_some());
+        assert!(
+            db.resource_admission()
+                .inspect(&child.operation_id)
+                .is_some()
+        );
         release.send(()).unwrap();
         worker.join().unwrap().unwrap();
         let operation = db.lock().unwrap().operation(&child.operation_id).unwrap();
         assert_eq!(operation.outcome, Some(Outcome::Cancelled));
         assert_eq!(operation.effect, Effect::Partial);
-        assert!(db
-            .resource_admission()
-            .inspect(&child.operation_id)
-            .is_none());
+        assert!(
+            db.resource_admission()
+                .inspect(&child.operation_id)
+                .is_none()
+        );
         assert_eq!(cancel.is_cancelled(), parent);
         drop(tools);
         drop(db);

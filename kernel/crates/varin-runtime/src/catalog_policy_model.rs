@@ -44,7 +44,7 @@ pub(crate) struct PolicyModelRead {
 impl PolicyModelRead {
     pub(crate) fn load(self) -> Result<PolicyModelState> {
         let intent = self.metadata.load_model(&self.content)?;
-        let snapshot = serde_json::from_value(self.content.load(&self.result.request_ref)?)?;
+        let snapshot = self.content.load_snapshot(&self.result.request_ref)?;
         let output = self
             .result
             .original_ref
@@ -135,7 +135,7 @@ impl PolicyModelAdmissionReferences {
         };
         Ok(Self {
             metadata,
-            request: content.save(&serde_json::to_value(snapshot)?)?,
+            request: content.save_snapshot(snapshot)?,
             capability: content.save(&serde_json::to_value(capability)?)?,
             checkpoint: super::policy_checkpoint::PolicyCheckpointReferences::write(
                 content, state, &action,
@@ -402,7 +402,7 @@ impl Catalog {
         let _synchronous = self.content.begin_synchronous()?;
         let _publication = self.content.begin_publication();
         let reference = self.policy_model_request_reference(run_id, epoch, action)?;
-        let snapshot = serde_json::from_value(self.content.load(&reference)?)?;
+        let snapshot = self.content.load_snapshot(&reference)?;
         let deliveries = super::memory::PreparedMemoryDeliveries::prepare(&snapshot)?;
         self.dispatch_policy_model_prepared(
             run_id, epoch, action, &reference, &snapshot, deliveries,
@@ -510,7 +510,7 @@ impl Catalog {
         let _synchronous = self.content.begin_synchronous()?;
         let _publication = self.content.begin_publication();
         let reference = self.policy_model_request_reference(run_id, epoch, action)?;
-        let snapshot = serde_json::from_value(self.content.load(&reference)?)?;
+        let snapshot = self.content.load_snapshot(&reference)?;
         let deliveries = receipt
             .filter(|receipt| receipt.usable)
             .map(|_| super::memory::PreparedMemoryDeliveries::prepare(&snapshot))

@@ -19,6 +19,15 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-11 增量：原工具与持久脚本的 typed media
+
+- 单一 `OutputBody` 保 opaque data 与有序 Text/Media；Incoming 只有字节/MIME，原调用/输入 owner 赋真实来源，Stored 引用既有 ContentStore，worker 才解引用。Computer 抽取同次 observation/action 截图并保 metadata；Node 显式 emitImage、普通 Result SDK call.output 与原结果/回执共用正文，print/普通 JSON 不猜图，nested 只显式转出、不造模型调用。
+- 原 provider serializer 真正编译图片块，Chat/Google 在完整原工具批次后附图；无能力/MIME 不支持明确失败。原 publication、typed manifest dependencies、输入修订、event/family/policy/child holder、fork/context/GC/reopen 一起闭合，无自由 hash 读取或另建媒体库。Catalog **48**、content **4**、manifest **2**、wire **3**、policy **4**直接替换内部格式，普通默认与外部资产不迁移。
+- typed Deliver 的原 child report、后继 execution 和 parent fork 经过同一报告与媒体 owner，User/client/认证 route/共享 UI 保精确身份、分页、取消和错误。五策略示例、原安装消费者与保留 Pi evaluator 一起接新合同；MCP 图片/audio/resource producer 尚未由此片接入。
+- 真实组合抓到内容格式写读不一致、typed child report 漏消费、managed Job 被送进 HostJob 专用 reader，以及 struct/Value 编码不同误拒原 None 图片回执，均已按原 owner 修复。独审另复现坏 base64 擦除已确认效果；SDK 在登记前拒绝，Rust 仅将未准入媒体替同位置诊断，保原 data/outcome/effect/停止事实及有效 parts。HostJob 晚到 acceptance_ref 与首次 Unknown 交换保持独立，不放宽效果验证。
+- Runtime **461/0，2 ignored、9 socket excluded**；kernel **148/0，18 ignored、3 socket excluded**。准确 fresh binary 的原 Node **6**、child guardian **1**、进程/接续 **2**全部通过；新增整链真实进入下一 Responses 请求，再经 family/fork/GC/关闭重开读原图。独审有限 producer/provider/Catalog/context/client/late 反例修后通过；完整同源、公开消费者、SDK/UI、真实 bundle 与复跑见[本片验收](../reviews/runtime-typed-media-2026-10-11.md)。不扩大为真桌面、产品 socket IPC、外部模型、浏览器或平台验收。
+- 继续 MCP 实际内容与剩余 resources/prompts/Tasks、Web/材料/PDF/学术/Bot、环境与来源/检索/上下文/provider 等设计能力。两设计总体与性能/产品验收未完成；用户最终默认切换/Pi 删除及全面资产迁移分工保持。
+
 ## 2026-10-11 增量：受管持久 JavaScript 环境
 
 - 发行普通 `script_open/run/close` 沿原 SDK/broker/冻结工具调用进入真实 Node、Storage 与 guardian；open 是 Run 所属 Environment Job，各 cell 保独立 Operation。共享 Node REPL 保词法/对象/完整 async 单元与原嵌套工具，内层 memory 已提交后外层报错仍进入下一真实请求；不回放丢失 heap，不把进程隔离称作 OS 沙箱。

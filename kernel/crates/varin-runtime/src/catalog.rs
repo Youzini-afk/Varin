@@ -1,9 +1,9 @@
 use crate::types::OperationMetadata as Operation;
 use crate::types::*;
 use fs2::FileExt;
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
-use serde::{de::DeserializeOwned, Serialize};
-use serde_json::{json, Value};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use serde::{Serialize, de::DeserializeOwned};
+use serde_json::{Value, json};
 use std::{
     fs::{File, OpenOptions},
     path::Path,
@@ -38,7 +38,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 47;
+pub(crate) const FORMAT: i64 = 48;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -138,7 +138,7 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
             [],
             |r| r.get(0),
         )?;
-        if content_format != 3 {
+        if content_format != crate::content::CONTENT_FORMAT {
             return Err(RuntimeError::Invalid(
                 "unsupported content format; data was preserved".into(),
             ));
@@ -157,7 +157,11 @@ fn initialize_metadata(
     let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     if version == 0 {
         tx.execute_batch(SCHEMA)?;
-        tx.execute_batch("CREATE TABLE input_history_content(input_id TEXT PRIMARY KEY REFERENCES input_queue(id),body TEXT NOT NULL); CREATE TABLE runtime_content_format(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL); INSERT INTO runtime_content_format VALUES(1,3);")?;
+        tx.execute_batch("CREATE TABLE input_history_content(input_id TEXT PRIMARY KEY REFERENCES input_queue(id),body TEXT NOT NULL); CREATE TABLE runtime_content_format(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL);")?;
+        tx.execute(
+            "INSERT INTO runtime_content_format VALUES(1,?1)",
+            [crate::content::CONTENT_FORMAT],
+        )?;
         tx.pragma_update(None, "user_version", FORMAT)?;
         context_jobs::initialize_new(&tx)?;
     }
@@ -451,13 +455,7 @@ impl Catalog {
                 }
             }
         }
-        let input_id = match &origin {
-            submissions::SubmissionOrigin::Ingress { input, .. } => input.id.clone(),
-            submissions::SubmissionOrigin::Child { operation_id, .. } => {
-                format!("child-input:{operation_id}")
-            }
-            _ => id(),
-        };
+        let input_id = prepared.input_id.clone();
         let run_id = prepared.run_id.clone();
         let history = HistoryItem {
             run_id: run_id.to_owned(),
@@ -1683,6 +1681,8 @@ pub mod observations;
 
 #[path = "catalog_history.rs"]
 pub mod history_views;
+#[path = "catalog_media.rs"]
+pub mod media;
 
 #[path = "catalog_fork.rs"]
 pub mod forks;

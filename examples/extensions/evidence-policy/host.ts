@@ -64,7 +64,7 @@ export default defineHostExtension({
         }
         if (event.kind === 'result_chunk') {
           const reference = state.evidence[0];
-          if (state.phase !== 'index_content' || !reference || reference.action_id !== event.reference.action_id || reference.node_id !== event.reference.node_id || reference.content_ref !== event.reference.content_ref
+          if (event.format !== 'output_body' || state.phase !== 'index_content' || !reference || reference.action_id !== event.reference.action_id || reference.node_id !== event.reference.node_id || reference.content_ref !== event.reference.content_ref
             || event.index !== state.nextChunk) return fail('Unexpected evidence index chunk');
           // Only this small, explicitly bounded index is parsed by the policy. Evidence bodies
           // stay in the core content store, regardless of their size, and enter the model by reference.
@@ -73,10 +73,12 @@ export default defineHostExtension({
           if (state.nextChunk < event.total_chunks) return {
             action: { kind: 'read_result', reference, index: state.nextChunk }, state: asJson(state),
           };
-          let result: unknown;
-          try { result = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(state.indexChunks))); }
+          let output: unknown;
+          try { output = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(state.indexChunks))); }
           catch { return fail('Evidence index result is not valid UTF-8 JSON'); }
           state.indexChunks = [];
+          if (!record(output) || !('data' in output) || !Array.isArray(output.parts)) return fail('Evidence index result is not an output body');
+          const result = output.data;
           if (!record(result) || result.missing !== false || !record(result.source) || typeof result.source.branchId !== 'string'
             || !Number.isSafeInteger(result.source.revision) || !record(result.content)
             || typeof result.content.text !== 'string') return fail('Evidence index is missing or is not a UTF-8 file');

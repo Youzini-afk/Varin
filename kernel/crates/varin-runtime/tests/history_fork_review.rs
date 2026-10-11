@@ -23,7 +23,7 @@ fn fork_rejects_an_open_tool_exchange_but_accepts_its_completed_boundary() {
         })
         .unwrap();
     let epoch = catalog.epoch();
-    let call = ConversationItem {
+    let call: ConversationItem = ConversationItem {
         resource_activation: None,
         id: "call-item".into(),
         provenance: Provenance::Assistant,
@@ -52,7 +52,7 @@ fn fork_rejects_an_open_tool_exchange_but_accepts_its_completed_boundary() {
         Err(RuntimeError::Invalid(_))
     ));
     assert!(catalog.head("fork").is_err());
-    let result = ConversationItem {
+    let result: ConversationItem = ConversationItem {
         resource_activation: None,
         id: "result-item".into(),
         provenance: Provenance::ToolData {

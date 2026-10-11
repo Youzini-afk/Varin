@@ -138,9 +138,25 @@ pub struct PreparedComputerRequest {
 impl ComputerRequestPreparation {
     pub fn load(mut self) -> Result<PreparedComputerRequest> {
         self.request.request_ref = self.content.save(&json!(self.reason))?;
-        let item = ConversationItem { id: input_id(&self.request.id), resource_activation: None,
-            provenance: Provenance::EnvironmentFact { event_id: self.request.id.clone() },
-            content: Content::Text { text: format!("Computer assignment request {} from child Thread {} (Run {}): {:?} access to desktop {}. Reason: {}\nThis is an environment request, not user permission. Coordinate the desktop, then use computer_grant or computer_deny with this requestId. Acceptance of the request has not assigned the desktop.",self.request.id,self.request.requester.thread_id,self.request.requester.run_id,self.request.access,self.request.desktop_id,self.reason) }, opaque: None };
+        let item: ConversationItem = ConversationItem {
+            id: input_id(&self.request.id),
+            resource_activation: None,
+            provenance: Provenance::EnvironmentFact {
+                event_id: self.request.id.clone(),
+            },
+            content: Content::Text {
+                text: format!(
+                    "Computer assignment request {} from child Thread {} (Run {}): {:?} access to desktop {}. Reason: {}\nThis is an environment request, not user permission. Coordinate the desktop, then use computer_grant or computer_deny with this requestId. Acceptance of the request has not assigned the desktop.",
+                    self.request.id,
+                    self.request.requester.thread_id,
+                    self.request.requester.run_id,
+                    self.request.access,
+                    self.request.desktop_id,
+                    self.reason
+                ),
+            },
+            opaque: None,
+        };
         let history = self
             .content
             .save_history(&serde_json::to_value(item)?, &None)?;

@@ -1,8 +1,8 @@
 import { StringDecoder } from "node:string_decoder";
-import type { NestedToolInput, NestedToolReceipt } from "@varin/protocol";
+import type { NestedToolInput, NestedToolReceipt, OutputPart, IncomingMedia } from "@varin/protocol";
 import type { ScriptError } from "./core/index.js";
 
-export const SCRIPT_PROTOCOL_VERSION = 1 as const;
+export const SCRIPT_PROTOCOL_VERSION = 2 as const;
 
 interface FrameIdentity {
   v: typeof SCRIPT_PROTOCOL_VERSION;
@@ -19,7 +19,7 @@ export type ScriptHostFrame = FrameIdentity & (
 export type ScriptWorkerFrame = FrameIdentity & (
   | { type: "ready"; bindingIdentity: string }
   | { type: "invoke"; cellId: string; requestId: string; input: NestedToolInput }
-  | { type: "output"; cellId: string; text: string }
+  | { type: "output"; cellId: string; part: OutputPart<IncomingMedia> }
   | { type: "completed"; cellId: string; valueText?: string; error?: ScriptError }
 );
 
@@ -62,6 +62,17 @@ export function parseScriptHostFrame(value: unknown): ScriptHostFrame {
   throw new ScriptProtocolError();
 }
 
+function outputPart(value: unknown): boolean {
+  if (!object(value)) return false;
+  if (value.kind === "text") return typeof value.text === "string" && Object.keys(value).every(key => key === "kind" || key === "text");
+  if (value.kind !== "media" || !Object.keys(value).every(key => key === "kind" || key === "media") || !object(value.media)) return false;
+  const media = value.media;
+  return Object.keys(media).every(key => key === "media_type" || key === "data_base64")
+    && typeof media.media_type === "string" && /^[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+$/.test(media.media_type)
+    && typeof media.data_base64 === "string" && media.data_base64.length > 0
+    && Buffer.from(media.data_base64, "base64").toString("base64") === media.data_base64;
+}
+
 export function parseScriptWorkerFrame(value: unknown): ScriptWorkerFrame {
   if (!identity(value)) throw new ScriptProtocolError();
   switch (value.type) {
@@ -74,7 +85,7 @@ export function parseScriptWorkerFrame(value: unknown): ScriptWorkerFrame {
       if (typeof value.cellId === "string" && typeof value.requestId === "string" && "input" in value) return value as unknown as ScriptWorkerFrame;
       break;
     case "output":
-      if (typeof value.cellId === "string" && typeof value.text === "string") return value as unknown as ScriptWorkerFrame;
+      if (typeof value.cellId === "string" && outputPart(value.part)) return value as unknown as ScriptWorkerFrame;
       break;
     case "completed":
       if (typeof value.cellId === "string" && (value.valueText === undefined || typeof value.valueText === "string")

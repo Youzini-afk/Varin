@@ -17,6 +17,7 @@ pub mod supervisor;
 pub mod model_session;
 
 pub mod content;
+pub mod output;
 
 pub mod context_capacity;
 pub mod context_job;

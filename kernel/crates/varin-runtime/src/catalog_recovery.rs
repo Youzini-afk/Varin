@@ -81,7 +81,19 @@ impl ExecutionPreparation {
             if cancel.is_some_and(CancellationToken::is_cancelled) {
                 return Ok(None);
             }
-            history.push(self.content.hydrate_history(item)?);
+            let mut item = item;
+            let loaded = self
+                .content
+                .load_history_payload_cancellable(&item.content, &|| {
+                    cancel.is_some_and(CancellationToken::is_cancelled)
+                });
+            let (body, provider) = match loaded {
+                Err(RuntimeError::DispatchCancelled) => return Ok(None),
+                other => other?,
+            };
+            item.content = body;
+            item.provider = provider;
+            history.push(item);
         }
         Ok(Some(history))
     }
@@ -205,7 +217,7 @@ impl RecoveryPreparation {
             RecoveryKind::None | RecoveryKind::Policy => None,
             RecoveryKind::Undispatched { step, checkpoint } => {
                 let snapshot: RequestSnapshot =
-                    serde_json::from_value(self.execution.content.load(&step.request)?)?;
+                    self.execution.content.load_snapshot(&step.request)?;
                 let frozen = &snapshot.view.binding;
                 if snapshot.view.request_id != step.id
                     || snapshot.view.run_id != self.execution.run.id
@@ -275,14 +287,11 @@ impl RecoveryPreparation {
                         | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
                 )?;
                 let (event, decision) = if let Some(checkpoint) = checkpoint {
-                    let mut event: PolicyEvent =
-                        serde_json::from_value(self.execution.content.load(
-                            checkpoint.continuation.as_ref().ok_or_else(|| {
-                                RuntimeError::Invalid(
-                                    "undispatched policy continuation missing".into(),
-                                )
-                            })?,
-                        )?)?;
+                    let mut event: PolicyEvent = self.execution.content.load_policy_event(
+                        checkpoint.continuation.as_ref().ok_or_else(|| {
+                            RuntimeError::Invalid("undispatched policy continuation missing".into())
+                        })?,
+                    )?;
                     let inputs =
                         checkpoint.invalidating_inputs(&database, &self.execution.run.id)?;
                     if !inputs.is_empty()
@@ -296,11 +305,11 @@ impl RecoveryPreparation {
                     let decision = if checkpoint.pending(&database, &self.execution.run.id)?
                         && frozen.goal == self.goal
                     {
-                        let action = serde_json::from_value(self.execution.content.load(
+                        let action = self.execution.content.load_policy_action(
                             checkpoint.action.as_ref().ok_or_else(|| {
                                 RuntimeError::Invalid("undispatched policy action missing".into())
                             })?,
-                        )?)?;
+                        )?;
                         if !matches!(
                             action,
                             PolicyAction::RequestModel
@@ -340,11 +349,11 @@ impl RecoveryPreparation {
                     rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
                         | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
                 )?;
-                let mut event: PolicyEvent = serde_json::from_value(self.execution.content.load(
+                let mut event: PolicyEvent = self.execution.content.load_policy_event(
                     checkpoint.continuation.as_ref().ok_or_else(|| {
                         RuntimeError::Invalid("policy continuation missing".into())
                     })?,
-                )?)?;
+                )?;
                 let input_ids =
                     checkpoint.invalidating_inputs(&database, &self.execution.run.id)?;
                 if !input_ids.is_empty()
@@ -362,11 +371,11 @@ impl RecoveryPreparation {
                                 RuntimeError::Invalid("pending decision state missing".into())
                             })?,
                         )?,
-                        action: serde_json::from_value(self.execution.content.load(
+                        action: self.execution.content.load_policy_action(
                             checkpoint.action.as_ref().ok_or_else(|| {
                                 RuntimeError::Invalid("pending decision missing".into())
                             })?,
-                        )?)?,
+                        )?,
                     })
                 } else {
                     None
@@ -394,7 +403,7 @@ impl RecoveryPreparation {
                 )?;
                 drop(snapshot_read);
                 let snapshot: RequestSnapshot =
-                    serde_json::from_value(self.execution.content.load(&model.step.request)?)?;
+                    self.execution.content.load_snapshot(&model.step.request)?;
                 let binding = &self.execution.binding;
                 let model_changed = snapshot.view.binding.connection_identity
                     != binding.connection_identity
@@ -1028,7 +1037,7 @@ impl Catalog {
                             completion: ToolCompletion::Result {
                                 outcome: Outcome::Cancelled,
                                 effect: Effect::None,
-                                content: json!({"error":"cancelled_before_dispatch"}),
+                                content: json!({"error":"cancelled_before_dispatch"}).into(),
                             },
                         },
                     );
@@ -1055,14 +1064,16 @@ impl Catalog {
                                     )
                                 })?,
                                 effect: op.effect,
-                                content: op
-                                    .result
-                                    .ok_or_else(|| {
-                                        RuntimeError::Invalid(
-                                            "terminal tool operation has no result".into(),
-                                        )
-                                    })?
-                                    .load(content)?,
+                                content: content.load_output(
+                                    op.result
+                                        .as_ref()
+                                        .ok_or_else(|| {
+                                            RuntimeError::Invalid(
+                                                "terminal tool operation has no result".into(),
+                                            )
+                                        })?
+                                        .reference()?,
+                                )?,
                             },
                         },
                     );
@@ -1084,10 +1095,8 @@ impl Catalog {
                     state: content.load(saved.pending_state.as_ref().ok_or_else(|| {
                         RuntimeError::Invalid("pending decision state missing".into())
                     })?)?,
-                    action: serde_json::from_value(content.load(
-                        saved.action.as_ref().ok_or_else(|| {
-                            RuntimeError::Invalid("pending policy decision missing".into())
-                        })?,
+                    action: content.load_policy_action(saved.action.as_ref().ok_or_else(
+                        || RuntimeError::Invalid("pending policy decision missing".into()),
                     )?)?,
                 })
             } else {

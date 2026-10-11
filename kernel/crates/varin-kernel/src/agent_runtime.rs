@@ -1,20 +1,21 @@
 //! Agent control is independent of the file/process Storage execution queue.
 //! Only the authenticated parent Host may use this management channel. It is not a tool grant.
-use crate::error::{response_error, KernelError};
+use crate::error::{KernelError, response_error};
 use crate::protocol::{
-    reject_unknown_fields, response_ok, validate_method_params, PROTOCOL_VERSION,
+    PROTOCOL_VERSION, reject_unknown_fields, response_ok, validate_method_params,
 };
 use crate::protocol_generated::*;
 use base64::Engine as _;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::{
+    Arc,
     atomic::{AtomicBool, Ordering},
-    mpsc, Arc,
+    mpsc,
 };
 use std::thread::{self, JoinHandle};
-use varin_runtime::{model_session, supervisor::RunSupervisor, Catalog, SubmitInput};
+use varin_runtime::{Catalog, SubmitInput, model_session, supervisor::RunSupervisor};
 
 #[path = "agent_computer.rs"]
 mod computer_commands;
@@ -248,16 +249,18 @@ pub(crate) fn spawn(
     // own execution slot; the receiver lock is released before any file I/O or decoding.
     for _ in 0..KERNEL_REQUEST_WINDOW {
         let jobs = content_jobs.clone();
-        thread::spawn(move || loop {
-            let job = {
-                jobs.lock()
-                    .unwrap_or_else(|error| error.into_inner())
-                    .recv()
-            };
-            let Ok(job) = job else {
-                break;
-            };
-            job();
+        thread::spawn(move || {
+            loop {
+                let job = {
+                    jobs.lock()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .recv()
+                };
+                let Ok(job) = job else {
+                    break;
+                };
+                job();
+            }
         });
     }
 
@@ -1727,13 +1730,15 @@ pub(crate) fn spawn(
                                     .map_err(domain)?
                             } else {
                                 let p: RunParams = serde_json::from_value(params)?;
-                                vec![owner
-                                    .lock()
-                                    .map_err(|_| {
-                                        KernelError::Storage("catalog owner failed".into())
-                                    })?
-                                    .capture_context_job(&p.run_id)
-                                    .map_err(domain)?]
+                                vec![
+                                    owner
+                                        .lock()
+                                        .map_err(|_| {
+                                            KernelError::Storage("catalog owner failed".into())
+                                        })?
+                                        .capture_context_job(&p.run_id)
+                                        .map_err(domain)?,
+                                ]
                             };
                             let response_id = id.clone();
                             let response_sender = responses.clone();
@@ -1966,6 +1971,40 @@ pub(crate) fn spawn(
                                     let _ = response_sender.send(response);
                                 })
                                 .map_err(|error| KernelError::Storage(error.to_string()))?;
+                            deferred = true;
+                            return Ok(Value::Null);
+                        }
+                        if method == "runtime.output.media.read" {
+                            let p: varin_runtime::output::MediaReadParams =
+                                serde_json::from_value(params)?;
+                            let read = runtime
+                                .catalog()
+                                .lock()
+                                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                                .capture_media_read(&p)
+                                .map_err(domain)?;
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            let cancelled = cancellation.clone();
+                            content_tasks
+                                .send(Box::new(move || {
+                                    let result = read
+                                        .chunk(&|| cancelled.load(Ordering::Acquire))
+                                        .map_err(domain)
+                                        .and_then(|chunk| {
+                                            serde_json::to_value(chunk).map_err(Into::into)
+                                        });
+                                    let response = match result {
+                                        Ok(value) => response_ok(&response_id, value),
+                                        Err(error) => response_error(&response_id, &error),
+                                    };
+                                    done(&response_id);
+                                    let _ = response_sender.send(response);
+                                }))
+                                .map_err(|_| {
+                                    KernelError::Storage("content reader unavailable".into())
+                                })?;
                             deferred = true;
                             return Ok(Value::Null);
                         }
@@ -2299,7 +2338,7 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
                 _ => {
                     return Err(KernelError::Protocol(
                         "specify one original model, policy or nested caller".into(),
-                    ))
+                    ));
                 }
             };
             let result = catalog
@@ -2381,7 +2420,7 @@ pub(crate) fn record_process_interaction(
             _ => {
                 return Err(KernelError::Authorization(
                     "unknown process interaction executor".into(),
-                ))
+                ));
             }
         };
         if !receipt.valid()
@@ -2409,7 +2448,7 @@ pub(crate) fn record_process_interaction(
             epoch: receipt.identity().kernel_epoch.clone(),
             outcome: receipt.outcome(),
             effect: receipt.effect(),
-            result: serde_json::to_value(receipt)?,
+            result: serde_json::to_value(receipt)?.into(),
         },
         executor_stopped && receipt.identity().state != crate::process::interaction::State::Unknown,
     )
@@ -2508,7 +2547,7 @@ fn apply_process_terminal(
             } else {
                 Effect::Confirmed
             },
-            result: fact.receipt.clone(),
+            result: fact.receipt.clone().into(),
         },
         confirmed,
     )
@@ -2614,7 +2653,7 @@ pub(crate) fn personalization_basis(
                                         _ => {
                                             return Err(KernelError::Protocol(
                                                 "invalid context fragment kind".into(),
-                                            ))
+                                            ));
                                         }
                                     },
                                 })

@@ -1,6 +1,6 @@
 //! Private journal observation for recovery; no filesystem replay.
-use super::file_resources::FileState;
 use super::file_mutations::TextMutation;
+use super::file_resources::FileState;
 use super::*;
 
 impl Storage {
@@ -141,7 +141,7 @@ impl Storage {
             _ => {
                 return Err(KernelError::Storage(
                     "mutation journal has an invalid terminal receipt".into(),
-                ))
+                ));
             }
         };
         // Receipt content must be identical across repeated reconciliation and
@@ -158,7 +158,7 @@ impl Storage {
             epoch: original_epoch,
             outcome,
             effect,
-            result: receipt,
+            result: receipt.into(),
         }))
     }
 }

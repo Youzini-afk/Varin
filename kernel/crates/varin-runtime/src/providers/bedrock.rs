@@ -1,6 +1,6 @@
 //! Bedrock ConverseStream over AWS binary eventstream, with dispatch-bound bearer or SigV4 auth.
 use super::*;
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -39,6 +39,32 @@ fn tool_id(id: &str) -> String {
     } else {
         hex::encode(Sha256::digest(id.as_bytes()))
     }
+}
+fn bedrock_parts(parts: Vec<crate::output::OutputPart>) -> Result<Vec<Value>, ExecutionError> {
+    let mut blocks = Vec::new();
+    for part in parts {
+        match part {
+            crate::output::OutputPart::Text { text } => blocks.push(json!({"text":text})),
+            crate::output::OutputPart::Media { media } => {
+                let format = match media.media_type.as_str() {
+                    "image/png" => "png",
+                    "image/jpeg" => "jpeg",
+                    "image/gif" => "gif",
+                    "image/webp" => "webp",
+                    _ => {
+                        return Err(ExecutionError::new(
+                            "unsupported_media",
+                            "Bedrock media type is unsupported",
+                        ));
+                    }
+                };
+                blocks.push(json!({"text":media_label(&media)}));
+                blocks
+                    .push(json!({"image":{"format":format,"source":{"bytes":media.data_base64}}}));
+            }
+        }
+    }
+    Ok(blocks)
 }
 impl ModelProvider for BedrockProvider {
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
@@ -101,45 +127,18 @@ impl ModelProvider for BedrockProvider {
                     push(
                         &mut messages,
                         "user",
-                        json!({"toolResult":{"toolUseId":tool_id(&result.call_id),"status":if success{"success"}else{"error"},"content":[{"json":serde_json::to_value(result.completion).map_err(|_|ExecutionError::new("serialize","invalid tool result"))?}]}}),
+                        json!({"toolResult":{"toolUseId":tool_id(&result.call_id),"status":if success{"success"}else{"error"},"content":bedrock_parts(completion_parts(&result.completion))?}}),
                     );
                 }
-                Content::Attachment {
-                    media_type,
-                    content_ref,
-                    ..
-                } => {
-                    let format = match media_type.as_str() {
-                        "image/png" => "png",
-                        "image/jpeg" => "jpeg",
-                        "image/gif" => "gif",
-                        "image/webp" => "webp",
-                        _ => {
-                            return Err(ExecutionError::new(
-                                "unsupported_attachment",
-                                "Bedrock image attachment format is unsupported",
-                            ))
-                        }
-                    };
-                    let data = content_ref
-                        .strip_prefix(&format!("data:{media_type};base64,"))
-                        .ok_or_else(|| {
-                            ExecutionError::new(
-                                "unsupported_attachment",
-                                "Bedrock requires admitted inline image data",
-                            )
-                        })?;
-                    BASE64.decode(data).map_err(|_| {
-                        ExecutionError::new(
-                            "unsupported_attachment",
-                            "Bedrock image data is invalid base64",
-                        )
-                    })?;
-                    push(
-                        &mut messages,
-                        "user",
-                        json!({"image":{"format":format,"source":{"bytes":data}}}),
-                    );
+                Content::Media { media } => {
+                    for block in bedrock_parts(vec![crate::output::OutputPart::Media { media }])? {
+                        push(&mut messages, "user", block);
+                    }
+                }
+                Content::Output { output } => {
+                    for block in bedrock_parts(evidence_parts(&output, &item.provenance))? {
+                        push(&mut messages, "user", block);
+                    }
                 }
                 Content::ProviderOnly => {}
             }
@@ -413,7 +412,7 @@ impl StreamState {
                         return Err(failure(
                             "unsupported_bedrock_stop",
                             "Bedrock returned an unsupported stop reason",
-                        ))
+                        ));
                     }
                 };
                 for (index, block) in std::mem::take(&mut self.blocks) {
@@ -480,7 +479,7 @@ impl StreamState {
                 return Err(failure(
                     "unsupported_bedrock_event",
                     "unsupported Bedrock stream event",
-                ))
+                ));
             }
         }
         Ok(())

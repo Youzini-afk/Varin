@@ -1,6 +1,6 @@
 # Bounded evidence policy
 
-An ordinary brokered Host extension implementing `varin.agent.policy@3` through
+An ordinary brokered Host extension implementing `varin.agent.policy@4` through
 `provideAgentPolicy`. It gathers evidence before the first model request, inspects a committed
 result, chooses a subsequent read from that content, and asks the normal selected model to answer.
 
@@ -23,8 +23,8 @@ Select its provider in existing service routing, with a real project ID:
 ```json
 {
   "serviceId": "varin.agent.policy",
-  "version": 3,
-  "providerKey": "example.evidence-policy:host:varin.agent.policy@3",
+  "version": 4,
+  "providerKey": "example.evidence-policy:host:varin.agent.policy@4",
   "scope": { "projectId": "YOUR_PROJECT_ID" },
   "allowFallback": false
 }
@@ -52,8 +52,9 @@ The example performs these actual decisions:
 
 1. Submit a one-node `tool_graph` for `evidence-index.json`, before any model request.
 2. Receive `tool_graph_completed` with its committed own-Run action/node output reference.
-3. Request the output through `read_result` chunks. Inspect the native result's source provenance
-   and parse its `content.text` JSON to obtain `nextFile`.
+3. Request the output through `read_result` chunks tagged `format: "output_body"`. Decode the
+   `{ data, parts }` body, inspect the native file result's provenance in `data.source`, and parse
+   `data.content.text` JSON to obtain `nextFile`.
 4. Submit a second read graph for that content-selected path. A different `nextFile` changes this
    read without changing policy code, model output or user input.
 5. Return `request_model_with_evidence` containing both committed references. Core resolves their
@@ -80,8 +81,11 @@ policy origins do not make every permissions, MCP, planning, child-task or quest
 null. A `not_dispatched` completion has a reason and no output. A `job_accepted` completion records
 `operation_id`, `phase`, `effect` and `lifetime`; it is not a successful job result. This example
 requires successful `result` completions before using evidence. `read_result`
-accepts that reference and a zero-based chunk index, producing `result_chunk` with byte data,
-chunk count and total byte count. Decode the complete UTF-8 JSON across chunk boundaries. The
+accepts that reference and a zero-based chunk index, producing `result_chunk` with a format tag,
+byte data, chunk count and total byte count. Decode the complete UTF-8 JSON across chunk boundaries.
+Ordinary tool output uses `format: "output_body"` with opaque tool JSON in `data` and ordered typed
+text/media in `parts`; this policy inspects only the file result in `data`. It does not infer media
+from arbitrary JSON. The
 core checks the exact own-Run/action/node/content association; knowing a content hash grants no
 access. Invalid references fail rather than exposing generic storage or another Run's data.
 

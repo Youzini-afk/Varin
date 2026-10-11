@@ -80,7 +80,7 @@ impl AgentPolicy for Sequence {
                 call: ToolCall {
                     call_id: id.into(),
                     name: name.into(),
-                    schema_version: if matches!(name,"dispatch"|"child_status"|"child_report") { "2" } else { "1" }.into(),
+                    schema_version: schemas(Vec::new()).into_iter().find(|schema|schema.name==name).unwrap().version,
                     arguments,
                 },
             }],

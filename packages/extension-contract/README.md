@@ -67,7 +67,7 @@ to determine whether a contribution is executable on the current runtime.
 
 See the complete [authoring guide](https://github.com/Youzini-afk/Varin/blob/main/docs/ops/varin-extension-authoring.md).
 
-`VARIN_AGENT_POLICY_CONTRACT` describes the `varin.agent.policy@3` Decision boundary, its explicit
+`VARIN_AGENT_POLICY_CONTRACT` describes the `varin.agent.policy@4` Decision boundary, its explicit
 state-only `transitionState` method and required `modelRoles`/`stateTransition` description, including
 inspectable input/output schemas. `parseVarinAgentPolicyInput` and `parseVarinAgentPolicyDecision`
 validate detached run/event facts, finite actions and private JSON state. The view deliberately
@@ -78,7 +78,12 @@ node carries exactly one tagged completion: `not_dispatched`, `result` (outcome,
 scoped output reference), or `job_accepted` (operation ID, phase, effect, lifetime, and an optional
 scoped acceptance-output reference). Job acceptance does not assert a terminal job outcome. Even a
 JSON-null result has a committed content reference; a retained JSON-null acceptance also stays null.
-Version 1 graph actions and receipt shapes are not accepted by version 2.
+`read_result` retains its original scoped reference and chunk cursor. Each chunk declares
+`format: 'output_body' | 'model_evidence'`: the former contains the resolved `{ data, parts }`
+output body, while the latter retains explicitly labelled auxiliary-model evidence. `deliver`
+accepts `output: OutputBody<IncomingMedia>` rather than an untyped text field. Its ingress cannot
+supply storage references or source identity. Older internal policy contracts are rejected rather
+than translated.
 
 `VARIN_RETRIEVAL_PLAN_CONTRACT` describes the declarative `varin.retrieval.plan@1` boundary.
 `describe([])` returns an immutable `configurationId`, `structure: 'builtin' | 'disabled'`, and optional

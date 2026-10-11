@@ -62,7 +62,7 @@ it('installed nested-tools uses actual SDK, broker scope, runtime capability and
       queries.push(query);
       const response = await memory.dispatch({ v: 1, kind: 'memory-request', id: `memory-${requests.length}`, kernelEpoch: 'epoch', query });
       expect(response.result.status).toBe('ready');
-      return { operationId, completion: { kind: 'result', outcome: 'succeeded', effect: query.arguments!.action === 'read' ? 'none' : 'confirmed', content: response.result } } satisfies NestedToolReceipt;
+      return { operationId, completion: { kind: 'result', outcome: 'succeeded', effect: query.arguments!.action === 'read' ? 'none' : 'confirmed', content: { data: response.result, parts: [] } } } satisfies NestedToolReceipt;
     } } as unknown as KernelClient;
     runtime.capabilities.register(VARIN_RUNTIME_TOOLS_CAPABILITY, createNestedToolOwner(kernel));
     await runtime.start();
@@ -92,8 +92,8 @@ it('installed nested-tools uses actual SDK, broker scope, runtime capability and
       send('execute');
       const nestedId = toolOperationId({ kind: 'nested_call', parent_operation_id: invocation.operationId }, 'memory');
       await expect.poll(() => frames.find(frame => frame.kind === 'host-tool-response' && frame.id === `${kind}:execute`)).toMatchObject({ executor_stopped: true,
-        completion: { kind: 'result', outcome: 'succeeded', content: { memory: { operationId: nestedId, completion: { kind: 'result', outcome: 'succeeded', effect: 'confirmed',
-          content: { memoryReceipt: { origin: `run:run:${nestedId}`, revision: revision + 1 } } } }, read: { status: 'not_requested' } } } });
+        completion: { kind: 'result', outcome: 'succeeded', content: { data: { memory: { operationId: nestedId, completion: { kind: 'result', outcome: 'succeeded', effect: 'confirmed',
+          content: { data: { memoryReceipt: { origin: `run:run:${nestedId}`, revision: revision + 1 } }, parts: [] } } }, read: { status: 'not_requested' } }, parts: [] } } });
       expect((await memory.personalization.context('thread')).memories).toContainEqual(expect.objectContaining({ content: `explicit nested ${kind}` }));
       const writes = memory.writes();
       const originalQuery = queries.at(-1)!;

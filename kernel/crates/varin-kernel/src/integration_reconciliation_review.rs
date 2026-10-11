@@ -281,7 +281,7 @@ fn replay_scenario(tail_phase: Option<&str>) {
             completion: ToolCompletion::Result {
                 outcome: Outcome::Indeterminate,
                 effect: Effect::Unknown,
-                content: json!({"original":"unknown"}),
+                content: json!({"original":"unknown"}).into(),
             },
             executor_stopped: false,
         },
@@ -299,7 +299,7 @@ fn replay_scenario(tail_phase: Option<&str>) {
                 completion: ToolCompletion::Result {
                     outcome: Outcome::Indeterminate,
                     effect: Effect::Unknown,
-                    content: json!({"original":"unknown"}),
+                    content: json!({"original":"unknown"}).into(),
                 },
             }],
         },
@@ -313,7 +313,7 @@ fn replay_scenario(tail_phase: Option<&str>) {
                 epoch: "host-owner".into(),
                 outcome: Outcome::Indeterminate,
                 effect: Effect::Unknown,
-                result: json!({"original":"unknown"}),
+                result: json!({"original":"unknown"}).into(),
             })
             .unwrap();
     f.db.record_external_tool_receipt_prepared(
@@ -390,7 +390,10 @@ fn replay_scenario(tail_phase: Option<&str>) {
             .load()
             .unwrap();
         assert_eq!(op.effect, Effect::Unknown);
-        assert_eq!(op.result, Some(json!({"original":"unknown"})));
+        assert_eq!(
+            op.result.as_ref().unwrap().output().unwrap().data,
+            json!({"original":"unknown"})
+        );
         assert!(db
             .resource_admission()
             .inspect(&context.operation_id)
@@ -432,7 +435,10 @@ fn replay_scenario(tail_phase: Option<&str>) {
                 .load()
                 .unwrap();
             assert_eq!(op.effect, Effect::Unknown);
-            assert_eq!(op.result, Some(json!({"original":"unknown"})));
+            assert_eq!(
+                op.result.as_ref().unwrap().output().unwrap().data,
+                json!({"original":"unknown"})
+            );
         }
         drop(owner);
         drop(runtime);
@@ -467,7 +473,10 @@ fn replay_scenario(tail_phase: Option<&str>) {
             .load()
             .unwrap()
     };
-    assert_eq!(original.result, Some(expected));
+    assert_eq!(
+        original.result.as_ref().unwrap().output().unwrap().data,
+        expected
+    );
     assert!(reconcile(
         &runtime,
         &resources,

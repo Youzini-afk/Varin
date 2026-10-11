@@ -1,3 +1,5 @@
+import type { OperationCallCompletion, IncomingMedia, OutputPart } from './protocol.generated.js';
+import type { MediaReadParams, MediaReadChunk } from './protocol.generated.js';
 import type * as CalendarProtocol from './protocol.generated.js';
 import type { ChildContinuationAcceptParams, DelegatedExecution } from './protocol.generated.js';
 import type { MessageSendParams, MessageListParams, MessageGetParams, MessageReceipt, MessagePage, MessageView } from './protocol.generated.js';
@@ -42,7 +44,7 @@ import type {
 import type {
   AdmissionInspectParams,
   AdmissionInspection,
-  ChildTextPage,
+  ChildReportPage,
   UnacceptedChildSource,
   ChildTask,
   ChildPrepareParams,
@@ -515,7 +517,7 @@ export class AgentRuntimeClient {
     offset = 0,
     maxBytes = 65536,
     signal?: AbortSignal,
-  ): Promise<ChildTextPage> {
+  ): Promise<ChildReportPage> {
     return this.kernel.agentRuntimeRequest(
       'runtime.child.report.read',
       { operationId, itemId, offset, maxBytes },
@@ -557,7 +559,7 @@ export class AgentRuntimeClient {
   childExecutions(childOperationId?: string, signal?: AbortSignal): Promise<DelegatedExecution[]> {
     return this.kernel.agentRuntimeRequest('runtime.child.execution.list', { ...(childOperationId ? { childOperationId } : {}) }, signal);
   }
-  readChildExecutionReport(executionId: string, itemId: string, offset = 0, maxBytes = 65536, signal?: AbortSignal): Promise<ChildTextPage> {
+  readChildExecutionReport(executionId: string, itemId: string, offset = 0, maxBytes = 65536, signal?: AbortSignal): Promise<ChildReportPage> {
     return this.kernel.agentRuntimeRequest('runtime.child.execution.report.read', { executionId, itemId, offset, maxBytes }, signal);
   }
   readyChildSource(input: ChildSourceReadyParams, signal?: AbortSignal): Promise<DelegatedExecution> {
@@ -1762,6 +1764,37 @@ export class AgentRuntimeClient {
       params,
       signal,
     );
+  }
+  /** Rehydrate only a body already held by the original Operation. The hash remains an equality check. */
+  async inlineCompletion(operation: Operation, signal?: AbortSignal): Promise<OperationCallCompletion<IncomingMedia>> {
+    const completion = operation.call_completion;
+    if (!completion) throw new Error('Original invocation completion is unavailable');
+    if (completion.kind === 'not_dispatched') return completion;
+    if (completion.kind === 'job_accepted' && completion.content === undefined) { const { content: _content, ...acceptance } = completion; return acceptance; }
+    const body = completion.content!;
+    const run = await this.run(operation.run_id, signal);
+    const parts: OutputPart<IncomingMedia>[] = [];
+    for (const [partIndex, part] of body.parts.entries()) {
+      if (part.kind === 'text') { parts.push(part); continue; }
+      const chunks: Buffer[] = []; let count = 1; let total = 0;
+      for (let chunkIndex = 0; chunkIndex < count; chunkIndex += 1) {
+        const chunk = await this.mediaRead({ threadId: run.thread_id, branchId: run.branch_id,
+          holder: { kind: 'operation', operationId: operation.id, output: 'completion' }, partIndex, chunkIndex,
+          expectedContentRef: part.media.content_ref.content_object }, signal);
+        if (chunk.partIndex !== partIndex || chunk.chunkIndex !== chunkIndex || chunk.media.media_type !== part.media.media_type
+          || chunk.media.content_ref.content_object !== part.media.content_ref.content_object || chunk.chunkCount < 1
+          || chunkIndex > 0 && (chunk.chunkCount !== count || chunk.totalBytes !== total)) throw new Error('Original completion media changed');
+        count = chunk.chunkCount; total = chunk.totalBytes;
+        chunks.push(Buffer.from(chunk.bytesBase64, 'base64'));
+      }
+      const bytes = Buffer.concat(chunks);
+      if (bytes.length !== total) throw new Error('Original completion media is incomplete');
+      parts.push({ kind: 'media', media: { media_type: part.media.media_type, data_base64: bytes.toString('base64') } });
+    }
+    return { ...completion, content: { data: body.data, parts } };
+  }
+  mediaRead(params: MediaReadParams, signal?: AbortSignal): Promise<MediaReadChunk> {
+    return this.kernel.agentRuntimeRequest('runtime.output.media.read', params, signal);
   }
   async historyItem(
     reference: HistoryReference,

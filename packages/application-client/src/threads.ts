@@ -1,7 +1,8 @@
+import type { MediaReadParams, MediaReadChunk } from '@varin/protocol';
 import type { ComputerAutomationProjection, ComputerAutomationState } from '@varin/protocol';
 import type { MessageSendParams, MessageListParams, MessageReceipt, MessagePage, MessageView } from '@varin/protocol';
 import type { FamilyList, FamilyRuns, FamilyRead, FamilyItem, FamilyRunsParams, FamilyReadParams, FamilyItemParams } from '@varin/protocol';
-import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, DelegatedExecution, ChildWait, TreeCancellationReceipt, Followup, FollowupView, FollowupRegisterParams, LiveRoot, ContextPersonalization, ContextResources, ResourceActivation, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
+import type { PlanSnapshot, PlanMutationResult, ChildReportPage, ChildTask, DelegatedExecution, ChildWait, TreeCancellationReceipt, Followup, FollowupView, FollowupRegisterParams, LiveRoot, ContextPersonalization, ContextResources, ResourceActivation, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
 
 import type { RunModelSelection, RunModelSelections } from '@varin/protocol';
 import type { HostJobSource, FollowupOccurrenceView, FollowupOccurrencesResult, FollowupPendingRegistration, FollowupRegistrationCancelResult, FollowupControlAction } from '@varin/protocol';
@@ -96,8 +97,8 @@ export interface ThreadCollaborationAPI {
   /** Explicit User input, retaining this child's exact previous execution configuration. */
   continueChild(input: ThreadChildContinuation, signal?: AbortSignal): Promise<DelegatedExecution>;
   executions(identity: ThreadIdentity, operationId?: string, signal?: AbortSignal): Promise<DelegatedExecution[]>;
-  readExecutionReport(identity: ThreadIdentity, executionId: string, itemId: string, offset?: number, maxBytes?: number, signal?: AbortSignal): Promise<ChildTextPage>;
-  readReport(identity: ThreadIdentity, operationId: string, itemId: string, offset?: number, maxBytes?: number): Promise<ChildTextPage>;
+  readExecutionReport(identity: ThreadIdentity, executionId: string, itemId: string, offset?: number, maxBytes?: number, signal?: AbortSignal): Promise<ChildReportPage>;
+  readReport(identity: ThreadIdentity, operationId: string, itemId: string, offset?: number, maxBytes?: number, signal?: AbortSignal): Promise<ChildReportPage>;
   children(identity: ThreadIdentity): Promise<ChildTask[]>;
   cancelChild(identity: ThreadIdentity, operationId: string): Promise<TreeCancellationReceipt>;
   cancelWait(identity: ThreadIdentity, waitId: string): Promise<ChildWait>;
@@ -238,6 +239,8 @@ export interface ThreadsAPI {
   enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; mode: InputMode }): Promise<InputReceipt>;
   editInput(inputId: string, expectedRevision: number, text: string, images?: ImageAttachment[]): Promise<QueuedInput>;
   cancelInput(inputId: string, expectedRevision: number): Promise<QueuedInput>;
+  /** Read one original-holder media chunk; the expected reference is identity, never authority. */
+  mediaRead(input: ThreadIdentity & Omit<MediaReadParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<MediaReadChunk>;
   historyPage(identity: ThreadIdentity, cursor: { headId: string; beforeId: string }): Promise<ThreadHistoryPage>;
   snapshot(identity: ThreadIdentity): Promise<ThreadSnapshot>;
   inspectTools(identity: ThreadIdentity, runId: string): Promise<ThreadToolInspection>;

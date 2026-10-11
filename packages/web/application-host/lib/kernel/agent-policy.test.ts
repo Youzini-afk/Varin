@@ -24,7 +24,7 @@ async function fixture() {
     await fs.writeFile(path.join(folder, 'varin.extension.json'), JSON.stringify({ schemaVersion: 1, id, version: '1.0.0', engines: { varin: '*' },
       entrypoints: { host: { file: 'host.cjs', mode: 'brokered', activation: ['service-request'] } }, provides: { services: [{ id: 'varin.agent.policy', version, multiple: true }] } }));
     await fs.writeFile(path.join(folder, 'host.cjs'), `module.exports={activate(context){context.services.provide({id:'varin.agent.policy',version:${version},multiple:true},{
-      describe(){${version === 3 ? "return {identity:{name:'installed-v3',version:'1'},configuration:{},modelRoles:[],stateTransition:'unsupported'}" : "throw new Error('Obsolete describe must never run')"}},
+      describe(){${version === 4 ? "return {identity:{name:'installed-v4',version:'1'},configuration:{},modelRoles:[],stateTransition:'unsupported'}" : "throw new Error('Obsolete describe must never run')"}},
       decide(){return {action:{kind:'complete'},state:null}}
     })}}`);
     await runtime.installOrStage({ expectedRevision: (await runtime.state()).catalog.revision, source: { kind: 'local', display: id, specifier: folder } });
@@ -46,24 +46,24 @@ it('absence, unselected old installation and another scope do not block the defa
   expect(await f.prepare(scope)).toBeUndefined();
   await f.runtime.setEnabled('review.policy-v1', false, (await f.runtime.state()).catalog.revision);
   expect(await f.prepare(scope)).toBeUndefined();
-  const installed = await f.install(3);
+  const installed = await f.install(4);
   expect(await f.prepare(scope)).toBeUndefined();
-  await f.route(3, installed, { sessionId: 'another-thread' });
+  await f.route(4, installed, { sessionId: 'another-thread' });
   expect(await f.prepare(scope)).toBeUndefined();
-  await f.route(3, installed, { sessionId: 'thread' });
+  await f.route(4, installed, { sessionId: 'thread' });
   const lease = await f.prepare(scope);
-  expect(lease?.binding.artifact.identity.name).toBe(`${installed}:installed-v3`);
+  expect(lease?.binding.artifact.identity.name).toBe(`${installed}:installed-v4`);
   lease?.release();
 });
 
-it.each([false, true])('an explicit unsupported policy cannot be replaced by the default loop or an installed-only v3 (fallback=%s)', async allowFallback => {
+it.each([false, true])('an explicit unsupported policy cannot be replaced by the default loop or an installed-only v4 (fallback=%s)', async allowFallback => {
   const f = await fixture();
   const old = await f.install(1);
   await f.route(1, old, { projectId: 'current' }, allowFallback);
   await expect(f.prepare({ sessionId: 'thread', projectId: 'current' })).rejects.toThrow(/version 1 is unsupported/);
-  await f.install(3);
+  await f.install(4);
   await expect(f.prepare({ sessionId: 'thread', projectId: 'current' })).rejects.toThrow(/version 1 is unsupported/);
-  expect(f.runtime.services.getSnapshot().providers.some(provider => provider.extensionId === 'review.policy-v3')).toBe(false);
+  expect(f.runtime.services.getSnapshot().providers.some(provider => provider.extensionId === 'review.policy-v4')).toBe(false);
 });
 
 it('conflicting unsupported rules cannot disappear into optional-policy absence', async () => {
@@ -77,19 +77,19 @@ it('conflicting unsupported rules cannot disappear into optional-policy absence'
   await expect(f.prepare(scope)).rejects.toThrow(/version 1 is unsupported/);
 });
 
-it('a real v3 selection remains usable alongside old routes and preserves its exact provider generation', async () => {
+it('a real v4 selection remains usable alongside old routes and preserves its exact provider generation', async () => {
   const f = await fixture();
   const old = await f.install(1);
   await f.route(1, old, { projectId: 'current' });
-  const selected = await f.install(3);
-  await f.route(3, selected, { projectId: 'current' });
+  const selected = await f.install(4);
+  await f.route(4, selected, { projectId: 'current' });
   const lease = await f.prepare({ sessionId: 'thread', projectId: 'current' });
-  expect(lease?.binding.artifact.identity.name).toBe(`${selected}:installed-v3`);
+  expect(lease?.binding.artifact.identity.name).toBe(`${selected}:installed-v4`);
   try {
     expect(await lease!.decide({ view: { run_id: 'run', state: 'runnable', history_count: 0, history_head_id: null, pending_tool_calls: 0, model_capabilities: [] }, event: { kind: 'started' }, state: null }, new AbortController().signal))
       .toEqual({ action: { kind: 'complete' }, state: null });
-    const childProvider = await f.install(3, 'review.child-policy');
-    await f.route(3, childProvider, { projectId: 'current', sessionId: 'thread:child' });
+    const childProvider = await f.install(4, 'review.child-policy');
+    await f.route(4, childProvider, { projectId: 'current', sessionId: 'thread:child' });
     const childPolicy = await f.prepare({ sessionId: 'thread:child', projectId: 'current' });
     try {
       expect(childPolicy!.binding.artifact.providerKey).toBe(childProvider);
@@ -108,15 +108,15 @@ it('an explicit unsupported registry selection is rejected without invoking its 
   const provider = f.runtime.services.getSnapshot().providers.find(provider => provider.providerKey === old)!;
   await f.runtime.setServiceSelection({ serviceId: 'varin.agent.policy', version: 1, providerId: provider.providerId });
   await expect(f.prepare({ sessionId: 'thread', projectId: 'current' })).rejects.toThrow(/version 1 is unsupported/);
-  await f.install(3);
+  await f.install(4);
   await expect(f.prepare({ sessionId: 'thread', projectId: 'current' })).rejects.toThrow(/version 1 is unsupported/);
-  expect(f.runtime.services.getSnapshot().providers.some(provider => provider.extensionId === 'review.policy-v3')).toBe(false);
+  expect(f.runtime.services.getSnapshot().providers.some(provider => provider.extensionId === 'review.policy-v4')).toBe(false);
 });
 
 
 it('a routing change between version-intent inspection and provider preparation fails before the implicit provider activates', async () => {
   const f = await fixture();
-  await f.install(3);
+  await f.install(4);
   const read = f.runtime.routing.read.bind(f.runtime.routing);
   let entered!: () => void; let release!: () => void; let reads = 0;
   const enteredGate = new Promise<void>(resolve => { entered = resolve; });
@@ -132,12 +132,12 @@ it('a routing change between version-intent inspection and provider preparation 
     await f.route(1, 'review.policy-v1:host:varin.agent.policy@1', { projectId: 'current' });
     release();
     await expect(pending).rejects.toThrow(/routing changed during preparation/);
-    expect(f.runtime.services.getSnapshot().providers.some(provider => provider.extensionId === 'review.policy-v3')).toBe(false);
+    expect(f.runtime.services.getSnapshot().providers.some(provider => provider.extensionId === 'review.policy-v4')).toBe(false);
   } finally { release(); }
 });
 
 
-it('a registry selection arriving while v3 absence is being resolved cannot silently select the default loop', async () => {
+it('a registry selection arriving while v4 absence is being resolved cannot silently select the default loop', async () => {
   const f = await fixture();
   const old = await f.install(1);
   await f.runtime.supervisor.activateExtension('review.policy-v1');
@@ -170,15 +170,15 @@ it('an installed child SDK policy preserves exact retirement/rebind across deliv
     outfile: path.join(example, 'host.cjs'), alias: { '@varin/extension-sdk': path.join(repository, 'packages/extension-sdk/dist/index.js') } });
   await f.runtime.installOrStage({ expectedRevision: (await f.runtime.state()).catalog.revision,
     source: { kind: 'local', display: 'Delivery pause SDK example', specifier: example } });
-  await f.route(3, 'example.delivery-pause-policy:host:varin.agent.policy@3', { sessionId: 'thread:child-delivery' });
+  await f.route(4, 'example.delivery-pause-policy:host:varin.agent.policy@4', { sessionId: 'thread:child-delivery' });
   const lease = await f.prepare({ sessionId: 'thread:child-delivery' });
-  expect(lease?.binding.artifact.identity.name).toContain('example.delivery-pause-policy:host:varin.agent.policy@3:delivery-pause');
+  expect(lease?.binding.artifact.identity.name).toContain('example.delivery-pause-policy:host:varin.agent.policy@4:delivery-pause');
   try {
     const input: VarinAgentPolicyInput = { view: { run_id: 'run:child-delivery', state: 'runnable', history_count: 1,
       history_head_id: 'user-input', pending_tool_calls: 0, model_capabilities: [] }, event: { kind: 'started' }, state: null };
     const signal = new AbortController().signal;
     const first = await lease!.decide(input, signal);
-    expect(first.action).toMatchObject({ kind: 'deliver', text: expect.stringContaining('first result') });
+    expect(first.action).toMatchObject({ kind: 'deliver', output: { data: null, parts: [{ kind: 'text', text: expect.stringContaining('first result') }] } });
     const pause = await lease!.decide({ ...input, state: first.state, event: { kind: 'delivered', action_id: 'delivery:first', item_id: 'history:first' } }, signal);
     expect(pause.action).toMatchObject({ kind: 'pause', reason: expect.stringContaining('Resume run') });
     // Normal installer replacement retires the old service, but the admitted Run's pin survives.
@@ -210,7 +210,7 @@ it('an installed child SDK policy preserves exact retirement/rebind across deliv
       const unexpected = await rebound!.decide({ ...input, state: pause.state, event: { kind: 'input_delivered', input_ids: ['queued'] } }, signal);
       expect(unexpected.action.kind).toBe('fail');
       const second = await rebound!.decide({ ...input, state: pause.state, event: { kind: 'resumed', action_id: 'pause:first', wait_id: 'pause-wait:first' } }, signal);
-      expect(second.action).toMatchObject({ kind: 'deliver', text: expect.stringContaining('explicitly resumed') });
+      expect(second.action).toMatchObject({ kind: 'deliver', output: { data: null, parts: [{ kind: 'text', text: expect.stringContaining('explicitly resumed') }] } });
       const end = await rebound!.decide({ ...input, state: second.state, event: { kind: 'delivered', action_id: 'delivery:second', item_id: 'history:second' } }, signal);
       expect(end.action.kind).toBe('complete');
     } finally { rebound?.release(); }
@@ -220,12 +220,12 @@ it('an installed child SDK policy preserves exact retirement/rebind across deliv
 
 it('exact recovery binds the original installed artifact without consulting a changed route', async () => {
   const f = await fixture();
-  const original = await f.install(3);
-  await f.route(3, original, { sessionId: 'recover' });
+  const original = await f.install(4);
+  await f.route(4, original, { sessionId: 'recover' });
   const first = await f.prepare({ sessionId: 'recover' });
   const requiredBinding = first!.binding.artifact;
-  const other = await f.install(3, 'review.other-policy');
-  await f.route(3, other, { sessionId: 'recover' });
+  const other = await f.install(4, 'review.other-policy');
+  await f.route(4, other, { sessionId: 'recover' });
   const current = await f.prepare({ sessionId: 'recover' });
   expect(current!.binding.artifact.providerKey).toBe(other);
   const recovered = await f.prepare({ sessionId: 'recover', requiredBinding });
@@ -233,7 +233,7 @@ it('exact recovery binds the original installed artifact without consulting a ch
   await expect(f.prepare({ sessionId: 'recover', requiredBinding: { ...requiredBinding, configurationIdentity: 'changed' } })).rejects.toThrow('policy_exact_binding_unavailable');
   await expect(f.prepare({ sessionId: 'recover', requiredBinding: { ...requiredBinding, artifactIntegrity: 'missing' } })).rejects.toThrow('policy_exact_binding_unavailable');
   expect((await first!.decide({ view: { run_id: 'original', state: 'runnable', history_count: 0, history_head_id: null, pending_tool_calls: 0, model_capabilities: [] }, event: { kind: 'started' }, state: null }, new AbortController().signal)).action.kind).toBe('complete');
-  await f.runtime.setEnabled('review.policy-v3', false, (await f.runtime.state()).catalog.revision);
+  await f.runtime.setEnabled('review.policy-v4', false, (await f.runtime.state()).catalog.revision);
   expect(first!.revocationSignal.aborted).toBe(true);
   await expect(f.prepare({ sessionId: 'recover', requiredBinding })).rejects.toThrow('policy_exact_binding_unavailable');
   recovered!.release(); current!.release(); first!.release();
@@ -241,18 +241,18 @@ it('exact recovery binds the original installed artifact without consulting a ch
 
 
 it('policy observation tracks the admitted routing scope and ignores unrelated project intent', async () => {
-  const f = await fixture(); const selected = await f.install(3);
-  await f.route(3, selected, { sessionId: 'observed' });
+  const f = await fixture(); const selected = await f.install(4);
+  await f.route(4, selected, { sessionId: 'observed' });
   const retained = await f.prepare({ sessionId: 'observed' });
   const controller = new AbortController(); let changes = 0;
   const close = f.prepare.observe({ sessionId: 'observed' }, () => { changes++; }, controller.signal);
   try {
     await expect.poll(() => changes).toBe(1);
-    const other = await f.install(3, 'review.unrelated-policy');
-    await f.route(3, other, { sessionId: 'another-session' });
+    const other = await f.install(4, 'review.unrelated-policy');
+    await f.route(4, other, { sessionId: 'another-session' });
     await new Promise(resolve => setImmediate(resolve));
     expect(changes).toBe(1);
-    await f.route(3, other, { sessionId: 'observed' });
+    await f.route(4, other, { sessionId: 'observed' });
     await expect.poll(() => changes).toBe(2);
   } finally { close(); controller.abort(); retained!.release(); }
 });
@@ -261,24 +261,24 @@ it('policy observation tracks the admitted routing scope and ignores unrelated p
 it('exact policy recovery selects the complete configuration among retained generations of one artifact', async () => {
   const services = new HostServiceRegistry('policy-config-review');
   const owner = (generation: number) => ({ entrypointId: 'host', extensionId: 'review.configured-policy', extensionVersion: '1', generation });
-  const provision = (configuration: string) => [{ descriptor: { id: 'varin.agent.policy', version: 3, multiple: true },
+  const provision = (configuration: string) => [{ descriptor: { id: 'varin.agent.policy', version: 4, multiple: true },
     handler(method: string): JsonValue {
       if (method === 'describe') return { identity: { name: 'configured-policy', version: '1' }, configuration: { selection: configuration }, modelRoles: [], stateTransition: 'unsupported' };
       return { action: { kind: 'complete' }, state: configuration };
     } }];
   await services.replaceOwner(owner(1), provision('old'));
-  services.setSelection('varin.agent.policy', 3, services.getSnapshot().providers[0]!.providerId);
+  services.setSelection('varin.agent.policy', 4, services.getSnapshot().providers[0]!.providerId);
   // Real registry and preparer; supervisor identity is a fixture for two generations of one package.
   const runtime = { services,
     routing: { read: async () => ({ authoritative: true, document: { schemaVersion: 1, revision: 0, updatedAt: '2026-10-10T00:00:00Z', rules: [] } }) },
-    prepareService: async () => services.bind('varin.agent.policy', 3),
+    prepareService: async () => services.bind('varin.agent.policy', 4),
     supervisor: { getRetainedArtifactIdentity: () => 'same-artifact', getActiveArtifactIdentity: () => 'same-artifact' },
   } as unknown as ApplicationExtensionRuntime;
   const prepare = createAgentPolicy(runtime);
   const old = (await prepare({ sessionId: 'thread:old-child' }))!;
   const replacement = services.prepareOwnerReplacement(owner(2), provision('new'));
   replacement.commit();
-  services.setSelection('varin.agent.policy', 3, services.getSnapshot().providers.find(provider => provider.status === 'active')!.providerId);
+  services.setSelection('varin.agent.policy', 4, services.getSnapshot().providers.find(provider => provider.status === 'active')!.providerId);
   const current = (await prepare({ sessionId: 'thread:new-child' }))!;
   try {
     expect(old.binding.artifact.configurationIdentity).not.toBe(current.binding.artifact.configurationIdentity);

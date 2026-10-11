@@ -4,9 +4,9 @@ mod content_collection;
 #[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 use varin_runtime::execution::*;
 use varin_runtime::*;
@@ -26,7 +26,7 @@ fn body_publication_keeps_policy_node_alive_and_receipt_idempotent() {
     let completion = ToolCompletion::Result {
         outcome: Outcome::Succeeded,
         effect: Effect::None,
-        content: value.clone(),
+        content: value.clone().into(),
     };
     let worker_run = run.clone();
     let worker_action = action.clone();
@@ -72,9 +72,8 @@ fn body_publication_keeps_policy_node_alive_and_receipt_idempotent() {
         f.db.lock().unwrap().operation(&action).unwrap().revision,
         before
     );
-    assert!(f
-        .db
-        .settle_policy_node(
+    assert!(
+        f.db.settle_policy_node(
             &run,
             epoch,
             &action,
@@ -82,10 +81,11 @@ fn body_publication_keeps_policy_node_alive_and_receipt_idempotent() {
             &ToolCompletion::Result {
                 outcome: Outcome::Succeeded,
                 effect: Effect::None,
-                content: json!("different body"),
+                content: json!("different body").into(),
             }
         )
-        .is_err());
+        .is_err()
+    );
     content_collection::collect(|| {
         f.db.lock()
             .unwrap()
@@ -95,9 +95,11 @@ fn body_publication_keeps_policy_node_alive_and_receipt_idempotent() {
     let evidence =
         f.db.policy_evidence(&run, epoch, receipt.output().unwrap())
             .unwrap();
-    assert!(serde_json::to_string(&evidence.item.content)
-        .unwrap()
-        .contains(value["evidence"].as_str().unwrap()));
+    assert!(
+        serde_json::to_string(&evidence.item.content)
+            .unwrap()
+            .contains(value["evidence"].as_str().unwrap())
+    );
 }
 
 #[test]
@@ -390,13 +392,13 @@ impl ToolExecutor for Tools {
             return ToolCompletion::Result {
                 outcome: Outcome::Cancelled,
                 effect: Effect::None,
-                content: json!({"cancelled":true}),
+                content: json!({"cancelled":true}).into(),
             };
         }
         ToolCompletion::Result {
             outcome: Outcome::Succeeded,
             effect: Effect::None,
-            content: json!({"answer":self.output,"node":call.call_id}),
+            content: json!({"answer":self.output,"node":call.call_id}).into(),
         }
     }
 }
@@ -515,9 +517,8 @@ fn graph_starts_without_model_and_actual_bytes_change_the_next_action() {
             assert!(request.history.iter().any(|item| matches!(
                 &item.provenance,
                 Provenance::PolicyToolData { .. }
-            ) && serde_json::to_string(&item.content)
-                .unwrap()
-                .contains(body)));
+            )
+                && serde_json::to_string(&item.content).unwrap().contains(body)));
             assert!(
                 !request.history.iter().any(|item| matches!(
                     item.content,
@@ -759,7 +760,7 @@ fn settled() -> ToolCompletion {
     ToolCompletion::Result {
         outcome: Outcome::Succeeded,
         effect: Effect::None,
-        content: json!({"answer":"DURABLE_RECEIPT"}),
+        content: json!({"answer":"DURABLE_RECEIPT"}).into(),
     }
 }
 fn reopen(f: &mut Fixture) {
@@ -785,10 +786,10 @@ fn admission_retry_is_same_action_and_changed_intent_is_rejected() {
     let mut altered = intent.clone();
     let PolicyGraphIntent::PolicyToolGraphV1 { nodes, .. } = &mut altered;
     nodes[0].node.call.arguments["path"] = json!("different");
-    assert!(f
-        .db
-        .admit_policy_graph(&f.input.run_id, f.input.owner_generation, &altered)
-        .is_err());
+    assert!(
+        f.db.admit_policy_graph(&f.input.run_id, f.input.owner_generation, &altered)
+            .is_err()
+    );
 }
 
 #[test]
@@ -831,12 +832,14 @@ fn restart_before_any_model_resumes_graph_at_each_durable_cut_without_rerunning_
         assert_eq!(report.state, RunState::Completed);
         assert_eq!(tools.calls.lock().unwrap().len(), 2 - settled_count);
         for id in ["a", "b"].iter().take(settled_count) {
-            assert!(!tools
-                .calls
-                .lock()
-                .unwrap()
-                .iter()
-                .any(|called| called == id));
+            assert!(
+                !tools
+                    .calls
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|called| called == id)
+            );
         }
         assert!(e.provider.requests.lock().unwrap().is_empty());
         assert_eq!(
@@ -879,17 +882,17 @@ fn missing_or_incompatible_policy_on_reopen_cannot_erase_graph_facts() {
             version: "2".into(),
         },
     ] {
-        assert!(f
-            .db
-            .lock()
-            .unwrap()
-            .prepare_recovered_execution(
-                &f.input.run_id,
-                f.input.binding.clone(),
-                wrong,
-                Value::Null
-            )
-            .is_err());
+        assert!(
+            f.db.lock()
+                .unwrap()
+                .prepare_recovered_execution(
+                    &f.input.run_id,
+                    f.input.binding.clone(),
+                    wrong,
+                    Value::Null
+                )
+                .is_err()
+        );
     }
     let epoch = f.db.lock().unwrap().epoch();
     let retained = f.db.policy_graph(&f.input.run_id, epoch).unwrap().unwrap();
@@ -909,7 +912,7 @@ fn output_chunks_are_owned_bounded_and_survive_content_collection() {
     let completion = ToolCompletion::Result {
         outcome: Outcome::Succeeded,
         effect: Effect::None,
-        content: output.clone(),
+        content: output.clone().into(),
     };
     let receipt =
         f.db.settle_policy_node(
@@ -935,28 +938,28 @@ fn output_chunks_are_owned_bounded_and_survive_content_collection() {
             .prepare_content_collection(Default::default())
     })
     .unwrap();
-    let first =
+    let (first, _) =
         f.db.policy_chunk(&f.input.run_id, epoch, &reference, 0)
             .unwrap();
     assert!(first.chunk_count >= 2);
     let mut bytes = vec![];
     for index in 0..first.chunk_count {
-        let chunk =
+        let (chunk, _) =
             f.db.policy_chunk(&f.input.run_id, epoch, &reference, index)
                 .unwrap();
         assert!(chunk.bytes.len() <= 256 * 1024);
         bytes.extend(chunk.bytes);
     }
     let decoded: Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(decoded, output);
-    assert!(f
-        .db
-        .policy_chunk(&f.input.run_id, epoch, &reference, first.chunk_count)
-        .is_err());
-    assert!(f
-        .db
-        .policy_chunk("another-run", epoch, &reference, 0)
-        .is_err());
+    assert_eq!(decoded, json!({"data":output,"parts":[]}));
+    assert!(
+        f.db.policy_chunk(&f.input.run_id, epoch, &reference, first.chunk_count)
+            .is_err()
+    );
+    assert!(
+        f.db.policy_chunk("another-run", epoch, &reference, 0)
+            .is_err()
+    );
     for field in ["action_id", "node_id", "content_ref"] {
         let mut bad = serde_json::to_value(&reference).unwrap();
         bad[field] = json!("foreign");
@@ -1043,7 +1046,7 @@ fn newer_decision_checkpoint_after_graph_results_is_not_rolled_back_on_restart()
         )
         .unwrap();
         if kind == "read_result_consumed" {
-            let chunk =
+            let (chunk, format) =
                 f.db.policy_chunk(&f.input.run_id, f.input.owner_generation, &reference, 0)
                     .unwrap();
             f.db.commit(
@@ -1051,6 +1054,7 @@ fn newer_decision_checkpoint_after_graph_results_is_not_rolled_back_on_restart()
                 f.input.owner_generation,
                 &ExecutionRecord::PolicyDecisionConsumed {
                     event: PolicyEvent::ResultChunk {
+                        format,
                         reference,
                         index: 0,
                         total_chunks: chunk.chunk_count,
@@ -1162,11 +1166,13 @@ fn exact_policy_node_stop_uses_run_owner_without_cancelling_its_sibling() {
         .iter()
         .find(|event| event["kind"] == "tool_graph_completed")
         .unwrap();
-    assert!(completed["receipts"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|receipt| receipt["completion"]["outcome"] == "cancelled"));
+    assert!(
+        completed["receipts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|receipt| receipt["completion"]["outcome"] == "cancelled")
+    );
 }
 
 #[test]
@@ -1280,9 +1286,11 @@ fn durable_operation_cancellation_before_worker_exists_prevents_recovered_reads(
     let receipts: Vec<PolicyNodeReceipt> =
         serde_json::from_value(completed["receipts"].clone()).unwrap();
     assert_eq!(receipts.len(), 2);
-    assert!(receipts
-        .iter()
-        .all(|receipt| receipt.outcome() == Outcome::Cancelled && receipt.output().is_none()));
+    assert!(
+        receipts
+            .iter()
+            .all(|receipt| receipt.outcome() == Outcome::Cancelled && receipt.output().is_none())
+    );
 }
 
 // Inject real durable commands at exact worker interleavings. No fabricated Catalog errors.
@@ -1440,7 +1448,13 @@ impl Persistence for InterleavingPersistence {
         epoch: u64,
         reference: &PolicyEvidenceRef,
         index: usize,
-    ) -> Result<varin_runtime::content::ContentChunk, ExecutionError> {
+    ) -> Result<
+        (
+            varin_runtime::content::ContentChunk,
+            varin_runtime::output::PolicyResultFormat,
+        ),
+        ExecutionError,
+    > {
         self.db.policy_chunk(run, epoch, reference, index)
     }
     fn tool_source(
@@ -1538,7 +1552,7 @@ fn concurrent_small_receipt_publication_and_gc_preserve_every_committed_output()
                 let completion = ToolCompletion::Result {
                     outcome: Outcome::Succeeded,
                     effect: Effect::None,
-                    content: value.clone(),
+                    content: value.clone().into(),
                 };
                 results.push((
                     value,
@@ -1566,13 +1580,13 @@ fn concurrent_small_receipt_publication_and_gc_preserve_every_committed_output()
     .unwrap();
     for (value, receipt) in results {
         let reference = receipt.unwrap().output().unwrap().clone();
-        let chunk =
+        let (chunk, _) =
             f.db.policy_chunk(&f.input.run_id, f.input.owner_generation, &reference, 0)
                 .unwrap();
         assert_eq!(chunk.chunk_count, 1);
         assert_eq!(
             serde_json::from_slice::<Value>(&chunk.bytes).unwrap(),
-            value
+            json!({"data":value,"parts":[]})
         );
     }
 }
@@ -1602,7 +1616,10 @@ impl AgentPolicy for InputWinsPolicy {
             }),
             PolicyEvent::InputDelivered { .. } => {
                 if !state.is_null() {
-                    return Err(ExecutionError::new("uncommitted_policy_state","failed graph admission leaked its proposed checkpoint into the next decision"));
+                    return Err(ExecutionError::new(
+                        "uncommitted_policy_state",
+                        "failed graph admission leaked its proposed checkpoint into the next decision",
+                    ));
                 }
                 Ok(PolicyDecision {
                     action: PolicyAction::Complete,
@@ -1651,14 +1668,14 @@ fn actual_new_input_winning_graph_admission_preserves_previous_policy_checkpoint
     assert_eq!(seen.len(), 2);
     assert_eq!(seen[1].0["kind"], "input_delivered");
     assert_eq!(seen[1].1, Value::Null);
-    assert!(f
-        .db
-        .lock()
-        .unwrap()
-        .events_after(0, 1000)
-        .unwrap()
-        .iter()
-        .all(|event| event.kind != "policy.graph_admitted"));
+    assert!(
+        f.db.lock()
+            .unwrap()
+            .events_after(0, 1000)
+            .unwrap()
+            .iter()
+            .all(|event| event.kind != "policy.graph_admitted")
+    );
 }
 
 /// A durable fixture executor journal models the independent resource owner's original receipt.
@@ -1742,7 +1759,7 @@ impl ToolExecutor for EffectOwner {
         _: &CancellationToken,
     ) -> ToolCompletion {
         assert!(matches!(context.origin, ToolOrigin::PolicyAction { .. }));
-        let receipt = ExternalReceipt {
+        let receipt: ExternalReceipt = ExternalReceipt {
             executor: contract.name.clone(),
             identity: context.operation_id.clone(),
             epoch: "original-executor-generation".into(),
@@ -1752,7 +1769,7 @@ impl ToolExecutor for EffectOwner {
             } else {
                 Effect::Confirmed
             },
-            result: Value::Null,
+            result: Value::Null.into(),
         };
         std::fs::write(
             &self.journal,
@@ -1775,7 +1792,7 @@ impl ToolExecutor for EffectOwner {
             ToolCompletion::Result {
                 outcome: Outcome::Succeeded,
                 effect: Effect::Confirmed,
-                content: Value::Null,
+                content: Value::Null.into(),
             }
         }
     }
@@ -1918,14 +1935,19 @@ fn effect_graph_recovery_uses_original_executor_at_every_dispatch_cut() {
             op.intent["origin"],
             serde_json::to_value(&context.origin).unwrap()
         );
-        assert_eq!(op.result, Some(Value::Null));
+        assert_eq!(
+            op.result,
+            Some(varin_runtime::output::OperationResult::Output {
+                output: Value::Null.into()
+            })
+        );
         assert!(matches!(
             op.call_completion,
             Some(ToolCompletion::Result {
-                content: Value::Null,
+                content,
                 effect: Effect::Confirmed,
                 ..
-            })
+            }) if content.data.is_null() && content.parts.is_empty()
         ));
         let events = e.policy.events.lock().unwrap();
         let receipt = &events
@@ -2039,13 +2061,13 @@ fn job_acceptance_unblocks_graph_dependency_and_late_terminal_preserves_call_rec
     let before = f.db.lock().unwrap().operation(id).unwrap();
     assert!(before.handed_off);
     assert_ne!(before.phase, OperationPhase::Terminal);
-    let receipt = ExternalReceipt {
+    let receipt: ExternalReceipt = ExternalReceipt {
         executor: "read".into(),
         identity: id.into(),
         epoch: "original-executor-generation".into(),
         outcome: Outcome::Succeeded,
         effect: Effect::Confirmed,
-        result: json!({"job":"finished"}),
+        result: json!({"job":"finished"}).into(),
     };
     let after =
         varin_runtime::catalog::result_content::record_external_receipt(&f.db, id, receipt, true)
@@ -2192,18 +2214,18 @@ fn read_only_job_recovery_waits_for_original_executor_at_both_completion_cuts() 
         );
         assert_eq!(recovered.result, before.result);
         assert_eq!(recovered.call_completion, before.call_completion);
-        assert!(f
-            .db
-            .lock()
-            .unwrap()
-            .pending_external_operations("read")
-            .unwrap()
-            .contains(&context.operation_id));
-        assert!(f
-            .db
-            .resource_admission()
-            .inspect(&context.operation_id)
-            .is_some());
+        assert!(
+            f.db.lock()
+                .unwrap()
+                .pending_external_operations("read")
+                .unwrap()
+                .contains(&context.operation_id)
+        );
+        assert!(
+            f.db.resource_admission()
+                .inspect(&context.operation_id)
+                .is_some()
+        );
         if !accepted {
             assert!(
                 matches!(f.db.resume_tool(&context,epoch),Err(error) if error.code=="tool_reconciliation_required")
@@ -2248,13 +2270,13 @@ fn read_only_job_recovery_waits_for_original_executor_at_both_completion_cuts() 
         )
         .unwrap();
         assert_eq!(repeated.revision, after.revision);
-        assert!(f
-            .db
-            .lock()
-            .unwrap()
-            .events_after(cursor, 1000)
-            .unwrap()
-            .is_empty());
+        assert!(
+            f.db.lock()
+                .unwrap()
+                .events_after(cursor, 1000)
+                .unwrap()
+                .is_empty()
+        );
         let stopped = varin_runtime::catalog::result_content::record_external_receipt(
             &f.db,
             &context.operation_id,
@@ -2280,18 +2302,18 @@ fn read_only_job_recovery_waits_for_original_executor_at_both_completion_cuts() 
         )
         .unwrap();
         assert_eq!(repeated_stop.revision, stopped.revision);
-        assert!(f
-            .db
-            .lock()
-            .unwrap()
-            .events_after(stop_events[0].cursor, 1000)
-            .unwrap()
-            .is_empty());
-        assert!(f
-            .db
-            .resource_admission()
-            .inspect(&context.operation_id)
-            .is_none());
+        assert!(
+            f.db.lock()
+                .unwrap()
+                .events_after(stop_events[0].cursor, 1000)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            f.db.resource_admission()
+                .inspect(&context.operation_id)
+                .is_none()
+        );
         let completion = match f.db.resume_tool(&context, epoch).unwrap() {
             ToolResume::Completed(read) => read.load().unwrap(),
             _ => panic!("original executor terminal must close the invocation"),
@@ -2304,7 +2326,7 @@ fn read_only_job_recovery_waits_for_original_executor_at_both_completion_cuts() 
                 ToolCompletion::Result {
                     outcome: Outcome::Succeeded,
                     effect: Effect::None,
-                    content: Value::Null,
+                    content: Value::Null.into(),
                 }
             }
         );
@@ -2334,13 +2356,13 @@ fn read_only_job_recovery_waits_for_original_executor_at_both_completion_cuts() 
                 .revision,
             revision
         );
-        assert!(f
-            .db
-            .lock()
-            .unwrap()
-            .events_after(cursor, 1000)
-            .unwrap()
-            .is_empty());
+        assert!(
+            f.db.lock()
+                .unwrap()
+                .events_after(cursor, 1000)
+                .unwrap()
+                .is_empty()
+        );
         let (input, recovery) =
             f.db.lock()
                 .unwrap()

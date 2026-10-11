@@ -142,6 +142,30 @@ impl ModelStepRead {
     }
 }
 impl OperationRead {
+    /// An internal domain preserves the exact captured receipt, including its typed media.
+    pub fn load_with_external_receipt(
+        self,
+    ) -> Result<(
+        crate::types::Operation,
+        Option<crate::types::ExternalReceipt>,
+    )> {
+        let receipt = self
+            .operation
+            .external_receipt
+            .as_ref()
+            .map(|receipt| {
+                Ok::<_, RuntimeError>(crate::types::ExternalReceipt {
+                    executor: receipt.executor.clone(),
+                    identity: receipt.identity.clone(),
+                    epoch: receipt.epoch.clone(),
+                    outcome: receipt.outcome,
+                    effect: receipt.effect,
+                    result: self.content.load_output(&receipt.result_ref)?,
+                })
+            })
+            .transpose()?;
+        Ok((hydrate_operation(self.operation, &self.content)?, receipt))
+    }
     pub fn load(self) -> Result<crate::types::Operation> {
         hydrate_operation(self.operation, &self.content)
     }
@@ -176,9 +200,13 @@ pub(super) fn hydrate_operation(
                 record.insert("call".into(), call);
                 record.insert("scope".into(), scope);
             }
-            Some(value)
+            Some(crate::output::OperationResult::Control { value })
         }
-        Some(OperationResultMetadata::Content { reference }) => Some(content.load(&reference)?),
+        Some(OperationResultMetadata::Content { reference }) => {
+            Some(crate::output::OperationResult::Output {
+                output: content.load_stored_output(&reference)?,
+            })
+        }
         None => None,
     };
     let external_receipt = operation
@@ -190,7 +218,7 @@ pub(super) fn hydrate_operation(
                 epoch: receipt.epoch,
                 outcome: receipt.outcome,
                 effect: receipt.effect,
-                result: content.load(&receipt.result_ref)?,
+                result: content.load_stored_output(&receipt.result_ref)?,
             })
         })
         .transpose()?;
@@ -199,7 +227,7 @@ pub(super) fn hydrate_operation(
         managed_process: operation.managed_process,
         call_completion: operation
             .call_completion
-            .map(|completion| completion.load(content))
+            .map(|completion| completion.load_stored(content))
             .transpose()?,
         external_receipt,
         id: operation.id,
@@ -433,8 +461,7 @@ impl ToolInvocationRead {
         };
         let (history_range, frozen, owner_epoch) = match &self.owner {
             InvocationOwner::Model { step } => {
-                let snapshot: RequestSnapshot =
-                    serde_json::from_value(self.content.load(&step.request)?)?;
+                let snapshot: RequestSnapshot = self.content.load_snapshot(&step.request)?;
                 if snapshot.view.run_id != self.context.run_id
                     || snapshot.view.request_id != step.id
                     || snapshot.view.binding.history_range.branch_id != self.branch_id

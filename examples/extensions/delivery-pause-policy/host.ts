@@ -22,13 +22,13 @@ export default defineHostExtension({
       decide({ event, state }, signal) {
         signal.throwIfAborted();
         if (state === null) return {
-          action: { kind: 'deliver', text: 'The first result is ready. Review it before continuing.' }, state: 'first_delivery',
+          action: { kind: 'deliver', output: { data: null, parts: [{ kind: 'text', text: 'The first result is ready. Review it before continuing.' }] } }, state: 'first_delivery',
         };
         if (state === 'first_delivery' && event.kind === 'delivered') return {
           action: { kind: 'pause', reason: 'Review the first result, then choose Resume run.' }, state: 'awaiting_resume',
         };
         if (state === 'awaiting_resume' && event.kind === 'resumed') return {
-          action: { kind: 'deliver', text: 'You explicitly resumed this run. The second result is ready.' }, state: 'second_delivery',
+          action: { kind: 'deliver', output: { data: null, parts: [{ kind: 'text', text: 'You explicitly resumed this run. The second result is ready.' }] } }, state: 'second_delivery',
         };
         // Core retains an unconsumed delivery/resume receipt across concurrent queued input.
         // The next private state becomes authoritative only when its action commits.

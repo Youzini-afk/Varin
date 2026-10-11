@@ -12,7 +12,7 @@ pub(super) fn job(f: &mut Fixture, key: &str, accept: bool) -> HostJobBinding {
             .unwrap();
     let prepared =
         f.db.prepare_result_content()
-            .write_result(&json!({"requestId":key}))
+            .write_data(&json!({"requestId":key}))
             .unwrap();
     let op =
         f.db.admit_user_host_job(
@@ -48,7 +48,7 @@ fn stop(f: &mut Fixture, binding: &HostJobBinding, stopped: bool) {
     };
     // A real stopped executor need not have a known business outcome or complete artifacts.
     let receipt = f.db.prepare_result_content().write_external_receipt(ExternalReceipt { executor: op.executor.unwrap(), identity: op.id, epoch: epoch.clone(), outcome: Outcome::Indeterminate, effect: Effect::Unknown,
-        result: json!({"attempt":{"attemptId":binding.subject_id,"state":"unknown","collectionState":"pending"}}) }).unwrap();
+        result: json!({"attempt":{"attemptId":binding.subject_id,"state":"unknown","collectionState":"pending"}}).into() }).unwrap();
     f.db.record_host_job_terminal(binding, receipt, stopped)
         .unwrap();
 }
@@ -114,10 +114,10 @@ fn accepted_job_discovery_and_registration_reject_unaccepted_process_and_foreign
         })
         .unwrap();
     assert!(f.db.host_job_sources(&foreign.run_id).unwrap().is_empty());
-    assert!(f
-        .db
-        .require_host_job_observation(&foreign.run_id, &accepted.operation_id)
-        .is_err());
+    assert!(
+        f.db.require_host_job_observation(&foreign.run_id, &accepted.operation_id)
+            .is_err()
+    );
     for id in [planned.operation_id.clone(), f.process.clone()] {
         let p =
             f.db.prepare_followup_registration(
@@ -165,9 +165,11 @@ fn job_unknown_without_stop_never_wins_then_original_stop_delivers_active_input_
     f.reconcile();
     assert!(f.db.followup("job-all").unwrap().occurrence.is_none());
     let mut f = f.reopen();
-    assert!(f.db.followup("job-all").unwrap().sources[0]
-        .observed
-        .is_some());
+    assert!(
+        f.db.followup("job-all").unwrap().sources[0]
+            .observed
+            .is_some()
+    );
     stop(&mut f, &binding, true);
     let candidate =
         f.db.capture_followup_continuations()
@@ -185,9 +187,10 @@ fn job_unknown_without_stop_never_wins_then_original_stop_delivers_active_input_
     f.db.admit_followup_continuation(candidate).unwrap();
     let items = deliver(&mut f);
     assert_eq!(items.len(), 1);
-    let Content::Text { text } = &items[0].content else {
-        panic!()
+    let Content::Output { output } = &items[0].content else {
+        panic!("follow-up output")
     };
+    let text = serde_json::to_string(&output.data).unwrap();
     assert!(
         text.contains("original domain acceptance")
             && text.contains("collectionState")
@@ -380,14 +383,14 @@ fn tree_stop_fences_existing_job_intents_but_later_user_intent_is_independent() 
         f.db.followup("before-stop").unwrap().state,
         FollowupState::Cancelled
     );
-    assert!(f
-        .db
-        .followup("after-stop")
-        .unwrap()
-        .occurrence
-        .unwrap()
-        .delivery
-        .is_some());
+    assert!(
+        f.db.followup("after-stop")
+            .unwrap()
+            .occurrence
+            .unwrap()
+            .delivery
+            .is_some()
+    );
     f.cleanup();
 }
 
@@ -425,7 +428,7 @@ fn winning_job_stop_keeps_its_original_unknown_body_after_refinement_gc_and_reop
                 epoch: epoch.clone(),
                 outcome: Outcome::Succeeded,
                 effect: Effect::Confirmed,
-                result: json!({"later":"known business result"}),
+                result: json!({"later":"known business result"}).into(),
             })
             .unwrap();
     f.db.record_host_job_terminal(&binding, known, true)
@@ -444,12 +447,14 @@ fn winning_job_stop_keeps_its_original_unknown_body_after_refinement_gc_and_reop
         "indeterminate"
     );
     assert_eq!(
-        public[0].data["host_job_stop"]["receipt"]["result"]["attempt"]["collectionState"],
+        public[0].data["host_job_stop"]["receipt"]["result"]["data"]["attempt"]["collectionState"],
         "pending"
     );
-    assert!(public[0].data["host_job_stop"]["receipt"]
-        .get("result_ref")
-        .is_none());
+    assert!(
+        public[0].data["host_job_stop"]["receipt"]
+            .get("result_ref")
+            .is_none()
+    );
     assert_eq!(
         f.db.prepare_content_collection(Arc::new(AtomicBool::new(false)))
             .run()
@@ -471,9 +476,10 @@ fn winning_job_stop_keeps_its_original_unknown_body_after_refinement_gc_and_reop
     let items = deliver(&mut f);
     assert_eq!(items.len(), 2);
     for item in items {
-        let Content::Text { text } = item.content else {
-            panic!()
+        let Content::Output { output } = item.content else {
+            panic!("follow-up output")
         };
+        let text = serde_json::to_string(&output.data).unwrap();
         assert!(text.contains("indeterminate") && text.contains("collectionState"));
         assert!(!text.contains("known business result"));
     }
@@ -586,14 +592,14 @@ fn corrupt_job_receipt_body_fails_only_its_definition_without_blocking_healthy_d
             .hold_reason,
         Some(HoldReason::PreparationFailed)
     );
-    assert!(f
-        .db
-        .followup("healthy-next")
-        .unwrap()
-        .occurrence
-        .unwrap()
-        .delivery
-        .is_some());
+    assert!(
+        f.db.followup("healthy-next")
+            .unwrap()
+            .occurrence
+            .unwrap()
+            .delivery
+            .is_some()
+    );
     assert!(f.db.capture_followup_continuations().unwrap().is_empty());
     f.cleanup();
 }

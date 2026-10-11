@@ -499,7 +499,7 @@ pub(in crate::catalog) fn delivered_submission(
         _ => {
             return Err(RuntimeError::Conflict(
                 "message already bound to another admission".into(),
-            ))
+            ));
         }
     }
     row.run_id = Some(run.id.clone());
@@ -624,6 +624,7 @@ impl RequestActivationPreparation {
                 }
                 let intent=content.save(&json!({"input_id":row.id,"previous_run_id":run.id,"previous_run_revision":run.revision,"launch_revision":launch.revision}))?;
                 let submission = submissions::PreparedSubmission {
+                    input_id: row.id.clone(),
                     run_id: id(),
                     identity: submissions::SubmissionIdentity {
                         key: format!("ingress-run:{}", row.id),
@@ -911,7 +912,7 @@ impl Catalog {
                 match validate_pending(&self.db, &row) {
                     Ok(()) => (),
                     Err(RuntimeError::RequestActivationStale) => {
-                        return Ok(RequestActivationAdmission::Stale)
+                        return Ok(RequestActivationAdmission::Stale);
                     }
                     Err(e) => return Err(e),
                 }
@@ -945,7 +946,7 @@ impl Catalog {
                 match validate_pending(&self.db, &row) {
                     Ok(()) => (),
                     Err(RuntimeError::RequestActivationStale) => {
-                        return Ok(RequestActivationAdmission::Stale)
+                        return Ok(RequestActivationAdmission::Stale);
                     }
                     Err(e) => return Err(e),
                 }

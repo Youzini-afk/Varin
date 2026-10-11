@@ -42,7 +42,7 @@ const completion = (result: IntegrationOperationReceipt): ToolExecutionReceipt =
   }
   return { completion: { kind: 'result',
     outcome: result.effect === 'unknown' || result.status === 'needs-attention' ? 'indeterminate' : result.status === 'applied' ? 'succeeded' : 'failed',
-    effect: result.effect, content: result }, executor_stopped: result.executorStopped };
+    effect: result.effect, content: { data: result, parts: [] } }, executor_stopped: result.executorStopped };
 };
 export function createIntegrationToolOwner(options: IntegrationToolOwnerOptions): HostCapabilityHandler {
   return async (method, params, context) => {
@@ -92,10 +92,10 @@ export function createIntegrationToolOwner(options: IntegrationToolOwnerOptions)
             if (original) return completion(original);
           } catch { /* Preserve unknown rather than inventing rollback or replay. */ }
           return { completion: { kind: 'result', outcome: 'indeterminate', effect: 'unknown',
-            content: { status: 'needs-attention', operationId: admitted.operationId, error: error instanceof Error ? error.message : String(error) } }, executor_stopped: error instanceof UnconfirmedIntegrationCommitError && error.executorStopped };
+            content: { data: { status: 'needs-attention', operationId: admitted.operationId, error: error instanceof Error ? error.message : String(error) }, parts: [] } }, executor_stopped: error instanceof UnconfirmedIntegrationCommitError && error.executorStopped };
         }
         return { completion: { kind: 'result', outcome: 'failed', effect: 'none',
-          content: { status: 'rejected', error: error instanceof Error ? error.message : String(error) } }, executor_stopped: true };
+          content: { data: { status: 'rejected', error: error instanceof Error ? error.message : String(error) }, parts: [] } }, executor_stopped: true };
       } finally {
         try { await target?.release(); }
         catch (error) {

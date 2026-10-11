@@ -8,8 +8,8 @@ import { ExistingHostCredentialOwner } from './credential-owner.js';
 import type { AgentPolicyArtifactBinding, LaunchIntent, PolicySelections, PolicySelectParams, PolicyReadyParams, PolicyFailParams, PolicyCancelParams, Run, ModelSessionConfiguration } from './protocol.generated.js';
 import type { VarinAgentPolicyDecision, VarinAgentPolicyInput } from '@varin/extension-contract';
 
-const artifact = (name: string): AgentPolicyArtifactBinding => ({ providerKey: `${name}:host:varin.agent.policy@3`, extensionId: name,
-  extensionVersion: '1', serviceId: 'varin.agent.policy', serviceVersion: 3, artifactIntegrity: `artifact-${name}`, configurationIdentity: 'configuration',
+const artifact = (name: string): AgentPolicyArtifactBinding => ({ providerKey: `${name}:host:varin.agent.policy@4`, extensionId: name,
+  extensionVersion: '1', serviceId: 'varin.agent.policy', serviceVersion: 4, artifactIntegrity: `artifact-${name}`, configurationIdentity: 'configuration',
   declaredIdentity: { name: 'test-policy', version: '1' }, identity: { name, version: `identity-${name}` }, modelRoles: ['agentPlanning'], stateTransition: 'explicit' });
 const input: VarinAgentPolicyInput = { view: { run_id: 'run', state: 'waiting', history_count: 1, history_head_id: 'history', pending_tool_calls: 0, model_capabilities: [] },
   event: { kind: 'resumed', action_id: 'pause', wait_id: 'wait' }, state: 'old-state' };

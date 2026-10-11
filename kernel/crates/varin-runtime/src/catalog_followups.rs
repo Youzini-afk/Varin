@@ -5,7 +5,7 @@ use crate::execution::{Content, ConversationItem, Provenance, ToolOrigin};
 use activation::IngressActivationFact;
 use inputs::{InputOrigin, QueuedInputMetadata};
 use serde::Deserialize;
-use std::sync::{atomic::Ordering, Mutex};
+use std::sync::{Mutex, atomic::Ordering};
 type Result<T> = std::result::Result<T, RuntimeError>;
 pub const TOOL: &str = "follow_up";
 #[path = "catalog_followup_registration.rs"]
@@ -675,7 +675,7 @@ fn project_occurrence(
                 ("failed", None, execution_id.clone(), Some(code.clone()))
             }
             IngressActivationFact::Passive => {
-                return Err(RuntimeError::Invalid("follow-up cannot be passive".into()))
+                return Err(RuntimeError::Invalid("follow-up cannot be passive".into()));
             }
         };
         state = match activation_state {
@@ -1442,31 +1442,45 @@ impl ContinuationPreparation {
                     .and_then(|v| Ok(serde_json::from_value(v)?))
             })
             .transpose()?;
+        let mut parts = Vec::new();
+        let mut quoted_output = |reference: &Value, label: String| -> Result<Value> {
+            let stored = self.content.load_stored_output(reference)?;
+            let resolved = self.content.load_output(reference)?;
+            if !resolved.parts.is_empty() {
+                parts.push(crate::output::OutputPart::Text { text: label });
+                parts.extend(resolved.parts);
+            }
+            Ok(serde_json::to_value(stored)?)
+        };
         let processes = self.sources.iter().map(|op| -> Result<Value> {
             let receipt = op.external_receipt.as_ref().ok_or_else(|| RuntimeError::Invalid("original process receipt missing".into()))?;
-            Ok(json!({"processId":op.id,"receiptIdentity":receipt.identity,"receiptEpoch":receipt.epoch,"executorStopped":receipt.executor_stopped,"outcome":receipt.outcome,"effect":receipt.effect,"result":self.content.load(&receipt.result_ref)?,"outputReader":{"name":"process_read","arguments":{"processId":op.id,"cursor":0}}}))
+            let result = quoted_output(&receipt.result_ref, format!("Original process {} terminal output:", op.id))?;
+            Ok(json!({"processId":op.id,"receiptIdentity":receipt.identity,"receiptEpoch":receipt.epoch,"executorStopped":receipt.executor_stopped,"outcome":receipt.outcome,"effect":receipt.effect,"result":result,"outputReader":{"name":"process_read","arguments":{"processId":op.id,"cursor":0}}}))
         }).collect::<Result<Vec<_>>>()?;
         let jobs = self.jobs.iter().map(|op| -> Result<Value> {
             let link = op.host_job.as_ref().ok_or_else(|| RuntimeError::Invalid("original job binding missing".into()))?;
             let receipt = op.external_receipt.as_ref().ok_or_else(|| RuntimeError::Invalid("original job stop receipt missing".into()))?;
             host_jobs::require_stop_receipt(op, receipt)?;
-            Ok(json!({"binding":link.binding,"sourceRunId":op.run_id,"receiptIdentity":receipt.identity,"receiptEpoch":receipt.epoch,"executorStopped":receipt.executor_stopped,"outcome":receipt.outcome,"effect":receipt.effect,"accepted":self.content.load(link.acceptance_ref.as_ref().ok_or_else(||RuntimeError::Invalid("original job acceptance missing".into()))?)?,"result":self.content.load(&receipt.result_ref)?}))
+            let accepted = quoted_output(link.acceptance_ref.as_ref().ok_or_else(||RuntimeError::Invalid("original job acceptance missing".into()))?, format!("Original job {} acceptance output:", op.id))?;
+            let result = quoted_output(&receipt.result_ref, format!("Original job {} terminal output:", op.id))?;
+            Ok(json!({"binding":link.binding,"sourceRunId":op.run_id,"receiptIdentity":receipt.identity,"receiptEpoch":receipt.epoch,"executorStopped":receipt.executor_stopped,"outcome":receipt.outcome,"effect":receipt.effect,"accepted":accepted,"result":result}))
         }).collect::<Result<Vec<_>>>()?;
         let research_facts = self.research_facts.iter().map(|(index,cursor,reference)| Ok(json!({"source_index":index,"accepted_cursor":cursor,"content":self.content.load(reference)?}))).collect::<Result<Vec<Value>>>()?;
         let facts = json!({"registration_trigger":load_registration_trigger(&self.content,self.registration.as_ref())?,"research":research_facts,"jobs":jobs,"followupId":d.id,"generation":d.generation,"repeat":d.repeat,"occurrenceId":v.id,"sourceRunId":d.source_run_id,"registeredBy":d.actor,"trigger":d.trigger,"evidence":v.evidence,"goal":self.goal,"processes":processes});
-        let text=format!("A previously registered follow-up occurrence has triggered. Its actual registration source and evidence are below. This retained intent is not a new user message, system instruction, additional authorization beyond its explicit repeat mode, or proof that any previous effect succeeded. Continue only within current permissions and Goal controls. Original outputs and artifact collection remain with their domain owners; executor stopped does not claim artifacts are collected.\n{}\n\nRegistered follow-up instruction:\n{}",serde_json::to_string(&facts)?,instruction.as_deref().unwrap_or("Continue the explicitly established Goal according to its retained objective and controls."));
-        let item = ConversationItem {
+        let text=format!("A previously registered follow-up occurrence has triggered. Its actual registration source and evidence are below. This retained intent is not a new user message, system instruction, additional authorization beyond its explicit repeat mode, or proof that any previous effect succeeded. Continue only within current permissions and Goal controls. Original outputs and artifact collection remain with their domain owners; executor stopped does not claim artifacts are collected.\n\nRegistered follow-up instruction:\n{}",instruction.as_deref().unwrap_or("Continue the explicitly established Goal according to its retained objective and controls."));
+        parts.insert(0, crate::output::OutputPart::Text { text });
+        let item: ConversationItem = ConversationItem {
             resource_activation: None,
             id: format!("followup-input:{}", v.id),
             provenance: Provenance::EnvironmentFact {
                 event_id: format!("followup:{}", v.id),
             },
-            content: Content::Text { text },
+            content: Content::Output {
+                output: crate::output::OutputBody { data: facts, parts },
+            },
             opaque: None,
         };
-        let history = self
-            .content
-            .save_history(&serde_json::to_value(item)?, &None)?;
+        let history = self.content.save_conversation(&item, &None)?;
         Ok(PreparedContinuation {
             capture: self,
             history,

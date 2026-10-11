@@ -3,7 +3,7 @@
 #[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use varin_runtime::catalog::launches::LaunchSelection;
 use varin_runtime::catalog::process_wait::WAIT_TOOL;
 use varin_runtime::execution::*;
@@ -305,7 +305,7 @@ impl Fixture {
     fn terminal(&mut self) {
         self.db.record_external_receipt_with_stop(PROCESS,ExternalReceipt{executor:"process_spawn".into(),identity:PROCESS.into(),
             epoch:"process-epoch".into(),outcome:Outcome::Succeeded,effect:Effect::Confirmed,
-            result:json!({"processId":PROCESS,"kernelEpoch":"process-epoch","treeConfirmed":true,"exitCode":0,"signal":null,"outputAvailable":true})},true).unwrap();
+            result:json!({"processId":PROCESS,"kernelEpoch":"process-epoch","treeConfirmed":true,"exitCode":0,"signal":null,"outputAvailable":true}).into()},true).unwrap();
     }
     fn reopen(self) -> Self {
         let Self { root, db, run } = self;
@@ -337,11 +337,11 @@ fn reopen_live_process_does_not_treat_recovery_indeterminate_as_a_terminal_fact(
     let pending = f.db.operation(PROCESS).unwrap();
     assert_eq!(pending.outcome, Some(Outcome::Indeterminate));
     assert!(pending.external_receipt.is_none());
-    assert!(f
-        .db
-        .deliver_process_waits()
-        .expect("live guardian has no terminal event yet; observation must remain parked")
-        .is_empty());
+    assert!(
+        f.db.deliver_process_waits()
+            .expect("live guardian has no terminal event yet; observation must remain parked")
+            .is_empty()
+    );
     assert_eq!(f.db.run(&f.run).unwrap().waiting_on, Some(wait.id));
     assert!(f.facts().is_empty());
     f.terminal();
@@ -460,12 +460,11 @@ fn process_terminal_fact_preserves_the_guardians_string_signal() {
     f.wait("signal");
     f.db.record_external_receipt_with_stop(PROCESS,ExternalReceipt{executor:"process_spawn".into(),identity:PROCESS.into(),
         epoch:"process-epoch".into(),outcome:Outcome::Failed,effect:Effect::Confirmed,
-        result:json!({"processId":PROCESS,"kernelEpoch":"process-epoch","treeConfirmed":true,"exitCode":null,"signal":"Killed"})},true).unwrap();
+        result:json!({"processId":PROCESS,"kernelEpoch":"process-epoch","treeConfirmed":true,"exitCode":null,"signal":"Killed"}).into()},true).unwrap();
     f.db.deliver_process_waits().unwrap();
     let facts = f.facts();
     assert_eq!(facts.len(), 1);
-    let text = facts[0]["content"]["text"].as_str().unwrap();
-    let fact: Value = serde_json::from_str(text.lines().last().unwrap()).unwrap();
+    let fact = &facts[0]["content"]["output"]["data"];
     assert_eq!(fact["signal"], "Killed");
     assert_eq!(fact["outcome"], "failed");
     assert!(fact["exitCode"].is_null());

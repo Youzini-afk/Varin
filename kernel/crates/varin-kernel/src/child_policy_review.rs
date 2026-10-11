@@ -499,11 +499,11 @@ impl Fixture {
 }
 fn artifact(g: u64) -> AgentPolicyArtifactBinding {
     AgentPolicyArtifactBinding {
-        provider_key: "child-strategy:host:varin.agent.policy@3".into(),
+        provider_key: "child-strategy:host:varin.agent.policy@4".into(),
         extension_id: "child-strategy".into(),
         extension_version: g.to_string(),
         service_id: "varin.agent.policy".into(),
-        service_version: 3,
+        service_version: 4,
         artifact_integrity: format!("child-artifact-{g}"),
         configuration_identity: format!("child-policy-config-{g}"),
         declared_identity: PolicyIdentity {
@@ -695,7 +695,7 @@ fn child_assembly_plans_with_own_credentials_switches_policy_and_keeps_frozen_to
                 let mut reply = json!({"v":1,"kind":"host-tool-response","id":frame["id"],"kernelEpoch":EPOCH,"ok":true});
                 if phase == "execute" {
                     reply["executor_stopped"] = json!(true);
-                    reply["completion"] = json!({"kind":"result","outcome":"succeeded","effect":"none","content":{"originalChildOwner":true}});
+                    reply["completion"] = json!({"kind":"result","outcome":"succeeded","effect":"none","content":{"data":{"originalChildOwner":true},"parts":[]}});
                     // Host publishes its authenticated original receipt before answering the
                     // invocation. Without that evidence an effectful service's None is Unknown.
                     serde_json::from_value::<crate::host_tools::LateReceipt>(json!({
@@ -738,7 +738,7 @@ fn child_assembly_plans_with_own_credentials_switches_policy_and_keeps_frozen_to
                                 .generation,
                             0
                         );
-                        json!({"state":{"childStage":2},"action":{"kind":"deliver","text":"First child plan ready"}})
+                        json!({"state":{"childStage":2},"action":{"kind":"deliver","output":{"data":null,"parts":[{"kind":"text","text":"First child plan ready"}]}}})
                     }
                     (1, "delivered") if frame["input"]["state"]["newPolicy"] == true => {
                         planning_decision(3)
@@ -749,7 +749,7 @@ fn child_assembly_plans_with_own_credentials_switches_policy_and_keeps_frozen_to
                             frame["input"]["event"]["receipts"][0]["completion"]["outcome"],
                             "succeeded"
                         );
-                        json!({"state":{"childStage":4},"action":{"kind":"deliver","text":"Independent child report"}})
+                        json!({"state":{"childStage":4},"action":{"kind":"deliver","output":{"data":null,"parts":[{"kind":"text","text":"Independent child report"}]}}})
                     }
                     (1, "delivered") => {
                         json!({"state":{"childStage":5},"action":{"kind":"pause","reason":"Review child report"}})

@@ -14,7 +14,7 @@ fn artifact(version: &str, transition: PolicyStateTransition) -> AgentPolicyArti
         extension_id: "fixture".into(),
         extension_version: version.into(),
         service_id: "varin.agent.policy".into(),
-        service_version: 3,
+        service_version: 4,
         artifact_integrity: format!("artifact-{version}"),
         configuration_identity: "configuration".into(),
         declared_identity: PolicyIdentity {
@@ -426,7 +426,7 @@ fn old_decision_model_and_job_acceptance_close_before_new_binding_activates() {
     f.reply(
         &next,
         PolicyAction::Deliver {
-            text: "new policy delivery".into(),
+            output: OutputBody::text("new policy delivery"),
         },
         json!({"new":1}),
     );
@@ -480,7 +480,7 @@ fn incompatible_candidate_keeps_original_checkpoint_and_large_explicit_transitio
         f.reply(
             &started,
             PolicyAction::Deliver {
-                text: "old delivery".into(),
+                output: OutputBody::text("old delivery"),
             },
             old_state.clone(),
         );

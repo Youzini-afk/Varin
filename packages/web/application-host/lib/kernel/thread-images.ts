@@ -15,9 +15,8 @@ export function parseThreadImages(value: unknown): ImageAttachment[] | undefined
 }
 
 export function threadInput(text: string, images?: readonly ImageAttachment[]) {
-  return { ...(text.length || !images?.length ? { text } : {}), ...(images?.length ? { attachments: images.map(image => ({
+  return { ...(text.length || !images?.length ? { text } : {}), ...(images !== undefined ? { attachments: images.map(image => ({
     media_type: image.mimeType,
-    content_ref: `data:${image.mimeType};base64,${image.data}`,
-    source: 'user-upload',
+    data_base64: image.data,
   })) } : {}) };
 }

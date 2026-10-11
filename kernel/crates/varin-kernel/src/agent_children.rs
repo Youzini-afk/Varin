@@ -156,7 +156,10 @@ pub(super) fn execute(
             .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
             .capture_delegated_report(&p.execution_id, &p.item_id, offset, max)
             .map_err(domain)?;
-        return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
+        return Ok(serde_json::to_value(
+            read.load_cancellable(&|| cancelled.load(Ordering::Acquire))
+                .map_err(domain)?,
+        )?);
     }
     if method == "runtime.child.source.ready" {
         let p: ChildSourceReadyParams = serde_json::from_value(params)?;
@@ -410,7 +413,10 @@ pub(super) fn execute(
             .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
             .capture_child_report(&p.operation_id, &p.item_id, offset, max)
             .map_err(domain)?;
-        return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
+        return Ok(serde_json::to_value(
+            read.load_cancellable(&|| cancelled.load(Ordering::Acquire))
+                .map_err(domain)?,
+        )?);
     }
     if method == "runtime.child.list" {
         let reads = {

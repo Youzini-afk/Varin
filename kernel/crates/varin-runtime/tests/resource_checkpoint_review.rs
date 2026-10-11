@@ -1,6 +1,6 @@
 #[path = "fixtures/content_collection.rs"]
 mod content_collection;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 use varin_runtime::catalog::{
     context::{ContextCheckpoint, ContextProposal},
@@ -240,14 +240,16 @@ fn original_model_call_reads_retained_bytes_after_refresh_and_collection() {
         .unwrap();
     assert_eq!(bound, old.resources.unwrap());
     assert_eq!(bound.snapshot.captured_files[0].content, "old bytes");
-    assert!(db
-        .capture_resource_snapshot(&receipt.run_id, &origin, "read-skill", &latest.id, None)
-        .unwrap()
-        .load()
-        .is_err());
-    assert!(db
-        .capture_resource_snapshot(&receipt.run_id, &origin, "forged-call", &old.id, None)
-        .is_err());
+    assert!(
+        db.capture_resource_snapshot(&receipt.run_id, &origin, "read-skill", &latest.id, None)
+            .unwrap()
+            .load()
+            .is_err()
+    );
+    assert!(
+        db.capture_resource_snapshot(&receipt.run_id, &origin, "forged-call", &old.id, None)
+            .is_err()
+    );
     let sql = rusqlite::Connection::open(f.0.join("conversation.sqlite")).unwrap();
     assert_eq!(
         sql.query_row("SELECT count(*) FROM operations", [], |row| row
@@ -328,15 +330,17 @@ fn policy_graph_freezes_original_resource_checkpoint_without_model_step() {
             .unwrap(),
         old.resources.unwrap()
     );
-    assert!(db
-        .capture_resource_snapshot(&receipt.run_id, &origin, "read-node", &latest.id, None)
-        .unwrap()
-        .load()
-        .is_err());
-    assert!(db
-        .capture_resource_snapshot(&receipt.run_id, &origin, "other-node", &old.id, None)
-        .and_then(|read| read.load())
-        .is_err());
+    assert!(
+        db.capture_resource_snapshot(&receipt.run_id, &origin, "read-node", &latest.id, None)
+            .unwrap()
+            .load()
+            .is_err()
+    );
+    assert!(
+        db.capture_resource_snapshot(&receipt.run_id, &origin, "other-node", &old.id, None)
+            .and_then(|read| read.load())
+            .is_err()
+    );
 }
 
 #[test]
@@ -374,8 +378,8 @@ fn resource_refresh_preserves_summary_memory_and_rejects_stale_or_profile_change
     assert!(db.publish_resource_refresh(stale).is_err());
     let mut changed = basis("new");
     changed.memory_snapshot.revision += 1;
-    assert!(db
-        .prepare_resource_refresh(
+    assert!(
+        db.prepare_resource_refresh(
             "main",
             updated.revision,
             "new".into(),
@@ -386,9 +390,10 @@ fn resource_refresh_preserves_summary_memory_and_rejects_stale_or_profile_change
         )
         .unwrap()
         .load()
-        .is_err());
-    assert!(db
-        .prepare_personalization_refresh(
+        .is_err()
+    );
+    assert!(
+        db.prepare_personalization_refresh(
             "main",
             updated.revision,
             "profile inject".into(),
@@ -398,7 +403,8 @@ fn resource_refresh_preserves_summary_memory_and_rejects_stale_or_profile_change
         )
         .unwrap()
         .load()
-        .is_err());
+        .is_err()
+    );
     assert_eq!(db.active_context("main").unwrap().unwrap(), updated);
 }
 
@@ -530,13 +536,14 @@ fn fork_and_reopen_preserve_resource_snapshot_provenance_and_bytes() {
         .load(Some(launch(None)), true)
         .unwrap();
     let fork_run = db.admit_submission(input).unwrap();
-    assert!(db
-        .launch_intent(&fork_run.run_id)
-        .unwrap()
-        .unwrap()
-        .selection
-        .source
-        .is_none());
+    assert!(
+        db.launch_intent(&fork_run.run_id)
+            .unwrap()
+            .unwrap()
+            .selection
+            .source
+            .is_none()
+    );
     let origin = model_call(&mut db, &fork_run, &fork.id);
     assert_eq!(
         db.capture_resource_snapshot(&fork_run.run_id, &origin, "read-skill", &fork.id, None)
@@ -609,19 +616,21 @@ fn input_retry_returns_original_receipt_before_current_context_validation() {
     assert_eq!(db.active_context("main").unwrap().unwrap(), latest);
     let mut changed = command.clone();
     changed.input = json!("different command");
-    assert!(db
-        .prepare_submission(changed, None, None)
-        .unwrap()
-        .load(selected, false)
-        .is_err());
-    assert!(db
-        .prepare_submission(command, None, None)
-        .unwrap()
-        .load(
-            Some(launch(Some(source("fixed_branch", "different-source")))),
-            false
-        )
-        .is_err());
+    assert!(
+        db.prepare_submission(changed, None, None)
+            .unwrap()
+            .load(selected, false)
+            .is_err()
+    );
+    assert!(
+        db.prepare_submission(command, None, None)
+            .unwrap()
+            .load(
+                Some(launch(Some(source("fixed_branch", "different-source")))),
+                false
+            )
+            .is_err()
+    );
 }
 
 #[test]
@@ -765,14 +774,18 @@ fn late_input_preparation_cannot_overwrite_a_checkpoint_newer_than_the_host_cand
         .unwrap()
         .with_resources(Some(candidate.clone()))
         .with_expected_context_checkpoint(Some(original.id));
-    assert!(prepared
-        .load(Some(launch(candidate.source.clone())), false)
-        .is_err());
+    assert!(
+        prepared
+            .load(Some(launch(candidate.source.clone())), false)
+            .is_err()
+    );
     let missing_basis = db.prepare_submission(next_command, None, None).unwrap();
-    assert!(missing_basis
-        .existing_receipt(&Some(launch(candidate.source)), false)
-        .unwrap()
-        .is_none());
+    assert!(
+        missing_basis
+            .existing_receipt(&Some(launch(candidate.source)), false)
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(db.active_context("main").unwrap().unwrap(), current);
     assert_eq!(db.head("main").unwrap(), Some(first.input_id));
 }
@@ -819,7 +832,7 @@ fn admit_explicit(db: &mut Catalog, key: &str, raw: &str, text: &str) -> Receipt
         .map(|checkpoint| checkpoint.id);
     preparation.expected_context_checkpoint = None;
     let mut command = command(db, key, "main");
-    command.input = json!({"text":raw,"attachments":[{"media_type":"image/png","content_ref":"image-original"}]});
+    command.input = json!({"text":raw,"attachments":[{"media_type":"image/png","data_base64":"aW1hZ2Utb3JpZ2luYWw="}]});
     let prepared = db
         .prepare_submission(command, Some(proposal(text)), Some(basis(text)))
         .unwrap()
@@ -949,7 +962,7 @@ impl ToolExecutor for ResourceFixtureTools {
         ToolCompletion::Result {
             outcome: varin_runtime::Outcome::Succeeded,
             effect: varin_runtime::Effect::None,
-            content: json!({"status":"ready","body":resources.snapshot.captured_files[0].content,"version":resources.snapshot.skills[0].reference.version}),
+            content: json!({"status":"ready","body":resources.snapshot.captured_files[0].content,"version":resources.snapshot.skills[0].reference.version}).into(),
         }
     }
 }
@@ -1042,7 +1055,7 @@ fn explicit_skill_survives_refresh_compaction_fork_reopen_and_real_request_tool_
         requests[0].view.binding.resource_checkpoint_id.as_deref(),
         Some(compacted.id.as_str())
     );
-    assert!(requests[1].view.history.iter().any(|item| matches!(&item.content, Content::ToolResult{result} if matches!(&result.completion,ToolCompletion::Result{content,..} if content["body"]=="original skill body"))));
+    assert!(requests[1].view.history.iter().any(|item| matches!(&item.content, Content::ToolResult{result} if matches!(&result.completion,ToolCompletion::Result{content,..} if content.data["body"]=="original skill body"))));
     assert_eq!(
         tools.frozen.lock().unwrap()[0].resource_activations,
         vec![activation.clone()]
@@ -1052,15 +1065,16 @@ fn explicit_skill_survives_refresh_compaction_fork_reopen_and_real_request_tool_
     };
     drop(requests);
     let mut db = catalog.lock().unwrap();
-    assert!(db
-        .capture_resource_snapshot(
+    assert!(
+        db.capture_resource_snapshot(
             &receipt.run_id,
             &origin,
             "original-skill",
             &original.id,
             Some("forged-id")
         )
-        .is_err());
+        .is_err()
+    );
     let fork = db
         .prepare_branch_fork("main", "fork-explicit", Some(&receipt.input_id), None)
         .unwrap()
@@ -1132,9 +1146,10 @@ fn explicit_skill_survives_refresh_compaction_fork_reopen_and_real_request_tool_
     let mut forged = intent.clone();
     let PolicyGraphIntent::PolicyToolGraphV1 { nodes, .. } = &mut forged;
     nodes[0].context.resource_activations[0].input_revision += 1;
-    assert!(db
-        .admit_policy_graph(&fork_receipt.run_id, db.epoch(), &forged)
-        .is_err());
+    assert!(
+        db.admit_policy_graph(&fork_receipt.run_id, db.epoch(), &forged)
+            .is_err()
+    );
     db.admit_policy_graph(&fork_receipt.run_id, db.epoch(), &intent)
         .unwrap();
     assert_eq!(
@@ -1150,8 +1165,8 @@ fn explicit_skill_survives_refresh_compaction_fork_reopen_and_real_request_tool_
         .unwrap(),
         original.resources.unwrap()
     );
-    assert!(db
-        .capture_resource_snapshot(
+    assert!(
+        db.capture_resource_snapshot(
             &fork_receipt.run_id,
             &origin,
             "inherited-skill",
@@ -1160,9 +1175,10 @@ fn explicit_skill_survives_refresh_compaction_fork_reopen_and_real_request_tool_
         )
         .unwrap()
         .load()
-        .is_err());
-    assert!(db
-        .capture_resource_snapshot(
+        .is_err()
+    );
+    assert!(
+        db.capture_resource_snapshot(
             &fork_receipt.run_id,
             &origin,
             "inherited-skill",
@@ -1171,9 +1187,10 @@ fn explicit_skill_survives_refresh_compaction_fork_reopen_and_real_request_tool_
         )
         .unwrap()
         .load()
-        .is_err());
-    assert!(db
-        .capture_resource_snapshot(
+        .is_err()
+    );
+    assert!(
+        db.capture_resource_snapshot(
             &fork_receipt.run_id,
             &origin,
             "inherited-skill",
@@ -1182,17 +1199,19 @@ fn explicit_skill_survives_refresh_compaction_fork_reopen_and_real_request_tool_
         )
         .unwrap()
         .load()
-        .is_err());
+        .is_err()
+    );
     db.request_cancel_operation(&action_id).unwrap();
-    assert!(db
-        .capture_resource_snapshot(
+    assert!(
+        db.capture_resource_snapshot(
             &fork_receipt.run_id,
             &origin,
             "inherited-skill",
             &original.id,
             Some(&activation.activation_id)
         )
-        .is_err());
+        .is_err()
+    );
 }
 
 #[test]
@@ -1209,7 +1228,7 @@ fn queued_skill_admission_edit_cancel_delivery_and_retry_keep_one_revision_autho
         thread_id: "thread".into(),
         branch_id: "main".into(),
         mode,
-        input: json!({"text":"/skill:skill argument","attachments":[{"media_type":"image/png","content_ref":"first-image"}]}),
+        input: json!({"text":"/skill:skill argument","attachments":[{"media_type":"image/png","data_base64":"Zmlyc3QtaW1hZ2U="}]}),
         configuration: None,
     };
     let commands = vec![
@@ -1249,12 +1268,13 @@ fn queued_skill_admission_edit_cancel_delivery_and_retry_keep_one_revision_autho
         .unwrap();
     let current = refresh(&mut db, "queue B");
     assert!(db.admit_queued_input(stale).is_err());
-    assert!(db
-        .prepare_enqueue(stale_command)
-        .unwrap()
-        .existing_receipt()
-        .unwrap()
-        .is_none());
+    assert!(
+        db.prepare_enqueue(stale_command)
+            .unwrap()
+            .existing_receipt()
+            .unwrap()
+            .is_none()
+    );
     let mut invalid = explicit_preparation(&current, "wrong arguments");
     invalid.skill.as_mut().unwrap().resource_id = "removed-resource".into();
     let duplicate = db
@@ -1270,17 +1290,18 @@ fn queued_skill_admission_edit_cancel_delivery_and_retry_keep_one_revision_autho
     assert_eq!(retry.receipt, receipts[0]);
     let mut different = commands[0].clone();
     different.mode = InputMode::NextRun;
-    assert!(db
-        .prepare_enqueue(different)
-        .unwrap()
-        .existing_receipt()
-        .is_err());
+    assert!(
+        db.prepare_enqueue(different)
+            .unwrap()
+            .existing_receipt()
+            .is_err()
+    );
     let edited = db
         .prepare_input_edit(
             &receipts[0].input_id,
             1,
             json!({"text":"/skill:skill argument",
-        "attachments":[{"media_type":"image/png","content_ref":"replacement-image"}]}),
+        "attachments":[{"media_type":"image/png","data_base64":"cmVwbGFjZW1lbnQtaW1hZ2U="}]}),
         )
         .unwrap()
         .load()
@@ -1312,8 +1333,8 @@ fn queued_skill_admission_edit_cancel_delivery_and_retry_keep_one_revision_autho
         .unwrap();
     let plain = db.admit_input_edit(plain).unwrap().load().unwrap();
     assert!(plain.content.get("skillInvocations").is_none());
-    assert!(db
-        .prepare_input_edit(
+    assert!(
+        db.prepare_input_edit(
             &receipts[1].input_id,
             plain.revision,
             json!({"text":"/skill:missing"})
@@ -1321,7 +1342,8 @@ fn queued_skill_admission_edit_cancel_delivery_and_retry_keep_one_revision_autho
         .unwrap()
         .with_input_preparation(Some(explicit_preparation(&current, "")))
         .load()
-        .is_err());
+        .is_err()
+    );
     assert_eq!(
         db.capture_queued_input(&receipts[1].input_id)
             .unwrap()
@@ -1390,7 +1412,7 @@ fn queued_skill_admission_edit_cancel_delivery_and_retry_keep_one_revision_autho
     assert_eq!(bindings[0].resource_checkpoint_id, original.id);
     assert_eq!(bindings[0].input_revision, 2);
     assert_eq!(bindings[1].resource_checkpoint_id, current.id);
-    assert!(delivered.items.iter().any(|item| matches!(&item.content,Content::Attachment{content_ref,..} if content_ref=="replacement-image")));
+    assert!(delivered.items.iter().any(|item| matches!(&item.content,Content::Media{media} if media.data_base64=="cmVwbGFjZW1lbnQtaW1hZ2U=")));
     content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
     finish(&mut db, &owner);
     let next = db
@@ -1412,15 +1434,17 @@ fn queued_skill_admission_edit_cancel_delivery_and_retry_keep_one_revision_autho
     drop(db);
     let db = f.open();
     let recovered = db.execution_history("main").unwrap();
-    assert!(recovered.iter().any(|item| item
-        .resource_activation
-        .as_ref()
-        .is_some_and(|binding| binding.input_id == receipts[2].input_id
-            && binding.resource_checkpoint_id == original.id)));
-    assert!(!recovered.iter().any(|item| item
-        .resource_activation
-        .as_ref()
-        .is_some_and(|binding| binding.input_id == cancelled.input_id)));
+    assert!(recovered.iter().any(|item| {
+        item.resource_activation.as_ref().is_some_and(|binding| {
+            binding.input_id == receipts[2].input_id
+                && binding.resource_checkpoint_id == original.id
+        })
+    }));
+    assert!(!recovered.iter().any(|item| {
+        item.resource_activation
+            .as_ref()
+            .is_some_and(|binding| binding.input_id == cancelled.input_id)
+    }));
 }
 
 #[test]
@@ -1493,9 +1517,11 @@ fn cold_calendar_skill_keeps_real_environment_proof_through_compaction_gc_and_re
     let head = db.head(&occurrence.branch_id).unwrap().unwrap();
     let original = db.active_context(&occurrence.branch_id).unwrap().unwrap();
     let history = db.execution_history(&occurrence.branch_id).unwrap();
-    assert!(history
-        .iter()
-        .all(|item| !matches!(item.provenance, Provenance::UserInstruction { .. })));
+    assert!(
+        history
+            .iter()
+            .all(|item| !matches!(item.provenance, Provenance::UserInstruction { .. }))
+    );
     let activation = varin_runtime::catalog::resources::retained_activations(&history).remove(0);
     assert!(matches!(
         history
@@ -1565,8 +1591,8 @@ fn cold_calendar_skill_keeps_real_environment_proof_through_compaction_gc_and_re
         captured.snapshot.captured_files[0].content,
         "calendar original skill"
     );
-    assert!(db
-        .capture_resource_snapshot(
+    assert!(
+        db.capture_resource_snapshot(
             &run,
             &origin,
             "calendar-resource",
@@ -1575,7 +1601,8 @@ fn cold_calendar_skill_keeps_real_environment_proof_through_compaction_gc_and_re
         )
         .unwrap()
         .load()
-        .is_err());
+        .is_err()
+    );
     drop(db);
     let db = f.open();
     assert_eq!(

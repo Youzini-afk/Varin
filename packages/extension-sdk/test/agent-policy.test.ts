@@ -10,7 +10,7 @@ const input = (completion: JsonValue): JsonValue => ({
   event: { kind: 'tool_graph_completed', action_id: 'graph', receipts: [{ node_id: 'save', completion }] }, state: null,
 });
 
-test('registered v3 policy gets immutable typed completions and passes only result references to inference', async () => {
+test('registered v4 policy gets immutable typed completions and passes only result references to inference', async () => {
   let calls = 0;
   const result = await runHostExtensionConformance({ extensionId: 'review.policy-contract', activation: async context => {
     let handler!: VarinHostServiceHandler;
@@ -41,9 +41,9 @@ test('registered v3 policy gets immutable typed completions and passes only resu
     await assert.rejects(async () => handler.decide!([input({ ...completion, output: null })], call), /Invalid policy graph receipts/);
     assert.equal(calls, 2);
     const inspection = await handler.inspect!([], call) as { version: number };
-    assert.equal(inspection.version, 3);
+    assert.equal(inspection.version, 4);
   } });
-  assert.deepEqual(result.providedServiceIds, ['varin.agent.policy@3']);
+  assert.deepEqual(result.providedServiceIds, ['varin.agent.policy@4']);
 });
 
 test('cancellation after an awaited policy decision discards its returned graph', async () => {

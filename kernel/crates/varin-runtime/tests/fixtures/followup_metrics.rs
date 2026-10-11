@@ -147,11 +147,12 @@ fn metric_edges_use_revisions_preserve_unknown_holding_and_survive_reopen() {
             .filter(|item| item.id == format!("followup-input:{}", occurrence.id))
             .collect::<Vec<_>>();
         assert_eq!(items.len(), 1);
-        let Content::Text { text } = &items[0].content else {
+        let Content::Output { output } = &items[0].content else {
             panic!("metric continuation input")
         };
-        assert!(text.contains("Inspect original machine measurements"));
-        let facts: serde_json::Value = serde_json::from_str(text.lines().nth(1).unwrap()).unwrap();
+        assert!(output.parts.iter().any(|part| matches!(part,
+            varin_runtime::output::OutputPart::Text { text } if text.contains("Inspect original machine measurements"))));
+        let facts = &output.data;
         assert_eq!(
             facts["evidence"],
             serde_json::to_value(&occurrence.evidence).unwrap()

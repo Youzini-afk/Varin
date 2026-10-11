@@ -51,7 +51,7 @@ export default defineHostExtension({
         };
         const deliver = (phase: Phase, message: string): VarinAgentPolicyDecision => {
           state.phase = phase;
-          return { action: { kind: 'deliver', text: message }, state: asJson(state) };
+          return { action: { kind: 'deliver', output: { data: null, parts: [{ kind: 'text', text: message }] } }, state: asJson(state) };
         };
         const event = input.event;
         if (input.state === null && (event.kind === 'started' || event.kind === 'input_delivered')) {
@@ -98,20 +98,22 @@ export default defineHostExtension({
         }
         if (event.kind === 'result_chunk') {
           const reference = state.reading;
-          if (!reference || event.reference.action_id !== reference.action_id || event.reference.node_id !== reference.node_id
+          if (event.format !== 'output_body' || !reference || event.reference.action_id !== reference.action_id || event.reference.node_id !== reference.node_id
             || event.reference.content_ref !== reference.content_ref || event.index !== state.nextChunk) return fail('Unexpected result chunk');
           state.bytes = state.bytes.concat(event.bytes);
           state.nextChunk += 1;
           if (state.nextChunk < event.total_chunks) return { action: { kind: 'read_result', reference, index: state.nextChunk }, state: asJson(state) };
-          let result: unknown;
-          try { result = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(state.bytes))); }
+          let output: unknown;
+          try { output = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(state.bytes))); }
           catch { return fail('The domain result is not complete UTF-8 JSON'); }
           state.bytes = [];
           state.reading = null;
+          if (!record(output) || !('data' in output) || !Array.isArray(output.parts)) return fail('The domain result is not an output body');
+          const result = output.data;
           if (!record(result)) return fail('The domain result is not an object');
           if (state.phase === 'plan_read') {
             if (result.status !== 'ready' || !(result.plan === null || record(result.plan) && text(result.plan.ref))) return fail('The current plan is unavailable');
-            return graph('plan_update', 'todo', { action: 'update', expectedRef: result.plan === null ? null : (result.plan as Record<string, string>).ref,
+            return graph('plan_update', 'todo', { action: 'update', expectedRef: result.plan === null ? null : (result.plan as { ref: string }).ref,
               items: [{ text: 'Review the question and optionally run the fixed process probe', status: 'in_progress' }] });
           }
           if (state.phase === 'question_status') {

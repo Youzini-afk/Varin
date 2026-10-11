@@ -2,7 +2,7 @@
 //! are controlled fixtures; no paid model or full Host IPC is used by these tests.
 use super::*;
 use varin_runtime::{
-    catalog::messages::reply_wait::ReplyWaitState, InputMode, Lifetime, OperationPhase,
+    InputMode, Lifetime, OperationPhase, catalog::messages::reply_wait::ReplyWaitState,
 };
 struct Batch {
     calls: Vec<ToolCall>,
@@ -297,8 +297,8 @@ fn absolute_deadlines_keep_early_reply_and_reject_late_reply_even_before_timer_r
     f.finish();
 }
 #[test]
-fn new_user_input_ends_all_observers_without_withdrawing_messages_and_terminal_close_is_not_delivery(
-) {
+fn new_user_input_ends_all_observers_without_withdrawing_messages_and_terminal_close_is_not_delivery()
+ {
     let f = fixture();
     waiting(&f, true, calls(vec![json!({}), json!({})]));
     let original = outgoing(&f);
@@ -320,12 +320,13 @@ fn new_user_input_ends_all_observers_without_withdrawing_messages_and_terminal_c
             .unwrap()
             .load()
             .unwrap();
-        assert!(db
-            .admit_input_delivery(p)
-            .unwrap()
-            .unwrap()
-            .items
-            .is_empty());
+        assert!(
+            db.admit_input_delivery(p)
+                .unwrap()
+                .unwrap()
+                .items
+                .is_empty()
+        );
     }
     reconcile(&f);
     for message in outgoing(&f) {

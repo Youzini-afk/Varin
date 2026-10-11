@@ -1,7 +1,7 @@
 //! Trusted Host script domain commands. The original Operation and Storage process own
 //! their facts; no script registry, grant issuer or secondary receipt journal lives here.
 use super::*;
-use varin_runtime::catalog::managed_process::{require_process, ManagedProcessKind};
+use varin_runtime::catalog::managed_process::{ManagedProcessKind, require_process};
 use varin_runtime::execution::{CancellationToken, ToolExecutionContext};
 use varin_runtime::{Effect, ExecutorOwner, ExternalReceipt, Outcome};
 
@@ -200,7 +200,7 @@ pub(super) fn execute(
             let receipt=prepared.write_external_receipt(ExternalReceipt{executor:op.executor.clone().expect("validated executor"),
                 identity:op.id.clone(),epoch,outcome:if stopped {if op.cancel_requested {Outcome::Cancelled} else {Outcome::Succeeded}} else {Outcome::Indeterminate},
                 effect:if stopped {Effect::Confirmed} else {Effect::Unknown},
-                result:json!({"environmentId":op.id,"process":process,"callbacksStopped":p.callbacks_stopped})}).map_err(domain)?;
+                result:json!({"environmentId":op.id,"process":process,"callbacksStopped":p.callbacks_stopped}).into()}).map_err(domain)?;
             let result = lock()?
                 .record_external_receipt_prepared(&op.id, receipt, stopped)
                 .map_err(domain)?;

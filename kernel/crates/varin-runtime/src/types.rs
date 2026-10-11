@@ -46,7 +46,11 @@ impl ExecutorOwner {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Operation<E = ExternalReceipt, R = Value, C = crate::execution::ToolCompletion> {
+pub struct Operation<
+    E = ExternalReceipt<crate::output::StoredMedia>,
+    R = crate::output::OperationResult,
+    C = crate::execution::ToolCompletion<crate::output::StoredMedia>,
+> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub host_job: Option<crate::catalog::host_jobs::HostJobLink>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -180,11 +184,11 @@ pub struct Wait {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ExternalReceipt {
+pub struct ExternalReceipt<M = crate::output::ResolvedMedia> {
     pub executor: String,
     pub identity: String,
     pub epoch: String,
     pub outcome: Outcome,
     pub effect: Effect,
-    pub result: Value,
+    pub result: crate::output::OutputBody<M>,
 }

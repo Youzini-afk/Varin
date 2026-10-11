@@ -1,7 +1,7 @@
 //! Durable observation of one process from the same Run, including legal launch rebinds.
 use crate::tools::{KernelResourceClient, ToolBinding, ToolKind};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use varin_runtime::catalog::process_wait::WAIT_TOOL;
 use varin_runtime::execution::*;
@@ -256,9 +256,11 @@ impl ProcessWaitTools {
         Ok(ToolCompletion::Result {
             outcome: receipt.outcome(),
             effect: receipt.effect(),
-            content: serde_json::to_value(receipt).map_err(|failure| {
-                ExecutionError::new("process_effect_unknown", failure.to_string())
-            })?,
+            content: serde_json::to_value(receipt)
+                .map_err(|failure| {
+                    ExecutionError::new("process_effect_unknown", failure.to_string())
+                })?
+                .into(),
         })
     }
     fn observe(
@@ -417,7 +419,7 @@ impl ToolExecutor for ProcessWaitTools {
                         ToolCompletion::Result {
                             outcome: Outcome::Indeterminate,
                             effect: Effect::Unknown,
-                            content: json!({"error":error.code,"message":error.message}),
+                            content: json!({"error":error.code,"message":error.message}).into(),
                         }
                     } else {
                         ToolCompletion::NotDispatched {
@@ -436,12 +438,12 @@ impl ToolExecutor for ProcessWaitTools {
                 Ok(content) => ToolCompletion::Result {
                     outcome: Outcome::Succeeded,
                     effect: Effect::None,
-                    content,
+                    content: content.into(),
                 },
                 Err(e) => ToolCompletion::Result {
                     outcome: Outcome::Failed,
                     effect: Effect::None,
-                    content: json!({"error":e.code,"message":e.message}),
+                    content: json!({"error":e.code,"message":e.message}).into(),
                 },
             };
         }
@@ -464,7 +466,7 @@ impl ToolExecutor for ProcessWaitTools {
         result.unwrap_or_else(|e| ToolCompletion::Result {
             outcome: Outcome::Failed,
             effect: Effect::None,
-            content: json!({"error":e.code,"message":e.message}),
+            content: json!({"error":e.code,"message":e.message}).into(),
         })
     }
 }

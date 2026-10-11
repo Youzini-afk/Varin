@@ -89,7 +89,7 @@ pub(crate) fn metadata(db: &Connection, run: &str) -> Result<Option<PolicyCheckp
                     _ => {
                         return Err(RuntimeError::Invalid(
                             "unknown policy checkpoint kind".into(),
-                        ))
+                        ));
                     }
                 };
                 if match kind {
@@ -144,7 +144,7 @@ impl PolicyCheckpointReferences {
         Ok(Self {
             state: content.save(state)?,
             previous_state: None,
-            action: content.save(&serde_json::to_value(action)?)?,
+            action: content.save_policy_action(action)?,
             continuation: None,
             wait_id: if let PolicyAction::Wait { wait_id } = action {
                 Some(wait_id.clone())
@@ -166,7 +166,7 @@ impl PolicyCheckpointReferences {
         content: &crate::content::ContentStore,
         event: &PolicyEvent,
     ) -> Result<Self> {
-        self.continuation = Some(content.save(&serde_json::to_value(event)?)?);
+        self.continuation = Some(content.save_policy_event(event)?);
         Ok(self)
     }
     pub fn publish(
@@ -262,11 +262,11 @@ impl PolicyCheckpointRead {
                     .load(self.metadata.pending_state.as_ref().ok_or_else(|| {
                         RuntimeError::Invalid("pending decision state missing".into())
                     })?)?,
-                action: serde_json::from_value(self.content.load(
+                action: self.content.load_policy_action(
                     self.metadata.action.as_ref().ok_or_else(|| {
                         RuntimeError::Invalid("pending decision body missing".into())
                     })?,
-                )?)?,
+                )?,
             })
         } else {
             None

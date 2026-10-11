@@ -1,7 +1,7 @@
 //! Ordinary memory tools and explicit safe-boundary context preparation.
 use super::host_query::OwnerChannel;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use varin_runtime::catalog::{
     context::ContextScope, memory::MemoryState, personalization::PersonalizationBasis,
@@ -208,7 +208,7 @@ impl ToolExecutor for MemoryTools {
                 } else {
                     Effect::Confirmed
                 },
-                content: value,
+                content: value.into(),
             },
             Ok(value) if value["status"] == "rejected" => ToolCompletion::NotDispatched {
                 reason: value["message"]
@@ -227,7 +227,7 @@ impl ToolExecutor for MemoryTools {
                 } else {
                     Effect::Unknown
                 },
-                content: value,
+                content: value.into(),
             },
             Err(failure) => ToolCompletion::Result {
                 outcome: if contract.read_only {
@@ -240,7 +240,7 @@ impl ToolExecutor for MemoryTools {
                 } else {
                     Effect::Unknown
                 },
-                content: json!({"error":failure.code,"message":failure.message}),
+                content: json!({"error":failure.code,"message":failure.message}).into(),
             },
         }
     }
@@ -416,7 +416,7 @@ pub(crate) fn reconcile(
                 let owner = runtime.catalog();
                 observe_receipt(&owner,&run_id,&response["memoryReceipt"])?;
                 varin_runtime::catalog::result_content::record_external_receipt(&owner, &operation.id,
-                    varin_runtime::ExternalReceipt { identity: operation.id.clone(), executor: TOOL.into(), epoch: origin, outcome: Outcome::Succeeded, effect: Effect::Confirmed, result: response }, true).map_err(error)?;
+                    varin_runtime::ExternalReceipt { identity: operation.id.clone(), executor: TOOL.into(), epoch: origin, outcome: Outcome::Succeeded, effect: Effect::Confirmed, result: response.into() }, true).map_err(error)?;
                 reconciled.push(operation.id);
             }
             Ok(json!({"reconciled":reconciled,"unresolved":unresolved}))

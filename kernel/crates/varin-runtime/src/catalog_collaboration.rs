@@ -204,7 +204,14 @@ pub struct ChildTask {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChildTextPage {
+#[serde(rename_all = "snake_case")]
+pub enum ChildReportFormat {
+    Text,
+    OutputBody,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChildReportPage {
+    pub format: ChildReportFormat,
     pub execution_id: String,
     pub operation_id: String,
     pub item_id: String,
@@ -222,7 +229,7 @@ impl Catalog {
         item_id: &str,
         offset: usize,
         max_bytes: usize,
-    ) -> Result<ChildTextPage> {
+    ) -> Result<ChildReportPage> {
         let _synchronous = self.content.begin_synchronous()?;
         self.capture_child_report(operation_id, item_id, offset, max_bytes)?
             .load()
@@ -812,7 +819,7 @@ impl ChildPreparation {
             ChildSource::Absent => None,
             ChildSource::Ready { selection, .. } => Some(selection),
             ChildSource::Pending { .. } => {
-                return Err(RuntimeError::Conflict("child source is not ready".into()))
+                return Err(RuntimeError::Conflict("child source is not ready".into()));
             }
         };
         if source.as_ref() != expected {
@@ -1293,7 +1300,7 @@ impl ChildSourcePreparation {
             _ => {
                 return Err(RuntimeError::Conflict(
                     "delegated source basis is unavailable".into(),
-                ))
+                ));
             }
         };
         if self.selection.mode != mode
@@ -1539,7 +1546,7 @@ impl Catalog {
             _ => {
                 return Err(RuntimeError::Conflict(
                     "WorkingResult does not match the original child candidate".into(),
-                ))
+                ));
             }
         }
         if child.code_result

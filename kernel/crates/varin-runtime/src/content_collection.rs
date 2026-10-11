@@ -256,20 +256,26 @@ impl ContentCollection {
         }
         let mut live = HashSet::new();
         let mut verified = HashSet::new();
-        for reference in references {
+        while let Some(reference) = references.pop() {
             self.check()?;
             if !verified.insert(reference.content_object.clone()) {
                 continue;
             }
             let manifest: Manifest =
                 serde_json::from_slice(&self.content.read_bytes(&reference.content_object)?)?;
-            if manifest.version != 1 {
+            if manifest.version != 2 {
                 return Err(RuntimeError::Invalid("unsupported content manifest".into()).into());
             }
             #[cfg(test)]
             self.at(CollectionPoint::Verify);
             self.check()?;
             live.insert(reference.content_object);
+            references.extend(
+                manifest
+                    .dependencies
+                    .into_iter()
+                    .map(|content_object| Reference { content_object }),
+            );
             let mut length = 0u64;
             for hash in manifest.chunks {
                 self.check()?;
@@ -318,7 +324,7 @@ impl ContentCollection {
         let reference: Reference = serde_json::from_value(value.clone())?;
         let manifest: Manifest =
             serde_json::from_slice(&self.content.read_bytes(&reference.content_object)?)?;
-        if manifest.version != 1 {
+        if manifest.version != 2 {
             return Err(RuntimeError::Invalid("unsupported content manifest".into()).into());
         }
         let mut bytes = Vec::new();
@@ -432,8 +438,12 @@ impl ContentCollection {
             Ok(values)
         };
         let requests = capture("SELECT json_extract(body,'$.request') FROM model_steps")?;
-        let graphs = capture("SELECT json_extract(body,'$.intent.body_ref') FROM operations WHERE json_extract(body,'$.intent.kind')='policy_tool_graph_v1'")?;
-        let dispatches = capture("SELECT json_extract(body,'$.dispatch_context_ref') FROM run_launches WHERE json_extract(body,'$.dispatch_context_ref') IS NOT NULL UNION ALL SELECT json_extract(body,'$.dispatch_context_ref') FROM child_tasks")?;
+        let graphs = capture(
+            "SELECT json_extract(body,'$.intent.body_ref') FROM operations WHERE json_extract(body,'$.intent.kind')='policy_tool_graph_v1'",
+        )?;
+        let dispatches = capture(
+            "SELECT json_extract(body,'$.dispatch_context_ref') FROM run_launches WHERE json_extract(body,'$.dispatch_context_ref') IS NOT NULL UNION ALL SELECT json_extract(body,'$.dispatch_context_ref') FROM child_tasks",
+        )?;
         Ok(CollectionRoots {
             references,
             requests,

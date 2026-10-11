@@ -33,7 +33,7 @@ async function fixture() {
   await runtime.installOrStage({ expectedRevision: (await runtime.state()).catalog.revision,
     source: { kind: 'local', display: 'Plan, question and process example', specifier: source } });
   await runtime.upsertServiceRoutingRule({ expectedRevision: (await runtime.routing.read()).document.revision,
-    rule: { serviceId: 'varin.agent.policy', version: 3, providerKey: 'example.domain-policy:host:varin.agent.policy@3',
+    rule: { serviceId: 'varin.agent.policy', version: 4, providerKey: 'example.domain-policy:host:varin.agent.policy@4',
       scope: { sessionId: 'main-thread' }, allowFallback: false } });
   const prepare = async (owner = runtime) => {
     const lease = await createAgentPolicy(owner)({ sessionId: 'main-thread' });
@@ -56,14 +56,14 @@ function completed(lease: AgentPolicyLease, before: VarinAgentPolicyDecision, to
 async function readResult(lease: AgentPolicyLease, before: VarinAgentPolicyDecision, tool: string, content: JsonValue) {
   const reference = { action_id: `${tool}-action`, node_id: tool, content_ref: `${tool}-original-content` };
   let next = await completed(lease, before, tool, { kind: 'result', outcome: 'succeeded', effect: 'none', output: reference });
-  const bytes = [...new TextEncoder().encode(JSON.stringify(content))];
+  const bytes = [...new TextEncoder().encode(JSON.stringify({ data: content, parts: [] }))];
   // The actual broker transports typed result bytes; split inside a Unicode code point when present.
   const multibyte = bytes.findIndex(byte => byte >= 0xc0);
   const split = multibyte < 0 ? Math.ceil(bytes.length / 2) : multibyte + 1;
   const chunks = [bytes.slice(0, split), bytes.slice(split)];
   for (const [index, chunk] of chunks.entries()) {
     expect(next.action).toEqual({ kind: 'read_result', reference, index });
-    next = await decide(lease, { kind: 'result_chunk', reference, index, total_chunks: chunks.length, total_bytes: bytes.length, bytes: chunk }, next.state);
+    next = await decide(lease, { kind: 'result_chunk', format: 'output_body', reference, index, total_chunks: chunks.length, total_bytes: bytes.length, bytes: chunk }, next.state);
   }
   return next;
 }
@@ -101,7 +101,7 @@ it('installed domain policy resumes its saved question, reads genuine result sha
   const inspect = await completed(lease, wait, 'wait_process', accepted('original-observer', 'awaiting_process'));
   expect(inspect.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'process_inspect', arguments: { processId: 'original-process' } } }] });
   const delivery = await readResult(lease, inspect, 'process_inspect', { status: 'exited', exitCode: 0 });
-  expect(delivery.action).toEqual({ kind: 'deliver', text: 'The original process owner reports that the fixed probe exited with code 0.' });
+  expect(delivery.action).toEqual({ kind: 'deliver', output: { data: null, parts: [{ kind: 'text', text: 'The original process owner reports that the fixed probe exited with code 0.' }] } });
   const pause = await decide(lease, { kind: 'delivered', action_id: 'delivery', item_id: 'delivery-history' }, delivery.state);
   expect(pause.action.kind).toBe('pause');
   expect((await decide(lease, { kind: 'started' }, pause.state)).action.kind).toBe('fail');

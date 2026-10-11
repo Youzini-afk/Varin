@@ -2,10 +2,10 @@
 #[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
 };
 use varin_runtime::{
     catalog::{goals::*, inputs::EnqueueInput},
@@ -95,7 +95,7 @@ impl AgentPolicy for Policy {
         let action = match (event, n) {
             (PolicyEvent::Started, 0) => PolicyAction::RequestModel,
             (PolicyEvent::ModelCompleted { .. }, 1) => PolicyAction::Deliver {
-                text: "durable progress".into(),
+                output: varin_runtime::output::OutputBody::text("durable progress"),
             },
             (PolicyEvent::Delivered { .. }, 2) => PolicyAction::RequestModel,
             (PolicyEvent::ModelCompleted { .. }, 3) => PolicyAction::Complete,
@@ -247,10 +247,12 @@ impl Fixture {
             context_preparation: Arc::new(NoopContextPreparation),
             progress: ProgressSink::default(),
         };
-        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-            || engine.run(input, CancellationToken::default())
-        ))
-        .is_err());
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                || engine.run(input, CancellationToken::default())
+            ))
+            .is_err()
+        );
         let request = cut.id.lock().unwrap().clone().unwrap();
         assert_eq!(
             db.lock().unwrap().model_step(&request).unwrap().state,
@@ -315,10 +317,11 @@ fn prepared_reopens_through_supervisor_without_redeciding_or_replaying_history()
     let requests = f.provider.requests.lock().unwrap();
     assert_eq!(requests.len(), 2);
     assert_ne!(requests[1].view.request_id, f.request);
-    assert!(requests[1].view.history.iter().any(|i| i
-        .opaque
-        .as_ref()
-        .is_some_and(|o| o.value == json!({"signature":[null,17,"原始"]}))));
+    assert!(requests[1].view.history.iter().any(|i| {
+        i.opaque
+            .as_ref()
+            .is_some_and(|o| o.value == json!({"signature":[null,17,"原始"]}))
+    }));
     let db = supervisor.catalog();
     let db = db.lock().unwrap();
     f.assert_closed(&db);
@@ -334,7 +337,7 @@ fn prepared_reopens_through_supervisor_without_redeciding_or_replaying_history()
     assert_eq!(
         history
             .iter()
-            .filter(|i| matches!(&i.content,Content::Text{text} if text=="durable progress"))
+            .filter(|i| matches!(&i.content,Content::Output{output} if output == &varin_runtime::output::OutputBody::text("durable progress")))
             .count(),
         1
     );
@@ -369,9 +372,11 @@ fn changed_goal_redecides_from_real_delivery_and_committed_private_state() {
         requests[1].view.binding.goal.as_ref().unwrap().generation,
         2
     );
-    assert!(serde_json::to_string(&requests[1])
-        .unwrap()
-        .contains("CURRENT OBJECTIVE"));
+    assert!(
+        serde_json::to_string(&requests[1])
+            .unwrap()
+            .contains("CURRENT OBJECTIVE")
+    );
     let decisions = f.policy.decisions.lock().unwrap();
     assert!(matches!(decisions[3],(PolicyEvent::Delivered{..},ref state) if state==&json!(2)));
     let db = supervisor.catalog();
@@ -404,18 +409,20 @@ fn queued_input_wins_without_replaying_committed_delivery() {
         assert_eq!(report.policy_state, json!(4));
         let requests = f.provider.requests.lock().unwrap();
         assert_eq!(requests.len(), 2);
-        assert!(requests[1]
-            .view
-            .history
-            .iter()
-            .any(|i| matches!(&i.content,Content::Text{text} if text=="NEW INPUT")));
+        assert!(
+            requests[1]
+                .view
+                .history
+                .iter()
+                .any(|i| matches!(&i.content,Content::Text{text} if text=="NEW INPUT"))
+        );
         let db = supervisor.catalog();
         let db = db.lock().unwrap();
         assert_eq!(
             db.execution_history("branch")
                 .unwrap()
                 .iter()
-                .filter(|i| matches!(&i.content,Content::Text{text} if text=="durable progress"))
+                .filter(|i| matches!(&i.content,Content::Output{output} if output == &varin_runtime::output::OutputBody::text("durable progress")))
                 .count(),
             1
         );
@@ -514,7 +521,7 @@ fn a_second_crash_after_nonexecution_publication_still_recovers_the_pending_prop
         report
             .history
             .iter()
-            .filter(|item| matches!(&item.content,Content::Text{text} if text=="durable progress"))
+            .filter(|item| matches!(&item.content,Content::Output{output} if output == &varin_runtime::output::OutputBody::text("durable progress")))
             .count(),
         1
     );
@@ -532,8 +539,8 @@ fn dispatched_intent_is_never_reclassified_or_replayed() {
         },
     )
     .unwrap();
-    assert!(db
-        .commit_execution(
+    assert!(
+        db.commit_execution(
             &f.run,
             db.epoch(),
             &ExecutionRecord::RequestNotDispatched {
@@ -541,7 +548,8 @@ fn dispatched_intent_is_never_reclassified_or_replayed() {
                 reason: NonDispatchReason::Recovery
             }
         )
-        .is_err());
+        .is_err()
+    );
     drop(db);
     let supervisor = RunSupervisor::new(Catalog::open(&f.root).unwrap());
     assert!(supervisor.start(&f.run, f.start()).unwrap().wait().is_err());
@@ -717,14 +725,16 @@ fn explicit_model_selection_activates_after_the_old_candidate_is_closed() {
     binding.model = config.model;
     binding.provider_family = config.provider_family;
     binding.configuration_generation = 2;
-    assert!(db
-        .activate_model_selection(&selected, db.epoch(), &binding)
-        .is_err());
+    assert!(
+        db.activate_model_selection(&selected, db.epoch(), &binding)
+            .is_err()
+    );
     db.prepare_recovered_execution(&f.run, f.binding.clone(), f.policy.identity(), json!(999))
         .unwrap();
-    assert!(db
-        .activate_model_selection(&selected, db.epoch(), &binding)
-        .unwrap());
+    assert!(
+        db.activate_model_selection(&selected, db.epoch(), &binding)
+            .unwrap()
+    );
     drop(db);
     let supervisor = RunSupervisor::new(Catalog::open(&f.root).unwrap());
     let mut start = f.start();

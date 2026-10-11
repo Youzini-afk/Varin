@@ -79,6 +79,45 @@ writing Pi session files or the Host harness's existing execution records.
 The wire source remains `kernel/protocol/schema.json`; it generates the state enums and the
 Host request/response DTOs. Domain implementation types remain private to Rust.
 
+## Typed output and media ownership
+
+`OutputBody<M> { data, parts }` is the single ordinary output shape. JSON data is opaque,
+including null, empty values and objects resembling content descriptors. Presentation parts are
+explicit ordered text or media. `IncomingMedia` accepts MIME and inline bytes; the original
+invocation/input owner stamps provenance. `StoredMedia` keeps MIME, original source and an immutable
+content reference. Worker-local `ResolvedMedia` supplies bytes to providers or the actual nested
+caller. Public Operation results explicitly distinguish short `Control` from `Output`; they do not
+infer domain control or media by inspecting ordinary data fields.
+
+The existing ContentStore writes media bytes before their containing output/history/request and
+records typed dependencies in its manifests. Original publication protection spans this work and
+the short identity/epoch/revision-checked commit. GC follows those dependencies from the existing
+history, input, operation, event, policy and request roots. Catalog retains only original metadata;
+byte reads, hash/base64 work and provider serialization stay outside its control lock. Catalog
+format **48**, content domain **4**, manifest **2** and Kernel wire **3** reject older internal
+formats directly. These are distinct from policy service **4** and private script worker protocol **2**.
+
+`runtime.output.media.read` uses the original caller Thread/branch plus an actual history, queued
+input/revision, Operation completion/result/external receipt, durable event, policy evidence or
+signed family-history or exact child-report holder. The expected content hash is only a consistency check. It never grants
+an arbitrary object read. The existing cancellable body lane returns bounded original chunks;
+source identity and byte order remain attached to the original descriptor. Accepted Job content and
+later terminal receipts remain distinct, including earlier receipts retained only by events.
+
+Computer's native adapter explicitly separates its known screenshot bytes from observation metadata;
+ordinary JSON producers do not guess media. Node `emitImage` and SDK `call.output` publish explicit
+parts to the outer invocation, including parts accepted before its failure. Nested receipt media is
+not automatically copied into that output and does not create model tool/result pairs. Cancellation,
+physical writer-stop evidence and accepted callback drain keep their existing owners.
+
+Provider adapters compile media through their actual wire protocols, preserving original tool call
+IDs and completing parallel result groups before separate Chat/Google image turns. Unsupported
+MIME/model combinations fail explicitly. Policy evidence and delivery are labelled external data,
+not fabricated tool exchanges. Frozen requests retain semantic media references and the exact
+serialized wire projection. Summary preparation keeps images typed; image token costs remain
+unmeasured. This contract does not claim native MCP image/audio/resource projection, live provider
+acceptance, physical desktop capture or complete platform/IPC verification.
+
 ## Instruction and skill checkpoint binding
 
 `catalog_resources` retains the Host-selected `ContextResources` snapshot inside the ordinary immutable
@@ -321,9 +360,9 @@ passive fact interrupts an unrelated observation Wait. Physical release remains 
 Computer owner's evidence, independent of input acceptance and body failure.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 46, input domain 6 and collaboration domain 8 store input intents/queue bodies and context-job ownership,
+Catalog version **48**, input domain 6 and collaboration domain 8 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
-configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
+configuration; content format **4** retains typed request origins and typed output bodies. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
 history, all model outputs (including rejected output), original command intents, queued-history references, context
 checkpoints, memory projections, summary recipes and source parts, policy action/checkpoint bodies,
@@ -479,7 +518,7 @@ Explicit context-job capture and publication also stage bodies outside the Catal
 ## Policy-originated tool graphs
 
 A pinned AgentPolicy may return `ToolGraph` before any model request. The public Decision contract is
-`varin.agent.policy@3`; the old read-graph contract is replaced, not translated. Nodes have unique identities,
+`varin.agent.policy@4`; the old read-graph contract is replaced, not translated. Nodes have unique identities,
 frozen schemas/source contexts and explicit acyclic prerequisites. Tool preparation, authorization,
 atomic resource/capacity admission, dispatch reauthorization and settlement use the same single-call
 execution path as model tools. Untrusted read-only annotations confer no permission.
@@ -557,9 +596,9 @@ output does not suppress their next legal request delivery or replay the write a
 
 The private protocol releases only completed-body transfer credit after a nested call belongs to its
 live worker, preserving the pending cancellation/final response. This permits further original
-permission/domain requests at the existing window size. Catalog **47** rejects older internal formats
-directly. Persistent script environments use the contract below; typed media delivery remains a
-separate capability. Arbitrary extension Node I/O is not sandboxed or intercepted.
+permission/domain requests at the existing window size. Catalog **48** rejects older internal formats
+directly. Persistent script environments use the contract below; typed media follows the shared
+output contract above. Arbitrary extension Node I/O is not sandboxed or intercepted.
 
 Question and process observers reuse the original Job acceptance and Wait owners. A pending observation
 parks before an ordinary policy callback, retaining the committed private state and original event.
@@ -631,7 +670,7 @@ advancing its private state, including after input delivery, a crash and GC. Suc
 admission/consumption promotes the proposal; a registered Wait promotes only when actually parked.
 Their content references and prepared publication leases participate in normal GC.
 
-`varin.agent.policy@3` exposes explicit `transitionState` compatibility. An unchanged complete target
+`varin.agent.policy@4` exposes explicit `transitionState` compatibility. An unchanged complete target
 can retain state; a different target must accept the original private state explicitly. Incompatibility
 leaves the active generation intact. The user's `restart_state` command resets only strategy-private
 state, retaining history and independent jobs. Preparing, cancelling or restarting a strategy update

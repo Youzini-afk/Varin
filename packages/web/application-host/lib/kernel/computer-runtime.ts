@@ -1,3 +1,5 @@
+import type { OutputPart, IncomingMedia } from './protocol.generated.js';
+import type { ComputerObservation } from '@varin/protocol';
 /** Native callers use the original Computer owner. Catalog owns identity and ToolCall settlement. */
 import { randomUUID } from 'node:crypto';
 import { COMPUTER_CAPABILITY, COMPUTER_TOOL_DECLARATIONS } from '@varin/extension-builtins';
@@ -30,8 +32,18 @@ function configuration(identity: string | null | undefined): { version: 1; defau
   }
   return { version: 1, defaultDesktopId: value.defaultDesktopId };
 }
-const result = (content: unknown, effect: Effect = 'none', stopped = true, outcome: 'succeeded' | 'failed' | 'cancelled' | 'indeterminate' = 'succeeded'): ToolExecutionReceipt =>
-  ({ executor_stopped: stopped, completion: { kind: 'result', outcome, effect, content } });
+const result = (content: unknown, effect: Effect = 'none', stopped = true, outcome: 'succeeded' | 'failed' | 'cancelled' | 'indeterminate' = 'succeeded', parts: OutputPart<IncomingMedia>[] = []): ToolExecutionReceipt =>
+  ({ executor_stopped: stopped, completion: { kind: 'result', outcome, effect, content: { data: content, parts } } });
+
+/** Only the Computer producer knows its screenshot field. Preserve every other observation fact. */
+function observationOutput(observation: ComputerObservation, parts: OutputPart<IncomingMedia>[]) {
+  const { screenshot, ...metadata } = observation;
+  if (!screenshot) return metadata;
+  const { base64, ...imageMetadata } = screenshot;
+  const partIndex = parts.length;
+  parts.push({ kind: 'media', media: { media_type: screenshot.mime, data_base64: base64 } });
+  return { ...metadata, screenshot: { ...imageMetadata, partIndex } };
+}
 
 export function createComputerRuntime({ kernel, runtime, computers, enabled }: { kernel: KernelClient; runtime: AgentRuntimeClient; computers: ComputerService; enabled(runId: string): Promise<boolean> }) {
   const scope = async (work: ComputerWorkRef, runId?: string, operationId?: string, signal?: AbortSignal): Promise<ComputerScope> => {
@@ -207,7 +219,7 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
         if (method === 'access') return result(await computers.automation.snapshot(work));
         if (method === 'wait') {
           const accepted = await rpc<Operation, 'runtime.computer.request.wait'>('runtime.computer.request.wait', { operationId: original.operationId, requestId: String(params.requestId) });
-          return { executor_stopped: false, completion: accepted.call_completion! };
+          return { executor_stopped: false, completion: await runtime.inlineCompletion(accepted) };
         }
         if (method === 'grant' || method === 'deny') {
           inputCallStarted = true;
@@ -242,13 +254,19 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
           const releaseScriptDispatch = noteInvocationComputerUse(context, desktopId, reason => admission.cancel(reason));
           try { switch (method) {
             case 'apps': return result({ apps: await computers.listApps(desktopId) });
-            case 'observe': return result({ observation: await computers.observe({ ...params as unknown as ComputerObserveParams, desktopId, signal: context.signal }) });
+            case 'observe': {
+              const parts: OutputPart<IncomingMedia>[] = [];
+              const observation = observationOutput(await computers.observe({ ...params as unknown as ComputerObserveParams, desktopId, signal: context.signal }), parts);
+              return result({ observation }, 'none', true, 'succeeded', parts);
+            }
             case 'act': {
               inputCallStarted = true;
               const action = await computers.act({ ...params as unknown as ComputerActParams, desktopId, signal: context.signal });
               const effect = action.receipt?.effect === 'verified' ? 'confirmed' : action.receipt?.effect ?? 'unknown';
-              return result({ result: action }, effect, action.inputWriterStopped,
-                effect === 'unknown' ? 'indeterminate' : action.cancelled ? 'cancelled' : action.accepted ? 'succeeded' : 'failed');
+              const parts: OutputPart<IncomingMedia>[] = [];
+              const data = { ...action, ...(action.observation ? { observation: observationOutput(action.observation, parts) } : {}) };
+              return result({ result: data }, effect, action.inputWriterStopped,
+                effect === 'unknown' ? 'indeterminate' : action.cancelled ? 'cancelled' : action.accepted ? 'succeeded' : 'failed', parts);
             }
             default: throw new ComputerError('computer-request-invalid', 'The selected Computer method is unavailable');
           } } finally { releaseScriptDispatch(); }

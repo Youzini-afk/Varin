@@ -69,7 +69,7 @@ pub trait InputAdmission {
     fn queued_input(&self, id: &str) -> Result<QueuedInput>;
     fn queued_inputs(&self, branch: &str) -> Result<Vec<QueuedInput>>;
     fn edit_queued_input(&mut self, id: &str, revision: u64, content: Value)
-        -> Result<QueuedInput>;
+    -> Result<QueuedInput>;
     fn cancel_queued_input(&mut self, id: &str, revision: u64) -> Result<QueuedInput>;
     fn consume_inputs(
         &mut self,

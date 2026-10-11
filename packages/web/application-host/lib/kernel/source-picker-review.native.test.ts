@@ -1,3 +1,4 @@
+import { responsesMetadataText } from './responses-wire.test-helper.js';
 import { createThreadSourcePreparer } from './thread-sources.js';
 import { createDocumentAuthority } from '../documents/authority.js';
 import { KernelStorageAdapter, createKernelWorkspaceWorkingStateAccess } from './storage-adapter.js';
@@ -94,7 +95,7 @@ it('prepares saved disk through real Documents and capture; concurrent and reope
   const reply = (body: Record<string, unknown>, response: ServerResponse) => {
     const output = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
     if (!output) tool(response, 'file_read', { path: 'source.txt' }, 1);
-    else { read = String(output.output); done(response); }
+    else { read = responsesMetadataText(output.output); done(response); }
   };
   const f = await fixture(reply);
   await fs.writeFile(path.join(f.workspace, 'source.txt'), 'saved baseline');
@@ -126,13 +127,13 @@ it('prepared editable copy runs a real process without modifying the source fold
   let serial = 0; let processId = ''; let read = ''; let discovered = ''; let matched = '';
   const f = await fixture((body, response) => {
     const output = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
-    const result = output ? JSON.parse(String(output.output)) as { operation_id?: string; content?: { writerActive?: boolean } } : undefined;
+    const result = output ? JSON.parse(responsesMetadataText(output.output)) as { operation_id?: string; content?: { writerActive?: boolean } } : undefined;
     if (!output) tool(response, 'process_spawn', { cwd: '', command: process.execPath, args: ['-e', 'require("node:fs").writeFileSync("source.txt", "isolated process edit"); require("node:fs").writeFileSync("generated.txt", "new process file")'], mode: 'pipe' }, ++serial);
     else if (String(output.call_id).startsWith('process_spawn-')) { processId = result!.operation_id!; tool(response, 'process_inspect', { processId }, ++serial); }
     else if (String(output.call_id).startsWith('process_inspect-')) { if (result!.content!.writerActive) tool(response, 'process_inspect', { processId }, ++serial); else tool(response, 'file_list', {}, ++serial); }
-    else if (String(output.call_id).startsWith('file_list-')) { discovered = String(output.output); tool(response, 'file_search', { query: 'isolated process edit' }, ++serial); }
-    else if (String(output.call_id).startsWith('file_search-')) { matched = String(output.output); tool(response, 'file_read', { path: 'source.txt' }, ++serial); }
-    else { read = String(output.output); done(response); }
+    else if (String(output.call_id).startsWith('file_list-')) { discovered = responsesMetadataText(output.output); tool(response, 'file_search', { query: 'isolated process edit' }, ++serial); }
+    else if (String(output.call_id).startsWith('file_search-')) { matched = responsesMetadataText(output.output); tool(response, 'file_read', { path: 'source.txt' }, ++serial); }
+    else { read = responsesMetadataText(output.output); done(response); }
   });
   await fs.writeFile(path.join(f.workspace, 'source.txt'), 'unmodified source folder');
   const identity = await f.api.create('editable-prepared-source');
@@ -154,7 +155,7 @@ it('list and search discover the prepared fixed snapshot rather than later disk 
   const returned: string[] = [];
   const f = await fixture((body, response) => {
     const output = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
-    if (output) returned.push(String(output.output));
+    if (output) returned.push(responsesMetadataText(output.output));
     turn++;
     if (turn === 1) tool(response, 'file_list', { paths: ['src'], recursive: true }, turn);
     else if (turn === 2) tool(response, 'file_search', { paths: ['src'], query: 'needle', fixedStrings: true }, turn);

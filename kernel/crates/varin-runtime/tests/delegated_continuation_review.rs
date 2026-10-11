@@ -8,7 +8,7 @@ mod fixture;
 mod input_admission;
 use fixture::Fixture;
 use input_admission::InputAdmission;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use varin_runtime::catalog::{
     collaboration::*, context::ContextProposal, delegated::*, dispatch::TreeCancelTarget,
     inputs::EnqueueInput, launches::SourceSelection, personalization::PersonalizationBasis,
@@ -59,7 +59,7 @@ fn finish(db: &mut Catalog, child: &ChildTask, text: Option<&str>) {
             db.epoch(),
             db.head(&child.child_branch_id).unwrap().as_deref(),
             HistorySource::Assistant,
-            serde_json::to_value(ConversationItem {
+            serde_json::to_value(ConversationItem::<varin_runtime::output::ResolvedMedia> {
                 id: "answer".into(),
                 provenance: Provenance::Assistant,
                 content: Content::Text { text: text.into() },
@@ -189,7 +189,7 @@ fn explicit_user_new_run_keeps_original_dispatch_and_never_borrows_its_report() 
         &f.db,
         &initial,
         "second",
-        json!({"text":"continue with this image","attachments":[{"media_type":"image/png","content_ref":"image:fixed","source":"user-upload"}]}),
+        json!({"text":"continue with this image","attachments":[{"media_type":"image/png","data_base64":"aW1hZ2U6Zml4ZWQ="}]}),
     );
     let next = accept(&mut f.db, command.clone());
     assert!(next.source.is_none());
@@ -214,8 +214,8 @@ fn explicit_user_new_run_keeps_original_dispatch_and_never_borrows_its_report() 
     let input = history.iter().find(|item| item.run_id == *run).unwrap();
     assert_eq!(input.source, HistorySource::User);
     assert_eq!(
-        input.content["attachments"][0]["content_ref"],
-        "image:fixed"
+        input.content["attachments"][0]["data_base64"],
+        "aW1hZ2U6Zml4ZWQ="
     );
     finish(&mut f.db, &child, None);
     let finished = f.db.delegated_execution(&next.execution_id).unwrap();
@@ -286,11 +286,11 @@ fn pending_cancel_fences_late_source_but_a_new_user_intent_after_cancel_can_proc
     };
     let source = ready_source(&mut f.db, &next);
     let child = prepare(&mut f.db, &next, source);
-    assert!(f
-        .db
-        .require_child_launch(&child.receipt.unwrap().run_id)
-        .unwrap()
-        .is_some());
+    assert!(
+        f.db.require_child_launch(&child.receipt.unwrap().run_id)
+            .unwrap()
+            .is_some()
+    );
     let root = f.root.clone();
     drop(f);
     std::fs::remove_dir_all(root).unwrap();
@@ -315,12 +315,12 @@ fn concurrent_preparation_is_one_execution_and_failed_pre_run_intent_does_not_bl
     assert_eq!(f.db.accept_child_continuation(b).unwrap(), accepted);
     let mut changed = command.clone();
     changed.input = json!("different");
-    assert!(f
-        .db
-        .capture_child_continuation(changed)
-        .unwrap()
-        .load()
-        .is_err());
+    assert!(
+        f.db.capture_child_continuation(changed)
+            .unwrap()
+            .load()
+            .is_err()
+    );
     let mut other = command.clone();
     other.key = "other".into();
     let blocked =
@@ -497,7 +497,7 @@ fn continuation_resource_cas_preserves_summary_memory_and_binds_explicit_skill_t
         &f.db,
         &first,
         "skill-next",
-        json!({"text":"/skill:review exact scope","attachments":[{"media_type":"image/png","content_ref":"image:retained"}]}),
+        json!({"text":"/skill:review exact scope","attachments":[{"media_type":"image/png","data_base64":"aW1hZ2U6cmV0YWluZWQ="}]}),
     );
     let next = accept(&mut f.db, command);
     let source = ready_source(&mut f.db, &next);
@@ -571,8 +571,8 @@ fn continuation_resource_cas_preserves_summary_memory_and_binds_explicit_skill_t
         current.id
     );
     assert_eq!(
-        item.content["attachments"][0]["content_ref"],
-        "image:retained"
+        item.content["attachments"][0]["data_base64"],
+        "aW1hZ2U6cmV0YWluZWQ="
     );
     let root = f.root.clone();
     drop(f);
@@ -675,10 +675,10 @@ fn each_new_run_retargets_only_the_original_mcp_definition_and_its_own_recovery_
             .mcp_binding,
         Some(second_binding.clone())
     );
-    assert!(f
-        .db
-        .prepare_mcp_launch(&run, derive(second_binding, "third"))
-        .is_err());
+    assert!(
+        f.db.prepare_mcp_launch(&run, derive(second_binding, "third"))
+            .is_err()
+    );
     drop(f);
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -704,10 +704,10 @@ fn continuation_freezes_the_previous_actual_model_and_policy_instead_of_initial_
     let choice =
         f.db.select_model(&run_id, "user-model", configuration.clone(), scope.clone())
             .unwrap();
-    assert!(f
-        .db
-        .prepare_model_selection(&choice, f.db.epoch(), None)
-        .unwrap());
+    assert!(
+        f.db.prepare_model_selection(&choice, f.db.epoch(), None)
+            .unwrap()
+    );
     let identity = varin_runtime::catalog::dispatch::ChildModelBinding {
         configuration: configuration.clone(),
         credential_scope: scope,
@@ -715,16 +715,16 @@ fn continuation_freezes_the_previous_actual_model_and_policy_instead_of_initial_
     .connection_identity()
     .unwrap();
     let binding:RequestBinding=serde_json::from_value(json!({"child_dispatch":null,"goal":null,"resource_activations":[],"resource_checkpoint_id":null,"connection_identity":identity,"provider_family":configuration.provider_family,"model":configuration.model,"credential_ref":null,"configuration_generation":configuration.configuration_generation,"tool_schema_generation":first.launch.tool_schema_generation,"tools":f.launch.tools,"instruction_sources":[],"memory_checkpoint":null,"attachment_refs":[],"environment_cursor":0,"history_range":{"branch_id":first.child_branch_id,"ancestor_id":null,"leaf_id":f.db.head(&first.child_branch_id).unwrap()}})).unwrap();
-    assert!(f
-        .db
-        .activate_model_selection(&choice, f.db.epoch(), &binding)
-        .unwrap());
+    assert!(
+        f.db.activate_model_selection(&choice, f.db.epoch(), &binding)
+            .unwrap()
+    );
     let mut artifact = AgentPolicyArtifactBinding {
         provider_key: "policy:exact".into(),
         extension_id: "policy".into(),
         extension_version: "1".into(),
         service_id: "varin.agent.policy".into(),
-        service_version: 3,
+        service_version: 4,
         artifact_integrity: "retained-artifact".into(),
         configuration_identity: "retained-configuration".into(),
         declared_identity: PolicyIdentity {
@@ -1381,8 +1381,8 @@ fn calendar_child_hold_reopen_and_resume_preserve_original_execution_source_and_
     std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
-fn cancelled_calendar_trigger_releases_other_ingress_without_cancelling_thread_or_reusing_dead_source(
-) {
+fn cancelled_calendar_trigger_releases_other_ingress_without_cancelling_thread_or_reusing_dead_source()
+ {
     use varin_runtime::catalog::calendar::*;
     let mut f = Fixture::new_in_project();
     let initial = first(&mut f);
@@ -1428,12 +1428,12 @@ fn cancelled_calendar_trigger_releases_other_ingress_without_cancelling_thread_o
     let cancelled = f.db.delegated_execution(&old.execution_id).unwrap();
     assert!(cancelled.cancel_requested && cancelled.receipt.is_none());
     assert_eq!(cancelled.report.unwrap().outcome, Outcome::Cancelled);
-    assert!(f
-        .db
-        .calendar_occurrence(&b.id)
-        .unwrap()
-        .execution_id
-        .is_none());
+    assert!(
+        f.db.calendar_occurrence(&b.id)
+            .unwrap()
+            .execution_id
+            .is_none()
+    );
     let next = calendar_execution(&mut f.db);
     assert_ne!(next.execution_id, old.execution_id);
     let source = ready_source(&mut f.db, &next);

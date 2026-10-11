@@ -2,7 +2,7 @@
 #[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use varin_runtime::{
     catalog::{host_jobs::HostJobBinding, launches::LaunchSelection},
     execution::*,
@@ -53,7 +53,7 @@ impl Fixture {
         let body = self
             .db
             .prepare_result_content()
-            .write_result(&json!({"requestId":key,"command":"example"}))
+            .write_data(&json!({"requestId":key,"command":"example"}))
             .unwrap();
         self.db
             .admit_user_host_job(
@@ -175,7 +175,7 @@ impl Fixture {
                 epoch: epoch.clone(),
                 outcome: Outcome::Succeeded,
                 effect: Effect::Confirmed,
-                result: json!({"attempt":"completed"}),
+                result: json!({"attempt":"completed"}).into(),
             })
             .unwrap();
         self.db.record_host_job_terminal(b, p, true).unwrap();
@@ -234,11 +234,10 @@ fn trusted_job_body_pairs_once_and_reopen_never_requires_resubmit() {
         phase: "accepted".into(),
         effect: Effect::Confirmed,
         lifetime: Lifetime::Thread,
-        content: Some(json!({"forged":true})),
+        content: Some(json!({"forged":true}).into()),
     };
-    assert!(f
-        .db
-        .commit_execution(
+    assert!(
+        f.db.commit_execution(
             &f.run,
             f.db.epoch(),
             &ExecutionRecord::ToolSettled {
@@ -247,7 +246,8 @@ fn trusted_job_body_pairs_once_and_reopen_never_requires_resubmit() {
                 executor_stopped: false
             }
         )
-        .is_err());
+        .is_err()
+    );
     let body = json!({"attempt":{"attemptId":"durable"},"text":"original body"});
     let b = f.bind(&c.operation_id, &body);
     let completion =
@@ -309,7 +309,7 @@ fn recovered_acceptance_keeps_an_already_delivered_unknown_result() {
     let unknown = ToolCompletion::Result {
         outcome: Outcome::Indeterminate,
         effect: Effect::Unknown,
-        content: json!({"error":"lost ack"}),
+        content: json!({"error":"lost ack"}).into(),
     };
     f.record(ExecutionRecord::ToolSettled {
         context: c.clone(),
@@ -329,12 +329,24 @@ fn recovered_acceptance_keeps_an_already_delivered_unknown_result() {
         f.db.capture_operation_read(f.db.operation(&b.operation_id).unwrap())
             .load()
             .unwrap();
-    assert_eq!(hydrated.call_completion, Some(unknown));
-    assert!(matches!(
-        f.db.host_job_acceptance(&b.operation_id)
+    assert_eq!(
+        serde_json::to_value(hydrated.call_completion).unwrap(),
+        serde_json::to_value(Some(unknown.clone())).unwrap()
+    );
+    assert_eq!(
+        f.db.capture_call_completion(&b.operation_id)
             .unwrap()
             .load()
             .unwrap(),
+        unknown
+    );
+    let acceptance =
+        f.db.capture_job_acceptance(&b.operation_id)
+            .unwrap()
+            .load()
+            .unwrap();
+    assert!(matches!(
+        &acceptance,
         ToolCompletion::JobAccepted {
             content: Some(_),
             ..
@@ -346,6 +358,20 @@ fn recovered_acceptance_keeps_an_already_delivered_unknown_result() {
     assert_eq!(f.db.deliver_process_waits().unwrap(), vec![f.run.clone()]);
     assert!(!f.db.operation(&b.operation_id).unwrap().cancel_requested);
     f.terminal(&b);
+    assert_eq!(
+        f.db.capture_job_acceptance(&b.operation_id)
+            .unwrap()
+            .load()
+            .unwrap(),
+        acceptance
+    );
+    assert_eq!(
+        f.db.capture_call_completion(&b.operation_id)
+            .unwrap()
+            .load()
+            .unwrap(),
+        unknown
+    );
 }
 impl Fixture {
     fn paired(&mut self, c: ToolExecutionContext, call: ToolCall) {
@@ -426,12 +452,12 @@ fn user_atomic_domain_link_is_discoverable_before_the_first_domain_call() {
     let mut f = Fixture::new();
     let user = f.user("pre-dispatch");
     assert!(user.host_job.as_ref().unwrap().acceptance_ref.is_none());
-    assert!(f
-        .db
-        .pending_host_jobs()
-        .unwrap()
-        .iter()
-        .any(|op| op.id == user.id));
+    assert!(
+        f.db.pending_host_jobs()
+            .unwrap()
+            .iter()
+            .any(|op| op.id == user.id)
+    );
     assert!(f.db.host_job_acceptance(&user.id).is_err());
     let read = f.db.capture_operation_read(user).load().unwrap();
     assert_eq!(read.intent["request"]["requestId"], "pre-dispatch");
@@ -457,7 +483,7 @@ fn cancelled_host_reader_consumes_the_acceptance_that_won_in_catalog() {
                 completion: ToolCompletion::Result {
                     outcome: Outcome::Indeterminate,
                     effect: Effect::Unknown,
-                    content: json!({"error":"Host reader cancelled"}),
+                    content: json!({"error":"Host reader cancelled"}).into(),
                 },
                 executor_stopped: false,
             },
@@ -542,7 +568,7 @@ impl ToolExecutor for RaceTools {
         ToolCompletion::Result {
             outcome: Outcome::Indeterminate,
             effect: Effect::Unknown,
-            content: json!({"error":"reader aborted after accepted"}),
+            content: json!({"error":"reader aborted after accepted"}).into(),
         }
     }
     fn execute_receipt(
@@ -613,7 +639,7 @@ impl AgentPolicy for RacePolicy {
     PolicyEvent::Started if self.graph=>serde_json::from_value(json!({"kind":"tool_graph","nodes":[{"id":"submit","depends_on":[],"call":{"call_id":"submit","name":"research_submit","schema_version":"1","arguments":{"command":"original"}}}]})).unwrap(),
     PolicyEvent::Started=>PolicyAction::RequestModel,
     PolicyEvent::ModelCompleted{..}=>PolicyAction::ExecuteTools,
-    PolicyEvent::ToolsCompleted{results}=>{assert!(matches!(&results[0].completion,ToolCompletion::JobAccepted{content:Some(body),..} if body["accepted"]=="full original domain body"));PolicyAction::Complete},
+    PolicyEvent::ToolsCompleted{results}=>{assert!(matches!(&results[0].completion,ToolCompletion::JobAccepted{content:Some(body),..} if body.data["accepted"]=="full original domain body"));PolicyAction::Complete},
     PolicyEvent::ToolGraphCompleted{receipts,..}=>{let body=serde_json::to_value(&receipts[0]).unwrap();assert_eq!(body["completion"]["kind"],"job_accepted");assert!(body["completion"]["output"].is_object());PolicyAction::Complete},
     other=>panic!("unexpected {other:?}")};
         Ok(PolicyDecision {
@@ -722,9 +748,11 @@ fn user_request_and_full_acceptance_are_original_content_roots_and_pending_is_me
             .collect::<std::result::Result<_, _>>()
             .unwrap();
     assert_eq!(projected.len(), 2);
-    assert!(projected
-        .iter()
-        .any(|p| p.binding.operation_id == healthy.id));
+    assert!(
+        projected
+            .iter()
+            .any(|p| p.binding.operation_id == healthy.id)
+    );
     f.db.request_cancel_operation(&user.id).unwrap();
     f.terminal(&b);
     assert!(
@@ -736,15 +764,15 @@ fn user_request_and_full_acceptance_are_original_content_roots_and_pending_is_me
     );
 }
 #[test]
-fn same_subject_cannot_acquire_a_second_user_execution_owner_and_historical_thread_scopes_survive_fork(
-) {
+fn same_subject_cannot_acquire_a_second_user_execution_owner_and_historical_thread_scopes_survive_fork()
+ {
     let mut f = Fixture::new();
     let (c, call) = f.tool("research_submit", "shared-key");
     let b = f.bind(&c.operation_id, &json!({"requestId":"same"}));
     f.paired(c, call);
     let body =
         f.db.prepare_result_content()
-            .write_result(&json!({"requestId":"same","command":"example"}))
+            .write_data(&json!({"requestId":"same","command":"example"}))
             .unwrap();
     let error =
         f.db.admit_user_host_job(
@@ -770,10 +798,10 @@ fn same_subject_cannot_acquire_a_second_user_execution_owner_and_historical_thre
     assert_eq!(scopes.len(), 1);
     assert_eq!(scopes[0].source_run_id, f.run);
     assert!(!scopes[0].can_submit);
-    assert!(f
-        .db
-        .research_scopes("another-thread", "fork", None, None)
-        .is_err());
+    assert!(
+        f.db.research_scopes("another-thread", "fork", None, None)
+            .is_err()
+    );
 }
 
 #[test]

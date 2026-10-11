@@ -32,7 +32,7 @@ fn process_source(id: &str) -> FollowupRegistrationSource {
 fn stopped(f: &mut Fixture, id: &str, stopped: bool) {
     let mut receipt = f.receipt();
     receipt.identity = id.into();
-    receipt.result = json!({"processId":id,"status":"exited","exitCode":0});
+    receipt.result = json!({"processId":id,"status":"exited","exitCode":0}).into();
     f.db.record_external_receipt_with_stop(id, receipt, stopped)
         .unwrap();
 }
@@ -185,10 +185,10 @@ fn any_at_is_one_active_input_without_a_missing_process_body_or_late_second_occu
         .unwrap();
     let batch = f.db.admit_input_delivery(p).unwrap().unwrap();
     assert_eq!(batch.items.len(), 1);
-    let Content::Text { text } = &batch.items[0].content else {
+    let Content::Output { output } = &batch.items[0].content else {
         panic!("fact")
     };
-    assert!(text.contains("\"processes\":[]"));
+    assert_eq!(output.data["processes"], json!([]));
     stopped(&mut f, &process, true);
     assert!(f.reconcile().is_empty());
     assert_eq!(
@@ -229,12 +229,12 @@ fn all_retains_each_fact_through_restart_and_removes_only_observed_time_deadline
         f.db.nearest_followup_deadline().unwrap(),
         Some(now + 120_000)
     );
-    assert!(f
-        .db
-        .events_after(definition.wait.after_cursor, 1000)
-        .unwrap()
-        .iter()
-        .any(|event| event.kind == "followup.sources_observed"));
+    assert!(
+        f.db.events_after(definition.wait.after_cursor, 1000)
+            .unwrap()
+            .iter()
+            .any(|event| event.kind == "followup.sources_observed")
+    );
     f.db.reconcile_followup_facts_at(now + 120_000).unwrap();
     assert_eq!(f.db.nearest_followup_deadline().unwrap(), None);
     stopped(&mut f, &process, false);
@@ -341,10 +341,11 @@ fn register_rechecks_multiple_original_receipts_and_all_needs_both_real_stops() 
         .load()
         .unwrap();
     let batch = f.db.admit_input_delivery(p).unwrap().unwrap();
-    let Content::Text { text } = &batch.items[0].content else {
+    let Content::Output { output } = &batch.items[0].content else {
         panic!("fact")
     };
-    assert!(text.contains(&process) && text.contains(&second));
+    let facts = serde_json::to_string(&output.data).unwrap();
+    assert!(facts.contains(&process) && facts.contains(&second));
     assert_eq!(batch.items.len(), 1);
     f.cleanup();
 }
@@ -481,9 +482,11 @@ fn dependency_checks_require_frozen_at_evidence_and_every_all_leaf() {
             // A later At fact cannot rewrite the original process-only race evidence.
             f.db.reconcile_followup_facts_at(future).unwrap();
             assert!(f.reconcile().is_empty());
-            assert!(f.db.followup("check").unwrap().sources[1]
-                .observed
-                .is_none());
+            assert!(
+                f.db.followup("check").unwrap().sources[1]
+                    .observed
+                    .is_none()
+            );
         } else {
             let runs = if mode == "all_pending" {
                 assert!(first.is_empty());
@@ -505,13 +508,14 @@ fn dependency_checks_require_frozen_at_evidence_and_every_all_leaf() {
                 goal.dependency_operation_id.as_deref(),
                 Some(dependency.as_str())
             );
-            assert!(!f
-                .db
-                .operation(&dependency)
-                .unwrap()
-                .external_receipt
-                .as_ref()
-                .is_some_and(|r| r.executor_stopped));
+            assert!(
+                !f.db
+                    .operation(&dependency)
+                    .unwrap()
+                    .external_receipt
+                    .as_ref()
+                    .is_some_and(|r| r.executor_stopped)
+            );
             assert!(f.reconcile().is_empty());
         }
         f.cleanup();

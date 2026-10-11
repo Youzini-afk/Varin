@@ -446,7 +446,7 @@ mod tests {
             ToolCompletion::Result {
                 outcome: crate::Outcome::Succeeded,
                 effect: crate::Effect::None,
-                content: json!(self.0),
+                content: json!(self.0).into(),
             }
         }
     }
@@ -511,10 +511,12 @@ mod tests {
             source: None,
         };
         let cancelled = CancellationToken::default();
-        assert!(first
-            .clone()
-            .bind_call(&call, &context, &cancelled)
-            .is_err());
+        assert!(
+            first
+                .clone()
+                .bind_call(&call, &context, &cancelled)
+                .is_err()
+        );
         let old_call = pinned.bind_call(&call, &context, &cancelled).unwrap();
         let contract = old_call.prepare(&cancelled).unwrap();
         let execution = ToolExecutionContext {
@@ -523,7 +525,7 @@ mod tests {
             origin: context.origin.clone(),
         };
         assert!(
-            matches!(old_call.execute(&execution, &contract, &cancelled).completion, ToolCompletion::Result {content, ..} if content == "first")
+            matches!(old_call.execute(&execution, &contract, &cancelled).completion, ToolCompletion::Result {content, ..} if content.data == "first")
         );
         let next_token = CancellationToken::default();
         let next_context = FrozenToolContext {
@@ -548,11 +550,13 @@ mod tests {
         assert!(next.revoke(first_id).unwrap());
         assert!(cancelled.is_cancelled());
         assert!(!next_token.is_cancelled());
-        assert!(old_call
-            .authorize(&execution, &contract, &cancelled)
-            .is_err());
         assert!(
-            matches!(next_call.execute(&execution, &next_contract, &next_token).completion, ToolCompletion::Result {content, ..} if content == "next")
+            old_call
+                .authorize(&execution, &contract, &cancelled)
+                .is_err()
+        );
+        assert!(
+            matches!(next_call.execute(&execution, &next_contract, &next_token).completion, ToolCompletion::Result {content, ..} if content.data == "next")
         );
     }
 }

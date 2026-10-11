@@ -128,7 +128,7 @@ async function pending(f: Awaited<ReturnType<typeof fixture>>, key: string) {
   const receipt = await f.api.submit({ ...identity, key: `${key}-input`, expectedHead: null, text: 'invoke exact fixture action', model });
   await expect.poll(async () => (await f.api.snapshot(identity)).operations.some(op => op.waiting_on?.startsWith('permission:')), { timeout: 10_000 }).toBe(true);
   const operation = (await f.api.snapshot(identity)).operations.find(op => op.waiting_on?.startsWith('permission:'))!;
-  const permission = (operation.result as { permission: { id: string; call: Record<string, unknown>; scope: Record<string, unknown>; actor: Record<string, unknown>; decision: unknown; consumed: boolean } }).permission;
+  const permission = (controlResult(operation.result) as { permission: { id: string; call: Record<string, unknown>; scope: Record<string, unknown>; actor: Record<string, unknown>; decision: unknown; consumed: boolean } }).permission;
   return { identity, receipt, operation, permission };
 }
 it('real permission flow remains undispatched until exact allow-once and never turns an ordinary answer into consent', async () => {
@@ -150,7 +150,7 @@ it('real permission flow remains undispatched until exact allow-once and never t
   expect(f.effects).toEqual([{ text: 'only this approved text' }]);
   await expect(f.api.decidePermission({ ...identity, operationId: operation.id, permissionId: permission.id, decision: 'allow_once' })).rejects.toMatchObject({ status: 400 });
   const second = (await f.api.snapshot(identity)).operations.find(op => op.id !== operation.id && op.waiting_on?.startsWith('permission:'))!;
-  const secondId = (second.result as { permission: { id: string } }).permission.id;
+  const secondId = (controlResult(second.result) as { permission: { id: string } }).permission.id;
   await f.api.decidePermission({ ...identity, operationId: second.id, permissionId: secondId, decision: 'deny' });
   await expect.poll(async () => (await f.api.run(receipt.run_id)).state).toBe('completed');
   expect(f.effects).toHaveLength(1);
@@ -194,7 +194,7 @@ it('explicit permission rules win, while Smart never infers approval for an unkn
       await expect.poll(async () => (await f.api.snapshot(identity)).operations.some(op => op.waiting_on?.startsWith('permission:'))).toBe(true);
       expect(f.effects).toEqual([]);
       const op = (await f.api.snapshot(identity)).operations.find(op => op.waiting_on?.startsWith('permission:'))!;
-      await f.api.decidePermission({ ...identity, operationId: op.id, permissionId: (op.result as { permission: { id: string } }).permission.id, decision: 'deny' });
+      await f.api.decidePermission({ ...identity, operationId: op.id, permissionId: (controlResult(op.result) as { permission: { id: string } }).permission.id, decision: 'deny' });
     }
     await expect.poll(async () => (await f.api.run(receipt.run_id)).state).toBe('completed');
     expect(f.effects).toHaveLength(selected === 'allow' ? 1 : 0);
@@ -202,3 +202,8 @@ it('explicit permission rules win, while Smart never infers approval for an unkn
     expect(opened).toHaveLength(selected === 'smart' ? 1 : 0);
   }
 }, 45_000);
+
+function controlResult(result: import('./protocol.generated.js').OperationResult | null): unknown {
+  if (result?.kind !== 'control') throw new Error('Expected original control result');
+  return result.value;
+}

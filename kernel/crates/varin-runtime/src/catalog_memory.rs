@@ -93,7 +93,7 @@ pub(super) fn project(
             if let Content::ToolResult { result } = &item.content {
                 if let crate::execution::ToolCompletion::Result { content, .. } = &result.completion
                 {
-                    if content.get("memoryReceipt").is_some_and(|receipt| {
+                    if content.data.get("memoryReceipt").is_some_and(|receipt| {
                         trusted_receipts
                             .get(&format!("{}:tool:{}", result.request_id, result.call_id))
                             == Some(receipt)
@@ -162,8 +162,13 @@ pub(crate) struct PreparedMemoryDeliveries {
     receipts: Vec<PreparedMemoryReceipt>,
 }
 enum MemoryReceiptOwner {
-    Model {request_id:String,call_id:String},
-    Policy {reference:crate::execution::PolicyEvidenceRef},
+    Model {
+        request_id: String,
+        call_id: String,
+    },
+    Policy {
+        reference: crate::execution::PolicyEvidenceRef,
+    },
 }
 struct PreparedMemoryReceipt {
     owner: MemoryReceiptOwner,
@@ -187,12 +192,9 @@ impl PreparedMemoryDeliveries {
             if matches!(&snapshot.view.origin, RequestOrigin::PolicyModelJob { .. })
                 && matches!(&item.provenance, Provenance::ExternalData { source } if source == "committed-conversation-context")
             {
-                if let Content::Text { text } = &item.content {
-                    if let Some((_, body)) = text.split_once('\n') {
-                        let quoted: Vec<ConversationItem> = serde_json::from_str(body)?;
-                        for item in &quoted {
-                            prepared.include(item)?;
-                        }
+                if let Content::Output { output } = &item.content {
+                    for item in &crate::execution::policy_model::quoted_context(output)? {
+                        prepared.include(item)?;
                     }
                 }
             }
@@ -218,23 +220,29 @@ impl PreparedMemoryDeliveries {
             {
                 if let crate::execution::ToolCompletion::Result { content, .. } = &result.completion
                 {
-                    if let Some(receipt) = content.get("memoryReceipt") {
+                    if let Some(receipt) = content.data.get("memoryReceipt") {
                         self.receipts.push(PreparedMemoryReceipt {
-                            owner:MemoryReceiptOwner::Model{request_id:result.request_id.clone(),call_id:result.call_id.clone()},
-                            result_ref: crate::content::ContentStore::reference(content)?,
+                            owner: MemoryReceiptOwner::Model {
+                                request_id: result.request_id.clone(),
+                                call_id: result.call_id.clone(),
+                            },
+                            result_ref: crate::content::ContentStore::output_reference(content)?,
                             origin: receipt["origin"].as_str().map(str::to_owned),
                             facts: receipt_facts(receipt),
                         });
                     }
                 }
             }
-            (Provenance::PolicyToolData{reference},Content::Text{text}) => {
-                if let Some((_,body))=text.split_once('\n') {
-                    let envelope:Value=serde_json::from_str(body)?;
-                    let data=&envelope["data"];
-                    if let Some(receipt)=data.get("memoryReceipt") {
-                        self.receipts.push(PreparedMemoryReceipt{owner:MemoryReceiptOwner::Policy{reference:reference.clone()},result_ref:crate::content::ContentStore::reference(data)?,origin:receipt["origin"].as_str().map(str::to_owned),facts:receipt_facts(receipt)});
-                    }
+            (Provenance::PolicyToolData { reference }, Content::Output { output }) => {
+                if let Some(receipt) = output.data.get("memoryReceipt") {
+                    self.receipts.push(PreparedMemoryReceipt {
+                        owner: MemoryReceiptOwner::Policy {
+                            reference: reference.clone(),
+                        },
+                        result_ref: crate::content::ContentStore::output_reference(output)?,
+                        origin: receipt["origin"].as_str().map(str::to_owned),
+                        facts: receipt_facts(receipt),
+                    });
                 }
             }
             _ => (),
@@ -277,12 +285,19 @@ pub(super) fn record_deliveries(
     let thread = &run.thread_id;
     let mut facts = prepared.facts;
     for candidate in prepared.receipts {
-        let owned=match &candidate.owner {
-            MemoryReceiptOwner::Model{request_id,call_id}=>owned_receipt(tx,request_id,call_id,thread)?,
-            MemoryReceiptOwner::Policy{reference}=>owned_policy_receipt(tx,&run.id,reference,thread)?,
+        let owned = match &candidate.owner {
+            MemoryReceiptOwner::Model {
+                request_id,
+                call_id,
+            } => owned_receipt(tx, request_id, call_id, thread)?,
+            MemoryReceiptOwner::Policy { reference } => {
+                owned_policy_receipt(tx, &run.id, reference, thread)?
+            }
         };
-        if !owned.is_some_and(|(reference, origin)| reference == candidate.result_ref && candidate.origin.as_deref() == Some(origin.as_str()))
-        {
+        if !owned.is_some_and(|(reference, origin)| {
+            reference == candidate.result_ref
+                && candidate.origin.as_deref() == Some(origin.as_str())
+        }) {
             continue;
         }
         // Errors in untrusted external receipts are ignored until the original successful
@@ -309,7 +324,7 @@ pub(super) fn record_deliveries(
             _ => {
                 return Err(RuntimeError::Invalid(
                     "memory delivery has no selected fact".into(),
-                ))
+                ));
             }
         };
         let observer = format!("memory-delivery:{}:{fact}", prepared.branch_id);
@@ -341,8 +356,14 @@ fn owned_receipt(
     {
         return Ok(None);
     }
-    let tool=super::tool_content::ToolIntent::from_operation(&operation)?;
-    if tool.call().name != "memory" || tool.call().call_id != call_id || tool.origin()!=&(crate::execution::ToolOrigin::ModelStep{request_id:request_id.into()}) {
+    let tool = super::tool_content::ToolIntent::from_operation(&operation)?;
+    if tool.call().name != "memory"
+        || tool.call().call_id != call_id
+        || tool.origin()
+            != &(crate::execution::ToolOrigin::ModelStep {
+                request_id: request_id.into(),
+            })
+    {
         return Ok(None);
     }
     let owned: bool = db.query_row(
@@ -352,8 +373,18 @@ fn owned_receipt(
     if !owned {
         return Ok(None);
     }
-    let reference = operation.result.as_ref().map(OperationResultMetadata::reference).transpose()?.cloned();
-    Ok(reference.map(|reference| (reference, format!("run:{}:{}", operation.run_id, operation.id))))
+    let reference = operation
+        .result
+        .as_ref()
+        .map(OperationResultMetadata::reference)
+        .transpose()?
+        .cloned();
+    Ok(reference.map(|reference| {
+        (
+            reference,
+            format!("run:{}:{}", operation.run_id, operation.id),
+        )
+    }))
 }
 
 pub(super) fn trusted_memory_receipts(
@@ -368,12 +399,21 @@ pub(super) fn trusted_memory_receipts(
     let mut receipts = BTreeMap::new();
     for row in rows {
         let operation: Operation = serde_json::from_str(&row)?;
-        let tool=super::tool_content::ToolIntent::from_operation(&operation)?;
+        let tool = super::tool_content::ToolIntent::from_operation(&operation)?;
         if tool.call().name != "memory" {
             continue;
         }
-        if let Some(receipt) = operation.result.map(|result| result.load(content)).transpose()?
-            .and_then(|result| result.get("memoryReceipt").cloned())
+        if let Some(receipt) = operation
+            .result
+            .map(|result| result.load(content))
+            .transpose()?
+            .map(|result| {
+                result
+                    .output()
+                    .map(|output| output.data.get("memoryReceipt").cloned())
+            })
+            .transpose()?
+            .flatten()
         {
             if receipt["origin"].as_str()
                 == Some(&format!("run:{}:{}", operation.run_id, operation.id))

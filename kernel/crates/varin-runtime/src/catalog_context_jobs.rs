@@ -722,7 +722,7 @@ impl ContextJobPreparation {
                 history,
             )?
             .into_iter()
-            .map(|part| self.content.save(&serde_json::to_value(part)?))
+            .map(|part| self.content.save_items(&part))
             .collect::<Result<Vec<_>>>()?
         };
         let recipe = self.content.save(&serde_json::to_value(ContextJobRecipe {

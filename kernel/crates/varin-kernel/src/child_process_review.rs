@@ -471,7 +471,7 @@ impl Harness {
                 outcome: varin_runtime::Outcome::Succeeded,
                 content,
                 ..
-            } => content,
+            } => content.data,
             other => panic!("original source tool: {other:?}"),
         }
     }
@@ -1232,7 +1232,7 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
     else {
         panic!("retired predecessor spool must remain readable: {completion:?}")
     };
-    let output = content["chunks"]
+    let output = content.data["chunks"]
         .as_array()
         .unwrap()
         .iter()

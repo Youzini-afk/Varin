@@ -1,3 +1,4 @@
+import { responsesMetadataText } from './responses-wire.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { createMemoryOwner } from './memory-owner.js';
 import { createLiveSourceOwner } from './live-source.js';
@@ -111,8 +112,8 @@ it('explicit live source reads current disk and shares actual root with list, se
   const outputs: string[] = []; let serial = 0; let processId = '';
   const f = await fixture((body, response) => {
     const output = lastOutput(body);
-    if (output) outputs.push(String(output.output));
-    const result = output ? JSON.parse(String(output.output)) : undefined;
+    if (output) outputs.push(responsesMetadataText(output.output));
+    const result = output ? JSON.parse(responsesMetadataText(output.output)) : undefined;
     if (!output) tool(response, 'file_read', { path: 'source.txt' }, ++serial);
     else if (String(output.call_id).startsWith('file_read-')) tool(response, 'file_write', { path: 'source.txt', readVersion: result.content.readVersion, content: 'conditional live edit' }, ++serial);
     else if (String(output.call_id).startsWith('file_write-')) tool(response, 'process_spawn', { cwd: '', command: process.execPath, args: ['-e', 'const fs=require("node:fs");fs.writeFileSync("process.txt",fs.readFileSync("source.txt","utf8")+" process same root")'], mode: 'pipe' }, ++serial);
@@ -174,7 +175,7 @@ it('freezes actual Documents AGENTS revision at first context while live reads a
   let serial = 0; const outputs: string[] = [];
   const f = await fixture((body, response) => {
     if ((body.input as Array<Record<string, unknown>>).filter(item => item.role !== 'system').at(-1)?.type !== 'function_call_output') tool(response, 'file_read', { path: 'AGENTS.md' }, ++serial);
-    else { outputs.push(String(lastOutput(body)!.output)); done(response); }
+    else { outputs.push(responsesMetadataText(lastOutput(body)!.output)); done(response); }
   });
   const identity = await f.api.create('live-context');
   await fs.writeFile(path.join(f.workspace, 'AGENTS.md'), 'BEFORE LIVE PREPARATION');
@@ -224,7 +225,7 @@ it('queued live selection reopens with fresh authority and reads changed disk wi
     }
     const last = lastOutput(body);
     if (!last) tool(response, 'file_read', { path: 'source.txt' }, ++serial);
-    else { output = String(last.output); done(response); }
+    else { output = responsesMetadataText(last.output); done(response); }
   };
   const f = await fixture(reply);
   await fs.writeFile(path.join(f.workspace, 'source.txt'), 'before queue');
@@ -332,7 +333,7 @@ it('cancelling after actual live-root registration revokes the fresh grant befor
 it('live read and discovery do not authorize a returned path that escapes its registered root', async () => {
   const returned: Array<Record<string, unknown>> = []; let serial = 0;
   const f = await fixture((body, response) => {
-    const output = lastOutput(body); if (output) returned.push(JSON.parse(String(output.output)) as Record<string, unknown>);
+    const output = lastOutput(body); if (output) returned.push(JSON.parse(responsesMetadataText(output.output)) as Record<string, unknown>);
     serial++;
     if (serial === 1) tool(response, 'file_read', { path: 'outside/private.txt' }, serial);
     else if (serial === 2) tool(response, 'file_search', { query: 'UNAUTHORIZED OUTSIDE CONTENT', fixedStrings: true }, serial);

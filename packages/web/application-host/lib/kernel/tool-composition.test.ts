@@ -73,7 +73,7 @@ function contribution(
           kind: 'result',
           outcome: 'succeeded',
           effect: 'confirmed',
-          content: {},
+          content: { data: {}, parts: [] },
         },
         executor_stopped: true,
       }),

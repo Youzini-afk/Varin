@@ -73,8 +73,8 @@ pub fn estimate_request(view: &RequestView, serialized: &Value) -> InputEstimate
         unmeasured_media: view
             .history
             .iter()
-            .filter(|item| matches!(item.content, Content::Attachment { .. }))
-            .count() as u64,
+            .map(|item| item.content.media().len() as u64)
+            .sum(),
         unmeasured_provider_items: view
             .history
             .iter()
@@ -90,9 +90,21 @@ pub fn estimate_item(item: &crate::execution::ConversationItem) -> u64 {
         Content::Text { text } | Content::ReasoningSummary { text } => {
             (text.len() as u64).div_ceil(4)
         }
-        Content::Attachment { .. } | Content::ProviderOnly => 0,
-        content => {
-            size(&serde_json::to_value(content).expect("semantic content serializes")).div_ceil(4)
+        Content::Media { .. } | Content::ProviderOnly => 0,
+        _ => {
+            let projected = item
+                .clone()
+                .map_media(|media| {
+                    Ok::<_, std::convert::Infallible>(crate::output::ResolvedMedia {
+                        data_base64: String::new(),
+                        ..media
+                    })
+                })
+                .unwrap();
+            (serde_json::to_vec(&projected.content)
+                .expect("semantic content serializes")
+                .len() as u64)
+                .div_ceil(4)
         }
     }
 }

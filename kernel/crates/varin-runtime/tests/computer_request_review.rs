@@ -40,7 +40,7 @@ fn real_child_request_and_wait_recover_one_environment_decision_from_both_origin
             .base
             .db
             .prepare_result_content()
-            .write_result(&json!("Original grant explanation"))
+            .write_data(&json!("Original grant explanation"))
             .unwrap();
         let actor = f.user("grant-original");
         let claiming = f
@@ -61,26 +61,27 @@ fn real_child_request_and_wait_recover_one_environment_decision_from_both_origin
             .base
             .db
             .prepare_result_content()
-            .write_result(&json!("Changed grant explanation"))
+            .write_data(&json!("Changed grant explanation"))
             .unwrap();
-        assert!(f
-            .base
-            .db
-            .begin_computer_decision(
-                &request.id,
-                request.revision,
-                actor,
-                false,
-                "physical-epoch".into(),
-                "different".into(),
-                Some(changed)
-            )
-            .is_err());
+        assert!(
+            f.base
+                .db
+                .begin_computer_decision(
+                    &request.id,
+                    request.revision,
+                    actor,
+                    false,
+                    "physical-epoch".into(),
+                    "different".into(),
+                    Some(changed)
+                )
+                .is_err()
+        );
         let detail = f
             .base
             .db
             .prepare_result_content()
-            .write_result(&json!("Original owner confirmed assignment ready"))
+            .write_data(&json!("Original owner confirmed assignment ready"))
             .unwrap();
         f.base
             .db

@@ -446,3 +446,29 @@ revision across selection changes and refreshed snapshots; conflicts preserve th
 explicit discard. A late read or write cannot publish after a Host/runtime change. Tool omission,
 explicit empty selection and reset remain different requests; editing shared fields never rewrites
 an untouched tool selection. Visible demand and settings events refresh the same shared projection.
+
+## Typed Thread media
+
+The Agent runtime history consumes original user-input attachments as StoredMedia and other history as
+semantic ConversationItems. `thread-content` reads only those declared entry points. It does not guess
+images from ordinary output JSON or retain the obsolete inline attachment reader. Tool completion facts
+and opaque output data remain visible separately from ordered Text/Media parts. Operation control views
+read only `result.kind === 'control'`; completion, result and external-receipt media keep distinct holders.
+
+`ThreadMedia` reads on demand through `ThreadsAPI.mediaRead`, retaining the original holder and absolute
+part ordinal. A rendered image owns only its temporary Blob URL; cancellation, Close, unmount and
+Thread/Host replacement discard the read and revoke the URL. Missing, failed or unsupported media stays
+visible with retry/refresh guidance or an original-file download, rather than disappearing. Family and
+follow-up Run history use their original fixed family anchor and caller identity. These reads never open
+an arbitrary URL, submit stored hashes as uploads, or move large image bytes into control snapshots.
+
+Queued text edits omit `images` to preserve the accepted attachments. Explicit removal sends `[]`;
+replacement uses the shared image-file picker and sends newly read inline bytes. Uncertain saves retain
+the draft and original revision. Composer/Pi image attachment behavior is unchanged.
+
+`ThreadChildReport` is shared by original child-dispatch reports and subsequent execution reports.
+Text reports keep their explicit byte-page navigation. Declared `output_body` reports are read on
+explicit demand through that same reader, checking every UTF-8 range, format and original
+Operation/Execution/item before combining the complete JSON and rendering ordered parts plus opaque
+data. Partial JSON never appears as Markdown or a complete report. Cancel and Host/Thread replacement
+discard unfinished reads; media uses the returned original execution in its `child_report` holder.

@@ -1,6 +1,6 @@
 # Plan, question and process policy
 
-This ordinary `varin.agent.policy@3` extension demonstrates a stateful workflow without provider
+This ordinary `varin.agent.policy@4` extension demonstrates a stateful workflow without provider
 inference: read a plan → CAS update → ask the user → read the authentic answer → optionally start and
 resize and write to a fixed PTY process → observe its actual exit → deliver → explicitly pause/resume → complete. Core owns every action,
 permission, Wait, result and history item. The extension owns only its versioned private state.
@@ -28,8 +28,8 @@ revision you just read:
 ```json
 {
   "serviceId": "varin.agent.policy",
-  "version": 3,
-  "providerKey": "example.domain-policy:host:varin.agent.policy@3",
+  "version": 4,
+  "providerKey": "example.domain-policy:host:varin.agent.policy@4",
   "scope": { "sessionId": "YOUR_NATIVE_THREAD_ID" },
   "allowFallback": false
 }
@@ -61,7 +61,10 @@ The plan owner retains its CAS receipt under the original operation and tagged t
 reply is reconciled from that receipt, not by repeating a mutation. The policy fails on an unsuccessful
 or indeterminate plan result. Question and process acceptance remain separate from later terminal
 facts; old handles are retained in private state. Result bytes are read in owned chunks, including
-UTF-8 split across chunks, without inventing a provider call or history entry.
+UTF-8 split across chunks, without inventing a provider call or history entry. The policy requires
+`format: "output_body"`, decodes `{ data, parts }`, and reads plan, answer and process facts from
+`data`. It does not treat text/media parts or arbitrary JSON fields as domain receipts. Deliveries
+use `data: null` and one typed text part; the existing delivered/resumed boundaries remain unchanged.
 
 Portable installed-artifact/Host consumer checks:
 

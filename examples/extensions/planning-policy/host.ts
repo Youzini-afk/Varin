@@ -100,7 +100,7 @@ export default defineHostExtension({
           return { action: { kind: 'read_result', reference: receipt.output, index: 0 }, state: asJson(state) };
         }
         if (event.kind === 'result_chunk') {
-          if (state.phase !== 'plan_content' || !state.plan || !sameRef(state.plan, event.reference) || event.index !== state.nextChunk
+          if (event.format !== 'model_evidence' || state.phase !== 'plan_content' || !state.plan || !sameRef(state.plan, event.reference) || event.index !== state.nextChunk
             || event.total_bytes > config.planBytes || state.chunks.length + event.bytes.length > config.planBytes
             || state.totalBytes !== null && state.totalBytes !== event.total_bytes || state.totalChunks !== null && state.totalChunks !== event.total_chunks) {
             return fail('Planning result is unexpected or exceeds its declared byte budget');
@@ -121,7 +121,7 @@ export default defineHostExtension({
           state.phase = 'evidence';
           state.expectedNodes = paths.map((_, index) => `evidence-${index}`);
           // A parsed plan requests reads; only core admission can authorize and execute them.
-          return { action: { kind: 'tool_graph', nodes: paths.map((path, index) => read(state.expectedNodes[index], path)) }, state: asJson(state) };
+          return { action: { kind: 'tool_graph', nodes: paths.map((path, index) => read(state.expectedNodes[index]!, path)) }, state: asJson(state) };
         }
         if (state.phase === 'context') return { action: { kind: 'tool_graph', nodes: [read('context', config.contextPath, config.contextBytes)] }, state: asJson(state) };
         return fail('Planning policy requires its committed operation event');

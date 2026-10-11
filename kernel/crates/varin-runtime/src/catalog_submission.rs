@@ -47,6 +47,7 @@ pub(super) enum SubmissionOrigin {
     Summary,
 }
 pub struct PreparedSubmission {
+    pub(super) input_id: String,
     pub(super) run_id: String,
     pub(super) identity: SubmissionIdentity,
     pub(super) epoch: u64,
@@ -78,14 +79,21 @@ fn submission_intent(
     launch: &Option<launches::LaunchSelection>,
     inherit_source: bool,
     child_context: Option<&Value>,
-) -> Value {
+) -> Result<(Value, Vec<String>)> {
     // The configuration catalog is prepared authority, like the initial context, not
     // a new user intent. An already accepted key keeps the first committed snapshot.
     let mut selected = serde_json::to_value(launch).expect("typed launch selection");
     if let Some(object) = selected.as_object_mut() {
         object.remove("child_dispatch");
     }
-    json!({"command":command,"launch":selected,"inherit_source":inherit_source,"child_context":child_context})
+    let input = crate::content::ContentStore::normalized_user_input(&command.key, &command.input)?;
+    let dependencies = crate::output::incoming_input_dependencies(&input)?;
+    let mut command = serde_json::to_value(command)?;
+    command["input"] = input;
+    Ok((
+        json!({"command":command,"launch":selected,"inherit_source":inherit_source,"child_context":child_context}),
+        dependencies,
+    ))
 }
 
 impl Catalog {
@@ -184,12 +192,14 @@ impl SubmissionPreparation {
         let Some((intent, receipt)) = &self.existing else {
             return Ok(None);
         };
-        if crate::content::ContentStore::reference(&submission_intent(
-            &self.command,
-            launch,
-            inherit_source,
-            None,
-        ))? != *intent
+        if submission_intent(&self.command, launch, inherit_source, None).and_then(
+            |(value, dependencies)| {
+                crate::content::ContentStore::payload_reference(
+                    &serde_json::to_vec(&value)?,
+                    dependencies,
+                )
+            },
+        )? != *intent
         {
             return Err(RuntimeError::Conflict(
                 "idempotency key has different input".into(),
@@ -210,6 +220,7 @@ impl SubmissionPreparation {
                 .0
                 .clone();
             return Ok(PreparedSubmission {
+                input_id: receipt.input_id,
                 run_id: receipt.run_id,
                 identity: SubmissionIdentity {
                     key: self.command.key,
@@ -289,6 +300,11 @@ impl PreparedSubmission {
             publication,
         } = body;
         let run_id = id();
+        let input_id = match &origin {
+            SubmissionOrigin::Ingress { input, .. } => input.id.clone(),
+            SubmissionOrigin::Child { operation_id, .. } => format!("child-input:{operation_id}"),
+            _ => id(),
+        };
         if resources.is_some() && initial.is_none() {
             return Err(RuntimeError::Invalid(
                 "resource candidate requires its prepared context".into(),
@@ -303,7 +319,9 @@ impl PreparedSubmission {
             selection.validate()?;
         }
         if inherit_source
-            && launch.as_ref().is_none_or(|selection| selection.source.is_some())
+            && launch
+                .as_ref()
+                .is_none_or(|selection| selection.source.is_some())
         {
             return Err(RuntimeError::Invalid(
                 "source inheritance requires a launch without an explicit source".into(),
@@ -466,7 +484,9 @@ impl PreparedSubmission {
                     .as_str()
                     .ok_or_else(|| RuntimeError::Invalid("child task must be text".into()))?;
                 content.save_history(
-                    &serde_json::to_value(crate::execution::ConversationItem {
+                    &serde_json::to_value(crate::execution::ConversationItem::<
+                        crate::output::ResolvedMedia,
+                    > {
                         resource_activation: None,
                         id: format!("child-input:{operation_id}"),
                         provenance: crate::execution::Provenance::AgentMessage {
@@ -478,7 +498,10 @@ impl PreparedSubmission {
                     &None,
                 )?
             }
-            _ => content.save_history(&input_material, &None)?,
+            SubmissionOrigin::User { .. } | SubmissionOrigin::ChildContinuation { .. } => {
+                content.save_user_history(&input_id, &input_material)?
+            }
+            SubmissionOrigin::Summary => content.save_history(&input_material, &None)?,
         };
         // The intent retains the original content and requested selection. Inherited source and
         // the initial prompt are separately frozen by the atomic admission, never by a retry.
@@ -487,16 +510,14 @@ impl PreparedSubmission {
         } else {
             None
         };
-        let intent = content.save(&submission_intent(
-            &command,
-            &launch,
-            inherit_source,
-            child_context,
-        ))?;
+        let (intent, dependencies) =
+            submission_intent(&command, &launch, inherit_source, child_context)?;
+        let intent = content.save_with_dependencies(&intent, dependencies)?;
         let launch = launch
             .map(|selection| launch_content::LaunchSelectionMetadata::stage(&content, selection))
             .transpose()?;
         Ok(Self {
+            input_id,
             run_id,
             identity: SubmissionIdentity {
                 key: command.key,

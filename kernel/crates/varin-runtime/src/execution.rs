@@ -4,12 +4,15 @@
 //! persistence or the data stream. Adapters must observe that control during blocking I/O. This
 //! module never retries a dispatched model request or an ambiguous external effect.
 
+pub use crate::output::{
+    IncomingMedia, OutputBody, OutputPart, OutputSource, ResolvedMedia, StoredMedia,
+};
 use crate::types::{Effect, ExecutorOwner, Lifetime, Outcome, RunState};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 
 #[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize, PartialEq, Eq)]
 #[error("{code}: {message}")]
@@ -214,35 +217,36 @@ pub struct OpaqueProviderItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Content {
+pub enum Content<M = ResolvedMedia> {
     Text {
         text: String,
     },
     ReasoningSummary {
         text: String,
     },
-    Attachment {
-        media_type: String,
-        content_ref: String,
-        source: String,
+    Media {
+        media: M,
+    },
+    Output {
+        output: OutputBody<M>,
     },
     ToolCall {
         call: ToolCall,
     },
     ToolResult {
-        result: ToolResult,
+        result: ToolResult<M>,
     },
     /// Opaque reasoning, signatures, server-side tool exchanges and continuation identifiers.
     ProviderOnly,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ConversationItem {
+pub struct ConversationItem<M = ResolvedMedia> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resource_activation: Option<crate::catalog::resources::ResourceActivation>,
     pub id: String,
     pub provenance: Provenance,
-    pub content: Content,
+    pub content: Content<M>,
     pub opaque: Option<OpaqueProviderItem>,
 }
 
@@ -346,12 +350,12 @@ pub struct RequestBinding {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RequestView {
+pub struct RequestView<M = ResolvedMedia> {
     pub request_id: String,
     pub run_id: String,
     pub origin: RequestOrigin,
     pub binding: RequestBinding,
-    pub history: Vec<ConversationItem>,
+    pub history: Vec<ConversationItem<M>>,
 }
 
 /// Explicit request identity: auxiliary work never masquerades as a conversation ModelStep.
@@ -371,8 +375,8 @@ pub enum RequestOrigin {
 
 /// The provider receives an immutable reference to the exact durably prepared request.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RequestSnapshot {
-    pub view: RequestView,
+pub struct RequestSnapshot<M = ResolvedMedia> {
+    pub view: RequestView<M>,
     pub serialized: Value,
 }
 
@@ -615,13 +619,13 @@ pub struct ToolContract {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ToolCompletion {
+pub enum ToolCompletion<M = ResolvedMedia> {
     /// Executor evidence that no external request or side effect was sent.
     NotDispatched { reason: String },
     Result {
         outcome: Outcome,
         effect: Effect,
-        content: Value,
+        content: OutputBody<M>,
     },
     /// This closes a model tool exchange with real acceptance; it does not claim job completion.
     JobAccepted {
@@ -630,7 +634,7 @@ pub enum ToolCompletion {
         effect: Effect,
         lifetime: Lifetime,
         #[serde(skip_serializing_if = "Option::is_none")]
-        content: Option<Value>,
+        content: Option<OutputBody<M>>,
     },
 }
 impl ToolCompletion {
@@ -638,7 +642,7 @@ impl ToolCompletion {
         Self::Result {
             outcome: Outcome::Cancelled,
             effect: Effect::None,
-            content: serde_json::json!({"error": "cancelled_before_dispatch"}),
+            content: serde_json::json!({"error": "cancelled_before_dispatch"}).into(),
         }
     }
     fn failure(code: &str, message: &str, effect: Effect) -> Self {
@@ -649,7 +653,7 @@ impl ToolCompletion {
                 Outcome::Failed
             },
             effect,
-            content: serde_json::json!({"error":code, "message":message}),
+            content: serde_json::json!({"error":code, "message":message}).into(),
         }
     }
 }
@@ -658,8 +662,8 @@ impl ToolCompletion {
 /// close the caller's exchange while the actual external execution is still unresolved.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct ToolExecutionReceipt {
-    pub completion: ToolCompletion,
+pub struct ToolExecutionReceipt<M = ResolvedMedia> {
+    pub completion: ToolCompletion<M>,
     pub executor_stopped: bool,
 }
 impl ToolExecutionReceipt {
@@ -689,10 +693,10 @@ impl ToolExecutionReceipt {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ToolResult {
+pub struct ToolResult<M = ResolvedMedia> {
     pub request_id: String,
     pub call_id: String,
-    pub completion: ToolCompletion,
+    pub completion: ToolCompletion<M>,
 }
 
 /// Stable identity supplied by the runtime; effectful adapters must use it for executor receipts.
@@ -758,7 +762,7 @@ pub trait PreparedToolCall: Send {
     fn plan(&self, cancel: &CancellationToken) -> Result<ToolPreparation, ExecutionError>;
     fn prepare(&self, cancel: &CancellationToken) -> Result<ToolContract, ExecutionError>;
     fn execution_class(&self, contract: &ToolContract)
-        -> crate::execution_capacity::ExecutionClass;
+    -> crate::execution_capacity::ExecutionClass;
     fn watch_admission(
         &self,
         context: &ToolExecutionContext,
@@ -1252,7 +1256,13 @@ pub trait Persistence: Send + Sync + 'static {
         _epoch: u64,
         _reference: &PolicyEvidenceRef,
         _index: usize,
-    ) -> Result<crate::content::ContentChunk, ExecutionError> {
+    ) -> Result<
+        (
+            crate::content::ContentChunk,
+            crate::output::PolicyResultFormat,
+        ),
+        ExecutionError,
+    > {
         Err(ExecutionError::new(
             "policy_graph_unavailable",
             "durable graph authority required",
@@ -1370,7 +1380,7 @@ pub enum PolicyAction {
     },
     ExecuteTools,
     Deliver {
-        text: String,
+        output: OutputBody<IncomingMedia>,
     },
     Pause {
         reason: String,
@@ -1415,6 +1425,7 @@ pub enum PolicyEvent {
         receipt: PolicyModelReceipt,
     },
     ResultChunk {
+        format: crate::output::PolicyResultFormat,
         reference: PolicyEvidenceRef,
         index: usize,
         total_chunks: usize,
@@ -1599,11 +1610,11 @@ pub struct ExecutionEngine<P: ?Sized, M: ?Sized, T: ?Sized, A: ?Sized> {
 }
 
 impl<
-        P: Persistence + ?Sized,
-        M: ModelProvider + ?Sized,
-        T: ToolExecutor + ?Sized,
-        A: AgentPolicy + ?Sized,
-    > ExecutionEngine<P, M, T, A>
+    P: Persistence + ?Sized,
+    M: ModelProvider + ?Sized,
+    T: ToolExecutor + ?Sized,
+    A: AgentPolicy + ?Sized,
+> ExecutionEngine<P, M, T, A>
 {
     /// Run on a worker, never a Catalog/control thread. The input must identify an admitted run.
     /// Re-entering with an old run is rejected by Persistence's durable request/epoch checks.
@@ -1968,7 +1979,7 @@ impl<
                                 model_steps: steps,
                                 waiting_on: Some(wait_id),
                                 failure: None,
-                            })
+                            });
                         }
                     }
                 }
@@ -2077,7 +2088,7 @@ impl<
                     event = self.execute_tool_graph(&input, graph, &cancel, retained)?;
                 }
                 PolicyAction::ReadResult { reference, index } => {
-                    let chunk = match self.persistence.policy_chunk(
+                    let (chunk, format) = match self.persistence.policy_chunk(
                         &input.run_id,
                         input.owner_generation,
                         &reference,
@@ -2088,6 +2099,7 @@ impl<
                     };
                     control_state = None;
                     event = PolicyEvent::ResultChunk {
+                        format,
                         reference,
                         index,
                         total_chunks: chunk.chunk_count,
@@ -2809,7 +2821,7 @@ impl<
                                         "resolved tool differs from frozen schema",
                                         Effect::None,
                                     ),
-                                ))
+                                ));
                             }
                             Err(error) => {
                                 return Ok(self.unprepared_result(
@@ -2825,7 +2837,7 @@ impl<
                                             Effect::None,
                                         )
                                     },
-                                ))
+                                ));
                             }
                         };
                         if bound.execution_class(&contract) != class {
@@ -3060,13 +3072,13 @@ fn validate_model_items(
                 return Err(ExecutionError::new(
                     "invalid_provider_item",
                     "a model cannot author a tool result",
-                ))
+                ));
             }
             Content::ProviderOnly if item.opaque.is_none() => {
                 return Err(ExecutionError::new(
                     "invalid_provider_item",
                     "provider-only item lacks its original",
-                ))
+                ));
             }
             _ => {}
         }

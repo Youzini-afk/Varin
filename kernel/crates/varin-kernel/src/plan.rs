@@ -1,7 +1,7 @@
 //! Ordinary Thread plans. Catalog supplies frozen identity; KnowledgeStore owns bodies and receipts.
 use super::plan_bridge::PlanBridge;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use varin_runtime::execution::*;
 use varin_runtime::{Catalog, Effect, Lifetime, Outcome};
@@ -292,7 +292,7 @@ impl ToolExecutor for PlanTools {
             Err(failure) => {
                 return ToolCompletion::NotDispatched {
                     reason: failure.message,
-                }
+                };
             }
         };
         let value = match self.bridge.query(query.clone(), cancel) {
@@ -351,7 +351,7 @@ impl ToolExecutor for PlanTools {
                         epoch: operation.epoch.to_string(),
                         outcome,
                         effect,
-                        result: value.clone(),
+                        result: value.clone().into(),
                     },
                     outcome != Outcome::Indeterminate,
                 )
@@ -362,14 +362,14 @@ impl ToolExecutor for PlanTools {
                 return ToolCompletion::Result {
                     outcome: Outcome::Indeterminate,
                     effect: Effect::Unknown,
-                    content: json!({"status":"unknown","message":failure.message}),
+                    content: json!({"status":"unknown","message":failure.message}).into(),
                 };
             }
         }
         ToolCompletion::Result {
             outcome,
             effect,
-            content: value,
+            content: value.into(),
         }
     }
 }
@@ -447,7 +447,7 @@ pub(crate) fn reconcile(
                             epoch: operation.epoch.to_string(),
                             outcome,
                             effect,
-                            result: response,
+                            result: response.into(),
                         },
                         outcome != Outcome::Indeterminate,
                     )

@@ -36,7 +36,7 @@ async function fixture() {
   await runtime.installOrStage({ expectedRevision: (await runtime.state()).catalog.revision,
     source: { kind: 'local', display: 'Collaboration policy example', specifier: source } });
   await runtime.upsertServiceRoutingRule({ expectedRevision: (await runtime.routing.read()).document.revision,
-    rule: { serviceId: 'varin.agent.policy', version: 3, providerKey: 'example.collaboration-policy:host:varin.agent.policy@3',
+    rule: { serviceId: 'varin.agent.policy', version: 4, providerKey: 'example.collaboration-policy:host:varin.agent.policy@4',
       scope: { sessionId: 'parent-thread' }, allowFallback: false } });
   const prepare = async (owner = runtime) => {
     const lease = await createAgentPolicy(owner)({ sessionId: 'parent-thread' });
@@ -75,7 +75,7 @@ async function waitingCheckpoint(lease: AgentPolicyLease): Promise<VarinAgentPol
 it('installed SDK collaboration policy keeps original handles and artifact identity across broker reopen', async () => {
   const f = await fixture();
   const lease = await f.prepare();
-  expect(lease.binding.artifact.identity.name).toBe('example.collaboration-policy:host:varin.agent.policy@3:fixed-source-collaboration');
+  expect(lease.binding.artifact.identity.name).toBe('example.collaboration-policy:host:varin.agent.policy@4:fixed-source-collaboration');
   const wait = await waitingCheckpoint(lease);
   const binding = lease.binding.artifact.identity;
   lease.release();
@@ -108,8 +108,8 @@ it('installed policy settles actual parent tool calls and never retries an indet
   const answer = await decide(lease, graph('wait-action', 'wait-child', accepted('observation', 'awaiting_child')), wait.state);
   expect((await decide(lease, { kind: 'model_completed', reason: 'tool_calls', tool_calls: 1 }, answer.state)).action).toEqual({ kind: 'execute_tools' });
   expect((await decide(lease, { kind: 'tools_completed', results: [{ request_id: 'real-request', call_id: 'real-call',
-    completion: { kind: 'result', outcome: 'succeeded', effect: 'none', content: {} } }] }, answer.state)).action)
+    completion: { kind: 'result', outcome: 'succeeded', effect: 'none', content: { data: {}, parts: [] } } }] }, answer.state)).action)
     .toEqual({ kind: 'request_model_with_evidence', evidence: [reference] });
   expect((await decide(lease, { kind: 'tools_completed', results: [{ request_id: 'real-request', call_id: 'real-call',
-    completion: { kind: 'result', outcome: 'indeterminate', effect: 'unknown', content: null } }] }, answer.state)).action.kind).toBe('fail');
+    completion: { kind: 'result', outcome: 'indeterminate', effect: 'unknown', content: { data: null, parts: [] } } }] }, answer.state)).action.kind).toBe('fail');
 });

@@ -1,7 +1,9 @@
+import { parseIncomingOutputPart } from './output.js';
+import type { OutputBody, IncomingMedia } from './nested-tools.generated.js';
 import type { JsonValue } from './types.js';
 
 export const VARIN_AGENT_POLICY_SERVICE_ID = 'varin.agent.policy';
-export const VARIN_AGENT_POLICY_VERSION = 3 as const;
+export const VARIN_AGENT_POLICY_VERSION = 4 as const;
 export interface VarinAgentPolicyIdentity { name: string; version: string }
 /** A capability-scoped association. A content hash alone never authorizes a read. */
 export interface VarinAgentPolicyEvidenceRef { action_id: string; node_id: string; content_ref: string }
@@ -56,7 +58,7 @@ export interface VarinAgentPolicyInput {
     | { kind: 'resumed'; action_id: string; wait_id: string }
     | { kind: 'model_job_completed'; action_id: string; receipt: VarinAgentPolicyModelReceipt }
     | { kind: 'tool_graph_completed'; action_id: string; receipts: VarinAgentPolicyNodeReceipt[] }
-    | { kind: 'result_chunk'; reference: VarinAgentPolicyEvidenceRef; index: number; total_chunks: number; total_bytes: number; bytes: number[] };
+    | { kind: 'result_chunk'; format: 'output_body' | 'model_evidence'; reference: VarinAgentPolicyEvidenceRef; index: number; total_chunks: number; total_bytes: number; bytes: number[] };
   state: JsonValue;
 }
 /** Core admits and authorizes every action. Graph eligibility comes from the trusted executor. */
@@ -65,7 +67,7 @@ export type VarinAgentPolicyAction = { kind: 'request_model' | 'execute_tools' |
   | { kind: 'tool_graph'; nodes: VarinAgentPolicyToolNode[] }
   | { kind: 'read_result'; reference: VarinAgentPolicyEvidenceRef; index: number }
   | { kind: 'request_model_with_evidence'; evidence: VarinAgentPolicyEvidenceRef[] }
-  | { kind: 'deliver'; text: string } | { kind: 'pause'; reason: string }
+  | { kind: 'deliver'; output: OutputBody<IncomingMedia> } | { kind: 'pause'; reason: string }
   | { kind: 'fail'; reason: string } | { kind: 'wait'; wait_id: string };
 export interface VarinAgentPolicyDecision { action: VarinAgentPolicyAction; state: JsonValue }
 export interface VarinAgentPolicyDescription {
@@ -115,7 +117,7 @@ const eventSchema = { oneOf: [
   objectSchema({ kind: { const: 'model_completed' }, reason: { enum: ['stop', 'tool_calls', 'length', 'content_filter'] }, tool_calls: integerSchema }),
   objectSchema({ kind: { const: 'tools_completed' }, results: arraySchema(objectSchema({ request_id: stringSchema, call_id: stringSchema, completion: { type: 'object' } })) }),
   objectSchema({ kind: { const: 'tool_graph_completed' }, action_id: stringSchema, receipts: arraySchema(objectSchema({ node_id: stringSchema, completion: toolCompletionSchema })) }),
-  objectSchema({ kind: { const: 'result_chunk' }, reference: referenceSchema, index: integerSchema, total_chunks: { type: 'integer', minimum: 1 }, total_bytes: integerSchema,
+  objectSchema({ kind: { const: 'result_chunk' }, format: { enum: ['output_body', 'model_evidence'] }, reference: referenceSchema, index: integerSchema, total_chunks: { type: 'integer', minimum: 1 }, total_bytes: integerSchema,
     bytes: arraySchema({ type: 'integer', minimum: 0, maximum: 255 }) }),
 ] };
 const actionSchema = { oneOf: [
@@ -124,7 +126,7 @@ const actionSchema = { oneOf: [
   objectSchema({ kind: { const: 'tool_graph' }, nodes: arraySchema(nodeSchema) }),
   objectSchema({ kind: { const: 'read_result' }, reference: referenceSchema, index: integerSchema }),
   objectSchema({ kind: { const: 'request_model_with_evidence' }, evidence: arraySchema(referenceSchema) }),
-  objectSchema({ kind: { const: 'deliver' }, text: { type: 'string' } }),
+  objectSchema({ kind: { const: 'deliver' }, output: objectSchema({ data: {}, parts: arraySchema({ oneOf: [objectSchema({ kind: { const: 'text' }, text: { type: 'string' } }), objectSchema({ kind: { const: 'media' }, media: objectSchema({ media_type: stringSchema, data_base64: stringSchema }) })] }) }) }),
   objectSchema({ kind: { const: 'pause' }, reason: { type: 'string' } }),
   objectSchema({ kind: { const: 'fail' }, reason: stringSchema }),
   objectSchema({ kind: { const: 'wait' }, wait_id: stringSchema }),
@@ -220,7 +222,8 @@ export function parseVarinAgentPolicyDecision(value: unknown): VarinAgentPolicyD
   } else if (action.kind === 'request_model_with_evidence') {
     if (!exact(action, ['kind', 'evidence']) || !Array.isArray(action.evidence) || !action.evidence.every(reference)) throw new Error('Invalid policy evidence');
   } else if (action.kind === 'deliver') {
-    if (!exact(action, ['kind', 'text']) || typeof action.text !== 'string') throw new Error('Invalid policy delivery');
+    if (!exact(action, ['kind', 'output']) || !object(action.output) || !exact(action.output, ['data', 'parts']) || !Array.isArray(action.output.parts)) throw new Error('Invalid policy delivery');
+    for (const part of action.output.parts) parseIncomingOutputPart(part);
   } else if (action.kind === 'pause') {
     if (!exact(action, ['kind', 'reason']) || typeof action.reason !== 'string') throw new Error('Invalid policy pause');
   } else if (action.kind === 'fail') {
@@ -248,8 +251,8 @@ export function parseVarinAgentPolicyInput(value: unknown): VarinAgentPolicyInpu
       && exact(result, ['request_id', 'call_id', 'completion']) && text(result.request_id) && text(result.call_id))) throw new Error('Invalid policy tool event'); break;
     case 'tool_graph_completed': if (!exact(event, ['kind', 'action_id', 'receipts']) || !text(event.action_id) || !Array.isArray(event.receipts) || !event.receipts.every(receipt => object(receipt)
       && exact(receipt, ['node_id', 'completion']) && text(receipt.node_id) && toolCompletion(receipt.completion))) throw new Error('Invalid policy graph receipts'); break;
-    case 'result_chunk': if (!exact(event, ['kind', 'reference', 'index', 'total_chunks', 'total_bytes', 'bytes']) || !reference(event.reference)
-      || !integer(event.index) || !integer(event.total_chunks) || event.total_chunks === 0 || event.index >= event.total_chunks || !integer(event.total_bytes)
+    case 'result_chunk': if (!exact(event, ['kind', 'format', 'reference', 'index', 'total_chunks', 'total_bytes', 'bytes']) || !reference(event.reference)
+      || !['output_body', 'model_evidence'].includes(String(event.format)) || !integer(event.index) || !integer(event.total_chunks) || event.total_chunks === 0 || event.index >= event.total_chunks || !integer(event.total_bytes)
       || !Array.isArray(event.bytes) || !event.bytes.every(byte => integer(byte) && byte <= 255)) throw new Error('Invalid policy result chunk'); break;
     default: throw new Error('Unknown agent policy event');
   }

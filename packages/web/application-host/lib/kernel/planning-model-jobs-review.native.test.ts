@@ -198,15 +198,15 @@ async function install(f: Fixture, decision: string, capabilities: string[] = ['
   await fs.writeFile(path.join(folder, 'package.json'), JSON.stringify({ name: id, version: '1.0.0' }));
   await fs.writeFile(path.join(folder, 'varin.extension.json'), JSON.stringify({ schemaVersion: 1, id, version: '1.0.0', engines: { varin: '*' },
     entrypoints: { host: { file: 'host.cjs', mode: 'brokered', activation: ['service-request'] } },
-    provides: { services: [{ id: 'varin.agent.policy', version: 3, multiple: true }] } }));
-  await fs.writeFile(path.join(folder, 'host.cjs'), `module.exports={activate(context){context.services.provide({id:'varin.agent.policy',version:3,multiple:true},{
+    provides: { services: [{ id: 'varin.agent.policy', version: 4, multiple: true }] } }));
+  await fs.writeFile(path.join(folder, 'host.cjs'), `module.exports={activate(context){context.services.provide({id:'varin.agent.policy',version:4,multiple:true},{
     describe(){return {identity:{name:'planning-review',version:'1'},configuration:{},modelRoles:${JSON.stringify(capabilities)},stateTransition:'unsupported'}},
     decide([input]){${decision}}
   })}}`);
   await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision,
     source: { kind: 'local', display: id, specifier: folder } });
   await f.extensions.upsertServiceRoutingRule({ expectedRevision: (await f.extensions.routing.read()).document.revision,
-    rule: { serviceId: 'varin.agent.policy', version: 3, providerKey: `${id}:host:varin.agent.policy@3`, scope: { projectId: 'planning-review' }, allowFallback: false } });
+    rule: { serviceId: 'varin.agent.policy', version: 4, providerKey: `${id}:host:varin.agent.policy@4`, scope: { projectId: 'planning-review' }, allowFallback: false } });
 }
 async function installBundledExample(f: Fixture) {
   const folder = path.join(f.root, 'bundled-planning-policy'); await fs.mkdir(folder);
@@ -218,7 +218,7 @@ async function installBundledExample(f: Fixture) {
   await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision,
     source: { kind: 'local', display: 'Bundled planning example', specifier: folder } });
   await f.extensions.upsertServiceRoutingRule({ expectedRevision: (await f.extensions.routing.read()).document.revision,
-    rule: { serviceId: 'varin.agent.policy', version: 3, providerKey: 'example.planning-policy:host:varin.agent.policy@3',
+    rule: { serviceId: 'varin.agent.policy', version: 4, providerKey: 'example.planning-policy:host:varin.agent.policy@4',
       scope: { projectId: 'planning-review' }, allowFallback: false } });
 }
 async function submitBundledExample(f: Fixture, key: string) {
@@ -411,8 +411,8 @@ it('retains a planner tool-call failure without executing it or authorizing its 
   expect(receipt).toMatchObject({ dispatch: 'completed', usable: false, outcome: 'failed', output: null,
     failure: { code: 'planning_tool_calls_forbidden' } });
   const operations = await modelOperations(f, run.run_id); expect(operations).toHaveLength(1);
-  expect(operations[0]!.result).toMatchObject({ original_ref: expect.any(Object), receipt: { usable: false, output: null } });
-  const originals = await originalObject(f, (operations[0]!.result as { original_ref: unknown }).original_ref);
+  expect(controlResult(operations[0]!.result)).toMatchObject({ original_ref: expect.any(Object), receipt: { usable: false, output: null } });
+  const originals = await originalObject(f, (controlResult(operations[0]!.result) as { original_ref: unknown }).original_ref);
   expect(JSON.stringify(originals)).toContain('forged-write-item');
   expect(JSON.stringify(originals)).toContain('UNAUTHORIZED_PLANNER_WRITE');
   expect((await f.runtime.events(0, 256)).filter(event => event.subject === run.run_id && event.kind === 'execution.committed'
@@ -640,7 +640,7 @@ it('independent planning preparation carries pending memory facts without changi
   expect(after.proposal.effective_system_prompt).toContain('PLANNING_FROZEN_MEMORY');
   const operations = await modelOperations(f, run.run_id);
   expect(operations).toHaveLength(1);
-  const stored = await originalObject(f, (operations[0]!.result as { request_ref: unknown }).request_ref) as { view: { request_id: string; origin: { kind: string } } };
+  const stored = await originalObject(f, (controlResult(operations[0]!.result) as { request_ref: unknown }).request_ref) as { view: { request_id: string; origin: { kind: string } } };
   expect(stored.view.origin.kind).toBe('policy_model_job');
   expect(JSON.stringify(stored)).toContain('PLANNING_NEW_MEMORY_FACT');
   const database = new DatabaseSync(path.join(f.root, 'agent-runtime', 'conversation.sqlite'), { readOnly: true });
@@ -692,3 +692,8 @@ it.each(['reject', 'throw'] as const)('planning context owner %s durably fails b
   expect((await runtime.events(0, 256)).filter(event => event.subject === run.run_id && event.kind === 'context.preparation_failed')).toEqual(failures);
   expect(await runtime.context(identity.branchId)).toEqual(before);
 });
+
+function controlResult(result: import('./protocol.generated.js').OperationResult | null): unknown {
+  if (result?.kind !== 'control') throw new Error('Expected original control result');
+  return result.value;
+}

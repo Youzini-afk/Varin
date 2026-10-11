@@ -73,7 +73,7 @@ function fixture() {
           kind: 'result',
           outcome: 'succeeded',
           effect: 'confirmed',
-          content: await work(),
+          content: { data: await work(), parts: [] },
         },
         executor_stopped: true,
       };
@@ -159,7 +159,7 @@ it('retained v1 executes its first call after v2 publication and drains only aft
       (frame) => frame.kind === 'host-tool-response' && frame.id === 'execute',
     ),
   ).toMatchObject({
-    completion: { content: 'original callback' },
+    completion: { content: { data: 'original callback', parts: [] } },
     executor_stopped: true,
   });
   f.bridge.unregister('run');
@@ -218,7 +218,7 @@ it('cancel/Run release/reset leaves original callback and lost-ACK evidence aliv
     executionOwner: { epoch: owner.ownerId },
     receipt: {
       executor_stopped: true,
-      completion: { content: 'late original result' },
+      completion: { content: { data: 'late original result', parts: [] } },
     },
   });
   f.bridge.reconnect();
@@ -312,10 +312,10 @@ it('large complete result and original receipt use the existing transport data p
     f.frames.find(
       (frame) => frame.kind === 'host-tool-response' && frame.id === 'execute',
     ),
-  ).toMatchObject({ completion: { content: { text: body } } });
+  ).toMatchObject({ completion: { content: { data: { text: body }, parts: [] } } });
   expect(
     f.frames.find((frame) => frame.kind === 'host-tool-receipt'),
-  ).toMatchObject({ receipt: { completion: { content: { text: body } } } });
+  ).toMatchObject({ receipt: { completion: { content: { data: { text: body }, parts: [] } } } });
   f.bridge.close();
 });
 it('the composition registration pins an acknowledged candidate through select replacement and restoration', async () => {
