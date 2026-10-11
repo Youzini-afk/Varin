@@ -13,7 +13,7 @@ export type McpResourceChange = {
     problem: string;
 };
 export type McpResourceCleanup = 'shared' | 'acknowledged' | 'unknown';
-export type McpResourceRelease = { status: 'acknowledged'; acknowledgement: Record<string, unknown> } | { status: 'shared' | 'unknown'; protocolError?: Record<string, unknown> };
+export type McpResourceRelease = { status: 'acknowledged'; acknowledgement: Record<string, unknown> } | { status: 'shared' | 'unknown'; protocolError?: Record<string, unknown>; interactionProblem?: string };
 export interface McpResourceObserver {
     readonly endpoint: McpEndpoint;
     readonly listenerId: string;

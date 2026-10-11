@@ -16,7 +16,7 @@ interface Entry {
   acceptanceFlight?:Promise<void>;
   lease?: McpTaskLease;
   unobserve?:()=>void;
-  unbindInteraction?:()=>void;
+  unbindInteraction?:(reason?:'rpc_closed')=>void;
   nextPoll: number;
   resultFlight?:Promise<void>;
   pollFlight?:Promise<void>;
@@ -25,6 +25,8 @@ interface Entry {
   result?:Record<string,unknown>;
   resultError?:McpTaskRequestError;
   resultAttempted:boolean;
+  observationSignal:number;
+  interactionBlocked?: 'status' | 'result';
   serial:Promise<unknown>;
 }
 export type McpTaskRuntime = ReturnType<typeof createMcpTaskRuntime>;
@@ -62,21 +64,23 @@ export function createMcpTaskRuntime(options:{
     });
     entry.op=next;return next;
   });
-  const recordProblem = async(entry:Entry,error:unknown,stage:McpTaskStage) => {
+  const recordProblem = async(entry:Entry,error:unknown,stage:McpTaskStage,observationSignal=entry.observationSignal) => {
     const task=entry.op.mcpTask!.task;
     const problem:McpTaskProblem = error instanceof McpTaskRequestError
       ? {kind:error.kind,stage,...(error.rpcCode === undefined ? {} : {rpcCode:error.rpcCode})}
       : {kind:error instanceof McpAuthorityError ? 'owner' : 'transport',stage};
     // A retention deadline can explain unavailability, never prove completion or physical stop.
     if (stage !== 'cancel' && task.ttl !== null && Date.parse(task.createdAt)+task.ttl <= Date.now() && problem.rpcCode === -32602) problem.kind='expired';
-    const content={taskId:task.taskId,problem,...(error instanceof McpTaskRequestError && error.protocolError ? {response:error.protocolError} : {})};
+    const content={taskId:task.taskId,problem,...(error instanceof McpTaskRequestError && error.protocolError ? {response:error.protocolError} : {}),...(error instanceof McpAuthorityError && error.interactionProblem ? {interactionProblem:error.interactionProblem} : {})};
     // A failed control request says nothing about observing the Task. Keep an existing
     // result/interaction error as the primary diagnostic rather than hiding that evidence.
     await update(entry,prior=>{
       const primary=stage==='cancel' && prior.problem && ['result','interaction'].includes(prior.problem.stage) ? prior.problem : problem;
       return{task:prior.task,availability:stage==='cancel'?prior.availability:'unavailable',problem:primary,content};
     });
-    if(unavailable(entry))entry.nextPoll=Infinity;
+    if(error instanceof McpTaskRequestError && error.rpcCode === -32042 && (stage === 'status' || stage === 'result')
+      && observationSignal === entry.observationSignal && (stage === 'status' || !terminal(entry.op.mcpTask!.task.status)))entry.interactionBlocked=stage;
+    if(unavailable(entry) || entry.interactionBlocked === 'status')entry.nextPoll=Infinity;
   };
   const observe = async(entry:Entry,response:McpTaskResponse,requested?:HostJobPending['mcpTask']) => {
     const original=entry.op.mcpTask!.task,next=response.task;
@@ -88,8 +92,11 @@ export function createMcpTaskRuntime(options:{
     if(requested && entry.op.mcpTask!.revision>requested.revision && original.status!==requested.task.status
       && terminal(original.status) && !terminal(next.status))return;
     if(terminal(original.status)&&next.status!==original.status)throw new McpTaskRequestError('mcp-task-terminal-changed',true,'protocol');
+    const changed = next.status !== original.status || next.lastUpdatedAt !== original.lastUpdatedAt;
+    if (changed) delete entry.interactionBlocked;
     await update(entry,prior=>{
-      const problem=prior.problem && prior.problem.stage !== 'status' && prior.problem.stage !== 'rebind' ? prior.problem : undefined;
+      const problem=prior.problem && prior.problem.stage !== 'status' && prior.problem.stage !== 'rebind'
+        && !(changed && prior.problem.rpcCode === -32042) ? prior.problem : undefined;
       return{task:next,availability:problem && problem.stage!=='cancel' ? prior.availability : 'available',...(problem?{problem}:{}),content:response.result};
     });
   };
@@ -108,14 +115,15 @@ export function createMcpTaskRuntime(options:{
     const failed=task.status !== 'completed' || raw?.isError === true || !!error;
     await update(entry,{task,availability:error?'unavailable':'available',...(error?{problem:{kind:'protocol' as const,stage:'result' as const,...(error.rpcCode===undefined?{}:{rpcCode:error.rpcCode})}}:{}),content:{taskId:task.taskId,status:task.status},
       result:{kind:error?'protocol_error':'response',outcome:failed ? 'indeterminate' : 'succeeded',effect:failed ? 'unknown' : 'confirmed',
-        content:error?{data:{taskId:task.taskId,protocolError:error.protocolError},parts:[]}:projectMcpOutput(raw!,'tool')}});
+        content:error?{data:{taskId:task.taskId,protocolError:error.protocolError,...(error.interactionProblem?{interactionProblem:error.interactionProblem}:{})},parts:[]}:projectMcpOutput(raw!,'tool')}});
     if(!entry.op.mcpTask!.resultReady)return;
     delete entry.result;delete entry.resultError;
     await options.runtime.reconcileObservations();
   };
   const receiveResult = (entry:Entry) => {
-    if (entry.resultFlight || entry.op.mcpTask!.resultReady || !entry.lease || entry.result || entry.resultError) return;
+    if (entry.resultFlight || entry.op.mcpTask!.resultReady || !entry.lease || entry.result || entry.resultError || entry.interactionBlocked) return;
     entry.resultAttempted=true;
+    const terminalAtRequest = terminal(entry.op.mcpTask!.task.status), observationSignal = entry.observationSignal;
     entry.resultFlight=(async()=>{
       try {
         const raw=await entry.lease!.result(entry.op.mcpTask!.task.taskId,lifetime.signal);
@@ -126,17 +134,21 @@ export function createMcpTaskRuntime(options:{
         if(!disposed){
           // Standard JSON-RPC management/validation errors do not establish an original task
           // result. Application errors on a known terminal Task retain their real error body.
-          if(error instanceof McpTaskRequestError && error.protocolError && error.rpcCode !== undefined
+          if(error instanceof McpTaskRequestError && error.rpcCode === -32042 && !terminalAtRequest) {
+            // A nonterminal tasks/result must normally block. An early error is diagnostic
+            // for this observation, never a result cached across a future terminal state.
+            await recordProblem(entry,error,'result',observationSignal);
+          } else if(error instanceof McpTaskRequestError && error.protocolError && error.rpcCode !== undefined
             && ![-32700,-32600,-32601,-32602,-32603].includes(error.rpcCode)) {
             entry.resultError=error;
             if(!terminal(entry.op.mcpTask!.task.status)) {
               try {await getStatus(entry);}catch(statusError){await recordProblem(entry,statusError,'status');}
             }
             await publishResult(entry);
-          }else await recordProblem(entry,error,'result');
+          }else await recordProblem(entry,error,'result',observationSignal);
         }
       }
-    })().catch(report).finally(()=>{delete entry.resultFlight;if(!disposed){entry.nextPoll=unavailable(entry)?Infinity:Date.now()+(entry.op.mcpTask!.task.pollInterval ?? 1000);wake();}});
+    })().catch(report).finally(()=>{delete entry.resultFlight;if(!disposed){entry.nextPoll=unavailable(entry)||entry.interactionBlocked==='status'?Infinity:Date.now()+(entry.op.mcpTask!.task.pollInterval ?? 1000);wake();}});
   };
   const retain = (entry:Entry,lease:McpTaskLease) => {
     entry.lease=lease;
@@ -144,10 +156,13 @@ export function createMcpTaskRuntime(options:{
     entry.unobserve=lease.onChange((id,unsupported)=>{
       if(id !== (entry.op.mcpTask?.task.taskId ?? entry.acceptance?.task.taskId) || disposed)return;
       if(unsupported&&entry.op.mcpTask) void recordProblem(entry,new McpTaskRequestError('mcp-task-interaction-unsupported',false,'unsupported'),'interaction').catch(report);
-      entry.nextPoll=0;wake();
+      entry.observationSignal++;delete entry.interactionBlocked;entry.nextPoll=0;wake();
     });
   };
-  const forget = (id:string,entry:Entry) => {entry.unobserve?.();entry.unbindInteraction?.();entry.lease?.release();entries.delete(id);};
+  const forget = (id:string,entry:Entry) => {
+    const natural = !disposed && !entry.op.cancelRequested && entry.op.mcpTask?.resultReady && stopped(entry.op.mcpTask.task.status);
+    entry.unobserve?.();entry.unbindInteraction?.(natural ? 'rpc_closed' : undefined);entry.lease?.release();entries.delete(id);
+  };
   const recordAcceptance=(entry:Entry):Promise<void>=>{
     if(!entry.acceptance)return Promise.resolve();
     if(entry.acceptanceFlight)return entry.acceptanceFlight;
@@ -188,6 +203,7 @@ export function createMcpTaskRuntime(options:{
         return;
       }
       try {await ensureLease(entry);}catch(error){if(!disposed)await recordProblem(entry,error,'rebind');return;}
+      const observationSignal = entry.observationSignal;
       try {
         await getStatus(entry);
         await publishResult(entry);
@@ -196,7 +212,7 @@ export function createMcpTaskRuntime(options:{
           if(status!=='cancelled'||!entry.resultAttempted)receiveResult(entry);
         }
         if(status==='cancelled'&&entry.resultAttempted&&!entry.resultFlight)entry.nextPoll=Infinity;
-      }catch(error){if(!disposed)await recordProblem(entry,error,'status');}
+      }catch(error){if(!disposed)await recordProblem(entry,error,'status',observationSignal);}
     })().catch(report).finally(()=>{delete entry.pollFlight;schedule();});
     return entry.pollFlight;
   };
@@ -216,7 +232,11 @@ export function createMcpTaskRuntime(options:{
       if(op.binding.domain !== DOMAIN || op.binding.subject.kind !== 'mcp' || !op.accepted || !op.mcpTask)continue;
       const id=op.binding.operationId;remaining.add(id);if(admitting.has(id))continue;
       let entry=entries.get(id);
-      if(!entry){entry={op,nextPoll:0,resultAttempted:false,serial:Promise.resolve()};entries.set(id,entry);}
+      if(!entry){
+        const problem=op.mcpTask.problem;
+        const blocked=problem?.rpcCode === -32042 && (problem.stage === 'status' || problem.stage === 'result' && !terminal(op.mcpTask.task.status)) ? problem.stage : undefined;
+        entry={op,nextPoll:blocked==='status'?Infinity:0,resultAttempted:false,observationSignal:0,serial:Promise.resolve(),...(blocked ? {interactionBlocked:blocked as 'status'|'result'} : {})};entries.set(id,entry);
+      }
       else if(!entry.op.mcpTask || op.mcpTask.revision>=entry.op.mcpTask.revision){
         if(entry.acceptance){
           if(entry.acceptance.task.taskId!==op.mcpTask.task.taskId || entry.acceptance.task.createdAt!==op.mcpTask.task.createdAt)
@@ -253,10 +273,11 @@ export function createMcpTaskRuntime(options:{
         if(before.accepted)return accepted(binding.operationId);
         if(before.cancelRequested || before.phase === 'terminal')throw new McpTaskRequestError('mcp-task-original-dispatch-unavailable',false,'owner');
         const response=await input.lease.start(input.tool.tool,input.args,{schemaVersion:input.tool.schemaVersion,signal:AbortSignal.any([input.signal,lifetime.signal]),
-          ...(input.ttl === undefined?{}:{ttl:input.ttl}),...(input.beforeDispatch?{beforeDispatch:input.beforeDispatch}:{})});
+          ...(input.ttl === undefined?{}:{ttl:input.ttl}),...(input.beforeDispatch?{beforeDispatch:input.beforeDispatch}:{}),
+          interaction:{operationId:input.call.operationId,executionOwner:input.owner}});
         // A returned remote ID is retained even if Catalog's acceptance reply is interrupted.
         // Only this identical local acceptance may be retried; tools/call is never replayed.
-        const entry:Entry={op:before,acceptance:response,nextPoll:0,resultAttempted:false,serial:Promise.resolve()};
+        const entry:Entry={op:before,acceptance:response,nextPoll:0,resultAttempted:false,observationSignal:0,serial:Promise.resolve()};
         retain(entry,input.lease);entries.set(binding.operationId,entry);retained=true;
         await recordAcceptance(entry);
         return {...accepted(binding.operationId),completion:{kind:'job_accepted',operation_id:binding.operationId,phase:'accepted',effect:'confirmed',lifetime:'thread',content:{data:response.result,parts:[]}}};
@@ -277,7 +298,19 @@ export function createMcpTaskRuntime(options:{
         const entry=entries.get(input.targetOperationId);if(entry){entry.op={...entry.op,cancelRequested:true};await cancelEntry(entry);}
       }
       await reconcile();
-      if(input.action==='get'){const entry=entries.get(input.targetOperationId);if(entry){entry.nextPoll=0;await syncEntry(entry);}}
+      if(input.action==='get'){
+        const entry=entries.get(input.targetOperationId);
+        if(entry){
+          const known=operation.host_job.mcpTask;
+          // Only a diagnostic already visible at this control's authorized Catalog read
+          // declares a fresh recheck. An ordinary concurrent get still joins its real RPC.
+          if(!known.resultReady && known.problem?.rpcCode===-32042 && (known.problem.stage==='status'||known.problem.stage==='result')){
+            entry.observationSignal++;delete entry.interactionBlocked;
+            await entry.pollFlight;
+          }
+          if(entries.get(input.targetOperationId)===entry){delete entry.interactionBlocked;entry.nextPoll=0;await syncEntry(entry);}
+        }
+      }
       const view=await request<{operation:Operation;observation:unknown;result:OutputBody<ResolvedMedia>|null},'runtime.host_job.task.read'>('runtime.host_job.task.read',{runId:input.call.runId,targetOperationId:input.targetOperationId},input.signal);
       return {executor_stopped:true,completion:{kind:'result',outcome:'succeeded',effect:input.action==='cancel'?'confirmed':'none',content:{data:{operationId:input.targetOperationId,
         task:view.operation.host_job!.mcpTask,executorStopped:view.operation.external_receipt?.executor_stopped ?? false,cancelRequested:view.operation.cancel_requested,

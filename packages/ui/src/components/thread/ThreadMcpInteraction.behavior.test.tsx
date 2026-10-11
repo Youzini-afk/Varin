@@ -3,7 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ThreadRequestError, type ThreadIdentity, type ThreadsAPI } from '@varin/application-client';
-import type { McpInteractionView } from '@varin/protocol';
+import type { McpInteractionItem, McpInteractionView } from '@varin/protocol';
 import { openExternalUrl } from '@/lib/url';
 import { ThreadMcpInteractions } from './ThreadMcpInteraction';
 
@@ -11,8 +11,8 @@ vi.mock('@/lib/url', () => ({ openExternalUrl: vi.fn(async () => false) }));
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:original', branchId: 'branch:original' };
 const makeView = (): McpInteractionView => ({ record: { id: 'elicitation:first', revision: 1,
   binding: { operationId: 'operation:original', executionOwner: { kind: 'external', identity: 'owner', epoch: 'epoch' },
-    endpoint: { server: 'Original MCP server', resourceKey: 'server-key', configurationVersion: 'config', credentialVersion: 'grant' }, connectionId: 'connection', requestId: 0,
-    relation: { kind: 'task', taskId: 'task:original' } }, runId: 'run:finished', threadId: identity.threadId, branchId: identity.branchId,
+    endpoint: { server: 'Original MCP server', resourceKey: 'server-key', configurationVersion: 'config', credentialVersion: 'grant' }, connectionId: 'connection', source: { kind: 'server_request', requestId: 0,
+    relation: { kind: 'task', taskId: 'task:original' } } }, runId: 'run:finished', threadId: identity.threadId, branchId: identity.branchId,
   mode: 'form', availability: 'live', choice: null, delivery: 'not_started', completionReported: false, problem: null },
   request: {}, response: null, presentation: { mode: 'form', message: '<script>server text</script> **untrusted server words**', fields: [
     { name: 'enabled', title: 'Enabled', kind: 'boolean', required: true, default: false },
@@ -24,13 +24,21 @@ const makeView = (): McpInteractionView => ({ record: { id: 'elicitation:first',
     { name: 'many', title: 'Several choices', kind: 'multi_enum', required: true, default: [], options: [{ value: 'a', title: 'A' }, { value: 'b', title: 'B' }], minItems: 0, maxItems: 2 },
   ] } });
 type API = Pick<ThreadsAPI, 'listMcpInteractions' | 'readMcpInteraction' | 'respondMcpInteraction'>;
+const item = ({ record, presentation, response }: McpInteractionItem): McpInteractionItem => structuredClone({ record, presentation, response });
+const errorView = (): McpInteractionView => {
+  const view = makeView();
+  return { ...view, record: { ...view.record, mode: 'url', availability: 'owner_unavailable', delivery: null,
+    binding: { ...view.record.binding, source: { kind: 'rpc_error', outgoingRequestId: 1.5, method: 'tools/call', elicitationId: 'external:original' } } },
+    request: { code: -32042, message: 'Original RPC error detail', data: { elicitations: [{ mode: 'url', message: 'Complete this external step', url: 'https://accounts.example.test/finish', elicitationId: 'external:original' }] } },
+    presentation: { mode: 'url', message: 'Complete this external step', url: 'https://accounts.example.test/finish', elicitationId: 'external:original' } };
+};
 function fixture() {
   let view = makeView();
   const api = {
-    listMcpInteractions: vi.fn<API['listMcpInteractions']>(async () => ({ items: [structuredClone(view)], nextCursor: null })),
+    listMcpInteractions: vi.fn<API['listMcpInteractions']>(async () => ({ items: [item(view)], nextCursor: null })),
     readMcpInteraction: vi.fn<API['readMcpInteraction']>(async () => structuredClone(view)),
     respondMcpInteraction: vi.fn<API['respondMcpInteraction']>(async input => {
-      view = { ...view, record: { ...view.record, revision: view.record.revision + 1, choice: input.response.action, delivery: 'sending' }, response: input.response };
+      view = { ...view, record: { ...view.record, revision: view.record.revision + 1, choice: input.response.action, delivery: view.record.binding.source.kind === 'rpc_error' ? null : 'sending' }, response: input.response };
       return structuredClone(view);
     }),
   };
@@ -138,7 +146,7 @@ it('opens only the exact displayed URL on a click and keeps opening, acceptance,
 
 it('replaces pages instead of loading all history and never sends cancellation when the view closes', async () => {
   const f = fixture(); const closed = { ...makeView(), record: { ...makeView().record, id: 'historical', availability: 'rpc_closed' as const } };
-  f.api.listMcpInteractions.mockImplementation(async input => input.cursor ? { items: [closed], nextCursor: null } : { items: [f.get()], nextCursor: 'opaque:next' });
+  f.api.listMcpInteractions.mockImplementation(async input => input.cursor ? { items: [item(closed)], nextCursor: null } : { items: [item(f.get())], nextCursor: 'opaque:next' });
   await render(f.api); await click('More requests');
   expect(f.api.listMcpInteractions.mock.calls[1]![0]).toEqual({ ...identity, cursor: 'opaque:next', limit: 20 });
   expect(container.querySelector('[aria-label="MCP request elicitation:first"]')).toBeNull();
@@ -170,4 +178,36 @@ it('uses the original external URL helper acknowledgement without treating a nul
   Object.defineProperty(window, '__VARIN_DESKTOP__', { configurable: true, value: { openExternal: desktopOpen } });
   expect(await actual.openExternalUrl('https://accounts.example.test/finish?value=0')).toBe(true);
   expect(desktopOpen).toHaveBeenCalledOnce(); expect(open).toHaveBeenCalledOnce();
+});
+
+
+it.each(['accept', 'decline', 'cancel'] as const)('records %s locally on a closed error-source card without implying a response or retry', async action => {
+  const f = fixture(); f.set(errorView());
+  const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
+  await render(f.api);
+  expect(f.api.readMcpInteraction).not.toHaveBeenCalled();
+  expect(f.api.respondMcpInteraction).not.toHaveBeenCalled();
+  expect(fetcher).not.toHaveBeenCalled(); expect(openExternalUrl).not.toHaveBeenCalled();
+  expect(container.textContent).toContain('tools/call (request 1.5) ended with error -32042');
+  expect(container.textContent).toContain('No MCP response is sent');
+  expect(container.textContent).toContain('does not retry the call, restart its Run, or grant the Agent permission');
+  expect(container.textContent).not.toContain('Original RPC error detail');
+  expect(button('Accept locally').disabled).toBe(false);
+  expect(button('Open website').disabled).toBe(false);
+  if (action === 'accept') await submit(); else await click(action === 'decline' ? 'Decline locally' : 'Cancel locally');
+  expect(f.api.respondMcpInteraction).toHaveBeenCalledExactlyOnceWith({ ...identity, operationId: 'operation:original', interactionId: 'elicitation:first', expectedRevision: 1, response: { action } });
+  expect(container.textContent).toContain(`Local choice: ${action} · No MCP response applies`);
+  expect(container.textContent).not.toContain('Response delivery started');
+  await click('Open website');
+  expect(openExternalUrl).toHaveBeenCalledExactlyOnceWith('https://accounts.example.test/finish');
+  expect(f.api.respondMcpInteraction).toHaveBeenCalledOnce();
+  await click('Show original RPC error');
+  expect(f.api.readMcpInteraction).toHaveBeenCalledExactlyOnceWith({ ...identity, operationId: 'operation:original', interactionId: 'elicitation:first' });
+  expect(container.querySelector('[aria-label="Original MCP evidence"]')?.textContent).toContain('Original RPC error detail');
+  f.set({ ...f.get(), record: { ...f.get().record, revision: 3, completionReported: true } });
+  await render(f.api, 1);
+  expect(container.textContent).toContain('The server reported this external interaction complete');
+  expect(container.textContent).toContain('Its result remains that error');
+  expect(f.api.respondMcpInteraction).toHaveBeenCalledOnce();
+  expect(fetcher).not.toHaveBeenCalled();
 });

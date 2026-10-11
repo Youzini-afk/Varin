@@ -141,7 +141,10 @@ async function receive(frame: Record<string, unknown>) {
     catch (error) { write({ kind: 'fixture-interaction-consumer-result', ok: false, error: error instanceof Error ? error.message : String(error) }); }
     return;
   }
-  if (frame.kind === 'fixture-interaction-complete') { assert(interaction); interaction.complete(String(frame.elicitationId)); return; }
+  if (frame.kind === 'fixture-interaction-complete') {
+    assert(interaction); await interaction.complete(String(frame.elicitationId));
+    if (frame.ack === true) write({ kind: 'fixture-interaction-completion-emitted' }); return;
+  }
   if (frame.kind === 'fixture-resource-prepare') {
     assert(resource); write({ kind: 'fixture-prepared', ...await resource.prepare(frame) }); return;
   }

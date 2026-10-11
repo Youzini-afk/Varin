@@ -24,14 +24,38 @@ pub enum McpInteractionRelation {
     Task { task_id: String },
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum McpInteractionSource {
+    ServerRequest {
+        request_id: McpRequestId,
+        relation: McpInteractionRelation,
+    },
+    RpcError {
+        outgoing_request_id: McpRequestId,
+        method: String,
+        elicitation_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        task_id: Option<String>,
+    },
+}
+impl McpInteractionSource {
+    fn is_error(&self) -> bool {
+        matches!(self, Self::RpcError { .. })
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct McpInteractionBinding {
     pub operation_id: String,
     pub execution_owner: ExecutorOwner,
     pub endpoint: host_jobs::McpEndpoint,
     pub connection_id: String,
-    pub request_id: McpRequestId,
-    pub relation: McpInteractionRelation,
+    pub source: McpInteractionSource,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -45,7 +69,7 @@ pub struct McpInteractionRecord {
     pub mode: Mode,
     pub availability: Availability,
     pub choice: Option<Choice>,
-    pub delivery: Delivery,
+    pub delivery: Option<Delivery>,
     pub completion_reported: bool,
     pub problem: Option<String>,
 }
@@ -58,19 +82,26 @@ struct Metadata {
     source_scope: launches::McpExecutionScope,
     request_ref: Value,
     response_ref: Option<Value>,
+    selector: Option<usize>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpInteractionItem {
+    pub record: McpInteractionRecord,
+    pub presentation: Value,
+    pub response: Option<Value>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpInteractionView {
-    pub record: McpInteractionRecord,
+    #[serde(flatten)]
+    pub item: McpInteractionItem,
     pub request: Value,
-    pub presentation: Value,
-    pub response: Option<Value>,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpInteractionPage {
-    pub items: Vec<McpInteractionView>,
+    pub items: Vec<McpInteractionItem>,
     pub next_cursor: Option<String>,
 }
 pub struct McpInteractionRead {
@@ -79,17 +110,30 @@ pub struct McpInteractionRead {
     _publication: crate::content::ContentPublication,
 }
 impl McpInteractionRead {
-    pub fn load(self) -> Result<McpInteractionView> {
-        let body = self.content.load(&self.metadata.request_ref)?;
-        Ok(McpInteractionView {
+    fn item(self, body: &Value) -> Result<McpInteractionItem> {
+        let presentation = match self.metadata.selector {
+            Some(index) => body["presentations"]
+                .get(index)
+                .ok_or_else(conflict)?
+                .clone(),
+            None => body["presentation"].clone(),
+        };
+        Ok(McpInteractionItem {
             record: self.metadata.record,
-            request: body["request"].clone(),
-            presentation: body["presentation"].clone(),
+            presentation,
             response: self
                 .metadata
                 .response_ref
                 .map(|r| self.content.load(&r))
                 .transpose()?,
+        })
+    }
+    pub fn load(self) -> Result<McpInteractionView> {
+        let body = self.content.load(&self.metadata.request_ref)?;
+        let request = body["request"].clone();
+        Ok(McpInteractionView {
+            item: self.item(&body)?,
+            request,
         })
     }
 }
@@ -99,12 +143,19 @@ pub struct McpInteractionPageRead {
 }
 impl McpInteractionPageRead {
     pub fn load(self) -> Result<McpInteractionPage> {
+        // An error can contain many URLs and a large diagnostic. Read its shared body once;
+        // a page contains only normalized presentation, never N copies of the original error.
+        let mut bodies = std::collections::HashMap::<String, Value>::new();
+        let mut items = Vec::with_capacity(self.items.len());
+        for read in self.items {
+            let key = encode(&read.metadata.request_ref)?;
+            if !bodies.contains_key(&key) {
+                bodies.insert(key.clone(), read.content.load(&read.metadata.request_ref)?);
+            }
+            items.push(read.item(&bodies[&key])?);
+        }
         Ok(McpInteractionPage {
-            items: self
-                .items
-                .into_iter()
-                .map(McpInteractionRead::load)
-                .collect::<Result<_>>()?,
+            items,
             next_cursor: self.next_cursor,
         })
     }
@@ -138,9 +189,9 @@ fn publish(tx: &Transaction<'_>, m: &mut Metadata, kind: &str) -> Result<()> {
     )?;
     Ok(())
 }
-fn original_live(db: &Connection, m: &Metadata, epoch: u64) -> Result<()> {
+fn original_owner(db: &Connection, m: &Metadata, epoch: u64) -> Result<(Operation, Run)> {
     let r = &m.record;
-    if m.epoch != epoch || r.availability != Availability::Live {
+    if m.epoch != epoch {
         return Err(RuntimeError::Conflict("mcp_interaction_not_live".into()));
     }
     let op: Operation = record(db, "operations", &r.binding.operation_id)?;
@@ -171,16 +222,15 @@ fn original_live(db: &Connection, m: &Metadata, epoch: u64) -> Result<()> {
             ));
         }
     }
-    match &r.binding.relation {
-        McpInteractionRelation::RpcResponseStream { .. } => {
-            if run.state.terminal()
-                || op.phase != OperationPhase::Running
-                || op.call_completion.is_some()
-            {
-                return Err(RuntimeError::Conflict("mcp_interaction_rpc_closed".into()));
-            }
-        }
-        McpInteractionRelation::Task { task_id } => {
+    match &r.binding.source {
+        McpInteractionSource::ServerRequest {
+            relation: McpInteractionRelation::RpcResponseStream { .. },
+            ..
+        } => {}
+        McpInteractionSource::ServerRequest {
+            relation: McpInteractionRelation::Task { task_id },
+            ..
+        } => {
             let Some(link) = op.host_job.as_ref() else {
                 return Err(conflict());
             };
@@ -189,25 +239,72 @@ fn original_live(db: &Connection, m: &Metadata, epoch: u64) -> Result<()> {
             };
             if link.acceptance_ref.is_none()
                 || task.task.task_id != *task_id
-                || task.task.status.terminal()
+                || task.task.status == host_jobs::McpTaskStatus::Cancelled
                 || !matches!(&link.binding.subject,host_jobs::HostJobSubject::Mcp { endpoint, .. } if endpoint == &r.binding.endpoint)
             {
                 return Err(conflict());
             }
         }
+        McpInteractionSource::RpcError { task_id, .. } => {
+            // A received error ends the finite RPC. Its local review does not resume that
+            // Operation or Run, and must remain possible after natural completion/failure.
+            if let Some(task_id) = task_id {
+                let link = op.host_job.as_ref().ok_or_else(conflict)?;
+                if link.acceptance_ref.is_none()
+                    || link
+                        .mcp_task
+                        .as_ref()
+                        .is_none_or(|task| task.task.task_id != *task_id)
+                    || !matches!(&link.binding.subject,host_jobs::HostJobSubject::Mcp { endpoint, .. } if endpoint == &r.binding.endpoint)
+                {
+                    return Err(conflict());
+                }
+            }
+        }
+    }
+    Ok((op, run))
+}
+fn finite_rpc_live(op: &Operation, run: &Run) -> bool {
+    !run.state.terminal() && op.phase == OperationPhase::Running && op.call_completion.is_none()
+}
+fn server_request_live(source: &McpInteractionSource, op: &Operation, run: &Run) -> bool {
+    match source {
+        McpInteractionSource::ServerRequest {
+            relation: McpInteractionRelation::RpcResponseStream { .. },
+            ..
+        } => finite_rpc_live(op, run),
+        McpInteractionSource::ServerRequest {
+            relation: McpInteractionRelation::Task { .. },
+            ..
+        } => op
+            .host_job
+            .as_ref()
+            .and_then(|link| link.mcp_task.as_ref())
+            .is_some_and(|task| !task.task.status.terminal()),
+        McpInteractionSource::RpcError { .. } => true,
+    }
+}
+fn original_live(db: &Connection, m: &Metadata, epoch: u64) -> Result<()> {
+    let (op, run) = original_owner(db, m, epoch)?;
+    if m.record.availability != Availability::Live {
+        return Err(RuntimeError::Conflict("mcp_interaction_not_live".into()));
+    }
+    if !server_request_live(&m.record.binding.source, &op, &run) {
+        return Err(RuntimeError::Conflict("mcp_interaction_rpc_closed".into()));
     }
     Ok(())
 }
 impl Catalog {
-    pub fn open_mcp_interaction(
-        &mut self,
+    fn prepare_mcp_interaction(
+        &self,
         id: String,
         binding: McpInteractionBinding,
         mode: Mode,
-        body: result_content::PreparedOperationResult,
+        body: &result_content::PreparedOperationResult,
+        selector: Option<usize>,
         snapshot: &tool_content::ToolInvocationSnapshot,
         frozen: &launches::HostToolBinding,
-    ) -> Result<McpInteractionRecord> {
+    ) -> Result<(Metadata, bool)> {
         self.validate_tool_invocation(snapshot, false)?;
         let op = self.operation(&binding.operation_id)?;
         let run = self.run(&op.run_id)?;
@@ -273,7 +370,11 @@ impl Catalog {
                 mode,
                 availability: Availability::Live,
                 choice: None,
-                delivery: Delivery::NotStarted,
+                delivery: if selector.is_some() {
+                    None
+                } else {
+                    Some(Delivery::NotStarted)
+                },
                 completion_reported: false,
                 problem: None,
             },
@@ -281,20 +382,87 @@ impl Catalog {
             source_scope: frozen.provenance.execution_scope,
             request_ref: body.reference.clone(),
             response_ref: None,
+            selector,
         };
         if let Some(old) = optional_record::<Metadata>(&self.db, "mcp_interactions", &m.record.id)?
         {
             if old.record.binding != m.record.binding || old.request_ref != m.request_ref {
                 return Err(conflict());
             }
-            return Ok(old.record);
+            return Ok((old, false));
         }
-        original_live(&self.db, &m, self.epoch)?;
+        if m.record.binding.source.is_error() != selector.is_some()
+            || selector.is_some() && mode != Mode::Url
+        {
+            return Err(conflict());
+        }
+        if let Err(error) = original_live(&self.db, &m, self.epoch) {
+            if !m.record.binding.source.is_error() {
+                return Err(error);
+            }
+            // This is an already received fact, even if cancellation/source retirement won
+            // the local publication race. Preserve the evidence without restoring authority.
+            m.record.availability = Availability::OwnerUnavailable;
+            m.record.problem = Some("mcp_interaction_owner_unavailable".into());
+        }
+        Ok((m, true))
+    }
+    fn publish_mcp_interactions(
+        &mut self,
+        prepared: Vec<(Metadata, bool)>,
+    ) -> Result<Vec<McpInteractionRecord>> {
         let tx = self.db.transaction()?;
-        tx.execute("INSERT INTO mcp_interactions(id,operation_id,connection_id,request_key,body) VALUES(?1,?2,?3,?4,?5)",params![m.record.id,m.record.binding.operation_id,m.record.binding.connection_id,encode(&m.record.binding.request_id)?,encode(&m)?])?;
-        publish(&tx, &mut m, "mcp.interaction.opened")?;
+        let mut records = Vec::with_capacity(prepared.len());
+        for (mut m, fresh) in prepared {
+            if fresh {
+                tx.execute("INSERT INTO mcp_interactions(id,operation_id,connection_id,request_key,body) VALUES(?1,?2,?3,?4,?5)",params![m.record.id,m.record.binding.operation_id,m.record.binding.connection_id,encode(&m.record.binding.source)?,encode(&m)?])?;
+                publish(&tx, &mut m, "mcp.interaction.opened")?;
+            }
+            records.push(m.record);
+        }
         tx.commit()?;
-        Ok(m.record)
+        Ok(records)
+    }
+    pub fn open_mcp_interaction(
+        &mut self,
+        id: String,
+        binding: McpInteractionBinding,
+        mode: Mode,
+        body: &result_content::PreparedOperationResult,
+        snapshot: &tool_content::ToolInvocationSnapshot,
+        frozen: &launches::HostToolBinding,
+    ) -> Result<McpInteractionRecord> {
+        let prepared =
+            self.prepare_mcp_interaction(id, binding, mode, body, None, snapshot, frozen)?;
+        self.publish_mcp_interactions(vec![prepared])?
+            .pop()
+            .ok_or_else(conflict)
+    }
+    pub fn open_mcp_error_interactions(
+        &mut self,
+        items: Vec<(String, McpInteractionBinding)>,
+        body: &result_content::PreparedOperationResult,
+        snapshot: &tool_content::ToolInvocationSnapshot,
+        frozen: &launches::HostToolBinding,
+    ) -> Result<Vec<McpInteractionRecord>> {
+        let prepared = items
+            .into_iter()
+            .enumerate()
+            .map(|(index, (id, binding))| {
+                self.prepare_mcp_interaction(
+                    id,
+                    binding,
+                    Mode::Url,
+                    body,
+                    Some(index),
+                    snapshot,
+                    frozen,
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
+        // The whole received response is one local publication. A failed member cannot leave
+        // sibling cards committed with their completion listeners silently discarded.
+        self.publish_mcp_interactions(prepared)
     }
     pub fn capture_mcp_interaction(
         &self,
@@ -340,7 +508,7 @@ impl Catalog {
                 ))
             })
             .transpose()?;
-        let mut q=self.db.prepare("SELECT m.rowid,m.body,CASE WHEN json_extract(m.body,'$.availability')='live' AND json_extract(m.body,'$.choice') IS NULL THEN 0 ELSE 1 END AS bucket FROM mcp_interactions m JOIN operations o ON o.id=m.operation_id JOIN runs r ON r.id=o.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=?1 AND b.id=?2 AND (?3 IS NULL OR bucket>?3 OR (bucket=?3 AND m.rowid<?4)) ORDER BY bucket,m.rowid DESC LIMIT ?5")?;
+        let mut q=self.db.prepare("SELECT m.rowid,m.body,CASE WHEN (json_extract(m.body,'$.availability')='live' OR json_extract(m.body,'$.binding.source.kind')='rpc_error') AND json_extract(m.body,'$.choice') IS NULL THEN 0 ELSE 1 END AS bucket FROM mcp_interactions m JOIN operations o ON o.id=m.operation_id JOIN runs r ON r.id=o.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=?1 AND b.id=?2 AND (?3 IS NULL OR bucket>?3 OR (bucket=?3 AND m.rowid<?4)) ORDER BY bucket,m.rowid DESC LIMIT ?5")?;
         let rows = q
             .query_map(
                 params![
@@ -397,11 +565,19 @@ impl Catalog {
             }
             return Err(conflict());
         }
-        original_live(&self.db, &m, self.epoch)?;
+        if !m.record.binding.source.is_error() {
+            original_live(&self.db, &m, self.epoch)?;
+        }
         if m.record.revision != revision {
             return Err(conflict());
         }
         m.record.choice = Some(choice);
+        if m.record.binding.source.is_error()
+            && choice != Choice::Accept
+            && m.record.availability == Availability::Live
+        {
+            m.record.availability = Availability::Cancelled;
+        }
         m.response_ref = Some(body.reference.clone());
         let tx = self.db.transaction()?;
         publish(&tx, &mut m, "mcp.interaction.responded")?;
@@ -416,13 +592,14 @@ impl Catalog {
         let mut m: Metadata = record(&self.db, "mcp_interactions", id)?;
         linked(&m, binding)?;
         original_live(&self.db, &m, self.epoch)?;
-        if m.record.choice.is_none()
+        if m.record.binding.source.is_error()
+            || m.record.choice.is_none()
             || m.response_ref.is_none()
-            || m.record.delivery != Delivery::NotStarted
+            || m.record.delivery != Some(Delivery::NotStarted)
         {
             return Err(conflict());
         }
-        m.record.delivery = Delivery::Sending;
+        m.record.delivery = Some(Delivery::Sending);
         let tx = self.db.transaction()?;
         publish(&tx, &mut m, "mcp.interaction.sending")?;
         tx.commit()?;
@@ -436,22 +613,24 @@ impl Catalog {
     ) -> Result<McpInteractionRecord> {
         let mut m: Metadata = record(&self.db, "mcp_interactions", id)?;
         linked(&m, binding)?;
-        if !matches!(
-            delivery,
-            Delivery::Sent | Delivery::Unknown | Delivery::NotSent
-        ) {
+        if m.record.binding.source.is_error()
+            || !matches!(
+                delivery,
+                Delivery::Sent | Delivery::Unknown | Delivery::NotSent
+            )
+        {
             return Err(conflict());
         }
-        if m.record.delivery == delivery {
+        if m.record.delivery == Some(delivery) {
             return Ok(m.record);
         }
-        if m.record.delivery == Delivery::Sent
-            || m.record.delivery == Delivery::NotSent
+        if m.record.delivery == Some(Delivery::Sent)
+            || m.record.delivery == Some(Delivery::NotSent)
             || delivery == Delivery::Sent && m.record.choice.is_none()
         {
             return Err(conflict());
         }
-        m.record.delivery = delivery;
+        m.record.delivery = Some(delivery);
         let tx = self.db.transaction()?;
         publish(&tx, &mut m, "mcp.interaction.response_settled")?;
         tx.commit()?;
@@ -473,7 +652,7 @@ impl Catalog {
             && m.record.mode == Mode::Url
             && m.record.choice == Some(Choice::Accept)
             && !m.record.completion_reported
-            && m.record.delivery != Delivery::NotSent;
+            && m.record.delivery != Some(Delivery::NotSent);
         if m.record.availability == availability
             || (m.record.availability != Availability::Live && !retained_completion)
         {
@@ -494,6 +673,40 @@ impl Catalog {
         if m.record.mode != Mode::Url || m.record.completion_reported {
             return Ok(m.record);
         }
+        // Observation publication cannot outrun a committed cancellation, source/Goal fence
+        // or reopen. Return the original row for a fenced late fact, rather than asking the
+        // Host to retry a notification whose original association has already been withdrawn.
+        if !matches!(
+            m.record.availability,
+            Availability::Live | Availability::RpcClosed
+        ) {
+            return Ok(m.record);
+        }
+        let (op, run) = match original_owner(&self.db, &m, self.epoch) {
+            Ok(owner) => owner,
+            Err(RuntimeError::Conflict(_) | RuntimeError::GoalChanged) => return Ok(m.record),
+            Err(error) => return Err(error),
+        };
+        let retained =
+            m.record.choice == Some(Choice::Accept) && m.record.delivery != Some(Delivery::NotSent);
+        match &m.record.binding.source {
+            McpInteractionSource::ServerRequest { .. }
+                if !server_request_live(&m.record.binding.source, &op, &run) && !retained =>
+            {
+                return Ok(m.record);
+            }
+            McpInteractionSource::ServerRequest { .. }
+                if m.record.availability == Availability::RpcClosed && !retained =>
+            {
+                return Ok(m.record);
+            }
+            McpInteractionSource::RpcError { .. }
+                if m.record.availability != Availability::Live =>
+            {
+                return Ok(m.record);
+            }
+            _ => {}
+        }
         m.record.completion_reported = true;
         let tx = self.db.transaction()?;
         publish(&tx, &mut m, "mcp.interaction.external_completed")?;
@@ -502,7 +715,7 @@ impl Catalog {
     }
     pub fn pending_mcp_interactions(&mut self) -> Result<Vec<McpInteractionRecord>> {
         let ids = {
-            let mut q=self.db.prepare("SELECT id FROM mcp_interactions WHERE json_extract(body,'$.availability')='live' OR json_extract(body,'$.delivery')='sending' OR (json_extract(body,'$.availability')='rpc_closed' AND json_extract(body,'$.mode')='url' AND json_extract(body,'$.choice')='accept' AND json_extract(body,'$.completionReported')=0 AND json_extract(body,'$.delivery')!='not_sent')")?;
+            let mut q=self.db.prepare("SELECT id FROM mcp_interactions WHERE (json_extract(body,'$.availability')='live' AND (json_extract(body,'$.binding.source.kind')!='rpc_error' OR (json_extract(body,'$.completionReported')=0 AND (json_extract(body,'$.choice') IS NULL OR json_extract(body,'$.choice')='accept')))) OR json_extract(body,'$.delivery')='sending' OR (json_extract(body,'$.availability')='rpc_closed' AND json_extract(body,'$.mode')='url' AND json_extract(body,'$.choice')='accept' AND json_extract(body,'$.completionReported')=0 AND json_extract(body,'$.delivery')!='not_sent')")?;
             let rows = q
                 .query_map([], |r| r.get::<_, String>(0))?
                 .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -551,7 +764,7 @@ impl Catalog {
     pub fn recover_mcp_interactions(&mut self) -> Result<()> {
         let tx = self.db.transaction()?;
         let ids = {
-            let mut q=tx.prepare("SELECT id FROM mcp_interactions WHERE json_extract(body,'$.availability')='live' OR json_extract(body,'$.delivery')='sending' OR (json_extract(body,'$.availability')='rpc_closed' AND json_extract(body,'$.mode')='url' AND json_extract(body,'$.choice')='accept' AND json_extract(body,'$.completionReported')=0 AND json_extract(body,'$.delivery')!='not_sent')")?;
+            let mut q=tx.prepare("SELECT id FROM mcp_interactions WHERE (json_extract(body,'$.availability')='live' AND (json_extract(body,'$.binding.source.kind')!='rpc_error' OR (json_extract(body,'$.completionReported')=0 AND (json_extract(body,'$.choice') IS NULL OR json_extract(body,'$.choice')='accept')))) OR json_extract(body,'$.delivery')='sending' OR (json_extract(body,'$.availability')='rpc_closed' AND json_extract(body,'$.mode')='url' AND json_extract(body,'$.choice')='accept' AND json_extract(body,'$.completionReported')=0 AND json_extract(body,'$.delivery')!='not_sent')")?;
             let rows = q
                 .query_map([], |r| r.get::<_, String>(0))?
                 .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -578,14 +791,14 @@ fn close(
 ) -> Result<()> {
     m.record.availability = availability;
     m.record.problem = problem;
-    if m.record.delivery == Delivery::Sending {
-        m.record.delivery = Delivery::Unknown;
+    if m.record.delivery == Some(Delivery::Sending) {
+        m.record.delivery = Some(Delivery::Unknown);
     }
     publish(tx, m, "mcp.interaction.closed")
 }
 pub(super) fn cancel_operation(tx: &Transaction<'_>, operation: &str) -> Result<()> {
     let ids = {
-        let mut q=tx.prepare("SELECT id FROM mcp_interactions WHERE operation_id=?1 AND (json_extract(body,'$.availability')='live' OR (json_extract(body,'$.availability')='rpc_closed' AND json_extract(body,'$.mode')='url' AND json_extract(body,'$.choice')='accept' AND json_extract(body,'$.completionReported')=0 AND json_extract(body,'$.delivery')!='not_sent'))")?;
+        let mut q=tx.prepare("SELECT id FROM mcp_interactions WHERE operation_id=?1 AND ((json_extract(body,'$.availability')='live' AND (json_extract(body,'$.binding.source.kind')!='rpc_error' OR (json_extract(body,'$.completionReported')=0 AND (json_extract(body,'$.choice') IS NULL OR json_extract(body,'$.choice')='accept')))) OR (json_extract(body,'$.availability')='rpc_closed' AND json_extract(body,'$.mode')='url' AND json_extract(body,'$.choice')='accept' AND json_extract(body,'$.completionReported')=0 AND json_extract(body,'$.delivery')!='not_sent'))")?;
         let rows = q
             .query_map([operation], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -599,7 +812,7 @@ pub(super) fn cancel_operation(tx: &Transaction<'_>, operation: &str) -> Result<
 }
 pub(super) fn cancel_run(tx: &Transaction<'_>, run: &str, source_only: bool) -> Result<()> {
     let ids = {
-        let mut q=tx.prepare("SELECT m.id FROM mcp_interactions m JOIN operations o ON o.id=m.operation_id WHERE o.run_id=?1 AND (json_extract(m.body,'$.availability')='live' OR (json_extract(m.body,'$.availability')='rpc_closed' AND json_extract(m.body,'$.mode')='url' AND json_extract(m.body,'$.choice')='accept' AND json_extract(m.body,'$.completionReported')=0 AND json_extract(m.body,'$.delivery')!='not_sent')) AND (?2=0 OR json_extract(m.body,'$.sourceScope')='workspace')")?;
+        let mut q=tx.prepare("SELECT m.id FROM mcp_interactions m JOIN operations o ON o.id=m.operation_id WHERE o.run_id=?1 AND ((json_extract(m.body,'$.availability')='live' AND (json_extract(m.body,'$.binding.source.kind')!='rpc_error' OR (json_extract(m.body,'$.completionReported')=0 AND (json_extract(m.body,'$.choice') IS NULL OR json_extract(m.body,'$.choice')='accept')))) OR (json_extract(m.body,'$.availability')='rpc_closed' AND json_extract(m.body,'$.mode')='url' AND json_extract(m.body,'$.choice')='accept' AND json_extract(m.body,'$.completionReported')=0 AND json_extract(m.body,'$.delivery')!='not_sent')) AND (?2=0 OR json_extract(m.body,'$.sourceScope')='workspace')")?;
         let rows = q
             .query_map(params![run, source_only], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;

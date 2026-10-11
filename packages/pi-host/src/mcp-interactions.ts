@@ -103,3 +103,16 @@ export function validateElicitationResponse(request: unknown, input: unknown): M
   }
   return structuredClone(input) as McpElicitationResponse;
 }
+
+/** A received URL_ELICITATION_REQUIRED error, not a synthesized elicitation/create request. */
+export function decodeUrlElicitationError(input: unknown): Array<Extract<McpElicitationPresentation, {mode: 'url'}>> {
+  if (!object(input) || input.code !== -32042 || typeof input.message !== 'string'
+    || !object(input.data) || !Array.isArray(input.data.elicitations) || !input.data.elicitations.length) return invalid();
+  const ids = new Set<string>();
+  return input.data.elicitations.map(raw => {
+    const decoded = decodeElicitationRequest(raw);
+    if (decoded.presentation.mode !== 'url' || ids.has(decoded.presentation.elicitationId)) return invalid();
+    ids.add(decoded.presentation.elicitationId);
+    return decoded.presentation;
+  });
+}

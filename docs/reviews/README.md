@@ -8,6 +8,7 @@ Last updated: 2026-10-11
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [原 MCP 错误来源 URL 交互（2026-10-11）](runtime-mcp-error-interactions-2026-10-11.md) | 原 RPC error/Task、零伪答复/重放、共享正文与公开消费者；迟到完成提交线和自然退休 |
 | [原 MCP 用户交互（2026-10-11）](runtime-mcp-interactions-2026-10-11.md) | 原 form/URL、HTTP/Task 关联、公开用户响应、真实 child/nested/policy 与取消/恢复证据 |
 | [原 MCP 资源观察（2026-10-11）](runtime-mcp-resources-2026-10-11.md) | 原 finite RPC/共享 holder/被动输入、source/Goal/取消与恢复；真实 stdio 和公开消费者 |
 | [原 MCP Tasks 与持久结果观察（2026-10-11）](runtime-mcp-tasks-2026-10-11.md) | 原 authority/Task/权限/取消/恢复与真实 stdio、child/nested/Wait 消费；受理/结果/停止独立 |

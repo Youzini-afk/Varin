@@ -4,10 +4,11 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { StreamableHttpTransport } from '@earendil-works/pi-mcp';
-import { McpAuthority, McpAuthorityError, decodeElicitationRequest, validateElicitationResponse, type McpInteractionRequest } from '../src/mcp-authority.js';
+import { McpAuthority, McpAuthorityError, decodeElicitationRequest, validateElicitationResponse, type McpInteractionRequest, type McpErrorInteraction } from '../src/mcp-authority.js';
 import type { McpElicitationResponse } from '@varin/protocol';
 const signal = new AbortController().signal;
 const form = {message:'Review values',requestedSchema:{type:'object',properties:{flag:{type:'boolean',default:false},count:{type:'integer',minimum:0,default:0},text:{type:'string',pattern:'^x?$',default:''},tags:{type:'array',items:{anyOf:[{const:'a',title:'First'}]},default:[]}},required:['flag','count','text','tags']}};
+const urlError = {code:-32042,message:'Review external requirements',data:{elicitations:[{mode:'url',message:'First requirement',elicitationId:'first-error-url',url:'https://flow.invalid/full?one=opaque'},{mode:'url',message:'Second requirement',elicitationId:'second-error-url',url:'https://other.invalid/full?two=opaque'}]},extension:{original:['保留',false,0]}};
 const answer = {action:'accept' as const,content:{flag:false,count:0,text:'',tags:['a']}};
 test('the sole decoder preserves primitive/enum-array values, pattern and valid defaults without coercion', () => {
   const decoded=decodeElicitationRequest(form); assert.equal(decoded.presentation.mode,'form');
@@ -28,6 +29,7 @@ async function fixture(){
   writeFileSync(join(root,'mcp.json'),JSON.stringify({mcpServers:{peer:{url,exposure:'direct'}}}));
   const sent:Message[]=[],streams=new Map<string,{id:string|number;controller:ReadableStreamDefaultController<Uint8Array>}>();
   const inputs:Array<{input:McpInteractionRequest;respond:(v:McpElicitationResponse)=>void;settled:string[]}>=[];
+  const errors:Array<{input:McpErrorInteraction;completed:string[];unavailable:string[]}>=[];
   let transports=0,failResponse=false,get:ReadableStreamDefaultController<Uint8Array>|undefined;
   const encode=(message:Message)=>new TextEncoder().encode(`data: ${JSON.stringify({jsonrpc:'2.0',...message})}\n\n`);
   const json=(id:string|number,result:unknown)=>new Response(JSON.stringify({jsonrpc:'2.0',id,result}),{headers:{'content-type':'application/json','mcp-session-id':'original-client'}});
@@ -42,17 +44,27 @@ async function fixture(){
     if(message.method==='tools/call'){
       const args=message.params?.arguments as Record<string,unknown>;
       if(args.expired)return new Response('expired',{status:404});
+      if(args.error==='url'||args.error==='unsafe'){
+        const error=structuredClone(urlError);
+        if(args.error==='unsafe')error.data.elicitations[0]!.url='javascript:alert(1)';
+        if(args.complete)return new Response(new ReadableStream<Uint8Array>({start(controller){
+          const frames=[{id:message.id!,error},{method:'notifications/elicitation/complete',params:{elicitationId:'first-error-url'}}];
+          const bytes=frames.map(frame=>new TextDecoder().decode(encode(frame))).join('');
+          controller.enqueue(new TextEncoder().encode(bytes));controller.close();
+        }}),{headers:{'content-type':'text/event-stream'}});
+        return new Response(JSON.stringify({jsonrpc:'2.0',id:message.id,error}),{headers:{'content-type':'application/json'}});
+      }
       if(args.error)return new Response(JSON.stringify({jsonrpc:'2.0',id:message.id,error:{code:-32042,message:'External action required',data:{elicitations:[{url:'https://flow.invalid/full?token=opaque'}]}}}),{headers:{'content-type':'application/json'}});
       return new Response(new ReadableStream<Uint8Array>({start(controller){streams.set(String(args.name),{id:message.id!,controller});}}),{headers:{'content-type':'text/event-stream'}});
     }
     throw new Error(`Unexpected ${message.method}`);
   };
-  const authority=new McpAuthority({createTransport:()=>{transports++;return new StreamableHttpTransport({url,fetch});},interactions:input=>new Promise(respond=>{
+  const authority=new McpAuthority({interactionErrors:input=>{const entry={input,completed:[] as string[],unavailable:[] as string[]};errors.push(entry);for(const item of input.items)item.onComplete(()=>entry.completed.push(item.presentation.elicitationId),()=>entry.unavailable.push(item.presentation.elicitationId));},createTransport:()=>{transports++;return new StreamableHttpTransport({url,fetch});},interactions:input=>new Promise(respond=>{
     const settled:string[]=[];input.onResponseSettled(state=>settled.push(state));inputs.push({input,respond,settled});
   })});
   const scope={agentDir:root,configCwd:root,executionCwd:root,environmentId:'host:global',executionScope:'global' as const,projectTrusted:false,sessionId:'pi'};
   const emit=(name:string,message:Message)=>streams.get(name)!.controller.enqueue(encode(message));
-  return {authority,scope,sent,streams,inputs,transports:()=>transports,failResponse:()=>{failResponse=true;},emit,get:(message:Message)=>get!.enqueue(encode(message)),
+  return {authority,scope,sent,streams,inputs,errors,transports:()=>transports,failResponse:()=>{failResponse=true;},emit,get:(message:Message)=>get!.enqueue(encode(message)),
     finish(name:string){const stream=streams.get(name)!;emit(name,{id:stream.id,result:{content:[]}});stream.controller.close();},
     async close(){await authority.close();rmSync(root,{recursive:true,force:true});}};
 }
@@ -70,8 +82,8 @@ test('Pi-first shared HTTP client associates exact concurrent callers; Task meta
     await until(()=>f.streams.size===2);
     f.emit('a',{id:1.5,method:'elicitation/create',params:form});f.emit('b',{id:'1',method:'elicitation/create',params:form});
     await until(()=>f.inputs.length===2);
-    assert.equal(f.inputs[0]!.input.binding.operationId,'op-a');assert.equal(f.inputs[0]!.input.binding.requestId,1.5);
-    assert.equal(f.inputs[1]!.input.binding.operationId,'op-b');assert.equal(f.inputs[1]!.input.binding.requestId,'1');
+    assert.equal(f.inputs[0]!.input.binding.operationId,'op-a');assert.ok(f.inputs[0]!.input.binding.source.kind==='server_request');assert.equal(f.inputs[0]!.input.binding.source.requestId,1.5);
+    assert.equal(f.inputs[1]!.input.binding.operationId,'op-b');assert.ok(f.inputs[1]!.input.binding.source.kind==='server_request');assert.equal(f.inputs[1]!.input.binding.source.requestId,'1');
     for(const input of f.inputs)input.respond(answer);
     await until(()=>f.inputs.every(i=>i.settled[0]==='sent'));
     const task=await b.taskOwner('peer',undefined,signal);const unbind=task.bindInteraction!('known-task',origin('accepted-task-b'));
@@ -118,5 +130,43 @@ test('an accepted URL keeps its original completion watcher after RPC close and 
     assert.equal(f.inputs[0]!.input.signal.reason,'rpc_closed');assert.equal(unavailable,0);
     await f.authority.close();assert.equal(unavailable,1);assert.equal(completed,0);
     assert.equal(f.sent.filter(m=>m.id==='url-question').length,1);dispose();lease.release();
+  }finally{await f.close();}
+});
+
+test('real outbound errors register every URL before same-chunk completion and never create protocol replies',async()=>{
+  const f=await fixture();try{
+    const lease=await f.authority.acquire(f.scope,{servers:['peer']}),tool=lease.binding.tools[0]!;
+    await assert.rejects(lease.callTool(tool.name,{error:'url',complete:true},{schemaVersion:tool.schemaVersion,signal,interaction:origin('error-only')}),error=>{
+      assert.ok(error instanceof McpAuthorityError);assert.equal(error.settlement,'rpc_response');assert.deepEqual(error.protocolError,urlError);return true;
+    });
+    await until(()=>f.errors[0]?.completed.length===1);
+    assert.equal(f.errors.length,1);assert.equal(f.errors[0]!.input.items.length,2);
+    const call=f.sent.find(m=>m.method==='tools/call')!;
+    for(const item of f.errors[0]!.input.items)assert.deepEqual(item.binding.source,{kind:'rpc_error',outgoingRequestId:call.id,method:'tools/call',elicitationId:item.presentation.elicitationId});
+    assert.deepEqual(f.errors[0]!.completed,['first-error-url']);assert.equal(f.inputs.length,0);
+    assert.equal(f.sent.filter(m=>!m.method).length,0);assert.equal(f.sent.filter(m=>m.method==='tools/call').length,1);
+    lease.release();
+  }finally{await f.close();}
+});
+test('unsafe error URLs and reused active IDs retain original errors and a local diagnostic without cross-caller cards',async()=>{
+  const f=await fixture();try{
+    const lease=await f.authority.acquire(f.scope,{servers:['peer']}),tool=lease.binding.tools[0]!;
+    const invoke=(value:string,id:string)=>lease.callTool(tool.name,{error:value},{schemaVersion:tool.schemaVersion,signal,interaction:origin(id)});
+    await assert.rejects(invoke('unsafe','unsafe'),error=>{
+      assert.ok(error instanceof McpAuthorityError);assert.equal(error.interactionProblem,'mcp_url_elicitation_invalid');
+      assert.deepEqual(error.protocolError?.extension,urlError.extension);return true;
+    });
+    assert.equal(f.errors.length,0);
+    await assert.rejects(invoke('url','first'));assert.equal(f.errors.length,1);
+    await assert.rejects(invoke('url','second'),error=>{
+      assert.ok(error instanceof McpAuthorityError);assert.equal(error.interactionProblem,'mcp_elicitation_identity_conflict');assert.deepEqual(error.protocolError,urlError);return true;
+    });
+    await assert.rejects(invoke('url','third'),error=>{
+      assert.ok(error instanceof McpAuthorityError);assert.equal(error.interactionProblem,'mcp_elicitation_identity_conflict');assert.deepEqual(error.protocolError,urlError);return true;
+    });
+    assert.equal(f.errors.length,1);assert.equal(f.errors[0]!.input.items[0]!.binding.operationId,'first');
+    assert.deepEqual(f.errors[0]!.unavailable,['first-error-url','second-error-url']);
+    f.get({method:'notifications/elicitation/complete',params:{elicitationId:'first-error-url'}});
+    await new Promise(resolve=>setTimeout(resolve,5));assert.deepEqual(f.errors[0]!.completed,[]);lease.release();
   }finally{await f.close();}
 });

@@ -574,7 +574,8 @@ export function createMcpResourceRuntime(options: {
               localReleased: true,
               remoteCleanup,
               ...('acknowledgement' in release ? { acknowledgement: release.acknowledgement } : {}),
-              ...('protocolError' in release ? { protocolError: release.protocolError } : {})
+              ...('protocolError' in release ? { protocolError: release.protocolError } : {}),
+              ...('interactionProblem' in release ? { interactionProblem: release.interactionProblem } : {})
             },
             parts: []
           }

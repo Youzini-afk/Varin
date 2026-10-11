@@ -1,14 +1,14 @@
 /** Live responders for Catalog-owned MCP input records. No durable state or connection authority here. */
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { decodeElicitationRequest, validateElicitationResponse, type McpInteractionRequest, type McpInteractionReceiver } from '@varin/pi-host/mcp-authority';
+import { decodeElicitationRequest, validateElicitationResponse, decodeUrlElicitationError, type McpInteractionRequest, type McpInteractionReceiver, type McpErrorInteractionItem, type McpErrorInteractionReceiver } from '@varin/pi-host/mcp-authority';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { KernelClient } from './kernel-client.js';
 import type { McpInteractionRecord, McpInteractionView, McpInteractionRespondParams, McpElicitationResponse, McpInteractionAvailability, McpInteractionDelivery } from './protocol.generated.js';
 const failure = (code: string): Error => Object.assign(new Error(code), {code});
 interface Entry {
   id: string;
-  input: McpInteractionRequest;
+  input: McpInteractionRequest | McpErrorInteractionItem;
   record?: McpInteractionRecord;
   controller: AbortController;
   resolve(response: McpElicitationResponse): void;
@@ -36,7 +36,8 @@ export function createMcpInteractionRuntime(options: { kernel: KernelClient; run
   const short = <T>(method: 'runtime.mcp.interaction.close' | 'runtime.mcp.interaction.response.begin' | 'runtime.mcp.interaction.response.settle' | 'runtime.mcp.interaction.complete', entry: Entry, extra: Record<string, unknown> = {}) =>
     options.kernel.agentRuntimeRequest<T, typeof method>(method, { binding: entry.input.binding, interactionId: entry.id, ...extra } as never);
   const hasFacts = (entry: Entry) => !!(entry.closeFact || entry.settlementFact || entry.completionFact);
-  const keepCompletion = (entry: Entry) => entry.record?.mode === 'url' && entry.record.choice === 'accept'
+  const keepCompletion = (entry: Entry) => entry.record?.mode === 'url'
+    && (entry.input.binding.source.kind === 'rpc_error' ? entry.record.choice === null || entry.record.choice === 'accept' : entry.record.choice === 'accept')
     && entry.record.delivery !== 'not_sent' && ['live', 'rpc_closed'].includes(entry.record.availability) && !entry.record.completionReported;
   const retire = (entry: Entry) => {
     if (!entry.finished || hasFacts(entry) || !entry.record) return;
@@ -112,7 +113,7 @@ export function createMcpInteractionRuntime(options: { kernel: KernelClient; run
   const receiver: McpInteractionReceiver = async input => {
     if (disposed) throw failure('mcp_interaction_owner_unavailable');
     const decoded = decodeElicitationRequest(input.request);
-    const id = `mcp-interaction:${createHash('sha256').update(JSON.stringify([input.binding.connectionId, input.binding.requestId])).digest('hex')}`;
+    const id = `mcp-interaction:${createHash('sha256').update(JSON.stringify([input.binding.connectionId, input.binding.source])).digest('hex')}`;
     if (entries.has(id)) throw failure('mcp_interaction_conflict');
     const controller = new AbortController();
     let resolve!: Entry['resolve'], reject!: Entry['reject'];
@@ -176,16 +177,82 @@ export function createMcpInteractionRuntime(options: { kernel: KernelClient; run
       throw error;
     }
   };
+  const errorReceiver: McpErrorInteractionReceiver = input => {
+    if (disposed) return;
+    const items = input.items.map(item => ({...item,
+      id: `mcp-interaction:${createHash('sha256').update(JSON.stringify([item.binding.connectionId, item.binding.source])).digest('hex')}`,
+    }));
+    if (items.some(item => entries.has(item.id))) throw failure('mcp_interaction_conflict');
+    // Register every completion listener synchronously before another wire message can arrive.
+    // Staging the single shared body is independent of the finite RPC's receipt/rejection.
+    let resolve!: (records: McpInteractionRecord[]) => void, reject!: (error: unknown) => void;
+    const publication = new Promise<McpInteractionRecord[]>((yes, no) => {resolve=yes;reject=no;});
+    const staged = items.map((item,index): Entry => {
+      const entry: Entry = {id:item.id,input:item,controller:new AbortController(),resolve:()=>{},reject:()=>{},
+        opened:publication.then(records => records[index]!),finished:true,choiceLane:Promise.resolve()};
+      entries.set(entry.id,entry);
+      entry.completion=item.onComplete(()=>{
+        entry.completionFact=true;entry.completion?.();delete entry.completion;
+        void entry.opened.then(()=>flush(entry)).catch(report);
+      },()=>close(entry,'connection_lost'));
+      return entry;
+    });
+    // Body work never runs on the synchronous SDK reader or holds its settlement promise.
+    queueMicrotask(()=>{void (async()=>{
+      let delay=250;
+      while (!disposed) {
+        try {
+          const records=await options.kernel.agentRuntimeRequest<McpInteractionRecord[],'runtime.mcp.interaction.error.open'>(
+            'runtime.mcp.interaction.error.open',{request:input.request,items:items.map(item=>({id:item.id,binding:item.binding,presentation:item.presentation}))});
+          for(let index=0;index<staged.length;index++) {
+            const entry=staged[index]!;adopt(entry,records[index]!);
+            if(entry.record!.availability !== 'live') {
+              entry.closeFact=entry.record!.availability;entry.completion?.();delete entry.completion;
+            }
+          }
+          resolve(records);
+          for(const entry of staged){if(hasFacts(entry))void flush(entry);else retire(entry);}
+          return;
+        } catch(error) {
+          const code=error && typeof error==='object' && 'code' in error ? error.code : undefined;
+          if(['operation-error','protocol-error','cancelled','unauthorized'].includes(String(code)))throw error;
+          report(error);await pause(delay);delay=Math.min(delay*2,30000);
+        }
+      }
+      throw failure('mcp_interaction_owner_unavailable');
+    })().catch(error=>{
+      reject(error);
+      for(const entry of staged){entry.completion?.();entries.delete(entry.id);void entry.opened.catch(()=>{});}
+      report(error);
+    });});
+  };
   return {
     receiver,
+    errorReceiver,
     start() { if (started || disposed) return; started = true; removers.push(options.runtime.onReady(wake), options.runtime.onEvent(wake)); wake(); },
     async respond(input: McpInteractionRespondParams, signal?: AbortSignal): Promise<McpInteractionView> {
       const read = () => options.kernel.agentRuntimeRequest<McpInteractionView, 'runtime.mcp.interaction.read'>('runtime.mcp.interaction.read', { operationId: input.operationId, interactionId: input.interactionId });
       const run = async () => {
         signal?.throwIfAborted();
         const view = await read();
-        const response = validateElicitationResponse(view.request, input.response);
+        const isError = view.record.binding.source.kind === 'rpc_error';
+        const request = isError
+          ? decodeUrlElicitationError(view.request).find(p => p.elicitationId === (view.record.binding.source as {elicitationId:string}).elicitationId)
+          : view.request;
+        const response = validateElicitationResponse(request, input.response);
         const entry = entries.get(input.interactionId);
+        if (isError) {
+          if (view.response !== null) {
+            if (!isDeepStrictEqual(view.response,response))throw failure('mcp_interaction_conflict');
+            return view;
+          }
+          signal?.throwIfAborted();
+          // Local review of already received evidence requires no client, active Run or send.
+          const record=await options.kernel.agentRuntimeRequest<McpInteractionRecord,'runtime.mcp.interaction.respond'>(
+            'runtime.mcp.interaction.respond',{...input,response});
+          if(entry){adopt(entry,record);retire(entry);}
+          return read();
+        }
         if (view.response !== null) {
           if (!isDeepStrictEqual(view.response, response)) throw failure('mcp_interaction_conflict');
           // A reply may have been lost after this receiver's choice committed, before it

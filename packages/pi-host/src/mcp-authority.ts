@@ -17,9 +17,9 @@ import { ConfigWatchManager } from './config-watch-manager.js';
 import { McpSessionExpiredError, McpError, type McpClient, type McpRequestOptions, type McpRequestHandlerContext } from '@earendil-works/pi-mcp';
 import { serviceKind, validateServiceResult, validatePromptArguments, type McpAuthorityService, type McpAuthorityPrompt, type McpPromptDeclaration, type McpServiceKind, type McpServiceRequest, type McpServiceResult } from './mcp-native-protocol.js';
 import { taskCapabilities, taskSupport, requiresMcpTask, validateTaskResponse, validateTaskResult, object as taskObject, type McpTaskLease, type McpEndpoint, type McpTaskSupport, type McpTaskResponse } from './mcp-tasks.js';
-import { decodeElicitationRequest } from './mcp-interactions.js';
-export { decodeElicitationRequest, validateElicitationResponse } from './mcp-interactions.js';
-import type { ExecutorOwner, McpInteractionBinding, McpElicitationResponse } from '@varin/protocol';
+import { decodeElicitationRequest, decodeUrlElicitationError } from './mcp-interactions.js';
+export { decodeElicitationRequest, validateElicitationResponse, decodeUrlElicitationError } from './mcp-interactions.js';
+import type { ExecutorOwner, McpInteractionBinding, McpElicitationResponse, McpElicitationPresentation } from '@varin/protocol';
 import type { McpResourceChange, McpResourceObserver, McpResourceRelease } from './mcp-resources.js';
 export type { McpResourceChange, McpResourceObserver, McpResourceCleanup, McpResourceRelease } from './mcp-resources.js';
 export { requiresMcpTask } from './mcp-tasks.js';
@@ -48,8 +48,23 @@ export interface McpInteractionRequest {
   onComplete(callback: () => void, unavailable?: () => void): () => void;
 }
 export type McpInteractionReceiver = (request: McpInteractionRequest) => Promise<McpElicitationResponse>;
+export interface McpErrorInteractionItem {
+  binding: McpInteractionBinding;
+  presentation: Extract<McpElicitationPresentation, {mode: 'url'}>;
+  signal: AbortSignal;
+  assertLive(): Promise<void>;
+  onComplete(callback: () => void, unavailable?: () => void): () => void;
+}
+export interface McpErrorInteraction {
+  /** Complete original error body, shared by all of this response's URLs. */
+  request: Record<string, unknown>;
+  items: McpErrorInteractionItem[];
+}
+export type McpErrorInteractionReceiver = (error: McpErrorInteraction) => void;
+
 export interface McpAuthorityOptions {
   interactions?: McpInteractionReceiver;
+  interactionErrors?: McpErrorInteractionReceiver;
   providerToken?: (scope: McpAuthorityScope, provider: string) => Promise<string | undefined>;
   credentialScope?: (scope: McpAuthorityScope, provider: string) => Promise<{
     reference: string; generation: number; authority?: string; account?: string;
@@ -139,11 +154,11 @@ export interface McpAuthorityLease {
 /** A pre-dispatch rejection is safe to record as no effect; an entered transport is uncertain. */
 export class McpAuthorityError extends Error {
   constructor(readonly code: string, readonly dispatched = false,
-    readonly settlement: 'unknown' | 'session_expired' | 'rpc_response' = 'unknown', readonly protocolError?: Record<string, unknown>) { super(code); this.name = 'McpAuthorityError'; }
+    readonly settlement: 'unknown' | 'session_expired' | 'rpc_response' = 'unknown', readonly protocolError?: Record<string, unknown>, readonly interactionProblem?: string) { super(code); this.name = 'McpAuthorityError'; }
 }
 export class McpTaskRequestError extends McpAuthorityError {
   constructor(code:string, dispatched:boolean, readonly kind:'protocol'|'transport'|'unsupported'|'owner',
-    readonly rpcCode?:number, override readonly protocolError?:Record<string,unknown>, settlement:'unknown'|'session_expired'='unknown') { super(code,dispatched,settlement); }
+    readonly rpcCode?:number, override readonly protocolError?:Record<string,unknown>, settlement:'unknown'|'session_expired'|'rpc_response'='unknown', interactionProblem?:string) { super(code,dispatched,settlement,protocolError,interactionProblem); }
 }
 type ConfigPatch = { enabled?: boolean; exposure?: 'direct' | 'codemode' | 'deferred' | 'hidden' };
 interface SourceWatch { keys: Set<string>; ready: Promise<string> }
@@ -164,13 +179,13 @@ interface ScopeRecord {
   shutdown: AbortController;
 }
 interface ResourceHolder { active:boolean; scope:ScopeRecord; change:(change:McpResourceChange)=>void }
-interface ResourceGroup { client:McpClient; uri:string; holders:Set<ResourceHolder>; acknowledgement:Promise<Record<string,unknown>>; subscribed:boolean; receivedResponse:boolean; closing?:Promise<McpResourceRelease> }
+interface ResourceGroup { client:McpClient; uri:string; holders:Set<ResourceHolder>; acknowledgement:Promise<Record<string,unknown>>; subscribed:boolean; receivedResponse:boolean; protocolError?:Record<string,unknown>; interactionProblem?:string; closing?:Promise<McpResourceRelease> }
 interface InteractionHolder { scope: ScopeRecord; origin: McpInteractionOrigin; controller: AbortController }
 interface ConnectionRecord {
   clientId?: string;
   rpcInteractions: Map<string | number, InteractionHolder>;
   taskInteractions: Map<string, Set<InteractionHolder>>;
-  elicitationComplete: Map<string, Set<() => void>>;
+  elicitationComplete: Map<string, {kind:'active';complete():void;invalidate():void} | {kind:'ambiguous'}>;
   completionDisposers: Set<() => void>;
   handle: string;
   generation: number;
@@ -671,7 +686,7 @@ export class McpAuthority {
     try { await this.#nativeClient(record); } catch { fail('mcp-connection-unavailable'); }
     this.#assertConnection(scope, record, tool, schemaVersion);
     if (signal.aborted) fail('mcp-call-cancelled');
-    let dispatched = false, receivedResponse = false;
+    let dispatched = false, receivedResponse = false, protocolError: Record<string, unknown> | undefined, interactionProblem: string | undefined;
     try { return await record.connection.requestOnce(async client => {
       this.#observeNativeClient(record, client);
       await this.#assertCredential(record);
@@ -682,13 +697,13 @@ export class McpAuthority {
       dispatched = true;
       return client.callTool(tool, args, {
         signal: AbortSignal.any([signal, record.shutdown.signal, scope.shutdown.signal]), timeoutMs: record.connection.timeoutMs,
-        ...this.#interactionRequestOptions(scope, record, interaction, received => {receivedResponse ||= received;}),
+        ...this.#interactionRequestOptions(scope, record, 'tools/call', interaction, (received,error,problem) => {receivedResponse ||= received;protocolError ??= error;interactionProblem ??= problem;}),
       });
     }); }
     catch (error) {
       if (!dispatched && error instanceof McpAuthorityError) throw error;
       if (error instanceof McpSessionExpiredError) throw new McpAuthorityError('mcp-session-expired', dispatched, 'session_expired');
-      throw new McpAuthorityError(signal.aborted || record.shutdown.signal.aborted || scope.shutdown.signal.aborted ? 'mcp-call-interrupted' : 'mcp-call-failed', dispatched, receivedResponse ? 'rpc_response' : 'unknown', error instanceof McpError ? {code:error.code,message:error.message,...(error.data === undefined ? {} : {data:error.data})} : undefined);
+      throw new McpAuthorityError(signal.aborted || record.shutdown.signal.aborted || scope.shutdown.signal.aborted ? 'mcp-call-interrupted' : 'mcp-call-failed', dispatched, receivedResponse ? 'rpc_response' : 'unknown', protocolError ?? (error instanceof McpError ? {code:error.code,message:error.message,...(error.data === undefined ? {} : {data:error.data})} : undefined),interactionProblem);
     }
     } finally { scope.inflight--; this.#drainScope(scope); }
   }
@@ -728,7 +743,7 @@ export class McpAuthority {
         }
       })().catch(()=>{if(record.nativeClient!==client)return;for(const {holder} of targets)if(holder.active)holder.change({kind:'unavailable',problem:'mcp-resource-owner-unavailable'});});});
     }));
-    record.nativeDisposers.push(client.onClose(()=>{if(record.nativeClient!==client)return;for(const dispose of record.completionDisposers)dispose();for(const group of record.resourceGroups.values())for(const holder of group.holders)if(holder.active)holder.change({kind:'gap'});}));
+    record.nativeDisposers.push(client.onClose(()=>{if(record.nativeClient!==client)return;for(const dispose of record.completionDisposers)dispose();record.elicitationComplete.clear();for(const group of record.resourceGroups.values())for(const holder of group.holders)if(holder.active)holder.change({kind:'gap'});}));
     client.onNotification('notifications/tasks/status', params => {
       if (record.nativeClient !== client || !taskObject(params) || typeof params.taskId !== 'string') return;
       for (const listener of record.taskListeners) listener(params.taskId);
@@ -743,10 +758,10 @@ export class McpAuthority {
     });
     record.nativeDisposers.push(client.onNotification('notifications/elicitation/complete', params => {
       if (record.nativeClient !== client || record.revoked || !taskObject(params) || typeof params.elicitationId !== 'string') return;
-      const listeners = record.elicitationComplete.get(params.elicitationId);
-      if (!listeners) return;
+      const watch = record.elicitationComplete.get(params.elicitationId);
+      if (!watch || watch.kind === 'ambiguous') return;
       record.elicitationComplete.delete(params.elicitationId);
-      for (const listener of listeners) listener();
+      watch.complete();
     }));
     client.onNotification('notifications/prompts/list_changed', () => {
       if (record.nativeClient !== client) return;
@@ -754,13 +769,26 @@ export class McpAuthority {
       record.promptRevision++;
     });
   }
-  #interactionRequestOptions(scope: ScopeRecord, record: ConnectionRecord, origin?: McpInteractionOrigin, settled?: (receivedResponse: boolean) => void): McpRequestOptions {
-    if (!origin || !this.#options.interactions) return {onRequestSettled: (_id, receivedResponse) => settled?.(receivedResponse)};
+  #interactionRequestOptions(scope: ScopeRecord, record: ConnectionRecord, method: string,
+    origin?: McpInteractionOrigin, settled?: (receivedResponse: boolean, error?: Record<string, unknown>, problem?: string) => void,
+    taskId?: string): McpRequestOptions {
     const client = record.nativeClient;
     return {
       onRequestId: id => {
+        if (!origin || !this.#options.interactions) return;
         if (client !== record.nativeClient || record.rpcInteractions.has(id)) throw new McpAuthorityError('mcp_interaction_owner_unavailable');
         record.rpcInteractions.set(id, { scope, origin, controller: new AbortController() });
+      },
+      onResponseError: (id, raw) => {
+        settled?.(true, raw);
+        if (!origin || raw.code !== -32042) return;
+        let problem: string | undefined;
+        try {
+          problem = this.#options.interactionErrors && client === record.nativeClient && client
+            ? this.#receiveErrorInteraction(scope, record, client, origin, id, method, raw, taskId)
+            : 'mcp_interaction_owner_unavailable';
+        } catch { problem = 'mcp_interaction_owner_unavailable'; }
+        if (problem) settled?.(true, raw, problem);
       },
       onRequestSettled: (id, receivedResponse) => {
         settled?.(receivedResponse);
@@ -771,13 +799,78 @@ export class McpAuthority {
       },
     };
   }
+  #receiveErrorInteraction(scope: ScopeRecord, record: ConnectionRecord, client: McpClient,
+    origin: McpInteractionOrigin, outgoingRequestId: string | number, method: string,
+    raw: Record<string, unknown>, taskId?: string): string | undefined {
+    if (client.protocolVersion !== '2025-11-25' || !client.options.capabilities?.elicitation?.url) return 'mcp_interaction_owner_unavailable';
+    let presentations: ReturnType<typeof decodeUrlElicitationError>;
+    try { presentations = decodeUrlElicitationError(raw); } catch { return 'mcp_url_elicitation_invalid'; }
+    // No guessing or cross-Thread broadcast when a peer reuses an active identity.
+    const conflicts=presentations.filter(p=>record.elicitationComplete.has(p.elicitationId));
+    if(conflicts.length){
+      // A future ID-only notification could refer to either RPC. Withdraw the old
+      // association as well; retaining it would guess that the first request completed.
+      for(const p of conflicts)this.#conflictElicitation(record,p.elicitationId);
+      return 'mcp_elicitation_identity_conflict';
+    }
+    const signal = AbortSignal.any([record.shutdown.signal, scope.shutdown.signal]);
+    const endpoint = this.#endpoint(scope, record), connectionId = record.clientId!;
+    const assertLive = async () => {
+      signal.throwIfAborted(); await this.#assertCredential(record); this.#assertConnection(scope, record);
+      if (record.nativeClient !== client || record.clientId !== connectionId || client.connectionState !== 'connected'
+        || stable(this.#endpoint(scope, record)) !== stable(endpoint)) throw new McpAuthorityError('mcp_interaction_owner_unavailable');
+      signal.throwIfAborted();
+    };
+    const watches = presentations.map(p => this.#completionWatch(scope, record, client, p.elicitationId));
+    try {
+      this.#options.interactionErrors!({request: raw, items: presentations.map((presentation, index) => ({
+        binding: {...origin, endpoint, connectionId, source: {kind:'rpc_error', outgoingRequestId, method,
+          elicitationId: presentation.elicitationId, ...(taskId === undefined ? {} : {taskId})}},
+        presentation, signal, assertLive, onComplete: (callback, unavailable) => watches[index]!.observe(() => {
+          callback();
+          if (taskId !== undefined) for (const listener of record.taskListeners) listener(taskId);
+        }, unavailable),
+      }))});
+    } catch { for (const watch of watches) watch.dispose(); return 'mcp_interaction_owner_unavailable'; }
+    return undefined;
+  }
+  #conflictElicitation(record: ConnectionRecord, id: string): void {
+    const current=record.elicitationComplete.get(id);
+    if(current?.kind==='active')current.invalidate();
+    // Only an actually ambiguous identity is retained for this client incarnation. A later
+    // RPC cannot reclaim it and misinterpret an old ID-only completion as its own.
+    record.elicitationComplete.set(id,{kind:'ambiguous'});
+  }
+  #completionWatch(scope: ScopeRecord, record: ConnectionRecord, client: McpClient, id: string) {
+    if(record.elicitationComplete.has(id)){this.#conflictElicitation(record,id);throw new McpError(-32602,'Elicitation identity is already in use');}
+    scope.retainedHolders++;
+    let released=false, completed=false, lost=false;
+    let callback: (() => void) | undefined, unavailable: (() => void) | undefined;
+    const dispose=()=>{if(released)return;released=true;
+      if(record.elicitationComplete.get(id)===registration)record.elicitationComplete.delete(id);
+      record.completionDisposers.delete(invalidate);record.shutdown.signal.removeEventListener('abort',invalidate);scope.shutdown.signal.removeEventListener('abort',invalidate);scope.retainedHolders--;
+      if(scope.closeRequested&&!scope.retainedHolders)this.closeScope(scope.handle);};
+    const invalidate=()=>{if(released)return;lost=true;dispose();unavailable?.();};
+    const deliver=()=>{void this.#assertCredential(record).then(()=>{
+      this.#assertConnection(scope,record);
+      if(!released&&record.nativeClient===client&&!record.revoked){completed=true;callback?.();}
+    }).catch(invalidate).finally(dispose);};
+    const registration={kind:'active' as const,complete:deliver,invalidate};record.elicitationComplete.set(id,registration);record.completionDisposers.add(invalidate);
+    record.shutdown.signal.addEventListener('abort',invalidate,{once:true});scope.shutdown.signal.addEventListener('abort',invalidate,{once:true});
+    if(record.shutdown.signal.aborted || scope.shutdown.signal.aborted)invalidate();
+    return {dispose, observe:(done:()=>void, invalid?:()=>void)=>{
+      callback=done;unavailable=invalid;
+      if(completed)queueMicrotask(done);else if(lost&&invalid)queueMicrotask(invalid);
+      return dispose;
+    }};
+  }
   async #receiveInteraction(record: ConnectionRecord, client: McpClient, params: unknown, context: McpRequestHandlerContext): Promise<McpElicitationResponse> {
     if (!this.#options.interactions || !client.options.capabilities?.elicitation)
       throw new McpError(-32601, 'Client capability is not supported');
     let decoded; try { decoded = decodeElicitationRequest(params); } catch { throw new McpError(-32602, 'Elicitation request is invalid'); }
     const meta = taskObject(params) && taskObject(params._meta) ? params._meta : undefined;
     const related = meta?.['io.modelcontextprotocol/related-task'];
-    let holder: InteractionHolder | undefined, relation: McpInteractionBinding['relation'];
+    let holder: InteractionHolder | undefined, relation: Extract<McpInteractionBinding['source'], {kind:'server_request'}>['relation'];
     if (related !== undefined) {
       if (!taskObject(related) || typeof related.taskId !== 'string') throw new McpError(-32602, 'Task association is invalid');
       const holders = [...(record.taskInteractions.get(related.taskId) ?? [])].filter(h => !h.controller.signal.aborted);
@@ -791,7 +884,7 @@ export class McpAuthority {
     }
     const selected = holder!;
     const binding: McpInteractionBinding = { ...selected.origin, endpoint: this.#endpoint(selected.scope, record),
-      connectionId: record.clientId!, requestId: context.requestId, relation };
+      connectionId: record.clientId!, source: {kind:'server_request', requestId: context.requestId, relation} };
     const signal = AbortSignal.any([context.signal, selected.controller.signal, record.shutdown.signal, selected.scope.shutdown.signal]);
     const assertLive = async () => {
       signal.throwIfAborted();
@@ -809,22 +902,7 @@ export class McpAuthority {
       onComplete: (callback, unavailable) => {
         if (decoded.presentation.mode !== 'url') return () => {};
         const id = decoded.presentation.elicitationId;
-        if(record.elicitationComplete.has(id))throw new McpError(-32602,'Elicitation identity is already in use');
-        const set = new Set<() => void>(); record.elicitationComplete.set(id,set);
-        selected.scope.retainedHolders++;
-        let released=false;
-        const dispose=()=>{if(released)return;released=true;set.clear();
-          if(record.elicitationComplete.get(id)===set)record.elicitationComplete.delete(id);
-          record.completionDisposers.delete(invalidate);record.shutdown.signal.removeEventListener('abort',invalidate);selected.scope.shutdown.signal.removeEventListener('abort',invalidate);selected.scope.retainedHolders--;
-          if(selected.scope.closeRequested&&!selected.scope.retainedHolders)this.closeScope(selected.scope.handle);};
-        const invalidate=()=>{if(released)return;dispose();unavailable?.();};
-        const deliver=()=>{void this.#assertCredential(record).then(()=>{
-          this.#assertConnection(selected.scope,record);
-          if(!released&&record.nativeClient===client&&!record.revoked)callback();
-        }).catch(invalidate).finally(dispose);};
-        set.add(deliver);record.completionDisposers.add(invalidate);
-        record.shutdown.signal.addEventListener('abort',invalidate,{once:true});selected.scope.shutdown.signal.addEventListener('abort',invalidate,{once:true});
-        return dispose;
+        return this.#completionWatch(selected.scope, record, client, id).observe(callback, unavailable);
       },
     });
   }
@@ -845,8 +923,11 @@ export class McpAuthority {
       if (stable(this.#endpoint(scope,record)) !== stable(endpoint)) fail('mcp-task-owner-changed');
     };
     const request = async (method:string, params:Record<string,unknown>, signal:AbortSignal,
-      beforeDispatch?: (client:McpClient)=>void|Promise<void>) => {
-      let dispatched = false;
+      beforeDispatch?: (client:McpClient)=>void|Promise<void>, creationOrigin?: McpInteractionOrigin) => {
+      let dispatched = false, receivedResponse = false, protocolError: Record<string, unknown> | undefined, interactionProblem: string | undefined;
+      const taskId = typeof params.taskId === 'string' ? params.taskId : undefined;
+      const holders = taskId === undefined ? [] : [...(record.taskInteractions.get(taskId) ?? [])].filter(h => !h.controller.signal.aborted);
+      const interaction = creationOrigin ?? (holders.length && holders.every(h => stable(h.origin) === stable(holders[0]!.origin)) ? holders[0]!.origin : undefined);
       scope.inflight++;
       try {
         await assert();
@@ -860,14 +941,15 @@ export class McpAuthority {
           signal.throwIfAborted();
           dispatched = true;
           return await client.request(method,params,{signal:AbortSignal.any([signal,scope.shutdown.signal,record.shutdown.signal]),
-            timeoutMs:method === 'tasks/result' ? 0 : record.connection.timeoutMs});
+            timeoutMs:method === 'tasks/result' ? 0 : record.connection.timeoutMs,
+            ...this.#interactionRequestOptions(scope,record,method,interaction,(received,error,problem)=>{receivedResponse ||= received;protocolError ??= error;interactionProblem ??= problem;},taskId)});
         });
       } catch (error) {
         if (error instanceof McpTaskRequestError) throw error;
         if (error instanceof McpSessionExpiredError) throw new McpTaskRequestError('mcp-session-expired',dispatched,'transport',undefined,undefined,'session_expired');
         if (error instanceof McpAuthorityError && !dispatched) throw error;
         if (error instanceof McpError) throw new McpTaskRequestError('mcp-task-protocol-error',dispatched,'protocol',error.code,
-          {code:error.code,message:error.message,...(error.data === undefined ? {} : {data:error.data})});
+          protocolError ?? {code:error.code,message:error.message,...(error.data === undefined ? {} : {data:error.data})},receivedResponse?'rpc_response':'unknown',interactionProblem);
         throw new McpTaskRequestError('mcp-task-request-unavailable',dispatched,'transport');
       } finally { scope.inflight--; this.#drainScope(scope); }
     };
@@ -884,7 +966,7 @@ export class McpAuthority {
         const holder: InteractionHolder = { scope, origin, controller: new AbortController() };
         let holders = record.taskInteractions.get(taskId); if (!holders) { holders = new Set(); record.taskInteractions.set(taskId, holders); }
         holders.add(holder);
-        const remove = () => { holder.controller.abort('owner_unavailable'); holders!.delete(holder);
+        const remove = (reason?: 'rpc_closed') => { holder.controller.abort(reason ?? 'owner_unavailable'); holders!.delete(holder);
           if (!holders!.size && record.taskInteractions.get(taskId) === holders) record.taskInteractions.delete(taskId); interactionRemovers.delete(remove); };
         interactionRemovers.add(remove); return remove;
       },
@@ -896,7 +978,7 @@ export class McpAuthority {
         if (!validate(args)) fail('mcp-arguments-invalid');
         await options.beforeDispatch?.();
         this.#assertConnection(scope,record,name,options.schemaVersion);
-      }),undefined,true),
+      },options.interaction),undefined,true),
       get: async (taskId,signal) => taskResponse(await request('tasks/get',{taskId},signal),taskId),
       result: async (taskId,signal) => {
         const raw = await request('tasks/result',{taskId},signal);
@@ -933,15 +1015,15 @@ export class McpAuthority {
       if(!group||group.holders.size){release();return cleanup=Promise.resolve({status:'shared'});}
       const selected=group;
       cleanup=(async():Promise<McpResourceRelease>=>{
-        let receivedResponse=false;
+        let receivedResponse=false, protocolError: Record<string, unknown> | undefined, interactionProblem: string | undefined;
         try{
           await selected.acknowledgement;
           // Never reconnect to clean an old client or substitute a later account.
           await this.#assertCredential(record);
           if(record.nativeClient!==selected.client||record.revoked||selected.client.connectionState!=='connected')return {status:'unknown'};
-          const raw=await selected.client.request('resources/unsubscribe',{uri:selected.uri},{signal:cleanupOptions ? AbortSignal.any([record.shutdown.signal,cleanupOptions.signal]) : record.shutdown.signal,timeoutMs:record.connection.timeoutMs,...this.#interactionRequestOptions(scope,record,cleanupOptions?.interaction,received=>{receivedResponse ||= received;})});
+          const raw=await selected.client.request('resources/unsubscribe',{uri:selected.uri},{signal:cleanupOptions ? AbortSignal.any([record.shutdown.signal,cleanupOptions.signal]) : record.shutdown.signal,timeoutMs:record.connection.timeoutMs,...this.#interactionRequestOptions(scope,record,'resources/unsubscribe',cleanupOptions?.interaction,(received,error,problem)=>{receivedResponse ||= received;protocolError ??= error;interactionProblem ??= problem;})});
           return taskObject(raw)?{status:'acknowledged',acknowledgement:raw}:{status:'unknown'};
-        }catch(error){return {status:'unknown',...(receivedResponse&&error instanceof McpError ? {protocolError:{code:error.code,message:error.message,...(error.data===undefined?{}:{data:error.data})}} : {})};}
+        }catch(error){return {status:'unknown',...(receivedResponse&&error instanceof McpError ? {protocolError:protocolError ?? {code:error.code,message:error.message,...(error.data===undefined?{}:{data:error.data})}} : {}),...(interactionProblem?{interactionProblem}:{})};}
         finally{if(record.resourceGroups.get(uri)===selected)record.resourceGroups.delete(uri);release();}
       })();
       selected.closing=cleanup;
@@ -974,7 +1056,7 @@ export class McpAuthority {
         if(!group||group.client!==client){
           const fresh:ResourceGroup={client,uri,holders:new Set(),subscribed:false,receivedResponse:false,acknowledgement:Promise.resolve({})};
           group=fresh;record.resourceGroups.set(uri,fresh);
-          fresh.acknowledgement=Promise.resolve().then(()=>client.request('resources/subscribe',{uri},{signal:record.shutdown.signal,timeoutMs:record.connection.timeoutMs,...this.#interactionRequestOptions(scope,record,options.interaction,received=>{fresh.receivedResponse ||= received;})})).then(raw=>{if(!taskObject(raw))throw new McpAuthorityError('mcp-resource-subscribe-response-invalid',true);fresh.subscribed=true;return raw;});
+          fresh.acknowledgement=Promise.resolve().then(()=>client.request('resources/subscribe',{uri},{signal:record.shutdown.signal,timeoutMs:record.connection.timeoutMs,...this.#interactionRequestOptions(scope,record,'resources/subscribe',options.interaction,(received,error,problem)=>{fresh.receivedResponse ||= received;if(error)fresh.protocolError ??= error;if(problem)fresh.interactionProblem ??= problem;})})).then(raw=>{if(!taskObject(raw))throw new McpAuthorityError('mcp-resource-subscribe-response-invalid',true);fresh.subscribed=true;return raw;});
         }
         holder={active:true,scope,change:options.onChange};group.holders.add(holder);
         record.shutdown.signal.addEventListener('abort',revoked,{once:true});
@@ -989,7 +1071,7 @@ export class McpAuthority {
     }catch(error){
       if(holder)void detach();else release();
       if(error instanceof McpAuthorityError)throw error;
-      throw new McpAuthorityError('mcp-resource-subscribe-unavailable',!!group,error instanceof McpSessionExpiredError ? 'session_expired' : group?.receivedResponse ? 'rpc_response' : 'unknown', error instanceof McpError ? {code:error.code,message:error.message,...(error.data===undefined?{}:{data:error.data})} : undefined);
+      throw new McpAuthorityError('mcp-resource-subscribe-unavailable',!!group,error instanceof McpSessionExpiredError ? 'session_expired' : group?.receivedResponse ? 'rpc_response' : 'unknown', group?.protocolError ?? (error instanceof McpError ? {code:error.code,message:error.message,...(error.data===undefined?{}:{data:error.data})} : undefined),group?.interactionProblem);
     }
   }
 
@@ -1005,7 +1087,7 @@ export class McpAuthority {
   }
   async #requestService(scope: ScopeRecord, record: ConnectionRecord, service: McpAuthorityService,
     request: McpServiceRequest, options: {signal: AbortSignal; beforeDispatch?: () => void | Promise<void>; interaction?: McpInteractionOrigin}, assertRequest: () => void): Promise<McpServiceResult> {
-    let dispatched = false, receivedResponse = false;
+    let dispatched = false, receivedResponse = false, protocolError: Record<string, unknown> | undefined, interactionProblem: string | undefined;
     const signal = AbortSignal.any([options.signal, record.shutdown.signal, scope.shutdown.signal]);
     if (signal.aborted) fail('mcp-call-cancelled');
     scope.inflight++;
@@ -1025,7 +1107,7 @@ export class McpAuthority {
         const promptRevision = record.promptRevision;
         dispatched = true;
         const result = validateServiceResult(request.operation,
-          await client.request(request.operation, params, { signal, timeoutMs: record.connection.timeoutMs, ...this.#interactionRequestOptions(scope, record, options.interaction, received => {receivedResponse ||= received;}) }));
+          await client.request(request.operation, params, { signal, timeoutMs: record.connection.timeoutMs, ...this.#interactionRequestOptions(scope, record, request.operation, options.interaction, (received,error,problem) => {receivedResponse ||= received;protocolError ??= error;interactionProblem ??= problem;}) }));
         if (request.operation === 'prompts/list') {
           const prompts = result.prompts as McpPromptDeclaration[];
           if (record.nativeClient === client && record.promptRevision === promptRevision) {
@@ -1040,7 +1122,7 @@ export class McpAuthority {
       // This original transport brand proves the request has stopped, not absence of effects.
       // Do not infer this settlement from an HTTP status, remote result or error message.
       if (error instanceof McpSessionExpiredError) throw new McpAuthorityError('mcp-session-expired', dispatched, 'session_expired');
-      throw new McpAuthorityError(signal.aborted ? 'mcp-call-interrupted' : 'mcp-call-failed', dispatched, receivedResponse ? 'rpc_response' : 'unknown', error instanceof McpError ? {code:error.code,message:error.message,...(error.data === undefined ? {} : {data:error.data})} : undefined);
+      throw new McpAuthorityError(signal.aborted ? 'mcp-call-interrupted' : 'mcp-call-failed', dispatched, receivedResponse ? 'rpc_response' : 'unknown', protocolError ?? (error instanceof McpError ? {code:error.code,message:error.message,...(error.data === undefined ? {} : {data:error.data})} : undefined),interactionProblem);
     } finally { scope.inflight--; this.#drainScope(scope); }
   }
 

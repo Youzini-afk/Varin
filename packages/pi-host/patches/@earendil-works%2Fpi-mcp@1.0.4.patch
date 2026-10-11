@@ -124,11 +124,12 @@ diff --git a/dist/client.js b/dist/client.js
              transport.onClose(() => this.handleTransportClose()),
          ];
          try {
-@@ -260,6 +268,7 @@
+@@ -260,6 +268,8 @@
              const entry = {
                  resolve,
                  reject,
 +                onRequestSettled: options.onRequestSettled,
++                onResponseError: options.onResponseError,
                  timeoutMs: options.timeoutMs ?? this.options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
                  timer: undefined,
                  signal: options.signal,
@@ -161,7 +162,7 @@ diff --git a/dist/client.js b/dist/client.js
              return;
          }
          if (isJsonRpcNotification(message)) {
-@@ -305,49 +317,67 @@
+@@ -305,49 +317,72 @@
          }
          this.emitError(new McpError(JSON_RPC_ERROR_CODES.invalidRequest, "Received invalid JSON-RPC message"));
      }
@@ -173,6 +174,11 @@ diff --git a/dist/client.js b/dist/client.js
              return;
          }
 -        this.removePending(message.id, entry);
++        // Synchronous observation of an actual matching error, before subsequent messages.
++        // This hook cannot delay or replace the original request's settlement.
++        if ("error" in message && context?.syntheticResponse !== true) {
++            try { entry.onResponseError?.(message.id, message.error); } catch (error) { this.emitError(error); }
++        }
 +        this.removePending(message.id, entry, context?.syntheticResponse !== true);
          if ("error" in message)
              entry.reject(new McpError(message.error.code, message.error.message, message.error.data));
@@ -320,7 +326,7 @@ diff --git a/dist/client.d.ts b/dist/client.d.ts
  export interface McpClientOptions extends Implementation {
      capabilities?: ClientCapabilities;
      protocolVersion?: SupportedProtocolVersion;
-@@ -15,6 +21,10 @@
+@@ -15,6 +21,12 @@
      roots?: readonly Root[] | (() => readonly Root[] | Promise<readonly Root[]>);
  }
  export interface McpRequestOptions {
@@ -328,6 +334,8 @@ diff --git a/dist/client.d.ts b/dist/client.d.ts
 +    onRequestId?: (id: string | number) => void;
 +    /** True only for a received JSON-RPC response matching this pending request. */
 +    onRequestSettled?: (id: string | number, receivedResponse: boolean) => void;
++    /** Actual matching peer error body. Synchronous observation only; never a synthetic EOF. */
++    onResponseError?: (id: string | number, error: Record<string, unknown>) => void;
      signal?: AbortSignal;
      timeoutMs?: number;
      onProgress?: (progress: ProgressNotification) => void;
