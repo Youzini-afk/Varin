@@ -23,6 +23,7 @@ it('a User admission shields only its own original subject while its Catalog res
  let admitted=false;let release:()=>void=()=>{};const gate=new Promise<void>(resolve=>{release=resolve;});
  let receipt:Awaited<ReturnType<ExperimentService['nativeReceipt']>>=null;
  const kernel={agentRuntimeRequest:async(method:string,params:Record<string,unknown>)=>{
+    if (method === "runtime.followup.research") return { works: [], nextCursor: null };
   if(method==='runtime.research.scopes')return [scope];
   if(method==='runtime.host_job.user'){operations.set('user',pending('user'));admitted=true;await gate;return pending('user');}
   if(method==='runtime.host_job.begin')return operations.get('user');
@@ -61,6 +62,7 @@ it.each([false, true])('original subscriptions precede recheck and preserve one 
   let attemptWake: (() => void) | undefined; let eventWake: (() => void) | undefined;
   let observations = 0; let submits = 0;
   const kernel = { agentRuntimeRequest: async (method: string, params: Record<string, unknown>) => {
+    if (method === "runtime.followup.research") return { works: [], nextCursor: null };
     calls.push(method);
     if (method === 'runtime.host_job.pending') { assert.ok(attemptWake && eventWake, 'subscribe before first snapshot'); return job.executorStopped ? [] : [structuredClone(job)]; }
     assert.deepEqual(params.binding, binding);
@@ -87,5 +89,24 @@ it.each([false, true])('original subscriptions precede recheck and preserve one 
     research = createResearchRuntime({ kernel, runtime, experiments, sources: {} as SourceService, resources: {} as ResourceService, onError: error => errors.push(error) });
     research.start(); await research.reconcile();
     assert.equal(calls.filter(method => method === 'runtime.host_job.terminal').length, 1); assert.equal(submits, 0); assert.deepEqual(errors, []);
+  } finally { await research.dispose(); }
+});
+
+it('retains accepted original jobs when their domain is unavailable without resubmission or fabricated stop', async () => {
+  const binding: HostJobPending['binding'] = { operationId: 'original', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'old-owner' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'ws', subjectId: 'original-attempt' };
+  const op: HostJobPending = { binding, runId: 'ended-source', accepted: true, cancelRequested: false, phase: 'running', executorStopped: false, origin: { kind: 'user', key: 'original' } };
+  const writes: string[] = [], errors: Error[] = []; let receiptReads = 0;
+  const kernel = { agentRuntimeRequest: async (method: string) => {
+    if (method === 'runtime.host_job.pending') return [op];
+    if (method === 'runtime.followup.research') return { works: [], nextCursor: null };
+    writes.push(method); throw new Error('no effect or stop may be manufactured');
+  } } as unknown as KernelClient;
+  const experiments = { nativeReceipt: async () => { receiptReads++; return null; }, submit: async () => { writes.push('submit'); }, reconcileUnaccepted: async () => { writes.push('reconcile-unaccepted'); } } as unknown as ExperimentService;
+  const research = createResearchRuntime({ kernel, runtime: {} as AgentRuntimeClient, experiments, sources: {} as SourceService, resources: {} as ResourceService, onError: error => errors.push(error) });
+  try {
+    await research.reconcile(); await research.reconcile();
+    assert.equal(receiptReads, 2); assert.deepEqual(writes, []); assert.equal(errors.length, 2);
+    assert.ok(errors.every(error => /Accepted original experiment subject is unavailable/.test(error.message)));
+    assert.equal(op.executorStopped, false); assert.equal(op.accepted, true);
   } finally { await research.dispose(); }
 });

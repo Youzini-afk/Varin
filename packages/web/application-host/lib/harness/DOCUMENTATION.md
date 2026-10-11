@@ -271,6 +271,13 @@ uses Catalog Wait, rather than retaining an `experiments.wait()` Promise. Native
 a real User command with its stable key, never a fake model call or Pi session. The authenticated
 Thread research API and shared facts view read the same attempt, logs, artifacts and permissions.
 
+Original artifact records expose their durable `recordRevision`; the attempt stores a
+`collectionCompletion` identity in the actual final collection CAS. Unrelated attempt updates do not
+create new completion facts. Never-spawned `not_started` requires original capture, preparation and
+admission to have truly drained. Artifact persistence failure cannot be swallowed into successful empty
+collection. A later explicit collect retries collection, not execution. Indexed keyset artifact reads
+remain in original Storage records and recheck the actual reader; no follow-up manifest is copied.
+
 `kernel/research-source.ts` binds the original live, materialized or exact fixed-revision source.
 Fixed input owns its original persistent pin until capture publishes or drains; physical capture uses
 the actual registered root. Source/transfer grants retain true Run attribution and their independent
@@ -1102,6 +1109,21 @@ Cancel releases the original receipt after actual readers drain. It does not rec
 offline writes. The authenticated `POST /api/threads/followup/occurrences` route checks the selected
 Thread/branch using short metadata and pages original occurrences without loading the instruction.
 History/latest/UI state never becomes another execution or cancellation owner.
+
+Research `artifact` and `collection` leaves use the same original definitions and occurrences.
+`research-artifact-followups.ts` is a transient consumer of Catalog work and ExperimentService
+metadata, still discoverable after the Job has left pending execution reconciliation. Subscriptions
+precede the initial recheck and preserve hints arriving during a read. Its independent metadata flight
+cannot hold the original Job cancellation/receipt flight; disposal drains both without claiming that
+the original collector or executor stopped. Pause blocks new observation reads, and late results remain
+fenced by the definition and owner epoch. The actual family reader is used, never the maintenance
+creator's privilege. Target workspace and the observer's execution workspace remain distinct.
+
+Per-artifact revisions and original collection completion identity are deduplicated by Catalog's
+source facts. Coherent before/after collection metadata prevents an old final marker from certifying
+new partial results as missing. Full accepted metadata lives in ContentStore; artifact bytes stay with
+their original owner. The authenticated `POST /api/threads/followup/occurrence` route checks the selected
+Thread/branch before expanding an exact old occurrence, independently of the latest projection.
 
 The following `followups.ts` service describes the still-supported Pi runtime path.
 

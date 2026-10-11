@@ -49,6 +49,7 @@ pub struct HostJobPending {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HostJobSource {
+    pub observation_kinds: Vec<String>,
     pub binding: HostJobBinding,
     pub source_run_id: String,
     pub thread_id: String,
@@ -122,7 +123,7 @@ fn descendants(db: &Connection, owner: &str) -> Result<BTreeSet<String>> {
     Ok(rows.collect::<std::result::Result<BTreeSet<_>, _>>()?)
 }
 
-fn scopes(
+pub(super) fn scopes(
     db: &Connection,
     thread: &str,
     branch: &str,
@@ -543,6 +544,13 @@ impl Catalog {
     }
 }
 
+pub(super) fn observation_kinds(binding: &HostJobBinding) -> Vec<String> {
+    let mut kinds = vec!["job_stopped".into()];
+    if binding.domain == "research.experiment" && binding.domain_version == 1 {
+        kinds.extend(["artifact".into(), "collection".into()]);
+    }
+    kinds
+}
 pub(super) fn require_observation(
     db: &Connection,
     run: &Run,
@@ -638,6 +646,7 @@ impl Catalog {
                 let source: Run = serde_json::from_str(&source)?;
                 let pending = HostJobPending::from_operation(op)?;
                 out.push(HostJobSource {
+                    observation_kinds: observation_kinds(&pending.binding),
                     binding: pending.binding,
                     source_run_id: pending.run_id,
                     thread_id: source.thread_id,

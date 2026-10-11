@@ -3,7 +3,7 @@ import type { FamilyList, FamilyRuns, FamilyRead, FamilyItem, FamilyRunsParams, 
 import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, DelegatedExecution, ChildWait, TreeCancellationReceipt, Followup, FollowupView, FollowupRegisterParams, LiveRoot, ContextPersonalization, ContextResources, ResourceActivation, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
 
 import type { RunModelSelection, RunModelSelections } from '@varin/protocol';
-import type { HostJobSource, FollowupOccurrencesResult, FollowupPendingRegistration, FollowupRegistrationCancelResult, FollowupControlAction } from '@varin/protocol';
+import type { HostJobSource, FollowupOccurrenceView, FollowupOccurrencesResult, FollowupPendingRegistration, FollowupRegistrationCancelResult, FollowupControlAction } from '@varin/protocol';
 import type { Goal, GoalBudget, GoalControlAction, GoalControlReceipt } from '@varin/protocol';
 import type { PolicySelection, PolicySelections } from '@varin/protocol';
 import type { ExtensionToolBinding, LaunchTool, McpBinding } from '@varin/protocol';
@@ -124,6 +124,8 @@ export interface ThreadFollowupsAPI {
   get(identity: ThreadIdentity, followupId: string, signal?: AbortSignal): Promise<FollowupView>;
   /** Original occurrence rows, in accepted-cursor order. Reading never activates or cancels work. */
   occurrences(identity: ThreadIdentity, followupId: string, after?: number, signal?: AbortSignal): Promise<FollowupOccurrencesResult>;
+  /** Read the specified occurrence's immutable accepted metadata, without switching to the latest occurrence. */
+  occurrence(identity: ThreadIdentity, followupId: string, occurrenceId: string, signal?: AbortSignal): Promise<FollowupOccurrenceView>;
   /** Revision-checked definition control; delivered occurrences keep their original delivery facts. */
   control(input: ThreadIdentity & { followupId: string; expectedRevision: number; action: FollowupControlAction }): Promise<Followup>;
 }

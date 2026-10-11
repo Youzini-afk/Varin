@@ -17,6 +17,7 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "operation.get"
         | "storage.record.get"
         | "storage.record.list"
+        | "storage.experiment.artifacts"
         | "working.result.get"
         | "working.result.list"
         | "working.draft.get"
@@ -69,8 +70,7 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "working.verification.release"
         | "working.review.put"
         | "working.review.release" => "storage.write",
-        "storage.record.workspaces"
-        | "branch.objects" => "storage.maintenance",
+        "storage.record.workspaces" | "branch.objects" => "storage.maintenance",
         "storage.gc" => "storage.gc",
         "storage.object.rebindOwner"
         | "recovery.operation.conflicts"
@@ -117,5 +117,8 @@ pub(crate) fn path_allowed_scopes(scopes: &[String], path: &str) -> bool {
 /// Exact branch/pin path metadata may expose the ancestors needed to traverse an admitted
 /// subtree. This never grants ancestor bytes, tree enumeration, or mutation authority.
 pub(crate) fn path_metadata_allowed_scopes(scopes: &[String], path: &str) -> bool {
-    path_allowed_scopes(scopes,path) || scopes.iter().any(|scope| !scope.is_empty() && (path.is_empty() || scope.starts_with(&format!("{path}/"))))
+    path_allowed_scopes(scopes, path)
+        || scopes.iter().any(|scope| {
+            !scope.is_empty() && (path.is_empty() || scope.starts_with(&format!("{path}/")))
+        })
 }

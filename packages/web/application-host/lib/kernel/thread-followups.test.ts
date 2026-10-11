@@ -5,7 +5,7 @@ import { createThreadsHttpAPI } from '@varin/application-client';
 import type { ThreadIdentity } from '@varin/application-client';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { KernelClientError, type KernelClient } from './kernel-client.js';
-import type { HostJobSource, FollowupPendingRegistration, Followup, FollowupOccurrencesResult, Run } from './protocol.generated.js';
+import type { HostJobSource, FollowupPendingRegistration, Followup, FollowupOccurrenceView, FollowupOccurrencesResult, Run } from './protocol.generated.js';
 import { ThreadAdapter } from './thread-adapter.js';
 import { registerThreadRoutes } from './thread-routes.js';
 
@@ -25,6 +25,7 @@ const definition: Followup = { repeat: 'once', pending_occurrences: 0, id: 'foll
  * Catalog durability, process-stop proof and atomic occurrence consumption are native suite obligations. */
 function fixture() {
   const facts = { reply: structuredClone(definition), list: [structuredClone(definition)], conflict: false,
+    occurrenceViews: new Map<string, FollowupOccurrenceView>(), occurrenceDetailError: false,
     occurrencePages: new Map<number | undefined, FollowupOccurrencesResult>(), occurrenceError: false,
     source: structuredClone(run), jobs: [] as HostJobSource[], registerError: false, pendingError: false, pending: [] as FollowupPendingRegistration[],
     liveInvalid: false, launch: { selection: { source: { mode: 'materialized', workspace_id: 'workspace:original',
@@ -47,6 +48,12 @@ function fixture() {
       }
       case 'runtime.host_job.sources': return facts.jobs;
       case 'runtime.followup.list': return facts.list;
+      case 'runtime.followup.occurrence': {
+        if (facts.occurrenceDetailError) throw new KernelClientError({ code: 'storage-error', message: 'original accepted metadata unavailable' });
+        const view = facts.occurrenceViews.get(String(params.occurrenceId));
+        if (!view) throw new KernelClientError({ code: 'operation-error', message: 'occurrence belongs to another follow-up' });
+        return view;
+      }
       case 'runtime.followup.occurrences': {
         if (facts.occurrenceError) throw new KernelClientError({ code: 'storage-error', message: 'original occurrence rows cannot be read' });
         return facts.occurrencePages.get(params.after as number | undefined) ?? { occurrences: [], nextCursor: null };
@@ -162,7 +169,7 @@ it('list and snapshot expose only the selected branch and controls reject anothe
 it('management routes enforce authentication, exact fields and revision conflict without exposing private errors', async () => {
   const f = fixture();
   const register = { ...identity, key: 'register', runId: run.id, trigger, instruction };
-  for (const method of ['register', 'list', 'get', 'occurrences', 'control', 'registrations/pending', 'registration/cancel']) {
+  for (const method of ['register', 'list', 'get', 'occurrence', 'occurrences', 'control', 'registrations/pending', 'registration/cancel']) {
     expect((await f.request(`/api/threads/followup/${method}`, identity, false)).status).toBe(401);
   }
   expect(f.requests).not.toHaveBeenCalled();
@@ -268,7 +275,7 @@ it('discovers and explicitly cancels an original unconfirmed file registration w
 
 it('accepted-job discovery and explicit job conditions use the observer work identity through the original public route', async () => {
   const f = fixture();
-  f.facts.jobs = [{ binding: { operationId: 'user-job:accepted', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'ws', subjectId: 'attempt:original' }, sourceRunId: 'historical-completed-run', threadId: 'thread:child', branchId: 'branch:child', phase: 'running', executorStopped: false, cancelRequested: false, origin: { kind: 'user', key: 'accepted-key' } }];
+  f.facts.jobs = [{ observationKinds: ['job_stopped', 'artifact', 'collection'], binding: { operationId: 'user-job:accepted', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'ws', subjectId: 'attempt:original' }, sourceRunId: 'historical-completed-run', threadId: 'thread:child', branchId: 'branch:child', phase: 'running', executorStopped: false, cancelRequested: false, origin: { kind: 'user', key: 'accepted-key' } }];
   expect(await f.api.followups.jobSources(identity, run.id)).toEqual(f.facts.jobs);
   expect(f.requests.mock.calls.find(([method]) => method === 'runtime.host_job.sources')?.[1]).toEqual({ runId: run.id });
   for (const trigger of [{ kind: 'job_stopped', operationId: f.facts.jobs[0]!.binding.operationId }, { kind: 'all', sources: [{ kind: 'at', atMs: 0 }, { kind: 'job_stopped', operationId: f.facts.jobs[0]!.binding.operationId }] }] as const) {
@@ -335,4 +342,66 @@ it('pages original occurrence rows by accepted cursor without hydrating instruct
   await expect(f.api.followups.occurrences(identity, definition.id, 137)).rejects.toMatchObject({ code: 'storage-error' });
   f.facts.occurrenceError = false;
   expect((await f.api.followups.occurrences(identity, definition.id, 137)).occurrences).toEqual(rows.slice(128));
+});
+
+it('routes artifact selectors and independent collection conditions without changing the selected continuation Run', async () => {
+  const f = fixture();
+  for (const trigger of [
+    { kind: 'artifact', operationId: 'original-user-job' },
+    { kind: 'artifact', operationId: 'original-user-job', artifactId: 'artifact:exact' },
+    { kind: 'artifact', operationId: 'original-user-job', name: 'metrics.json' },
+    { kind: 'collection', operationId: 'original-user-job' },
+    { kind: 'any', sources: [{ kind: 'artifact', operationId: 'original-user-job' }, { kind: 'collection', operationId: 'original-user-job' }] },
+    { kind: 'all', sources: [{ kind: 'artifact', operationId: 'original-user-job', name: 'metrics.json' }, { kind: 'collection', operationId: 'original-user-job' }] },
+  ]) {
+    const body = { ...identity, key: 'explicit-research', runId: run.id, trigger, repeat: 'each', instruction };
+    expect((await f.request('/api/threads/followup/register', body)).status).toBe(200);
+    expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.followup.register').at(-1)?.[1])
+      .toEqual({ key: body.key, runId: run.id, trigger, repeat: 'each', instruction });
+  }
+  f.requests.mockClear();
+  for (const trigger of [
+    { kind: 'artifact', operationId: '', artifactId: 'a' },
+    { kind: 'artifact', operationId: 'job', artifactId: 'a', name: 'same' },
+    { kind: 'artifact', operationId: 'job', artifactId: null },
+    { kind: 'artifact', operationId: 'job', name: '' },
+    { kind: 'artifact', operationId: 'job', artifact_id: 'private' },
+    { kind: 'artifact', operationId: 'job', workspaceId: 'forged' },
+    { kind: 'collection', operationId: 'job', name: 'not-a-selector' },
+    { kind: 'collection', operationId: 'job', completionRevision: 9 },
+  ]) expect((await f.request('/api/threads/followup/register', { ...identity, key: 'invalid', runId: run.id, trigger, instruction })).status).toBe(400);
+  expect(f.requests).not.toHaveBeenCalled(); expect(f.issueGrant).not.toHaveBeenCalled(); expect(f.models.resolveModel).not.toHaveBeenCalled();
+});
+
+it('reads only the exact original occurrence metadata through the public API and short branch authorization', async () => {
+  const f = fixture();
+  const binding: HostJobSource['binding'] = { operationId: 'job:research', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'ws:original', subjectId: 'attempt:original' };
+  const first: FollowupOccurrenceView = {
+    occurrence: { id: 'occurrence:original', generation: 1, accepted_cursor: 25, trigger_cursor: 100, state: 'completed', hold_reason: null, delivery: null,
+      evidence: { kind: 'all', sources: [
+        { source_index: 0, accepted_cursor: 12, trigger_cursor: 100, evidence: { kind: 'artifact', binding, fact: { kind: 'artifact_available', artifact_id: 'artifact:zero', record_revision: 2 }, gap: false } },
+        { source_index: 1, accepted_cursor: 25, trigger_cursor: 90, evidence: { kind: 'collection', binding, completion_revision: 7, outcome: 'done', counts: { available: 1, failed: 0, expired: 0, pending: 0 }, gap: false } },
+      ] } },
+    facts: [{ source_index: 0, accepted_cursor: 12, content: { artifactId: 'artifact:zero', byteLength: 0 } },
+      { source_index: 1, accepted_cursor: 25, content: { attemptId: binding.subjectId, completionRevision: 7 } }],
+  };
+  f.facts.occurrenceViews.set(first.occurrence.id, first);
+  f.facts.list[0]!.occurrence = { ...first.occurrence, id: 'occurrence:latest', accepted_cursor: 50 };
+  expect(await f.api.followups.occurrence(identity, definition.id, first.occurrence.id)).toEqual(first);
+  expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.followup.occurrence')).toHaveLength(1);
+  expect(f.requests.mock.calls.at(-1)).toEqual(['runtime.followup.occurrence', { followupId: definition.id, occurrenceId: first.occurrence.id }, expect.any(AbortSignal)]);
+  expect(f.requests.mock.calls.some(([method]) => ['runtime.followup.get', 'runtime.followup.occurrences', 'runtime.operation.inspect', 'runtime.input.submit', 'runtime.run.start'].includes(method))).toBe(false);
+  f.requests.mockClear();
+  for (const [selected, id] of [[{ ...identity, branchId: 'branch:other' }, definition.id], [identity, 'foreign-followup']] as const) {
+    await expect(f.api.followups.occurrence(selected, id, first.occurrence.id)).rejects.toMatchObject({ status: 400 });
+  }
+  expect(f.requests.mock.calls.some(([method]) => method === 'runtime.followup.occurrence')).toBe(false);
+  for (const body of [{ occurrenceId: '' }, { occurrenceId: null }, { occurrenceId: first.occurrence.id, after: 25 }, { occurrenceId: first.occurrence.id, sourceRunId: 'forged' }]) {
+    expect((await f.request('/api/threads/followup/occurrence', { ...identity, followupId: definition.id, ...body })).status).toBe(400);
+  }
+  await expect(f.api.followups.occurrence(identity, definition.id, 'occurrence:foreign')).rejects.toMatchObject({ code: 'operation-error' });
+  f.facts.occurrenceDetailError = true;
+  await expect(f.api.followups.occurrence(identity, definition.id, first.occurrence.id)).rejects.toMatchObject({ code: 'storage-error' });
+  f.facts.occurrenceDetailError = false;
+  expect(await f.api.followups.occurrence(identity, definition.id, first.occurrence.id)).toEqual(first);
 });

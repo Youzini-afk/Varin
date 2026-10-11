@@ -1,7 +1,7 @@
 //! Original Host job receipts feed ordinary follow-up admission and real input activation.
 use super::*;
 use varin_runtime::catalog::host_jobs::HostJobBinding;
-fn job(f: &mut Fixture, key: &str, accept: bool) -> HostJobBinding {
+pub(super) fn job(f: &mut Fixture, key: &str, accept: bool) -> HostJobBinding {
     let run = f.db.run(&f.run).unwrap();
     let source =
         f.db.launch_intent(&f.run)

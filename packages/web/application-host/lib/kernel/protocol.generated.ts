@@ -87,12 +87,15 @@ export type KernelMethod =
   | "runtime.model.select"
   | "runtime.model.inspect"
   | "runtime.status"
+  | "runtime.followup.research"
+  | "runtime.followup.research.observe"
   | "runtime.followup.files"
   | "runtime.followup.file.observe"
   | "runtime.followup.file.release"
   | "runtime.followup.registrations.pending"
   | "runtime.followup.registration.cancel"
   | "runtime.followup.register"
+  | "runtime.followup.occurrence"
   | "runtime.followup.occurrences"
   | "runtime.followup.get"
   | "runtime.followup.list"
@@ -160,6 +163,7 @@ export type KernelMethod =
   | "file.materialize"
   | "storage.record.put"
   | "storage.record.get"
+  | "storage.experiment.artifacts"
   | "storage.record.list"
   | "storage.record.workspaces"
   | "storage.record.release"
@@ -302,6 +306,7 @@ export interface HostJobPending {
 }
 
 export interface HostJobSource {
+  observationKinds: ('job_stopped' | 'artifact' | 'collection')[];
   binding: HostJobBinding;
   sourceRunId: string;
   threadId: string;
@@ -581,6 +586,81 @@ export interface MessagePage {
   nextCursor: string | null;
 }
 
+export type ResearchCollectionOutcome = 'done' | 'failed' | 'not_started';
+
+export interface ResearchArtifactCounts {
+  available: number;
+  failed: number;
+  expired: number;
+  pending: number;
+}
+
+export type FollowupArtifactFact = { kind: 'artifact_available' | 'artifact_failed' | 'artifact_expired'; artifact_id: string; record_revision: number } | { kind: 'artifact_missing' | 'artifact_absent'; completion_revision: number; outcome: ResearchCollectionOutcome };
+
+export interface FollowupArtifactEvidence {
+  kind: 'artifact';
+  binding: HostJobBinding;
+  fact: FollowupArtifactFact;
+  gap: boolean;
+}
+
+export interface FollowupCollectionEvidence {
+  kind: 'collection';
+  binding: HostJobBinding;
+  completion_revision: number;
+  outcome: ResearchCollectionOutcome;
+  counts: ResearchArtifactCounts;
+  gap: boolean;
+}
+
+export type FollowupResearchEvidence = FollowupArtifactEvidence | FollowupCollectionEvidence;
+
+export interface FollowupResearchKey {
+  followupId: string;
+  generation: number;
+  sourceIndex: number;
+  definitionRevision: number;
+  ownerEpoch: number;
+}
+
+export interface FollowupResearchWork {
+  key: FollowupResearchKey;
+  binding: HostJobBinding;
+  observer: ResearchScope;
+  source: FollowupSource;
+}
+
+export interface FollowupResearchWorksParams {
+  after?: string;
+}
+
+export interface FollowupResearchWorksResult {
+  works: FollowupResearchWork[];
+  nextCursor: string | null;
+}
+
+export interface FollowupResearchObserveParams {
+  key: FollowupResearchKey;
+  evidence: FollowupResearchEvidence;
+  content: unknown;
+}
+
+export interface FollowupResearchObserveResult {
+  accepted: boolean;
+}
+
+export interface KernelExperimentArtifactsParams {
+  workspaceId: string;
+  attemptId: string;
+  after?: string;
+  pageSize?: number;
+}
+
+export interface KernelExperimentArtifactsResult {
+  records: KernelRecordResult[];
+  nextCursor: string | null;
+}
+
 export type FileCondition = 'exists' | 'changed' | 'ready';
 
 export type FileState = { kind: 'regular-file'; objectHash: string; byteLength: number; mode: number | null } | { kind: 'directory'; mode: number | null } | { kind: 'symlink'; symlinkTarget: string; mode: number | null } | { kind: 'missing' } | { kind: 'unsupported' };
@@ -734,9 +814,9 @@ export type FileObservationOwnerResult = { ok: false; code: string } | { ok: tru
 
 export type FileObservationOwnerHint = {v: 1; kind: 'file-observation-invalidated'; kernelEpoch: string} & ({scope: 'root'; rootId: string; canonicalRoot: string} | {scope: 'receipt'; receiptId: string});
 
-export type FollowupSource = { kind: 'at'; at_ms: number } | { kind: 'process_stopped'; operation_id: string } | { kind: 'job_stopped'; operation_id: string } | { kind: 'file'; path: string; condition: FileCondition };
+export type FollowupSource = { kind: 'at'; at_ms: number } | { kind: 'process_stopped'; operation_id: string } | { kind: 'job_stopped'; operation_id: string } | { kind: 'file'; path: string; condition: FileCondition } | { kind: 'artifact'; operation_id: string; artifact_id?: string; name?: string } | { kind: 'collection'; operation_id: string };
 
-export type FollowupLeafEvidence = { kind: 'at'; at_ms: number; observed_at_ms: number } | { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string } | { kind: 'job_stopped'; binding: HostJobBinding; outcome: Outcome; effect: Effect; receipt_identity: string; receipt_epoch: string } | FollowupFileEvidence;
+export type FollowupLeafEvidence = { kind: 'at'; at_ms: number; observed_at_ms: number } | { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string } | { kind: 'job_stopped'; binding: HostJobBinding; outcome: Outcome; effect: Effect; receipt_identity: string; receipt_epoch: string } | FollowupFileEvidence | FollowupArtifactEvidence | FollowupCollectionEvidence;
 
 export interface FollowupSourceObservation {
   accepted_cursor: number;
@@ -1789,6 +1869,22 @@ export interface RunContextScope {
 
 export type FollowupRepeat = 'once' | 'each';
 
+export interface FollowupOccurrenceGetParams {
+  followupId: string;
+  occurrenceId: string;
+}
+
+export interface FollowupOccurrenceFact {
+  source_index: number;
+  accepted_cursor: number;
+  content: unknown;
+}
+
+export interface FollowupOccurrenceView {
+  occurrence: FollowupOccurrence;
+  facts: FollowupOccurrenceFact[];
+}
+
 export interface FollowupOccurrencesParams {
   followupId: string;
   after?: number;
@@ -1801,7 +1897,7 @@ export interface FollowupOccurrencesResult {
 
 export type FollowupControlAction = 'pause' | 'resume' | 'cancel';
 
-export type FollowupRegistrationSource = { kind: 'at'; atMs: number } | { kind: 'process_stopped'; operationId: string } | { kind: 'job_stopped'; operationId: string } | { kind: 'file'; path: string; condition: FileCondition };
+export type FollowupRegistrationSource = { kind: 'at'; atMs: number } | { kind: 'process_stopped'; operationId: string } | { kind: 'job_stopped'; operationId: string } | { kind: 'file'; path: string; condition: FileCondition } | { kind: 'artifact'; operationId: string; artifactId?: string; name?: string } | { kind: 'collection'; operationId: string };
 
 export type FollowupRegistrationTrigger = FollowupRegistrationSource | { kind: 'any' | 'all'; sources: FollowupRegistrationSource[] };
 
@@ -1850,7 +1946,7 @@ export interface FollowupControlParams {
 
 export interface FollowupWait {
   id: string;
-  kind: 'process_stopped' | 'job_stopped' | 'run_completed' | 'goal_requested' | 'at' | 'any' | 'all' | 'file';
+  kind: 'process_stopped' | 'job_stopped' | 'run_completed' | 'goal_requested' | 'at' | 'any' | 'all' | 'file' | 'artifact' | 'collection';
   after_cursor: number;
   trigger_cursor: number | null;
   state: 'waiting' | 'observed' | 'consumed' | 'cancelled';
@@ -3720,11 +3816,14 @@ export type KernelMethodParams = {
   "runtime.followup.registration.cancel": FollowupRegistrationCancelParams;
   "runtime.followup.register": FollowupRegisterAdmissionParams;
   "runtime.followup.files": FollowupFilesParams;
+  "runtime.followup.research": FollowupResearchWorksParams;
+  "runtime.followup.research.observe": FollowupResearchObserveParams;
   "runtime.followup.file.observe": FollowupFileObserveParams;
   "runtime.followup.file.release": FollowupFileReleaseParams;
   "runtime.followup.list": ThreadParams;
   "runtime.followup.get": FollowupGetParams;
   "runtime.followup.occurrences": FollowupOccurrencesParams;
+  "runtime.followup.occurrence": FollowupOccurrenceGetParams;
   "runtime.followup.control": FollowupControlParams;
   "runtime.branch.fork": BranchForkParams;
   "runtime.plan.view": PlanViewParams;
@@ -3836,6 +3935,7 @@ export type KernelMethodParams = {
   "storage.record.put": KernelRecordPutParams;
   "storage.record.get": KernelRecordGetParams;
   "storage.record.list": KernelRecordListParams;
+  "storage.experiment.artifacts": KernelExperimentArtifactsParams;
   "storage.record.workspaces": KernelRecordWorkspacesParams;
   "storage.record.release": KernelRecordReleaseParams;
   "working.result.prepare": KernelWorkingResultPrepareParams;
@@ -4203,6 +4303,24 @@ export type KernelRequest =
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
       id: string;
+      method: "runtime.followup.research";
+      params: FollowupResearchWorksParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.research.observe";
+      params: FollowupResearchObserveParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
       method: "runtime.followup.file.observe";
       params: FollowupFileObserveParams;
       epoch?: string;
@@ -4241,6 +4359,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.followup.occurrences";
       params: FollowupOccurrencesParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.occurrence";
+      params: FollowupOccurrenceGetParams;
       epoch?: string;
       grantId?: string;
     }
@@ -5240,6 +5367,15 @@ export type KernelRequest =
       id: string;
       method: "storage.record.list";
       params: KernelRecordListParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "storage.experiment.artifacts";
+      params: KernelExperimentArtifactsParams;
       epoch?: string;
       grantId?: string;
     }

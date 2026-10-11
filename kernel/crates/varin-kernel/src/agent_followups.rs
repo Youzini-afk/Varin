@@ -131,6 +131,49 @@ pub(super) fn execute(
                 Ok(json!({"released":released}))
             }
         }
+        "runtime.followup.research" => {
+            let p: FollowupResearchWorksParams = serde_json::from_value(params)?;
+            let (works, next) = runtime
+                .catalog()
+                .lock()
+                .map_err(|_| KernelError::Storage("Catalog owner failed".into()))?
+                .followup_research_works(p.after.as_deref())
+                .map_err(domain)?;
+            Ok(json!({"works":works,"nextCursor":next}))
+        }
+        "runtime.followup.research.observe" => {
+            let p = serde_json::from_value(params)?;
+            let prepare = runtime
+                .catalog()
+                .lock()
+                .map_err(|_| KernelError::Storage("Catalog owner failed".into()))?
+                .prepare_research_observation(p)
+                .map_err(domain)?;
+            let Some(prepare) = prepare else {
+                return Ok(json!({"accepted":false}));
+            };
+            let prepared = prepare.load().map_err(domain)?;
+            if cancel.load(Ordering::Acquire) {
+                return Err(KernelError::Cancelled);
+            }
+            let accepted = runtime
+                .catalog()
+                .lock()
+                .map_err(|_| KernelError::Storage("Catalog owner failed".into()))?
+                .apply_research_observation(prepared)
+                .map_err(domain)?;
+            Ok(json!({"accepted":accepted}))
+        }
+        "runtime.followup.occurrence" => {
+            let p: FollowupOccurrenceGetParams = serde_json::from_value(params)?;
+            let read = runtime
+                .catalog()
+                .lock()
+                .map_err(|_| KernelError::Storage("Catalog owner failed".into()))?
+                .capture_followup_occurrence(&p.followup_id, &p.occurrence_id)
+                .map_err(domain)?;
+            Ok(serde_json::to_value(read.load().map_err(domain)?)?)
+        }
         "runtime.followup.occurrences" => {
             let p: FollowupOccurrencesParams = serde_json::from_value(params)?;
             let after = p.after.map(u64::try_from).transpose().map_err(|_| {

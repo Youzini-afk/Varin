@@ -42,14 +42,14 @@ the current revision before a new explicit action. Ordinary message submission a
 are not Goal creation commands. Goal-owned followups are controlled through their Goal.
 
 `ThreadsAPI.followups` registers one explicit instruction for an absolute `at` instant, accepted
-`process_stopped`/`job_stopped` operation, original-source file condition, or flat `any`/`all` combination. Register retains a stable key and exact source Run/trigger/body for uncertain
+`process_stopped`/`job_stopped` operation, original-source file condition, research `artifact`/`collection`, or flat `any`/`all` combination. Register retains a stable key and exact source Run/trigger/body for uncertain
 retries. `list` exposes short lifecycle metadata, while abortable `get` reads the original instruction.
 Control uses the displayed revision. Triggering, input binding and actual history delivery are distinct:
 a bound but undelivered occurrence can still be paused/cancelled without cancelling its shared Run or
 process. Agent-only optional waiting is not part of this User API. Independently registered followups
 retain their explicit actor even under a Goal; automatic Goal-owned definitions use Goal controls.
 
-`repeat: 'each'` explicitly authorizes the same instruction on each accepted file-change edge; omitted
+`repeat: 'each'` explicitly authorizes the same instruction on each accepted file-change or research metadata edge; omitted
 `repeat` means once. Repeated Any consumes finite leaves once; repeated All pairs FIFO changes from
 every repeatable leaf. The definition retains its observer after delivery. Pause holds accepted work;
 Cancel withdraws future and undelivered occurrences, without changing delivered Runs or results.
@@ -59,13 +59,25 @@ order and returns `nextCursor`; source `trigger_cursor` has a different meaning.
 continuous controls, explicit retry of undelivered work and a refreshable history page. Run navigation
 reuses the original read-only `family` reader with the exact delivered Run, not another execution target.
 
+Abortable `followups.occurrence(identity, followupId, occurrenceId)` reads one exact occurrence and
+the original metadata accepted for its source facts. The GUI loads details on demand, checks their
+occurrence/source cursors and discards late replies after identity or selection changes. Bodies are
+shown as data, never executed markup or another trigger. The short history list does not fetch them.
+These are historical metadata, not a new immutable artifact-byte snapshot; original artifact reads
+remain current-domain operations with their own authority and availability.
+`artifact` accepts an optional `artifactId` or `name`, not both; no selector means any original artifact.
+`collection` explicitly observes the original collection completion, including empty or failed results.
+An explicit Any observes both. Failed collection absence, missing in a completed snapshot, pending
+metadata and a zero-byte available artifact retain different meanings.
+
 `followups.jobSources(identity, runId)` discovers original accepted domain Jobs in the actual task
 family, including independent User, historical and child/sibling work absent from the current history
 page. It returns short binding/origin/lifecycle metadata and accepts AbortSignal. The selected Run must
 belong to the selected Thread/branch; a target Job's `sourceRunId` remains attribution, never the
 follow-up execution source. A Job's executor stop is separate from artifact collection and unknown
 business outcomes. The UI retains the original selected Run/key/trigger when retrying an uncertain
-registration and discards stale Host/selection responses.
+registration and discards stale Host/selection responses. Required `observationKinds` comes from the
+original owner and determines the UI's available source kinds without a second domain support table.
 
 `ThreadsAPI.family` reads the original task family without selecting another execution target.
 The caller `ThreadIdentity` is separate from the target request. `list` discovers actual related

@@ -68,6 +68,7 @@ interface Harness {
 }
 
 const artifactView = (overrides: Partial<ExperimentArtifactView> = {}): ExperimentArtifactView => ({
+  recordRevision: 1,
   artifactId: "art-1",
   attemptId: "attempt-1",
   name: "result.json",

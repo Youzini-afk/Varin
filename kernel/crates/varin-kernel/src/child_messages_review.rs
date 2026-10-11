@@ -353,6 +353,12 @@ fn explicit_followup_uses_both_real_origins_and_separates_registration_from_wait
         "job_stopped",
         "any_job",
         "all_job",
+        "artifact",
+        "collection",
+        "any_artifact",
+        "all_artifact",
+        "each_artifact",
+        "each_collection",
     ]
     .into_iter()
     .flat_map(|kind| [true, false].map(|model| (kind, model)))
@@ -368,15 +374,18 @@ fn explicit_followup_uses_both_real_origins_and_separates_registration_from_wait
             }
             let deadline = varin_runtime::catalog::observations::wall_time_ms().unwrap() + 60_000;
             let mut args = json!({"action":"register","trigger":{"kind":"at","atMs":deadline},"instruction":"Check this delegated task once at the requested time"});
-            let job = trigger_kind
-                .contains("job")
-                .then(|| accepted_family_job(&f, "followup-family"));
+            let job = (trigger_kind.contains("job")
+                || trigger_kind.contains("artifact")
+                || trigger_kind.contains("collection"))
+            .then(|| accepted_family_job(&f, "followup-family"));
             if let Some(job) = &job {
-                let leaf = json!({"kind":"job_stopped","operationId":job.operation_id});
-                args["trigger"] = if trigger_kind == "job_stopped" {
+                let leaf = json!({"kind":if trigger_kind.contains("collection") {"collection"} else if trigger_kind.contains("artifact") {"artifact"} else {"job_stopped"},"operationId":job.operation_id});
+                args["trigger"] = if !trigger_kind.starts_with("any_")
+                    && !trigger_kind.starts_with("all_")
+                {
                     leaf
                 } else {
-                    json!({"kind":if trigger_kind == "any_job" {"any"} else {"all"},"sources":[leaf,{"kind":"at","atMs":deadline}]})
+                    json!({"kind":if trigger_kind.starts_with("any_") {"any"} else {"all"},"sources":[leaf,{"kind":"at","atMs":deadline}]})
                 };
             } else if matches!(trigger_kind, "file" | "repeating_file") {
                 args["trigger"] = json!({"kind":"all","sources":[{"kind":"file","path":"result.txt","condition":"exists"},{"kind":"file","path":"result.txt","condition":"changed"}]});
@@ -386,6 +395,9 @@ fn explicit_followup_uses_both_real_origins_and_separates_registration_from_wait
             if trigger_kind == "repeating_file" {
                 args["repeat"] = json!("each");
                 args["trigger"] = json!({"kind":"file","path":"result.txt","condition":"changed"});
+            }
+            if trigger_kind.starts_with("each_") {
+                args["repeat"] = json!("each");
             }
             if wait {
                 args["wait"] = json!({});
@@ -871,181 +883,194 @@ fn accepted_job_stop_wakes_original_followup_observation_and_active_child_ingres
 #[test]
 fn repeating_family_job_then_time_uses_real_idle_and_active_child_occurrences() {
     use varin_runtime::catalog::{delegated::DelegatedTrigger, followups::*};
-    let mut f = Fixture::with_tools(
-        false,
-        vec![crate::followup_tools::schema()],
-        vec!["follow_up".into()],
-    );
-    enable_fixed_file_reader(&mut f);
-    let job = accepted_family_job(&f, "cold-child-job");
-    execute(
-        &f,
-        false,
-        vec![ToolCall {
-            call_id: "after-job".into(),
-            name: "follow_up".into(),
-            schema_version: crate::followup_tools::schema().version,
-            arguments: json!({"action":"register","repeat":"each","trigger":{"kind":"any","sources":[{"kind":"job_stopped","operationId":job.operation_id},{"kind":"at","atMs":varin_runtime::catalog::observations::MAX_DEADLINE_MS},{"kind":"file","path":"result.txt","condition":"changed"}]},"instruction":"Continue the child's original work after the family experiment stops"}),
-        }],
-        &mut OwnerReplies::default(),
-        false,
-    );
-    let owner = f.catalog();
-    let reports = owner
-        .lock()
-        .unwrap()
-        .capture_child_reports()
-        .unwrap()
-        .load()
-        .unwrap();
-    for report in reports {
-        owner.lock().unwrap().admit_child_report(report).unwrap();
-    }
-    assert!(owner
-        .lock()
-        .unwrap()
-        .run(&f.run.id)
-        .unwrap()
-        .state
-        .terminal());
-    stop_family_job(&f, &job);
-    drop(owner);
-    let f = f.reopen();
-    let owner = f.catalog();
-    reconcile(&owner).unwrap();
-    let mut db = owner.lock().unwrap();
-    let value = db.followups(&f.run.thread_id).unwrap().remove(0);
-    let child = db
-        .delegated_executions(Some(&f.child.operation_id))
-        .unwrap()
-        .into_iter()
-        .find(|v| matches!(v.trigger, DelegatedTrigger::Followup { .. }))
-        .expect("real follow-up child execution");
-    assert_ne!(child.execution_id, f.child.operation_id);
-    assert_eq!(value.source_run_id, f.run.id);
-    assert_eq!(
-        value
-            .occurrence
-            .as_ref()
-            .unwrap()
-            .delivery
-            .as_ref()
-            .unwrap()
-            .execution_id
-            .as_deref(),
-        Some(child.execution_id.as_str())
-    );
-    assert!(child.receipt.is_none());
-    assert_eq!(
-        child.source_basis.as_ref().unwrap().source().workspace_id,
-        f.original.source.as_ref().unwrap().workspace_id
-    );
-    // Prepare through the same original child source/context owner. No original Run is revived.
-    let mut source = child.source_basis.as_ref().unwrap().source().clone();
-    source.branch_id = Some(format!("child-source:{}", child.execution_id));
-    source.revision = Some(0);
-    source.environment_run_id = None;
-    let root = child.source_basis.as_ref().unwrap().root().to_owned();
-    let prepared = db
-        .prepare_child_source(
-            &child.execution_id,
-            varin_runtime::catalog::collaboration::ChildSourcePin {
-                pin_id: format!("child-source-pin:{}", child.execution_id),
-                root: root.clone(),
-                source: source.clone(),
-            },
-            source.clone(),
-            varin_runtime::catalog::collaboration::ChildSourceProvenance::FixedRoot {
-                root,
-                resources: None,
-            },
-        )
-        .unwrap()
-        .load()
-        .unwrap();
-    db.attach_child_source(prepared).unwrap();
-    let task = db.execution_task(&child.execution_id).unwrap();
-    let proposal = varin_runtime::catalog::context::ContextProposal {
-        key: "job-followup-child-context".into(),
-        branch_id: task.child_branch_id.clone(),
-        through_id: None,
-        expected_revision: 0,
-        summary: String::new(),
-        effective_system_prompt: "Independent continuation".into(),
-        instruction_sources: vec![],
-        memory_checkpoint: None,
-    };
-    let basis=serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,"configurationDigest":"job-child","memorySnapshot":{"revision":0,"memories":[]},"sessionId":task.child_thread_id,"projectId":task.project_id,"originalSections":[{"name":"system","content":"Independent continuation"}],"instructionSources":[]})).unwrap();
-    let p = db
-        .capture_child_preparation(&child.execution_id, source, proposal, basis)
-        .unwrap()
-        .load()
-        .unwrap();
-    let admitted = db.admit_child(p).unwrap();
-    let next = admitted.receipt.unwrap().run_id;
-    assert_ne!(next, f.run.id);
-    assert_eq!(db.run(&f.run.id).unwrap().state, RunState::Completed);
-    let history = db.execution_history(&f.run.branch_id).unwrap();
-    assert!(history.iter().any(|item|matches!(&item.content,Content::Text {text} if text.contains("accepted original family experiment"))));
-    // A later accepted edge keeps the same definition and enters the actual new
-    // child Run; it cannot borrow the earlier occurrence's input or execution ID.
-    let epoch=db.epoch();
-    db.commit_execution(
-        &next,
-        epoch,
-        &ExecutionRecord::StateChanged {
-            state: RunState::Runnable,
-            waiting_on: None,
-        },
-    )
-    .unwrap();
-    db.reconcile_followup_facts_at(varin_runtime::catalog::observations::MAX_DEADLINE_MS)
-        .unwrap();
-    let definition_id = value.id.clone();
-    drop(db);
-    reconcile(&owner).unwrap();
-    let mut db = owner.lock().unwrap();
-    let page = db.followup_occurrences(&definition_id, None).unwrap();
-    assert_eq!(page.occurrences.len(), 2);
-    assert_ne!(page.occurrences[0].id, page.occurrences[1].id);
-    assert_eq!(
-        page.occurrences[1]
-            .delivery
-            .as_ref()
-            .unwrap()
-            .run_id
-            .as_deref(),
-        Some(next.as_str())
-    );
-    let p = db
-        .prepare_input_delivery(
-            &next,
-            db.epoch(),
-            db.head(&f.run.branch_id).unwrap().as_deref(),
-        )
-        .unwrap()
-        .load()
-        .unwrap();
-    assert_eq!(db.admit_input_delivery(p).unwrap().unwrap().items.len(), 1);
-    assert_eq!(
-        db.followup(&definition_id).unwrap().wait.state,
-        NextRunWaitState::Waiting
-    );
-    drop(db);
-    reconcile(&owner).unwrap();
-    assert_eq!(
-        owner
+    for event_kind in ["job_stopped", "artifact", "collection"] {
+        let mut f = Fixture::with_tools(
+            false,
+            vec![crate::followup_tools::schema()],
+            vec!["follow_up".into()],
+        );
+        enable_fixed_file_reader(&mut f);
+        let job = accepted_family_job(&f, "cold-child-job");
+        execute(
+            &f,
+            false,
+            vec![ToolCall {
+                call_id: "after-job".into(),
+                name: "follow_up".into(),
+                schema_version: crate::followup_tools::schema().version,
+                arguments: json!({"action":"register","repeat":"each","trigger":{"kind":"any","sources":[{"kind":event_kind,"operationId":job.operation_id},{"kind":"at","atMs":varin_runtime::catalog::observations::MAX_DEADLINE_MS},{"kind":"file","path":"result.txt","condition":"changed"}]},"instruction":"Continue the child's original work after the family experiment stops"}),
+            }],
+            &mut OwnerReplies::default(),
+            false,
+        );
+        let owner = f.catalog();
+        let reports = owner
             .lock()
             .unwrap()
+            .capture_child_reports()
+            .unwrap()
+            .load()
+            .unwrap();
+        for report in reports {
+            owner.lock().unwrap().admit_child_report(report).unwrap();
+        }
+        assert!(owner
+            .lock()
+            .unwrap()
+            .run(&f.run.id)
+            .unwrap()
+            .state
+            .terminal());
+        if event_kind == "job_stopped" {
+            stop_family_job(&f, &job);
+        } else {
+            publish_research_fact(&f, &job, event_kind, 1);
+        }
+        drop(owner);
+        let f = f.reopen();
+        let owner = f.catalog();
+        reconcile(&owner).unwrap();
+        let mut db = owner.lock().unwrap();
+        let value = db.followups(&f.run.thread_id).unwrap().remove(0);
+        let child = db
             .delegated_executions(Some(&f.child.operation_id))
             .unwrap()
             .into_iter()
-            .filter(|v| matches!(v.trigger, DelegatedTrigger::Followup { .. }))
-            .count(),
-        1
-    );
-    drop(owner);
-    f.finish();
+            .find(|v| matches!(v.trigger, DelegatedTrigger::Followup { .. }))
+            .expect("real follow-up child execution");
+        assert_ne!(child.execution_id, f.child.operation_id);
+        assert_eq!(value.source_run_id, f.run.id);
+        assert_eq!(
+            value
+                .occurrence
+                .as_ref()
+                .unwrap()
+                .delivery
+                .as_ref()
+                .unwrap()
+                .execution_id
+                .as_deref(),
+            Some(child.execution_id.as_str())
+        );
+        assert!(child.receipt.is_none());
+        assert_eq!(
+            child.source_basis.as_ref().unwrap().source().workspace_id,
+            f.original.source.as_ref().unwrap().workspace_id
+        );
+        // Prepare through the same original child source/context owner. No original Run is revived.
+        let mut source = child.source_basis.as_ref().unwrap().source().clone();
+        source.branch_id = Some(format!("child-source:{}", child.execution_id));
+        source.revision = Some(0);
+        source.environment_run_id = None;
+        let root = child.source_basis.as_ref().unwrap().root().to_owned();
+        let prepared = db
+            .prepare_child_source(
+                &child.execution_id,
+                varin_runtime::catalog::collaboration::ChildSourcePin {
+                    pin_id: format!("child-source-pin:{}", child.execution_id),
+                    root: root.clone(),
+                    source: source.clone(),
+                },
+                source.clone(),
+                varin_runtime::catalog::collaboration::ChildSourceProvenance::FixedRoot {
+                    root,
+                    resources: None,
+                },
+            )
+            .unwrap()
+            .load()
+            .unwrap();
+        db.attach_child_source(prepared).unwrap();
+        let task = db.execution_task(&child.execution_id).unwrap();
+        let proposal = varin_runtime::catalog::context::ContextProposal {
+            key: "job-followup-child-context".into(),
+            branch_id: task.child_branch_id.clone(),
+            through_id: None,
+            expected_revision: 0,
+            summary: String::new(),
+            effective_system_prompt: "Independent continuation".into(),
+            instruction_sources: vec![],
+            memory_checkpoint: None,
+        };
+        let basis=serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,"configurationDigest":"job-child","memorySnapshot":{"revision":0,"memories":[]},"sessionId":task.child_thread_id,"projectId":task.project_id,"originalSections":[{"name":"system","content":"Independent continuation"}],"instructionSources":[]})).unwrap();
+        let p = db
+            .capture_child_preparation(&child.execution_id, source, proposal, basis)
+            .unwrap()
+            .load()
+            .unwrap();
+        let admitted = db.admit_child(p).unwrap();
+        let next = admitted.receipt.unwrap().run_id;
+        assert_ne!(next, f.run.id);
+        assert_eq!(db.run(&f.run.id).unwrap().state, RunState::Completed);
+        let history = db.execution_history(&f.run.branch_id).unwrap();
+        let original_fact = if event_kind == "job_stopped" {
+            "accepted original family experiment"
+        } else {
+            "result available"
+        };
+        assert!(history.iter().any(
+            |item| matches!(&item.content, Content::Text { text } if text.contains(original_fact))
+        ));
+        // A later accepted edge keeps the same definition and enters the actual new
+        // child Run; it cannot borrow the earlier occurrence's input or execution ID.
+        let epoch = db.epoch();
+        db.commit_execution(
+            &next,
+            epoch,
+            &ExecutionRecord::StateChanged {
+                state: RunState::Runnable,
+                waiting_on: None,
+            },
+        )
+        .unwrap();
+        db.reconcile_followup_facts_at(varin_runtime::catalog::observations::MAX_DEADLINE_MS)
+            .unwrap();
+        let definition_id = value.id.clone();
+        drop(db);
+        reconcile(&owner).unwrap();
+        let mut db = owner.lock().unwrap();
+        let page = db.followup_occurrences(&definition_id, None).unwrap();
+        assert_eq!(page.occurrences.len(), 2);
+        assert_ne!(page.occurrences[0].id, page.occurrences[1].id);
+        assert_eq!(
+            page.occurrences[1]
+                .delivery
+                .as_ref()
+                .unwrap()
+                .run_id
+                .as_deref(),
+            Some(next.as_str())
+        );
+        let p = db
+            .prepare_input_delivery(
+                &next,
+                db.epoch(),
+                db.head(&f.run.branch_id).unwrap().as_deref(),
+            )
+            .unwrap()
+            .load()
+            .unwrap();
+        assert_eq!(db.admit_input_delivery(p).unwrap().unwrap().items.len(), 1);
+        assert_eq!(
+            db.followup(&definition_id).unwrap().wait.state,
+            NextRunWaitState::Waiting
+        );
+        drop(db);
+        reconcile(&owner).unwrap();
+        assert_eq!(
+            owner
+                .lock()
+                .unwrap()
+                .delegated_executions(Some(&f.child.operation_id))
+                .unwrap()
+                .into_iter()
+                .filter(|v| matches!(v.trigger, DelegatedTrigger::Followup { .. }))
+                .count(),
+            1
+        );
+        drop(owner);
+        f.finish();
+    }
 }
 
 #[test]
@@ -1173,5 +1198,125 @@ fn repeating_tool_wait_returns_first_occurrence_even_when_later_edges_precede_wa
         drop(db);
         drop(owner);
         f.finish();
+    }
+}
+
+fn publish_research_fact(
+    f: &Fixture,
+    binding: &varin_runtime::catalog::host_jobs::HostJobBinding,
+    kind: &str,
+    revision: u64,
+) {
+    use varin_runtime::catalog::followups::*;
+    let owner = f.catalog();
+    let db = owner.lock().unwrap();
+    let work = db
+        .followup_research_works(None)
+        .unwrap()
+        .0
+        .into_iter()
+        .find(|w| w.key.followup_id.starts_with("followup:tool:") && w.binding == *binding)
+        .unwrap();
+    assert_eq!(work.observer.thread_id, f.run.thread_id);
+    let evidence = if kind == "artifact" {
+        FollowupLeafEvidence::Artifact {
+            binding: binding.clone(),
+            fact: FollowupArtifactFact::ArtifactAvailable {
+                artifact_id: "result".into(),
+                record_revision: revision,
+            },
+            gap: false,
+        }
+    } else {
+        FollowupLeafEvidence::Collection {
+            binding: binding.clone(),
+            completion_revision: revision,
+            outcome: ResearchCollectionOutcome::Done,
+            counts: ResearchArtifactCounts {
+                available: 1,
+                ..Default::default()
+            },
+            gap: false,
+        }
+    };
+    let p = db
+        .prepare_research_observation(FollowupResearchObservation {
+            key: work.key,
+            evidence,
+            content: json!({"originalArtifactMetadata":"result available","revision":revision}),
+        })
+        .unwrap()
+        .unwrap();
+    drop(db);
+    let p = p.load().unwrap();
+    assert!(owner.lock().unwrap().apply_research_observation(p).unwrap());
+}
+
+#[test]
+fn original_artifact_and_collection_facts_reach_real_child_observations_from_both_tool_origins() {
+    use varin_runtime::catalog::followups::*;
+    for model in [true, false] {
+        for kind in ["artifact", "collection"] {
+            let f = Fixture::with_tools(
+                false,
+                vec![crate::followup_tools::schema()],
+                vec!["follow_up".into()],
+            );
+            let job = accepted_family_job(&f, "research-wait");
+            wait_review::waiting(
+                &f,
+                model,
+                vec![ToolCall {
+                    call_id: "await-artifact".into(),
+                    name: "follow_up".into(),
+                    schema_version: crate::followup_tools::schema().version,
+                    arguments: json!({"action":"register","repeat":"each","trigger":{"kind":kind,"operationId":job.operation_id},"instruction":"Read actual collected metadata","wait":{}}),
+                }],
+            );
+            publish_research_fact(&f, &job, kind, 1);
+            f.assembly.runtime.reconcile_observations().unwrap();
+            // Original native wake first settles Waits, then independently admits continuation input.
+            reconcile(&f.catalog()).unwrap();
+            let owner = f.catalog();
+            let mut db = owner.lock().unwrap();
+            let definition = db.followups(&f.run.thread_id).unwrap().remove(0);
+            assert!(definition.observation.unwrap().delivered);
+            let occurrence = definition.occurrence.unwrap();
+            assert_eq!(
+                occurrence.delivery.as_ref().unwrap().run_id.as_deref(),
+                Some(f.run.id.as_str())
+            );
+            let detail = db
+                .capture_followup_occurrence(&definition.id, &occurrence.id)
+                .unwrap()
+                .load()
+                .unwrap();
+            assert_eq!(
+                detail.facts[0].content["originalArtifactMetadata"],
+                "result available"
+            );
+            let p = db
+                .prepare_input_delivery(
+                    &f.run.id,
+                    db.epoch(),
+                    db.head(&f.run.branch_id).unwrap().as_deref(),
+                )
+                .unwrap()
+                .load()
+                .unwrap();
+            let delivery = db.admit_input_delivery(p).unwrap().unwrap();
+            assert_eq!(delivery.items.len(), 1);
+            assert!(serde_json::to_string(&delivery.items)
+                .unwrap()
+                .contains("originalArtifactMetadata"));
+            assert!(!db.operation(&job.operation_id).unwrap().cancel_requested);
+            assert_eq!(
+                db.followup(&definition.id).unwrap().wait.state,
+                NextRunWaitState::Waiting
+            );
+            drop(db);
+            drop(owner);
+            f.finish();
+        }
     }
 }

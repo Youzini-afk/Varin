@@ -293,7 +293,7 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 38, input domain 6 and collaboration domain 7 store input intents/queue bodies and context-job ownership,
+Catalog version 39, input domain 6 and collaboration domain 7 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
@@ -591,10 +591,11 @@ pending requests. See the ordinary [SDK example](../../../examples/extensions/de
 
 ## Explicit follow-ups and repeated occurrences
 
-The ordinary `follow_up` tool (version 5) supports register/list/get/jobs/occurrences/control from the actual ModelStep or policy
+The ordinary `follow_up` tool (version 6) supports register/list/get/jobs/occurrences/occurrence/control from the actual ModelStep or policy
 invocation. `runtime.followup.register` is the authenticated User path. Each registration retains one
 explicit instruction and an absolute `at` instant, the original accepted `process_spawn` identity,
-an original accepted Host domain `job_stopped` identity, an exact original-source file condition, or a
+an original accepted Host domain `job_stopped` identity, an exact original-source file condition,
+original research `artifact`/`collection` facts, or a
 flat `any`/`all` combination of these sources. Every process/Job/file leaf is authorized even when
 another leaf is already satisfied. Empty combinations and nested conditions are invalid; there is no separate
 workflow executor or arbitrary source-count limit.
@@ -624,7 +625,7 @@ time branch can satisfy `any` without waiting for its other processes to stop; `
 source. Only the occurrence's actual process/Job stop evidence contributes receipt bodies to preparation.
 With `once`, one combination produces one occurrence; a time check followed by a later completion
 check needs two explicit registrations. `each` is continuing authorization for this same instruction.
-Its single source must be file `changed`; repeated `any` requires at least one such source and creates
+Its single source must be file `changed`, research `artifact` or `collection`; repeated `any` requires at least one repeatable source and creates
 one occurrence per accepted leaf edge. Finite time/stop/exists/ready leaves contribute at most once.
 Repeated `all` requires repeatable leaves and pairs their oldest unconsumed evidence: A1,A2,B1 yields
 (A1,B1), retaining A2 for B2, including across restart. It never overwrites unpaired facts with latest.
@@ -642,7 +643,35 @@ counts original undelivered facts through pending-occurrence/input indexes rathe
 actual task family, including independent User work and earlier, child or sibling Runs. The target's
 `sourceRunId` is attribution only: registration continues the actual invoking/selected Run's work.
 An unaccepted domain intent, ordinary Result or kernel process is not an accepted Host Job. Discovery
-confers no submit/cancel authority and never hydrates accepted content or log bodies.
+confers no submit/cancel authority and never hydrates accepted content or log bodies. The owner's
+`observationKinds` also declares which source kinds this exact binding supports; public consumers do
+not maintain another domain/version support list.
+
+`artifact` selects an optional artifact ID or name (mutually exclusive), or any artifact in the accepted
+research attempt. Available, failed and expired original records retain per-entity record revisions;
+pending metadata is not completion, and zero-byte available content remains success. `once` selects
+the first applicable current ordered snapshot, not a reconstructed historical first event. `each`
+accepts later revisions of each entity. Collection completion is a separate explicit leaf, including
+truly empty results. An artifact leaf with no matching record can produce missing only from a coherent
+completed collection; failed collection reports absence of a collected record rather than proving a
+file does not exist. To observe both individual artifacts and the final collection, register an
+explicit Any. A later explicit collection retry can produce new facts without resubmitting the Job.
+
+Original ExperimentService/Storage own collection state, stable completion revisions and indexed
+artifact metadata. Their notifications only wake the observer, which rechecks the actual family
+reader against the exact accepted Job binding. Source work remains discoverable after execution
+stops. Metadata observation has its own transient single flight, so a slow metadata read does not
+hold original Job cancellation or receipt reconciliation. It is not a second scheduler or collector.
+Accepted Host Jobs retain their original external owner and call receipt across Catalog reopen;
+recovery never manufactures a local-executor interruption for such an accepted Job.
+
+Metadata content is staged outside Catalog, referenced separately by the original source event and
+protected by publication and GC, including unpaired All facts and old occurrences. Preparation loads
+the exact accepted metadata rather than the latest domain snapshot. Artifact bytes remain with their
+original owner; this does not create a historical byte snapshot or grant. The original artifact reader
+continues to read the current domain record under current authority. `occurrence`/`runtime.followup.occurrence` expands one exact occurrence and its original
+metadata by source index and accepted cursor on a read worker; short evidence never exposes private
+content references. Public event reads likewise expand the original body outside Catalog.
 
 A Job leaf retains the exact HostJobBinding, original receipt identity/epoch and original
 `operation.executor_stopped` event cursor. Job acceptance, submitting Run completion, observation
@@ -662,7 +691,7 @@ history/instruction refresh is allowed; changed source or ContextScope holds the
 
 Binding is not delivery. Pause/cancel still controls bound-but-queued ingress; only actual history
 delivery consumes a `once` definition. An `each` delivery leaves its original source observer and
-authorization active. Pause stops new file reads and execution while retaining accepted work; Resume
+authorization active. Pause stops new file/metadata reads and execution while retaining accepted work; Resume
 rechecks the original source and explicitly retries failed undelivered occurrences. Cancel withdraws
 future authorization and every undelivered occurrence/input, leaving delivered history and shared Runs
 unchanged. The actual current branch Run's explicit Stop transaction also withdraws existing `each`
@@ -689,7 +718,7 @@ Startup and stale preparation reuse original identities. Failures remain explici
 healthy continuations can advance. Shutdown fences old workers, publication leases protect staged
 bodies, and original instructions/input/history remain normal GC roots. Continuing authorization
 requires explicit `each`; it is never inferred from a delivered one-time instruction. Calendar
-definitions have their separate original asset/occurrence contract; log/metric/artifact adapters
+definitions have their separate original asset/occurrence contract; log/metric adapters
 and broader domain combinations remain separate work.
 
 ### File conditions and source ownership

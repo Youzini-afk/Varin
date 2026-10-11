@@ -6,7 +6,7 @@ import type { ThreadIdentity, ThreadModel, ThreadSubmit, ThreadThinkingLevel, Th
 import { HarnessServiceError } from '../harness/service-error.js';
 import { KernelClientError } from './kernel-client.js';
 import { ThreadAdapter } from './thread-adapter.js';
-import { listThreadFollowupJobs, pendingThreadFollowupRegistrations, cancelThreadFollowupRegistration, controlThreadFollowup, getThreadFollowup, listThreadFollowupOccurrences, listThreadFollowups, registerThreadFollowup } from './thread-followups.js';
+import { listThreadFollowupJobs, pendingThreadFollowupRegistrations, cancelThreadFollowupRegistration, controlThreadFollowup, getThreadFollowup, getThreadFollowupOccurrence, listThreadFollowupOccurrences, listThreadFollowups, registerThreadFollowup } from './thread-followups.js';
 import { controlThreadGoal, listThreadGoals, startThreadGoal, updateThreadGoal } from './thread-goals.js';
 
 const object = (value: unknown): Record<string, unknown> => {
@@ -37,8 +37,14 @@ const followupSource = (value: unknown): FollowupRegistrationSource => {
     && Number.isSafeInteger(trigger.atMs) && Number(trigger.atMs) >= 0) {
     return { kind: 'at', atMs: Number(trigger.atMs) };
   }
-  if ((trigger.kind === 'process_stopped' || trigger.kind === 'job_stopped') && Object.keys(trigger).every(key => key === 'kind' || key === 'operationId')) {
+  if ((trigger.kind === 'process_stopped' || trigger.kind === 'job_stopped' || trigger.kind === 'collection') && Object.keys(trigger).every(key => key === 'kind' || key === 'operationId')) {
     return { kind: trigger.kind, operationId: text(trigger.operationId) };
+  }
+  if (trigger.kind === 'artifact' && Object.keys(trigger).every(key => ['kind', 'operationId', 'artifactId', 'name'].includes(key))
+    && !('artifactId' in trigger && 'name' in trigger)) {
+    return { kind: 'artifact', operationId: text(trigger.operationId),
+      ...('artifactId' in trigger ? { artifactId: text(trigger.artifactId) } : {}),
+      ...('name' in trigger ? { name: text(trigger.name) } : {}) };
   }
   if (trigger.kind === 'file' && Object.keys(trigger).every(key => ['kind', 'path', 'condition'].includes(key))
     && (trigger.condition === 'exists' || trigger.condition === 'changed' || trigger.condition === 'ready')) {
@@ -112,6 +118,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'followup/registrations/pending': ['runtime', 'threadId', 'branchId'],
     'followup/registration/cancel': ['runtime', 'threadId', 'branchId', 'key', 'runId'],
     'followup/register': ['runtime', 'threadId', 'branchId', 'key', 'runId', 'trigger', 'instruction', 'repeat'],
+    'followup/occurrence': ['runtime', 'threadId', 'branchId', 'followupId', 'occurrenceId'],
     'followup/occurrences': ['runtime', 'threadId', 'branchId', 'followupId', 'after'],
     'followup/get': ['runtime', 'threadId', 'branchId', 'followupId'],
     'followup/list': ['runtime', 'threadId', 'branchId'],
@@ -257,6 +264,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       trigger: followupTrigger(body.trigger), instruction: text(body.instruction),
       ...(body.repeat === undefined ? {} : { repeat: body.repeat }) }, signal);
   });
+  post('followup/occurrence', (body, signal) => getThreadFollowupOccurrence(adapter, identity(body), text(body.followupId), text(body.occurrenceId), signal));
   post('followup/occurrences', (body, signal) => listThreadFollowupOccurrences(adapter, identity(body), text(body.followupId),
     body.after === undefined ? undefined : revision(body.after), signal));
   post('followup/get', (body, signal) => getThreadFollowup(adapter, identity(body), text(body.followupId), signal));

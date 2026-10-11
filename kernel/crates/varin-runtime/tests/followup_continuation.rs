@@ -1203,3 +1203,6 @@ mod jobs;
 
 #[path = "fixtures/followup_repeating.rs"]
 mod repeating;
+
+#[path = "fixtures/followup_artifacts.rs"]
+mod artifacts;

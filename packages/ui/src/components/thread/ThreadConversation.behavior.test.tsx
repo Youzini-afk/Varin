@@ -52,7 +52,7 @@ function fixture(active = false) {
   });
   let listener: Parameters<ThreadsAPI['observe']>[1] | undefined;
   const unused = async (): Promise<never> => { throw new Error('unused fixture API'); };
-  const api: ThreadsAPI = { goals: { start: vi.fn(unused), update: unused, control: unused, list: async () => view.goals }, resources: { refresh: unused }, followups: { jobSources: async () => [], register: unused, list: unused, get: unused, occurrences: unused, control: unused, pendingRegistrations: async () => [], cancelRegistration: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
+  const api: ThreadsAPI = { goals: { start: vi.fn(unused), update: unused, control: unused, list: async () => view.goals }, resources: { refresh: unused }, followups: { jobSources: async () => [], register: unused, list: unused, get: unused, occurrence: unused, occurrences: unused, control: unused, pendingRegistrations: async () => [], cancelRegistration: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
     snapshot: async () => structuredClone(view), submit, enqueue, editInput, cancelInput, cancelRun,
     inspectTools: unused, inspectPolicy: unused, restartPolicy: unused, cancelPolicyUpdate: unused, selectModel: unused, decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, retryPreparation: unused, events: async () => [],
     observe: async (_cursor, onEvent, { signal }) => new Promise<void>(resolve => { listener = onEvent; if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true }); }),
@@ -1143,7 +1143,7 @@ it('discovers retained unconfirmed file resources and retries their explicit can
 it.each(['job_stopped', 'any', 'all'] as const)('registers %s from accepted family jobs outside visible operations using current work and stable retry', async kind => {
   const f = fixture(true);
   const job: Awaited<ReturnType<ThreadsAPI['followups']['jobSources']>>[number] = {
-    binding: { operationId: 'user-job:original', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original-domain' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'workspace', subjectId: 'attempt:historical' },
+    observationKinds: ['job_stopped', 'artifact', 'collection'], binding: { operationId: 'user-job:original', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original-domain' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'workspace', subjectId: 'attempt:historical' },
     sourceRunId: 'old-completed-run', threadId: 'thread:family-child', branchId: 'branch:family-child', cancelRequested: false, phase: 'terminal', executorStopped: true, origin: { kind: 'user', key: 'submit-original' },
   };
   f.api.followups.jobSources = vi.fn(async () => [job]);
@@ -1184,7 +1184,7 @@ it('discards a late accepted-job query from the previous work Run and keeps a fa
   await edit('[aria-label="Follow-up trigger"]', 'job_stopped', 'change');
   f.view.activeRun = { ...f.view.activeRun!, id: 'new-work' };
   await act(async () => f.emit({ cursor: 2, subject: 'new-work', revision: 1, kind: 'run.accepted', data: {} }));
-  await act(async () => release!([{ binding: { operationId: 'late-job', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'old' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'ws', subjectId: 'late-attempt' }, sourceRunId: 'old-work', threadId: identity.threadId, branchId: identity.branchId, phase: 'running', executorStopped: false, cancelRequested: false, origin: { kind: 'user', key: 'old' } }]));
+  await act(async () => release!([{ observationKinds: ['job_stopped', 'artifact', 'collection'], binding: { operationId: 'late-job', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'old' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'ws', subjectId: 'late-attempt' }, sourceRunId: 'old-work', threadId: identity.threadId, branchId: identity.branchId, phase: 'running', executorStopped: false, cancelRequested: false, origin: { kind: 'user', key: 'old' } }]));
   await edit('[aria-label="Follow-up trigger"]', 'job_stopped', 'change');
   await edit('[aria-label="Follow-up instruction"]', 'Wait for a real candidate');
   expect(container.textContent).toContain('Accepted jobs could not be read');
@@ -1220,7 +1220,7 @@ it('requires legal repeat conditions and keeps the original repeated authorizati
   await edit('[aria-label="Follow-up time"]', '2030-02-03T04:05:06');
   await edit('[aria-label="Follow-up instruction"]', 'Read each accepted change.');
   expect(button('Register repeating follow-up').disabled).toBe(true);
-  expect(container.textContent).toContain('Repetition requires a file-change condition');
+  expect(container.textContent).toContain('Repetition requires a file-change, artifact or collection condition');
   await edit('[aria-label="Follow-up trigger"]', 'any', 'change');
   await edit('[aria-label="Condition 1 time"]', '2030-02-03T04:05:06');
   await edit('[aria-label="Condition 2 kind"]', 'file', 'change');
@@ -1345,4 +1345,164 @@ it('offers the original definition retry when an older occurrence failed and the
   await act(async () => button('Read occurrence history').click());
   expect(container.querySelector('[aria-label="Follow-up occurrence history"]')!.textContent).toContain('source_unavailable');
   expect(button('Cancel follow-up')).toBeDefined(); expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
+});
+
+function researchJob(): Awaited<ReturnType<ThreadsAPI['followups']['jobSources']>>[number] {
+  return { observationKinds: ['job_stopped', 'artifact', 'collection'],
+    binding: { operationId: 'job:research-original', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'workspace:original', subjectId: 'attempt:historical-research' },
+    sourceRunId: 'run:historical-child', threadId: 'thread:child', branchId: 'branch:child', phase: 'running', executorStopped: false, cancelRequested: false, origin: { kind: 'user', key: 'user-accepted' } };
+}
+function researchOccurrence(id: string, accepted: number): NonNullable<ThreadSnapshot['followups'][number]['occurrence']> {
+  const binding = researchJob().binding;
+  return { ...repeatedOccurrence(id, accepted, true), evidence: { kind: 'all', sources: [
+    { source_index: 0, accepted_cursor: accepted - 3, trigger_cursor: 95, evidence: { kind: 'artifact', binding, fact: { kind: 'artifact_available', artifact_id: 'artifact:zero', record_revision: 2 }, gap: false } },
+    { source_index: 1, accepted_cursor: accepted, trigger_cursor: 80, evidence: { kind: 'collection', binding, completion_revision: 7, outcome: 'done', counts: { available: 1, failed: 0, expired: 0, pending: 0 }, gap: false } },
+  ] } };
+}
+function researchDetail(occurrence: ReturnType<typeof researchOccurrence>): Awaited<ReturnType<ThreadsAPI['followups']['occurrence']>> {
+  return { occurrence, facts: [
+    { source_index: 0, accepted_cursor: occurrence.accepted_cursor - 3, content: { artifactId: 'artifact:zero', byteLength: 0, name: `<img src=x onerror="runInstructions()">${occurrence.id}` } },
+    { source_index: 1, accepted_cursor: occurrence.accepted_cursor, content: { completionRevision: 7, outcome: 'done' } },
+  ] };
+}
+
+it.each(['any', 'artifactId', 'name', 'collection'] as const)('registers exact research %s facts on selected work and preserves the entire uncertain intent', async selector => {
+  const f = fixture(true); const job = researchJob();
+  const repeat = selector === 'any' ? 'once' : 'each';
+  const registerLabel = repeat === 'once' ? 'Register one-time follow-up' : 'Register repeating follow-up';
+  const unsupported = { ...job, observationKinds: ['job_stopped'] as const, binding: { ...job.binding, operationId: 'job:unsupported-version', domainVersion: 99, subjectId: 'unsupported-research-attempt' } };
+  f.api.followups.jobSources = vi.fn(async () => [job, { ...unsupported, observationKinds: [...unsupported.observationKinds] }]);
+  const register = vi.fn<ThreadsAPI['followups']['register']>().mockRejectedValue(new Error('acceptance reply lost')); f.api.followups.register = register;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Schedule a follow-up').click());
+  await edit('[aria-label="Follow-up trigger"]', selector === 'collection' ? 'collection' : 'artifact', 'change');
+  const picker = container.querySelector('[aria-label="Follow-up job"]')!;
+  expect(picker.textContent).toContain(job.binding.subjectId); expect(picker.textContent).not.toContain('unsupported-research-attempt');
+  await edit('[aria-label="Follow-up job"]', job.binding.operationId, 'change');
+  await edit('[aria-label="Follow-up repetition"]', repeat, 'change');
+  if (selector !== 'collection') {
+    await edit('[aria-label="Follow-up artifact selector"]', selector, 'change');
+    if (selector !== 'any') {
+      await edit('[aria-label="Follow-up instruction"]', 'Use the accepted original facts.');
+      expect(button(registerLabel).disabled).toBe(true);
+      await edit('[aria-label="Follow-up artifact value"]', 'original-artifact');
+    }
+  }
+  await edit('[aria-label="Follow-up instruction"]', '  Use the accepted original facts.\nKeep failures visible.  ');
+  expect(button(registerLabel).disabled).toBe(false);
+  await act(async () => button(registerLabel).click());
+  const original = register.mock.calls[0]![0];
+  expect(original).toMatchObject({ ...identity, runId: 'ui-run', repeat, instruction: '  Use the accepted original facts.\nKeep failures visible.  ',
+    trigger: selector === 'collection' ? { kind: 'collection', operationId: job.binding.operationId }
+      : { kind: 'artifact', operationId: job.binding.operationId, ...(selector === 'any' ? {} : { [selector]: 'original-artifact' }) } });
+  expect(original.runId).not.toBe(job.sourceRunId);
+  const keys = Object.keys(original.trigger); expect(keys).not.toContain(selector === 'name' ? 'artifactId' : 'name');
+  f.view.activeRun = { ...f.view.activeRun!, id: 'new-selected-work' };
+  await act(async () => f.emit({ cursor: 8, subject: 'new-selected-work', revision: 1, kind: 'run.accepted', data: {} }));
+  await act(async () => button('Retry original follow-up').click());
+  expect(register.mock.calls[1]![0]).toEqual(original);
+  expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled(); expect(f.cancelRun).not.toHaveBeenCalled();
+});
+
+it('allows repeatable artifact and collection in Any and FIFO All while keeping finite leaves once-only', async () => {
+  const f = fixture(true); const job = researchJob(); f.api.followups.jobSources = async () => [job];
+  const register = vi.fn<ThreadsAPI['followups']['register']>().mockRejectedValue(new Error('uncertain')); f.api.followups.register = register;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Schedule a follow-up').click());
+  await edit('[aria-label="Follow-up repetition"]', 'each', 'change');
+  await edit('[aria-label="Follow-up trigger"]', 'any', 'change');
+  await edit('[aria-label="Condition 1 time"]', '2030-02-03T04:05:06');
+  await edit('[aria-label="Condition 2 kind"]', 'artifact', 'change');
+  await edit('[aria-label="Condition 2 job"]', job.binding.operationId, 'change');
+  await edit('[aria-label="Follow-up instruction"]', 'Use each original fact.');
+  expect(button('Register repeating follow-up').disabled).toBe(false);
+  await edit('[aria-label="Follow-up trigger"]', 'all', 'change');
+  expect(button('Register repeating follow-up').disabled).toBe(true);
+  await edit('[aria-label="Condition 1 kind"]', 'collection', 'change');
+  await edit('[aria-label="Condition 1 job"]', job.binding.operationId, 'change');
+  expect(button('Register repeating follow-up').disabled).toBe(false);
+  await act(async () => button('Register repeating follow-up').click());
+  expect(register.mock.calls[0]![0]).toMatchObject({ runId: 'ui-run', repeat: 'each', trigger: { kind: 'all', sources: [
+    { kind: 'collection', operationId: job.binding.operationId }, { kind: 'artifact', operationId: job.binding.operationId },
+  ] } });
+});
+
+it('reads frozen O1 research metadata on demand with distinct source cursors while O2 becomes latest', async () => {
+  const f = fixture(true); const followup = repeatedFollowup(); const first = researchOccurrence('research:O1', 20); const second = researchOccurrence('research:O2', 40);
+  followup.occurrence = first; f.view.followups = [followup];
+  const detail = vi.fn<ThreadsAPI['followups']['occurrence']>(async (_identity, _followup, id) => researchDetail(id === first.id ? first : second));
+  f.api.followups.occurrence = detail; f.api.followups.occurrences = async () => ({ occurrences: [first], nextCursor: null });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  expect(detail).not.toHaveBeenCalled();
+  await act(async () => button('Read occurrence history').click());
+  const history = () => container.querySelector('[aria-label="Follow-up occurrence history"]')!;
+  const readOriginal = () => [...history().querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === 'Read occurrence metadata')!;
+  await act(async () => readOriginal().click());
+  expect(detail).toHaveBeenCalledExactlyOnceWith(identity, followup.id, first.id, expect.any(AbortSignal));
+  const metadata = () => history().querySelector('[aria-label="Original occurrence metadata"]')!;
+  expect(metadata().textContent).toContain('Condition 1 · accepted 17'); expect(metadata().textContent).toContain('Condition 2 · accepted 20');
+  expect(metadata().textContent).toContain('"byteLength": 0'); expect(metadata().textContent).toContain('<img'); expect(metadata().querySelector('img')).toBeNull();
+  followup.occurrence = second;
+  await act(async () => f.emit({ cursor: 50, subject: followup.id, revision: 2, kind: 'followup.changed', data: {} }));
+  expect(detail).toHaveBeenCalledTimes(1); expect(metadata().textContent).toContain(first.id); expect(metadata().textContent).not.toContain(second.id);
+  expect(container.querySelector('[aria-label="Latest follow-up occurrence"]')!.textContent).toContain(second.id);
+  expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
+});
+
+it('rejects wrong occurrence or mismatched accepted-source metadata and retries the same original read', async () => {
+  const f = fixture(true); const followup = repeatedFollowup(); const first = researchOccurrence('research:O1', 20);
+  followup.occurrence = first; f.view.followups = [followup];
+  const good = researchDetail(first); const wrongCursor = structuredClone(good); wrongCursor.facts[0]!.accepted_cursor = 20;
+  const detail = vi.fn<ThreadsAPI['followups']['occurrence']>()
+    .mockRejectedValueOnce(new Error('metadata storage failed'))
+    .mockResolvedValueOnce(researchDetail(researchOccurrence('research:O2', 40)))
+    .mockResolvedValueOnce(wrongCursor).mockResolvedValueOnce(good);
+  f.api.followups.occurrence = detail;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Read occurrence metadata').click());
+  for (let retry = 0; retry < 3; retry++) {
+    expect(container.textContent).toContain('Original occurrence metadata could not be read');
+    expect(container.textContent).not.toContain('"byteLength"'); expect(container.textContent).not.toContain('research:O2');
+    await act(async () => button('Retry occurrence metadata').click());
+  }
+  expect(container.textContent).toContain('"byteLength": 0');
+  for (const call of detail.mock.calls) expect(call.slice(0, 3)).toEqual([identity, followup.id, first.id]);
+});
+
+it('discards late occurrence metadata after close, a newer occurrence, Host replacement and branch navigation', async () => {
+  const f = fixture(true); const followup = repeatedFollowup(); const first = researchOccurrence('research:O1', 20); const second = researchOccurrence('research:O2', 40);
+  followup.occurrence = first; f.view.followups = [followup];
+  type Detail = Awaited<ReturnType<ThreadsAPI['followups']['occurrence']>>;
+  const releases: ((value: Detail) => void)[] = [];
+  const detail = vi.fn<ThreadsAPI['followups']['occurrence']>(() => new Promise(resolve => releases.push(resolve))); f.api.followups.occurrence = detail;
+  const open = async () => { await act(async () => button('Read occurrence metadata').click()); return detail.mock.calls.at(-1)![3]!; };
+  const late = async (index: number, original: typeof first) => { await act(async () => releases[index]!(researchDetail(original))); expect(container.textContent).not.toContain('"byteLength"'); };
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  const closed = await open(); await act(async () => button('Hide occurrence metadata').click()); expect(closed.aborted).toBe(true); await late(0, first);
+  const previous = await open(); followup.occurrence = second;
+  await act(async () => f.emit({ cursor: 50, subject: followup.id, revision: 2, kind: 'followup.changed', data: {} }));
+  expect(previous.aborted).toBe(true); await late(1, first);
+  const oldHost = await open(); await act(async () => { endpoint.generation++; for (const listener of endpoint.listeners) listener(); });
+  expect(oldHost.aborted).toBe(true); await late(2, second);
+  const oldBranch = await open(); const nextIdentity = { ...identity, branchId: 'branch:other' }; const next = fixture(true);
+  next.view.identity = nextIdentity; next.view.thread.branches[0]!.branch_id = nextIdentity.branchId;
+  await act(async () => root.render(<ThreadConversation api={next.api} identity={nextIdentity} />));
+  expect(oldBranch.aborted).toBe(true); await late(3, second);
+  expect(f.cancelRun).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled();
+});
+
+it('keeps failed collection with no records distinct from a genuinely empty completed collection', async () => {
+  const f = fixture(true); const followup = repeatedFollowup(); const binding = researchJob().binding;
+  followup.occurrence = { ...researchOccurrence('failed-collection', 20), evidence: { kind: 'all', sources: [
+    { source_index: 0, accepted_cursor: 17, trigger_cursor: 95, evidence: { kind: 'artifact', binding, fact: { kind: 'artifact_absent', completion_revision: 7, outcome: 'failed' }, gap: true } },
+    { source_index: 1, accepted_cursor: 20, trigger_cursor: 80, evidence: { kind: 'collection', binding, completion_revision: 7, outcome: 'failed', counts: { available: 0, failed: 0, expired: 0, pending: 0 }, gap: true } },
+  ] } }; f.view.followups = [followup];
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  const latest = () => container.querySelector('[aria-label="Latest follow-up occurrence"]')!;
+  expect(latest().textContent).toContain('source file absence is unproven'); expect(latest().textContent).toContain('collection failed');
+  expect(latest().textContent).toContain('observation gap'); expect(latest().textContent).not.toContain('empty collection');
+  followup.occurrence = { ...researchOccurrence('done-empty-collection', 40), evidence: { kind: 'collection', binding, completion_revision: 8, outcome: 'done', counts: { available: 0, failed: 0, expired: 0, pending: 0 }, gap: false } };
+  await act(async () => f.emit({ cursor: 50, subject: followup.id, revision: 2, kind: 'followup.changed', data: {} }));
+  expect(latest().textContent).toContain('collection done'); expect(latest().textContent).toContain('empty collection');
+  expect(button('Cancel follow-up')).toBeDefined(); expect(button('Pause follow-up')).toBeDefined();
 });

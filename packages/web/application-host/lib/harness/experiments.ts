@@ -11,6 +11,7 @@
  * whose artifacts failed to copy stays completed/failed with
  * collection:"failed" and can be re-collected without re-running.
  */
+import { isDeepStrictEqual } from "node:util";
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import type { ResearchSourceAuthority, ExperimentSourceAdmission } from "../kernel/research-source.js";
@@ -74,7 +75,7 @@ export const ATTEMPT_STATES: ReadonlySet<string> = new Set(["submitted", "queued
 export const isTerminalAttemptState = (state: ExperimentAttemptState): boolean => TERMINAL.has(state);
 
 export type { ExperimentCaller } from './research-identity.js';
-import { type ExperimentCaller, mayAccessResearch, requireResearchOwner, researchNamespace, researchMaintenanceCaller } from './research-identity.js';
+import { type ExperimentCaller, mayAccessResearch, requireResearchOwner, researchNamespace, researchMaintenanceCaller, researchOwner } from './research-identity.js';
 
 export interface ExperimentContext {
   scoped: KernelScopedClient;
@@ -259,6 +260,21 @@ const specView = (record: KernelRecordResult): ExperimentSpecView | null => {
   };
 };
 
+const collectionCompletion = (raw: unknown, currentRevision: number): import("@varin/protocol").ExperimentCollectionCompletion => {
+  const value = raw as { recordRevision?: unknown; outcome?: unknown } | null;
+  if (!value || !Number.isSafeInteger(value.recordRevision) || (value.recordRevision as number) < 1 || (value.recordRevision as number) > currentRevision || !["done", "failed", "not_started"].includes(String(value.outcome))) {
+    throw new HarnessServiceError("unavailable", "Original collection completion is unreadable");
+  }
+  return value as import("@varin/protocol").ExperimentCollectionCompletion;
+};
+const unspawnedDrained = (payload: Record<string, unknown>): boolean => !payload.spawnDispatched
+  && (!payload.captureStarted || payload.captureDrained === true)
+  && (!payload.preparationStarted || payload.preparationDrained === true)
+  && (!payload.admissionStarted || payload.admissionDrained === true);
+const originalOutputDrained = (record: KernelRecordResult, view: ExperimentAttemptView, job: KernelRecordResult | null): boolean =>
+  view.state !== "lost" && TERMINAL.has(view.state) && (payloadOf(record).spawnDispatched
+    ? !!job && payloadOf(job).executorStopped === true && payloadOf(job).outputDrained === true : unspawnedDrained(payloadOf(record)));
+
 const attemptView = (record: KernelRecordResult): ExperimentAttemptView | null => {
   const payload = payloadOf(record);
   const attemptId = str(payload.id);
@@ -280,6 +296,7 @@ const attemptView = (record: KernelRecordResult): ExperimentAttemptView | null =
   const endedAt = num(payload.endedAt);
   return {
     attemptId,
+    ...(payload.collectionCompletion ? { collectionCompletion: collectionCompletion(payload.collectionCompletion, record.recordRevision) } : {}),
     specId: specId ?? null,
     cancelRequested: payload.cancelRequested,
     backend,
@@ -362,6 +379,7 @@ const artifactView = (record: KernelRecordResult): ExperimentArtifactView | null
     ? remote.accessible : "available";
   return {
     artifactId,
+    recordRevision: record.recordRevision,
     attemptId,
     name,
     kind,
@@ -662,7 +680,8 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
       ownerIds?: string[];
       expectedRecordRevision?: number;
     },
-  ): Promise<KernelRecordResult> => ctx.scoped.putRecord({
+  ): Promise<KernelRecordResult> => {
+    const record = await ctx.scoped.putRecord({
     operationId: `${input.recordType}:${randomUUID()}`,
     recordId: input.recordId,
     workspaceId,
@@ -676,7 +695,10 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     ...(caller.threadId ? { threadId: caller.threadId } : {}),
     ...(caller.runId ? { runId: caller.runId } : {}),
     ...(input.expectedRecordRevision === undefined ? {} : { expectedRecordRevision: input.expectedRecordRevision }),
-  });
+    });
+    if (input.recordType === "experiment.artifact" && input.payload.internalLogChunk !== true) notify(workspaceId, String(input.payload.attemptId), null);
+    return record;
+  };
 
   const getAttemptRecord = (ctx: ExperimentContext, workspaceId: string, attemptId: string) => (
     ctx.scoped.getRecord(workspaceId, recordIdFor.attempt(attemptId))
@@ -688,7 +710,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     caller: ExperimentCaller,
     attemptId: string,
     state: ExperimentAttemptState | ((current: ExperimentAttemptView) => ExperimentAttemptState),
-    mutate: (payload: Record<string, unknown>) => Record<string, unknown>,
+    mutate: (payload: Record<string, unknown>, nextRevision: number) => Record<string, unknown>,
     onlyIf?: (current: ExperimentAttemptView) => boolean,
   ): Promise<KernelRecordResult> => {
     let existing = await getAttemptRecord(ctx, workspaceId, attemptId);
@@ -703,7 +725,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
           recordType: "experiment.attempt",
           state: typeof state === "function" ? state(current) : state,
           expectedRecordRevision: existing.recordRevision,
-          payload: mutate(payloadOf(existing)),
+          payload: mutate(payloadOf(existing), existing.recordRevision + 1),
         });
         const view = attemptView(record);
         notify(workspaceId, attemptId, view);
@@ -731,7 +753,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
   sharedRuntime.listeners.add(deliverNotification);
 
   const notify = (workspaceId: string, attemptId: string, view: ExperimentAttemptView | null) => {
-    for (const listener of sharedRuntime.listeners) listener(workspaceId, attemptId, view);
+    for (const listener of sharedRuntime.listeners) { try { listener(workspaceId, attemptId, view); } catch (error) { report(error); } }
   };
 
   const logChunkArtifactId = (
@@ -1000,11 +1022,10 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
             collectedAt: now(), error: errorMessage(error),
             ...extra,
           },
-        }).catch(() => null);
-        const view = record ? artifactView(record) : null;
-        artifacts.push(view ?? {
-          artifactId, attemptId, name, kind, state: "failed", error: errorMessage(error),
         });
+        const view = artifactView(record);
+        if (!view) throw new HarnessServiceError("unavailable", "Collected artifact failure record is unreadable");
+        artifacts.push(view);
       }
     };
     const persistObject = async (
@@ -1137,11 +1158,10 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
             id: artifactId, attemptId, name: relativePath, kind: "file",
             path: relativePath, collectedAt: now(), error: errorMessage(error),
           },
-        }).catch(() => null);
-        if (record) {
-          const view = artifactView(record);
-          if (view) artifacts.push(view);
-        }
+        });
+        const view = artifactView(record);
+        if (!view) throw new HarnessServiceError("unavailable", "Collected artifact failure record is unreadable");
+        artifacts.push(view);
       }
     }
     return artifacts;
@@ -1326,7 +1346,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
           report(error);
         }
         await serializeAttempt(workspaceId, attemptId, () => updateAttempt(
-          ctx, workspaceId, owner, attemptId, (view) => view.state, (payload) => ({ ...payload, collection: state }),
+          ctx, workspaceId, owner, attemptId, (view) => view.state, (payload, nextRevision) => ({ ...payload, collection: state, collectionCompletion: { recordRevision: nextRevision, outcome: state } }),
           (view) => view.state !== "lost" && TERMINAL.has(view.state),
         ));
       }
@@ -2129,7 +2149,10 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     }
     if (!await settleInputCandidate(ctx, workspaceId, record)) return;
     await releaseSourceAdmission(ctx, workspaceId, record);
-    const cancelled = await updateAttempt(ctx, workspaceId, recordCaller(workspaceId, record), id, "cancelled", (p) => ({ ...p, endedAt: now(), collection: "none", phase: "settled" }), (view) => view.state === "stopping");
+    const cancelled = await updateAttempt(ctx, workspaceId, recordCaller(workspaceId, record), id, "cancelled", (p, nextRevision) => {
+      if (!unspawnedDrained(p)) throw new HarnessServiceError("unavailable", "Original unspawned preparation is not drained");
+      return { ...p, endedAt: now(), collection: "none", phase: "settled", collectionCompletion: { recordRevision: nextRevision, outcome: "not_started" } };
+    }, (view) => view.state === "stopping");
     await releaseTerminalCommitment(ctx, workspaceId, cancelled);
     await retireAttemptAuthority(recordCaller(workspaceId,cancelled));
   };
@@ -2159,7 +2182,17 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
         if (!await settleInputCandidate(ctx, workspaceId, fresh)) return;
         await releaseSourceAdmission(ctx, workspaceId, fresh);
         await releaseTerminalCommitment(ctx, workspaceId, fresh);
-        if (!payload.spawnDispatched) { await retireAttemptAuthority(recordCaller(workspaceId,fresh)); return; }
+        if (!payload.spawnDispatched) {
+          if (unspawnedDrained(payload) && !payload.collectionCompletion) {
+            fresh = await updateAttempt(ctx, workspaceId, recordCaller(workspaceId, fresh), attempt.attemptId, current => current.state,
+              (p, nextRevision) => {
+                if (!unspawnedDrained(p)) throw new HarnessServiceError("unavailable", "Original unspawned preparation is not drained");
+                return { ...p, collectionCompletion: { recordRevision: nextRevision, outcome: "not_started" } };
+              });
+          }
+          if (unspawnedDrained(payloadOf(fresh))) await retireAttemptAuthority(recordCaller(workspaceId,fresh));
+          return;
+        }
       }
       if (attempt.state === "stopping" && !payload.spawnDispatched) {
         await finishUnspawnedCancellation(ctx, workspaceId, fresh);
@@ -2388,25 +2421,83 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     const jobRecord = await ctx.scoped.getRecord(caller.workspaceId, recordIdFor.job(jobIdFor(attemptId)));
     const job = jobRecord ? jobView(jobRecord) : null;
     const artifacts: ExperimentArtifactView[] = [];
-    let cursor: number | undefined;
+    let after: string | undefined;
     do {
-      const page = await ctx.scoped.listRecords({
-        workspaceId: caller.workspaceId, recordType: "experiment.artifact", pageSize: 128,
-        ...(cursor === undefined ? {} : { cursor }),
-      });
-      for (const record of page.records) {
-        if (payloadOf(record).internalLogChunk === true) continue;
-        const artifact = artifactView(record);
-        if (artifact?.attemptId === attemptId) artifacts.push(artifact);
+      const page = await ctx.scoped.experimentArtifacts({ workspaceId: caller.workspaceId, attemptId, ...(after ? { after } : {}) });
+      for (const item of page.records) {
+        assertRecordAllowed(caller, item, `experiment artifact: ${item.recordId}`);
+        const artifact = artifactView(item);
+        if (!artifact || artifact.attemptId !== attemptId) throw new HarnessServiceError("unavailable", "Original artifact record is unreadable");
+        artifacts.push(artifact);
       }
-      cursor = page.nextCursor === null ? undefined : page.nextCursor;
-    } while (cursor !== undefined);
+      after = page.nextCursor ?? undefined;
+    } while (after !== undefined);
     return {
       attempt: callerView(caller, record, view),
       ...(spec ? { spec } : {}),
       ...(job ? { job } : {}),
       artifacts,
     };
+  };
+
+  /** Original metadata only. The observer's read authority never becomes target control authority. */
+  const readArtifactObservation = async (
+    caller: ExperimentCaller,
+    binding: import("../kernel/protocol.generated.js").HostJobBinding,
+    selector: { artifactId?: string; name?: string },
+    signal?: AbortSignal,
+  ) => {
+    if (caller.access.kind !== "family" || caller.workspaceId !== binding.workspaceId || binding.domain !== "research.experiment" || binding.domainVersion !== 1) {
+      throw new HarnessServiceError("denied", "Artifact observation requires its actual family reader and original research binding");
+    }
+    for (;;) {
+      signal?.throwIfAborted();
+      const before = await requireAttempt(caller, binding.subjectId);
+      const original = researchOwner(before.record);
+      if (original.runtime !== "agent" || original.operationId !== binding.operationId
+        || !isDeepStrictEqual(original.executionOwner, binding.executionOwner)) {
+        throw new HarnessServiceError("denied", "Artifact observation target differs from its original accepted owner");
+      }
+      const artifacts: ExperimentArtifactView[] = [];
+      const selectedId = selector.artifactId ?? (selector.name ? artifactIdFor(binding.subjectId, selector.name) : undefined);
+      const accept = (record: KernelRecordResult) => {
+        assertRecordAllowed(caller, record, `experiment artifact: ${record.recordId}`);
+        const artifact = artifactView(record), owner = researchOwner(record);
+        if (!artifact || artifact.attemptId !== binding.subjectId || payloadOf(record).internalLogChunk === true
+          || owner.runtime !== "agent" || owner.operationId !== binding.operationId || !isDeepStrictEqual(owner.executionOwner, binding.executionOwner)) {
+          throw new HarnessServiceError("unavailable", "Original artifact metadata or provenance is unreadable");
+        }
+        if (selector.name && artifact.name !== selector.name && artifact.path !== selector.name) {
+          throw new HarnessServiceError("unavailable", "Original artifact name binding changed");
+        }
+        if (!Number.isSafeInteger(artifact.recordRevision) || artifact.recordRevision < 1
+          || !["pending", "available", "failed", "expired"].includes(artifact.state)) {
+          throw new HarnessServiceError("unavailable", "Original artifact state or revision is unreadable");
+        }
+        artifacts.push(artifact);
+      };
+      if (selectedId) {
+        const record = await before.ctx.scoped.getRecord(caller.workspaceId, recordIdFor.artifact(selectedId), signal);
+        if (record) accept(record);
+      } else {
+        let after: string | undefined;
+        do {
+          signal?.throwIfAborted();
+          const page = await before.ctx.scoped.experimentArtifacts({ workspaceId: caller.workspaceId, attemptId: binding.subjectId, ...(after ? { after } : {}) }, signal);
+          for (const record of page.records) accept(record);
+          if (page.nextCursor !== null && (page.nextCursor === after || page.nextCursor.length === 0)) throw new HarnessServiceError("unavailable", "Artifact metadata cursor did not advance");
+          after = page.nextCursor ?? undefined;
+        } while (after !== undefined);
+      }
+      const after = await requireAttempt(caller, binding.subjectId);
+      const stamp = (view: ExperimentAttemptView) => JSON.stringify([view.collection, view.collectionCompletion ?? null]);
+      if (stamp(before.view) !== stamp(after.view)) continue;
+      const completion = after.view.collectionCompletion;
+      const settled = completion && (completion.outcome === after.view.collection || (completion.outcome === "not_started" && after.view.collection === "none"));
+      return { attempt: after.view, attemptRevision: after.record.recordRevision, artifacts,
+        completion: settled ? completion : null,
+        counts: artifacts.reduce((counts, artifact) => { counts[artifact.state]++; return counts; }, { available: 0, failed: 0, expired: 0, pending: 0 }) };
+    }
   };
 
   const list = async (
@@ -2550,13 +2641,8 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     params: { attemptId: string; stream?: "stdout" | "stderr"; offset?: number; maxBytes?: number },
   ): Promise<ExperimentLogsResult> => {
     const { ctx, view, record: attemptRecord } = await requireAttempt(caller, params.attemptId);
-    const attemptPayload = payloadOf(attemptRecord);
     const jobRecord = await ctx.scoped.getRecord(caller.workspaceId, recordIdFor.job(jobIdFor(params.attemptId)));
-    const outputDrained = view.state !== "lost" && TERMINAL.has(view.state) && (attemptPayload.spawnDispatched
-      ? !!jobRecord && payloadOf(jobRecord).outputDrained === true
-      : (!attemptPayload.captureStarted || attemptPayload.captureDrained === true)
-        && (!attemptPayload.preparationStarted || attemptPayload.preparationDrained === true)
-        && (!attemptPayload.admissionStarted || attemptPayload.admissionDrained === true));
+    const outputDrained = originalOutputDrained(attemptRecord, view, jobRecord);
     const stream = params.stream ?? "stdout";
     const offset = Math.max(0, params.offset ?? 0);
     const maxBytes = Math.max(1, Math.floor(params.maxBytes ?? 64 * 1024));
@@ -2885,10 +2971,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     if (!attempt) throw new HarnessServiceError("unavailable", "Native experiment receipt is unreadable");
     const payload = payloadOf(record);
     const job = await ctx.scoped.getRecord(workspaceId, recordIdFor.job(jobIdFor(attemptId)));
-    const stopped = attempt.state !== "lost" && TERMINAL.has(attempt.state) && (payload.spawnDispatched
-      ? !!job && payloadOf(job).executorStopped === true && payloadOf(job).outputDrained === true
-      : (!payload.captureStarted || payload.captureDrained === true) && (!payload.preparationStarted || payload.preparationDrained === true)
-        && (!payload.admissionStarted || payload.admissionDrained === true));
+    const stopped = originalOutputDrained(record, attempt, job);
     void reconcileAttempt(ctx, workspaceId, caller, record).catch(report);
     const owner = requireResearchOwner(caller);
     if (owner.runtime !== "agent") return null;
@@ -2899,7 +2982,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
 
 
   return {
-    submit, list, get, logs, cancel, wait, collect, readArtifact, readArtifactPage, submissionId, reconcileUnaccepted, nativeReceipt,
+    submit, list, get, logs, cancel, wait, collect, readArtifactObservation, readArtifact, readArtifactPage, submissionId, reconcileUnaccepted, nativeReceipt,
     stopForThreads, refreshQueue, ensureReconciled, subscribeAttempts,
     detachObservers,
     dispose: detachObservers,

@@ -41,7 +41,9 @@ impl Storage {
         self.sweep_compute_readers()?;
         let storage = self;
         match method {
-            method if method.starts_with("compute.") => storage.dispatch_compute(method, authorized_params, authorized_grant),
+            method if method.starts_with("compute.") => {
+                storage.dispatch_compute(method, authorized_params, authorized_grant)
+            }
             method if method.starts_with("process.") => {
                 storage.dispatch_process(method, authorized_params, authorized_grant)
             }
@@ -96,6 +98,9 @@ impl Storage {
             "storage.record.get" => {
                 storage.domain_record_get(authorized_params, grant_id.unwrap_or(""))
             }
+            "storage.experiment.artifacts" => {
+                storage.experiment_artifact_page(authorized_params, grant_id.unwrap_or(""))
+            }
             "storage.record.list" => {
                 storage.domain_record_list(authorized_params, grant_id.unwrap_or(""))
             }
@@ -105,10 +110,18 @@ impl Storage {
             "storage.record.release" => idempotent(storage, method, authorized_params, |storage| {
                 storage.domain_record_release(authorized_params, grant_id.unwrap_or(""))
             }),
-            "working.result.prepare" => storage.prepare_working_result(authorized_params, grant_id.unwrap_or(""))
-                    .and_then(|receipt|serde_json::to_value(super::result_publication::candidate_view(&receipt)?).map_err(Into::into)),
-            "working.result.publish" => storage.publish_working_result(authorized_params, grant_id.unwrap_or("")),
-            "working.result.candidate.release" => storage.release_working_result_candidate(authorized_params, grant_id.unwrap_or("")),
+            "working.result.prepare" => storage
+                .prepare_working_result(authorized_params, grant_id.unwrap_or(""))
+                .and_then(|receipt| {
+                    serde_json::to_value(super::result_publication::candidate_view(&receipt)?)
+                        .map_err(Into::into)
+                }),
+            "working.result.publish" => {
+                storage.publish_working_result(authorized_params, grant_id.unwrap_or(""))
+            }
+            "working.result.candidate.release" => {
+                storage.release_working_result_candidate(authorized_params, grant_id.unwrap_or(""))
+            }
             "working.result.put" => idempotent(storage, method, authorized_params, |storage| {
                 storage.working_record_put(
                     method,
@@ -280,7 +293,9 @@ impl Storage {
             }),
             "pin.read" => storage.pin_read(authorized_params, grant_id.unwrap_or("")),
             "storage.gc" => idempotent(storage, method, authorized_params, |storage| storage.gc()),
-            "recovery.operation.conflicts" => storage.recovery_operation_conflicts(authorized_params,authorized_grant),
+            "recovery.operation.conflicts" => {
+                storage.recovery_operation_conflicts(authorized_params, authorized_grant)
+            }
             "recovery.operation.get" => {
                 storage.recovery_operation_get(authorized_params, grant_id.unwrap_or(""))
             }
