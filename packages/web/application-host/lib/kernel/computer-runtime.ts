@@ -7,11 +7,12 @@ import type { ThreadComputerAPI, ThreadIdentity } from '@varin/application-clien
 import { computerWorkKey, parseComputerWorkRef, type ComputerActParams, type ComputerObserveParams, type ComputerWorkRef, type ComputerActor, type ComputerAccessRequest, type ComputerExecutionRef, type ComputerWorkScope } from '@varin/protocol';
 import { compileToolJsonSchema } from '@varin/pi-host/tool-schema';
 import type { ComputerService } from '../computer/computer-service.js';
+import type { PendingComputerControlEvent, PendingComputerControlCancellation } from '../computer/computer-records.js';
 import { ComputerError, ComputerReleaseUnconfirmed } from '../computer/computer-error.js';
 import type { ComputerWorkResolution } from '../computer/computer-actor.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import { KernelClientError, type KernelClient } from './kernel-client.js';
-import type { ComputerScope, Effect, Run, ComputerRequestRecord, ComputerRequestView, ComputerDecisionActor, KernelMethod, KernelMethodParams, Operation } from './protocol.generated.js';
+import type { ComputerScope, Effect, Run, ComputerRequestRecord, ComputerRequestView, ComputerEventReceipt, ComputerDecisionActor, KernelMethod, KernelMethodParams, Operation } from './protocol.generated.js';
 import type { ExtensionToolOwnerOptions } from './extension-tool-owner.js';
 import { requireToolInvocation, runToolDomainCall } from './tool-invocation.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
@@ -67,6 +68,22 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
   const hostEpoch = computers.controlOwnerEpoch;
   const decisions = new Map<string, Promise<ComputerRequestRecord>>();
   const rpc = <T, M extends Extract<KernelMethod, `runtime.${string}`>>(method: M, params: KernelMethodParams[M], signal?: AbortSignal): Promise<T> => kernel.agentRuntimeRequest<T, M>(method, params, signal);
+  const acceptControlEvent = async (event: PendingComputerControlEvent): Promise<ComputerEventReceipt> => {
+    const execution = event.actor.execution;
+    if (execution.work.runtime !== 'agent') throw new ComputerError('computer-request-invalid', 'An original Agent execution is required');
+    // Root lineage and activation are derived by Catalog. Host does not invent a receiving Run.
+    return rpc<ComputerEventReceipt, 'runtime.computer.event.accept'>('runtime.computer.event.accept', {
+      fact: { id: event.id, kind: event.kind, desktopId: event.desktopId, at: event.at, releaseConfirmed: event.releaseConfirmed,
+        execution: { threadId: execution.work.threadId, branchId: execution.work.branchId, runId: execution.runId } }, label: event.label,
+    });
+  };
+  const cancelControlEvents = async (command: PendingComputerControlCancellation): Promise<void> => {
+    const execution = command.actor.execution;
+    if (execution.work.runtime !== 'agent') throw new ComputerError('computer-request-invalid', 'An original Agent execution is required');
+    await rpc<void, 'runtime.computer.event.cancel'>('runtime.computer.event.cancel', {
+      execution: { threadId: execution.work.threadId, branchId: execution.work.branchId, runId: execution.runId }, id: command.id, desktopId: command.desktopId, pendingEventIds: command.pendingEventIds,
+    });
+  };
   const refreshRequests = async (root?: ComputerWorkRef): Promise<ComputerRequestView[]> => {
     if (root && root.runtime !== 'agent') return [];
     return rpc<ComputerRequestView[], 'runtime.computer.request.list'>('runtime.computer.request.list', root ? { rootThreadId: root.threadId, rootBranchId: root.branchId } : {});
@@ -294,10 +311,10 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
   };
   const start = (onError: (error: unknown) => void = () => {}) => {
     if (removers.length || stopped) return;
-    const wake = () => { void reconcileExecutions().catch(onError); };
+    const wake = () => { void reconcileExecutions().catch(onError); void computers.reconcileControlEvents().catch(onError); };
     removers.push(kernel.onToolReleased(wake), runtime.onReady(wake), runtime.onEvent(event => { if (event.stream === 'durable') wake(); }));
     wake();
   };
   const stop = () => { stopped = true; for (const remove of removers.splice(0)) remove(); };
-  return { capability, user, resolve, prepareConfiguration, reconcileExecutions, start, stop };
+  return { capability, user, resolve, prepareConfiguration, acceptControlEvent, cancelControlEvents, reconcileExecutions, start, stop };
 }

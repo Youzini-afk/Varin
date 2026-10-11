@@ -868,6 +868,8 @@ impl Catalog {
             .collect::<Vec<_>>();
         let run_ids = runs.iter().map(|run| run.id.clone()).collect::<Vec<_>>();
         for run in &runs {
+            let stopped: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='run.tree_stop_requested')", [&run.id], |r| r.get(0))?;
+            if !stopped { event(&tx, &run.id, run.revision, "run.tree_stop_requested", Value::Null)?; }
             super::request_cancel_run_in(&tx, &run.id)?;
             // Terminal source Runs can still own live process-trigger registrations. Cancel
             // those original registrations without changing the source Run's terminal fact.

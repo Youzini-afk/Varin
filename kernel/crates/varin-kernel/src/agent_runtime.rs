@@ -595,6 +595,7 @@ pub(crate) fn spawn(
                                 | "runtime.input.enqueue"
                                 | "runtime.input.edit"
                                 | "runtime.messages.send"
+                                | "runtime.computer.event.accept"
                                 | "runtime.followup.register"
                                 | "runtime.calendar.sync"
                                 | "runtime.calendar.admit"

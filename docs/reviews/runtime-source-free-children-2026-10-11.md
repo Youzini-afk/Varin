@@ -8,6 +8,8 @@ frozen configuration, context preparation, child Run, report, Wait and later exe
 source-bearing work. It does not manufacture a directory, file grant or source pin to make ordinary
 capability work admissible. Trusted Computer handback, persistent Computer scripts and the remaining
 two-design capabilities are separate work; complete IPC and platform acceptance remain open.
+The subsequent [trusted Computer control slice](runtime-computer-control-facts-2026-10-11.md)
+closes the handback capability; persistent scripts remain separate.
 
 ## Common contract and actual consumers
 

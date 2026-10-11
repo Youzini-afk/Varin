@@ -65,7 +65,10 @@ pub(super) fn delegated_source_lineage(
         let Some(raw) = raw else { return Ok(None) };
         let current: delegated::DelegatedExecution = serde_json::from_str(&raw)?;
         let (previous_id, previous_run_id) = match &current.trigger {
-            delegated::DelegatedTrigger::Followup {
+            delegated::DelegatedTrigger::ComputerEvent {
+                previous_execution_id, previous_run_id, ..
+            }
+            | delegated::DelegatedTrigger::Followup {
                 previous_execution_id,
                 previous_run_id,
                 ..

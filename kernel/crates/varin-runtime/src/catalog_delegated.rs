@@ -43,6 +43,14 @@ pub enum DelegatedTrigger {
         previous_run_revision: u64,
         expected_head: Option<String>,
     },
+    ComputerEvent {
+        event_id: String,
+        input_id: String,
+        previous_execution_id: String,
+        previous_run_id: String,
+        previous_run_revision: u64,
+        expected_head: Option<String>,
+    },
     MessageRequest {
         message_id: String,
         previous_execution_id: String,
@@ -326,6 +334,7 @@ impl DelegatedExecutionRead {
             input: if matches!(
                 execution.trigger,
                 DelegatedTrigger::MessageRequest { .. }
+                    | DelegatedTrigger::ComputerEvent { .. }
                     | DelegatedTrigger::Followup { .. }
                     | DelegatedTrigger::Calendar { .. }
             ) {
@@ -462,9 +471,13 @@ impl ChildContinuationPreparation {
                     RuntimeError::Conflict("previous immutable source is unavailable".into())
                 })?;
                 if matches!(source, ChildSource::Absent) {
-                    if previous.launch.source.is_some() || previous.source_basis.is_some()
-                        || previous.code_result != ChildCodeResult::NotApplicable {
-                        return Err(RuntimeError::Conflict("source-free predecessor has file state".into()));
+                    if previous.launch.source.is_some()
+                        || previous.source_basis.is_some()
+                        || previous.code_result != ChildCodeResult::NotApplicable
+                    {
+                        return Err(RuntimeError::Conflict(
+                            "source-free predecessor has file state".into(),
+                        ));
                     }
                     return Ok(None);
                 }
@@ -484,11 +497,14 @@ impl ChildContinuationPreparation {
                     _ => pin.root.clone(),
                 };
                 let resources = provenance.get("resources").cloned();
-                self.content.save(&serde_json::to_value(
-                    collaboration::ChildSourceProvenance::FixedRoot { root, resources },
-                )?).map(Some)
+                self.content
+                    .save(&serde_json::to_value(
+                        collaboration::ChildSourceProvenance::FixedRoot { root, resources },
+                    )?)
+                    .map(Some)
             })
-            .transpose()?.flatten();
+            .transpose()?
+            .flatten();
         let selection = self
             .launch
             .as_ref()
@@ -644,7 +660,12 @@ impl Catalog {
         // business effect remains Unknown. Native synchronous writes were quiesced
         // by that result's existing Storage publication owner; independently-lived
         // processes and Host source callbacks still require their original stop receipt.
-        if writers.as_ref().map(|writers| self.child_writers_stopped(writers)).transpose()? == Some(false) {
+        if writers
+            .as_ref()
+            .map(|writers| self.child_writers_stopped(writers))
+            .transpose()?
+            == Some(false)
+        {
             if prepared.ingress.is_some() {
                 return Err(RuntimeError::RequestActivationHeld);
             }
@@ -665,10 +686,15 @@ impl Catalog {
         })?;
         let absent = matches!(source, ChildSource::Absent);
         let basis = if absent {
-            if previous.launch.source.is_some() || launch.selection.source.is_some()
-                || previous.source_basis.is_some() || prepared.provenance_ref.is_some()
-                || previous.code_result != ChildCodeResult::NotApplicable {
-                return Err(RuntimeError::Conflict("source-free predecessor has file state".into()));
+            if previous.launch.source.is_some()
+                || launch.selection.source.is_some()
+                || previous.source_basis.is_some()
+                || prepared.provenance_ref.is_some()
+                || previous.code_result != ChildCodeResult::NotApplicable
+            {
+                return Err(RuntimeError::Conflict(
+                    "source-free predecessor has file state".into(),
+                ));
             }
             None
         } else {
@@ -702,7 +728,10 @@ impl Catalog {
                 ChildCodeResult::Unavailable {
                     effect: Effect::None,
                     ..
-                } if self.child_file_effect_bound(writers.as_ref().expect("captured file writer bindings"))? == Effect::None => {
+                } if self.child_file_effect_bound(
+                    writers.as_ref().expect("captured file writer bindings"),
+                )? == Effect::None =>
+                {
                     ChildSourceBasis::ImmutableSource {
                         source: pin.source.clone(),
                         root: pin.root.clone(),
@@ -743,16 +772,12 @@ impl Catalog {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
         let pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM delegated_executions WHERE child_operation_id=?1 AND run_id IS NULL AND json_extract(body,'$.report') IS NULL AND json_extract(body,'$.cancel_requested')=0)",[&child.operation_id],|row|row.get(0))?;
-        let latest_run: String = tx.query_row(
-            "SELECT id FROM runs WHERE branch_id=?1 ORDER BY rowid DESC LIMIT 1",
-            [&child.child_branch_id],
-            |row| row.get(0),
-        )?;
+        let latest_run = activation::latest_run(&tx, &child.child_branch_id)?;
         if head != prepared.command.expected_head
             || head != previous.terminal_head
             || active.is_some()
             || pending
-            || latest_run != run.id
+            || latest_run.as_ref().map(|run| &run.id) != Some(&run.id)
         {
             if prepared.ingress.is_some() {
                 return Err(RuntimeError::RequestActivationStale);
@@ -794,6 +819,16 @@ impl Catalog {
                         previous_run_revision: run.revision,
                         expected_head: head.clone(),
                     },
+                    inputs::InputOrigin::ComputerEvent { fact, .. } => {
+                        DelegatedTrigger::ComputerEvent {
+                            event_id: fact.id.clone(),
+                            input_id: row.id.clone(),
+                            previous_execution_id: previous.execution_id.clone(),
+                            previous_run_id: run.id.clone(),
+                            previous_run_revision: run.revision,
+                            expected_head: head.clone(),
+                        }
+                    }
                     inputs::InputOrigin::Message { .. } => DelegatedTrigger::MessageRequest {
                         message_id: row.id.clone(),
                         previous_execution_id: previous.execution_id.clone(),
@@ -950,7 +985,8 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
             DelegatedTrigger::Dispatch => None,
             DelegatedTrigger::UserContinuation { key, .. } => Some(key.as_str()),
             DelegatedTrigger::MessageRequest { message_id, .. } => Some(message_id.as_str()),
-            DelegatedTrigger::Followup { input_id, .. }
+            DelegatedTrigger::ComputerEvent { input_id, .. }
+            | DelegatedTrigger::Followup { input_id, .. }
             | DelegatedTrigger::Calendar { input_id, .. } => Some(input_id.as_str()),
         };
         let family = relation(db, &child)?;
@@ -976,11 +1012,14 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
                 "malformed original dispatch execution; user data was preserved".into(),
             ));
         }
-        if matches!(execution.source, Some(ChildSource::Absent)) != (execution.code_result == ChildCodeResult::NotApplicable)
+        if matches!(execution.source, Some(ChildSource::Absent))
+            != (execution.code_result == ChildCodeResult::NotApplicable)
             || (matches!(execution.source, Some(ChildSource::Absent))
                 && (execution.source_basis.is_some() || execution.launch.source.is_some()))
         {
-            return Err(RuntimeError::Invalid("malformed source-free execution; user data was preserved".into()));
+            return Err(RuntimeError::Invalid(
+                "malformed source-free execution; user data was preserved".into(),
+            ));
         }
         if execution.execution_id != id
             || execution.child_operation_id != child

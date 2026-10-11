@@ -11,7 +11,7 @@ import { parseComputerAutomationInvalidation, type ComputerWorkRef, type Compute
 import { createComputerRuntime } from './computer-runtime.js';
 import { withToolInvocation } from './tool-invocation.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
-import type { KernelRecordResult, ToolOrigin, ComputerRequestRecord } from './protocol.generated.js';
+import type { KernelRecordResult, ToolOrigin, ComputerRequestRecord, ComputerEventCommand, ComputerEventCancellation } from './protocol.generated.js';
 
 const work = (threadId = 'root'): ComputerWorkRef => ({ runtime: 'agent', threadId, branchId: `${threadId}-branch` });
 const owner = { extensionId: 'varin.builtin.computer', extensionVersion: '1.0.0', entrypointId: 'host', generation: 1 };
@@ -23,6 +23,8 @@ async function fixture(records = new Map<string, KernelRecordResult>()) {
   const failedRuns = new Set<string>();
   const requestFacts: ComputerRequestRecord[] = [], invalidations: ComputerAutomationInvalidation[] = [];
   let requestBodyFailure = false, requestBodyReads = 0;
+  let transferFailure = false, ackLoss = false, cancelFailure = false;
+  const controlFacts = new Map<string, ComputerEventCommand>(), controlCancels: ComputerEventCancellation[] = [];
   const toolReleased = new Set<() => void>(), ready = new Set<() => void>(), events = new Set<(event: { stream: 'durable'; cursor: number }) => void>();
   const observe = <T>(set: Set<T>, listener: T) => { set.add(listener); return () => { set.delete(listener); }; };
   const input = deferred<DriverResponse>(), started = deferred<void>();
@@ -57,6 +59,21 @@ async function fixture(records = new Map<string, KernelRecordResult>()) {
       if (method === 'runtime.computer.request.list') { requestBodyReads++; if (requestBodyFailure) throw new Error('controlled request body failure'); return requestFacts.map(request => ({ request: structuredClone(request), reason: 'Original request reason', detail: null })); }
       if (method === 'runtime.computer.request.reconcile') return structuredClone(requestFacts);
       if (method === 'runtime.computer.request.cancel') return null;
+      if (method === 'runtime.computer.event.cancel') {
+        if (cancelFailure) throw new Error('controlled short cancellation unavailable');
+        controlCancels.push(structuredClone(params as unknown as ComputerEventCancellation));
+        return null;
+      }
+      if (method === 'runtime.computer.event.accept') {
+        if (transferFailure) throw new Error('controlled fact body unavailable');
+        const command = params as unknown as ComputerEventCommand;
+        const id = `${command.fact.kind}:${command.fact.id}`;
+        if (controlFacts.has(id)) assert.deepEqual(command, controlFacts.get(id));
+        else controlFacts.set(id, structuredClone(command));
+        deliveries++;
+        if (ackLoss) throw new Error('controlled acceptance ACK lost');
+        return { eventId: id, inputIds: [`${id}:actor`], cursor: controlFacts.size };
+      }
       if (method === 'runtime.run.inspect') return runRecord(params.runId!);
       assert.equal(method, 'runtime.computer.scope');
       assert.equal(params.branchId, `${params.threadId}-branch`);
@@ -72,7 +89,8 @@ async function fixture(records = new Map<string, KernelRecordResult>()) {
     run: async (id: string) => { const run = runRecord(id); if (terminal) for (const listener of toolReleased) listener(); return run; } };
 
   const computers = createComputerService({ client: kernel as never, hostId: 'host', platform: 'windows', dataDir, createDriver: () => driver,
-    onHandback: async () => { deliveries++; },
+    onControlEvent: async event => { await computer.acceptControlEvent(event); },
+    onControlEventCancel: command => computer.cancelControlEvents(command),
     onAutomationInvalidated: event => { invalidations.push(parseComputerAutomationInvalidation(event)); },
     resolveActor: async ref => ref.runtime === 'agent' ? (await computer.resolve(ref)).actor : {
       execution: { work: ref, runId: 'pi-run' }, rootWork: ref, rootExecution: { work: ref, runId: 'pi-run' }, registry: { scopeId: 'scope', threadId: 'pi' }, label: 'Pi', roleAccess: { kind: 'pi-role', readOnly: false } },
@@ -93,6 +111,8 @@ async function fixture(records = new Map<string, KernelRecordResult>()) {
     return { content, receipt };
   }
   return { computer, computers, calls, records, invoke, started, dataDir, releases: () => releases,
+    controlFacts, controlCancels,
+    failTransfer: (value = true) => { transferFailure = value; }, loseAck: (value = true) => { ackLoss = value; }, failCancel: (value = true) => { cancelFailure = value; },
     requestFacts, invalidations, failRequestBody: () => { requestBodyFailure = true; }, requestBodyReads: () => requestBodyReads,
     durable: () => { for (const listener of events) listener({ stream: 'durable', cursor: 1 }); },
     failRestore: () => { failList = true; },
@@ -111,7 +131,7 @@ test('obsolete desktop stays visible and fenced without poisoning healthy work r
     const payload = JSON.parse(original.payloadJson);
     for (const [id, runtime] of [
       ['obsolete', { runtimeVersion: 1, usage: { sessionId: 'legacy', at: '2026-10-11' } }],
-      ['malformed', { runtimeVersion: 3, interrupted: { id: 'old', actor: { sessionId: 'legacy' } } }],
+      ['malformed', { runtimeVersion: 4, interrupted: { id: 'old', actor: { sessionId: 'legacy' } } }],
     ] as const) f.records.set(`computer.desktop:${id}`, { ...structuredClone(original), recordId: `computer.desktop:${id}`,
       payloadJson: JSON.stringify({ ...payload, id, label: id, ...runtime }) });
     const catalog = await f.computers.list();
@@ -287,16 +307,16 @@ test('idle Native work projects exact accepted cleanup and Stop never invents a 
   } finally { await f.cleanup(); }
 });
 
-test('Native handback retains its original pending event without dispatching a Pi notification', async () => {
+test('Native takeover and handback transfer the original typed fact through the runtime consumer', async () => {
   const f = await fixture();
   try {
     await f.invoke('act', { desktopId: 'local-console', action: { kind: 'key', app: 'editor', key: 'enter' } });
     await f.computers.takeover({ desktopId: 'local-console', holderId: 'viewer' });
     await f.computers.handback({ desktopId: 'local-console', holderId: 'viewer' });
-    await assert.rejects(f.computers.reconcileHandbacks(), /Agent handback input is not connected/u);
+    await f.computers.reconcileControlEvents();
     const body = JSON.parse(f.records.get('computer.desktop:local-console')!.payloadJson);
-    assert.equal(body.handbackEvents.length, 1); assert.equal(body.handbackEvents[0].actor.execution.runId, 'root-run');
-    assert.equal(f.deliveries(), 0); assert.equal((await f.computers.control('local-console')).owner, 'agent');
+    assert.equal(body.controlEvents.length, 0);
+    assert.ok(f.deliveries() >= 2); assert.equal((await f.computers.control('local-console')).owner, 'agent');
   } finally { await f.cleanup(); }
 });
 
@@ -387,4 +407,130 @@ test('Native request durable changes and recovery invalidate the original root p
     assert.ok(f.invalidations.length > 0, 'a bad body cannot hide its root invalidation');
     await assert.rejects(f.computer.user.state(work() as never), /controlled request body failure/);
   } finally { await f.cleanup(); }
+});
+
+
+test('original desktop outbox replays the same typed fact after a lost durable ACK and Host reopen', async () => {
+  const records = new Map<string, KernelRecordResult>();
+  const first = await fixture(records);
+  let event: ComputerEventCommand | undefined;
+  try {
+    first.loseAck();
+    await first.invoke('act', { desktopId: 'local-console', action: { kind: 'key', app: 'editor', key: 'enter' } });
+    await first.computers.takeover({ desktopId: 'local-console', holderId: 'viewer' });
+    await first.computers.handback({ desktopId: 'local-console', holderId: 'viewer' });
+    await assert.rejects(first.computers.reconcileControlEvents(), /ACK lost/u);
+    event = [...first.controlFacts.values()][0];
+    assert.ok(event);
+    const body = JSON.parse(records.get('computer.desktop:local-console')!.payloadJson);
+    assert.ok(body.controlEvents.length >= 2);
+    assert.equal(body.controlEvents.find((entry: { kind: string }) => entry.kind === 'handback').releaseConfirmed, true);
+  } finally { await first.cleanup(); }
+  const second = await fixture(records);
+  try {
+    await second.computers.reconcileControlEvents();
+    assert.deepEqual(second.controlFacts.get(`${event!.fact.kind}:${event!.fact.id}`), event);
+    assert.equal(JSON.parse(records.get('computer.desktop:local-console')!.payloadJson).controlEvents.length, 0);
+    assert.ok([...second.controlFacts.values()].some(entry => entry.fact.kind === 'handback'));
+  } finally { await second.cleanup(); }
+});
+
+test('physical Stop and its durable exact handback cancellation survive unavailable fact bodies and restart', async () => {
+  const records = new Map<string, KernelRecordResult>();
+  const first = await fixture(records);
+  let handbackId = '';
+  try {
+    first.failTransfer();
+    await first.invoke('act', { desktopId: 'local-console', action: { kind: 'key', app: 'editor', key: 'enter' } });
+    await first.computers.takeover({ desktopId: 'local-console', holderId: 'viewer' });
+    await first.computers.handback({ desktopId: 'local-console', holderId: 'viewer' });
+    await assert.rejects(first.computers.reconcileControlEvents(), /fact body/u);
+    let body = JSON.parse(records.get('computer.desktop:local-console')!.payloadJson);
+    handbackId = body.controlEvents.find((entry: { kind: string }) => entry.kind === 'handback').id;
+    first.failCancel();
+    const stopped = await first.computer.user.stop(work() as never, { runId: 'root-run', desktopId: 'local-console' });
+    assert.equal(stopped.state.status, 'cancel-unconfirmed');
+    assert.ok(first.releases() > 0);
+    body = JSON.parse(records.get('computer.desktop:local-console')!.payloadJson);
+    assert.equal(body.physicalControl, null, 'failed metadata does not undo confirmed physical cleanup');
+    assert.ok(body.controlCancellations.some((entry: { pendingEventIds: string[] }) => entry.pendingEventIds.includes(handbackId)));
+    first.failTransfer(false);
+    await assert.rejects(first.computers.reconcileControlEvents(), /short cancellation/u);
+    assert.equal(first.controlFacts.size, 0, 'body recovery cannot overtake the pending exact Stop');
+  } finally { await first.cleanup(); }
+  const second = await fixture(records);
+  try {
+    await second.computers.reconcileControlEvents();
+    assert.ok(second.controlCancels.some(command => command.pendingEventIds.includes(handbackId)));
+    const body = JSON.parse(records.get('computer.desktop:local-console')!.payloadJson);
+    assert.deepEqual(body.controlCancellations, []); assert.deepEqual(body.controlEvents, []);
+    assert.ok([...second.controlFacts.values()].some(entry => entry.fact.kind === 'cancel'));
+  } finally { await second.cleanup(); }
+});
+
+test('natural Native completion retains only handoff provenance for later handback and exact idle Stop', async () => {
+  for (const stopBeforeReturn of [false, true]) {
+    const f = await fixture();
+    try {
+      await f.invoke('act', { desktopId: 'local-console', action: { kind: 'key', app: 'editor', key: 'enter' } });
+      await f.computers.takeover({ desktopId: 'local-console', holderId: 'viewer' });
+      f.terminal(); await f.computer.reconcileExecutions();
+      assert.equal(f.computers.automation.controller('local-console'), null);
+      const original = JSON.parse(f.records.get('computer.desktop:local-console')!.payloadJson).interrupted;
+      assert.equal(original.actor.execution.runId, 'root-run');
+      const denied = await f.invoke('act', { desktopId: 'local-console', action: { kind: 'key', app: 'editor', key: 'enter' } });
+      assert.equal(denied.receipt.completion.kind, 'result');
+      if (denied.receipt.completion.kind === 'result') assert.equal(denied.receipt.completion.effect, 'none');
+      assert.equal(f.computers.automation.controller('local-console'), null);
+      if (!stopBeforeReturn) {
+        await f.computers.handback({ desktopId: 'local-console', holderId: 'viewer' });
+        await f.computers.reconcileControlEvents();
+        assert.equal(f.controlFacts.get(`handback:${original.id}`)?.fact.execution.runId, 'root-run');
+        assert.equal(JSON.parse(f.records.get('computer.desktop:local-console')!.payloadJson).interrupted.returned, true);
+        assert.equal((await f.computers.control('local-console')).operator, undefined);
+      }
+      const control = await f.computers.control('local-console');
+      if (!stopBeforeReturn) {
+        f.failCancel();
+        const pending = await f.computers.stopDesktop({ desktopId: 'local-console', automationEpoch: control.automationEpoch });
+        assert.equal(pending.released, true);
+        assert.equal(pending.control.workStatus, 'cancel-unconfirmed');
+        assert.equal(pending.control.operator?.execution.runId, 'root-run');
+        f.failCancel(false);
+      }
+      const latest = await f.computers.control('local-console');
+      const stopped = await f.computers.stopDesktop({ desktopId: 'local-console', automationEpoch: latest.automationEpoch });
+      assert.equal(stopped.released, true);
+      await f.computers.reconcileControlEvents();
+      assert.ok([...f.controlFacts.values()].filter(command => command.fact.kind === 'cancel').every(command => command.fact.releaseConfirmed));
+      assert.ok(f.controlCancels.some(command => command.execution.runId === 'root-run' && command.pendingEventIds.includes(original.id)));
+      assert.equal(JSON.parse(f.records.get('computer.desktop:local-console')!.payloadJson).interrupted, null);
+      if (stopBeforeReturn) assert.equal(f.controlFacts.has(`handback:${original.id}`), false);
+    } finally { await f.cleanup(); }
+  }
+});
+
+test('reopened idle Thread Stop captures returned handoff after ACK without touching unrelated desktops', async () => {
+  const records = new Map<string, KernelRecordResult>();
+  const first = await fixture(records);
+  let id = '';
+  try {
+    await first.invoke('act', { desktopId: 'local-console', action: { kind: 'key', app: 'editor', key: 'enter' } });
+    await first.computers.takeover({ desktopId: 'local-console', holderId: 'viewer' });
+    first.terminal(); await first.computer.reconcileExecutions();
+    await first.computers.handback({ desktopId: 'local-console', holderId: 'viewer' });
+    await first.computers.reconcileControlEvents();
+    const record = records.get('computer.desktop:local-console')!;
+    id = JSON.parse(record.payloadJson).interrupted.id;
+    records.set('computer.desktop:unrelated', { ...record, recordId: 'computer.desktop:unrelated', payloadJson: JSON.stringify({ ...JSON.parse(record.payloadJson), id: 'unrelated', runtimeVersion: 1 }) });
+  } finally { await first.cleanup(); }
+  const second = await fixture(records);
+  second.terminal();
+  try {
+    const unrelated = records.get('computer.desktop:unrelated');
+    const stopped = await second.computer.user.stop(work() as never, { runId: 'root-run' });
+    assert.equal(stopped.state.currentExecution, null);
+    assert.ok(second.controlCancels.some(command => command.pendingEventIds.includes(id)));
+    assert.equal(records.get('computer.desktop:unrelated'), unrelated);
+  } finally { await second.cleanup(); }
 });

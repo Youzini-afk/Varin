@@ -1,5 +1,34 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
 
+export type ComputerEventKind = 'takeover' | 'cancel' | 'handback';
+
+export interface ComputerEventFact {
+  id: string;
+  kind: ComputerEventKind;
+  desktopId: string;
+  execution: ComputerRequestExecution;
+  at: string;
+  releaseConfirmed: boolean;
+}
+
+export interface ComputerEventCommand {
+  fact: ComputerEventFact;
+  label: string;
+}
+
+export interface ComputerEventCancellation {
+  id: string;
+  execution: ComputerRequestExecution;
+  desktopId: string;
+  pendingEventIds: string[];
+}
+
+export interface ComputerEventReceipt {
+  eventId: string;
+  inputIds: string[];
+  cursor: number;
+}
+
 export interface ComputerRequestExecution {
   threadId: string;
   branchId: string;
@@ -2083,7 +2112,7 @@ export interface ChildExecutionReportReadParams {
   maxBytes?: number;
 }
 
-export type DelegatedExecutionTrigger = { kind: 'dispatch' } | { kind: 'user_continuation'; key: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'message_request'; message_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'followup'; followup_id: string; occurrence_id: string; input_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'calendar'; definition_id: string; occurrence_id: string; input_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null };
+export type DelegatedExecutionTrigger = { kind: 'dispatch' } | { kind: 'user_continuation'; key: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'computer_event'; event_id: string; input_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'message_request'; message_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'followup'; followup_id: string; occurrence_id: string; input_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'calendar'; definition_id: string; occurrence_id: string; input_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null };
 
 export type ChildSourceBasis = { kind: 'working_result'; source: LaunchSource; root: string; provenance: ChildSourceProvenance; result: ChildWorkingResultRef } | { kind: 'immutable_source'; source: LaunchSource; root: string; provenance: ChildSourceProvenance; pin: ChildSourcePin };
 

@@ -18,6 +18,8 @@ export function createComputerAutomation(options: {
   resolveActor(work: ComputerWorkRef): Promise<ComputerActor | null>;
   resolveScope(work: ComputerWorkRef): Promise<ComputerWorkScope | null>;
   pendingReleases?(): readonly { actor: ComputerActor; desktopId: string }[];
+  /** Original handoff/outbox provenance only; never an assignment or physical cleanup. */
+  pendingControlFacts?(): readonly { actor: ComputerActor; desktopId: string }[];
   reserve?(lease: ComputerLease, signal: AbortSignal): Promise<void>;
   describeDesktop?(desktopId: string): Promise<string>;
   release(lease: ComputerLease): Promise<{ released: boolean }>;
@@ -25,7 +27,8 @@ export function createComputerAutomation(options: {
   notify(actor: ComputerActor, text: string, wake: boolean, id: string, recipient?: 'actor' | 'root'): Promise<void>;
   revokeSession(actor: ComputerActor): Promise<void>;
   bindDesktop(actor: ComputerActor, desktopId: string): Promise<void>;
-  cancelWork?(actor: ComputerActor, desktopId?: string): Promise<void>;
+  cancelWork?(actor: ComputerActor, desktopIds: readonly string[], cancellationId: string): Promise<void>;
+  notifyCancelled?(actor: ComputerActor, desktopIds: readonly string[], cancellationId: string): Promise<void>;
   onChange(state: ComputerAutomationState): void;
   onInvalidate?(work: ComputerWorkRef): void;
 }) {
@@ -262,7 +265,7 @@ export function createComputerAutomation(options: {
   };
   const cancelWork = async (actor: ComputerActor, desktopId?: string, exact = false) => {
     const key = exact ? `execution:${actorKey(actor)}${desktopId ? `\0${desktopId}` : ''}` : workKey(actor, desktopId);
-    const accepted = [...leases.values(), ...failedReleases.values(), ...controllers.values(), ...(options.pendingReleases?.() ?? [])];
+    const accepted = [...leases.values(), ...failedReleases.values(), ...controllers.values(), ...(options.pendingReleases?.() ?? []), ...(options.pendingControlFacts?.() ?? [])];
     const captured = new Set(accepted.filter(entry => actor.execution.work.runtime === 'agent' && rootActor(actor) && sameFamily(entry.actor, actor)).map(entry => actorKey(entry.actor)));
     const belongs = (candidate: ComputerActor, target?: string) => (exact ? actorKey(candidate) === actorKey(actor) : actor.execution.work.runtime === 'agent' ? actorKey(candidate) === actorKey(actor) || captured.has(actorKey(candidate)) : roundKey(candidate) === roundKey(actor)) && (!desktopId || target === desktopId);
     const ongoing = cancellations.get(key);
@@ -278,6 +281,8 @@ export function createComputerAutomation(options: {
     }
     const requestCancellation = actor.execution.work.runtime === 'agent' ? nativeRequests?.cancel(actor, desktopId, !exact && rootActor(actor)) : undefined;
     const affected = [...leases.values(), ...failedReleases.values()].filter(lease => belongs(lease.actor, lease.desktopId));
+    const desktopsFor = (recipient: ComputerActor) => [...new Set(accepted.filter(entry => belongs(entry.actor, entry.desktopId)
+      && actorKey(entry.actor) === actorKey(recipient)).flatMap(entry => entry.desktopId ? [entry.desktopId] : []))];
     const participants = accepted.filter(entry => belongs(entry.actor, entry.desktopId)).map(entry => entry.actor);
     const recipients = new Map([[actorKey(actor), actor], ...participants.map(caller => [actorKey(caller), caller] as const)]);
     for (const { actor: caller, abort, desktopId: target } of controllers.values()) if (belongs(caller, target)) abort.abort(new Error('User cancelled the current computer work'));
@@ -287,12 +292,10 @@ export function createComputerAutomation(options: {
       // Original physical cleanup starts independently of Catalog cancellation or identity reads.
       // Drain live leases first, then retry only the already-captured physical marker owners.
       const physical = (async () => {
-        const results = await Promise.allSettled(affected.map(removeLease));
-        if (options.cancelWork) results.push(...await Promise.allSettled(
-          (actor.execution.work.runtime === 'agent' ? [...recipients.values()] : [actor])
-            .map(recipient => options.cancelWork!(recipient, desktopId)),
-        ));
-        return results;
+        const leases = affected.map(removeLease);
+        const owners = options.cancelWork ? (actor.execution.work.runtime === 'agent' ? [...recipients.values()] : [actor])
+          .map(recipient => options.cancelWork!(recipient, desktopsFor(recipient), cancellationId)) : [];
+        return Promise.allSettled([...leases, ...owners]);
       })();
       const metadata = Promise.allSettled([
         ...(requestCancellation ? [requestCancellation] : []),
@@ -307,7 +310,12 @@ export function createComputerAutomation(options: {
       else cancellationState.delete(key);
       publish(actor);
       const notices = await Promise.allSettled([...recipients.values()].map(async recipient => {
-        if (recipient.execution.work.runtime !== 'pi' || !await isCurrent(recipient)) return;
+        if (recipient.execution.work.runtime === 'agent') {
+          const desktopIds = desktopsFor(recipient);
+          if (options.notifyCancelled) await options.notifyCancelled(recipient, desktopIds, cancellationId);
+          return;
+        }
+        if (!await isCurrent(recipient)) return;
         await options.notify(recipient,
           `The user manually cancelled the current computer work. ${unconfirmed ? 'Input release has not been confirmed.' : 'The work was cancelled; already-dispatched actions may have left partial effects.'} Computer Use permissions are unchanged.`,
           false, `cancel:${cancellationId}:${computerExecutionKey(recipient.execution)}`);
@@ -323,13 +331,17 @@ export function createComputerAutomation(options: {
     const accepted = [...leases.values(), ...failedReleases.values()].filter(lease => !desktopId || lease.desktopId === desktopId).map(lease => lease.actor);
     accepted.push(...[...controllers.values()].filter(entry => !desktopId || entry.desktopId === desktopId).map(entry => entry.actor));
     accepted.push(...(options.pendingReleases?.() ?? []).filter(entry => !desktopId || entry.desktopId === desktopId).map(entry => entry.actor));
+    accepted.push(...(options.pendingControlFacts?.() ?? []).filter(entry => !desktopId || entry.desktopId === desktopId).map(entry => entry.actor));
     accepted.push(...[...lastActors.values()].filter(actor => Boolean(statusFor(actor, desktopId))));
     let actor = accepted.find(candidate => !originFor(candidate) && sameComputerExecution(candidate.execution, execution));
     if (!actor) {
       const scope = await options.resolveScope(execution.work);
       if (!scope) throw new ComputerError('computer-work-not-found', 'The selected Computer Use work no longer exists; reopen the conversation');
-      const current = await options.resolveActor(execution.work);
-      if (current && sameComputerExecution(current.execution, execution)) actor = current;
+      actor = (options.pendingControlFacts?.() ?? []).find(entry => (!desktopId || entry.desktopId === desktopId) && sameComputerExecution(entry.actor.execution, execution))?.actor;
+      if (!actor) {
+        const current = await options.resolveActor(execution.work);
+        if (current && sameComputerExecution(current.execution, execution)) actor = current;
+      }
     }
     if (!actor) throw new ComputerError('computer-execution-stale', 'This execution has no remaining Computer Use cleanup; refresh the conversation before stopping its current Run');
     await cancelWork(actor, desktopId, !rootActor(actor));
@@ -402,8 +414,8 @@ export function createComputerAutomation(options: {
       await cancelWork(actor, desktopId, !rootActor(actor));
     },
     context, invalidate, authorize, request: accessRequest, decide, wait, release, stop, finishRun, snapshot, isCurrent,
-    async cancelDesktop(desktopId: string) {
-      const actor = owner(desktopId)?.actor ?? [...failedReleases.values()].find(lease => lease.desktopId === desktopId)?.actor;
+    async cancelDesktop(desktopId: string, captured?: ComputerActor) {
+      const actor = owner(desktopId)?.actor ?? [...failedReleases.values()].find(lease => lease.desktopId === desktopId)?.actor ?? captured;
       if (!actor) return;
       await cancelWork(actor, desktopId);
     },
@@ -418,6 +430,10 @@ export function createComputerAutomation(options: {
       return targets[0] ?? null;
     },
     cancellationStatus: statusFor,
+    physicalReleaseConfirmed(actor: ComputerActor, desktopId: string) {
+      return ![...failedReleases.values(), ...(options.pendingReleases?.() ?? [])]
+        .some(entry => entry.desktopId === desktopId && sameComputerExecution(entry.actor.execution, actor.execution));
+    },
     delegation: (lease: ComputerLease) => { const entry = delegationFor(lease.actor); return entry ? { origin: entry.origin, assignmentId: entry.assignmentId } : null; },
     setHumanControl(desktopId: string, human: boolean) {
       for (const lease of leases.values()) if (lease.desktopId === desktopId && lease.access === 'control') {

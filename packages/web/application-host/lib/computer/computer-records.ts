@@ -9,13 +9,30 @@ export interface ComputerPhysicalControl {
     | { kind: 'human'; holderId: string };
   since: string;
 }
-export interface ComputerInterrupted { id: string; actor: ComputerActor; holderId?: string }
-export interface PendingComputerHandback { id: string; desktopId: string; label: string; at: string; actor: ComputerActor }
+export interface ComputerInterrupted { id: string; actor: ComputerActor; at: string; holderId?: string; returned?: true; notice?: { label: string; releaseConfirmed: boolean } }
+export interface PendingComputerControlEvent {
+  id: string;
+  kind: 'takeover' | 'cancel' | 'handback';
+  desktopId: string;
+  label: string;
+  at: string;
+  actor: ComputerActor;
+  releaseConfirmed: boolean;
+  /** A separate exact Stop command. The original fact above stays immutable. */
+  cancelPending?: true;
+}
+export interface PendingComputerControlCancellation {
+  id: string;
+  actor: ComputerActor;
+  desktopId: string;
+  pendingEventIds: string[];
+}
 export interface ComputerRuntimeRecord {
   usage?: NonNullable<ComputerDesktop['usage']>;
   work?: ComputerWorkAssociation[];
   interrupted?: ComputerInterrupted;
-  handbackEvents: PendingComputerHandback[];
+  controlEvents: PendingComputerControlEvent[];
+  controlCancellations: PendingComputerControlCancellation[];
   physicalControl?: ComputerPhysicalControl;
 }
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -24,12 +41,12 @@ const invalid = (): never => { throw new ComputerError('computer-runtime-record-
 
 export function decodeComputerRuntime(body: Record<string, unknown>): ComputerRuntimeRecord {
   const nonempty = (value: unknown) => value !== undefined && value !== null && (!Array.isArray(value) || value.length > 0);
-  if (body.runtimeVersion !== 3 && ['usage', 'work', 'interrupted', 'handbackEvents', 'physicalControl'].some(key => nonempty(body[key]))) {
+  if (body.runtimeVersion !== 4 && ['usage', 'work', 'interrupted', 'handbackEvents', 'controlEvents', 'controlCancellations', 'physicalControl'].some(key => nonempty(body[key]))) {
     throw new ComputerError('computer-runtime-format-unsupported', 'This desktop has an obsolete internal work/control record; stop its original physical session before resetting its runtime metadata');
   }
-  if (body.runtimeVersion !== undefined && body.runtimeVersion !== 3) return invalid();
+  if (body.runtimeVersion !== undefined && body.runtimeVersion !== 4) return invalid();
   try {
-    const result: ComputerRuntimeRecord = { handbackEvents: [] };
+    const result: ComputerRuntimeRecord = { controlEvents: [], controlCancellations: [] };
     if (body.usage != null) {
       if (!object(body.usage) || !id(body.usage.at)) return invalid();
       result.usage = { execution: parseComputerExecutionRef(body.usage.execution), at: body.usage.at };
@@ -49,14 +66,24 @@ export function decodeComputerRuntime(body: Record<string, unknown>): ComputerRu
     }
     if (body.interrupted != null) {
       const value = body.interrupted;
-      if (!object(value) || !id(value.id) || value.holderId !== undefined && !id(value.holderId)) return invalid();
-      result.interrupted = { id: value.id, actor: parseComputerActor(value.actor), ...(value.holderId === undefined ? {} : { holderId: value.holderId }) };
+      if (!object(value) || !id(value.id) || !id(value.at) || value.holderId !== undefined && !id(value.holderId) || value.returned !== undefined && value.returned !== true) return invalid();
+      if (value.notice !== undefined && (!object(value.notice) || !id(value.notice.label) || typeof value.notice.releaseConfirmed !== 'boolean')) return invalid();
+      result.interrupted = { id: value.id, actor: parseComputerActor(value.actor), at: value.at, ...(value.returned ? { returned: true } : {}), ...(value.notice ? { notice: value.notice as NonNullable<ComputerInterrupted['notice']> } : {}), ...(value.holderId === undefined ? {} : { holderId: value.holderId }) };
     }
-    if (body.handbackEvents != null) {
-      if (!Array.isArray(body.handbackEvents)) return invalid();
-      result.handbackEvents = body.handbackEvents.map((entry): PendingComputerHandback => {
-        if (!object(entry) || !id(entry.id) || !id(entry.desktopId) || !id(entry.label) || !id(entry.at)) return invalid();
-        return { id: entry.id, desktopId: entry.desktopId, label: entry.label, at: entry.at, actor: parseComputerActor(entry.actor) };
+    if (body.controlEvents != null) {
+      if (!Array.isArray(body.controlEvents)) return invalid();
+      result.controlEvents = body.controlEvents.map((entry): PendingComputerControlEvent => {
+        if (!object(entry) || !id(entry.id) || !id(entry.desktopId) || !id(entry.label) || !id(entry.at) || !['takeover', 'cancel', 'handback'].includes(String(entry.kind))
+          || typeof entry.releaseConfirmed !== 'boolean' || entry.cancelPending !== undefined && (entry.cancelPending !== true || entry.kind !== 'handback')) return invalid();
+        return { id: entry.id, kind: entry.kind as PendingComputerControlEvent['kind'], desktopId: entry.desktopId, label: entry.label,
+          at: entry.at, actor: parseComputerActor(entry.actor), releaseConfirmed: entry.releaseConfirmed, ...(entry.cancelPending ? { cancelPending: true } : {}) };
+      });
+    }
+    if (body.controlCancellations != null) {
+      if (!Array.isArray(body.controlCancellations)) return invalid();
+      result.controlCancellations = body.controlCancellations.map((entry): PendingComputerControlCancellation => {
+        if (!object(entry) || !id(entry.id) || !id(entry.desktopId) || !Array.isArray(entry.pendingEventIds) || !entry.pendingEventIds.every(id)) return invalid();
+        return { id: entry.id, actor: parseComputerActor(entry.actor), desktopId: entry.desktopId, pendingEventIds: entry.pendingEventIds };
       });
     }
     if (body.physicalControl != null) {

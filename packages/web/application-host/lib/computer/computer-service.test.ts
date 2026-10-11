@@ -1346,23 +1346,23 @@ describe("computer service work association (BC8)", () => {
       notifyActor: async () => {},
       createDriver: () => makeDriver(async (op) => op.tool === "get_app_state" ? okResponse({ snapshot: appSnapshot() }) : okResponse()),
       resolveWork: async () => ({ scopeId: "bot:b", threadId: "t1" }) };
-    const first = createComputerService({ ...options, onHandback: async (event) => { delivered.push(event.id); throw new Error("Thread unavailable"); } });
+    const first = createComputerService({ ...options, onControlEvent: async (event) => { delivered.push(event.id); throw new Error("Thread unavailable"); } });
     await first.ensureLocal();
     await first.automation.authorize(piWork('s1'), 'control', 'local-console', async () => {});
     await first.observe({ desktopId: "local-console", app: "notepad", sessionId: "s1" });
     const unsubscribe = await first.subscribeFrames("local-console", "viewer", () => {}, { frames: false });
     await first.takeover({ desktopId: "local-console", holderId: "viewer" });
     await first.handback({ desktopId: "local-console", holderId: "viewer" });
-    await first.reconcileHandbacks().catch(() => undefined);
+    await first.reconcileControlEvents().catch(() => undefined);
     unsubscribe();
     await first.dispose();
-    const resumed = createComputerService({ ...options, onHandback: async (event) => { delivered.push(event.id); } });
-    await resumed.reconcileHandbacks();
-    await resumed.reconcileHandbacks();
+    const resumed = createComputerService({ ...options, onControlEvent: async (event) => { delivered.push(event.id); } });
+    await resumed.reconcileControlEvents();
+    await resumed.reconcileControlEvents();
     expect(delivered.length).toBeGreaterThanOrEqual(2);
     expect(new Set(delivered).size).toBe(1);
     const record = kernel.records.get("__varin_computers__:computer.desktop:local-console");
-    expect(JSON.parse(record!.payloadJson).handbackEvents).toEqual([]);
+    expect(JSON.parse(record!.payloadJson).controlEvents).toEqual([]);
     await resumed.dispose();
   });
 

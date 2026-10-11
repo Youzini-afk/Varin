@@ -759,7 +759,7 @@ impl Fixture {
                 call_id: call.call_id,
                 completion: ToolCompletion::JobAccepted {
                     content: None,
-                operation_id: context.operation_id.clone(),
+                    operation_id: context.operation_id.clone(),
                     phase: "awaiting_child".into(),
                     effect: Effect::None,
                     lifetime: Lifetime::Thread,
@@ -893,7 +893,7 @@ impl Fixture {
         };
         let completion = ToolCompletion::JobAccepted {
             content: None,
-                operation_id: context.operation_id.clone(),
+            operation_id: context.operation_id.clone(),
             phase: phase.into(),
             effect: Effect::None,
             lifetime: Lifetime::Thread,
