@@ -154,6 +154,18 @@ impl Storage {
         lease_id: Option<&str>,
     ) -> Result<(), KernelError> {
         let requested = self.canonical_lease_resources(root_id, paths, grant)?;
+        self.assert_canonical_file_lease(grant, root_id, &requested, lease_id)
+    }
+
+    /// Admission and retention use one resolved physical identity. A second path
+    /// resolution between overlap checking and insertion could switch aliases.
+    pub(super) fn assert_canonical_file_lease(
+        &self,
+        grant: &Grant,
+        root_id: &str,
+        requested: &[CanonicalFileLeaseResource],
+        lease_id: Option<&str>,
+    ) -> Result<(), KernelError> {
         if let Some(lease_id) = lease_id {
             let lease = self.active_file_worker_lease(grant, root_id, lease_id)?;
             if requested.iter().any(|resource| {

@@ -226,8 +226,12 @@ retain that same source lease until the real response. Cancellation sends contro
 for the worker acknowledgement; transport loss remains unknown, with reconciliation checking the
 original lease rather than claiming drain. Ordinary scan/measure reads need no new lease. Pagination
 still rescans the path inventory; its fingerprint is neither a content hash nor an OS snapshot. No file
-bytes are copied or hashed by the TypeScript control owner. The local artifact backend's single-file
-`file.capture` body path remains a separate synchronous Storage boundary.
+bytes are copied or hashed by the TypeScript control owner. Local artifact collection uses the same
+independent single-file capture reader and original blob owner as FileResourceBackend. Its ordinary
+unbound capture retains an exact native physical lease while reading; the backend waits for the real
+capture response before releasing its process/grant. A disconnected client cannot reuse its old scoped
+handle to release native ownership in a new epoch. Existing mutation/reconciliation observations remain
+synchronous; worker capture does not claim those separate handlers have also been isolated.
 
 Cancellation first commits `cancelRequested`/`stopping` through a short record update. It does not
 wait behind preparation, spawn, or workspace reconciliation. The original worker/late dispatch receipt

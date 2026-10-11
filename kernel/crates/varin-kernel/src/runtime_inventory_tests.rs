@@ -118,6 +118,10 @@ impl Fixture {
             .handle(&request, cancel.clone(), &self.tx)
             .unwrap()
             .is_none());
+        assert!(
+            pending_file_worker(method),
+            "production loop would discard the active cancellation identity"
+        );
         (request, cancel)
     }
     fn receive(
@@ -592,3 +596,7 @@ fn file_inventory_bound_scope_rejects_parent_symlink_retarget_during_walk() {
         matches!(f.finish(), Err(KernelError::Authorization(message)) if message.contains("outside the held lease"))
     );
 }
+
+// The same real Kernel fixture exercises body workers as well as metadata workers.
+#[path = "runtime_capture_tests.rs"]
+mod captures;

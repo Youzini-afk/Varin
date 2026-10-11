@@ -8,6 +8,7 @@ Last updated: 2026-10-11
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [单文件 capture 与实际正文消费者（2026-10-11）](runtime-file-capture-2026-10-11.md) | 共同 reader、原物理 lease、正文安装/owner、取消及原 gate/backend 消费 |
 | [文件 inventory 与真实 reader 排空（2026-10-11）](runtime-file-inventory-2026-10-11.md) | 原 scan/measure 锁外遍历、取消与 source lease 寿命；分层组件验收 |
 | [原生研究作业与真实领域消费者（2026-10-11）](runtime-research-jobs-2026-10-11.md) | 原 Job/Wait/User 与实验 owner、精确来源/grant、产物独立收集和共享 UI；完整 Host IPC 待验 |
 | [实验短受理与真实排空（2026-10-11）](runtime-experiment-admission-2026-10-11.md) | 原实验/资源 owner、异步准备、取消恢复与 Pi/User 消费；独立七条反例修后通过 |

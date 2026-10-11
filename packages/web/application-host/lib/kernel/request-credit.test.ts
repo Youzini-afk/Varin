@@ -59,12 +59,14 @@ it('keeps an aborted admitted input until its original effect response after cre
   f.finish(0); await drained; expect(idle).toBe(true);
 });
 
-it.each(['capture', 'materialize', 'scan', 'measure'] as const)('retains the %s worker promise until its original completion while control remains available', async kind => {
+it.each(['capture', 'single-capture', 'materialize', 'scan', 'measure'] as const)('retains the %s worker promise until its original completion while control remains available', async kind => {
   const f = fixture(); const controller = new AbortController();
   const grant = f.owner.grantFromResponse({ grant_id: 'preparation', kernel_epoch: 'epoch' });
   let settled = false;
   const work = (kind === 'capture'
     ? f.client.fileCaptureBatch({ operationId: 'capture', workspaceId: 'workspace', rootId: 'root', paths: ['input'], leaseId: 'input-lease', store: true }, grant, controller.signal)
+    : kind === 'single-capture'
+      ? f.client.fileCapture({ operationId: 'single', workspaceId: 'workspace', rootId: 'root', path: 'input', store: true }, grant, controller.signal)
     : kind === 'materialize'
       ? f.client.fileMaterialize({ operationId: 'materialize', workspaceId: 'workspace', rootId: 'root', path: 'attempt', sourceRoot: 'source' }, grant, controller.signal)
       : kind === 'scan'
@@ -100,12 +102,14 @@ it.each(['retire', 'revoke'] as const)('%s closes the original grant caller over
 });
 
 
-it.each(['scan', 'measure'] as const)('keeps a disconnected %s distinct from its cancellation acknowledgement', async kind => {
+it.each(['scan', 'measure', 'single-capture'] as const)('keeps a disconnected %s distinct from its cancellation acknowledgement', async kind => {
   const f = fixture(); const controller = new AbortController();
   const grant = f.owner.grantFromResponse({ grant_id: 'source', kernel_epoch: 'epoch' });
   const reading = (kind === 'scan'
     ? f.client.fileScan({ workspaceId: 'workspace', rootId: 'root', path: '' }, grant, controller.signal)
-    : f.client.fileMeasure({ workspaceId: 'workspace', rootId: 'root', path: '' }, grant, controller.signal));
+    : kind === 'single-capture'
+      ? f.client.fileCapture({ operationId: 'single', workspaceId: 'workspace', rootId: 'root', path: 'input', store: true }, grant, controller.signal)
+      : f.client.fileMeasure({ workspaceId: 'workspace', rootId: 'root', path: '' }, grant, controller.signal));
   const rejected = expect(reading).rejects.toMatchObject({ code: 'kernel-disconnected' });
   await tick(); controller.abort(); await tick();
   expect(f.owner.pending.size).toBe(1);

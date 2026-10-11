@@ -219,13 +219,7 @@ impl Storage {
             return Err(KernelError::Operation("file resource is busy".into()));
         }
         let result = (|| {
-            let (expected, _) = self.capture_file_state(
-                &resource,
-                false,
-                "observe",
-                workspace_id,
-                &grant.grant_id,
-            )?;
+            let expected = self.capture_file_state(&resource)?;
             let current_version = read_version(grant, root_id, &resource.path, &expected)?;
             if current_version != mutation.read_version() {
                 return Ok(

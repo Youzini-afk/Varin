@@ -38,6 +38,7 @@ interface BoundFileContext extends KernelFileAuthorityContext {
 interface LeaseContext {
   key: string;
   leaseId: string;
+  signal?: AbortSignal;
   observed: Map<string, RecoveryState>;
 }
 
@@ -175,6 +176,11 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
             })),
           });
           options.signal?.throwIfAborted();
+          existing.signal?.throwIfAborted();
+          if (options.signal && options.signal !== existing.signal) {
+            const signal = existing.signal ? AbortSignal.any([existing.signal, options.signal]) : options.signal;
+            return this.leaseContext.run({ ...existing, signal }, operation);
+          }
           return operation();
         }
         if (this.leaseContext.getStore()) {
@@ -184,6 +190,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
         const lease: LeaseContext = {
           key: `${context.owningWorkspaceId}\0${context.rootId}`,
           leaseId,
+          ...(options.signal ? { signal: options.signal } : {}),
           observed: new Map(),
         };
         try {
@@ -221,7 +228,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
       path: relative,
       store: options.store !== false,
       leaseId: lease.leaseId,
-    });
+    }, lease.signal);
     const captured = parseCaptured(value);
     const result: CapturedState & { ownerId?: string } = {
       path: resolved.relative,

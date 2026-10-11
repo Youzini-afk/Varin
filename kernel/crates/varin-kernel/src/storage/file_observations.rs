@@ -560,6 +560,10 @@ impl Storage {
                     root,
                     grant.clone(),
                     r.path.clone(),
+                    self.file_leases
+                        .get(&lease_id)
+                        .expect("admitted observation lease")
+                        .clone(),
                     self.root.clone(),
                     cancel.clone(),
                 )),
