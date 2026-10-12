@@ -5,6 +5,14 @@ use crate::catalog::inference::generation::{
 use crate::catalog::inference::{InferenceProblem, InferenceReceipt, InferenceUsage};
 use crate::execution::{FinishReason, UsageMeasurement};
 
+// Domain unit fixtures publish the original Bot gate on each executor epoch.
+// Production publication is exercised by the BotService stdio review.
+fn open_bot_catalog(path: impl AsRef<std::path::Path>) -> Result<Catalog> {
+    let mut db = Catalog::open(path)?;
+    db.publish_bot_gate(super::super::bot::BotGate { bot_id:"original".into(), profile_revision:1, activity_operation_id:None, permitted:true })?;
+    Ok(db)
+}
+
 fn admission(key: &str, mode: MemoryWorkMode, start: u64) -> MemoryWorkAdmit {
     serde_json::from_value(json!({"key":key,"scopeId":"bot:original","mode":mode,
         "executionOwner":{"kind":"external","identity":"memory.organizer.v1","epoch":"host-one"},
@@ -43,7 +51,7 @@ fn root() -> std::path::PathBuf {
 
 #[test]
 fn work_uses_its_own_run_and_exact_source_claim_without_a_conversation_or_goal() {
-    let mut db = Catalog::open(root()).unwrap();
+    let mut db = open_bot_catalog(root()).unwrap();
     let p = admission("automatic", MemoryWorkMode::Automatic, 0);
     let id = admit(&mut db, &p);
     let view = db.capture_memory_work(&id).unwrap().load().unwrap();
@@ -81,7 +89,7 @@ fn work_uses_its_own_run_and_exact_source_claim_without_a_conversation_or_goal()
 #[test]
 fn recovery_is_read_only_until_explicit_claim_and_old_owner_is_fenced() {
     let path = root();
-    let mut db = Catalog::open(&path).unwrap();
+    let mut db = open_bot_catalog(&path).unwrap();
     let p = admission("recover", MemoryWorkMode::Automatic, 0);
     let id = admit(&mut db, &p);
     change(
@@ -93,7 +101,7 @@ fn recovery_is_read_only_until_explicit_claim_and_old_owner_is_fenced() {
     .unwrap();
     let before = db.operation(&id).unwrap();
     drop(db);
-    let mut db = Catalog::open(&path).unwrap();
+    let mut db = open_bot_catalog(&path).unwrap();
     let after = db.operation(&id).unwrap();
     assert_eq!(before.epoch, after.epoch);
     assert_ne!(after.epoch, db.epoch());
@@ -132,7 +140,7 @@ fn recovery_is_read_only_until_explicit_claim_and_old_owner_is_fenced() {
 #[test]
 fn dispatched_unknown_preserves_frozen_batch_and_cannot_replay_or_block_another_range() {
     let path = root();
-    let mut db = Catalog::open(&path).unwrap();
+    let mut db = open_bot_catalog(&path).unwrap();
     let p = admission("unknown", MemoryWorkMode::Selection, 0);
     let id = admit(&mut db, &p);
     let request = generation(&p, &id);
@@ -144,7 +152,7 @@ fn dispatched_unknown_preserves_frozen_batch_and_cannot_replay_or_block_another_
     db.dispatch_inference_generation(&inference.operation_id)
         .unwrap();
     drop(db);
-    let mut db = Catalog::open(&path).unwrap();
+    let mut db = open_bot_catalog(&path).unwrap();
     let view = db.capture_memory_work(&id).unwrap().load().unwrap();
     assert_eq!(view.recipe, p.recipe);
     assert_eq!(view.inference[0].effect, Effect::Unknown);
@@ -158,7 +166,7 @@ fn dispatched_unknown_preserves_frozen_batch_and_cannot_replay_or_block_another_
 #[test]
 fn original_generation_receipt_and_batch_survive_consumption_and_observer_ack_retries() {
     let path = root();
-    let mut db = Catalog::open(&path).unwrap();
+    let mut db = open_bot_catalog(&path).unwrap();
     let p = admission("complete", MemoryWorkMode::Selection, 0);
     let id = admit(&mut db, &p);
     let request = generation(&p, &id);
@@ -213,7 +221,7 @@ fn original_generation_receipt_and_batch_survive_consumption_and_observer_ack_re
         crate::ContentCollectionStatus::Completed
     );
     drop(db);
-    let db = Catalog::open(&path).unwrap();
+    let db = open_bot_catalog(&path).unwrap();
     let view = db.capture_memory_work(&id).unwrap().load().unwrap();
     assert_eq!(view.recipe, p.recipe);
     assert!(view.consumed);
@@ -228,7 +236,7 @@ fn original_generation_receipt_and_batch_survive_consumption_and_observer_ack_re
 }
 #[test]
 fn explicit_selection_retry_requires_original_stopped_failure() {
-    let mut db = Catalog::open(root()).unwrap();
+    let mut db = open_bot_catalog(root()).unwrap();
     let p = admission("no-send", MemoryWorkMode::Selection, 0);
     let id = admit(&mut db, &p);
     let mut retry = admission("retry", MemoryWorkMode::Selection, 0);
@@ -273,7 +281,7 @@ fn wake_resumes_only_unsent_generation_and_preserves_completed_decision_and_canc
         InferenceAdmitParams, InferenceOwnerParams, InferenceSettleParams,
     };
     for completed_decision in [false, true] {
-        let mut db = Catalog::open(root()).unwrap();
+        let mut db = open_bot_catalog(root()).unwrap();
         let mut p = admission("wake", MemoryWorkMode::Automatic, 0);
         p.recipe["decisionStatus"] = json!({"status":"ready","binding":{"configurationId":"original-classifier","providerId":"review","modelId":"classifier"}});
         let id = admit(&mut db, &p);
@@ -356,7 +364,7 @@ fn wake_resumes_only_unsent_generation_and_preserves_completed_decision_and_canc
 
 #[test]
 fn explicit_retry_after_confirmed_local_drain_keeps_original_unknown_charge() {
-    let mut db = Catalog::open(root()).unwrap();
+    let mut db = open_bot_catalog(root()).unwrap();
     let p = admission("paid-unknown", MemoryWorkMode::Selection, 0);
     let id = admit(&mut db, &p);
     let request = generation(&p, &id);

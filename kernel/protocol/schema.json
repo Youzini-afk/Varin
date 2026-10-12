@@ -928,7 +928,7 @@
   "framing": "private-control-json-and-data-streams",
   "maxFrameBytes": 16777216,
   "requestWindow": 2,
-  "controlMethods": ["runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status",
+  "controlMethods": ["runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status",
     "runtime.mcp.interaction.inspect",
     "runtime.mcp.interaction.pending",
     "runtime.mcp.interaction.response.begin",
@@ -936,7 +936,7 @@
     "runtime.mcp.interaction.close",
     "runtime.mcp.interaction.complete",
     "runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.source.tools","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"],
-  "controlResponseMethods": ["runtime.inference.session","runtime.inference.generate","runtime.inference.receipt_pending","runtime.inference.admit","runtime.inference.dispatch","runtime.inference.status","runtime.inference.settle",
+  "controlResponseMethods": ["runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.generate","runtime.inference.receipt_pending","runtime.inference.admit","runtime.inference.dispatch","runtime.inference.status","runtime.inference.settle",
     "runtime.mcp.interaction.inspect",
     "runtime.mcp.interaction.pending",
     "runtime.mcp.interaction.response.begin",
@@ -960,6 +960,8 @@
   "response": {"v": 1, "kind": "response", "id": "request-id", "ok": true, "result": {}},
   "requestUnion": true,
   "methodParams": {
+"runtime.bot.gate.publish":"BotExecutionGate","runtime.bot.thread.create":"BotThreadCreateParams","runtime.bot.scope.suspend":"BotScopeSuspension","runtime.bot.scope.status":"BotScopeSuspension","runtime.bot.scope.resume":"BotScopeSuspension",
+
 "runtime.memory_work.admit":"MemoryWorkAdmit",
 "runtime.memory_work.read":"MemoryWorkReadParams",
 "runtime.memory_work.status":"MemoryWorkReadParams",
@@ -1268,6 +1270,8 @@
     "runtime.mcp.resource.release_source": "RunParams"
   },
   "dto": {
+"BotExecutionGate":{"fields":{"botId":{"type":"string"},"profileRevision":{"type":"number"},"activityOperationId":{"type":"string | null"},"permitted":{"type":"boolean"}},"rustType":"varin_runtime::catalog::bot::BotGate"},"BotScopeSuspension":{"fields":{"botId":{"type":"string"},"profileRevision":{"type":"number"},"activityOperationId":{"type":"string"}},"rustType":"varin_runtime::catalog::bot::BotSuspension"},"BotThreadCreateParams":{"fields":{"botId":{"type":"string"},"threadId":{"type":"string"},"branchId":{"type":"string"}}},"BotKernelScopeStatus":{"fields":{"suspension":{"type":"BotScopeSuspension"},"kernelEpoch":{"type":"number"},"sourceProfileRevision":{"type":"number | null"},"currentKernelWorkersDrained":{"type":"boolean"},"unprovenOperationStopIds":{"type":"string[]"},"unknownEffectOperationIds":{"type":"string[]"},"unresolvedModelRequestIds":{"type":"string[]"}},"rustType":"varin_runtime::catalog::bot::BotKernelScopeStatus"},"BotScopeResume":{"fields":{"resumedRunIds":{"type":"string[]"},"blockedRunIds":{"type":"string[]"}},"rustType":"varin_runtime::catalog::bot::BotScopeResume"},
+
 "MemoryWorkMode":{"raw":"export type MemoryWorkMode = 'automatic' | 'selection';","rustType":"varin_runtime::catalog::memory_work::MemoryWorkMode"},
 "MemoryWorkAction":{"raw":"export type MemoryWorkAction = {kind:'claim'} | {kind:'resume'} | {kind:'decision';keep:number[]} | {kind:'finish'} | {kind:'reject'};","rustType":"varin_runtime::catalog::memory_work::MemoryWorkAction"},
 "MemoryWorkClaim":{"fields":{"source":{"type":"string"},"start":{"type":"number"},"end":{"type":"number"}},"rustType":"varin_runtime::catalog::memory_work::MemoryWorkClaim"},
@@ -2517,6 +2521,8 @@
     "OperationInspectParams": {"fields": {"operationId": {"type": "string"}, "allowMissing": {"type": "boolean", "optional": true}}}
   },
   "methods": {
+"runtime.bot.gate.publish":"Private BotService execution projection","runtime.bot.thread.create":"Private BotService execution projection","runtime.bot.scope.suspend":"Private BotService execution projection","runtime.bot.scope.status":"Private BotService execution projection","runtime.bot.scope.resume":"Private BotService execution projection",
+
 "runtime.memory_work.admit":"Private original Bot memory work admit",
 "runtime.memory_work.read":"Private original Bot memory work read",
 "runtime.memory_work.status":"Private original Bot memory control status without content hydration",

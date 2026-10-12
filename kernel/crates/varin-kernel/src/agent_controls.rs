@@ -180,6 +180,14 @@ impl ControlCommands {
     ) -> Result<Value, KernelError> {
         let runtime = &self.runtime;
         match method {
+            "runtime.bot.scope.status" => {
+                let p: varin_runtime::catalog::bot::BotSuspension = serde_json::from_value(params)?;
+                Ok(serde_json::to_value(runtime.bot_scope_status(&p).map_err(|e|KernelError::Operation(e.to_string()))?)?)
+            }
+            "runtime.bot.scope.resume" => {
+                let p: varin_runtime::catalog::bot::BotSuspension = serde_json::from_value(params)?;
+                Ok(serde_json::to_value(runtime.resume_bot_scope(&p).map_err(|e|KernelError::Operation(e.to_string()))?)?)
+            }
             "runtime.followup.control" => {
                 let p: FollowupControlParams = serde_json::from_value(params)?;
                 Ok(serde_json::to_value(

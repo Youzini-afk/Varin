@@ -1023,6 +1023,7 @@ pub enum ModelOutcome {
 #[serde(rename_all = "snake_case")]
 pub enum NonDispatchReason {
     Cancelled,
+    Suspended,
     InputPending,
     GoalChanged,
     Recovery,
@@ -1109,6 +1110,15 @@ pub enum ToolResume {
 }
 
 pub trait Persistence: Send + Sync + 'static {
+    fn stop_reason(&self, _run: &str, _epoch: u64) -> Result<crate::catalog::bot::RunStopReason, ExecutionError> {
+        Ok(crate::catalog::bot::RunStopReason::Cancel)
+    }
+    fn non_dispatch_stop_reason(&self, run: &str, epoch: u64) -> Result<NonDispatchReason, ExecutionError> {
+        Ok(if matches!(self.stop_reason(run, epoch)?, crate::catalog::bot::RunStopReason::BotSuspension(_)) { NonDispatchReason::Suspended } else { NonDispatchReason::Cancelled })
+    }
+    fn park_suspension(&self, _run: &str, _epoch: u64) -> Result<crate::Run, ExecutionError> {
+        Err(ExecutionError::new("suspension_unavailable", "Persistence has no Run suspension authority"))
+    }
     fn bind_managed_process(
         &self,
         _context: &ToolExecutionContext,
@@ -1780,7 +1790,12 @@ impl<
             }};
         }
         'agent: loop {
-            if cancel.is_cancelled() {
+            let suspended = matches!(self.persistence.stop_reason(&input.run_id, input.owner_generation)?, crate::catalog::bot::RunStopReason::BotSuspension(_));
+            if cancel.is_cancelled() || suspended {
+                if suspended {
+                    let parked = self.persistence.park_suspension(&input.run_id, input.owner_generation)?;
+                    return Ok(ExecutionReport { state:parked.state, history, policy_state, model_steps:steps, waiting_on:parked.waiting_on, failure:None });
+                }
                 if let Some((snapshot, calls)) = pending.take() {
                     self.close_unexecuted_batch(
                         &input,
@@ -2354,7 +2369,7 @@ impl<
                     ) {
                         Ok(()) => {}
                         Err(error)
-                            if matches!(error.code.as_str(), "input_pending" | "goal_changed")
+                            if matches!(error.code.as_str(), "input_pending" | "goal_changed" | "bot_suspended")
                                 || model_cancel.is_cancelled() =>
                         {
                             steps -= 1;
@@ -2369,7 +2384,7 @@ impl<
                             &input,
                             ExecutionRecord::RequestNotDispatched {
                                 request_id: snapshot.view.request_id.clone(),
-                                reason: NonDispatchReason::Cancelled,
+                                reason: self.persistence.non_dispatch_stop_reason(&input.run_id, input.owner_generation)?,
                             },
                         )?;
                         policy_state = previous_policy_state;
@@ -2395,7 +2410,7 @@ impl<
                             control_state = None;
                         }
                         Err(error)
-                            if matches!(error.code.as_str(), "input_pending" | "goal_changed")
+                            if matches!(error.code.as_str(), "input_pending" | "goal_changed" | "bot_suspended")
                                 || model_cancel.is_cancelled() =>
                         {
                             interrupted_generation =
@@ -2409,7 +2424,7 @@ impl<
                                     } else if error.code == "input_pending" {
                                         NonDispatchReason::InputPending
                                     } else {
-                                        NonDispatchReason::Cancelled
+                                        self.persistence.non_dispatch_stop_reason(&input.run_id, input.owner_generation)?
                                     },
                                 },
                             )?;
@@ -2426,8 +2441,12 @@ impl<
                             .as_ref()
                             .map(|selected| selected.provider.as_ref()),
                     );
-                    let cancelled = cancel.is_cancelled();
-                    let interrupted = model_cancel.is_cancelled() && !cancelled;
+                    let stopping = cancel.is_cancelled();
+                    let suspended = stopping && matches!(self.persistence.stop_reason(&input.run_id, input.owner_generation)?, crate::catalog::bot::RunStopReason::BotSuspension(_));
+                    let cancelled = stopping && !suspended;
+                    // A fully returned exchange remains completed even if suspension raced
+                    // its publication. Partial output is interrupted, never silently replayed.
+                    let interrupted = model_cancel.is_cancelled() && !cancelled && !(suspended && result.is_ok());
                     let mut calls = Vec::new();
                     if let Ok(reason) = result {
                         let validation =
@@ -2480,7 +2499,7 @@ impl<
                             failure: result.as_ref().err().cloned(),
                         },
                     )?;
-                    if cancelled {
+                    if stopping {
                         continue;
                     }
                     if interrupted {

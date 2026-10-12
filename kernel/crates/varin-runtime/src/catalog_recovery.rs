@@ -1251,6 +1251,9 @@ impl Catalog {
         if run.state.terminal() {
             return Ok(Some(run));
         }
+        if matches!(self.run_stop_reason(run_id, epoch)?, super::bot::RunStopReason::BotSuspension(_)) {
+            return self.park_bot_run(run_id, epoch).map(Some);
+        }
         let run = self.request_cancel_run(run_id)?;
         {
             let tx = self.db.transaction()?;

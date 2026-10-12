@@ -436,6 +436,12 @@ impl RunSupervisor {
                     if let Ok(mut catalog) = catalog.lock() {
                         let commit = (|| -> std::result::Result<(), RuntimeError> {
                             let run = catalog.run(&identity)?;
+                            if matches!(catalog.run_stop_reason(&identity, epoch)?, crate::catalog::bot::RunStopReason::BotSuspension(_)) {
+                                // Dispatch fences can win before the physical token. Preserve the
+                                // original checkpoint rather than failing launch preparation.
+                                if catalog.park_bot_run(&identity, epoch).is_ok() { return Ok(()); }
+                                return catalog.pause_failed_execution(&identity, epoch, &error.code, &error.message);
+                            }
                             let preparation = !assembly_complete
                                 && !run.cancel_requested
                                 && matches!(
@@ -787,6 +793,62 @@ impl RunSupervisor {
     }
     /// Each waiter shares its Run's teardown. No Catalog or global worker lock crosses join.
     /// Joins the terminal Run worker. Storage file leases must also be drained separately.
+    pub fn suspend_bot_scope(&self, suspension: crate::catalog::bot::BotSuspension) -> Result<crate::catalog::bot::BotScopeCapture> {
+        let capture = self.catalog.lock().map_err(error)?.suspend_bot_scope(suspension).map_err(error)?;
+        for run in &capture.run_ids { self.cancel_control(run); }
+        Ok(capture)
+    }
+    /// Must run off the control actor. Joining actual Rust owners is separate from
+    /// original Host/Computer receipts; no acknowledgement is promoted to a stop fact.
+    pub fn drain_bot_scope(&self, capture: &crate::catalog::bot::BotScopeCapture) -> Result<crate::catalog::bot::BotKernelScopeStatus> {
+        if self.catalog.lock().map_err(error)?.epoch() != capture.kernel_epoch { return Err(error("Scope drain belongs to another kernel epoch")); }
+        for run in &capture.run_ids { self.cancel_control(run); }
+        for run in &capture.run_ids {
+            self.quiesce_run_workers(run, |_| true, true)?;
+            let mut catalog = self.catalog.lock().map_err(error)?;
+            let original = catalog.run(run).map_err(error)?;
+            if !original.state.terminal() && matches!(catalog.run_stop_reason(run, original.epoch).map_err(error)?, crate::catalog::bot::RunStopReason::BotSuspension(_)) {
+                catalog.park_bot_run(run, original.epoch).map_err(error)?;
+            }
+        }
+        self.bot_scope_status_for_runs(&capture.suspension, &capture.run_ids)
+    }
+    pub fn bot_scope_status(&self, suspension: &crate::catalog::bot::BotSuspension) -> Result<crate::catalog::bot::BotKernelScopeStatus> {
+        let runs = self.catalog.lock().map_err(error)?.bot_scope_run_ids(&suspension.bot_id).map_err(error)?;
+        self.bot_scope_status_for_runs(suspension, &runs)
+    }
+    fn bot_scope_status_for_runs(&self, suspension: &crate::catalog::bot::BotSuspension, runs: &[String]) -> Result<crate::catalog::bot::BotKernelScopeStatus> {
+        let catalog = self.catalog.lock().map_err(error)?;
+        let source_profile_revision = catalog.bot_scope_source_revision(suspension).map_err(error)?;
+        let mut unproven_operation_stop_ids = Vec::new();
+        let mut unknown_effect_operation_ids = Vec::new();
+        let mut unresolved_model_request_ids = Vec::new();
+        for run in runs {
+            let (stops, effects, models) = catalog.bot_run_barriers(run).map_err(error)?;
+            unproven_operation_stop_ids.extend(stops);
+            unknown_effect_operation_ids.extend(effects);
+            unresolved_model_request_ids.extend(models);
+        }
+        let kernel_epoch = catalog.epoch();
+        drop(catalog);
+        let current_kernel_workers_drained = !self.workers.lock().map_err(error)?.keys().any(|id|runs.contains(id))
+            && !self.operation_workers.lock().map_err(error)?.values().any(|worker|runs.contains(&worker.run_id))
+            && !self.quiescence.lock().map_err(error)?.iter().any(|(id,drain)|runs.contains(id)&&drain.active.load(Ordering::Acquire));
+        Ok(crate::catalog::bot::BotKernelScopeStatus { suspension:suspension.clone(), kernel_epoch, source_profile_revision, current_kernel_workers_drained, unproven_operation_stop_ids, unknown_effect_operation_ids, unresolved_model_request_ids })
+    }
+    pub fn resume_bot_scope(&self, suspension: &crate::catalog::bot::BotSuspension) -> Result<crate::catalog::bot::BotScopeResume> {
+        let runs = {
+            let catalog = self.catalog.lock().map_err(error)?;
+            catalog.check_bot_scope_gate(suspension, Some(true)).map_err(error)?;
+            catalog.bot_held_run_ids(suspension).map_err(error)?
+        };
+        let draining = self.workers.lock().map_err(error)?.keys().any(|id|runs.contains(id))
+            || self.operation_workers.lock().map_err(error)?.values().any(|worker|runs.contains(&worker.run_id))
+            || self.quiescence.lock().map_err(error)?.iter().any(|(id,drain)|runs.contains(id)&&drain.active.load(Ordering::Acquire));
+        if draining { return Err(error("Original held kernel workers are still draining")); }
+        self.catalog.lock().map_err(error)?.resume_bot_scope(suspension).map_err(error)
+    }
+
     pub fn quiesce_terminal(&self, run_id: &str) -> Result<()> {
         self.quiesce_run(run_id, |run| {
             matches!(
@@ -796,6 +858,9 @@ impl RunSupervisor {
         })
     }
     fn quiesce_run(&self, run_id: &str, waiting: impl Fn(&Run) -> bool) -> Result<()> {
+        self.quiesce_run_workers(run_id, waiting, false)
+    }
+    fn quiesce_run_workers(&self, run_id: &str, waiting: impl Fn(&Run) -> bool, operations: bool) -> Result<()> {
         let serial = self
             .quiescence
             .lock()
@@ -826,6 +891,18 @@ impl RunSupervisor {
                 if let Some(join) = worker.join.take() {
                     join.join().map_err(|_| error("Run wait teardown failed"))?;
                 }
+                if let Some(pending) = worker.pending.take().filter(|_| operations) {
+                    let run = self.catalog.lock().map_err(error)?.park_bot_run(run_id, pending.epoch).map_err(error)?;
+                    let _ = pending.completion.send(Ok(ExecutionReport { state:run.state, history:vec![], policy_state:pending.policy_state, model_steps:0, waiting_on:run.waiting_on, failure:None }));
+                }
+            }
+            if operations {
+                let joins = {
+                    let mut workers = self.operation_workers.lock().map_err(error)?;
+                    let ids: Vec<_> = workers.iter().filter(|(_,worker)|worker.run_id==run_id).map(|(id,_)|id.clone()).collect();
+                    ids.into_iter().filter_map(|id|workers.remove(&id).and_then(|worker|worker.join)).collect::<Vec<_>>()
+                };
+                for join in joins { join.join().map_err(|_| error("Operation suspension teardown failed"))?; }
             }
             Ok(())
         })();
@@ -989,6 +1066,10 @@ impl RunSupervisor {
         run_id: &str,
         execute: impl FnOnce(&CancellationToken) -> Result<()> + Send + 'static,
     ) -> Result<()> {
+        let operation = self.catalog.lock().map_err(error)?.operation(operation_id).map_err(error)?;
+        if operation.run_id != run_id { return Err(error("Operation worker Run identity changed")); }
+        let kernel_owner = operation.execution_owner == Some(crate::ExecutorOwner::Kernel);
+        let operation_epoch = operation.epoch;
         let token = CancellationToken::default();
         let mut workers = self.operation_workers.lock().map_err(error)?;
         if self.stopping.load(Ordering::Acquire) {
@@ -1004,6 +1085,10 @@ impl RunSupervisor {
             .name("model-operation".into())
             .spawn(move || {
                 let result = execute(&token_worker);
+                if kernel_owner {
+                    let stopped = owner.catalog.lock().map_err(error).and_then(|mut catalog|catalog.record_kernel_operation_worker_stopped(&id, operation_epoch).map_err(error));
+                    if let Err(failure) = stopped { if let Ok(mut errors) = owner.failures.lock() { errors.insert(id.clone(), failure); } }
+                }
                 if let Err(failure) = result {
                     if let Ok(mut errors) = owner.failures.lock() {
                         errors.insert(id, failure);

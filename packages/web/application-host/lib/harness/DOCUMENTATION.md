@@ -137,6 +137,13 @@ writers still block capture, and writer, mutation, epoch and filesystem-watch ch
 
 ### Bot sleep and wake
 
+The native runtime currently has a private Bot Thread/gate/suspension foundation. BotService remains
+the identity/activity owner and publishes its original record revision to Catalog. A kernel epoch
+change invalidates the cached scoped grant and requires fresh gate publication. Host Run preparation
+keeps its original registration until the underlying promise settles, even if the caller has already
+received cancellation. Native scope status only proves the named Rust workers drained; native Bot
+entry/source/recall, full domain-writer and Computer lifecycle integration are still pending.
+
 `bots/bot-service.ts` stores sleep intent, interrupted Run identities, confirmed stop/resume steps,
 remote machine progress and errors in the kernel-owned Bot profile. API calls return after intent
 is durable; Host-owned work continues independently of an open renderer. Startup resumes unfinished

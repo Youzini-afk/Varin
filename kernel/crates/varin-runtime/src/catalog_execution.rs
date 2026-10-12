@@ -6,6 +6,12 @@ use crate::execution::*;
 use std::sync::{Arc, Mutex};
 
 impl Persistence for Mutex<Catalog> {
+    fn stop_reason(&self, run: &str, epoch: u64) -> std::result::Result<super::bot::RunStopReason, ExecutionError> {
+        self.lock().map_err(catalog_lock_error)?.run_stop_reason(run, epoch).map_err(policy_error)
+    }
+    fn park_suspension(&self, run: &str, epoch: u64) -> std::result::Result<Run, ExecutionError> {
+        self.lock().map_err(catalog_lock_error)?.park_bot_run(run, epoch).map_err(policy_error)
+    }
     fn bind_managed_process(
         &self,
         context: &ToolExecutionContext,
@@ -51,7 +57,9 @@ impl Persistence for Mutex<Catalog> {
                 ));
             }
             fence(&db.run(&context.run_id).map_err(policy_error)?, epoch).map_err(policy_error)?;
-            if op.call_completion.is_none() {
+            // A trusted domain receipt may already own a different canonical result.
+            // The same completion can still refine its original executor-stop evidence.
+            if op.call_completion.is_none() || op.call_completion == prepared.completion {
                 db.commit_prepared_execution(&context.run_id, epoch, &record, prepared)
                     .map_err(policy_error)?;
             }
@@ -603,6 +611,7 @@ impl Persistence for Mutex<Catalog> {
         });
         match result {
             Ok(()) => Ok(()),
+            Err(RuntimeError::BotSuspended) => Err(ExecutionError::new("bot_suspended", "Bot execution gate is closed")),
             Err(RuntimeError::GoalChanged) => Err(ExecutionError::new(
                 "goal_changed",
                 "Goal authorization or constraints changed",
@@ -647,7 +656,9 @@ impl Persistence for Mutex<Catalog> {
 }
 fn policy_error(error: RuntimeError) -> ExecutionError {
     ExecutionError::new(
-        if matches!(error, RuntimeError::GoalChanged) {
+        if matches!(error, RuntimeError::BotSuspended) {
+            "bot_suspended"
+        } else if matches!(error, RuntimeError::GoalChanged) {
             "goal_changed"
         } else if matches!(error, RuntimeError::InputPending) {
             "input_pending"
@@ -1643,6 +1654,9 @@ impl Catalog {
                             "original invocation completion changed".into(),
                         ));
                     }
+                    if *executor_stopped && !matches!(completion, ToolCompletion::JobAccepted { .. }) {
+                        record_invocation_executor_stopped(&tx, &op)?;
+                    }
                     tx.commit()?;
                     self.release_unoccupied_resource_owner(&key)?;
                     return Ok(());
@@ -1737,6 +1751,9 @@ impl Catalog {
                         "DELETE FROM resource_occupancy WHERE operation_id=?1",
                         [&key],
                     )?;
+                }
+                if *executor_stopped && !matches!(completion, ToolCompletion::JobAccepted { .. }) {
+                    record_invocation_executor_stopped(&tx, &op)?;
                 }
                 op.call_completion = Some(receipt.clone());
                 op.revision += 1;
@@ -2013,6 +2030,10 @@ pub(super) fn close_prepared_request(
         return Err(RuntimeError::Conflict(
             "prepared request already has execution evidence".into(),
         ));
+    }
+    if reason == NonDispatchReason::Suspended {
+        event(tx, request_id, 0, "model.suspended_before_dispatch", json!({"run_id":run.id}))?;
+        return Ok(());
     }
     step.state = ModelStepState::NotDispatched;
     put(tx, "model_steps", request_id, &step)?;
@@ -2328,6 +2349,26 @@ fn confirmed_no_effect_receipt(operation: &Operation, outcome: Outcome, content:
 
 /// This event indexes the original receipt; it is not a second writable process state.
 /// The only caller is the trusted original executor-receipt transaction.
+pub(super) fn record_kernel_executor_stopped(tx: &Transaction<'_>, operation: &Operation, epoch: u64) -> Result<()> {
+    if operation.epoch != epoch || operation.execution_owner != Some(ExecutorOwner::Kernel) {
+        return Err(RuntimeError::Conflict("Kernel executor stop owner changed".into()));
+    }
+    let recorded: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='operation.kernel_executor_stopped' AND json_extract(data,'$.operationEpoch')=?2)", params![operation.id,sql_number(epoch)?], |r|r.get(0))?;
+    if !recorded { event(tx, &operation.id, operation.revision, "operation.kernel_executor_stopped", json!({"operationEpoch":epoch,"executionOwner":{"kind":"kernel"}}))?; }
+    Ok(())
+}
+
+fn record_invocation_executor_stopped(tx: &Transaction<'_>, operation: &Operation) -> Result<()> {
+    tx.execute("DELETE FROM resource_occupancy WHERE operation_id=?1", [&operation.id])?;
+    let Some(owner) = &operation.execution_owner else { return Ok(()); };
+    let owner_value = serde_json::to_value(owner)?;
+    let recorded: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='operation.invocation_executor_stopped' AND json_extract(data,'$.operationEpoch')=?2 AND json_extract(data,'$.executionOwner.kind') IS ?3 AND json_extract(data,'$.executionOwner.identity') IS ?4 AND json_extract(data,'$.executionOwner.epoch') IS ?5)", params![operation.id,sql_number(operation.epoch)?,owner_value["kind"].as_str(),owner_value["identity"].as_str(),owner_value["epoch"].as_str()], |r|r.get(0))?;
+    if !recorded {
+        event(tx, &operation.id, operation.revision, "operation.invocation_executor_stopped", json!({"operationEpoch":operation.epoch,"executionOwner":owner}))?;
+    }
+    Ok(())
+}
+
 fn record_executor_stopped(
     tx: &Transaction<'_>,
     operation: &Operation,

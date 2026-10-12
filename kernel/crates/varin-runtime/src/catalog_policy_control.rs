@@ -394,6 +394,9 @@ impl Catalog {
         }
         let tx = self.db.transaction()?;
         active_owner(&tx, &run)?;
+        if !super::bot::run_permitted(&tx, &run)? {
+            return Err(RuntimeError::BotSuspended);
+        }
         if super::inputs::has_boundary_inputs(&tx, run_id)? {
             return Err(RuntimeError::InputPending);
         }
@@ -708,7 +711,7 @@ fn resume_receipt(
     Ok(None)
 }
 pub(crate) fn run_startable(db: &Connection, run: &Run) -> Result<bool> {
-    if run.cancel_requested || run.state.terminal() {
+    if run.cancel_requested || run.state.terminal() || !super::bot::run_permitted(db, run)? {
         return Ok(false);
     }
     match run.state {

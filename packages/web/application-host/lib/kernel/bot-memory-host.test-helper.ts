@@ -129,8 +129,10 @@ async function initialize(frame: Record<string, unknown>) {
     stopMemory: scope => organizer.suspendScope(scope), resumeMemory: scope => organizer.resumeScope(scope), wakeFollowUps: async () => {},
   });
   bots = createBotService({ client: kernel, hostId: HOST, dataDir: root, registry,
+    publishExecutionGate: gate => kernel.agentRuntimeRequest<void, 'runtime.bot.gate.publish'>('runtime.bot.gate.publish', gate),
     createSession: async () => ({ sessionId: 'original-bot-conversation' }), openSession: async input => ({ sessionId: input.sessionId }),
     lifecycle: () => lifecycle, onError: error => errors.push(String(error)) });
+  await bots.publishExecutionGates();
   if (frame.reopen) {
     ({ botId, scopeId, sessionId } = JSON.parse(await readFile(join(root, 'memory-fixture.json'), 'utf8')));
     assert(await bots.get(botId));

@@ -8,6 +8,10 @@ pub(super) fn hold(
     row: &QueuedInputMetadata,
     run: Option<&Run>,
 ) -> Result<Option<String>> {
+    if !super::bot::thread_permitted(db, &row.thread_id, super::bot::current_epoch(db)?)?
+        || match run { Some(run) => !super::bot::run_permitted(db, run)?, None => false } {
+        return Ok(Some("bot_suspended".into()));
+    }
     match row.origin {
         InputOrigin::Followup { .. } => {
             Ok(followups::ingress_hold(db, row, run)?.map(|reason| format!("{reason:?}")))

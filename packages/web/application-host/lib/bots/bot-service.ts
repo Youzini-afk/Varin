@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.js";
-import type { KernelRecordResult } from "../kernel/protocol.generated.js";
+import type { BotExecutionGate, KernelRecordResult } from "../kernel/protocol.generated.js";
 import { HarnessServiceError } from "../harness/service-error.js";
 import { botScopeId } from "../harness/owner-scope.js";
 import type { ThreadRegistry } from "../harness/thread-registry.js";
@@ -58,6 +58,8 @@ export interface BotServiceOptions {
   onError?(error: unknown): void;
   lifecycle?(): BotLifecycleRuntime;
   removeData?(bot: BotSummary): Promise<void>;
+  /** Private execution projection of this service's exact authoritative record. */
+  publishExecutionGate?(gate: BotExecutionGate): Promise<void>;
   onChange?(bot: BotSummary): void;
   onDeleted?(botId: string): void;
 }
@@ -138,6 +140,7 @@ export interface BotService {
   wake(botId: string): Promise<BotSummary>;
   retry(botId: string): Promise<BotSummary>;
   canExecute(botId: string): Promise<boolean>;
+  publishExecutionGates(): Promise<void>;
   reconcile(): Promise<void>;
   dispose(): Promise<void>;
   /**
@@ -170,6 +173,7 @@ export function createBotService(options: BotServiceOptions): BotService {
     return task.finally(() => { if (mutations.get(botId) === task) mutations.delete(botId); });
   };
   let scopedClient: Promise<KernelScopedClient> | null = null;
+  const detachKernelExit = options.client.subscribeExit(() => { scopedClient = null; });
   const scoped = (): Promise<KernelScopedClient> => {
     if (scopedClient) return scopedClient;
     const creating = (async () => {
@@ -205,6 +209,19 @@ export function createBotService(options: BotServiceOptions): BotService {
       throw new HarnessServiceError("failed", `Bot profile is malformed: ${botId}`);
     }
     return record;
+  };
+
+  const permitted = (bot: BotSummary): boolean => !bot.archived && !bot.deletion && (!bot.activity || bot.activity.state === "awake"
+    || (bot.activity.state === "waking" && bot.activity.readyToResume === true && operations.has(bot.id)));
+  const publishExecutionGate = async (record: KernelRecordResult): Promise<void> => {
+    if (!options.publishExecutionGate) return;
+    const bot = toSummary(record);
+    if (!bot) throw new HarnessServiceError("failed", `Bot profile is malformed: ${record.recordId}`);
+    // A saved waking receipt cannot reopen this executor epoch. Reconciliation
+    // checkpoints readiness=false before the new lifecycle owner resumes its work.
+    if (bot.activity?.state === "waking" && bot.activity.readyToResume && !operations.has(bot.id)) return;
+    await options.publishExecutionGate({ botId:bot.id, profileRevision:record.recordRevision,
+      activityOperationId:bot.activity?.operationId ?? null, permitted:permitted(bot) });
   };
 
   const write = async (
@@ -251,11 +268,12 @@ export function createBotService(options: BotServiceOptions): BotService {
     // cleared entry binding cannot keep an old sessionId mapped.
     catalogGeneration += 1;
     sessionIndex = null;
+    await publishExecutionGate(result);
     options.onChange?.(summary);
     return summary;
   };
 
-  const list: BotService["list"] = async () => {
+  const listRecords = async (): Promise<KernelRecordResult[]> => {
     const client = await scoped();
     const records: KernelRecordResult[] = [];
     let cursor: number | undefined;
@@ -269,7 +287,10 @@ export function createBotService(options: BotServiceOptions): BotService {
       records.push(...page.records);
       cursor = page.nextCursor === null ? undefined : page.nextCursor;
     } while (cursor !== undefined);
-    return records
+    return records;
+  };
+  const list: BotService["list"] = async () => {
+    return (await listRecords())
       .map((record) => {
         const bot = toSummary(record);
         if (!bot) throw new HarnessServiceError("failed", `Bot profile is malformed: ${record.recordId}`);
@@ -358,8 +379,7 @@ export function createBotService(options: BotServiceOptions): BotService {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const canExecute = async (botId: string): Promise<boolean> => {
     const bot = await get(botId);
-    return Boolean(bot && !bot.archived && !bot.deletion && (!bot.activity || bot.activity.state === "awake"
-      || (bot.activity.state === "waking" && bot.activity.readyToResume === true && operations.has(botId))));
+    return Boolean(bot && permitted(bot));
   };
   const checkpoint = (botId: string, activity: BotActivity) => serialize(botId, async () => {
     const current = await get(botId);
@@ -662,6 +682,16 @@ export function createBotService(options: BotServiceOptions): BotService {
     wake: (botId) => transition(botId, true),
     retry,
     canExecute,
+    publishExecutionGates: async () => {
+      for (const listed of await listRecords()) {
+        const bot = toSummary(listed);
+        if (!bot) throw new HarnessServiceError("failed", `Bot profile is malformed: ${listed.recordId}`);
+        await serialize(bot.id, async () => {
+          const current = await recordFor(bot.id);
+          if (current) await publishExecutionGate(current);
+        });
+      }
+    },
     reconcile: async () => {
       for (const bot of await list()) {
         if (bot.activity?.state === 'waking' && !operations.has(bot.id)) {
@@ -679,6 +709,7 @@ export function createBotService(options: BotServiceOptions): BotService {
     },
     dispose: async () => {
       disposed = true;
+      detachKernelExit();
       for (const timer of timers.values()) clearTimeout(timer);
       timers.clear();
       await Promise.allSettled(operations.values());

@@ -829,9 +829,30 @@ pub(crate) fn spawn(
                             deferred = true;
                             return Ok(Value::Null);
                         }
+                        if method == "runtime.bot.scope.suspend" {
+                            let p: varin_runtime::catalog::bot::BotSuspension = serde_json::from_value(params)?;
+                            let capture = runtime.suspend_bot_scope(p).map_err(|e|KernelError::Operation(e.to_string()))?;
+                            let runtime = runtime.clone();
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            thread::spawn(move || {
+                                let result = runtime.drain_bot_scope(&capture).map_err(|e|KernelError::Operation(e.to_string()));
+                                let response = match result {
+                                    Ok(value) => response_ok(&response_id, serde_json::to_value(value).expect("scope status is serializable")),
+                                    Err(error) => response_error(&response_id, &error),
+                                };
+                                done(&response_id);
+                                let _ = response_sender.send(response);
+                            });
+                            deferred = true;
+                            return Ok(Value::Null);
+                        }
                         if matches!(
                             method,
-                            "runtime.question.answer"
+                            "runtime.bot.scope.status"
+                                | "runtime.bot.scope.resume"
+                                | "runtime.question.answer"
                                 | "runtime.run.resume"
                                 | "runtime.run.cancel"
                                 | "runtime.operation.cancel"
@@ -2365,6 +2386,17 @@ pub(crate) fn live_mcp_binding(
     })
 }
 fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value, KernelError> {
+    if method == "runtime.bot.gate.publish" {
+        let p: varin_runtime::catalog::bot::BotGate = serde_json::from_value(params)?;
+        catalog.publish_bot_gate(p).map_err(domain)?;
+        return Ok(Value::Null);
+    }
+    if method == "runtime.bot.thread.create" {
+        let p: BotThreadCreateParams = serde_json::from_value(params)?;
+        catalog.create_bot_thread(&p.thread_id, &p.branch_id, &p.bot_id).map_err(domain)?;
+        return Ok(json!({"threadId":p.thread_id,"branchId":p.branch_id}));
+    }
+
     if method == "runtime.plan.contains" {
         if ["headId", "candidateHeadId"]
             .iter()
@@ -3163,3 +3195,7 @@ mod context_transform_review;
 #[cfg(test)]
 #[path = "context_budget_review.rs"]
 mod context_budget_review;
+
+#[cfg(test)]
+#[path = "bot_gate_host_review.rs"]
+mod bot_gate_host_review;
