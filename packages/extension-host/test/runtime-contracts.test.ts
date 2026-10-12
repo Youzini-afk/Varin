@@ -57,13 +57,13 @@ test('cold service discovery shares scoped routing without migration, activation
     assert.equal(ambiguous.action === 'describe' && ambiguous.status, 'unresolved');
     const current = await h.runtime.routing.read();
     await h.runtime.routing.upsertRule({ expectedRevision: current.document.revision,
-      rule: { serviceId, version: 1, scope: { projectId: 'selected-project' }, providerKey: 'example.second:host:example.contract@1', allowFallback: false } });
+      rule: { serviceId, version: 1, scope: { projectId: 'selected-project' }, providerKeys: ['example.second:host:example.contract@1'], allowFallback: false } });
     h.runtime.storage.update = async () => { throw new Error('A metadata query must not persist configuration'); };
     const selected = await h.query(request, 'selected-project');
     assert.ok(selected.action === 'describe' && selected.kind === 'service');
     assert.equal(selected.status, 'found');
-    assert.equal(selected.service?.selection.providerKey, 'example.second:host:example.contract@1');
-    assert.equal(selected.service?.selection.providerId, undefined);
+    assert.deepEqual(selected.service?.selection.providerKeys, ['example.second:host:example.contract@1']);
+    assert.equal(selected.service?.selection.providerIds, undefined);
     assert.deepEqual(selected.member?.contract, h.descriptors.get('example.second')!.contract!.methods.read);
     assert.equal(selected.service?.implementations[0]?.registration, 'declared');
     assert.deepEqual(h.counts(), { activations: 0, calls: 0 });
@@ -84,7 +84,13 @@ test('actual service preparation and its exact method query share the original d
       member: { kind: 'event', name: 'changed' } });
     assert.ok(result.action === 'describe' && result.kind === 'service');
     assert.equal(result.status, 'found');
-    assert.equal(result.service?.selection.providerId, binding.providerId);
+    assert.deepEqual(result.service?.selection.providerIds, [binding.providerId]);
+    assert.ok(result.service);
+    for (const selection of [
+      { ...result.service.selection, providerKey: binding.providerKey },
+      { ...result.service.selection, providerKeys: [], providerIds: [] },
+      { ...result.service.selection, providerIds: [] },
+    ]) assert.throws(() => parseVarinRuntimeContractResult({ ...result, service: { ...result.service, selection } }));
     assert.deepEqual(result.member?.contract, h.descriptors.get('example.first')!.contract!.events!.changed);
     assert.deepEqual(h.counts(), { activations: 1, calls: 1 });
     const pin = binding.pin();
@@ -166,7 +172,7 @@ for (const change of ['contract', 'source'] as const) test(`same-version ${chang
     const during = await h.query(request);
     assert.ok(during.action === 'describe' && during.kind === 'service');
     assert.equal(during.service?.implementations[0]?.registration, 'declared');
-    assert.equal(during.service?.selection.providerId, undefined);
+    assert.equal(during.service?.selection.providerIds, undefined);
     assert.equal(during.service?.implementations[0]?.artifacts.selected?.artifactIntegrity, candidate.integrity);
     const oldProvider = h.runtime.services.getSnapshot().providers.find(provider => provider.providerId === binding.providerId)!;
     assert.equal(h.runtime.supervisor.getRetainedArtifactIdentity(oldProvider), snapshot.extensions.find(entry => entry.manifest.id === id)!.integrity);
@@ -185,7 +191,8 @@ for (const change of ['contract', 'source'] as const) test(`same-version ${chang
     assert.ok(ready.action === 'describe' && ready.kind === 'service');
     assert.equal(ready.status, 'found');
     assert.equal(ready.service?.implementations[0]?.registration, 'registered');
-    assert.notEqual(ready.service?.selection.providerId, binding.providerId);
+    assert.equal(ready.service?.selection.providerIds?.length, 1);
+    assert.notDeepEqual(ready.service?.selection.providerIds, [binding.providerId]);
   } finally { release(); await selecting?.catch(() => undefined); await h.close(); }
 });
 

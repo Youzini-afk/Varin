@@ -457,7 +457,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
         rule: {
           serviceId,
           version: 1,
-          providerKey: `${extensionId}:host:${serviceId}@1`,
+          providerKeys: [`${extensionId}:host:${serviceId}@1`],
           allowFallback: false,
           scope: { sessionId: 'thread' },
         },
@@ -520,22 +520,28 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
     const removed: string[] = [];
     let rejected: Awaited<ReturnType<typeof retainExtensionTool>> | undefined;
     let restored: Awaited<ReturnType<typeof retainExtensionTool>> | undefined;
+    let observedA!: () => void;
+    const restoredA = new Promise<void>(resolve => { observedA = resolve; });
+    let observedB!: () => void;
+    const publishedB = new Promise<void>(resolve => { observedB = resolve; });
     scope.start(async (_slot, lease, revoked) => {
       if (lease && lease.binding.extensionId === a && removed.includes(a)) {
         restored = lease;
         leases.push(lease);
+        observedA();
         return;
       }
       if (lease) {
-        rejected = lease;
+        if (lease.binding.extensionId === b) { rejected = lease; observedB(); }
         lease.lease.release();
         throw new Error('directory rejects candidate');
       }
       if (revoked) removed.push(revoked.binding.extensionId);
     });
     await route(b);
-    await expect.poll(() => rejected?.binding.extensionId).toBe(b);
-    await expect.poll(() => scope.inspect()[0]?.status).toBe('unavailable');
+    await publishedB;
+    expect(rejected?.binding.extensionId).toBe(b);
+    await expect.poll(() => scope.inspect().find(state => state.serviceId === serviceId)?.status).toBe('unavailable');
     // Reconstruct the saved exact A while current routing points to B. Only subsequent
     // new candidate preparation follows B; recovery never silently rewrites the old binding.
     const recovered = await createExtensionTools(options)(
@@ -546,13 +552,16 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
     try {
       expect(recovered.initial[0]!.binding).toEqual(scope.initial[0]!.binding);
       let nextProvider: string | undefined;
+      let observedNext!: () => void;
+      const next = new Promise<void>(resolve => { observedNext = resolve; });
       recovered.start(async (_slot, lease) => {
         if (lease) {
-          nextProvider = lease.binding.extensionId;
+          if (lease.binding.extensionId === b) { nextProvider = lease.binding.extensionId; observedNext(); }
           lease.lease.release();
         }
       });
-      await expect.poll(() => nextProvider).toBe(b);
+      await next;
+      expect(nextProvider).toBe(b);
     } finally {
       recovered.close();
       for (const retained of recovered.initial) retained.lease.release();
@@ -699,7 +708,8 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
       true,
       (await runtime.catalog.snapshot()).revision,
     );
-    await expect.poll(() => restored?.binding.extensionId).toBe(a);
+    await restoredA;
+    expect(restored?.binding.extensionId).toBe(a);
     expect(restored!.generation).not.toBe(scope.initial[0]!.generation);
     expect(restored!.lease.available(restored!.binding.tool)).toBe(true);
     expect(

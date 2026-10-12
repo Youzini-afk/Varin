@@ -261,7 +261,7 @@ async function initialize(frame:Record<string,unknown>) {
   await extensions.start();
   await extensions.upsertServiceRoutingRule({expectedRevision:(await extensions.routing.read()).document.revision,
     rule:{scope:{sessionId:'thread:parent'},serviceId:'varin.retrieval.plan',version:1,allowFallback:false,
-      providerKey:`varin.builtin.retrieval-${mode==='syntax'?'structured':mode==='semantic'||usesSemantic()?'semantic':'keyword'}:host:varin.retrieval.plan@1`}});
+      providerKeys: [`varin.builtin.retrieval-${mode==='syntax'?'structured':mode==='semantic'||usesSemantic()?'semantic':'keyword'}:host:varin.retrieval.plan@1`]}});
   const composition=createRetrievalComposition(extensions,{structure:syntax,syntax,
     prepareSemantic:async(scope,signal)=>{
       if(!semantic||!scope.query||!scope.inference) throw new Error('Semantic inference is not configured');

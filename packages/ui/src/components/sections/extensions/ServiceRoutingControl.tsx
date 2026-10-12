@@ -8,10 +8,10 @@ export interface ServiceRoutingControlProps {
   busy: boolean;
   composition?: 'ordered';
   extensionNames: ReadonlyMap<string, string>;
-  inheritedSelection?: string | readonly string[];
-  onSelect: (selection: string | readonly string[] | null) => void;
+  inheritedSelection?: readonly string[];
+  onSelect: (selection: readonly string[] | null) => void;
   providers: readonly ServiceRoutingOption[];
-  selection: string | readonly string[] | null;
+  selection: readonly string[] | null;
 }
 
 /** The control edits only the exact scope rule. Inherited choices and missing members are
@@ -20,16 +20,17 @@ export const ServiceRoutingControl: React.FC<ServiceRoutingControlProps> = ({
   busy, composition, extensionNames, inheritedSelection, onSelect, providers, selection,
 }) => {
   const { t } = useI18n();
-  const ordered = selection !== null && typeof selection !== 'string' ? selection : null;
-  const value = ordered ? (ordered.length ? '__ordered__' : '__empty__') : typeof selection === 'string' ? selection : '__automatic__';
+  const ordered = selection !== null && (composition === 'ordered' || selection.length !== 1) ? selection : null;
+  const single = selection?.length === 1 ? selection[0] : undefined;
+  const value = selection === null ? '__automatic__' : ordered ? (ordered.length ? '__ordered__' : '__empty__') : single;
   const label = (key: string): string => {
     const provider = providers.find((candidate) => candidate.providerKey === key);
     return provider ? extensionNames.get(provider.extensionId) ?? provider.extensionId : key;
   };
   const available = (key: string): boolean => providers.some((provider) => provider.providerKey === key);
   const selectedLabel = ordered ? t(ordered.length ? 'settings.varin.extensions.routing.ordered' : 'settings.varin.extensions.routing.empty')
-    : typeof selection === 'string' ? available(selection) ? t('settings.varin.extensions.routing.single', { name: label(selection) })
-      : `${selection} · ${t('settings.varin.extensions.routing.missing')}` : t('settings.varin.extensions.routing.automatic');
+    : single ? available(single) ? t('settings.varin.extensions.routing.single', { name: label(single) })
+      : `${single} · ${t('settings.varin.extensions.routing.missing')}` : t('settings.varin.extensions.routing.automatic');
   const move = (index: number, offset: number): void => {
     if (!ordered) return;
     const next = [...ordered];
@@ -47,8 +48,7 @@ export const ServiceRoutingControl: React.FC<ServiceRoutingControlProps> = ({
         onValueChange={(next) => {
           if (next === '__automatic__') onSelect(null);
           else if (next === '__empty__') onSelect([]);
-          else if (next === '__ordered__') onSelect(typeof selection === 'string' ? [selection] : ordered ?? []);
-          else onSelect(next);
+          else if (next !== '__ordered__') onSelect([next]);
         }}
       >
         <SelectTrigger aria-label={t('settings.varin.extensions.routing.selection')}><SelectValue>{selectedLabel}</SelectValue></SelectTrigger>
@@ -56,12 +56,12 @@ export const ServiceRoutingControl: React.FC<ServiceRoutingControlProps> = ({
           <SelectItem value="__automatic__">{t('settings.varin.extensions.routing.automatic')}</SelectItem>
           {composition === 'ordered' || ordered ? (
             <>
-              <SelectItem value="__ordered__" disabled={composition !== 'ordered'}>{t('settings.varin.extensions.routing.ordered')}</SelectItem>
+              <SelectItem value="__ordered__" disabled>{t('settings.varin.extensions.routing.ordered')}</SelectItem>
               <SelectItem value="__empty__" disabled={composition !== 'ordered'}>{t('settings.varin.extensions.routing.empty')}</SelectItem>
             </>
           ) : null}
-          {typeof selection === 'string' && !available(selection) ? (
-            <SelectItem value={selection}>{selection} · {t('settings.varin.extensions.routing.missing')}</SelectItem>
+          {single && !available(single) ? (
+            <SelectItem value={single}>{single} · {t('settings.varin.extensions.routing.missing')}</SelectItem>
           ) : null}
           {providers.map((provider) => (
             <SelectItem key={provider.providerKey} value={provider.providerKey}>
@@ -114,8 +114,7 @@ export const ServiceRoutingControl: React.FC<ServiceRoutingControlProps> = ({
       {selection === null && inheritedSelection !== undefined ? (
         <div className="typography-micro text-muted-foreground">
           <p>{t('settings.varin.extensions.routing.inherited')}</p>
-          {typeof inheritedSelection === 'string' ? <p className="break-all">{inheritedSelection}</p>
-            : inheritedSelection.length ? <ol className="list-inside list-decimal">{inheritedSelection.map((key) => <li key={key} className="break-all">{key}</li>)}</ol>
+          {inheritedSelection.length ? <ol className="list-inside list-decimal">{inheritedSelection.map((key) => <li key={key} className="break-all">{key}</li>)}</ol>
               : <p>{t('settings.varin.extensions.routing.empty')}</p>}
         </div>
       ) : null}

@@ -146,13 +146,15 @@ entrypoint readiness. Exact provider handles retain the existing generation hand
 
 Context fragments retain the author `describe` v1 declaration. `ServiceProvision.contract.composition:
 "ordered"` explicitly opts a provider into that contract's collection consumer; `multiple` alone
-does not. Original routing rules keep `providerKey`, or explicitly choose ordered `providerKeys`.
-The fields are mutually exclusive, repeated keys reject, and an empty list means no contribution.
-Every selected member is required; fallback, if enabled, chooses an entire lower-priority rule and
-never shortens a partially available collection. Equally ranked different orders conflict.
-Single-service invocation rejects any collection rule, including a one-member list. User single-value
-configuration and external extension assets are not rewritten. The routing document remains the same
-owner/schema with the additive rule shape, and inspection reports collection order separately.
+does not. Routing rules use only `providerKeys: string[]`; each provider's stable identity remains
+`providerKey`. Repeated keys reject. Single-service invocation requires exactly one key. An ordered
+consumer accepts an ordered list, including an explicit empty list that means no contribution.
+Every selected member must support the ordered contract and is required; fallback, if enabled,
+chooses an entire lower-priority rule and never shortens a partially available collection. Equally
+ranked different orders conflict. Removing a scope rule restores inheritance. Inspection returns
+`providerKeys` and, when registered, the matching generation-bound `providerIds` in the same order.
+The routing document and its actual storage schema marker remain the authority; malformed or stale
+state cannot become successful automatic routing.
 
 
 `VARIN_CONTEXT_BUDGET_SERVICE` is the shared manifest/registration/method-schema declaration for

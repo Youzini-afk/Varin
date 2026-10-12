@@ -36,7 +36,7 @@ async function fixture(holdStructure = false) {
   f.kernel.setRetrievalOwner(createRetrievalOwner({ sources: createRetrievalSourceOwner({ documents: f.documents.authority, kernel: f.kernel, validateLiveSource: f.liveSources.validate }), kernel: f.kernel,
     preparePipeline: async (query, signal) => { const binding = await composition.prepare({ threadId: query.threadId, projectId: 'retrieval-project', workspaceId: f.documents.workspaceRoot }, signal); bindings.push(binding); return binding; } }));
   const route = async (providerKey: string, scope: { projectId?: string; sessionId?: string } = { projectId: 'retrieval-project' }) => extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision,
-    rule: { allowFallback: false, providerKey, scope, serviceId: 'varin.retrieval.plan', version: 1 } });
+    rule: { allowFallback: false, providerKeys: [providerKey], scope, serviceId: 'varin.retrieval.plan', version: 1 } });
   return { ...f, extensions, structure, composition, bindings, route, gate, entered: () => entered };
 }
 
@@ -166,7 +166,7 @@ it('retrieval routing uses the accepted Run project even when the visible projec
   const composition = createRetrievalComposition(extensions, { structure });
   for (const [projectId, providerKey] of [['accepted-project', keywordKey], ['visible-project', structuredKey]]) await extensions.upsertServiceRoutingRule({
     expectedRevision: (await extensions.routing.read()).document.revision,
-    rule: { allowFallback: false, providerKey: providerKey!, scope: { projectId: projectId! }, serviceId: 'varin.retrieval.plan', version: 1 },
+    rule: { allowFallback: false, providerKeys: [providerKey!], scope: { projectId: projectId! }, serviceId: 'varin.retrieval.plan', version: 1 },
   });
   const personalization = createAgentPersonalization({ client: f.kernel, context: async () => ({ bot: false, threadRole: 'main', projectId: 'accepted-project' }) });
   const storage = new KernelStorageAdapter({ client: f.kernel, hostId: 'process-consumer', storageRoot: f.documents.root,

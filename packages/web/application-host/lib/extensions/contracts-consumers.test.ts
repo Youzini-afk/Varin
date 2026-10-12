@@ -345,13 +345,13 @@ describe('runtime contract User API through the real HTTP handler and runtime', 
   it('derives directory and saved project scope through the original identity owner', async () => {
     const providerKey = 'dev.contract.one:host:dev.contract.discovery@1';
     await runtime.routing.upsertRule({ expectedRevision: 0, rule: {
-      serviceId, version: 1, providerKey, allowFallback: false,
+      serviceId, version: 1, providerKeys: [providerKey], allowFallback: false,
       scope: { userId: 'default', workspaceId: directory, projectId: 'saved-project' },
     } });
     const unscoped = await api.queryContracts({ action: 'list', kind: 'service' });
     expect(unscoped).toMatchObject({ entries: [{ selection: { status: 'ambiguous' } }] });
     const scoped = await api.queryContracts({ action: 'list', kind: 'service' }, { directory });
-    expect(scoped).toMatchObject({ entries: [{ selection: { status: 'resolved', providerKey } }] });
+    expect(scoped).toMatchObject({ entries: [{ selection: { status: 'resolved', providerKeys: [providerKey] } }] });
     const outsider = path.join(root, 'outside');
     await mkdir(outsider);
     await expect(api.queryContracts({ action: 'list', kind: 'service' }, { directory: outsider })).rejects.toThrow('deployment boundary');
@@ -360,11 +360,11 @@ describe('runtime contract User API through the real HTTP handler and runtime', 
   it('queries a legal unregistered directory without creating a workspace or notifying registration observers', async () => {
     expect(await documents.listWorkspaceRegistrations()).toEqual([]);
     await runtime.routing.upsertRule({ expectedRevision: 0, rule: {
-      serviceId, version: 1, providerKey: 'dev.contract.one:host:dev.contract.discovery@1', allowFallback: false,
+      serviceId, version: 1, providerKeys: ['dev.contract.one:host:dev.contract.discovery@1'], allowFallback: false,
       scope: { projectId: 'saved-project' },
     } });
     const result = await api.queryContracts({ action: 'list', kind: 'service' }, { directory });
-    expect(result).toMatchObject({ entries: [{ selection: { status: 'resolved', providerKey: 'dev.contract.one:host:dev.contract.discovery@1' } }] });
+    expect(result).toMatchObject({ entries: [{ selection: { status: 'resolved', providerKeys: ['dev.contract.one:host:dev.contract.discovery@1'] } }] });
     await api.queryContracts({ action: 'list', kind: 'ui_slot' }, { directory });
     expect(await documents.listWorkspaceRegistrations()).toEqual([]);
     expect(onWorkspaceResolved).not.toHaveBeenCalled();

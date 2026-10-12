@@ -87,7 +87,7 @@ test('missing collection members remain visible in full when no ordered contract
 
 for (const [selection, label] of [
   [null, 'Automatic'],
-  [key('a'), 'Single provider: A'],
+  [[key('a')], 'Ordered provider list'],
   [[], 'No providers (explicit empty list)'],
 ] as const) test(`renders ${label} without silently changing routing`, async () => {
   const ui = await mount(selection);
@@ -103,4 +103,10 @@ test('removing the last member sends an explicit empty list rather than automati
   assert.match(ui.document.body.textContent ?? '', /No providers run for this scope\./);
   await ui.click('Add B');
   assert.deepEqual(ui.selections, [[], [key('b')]]);
+});
+
+test('single-contract selection uses the same one-element array', async () => {
+  const ui = await mount([key('a')], {});
+  assert.equal(ui.selectedText(), 'Single provider: A');
+  assert.deepEqual(ui.selections, []);
 });

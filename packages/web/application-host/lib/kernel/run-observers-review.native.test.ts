@@ -44,7 +44,7 @@ async function fixture() {
     await extensions.installOrStage({ expectedRevision: (await extensions.state()).catalog.revision, source: { kind: 'local', display: id, specifier: dir } });
   }
   async function route(thread = 'thread', id = 'example.run-activity') {
-    await extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision, rule: { serviceId, version: 1, providerKey: key(id), scope: { sessionId: thread }, allowFallback: false } });
+    await extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision, rule: { serviceId, version: 1, providerKeys: [key(id)], scope: { sessionId: thread }, allowFallback: false } });
   }
   async function submit(thread = 'thread') { await runtime.createThread(thread, `${thread}-branch`); return runtime.submit({ key: `input-${thread}`, threadId: thread, branchId: `${thread}-branch`, expectedHead: null, input: { text: 'private content must not reach observer' }, configuration: {} }); }
   const invoke = (method: string, args: JsonValue[] = [], thread = 'thread') => extensions.invokeService({ serviceId, version: 1, method, args, routing: { sessionId: thread } });
@@ -200,7 +200,7 @@ it('explicit disable terminates noncooperative observer and never commits its la
   expect(await f.runtime.observerEvents(subscription('thread','example.disabled'),'thread',64)).toHaveLength(1);
 });
 async function projectRoute(f: Awaited<ReturnType<typeof fixture>>, projectId: string, id: string) {
-  await f.extensions.upsertServiceRoutingRule({expectedRevision:(await f.extensions.routing.read()).document.revision,rule:{serviceId,version:1,providerKey:key(id),scope:{projectId},allowFallback:false}});
+  await f.extensions.upsertServiceRoutingRule({expectedRevision:(await f.extensions.routing.read()).document.revision,rule:{serviceId,version:1,providerKeys: [key(id)],scope:{projectId},allowFallback:false}});
 }
 const projectInvoke = (f: Awaited<ReturnType<typeof fixture>>, projectId: string, id: string, method = 'getSnapshot') =>
   f.extensions.invokeService({serviceId,version:1,method,args:method === 'getSnapshot' ? [subscription('thread',id,projectId)] : [],routing:{sessionId:'thread',projectId}});

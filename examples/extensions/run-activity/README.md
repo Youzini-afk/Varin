@@ -24,7 +24,7 @@ Use the existing service-routing settings/API to select it for a project or sess
 {
   "serviceId": "varin.run.activity",
   "version": 1,
-  "providerKey": "example.run-activity:host:varin.run.activity@1",
+  "providerKeys": ["example.run-activity:host:varin.run.activity@1"],
   "scope": { "sessionId": "YOUR_NATIVE_THREAD_ID" },
   "allowFallback": false
 }

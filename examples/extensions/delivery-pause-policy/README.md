@@ -24,7 +24,7 @@ Select the provider through existing service routing, using the document's curre
 {
   "serviceId": "varin.agent.policy",
   "version": 4,
-  "providerKey": "example.delivery-pause-policy:host:varin.agent.policy@4",
+  "providerKeys": ["example.delivery-pause-policy:host:varin.agent.policy@4"],
   "scope": { "sessionId": "YOUR_NATIVE_THREAD_ID" },
   "allowFallback": false
 }

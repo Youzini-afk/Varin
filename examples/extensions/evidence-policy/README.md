@@ -24,7 +24,7 @@ Select its provider in existing service routing, with a real project ID:
 {
   "serviceId": "varin.agent.policy",
   "version": 4,
-  "providerKey": "example.evidence-policy:host:varin.agent.policy@4",
+  "providerKeys": ["example.evidence-policy:host:varin.agent.policy@4"],
   "scope": { "projectId": "YOUR_PROJECT_ID" },
   "allowFallback": false
 }

@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { HostServiceOwnerIdentity } from './service-registry.js';
 import {
   parseVarinRuntimeContractRequest,
-  resolveVarinExtensionServiceRouting, resolveVarinWorkbenchProfile,
+  resolveVarinExtensionServiceRouting, resolveVarinWorkbenchProfile, serviceRoutingComposition,
   resolveVarinWorkbenchShellSurfaceSeams, parseVarinWorkbenchShellContributionData,
   VARIN_WORKBENCH_SLOT_CONTRACTS,
   checkVarinContributionCompatibility,
@@ -24,8 +24,11 @@ export function resolveDeclaredServiceRouting(
     .map(entry => ({ providerKey: `${entry.manifest.id}:host:${serviceId}@${version}`, providerId: entry.manifest.id,
       ...(entry.manifest.provides!.services!.find(service => service.id === serviceId && service.version === version)!.contract?.composition
         ? { composition: 'ordered' as const } : {}) }));
-  return resolveVarinExtensionServiceRouting({ candidates, document: routing.document, serviceId, version,
+  const resolved = resolveVarinExtensionServiceRouting({ candidates, document: routing.document, serviceId, version,
     ...(context ? { context } : {}), ...(defaultProviderKey ? { defaultProviderKey } : {}), ...(composition ? { composition } : {}) });
+  if (resolved.status !== 'resolved') return resolved;
+  const { providerIds: extensionIds, ...selection } = resolved;
+  return { ...selection, extensionIds };
 }
 
 function methodNames(descriptor: VarinExtensionServiceProvision): string[] | null {
@@ -86,24 +89,19 @@ function serviceSummary(state: VarinExtensionHostStateSnapshot, serviceId: strin
   if (explicit) {
     const selected = providers.find(provider => provider.providerId === explicit && provider.status === 'active');
     summary.selection = selected ? currentDeclarationMatches(selected)
-      ? { status: 'resolved', providerKey: selected.providerKey, providerId: selected.providerId, codes: [] }
+      ? { status: 'resolved', providerKeys: [selected.providerKey], providerIds: [selected.providerId], codes: [] }
       : { status: 'stale', codes: ['selected_contract_changed'] }
       : { status: 'unavailable', codes: ['selected_unavailable'] };
     return summary;
   }
-  const resolution = resolveDeclaredServiceRouting(state.catalog, state.routing, serviceId, version, scope.routing, undefined, "ordered");
-  if (resolution.composition === 'ordered') {
-    const active = resolution.providerKeys?.map(key => providers.find(provider => provider.status === 'active'
-      && provider.providerKey === key && currentDeclarationMatches(provider)));
-    summary.selection = { status: resolution.status, codes: resolution.diagnostics.map(diagnostic => diagnostic.code),
-      composition: 'ordered', ...(resolution.providerKeys ? { providerKeys: resolution.providerKeys } : {}),
-      ...(active?.every(provider => provider !== undefined) ? { providerIds: active.map(provider => provider!.providerId) } : {}) };
-  } else {
-    const active = providers.find(provider => provider.status === 'active' && provider.providerKey === resolution.providerKey
-      && currentDeclarationMatches(provider));
-    summary.selection = { status: resolution.status, codes: resolution.diagnostics.map(diagnostic => diagnostic.code),
-      ...(resolution.providerKey ? { providerKey: resolution.providerKey } : {}), ...(active ? { providerId: active.providerId } : {}) };
-  }
+  const composition = serviceRoutingComposition(state, serviceId, version);
+  const resolution = resolveDeclaredServiceRouting(state.catalog, state.routing, serviceId, version, scope.routing, undefined, composition);
+  const active = resolution.providerKeys?.map(key => providers.find(provider => provider.status === 'active'
+    && provider.providerKey === key && currentDeclarationMatches(provider)));
+  summary.selection = { status: resolution.status, codes: resolution.diagnostics.map(diagnostic => diagnostic.code),
+    ...(composition ? { composition } : {}), ...(resolution.providerKeys !== undefined ? { providerKeys: resolution.providerKeys } : {}),
+    ...(resolution.status === 'resolved' && active?.every(provider => provider !== undefined)
+      ? { providerIds: active.map(provider => provider!.providerId) } : {}) };
   return summary;
 }
 
@@ -167,8 +165,9 @@ export function queryRuntimeContracts(state: VarinExtensionHostStateSnapshot,
   if (!candidates.length) return { ...basis, action: 'describe', kind: 'service', status: 'missing', service: null, member: null };
   if (!request.member) return { ...basis, action: 'describe', kind: 'service', status: 'found', service, member: null };
   // Explicit implementation or the original scoped selection. Ambiguity never selects an arbitrary schema.
-  const entry = request.extensionId ? candidates[0] : candidates.find(candidate =>
-    `${candidate.manifest.id}:host:${request.serviceId}@${request.version}` === service.selection.providerKey);
+  const selectedKeys = service.selection.providerKeys;
+  const entry = request.extensionId ? candidates[0] : selectedKeys?.length === 1 ? candidates.find(candidate =>
+    selectedKeys.includes(`${candidate.manifest.id}:host:${request.serviceId}@${request.version}`)) : undefined;
   if (!entry) return { ...basis, action: 'describe', kind: 'service', status: 'unresolved', service, member: null };
   const descriptor = entry.manifest.provides!.services!.find(item => item.id === request.serviceId && item.version === request.version)!;
   const { kind, name } = request.member;

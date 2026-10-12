@@ -215,7 +215,8 @@ export class RunObservers {
       return undefined;
     }
     const legacyProvider = selection.legacy ? this.extensions.services.getSnapshot().providers.find(provider => provider.providerId === selection.legacy) : undefined;
-    const providerKey = legacyProvider?.providerKey ?? resolved.providerKey;
+    const providerKey = legacyProvider?.providerKey ?? (resolved.status === 'resolved' && resolved.providerKeys.length === 1
+      ? resolved.providerKeys[0] : undefined);
     if ((!selection.legacy && resolved.status !== 'resolved') || !providerKey) {
       throw new Error('Selected activity observer is unavailable or ambiguous');
     }

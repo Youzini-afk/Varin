@@ -7,8 +7,8 @@ import { fileURLToPath } from 'node:url';
 import type { Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import express, { type Express, type RequestHandler } from 'express';
-import { test } from 'vitest';
-import { ApplicationExtensionRuntime } from '@varin/extension-host';
+import { test, vi } from 'vitest';
+import { ApplicationExtensionRuntime, ExtensionStorageError } from '@varin/extension-host';
 import { parseVarinExtensionServiceProvision, VARIN_CONTEXT_BUDGET_SERVICE, VARIN_CONTEXT_FRAGMENTS_SERVICE as descriptor } from '@varin/extension-contract';
 import type { RuntimeAPIs } from '@varin/application-client';
 import { registerExtensionRoutes } from '#application-host/lib/extensions/routes.js';
@@ -39,9 +39,9 @@ test('real settings controls persist ordered choices through the original client
   const a = providerKey('review.a'), b = providerKey('review.b'), c = providerKey('review.c');
   const missing = providerKey('review.missing');
   const now = new Date().toISOString();
-  for (const id of ['review.a', 'review.b', 'review.c', 'review.legacy']) {
+  for (const id of ['review.a', 'review.b', 'review.c', 'review.single-owner']) {
     const provision = parseVarinExtensionServiceProvision(
-      id === 'review.legacy' ? { id: 'review.single', version: 1, multiple: true } : descriptor,
+      id === 'review.single-owner' ? { id: 'review.single', version: 1, multiple: true } : descriptor,
     );
     await runtime.catalog.upsert({
       manifest: { schemaVersion: 1, id, version: '1.0.0', engines: { varin: '*' },
@@ -73,7 +73,8 @@ test('real settings controls persist ordered choices through the original client
     transport = routerTransport(router);
   };
   attachRouter();
-  const writes: Array<{ method: string; path: string; body: { expectedRevision: number; rule?: { providerKeys?: string[]; providerKey?: string } }; status?: number }> = [];
+  const writes: Array<{ method: string; path: string; body: { expectedRevision: number; rule?: { providerKeys: string[] } }; status?: number }> = [];
+  const failures: Array<{ status: number; payload: unknown }> = [];
   let competeBeforeNextWrite = false;
   setGlobal('fetch', async (input: URL | string, init: RequestInit = {}) => {
     const target = new URL(String(input));
@@ -92,6 +93,7 @@ test('real settings controls persist ordered choices through the original client
     }
     const response = await transport(target, { ...init, headers });
     if (write) write.status = response.status;
+    if (write && !response.ok) failures.push({ status: response.status, payload: await response.clone().json() });
     return response;
   });
   const api = createWebExtensionsAPI();
@@ -109,8 +111,8 @@ test('real settings controls persist ordered choices through the original client
       busy: false, composition: serviceRoutingComposition(snapshot, serviceId, 1),
       extensionNames: new Map([['review.a', 'A'], ['review.b', 'B'], ['review.c', 'C'], ['example.context-budget', 'Evidence budget']]),
       providers: serviceRoutingOptions(snapshot).get(`${serviceId}@1`) ?? [],
-      selection: rule?.providerKeys ?? rule?.providerKey ?? null,
-      onSelect: (selection: string | readonly string[] | null) => { pending = store.setVarinExtensionServiceRoute(serviceId, 1, scope, selection); },
+      selection: rule?.providerKeys ?? null,
+      onSelect: (selection: readonly string[] | null) => { pending = store.setVarinExtensionServiceRoute(serviceId, 1, scope, selection); },
     }));
   }
   const click = async (label: string) => {
@@ -132,6 +134,12 @@ test('real settings controls persist ordered choices through the original client
     const initial = store.getVarinExtensionCatalogState().snapshot;
     assert.ok(initial);
     assert.equal(serviceRoutingComposition(initial, 'review.single', 1), undefined);
+    const plain = await readWhileWatching(() => api.queryContracts({ action: 'describe', kind: 'service',
+      serviceId: 'review.single', version: 1, member: { kind: 'method', name: 'read' } }));
+    assert.ok(plain.action === 'describe' && plain.kind === 'service');
+    assert.equal(plain.status, 'undeclared', 'Generic services remain legal without optional method metadata');
+    assert.deepEqual(plain.service?.selection.providerKeys, ['review.single-owner:host:review.single@1']);
+    assert.equal(plain.service?.selection.composition, undefined);
     root = createRoot(window.document.getElementById('app')!);
     await React.act(async () => root!.render(React.createElement(SettingsConsumer)));
     assert.equal(selectionLabel(), 'Automatic');
@@ -192,10 +200,9 @@ test('real settings controls persist ordered choices through the original client
     assert.equal(writes.at(-1)?.path, '/api/varin/extensions/v1/services/routing/remove');
     assert.equal(selectedRule(), undefined);
     assert.equal(selectionLabel(), 'Automatic');
-    await React.act(async () => store.setVarinExtensionServiceRoute(serviceId, 1, scope, a));
-    assert.equal(writes.at(-1)?.body.rule?.providerKey, a);
-    assert.equal(writes.at(-1)?.body.rule?.providerKeys, undefined);
-    assert.equal(selectionLabel(), 'Single provider: A');
+    await React.act(async () => store.setVarinExtensionServiceRoute(serviceId, 1, scope, [a]));
+    assert.deepEqual(writes.at(-1)?.body.rule?.providerKeys, [a]);
+    assert.equal(selectionLabel(), 'Ordered provider list');
     await React.act(async () => store.setVarinExtensionServiceRoute(serviceId, 1, { workspaceId: '/selected-project' }, [b, a]));
     const documents = await readWhileWatching(async () => {
       const files = await readdir(runtime.storage.directory, { recursive: true });
@@ -206,6 +213,41 @@ test('real settings controls persist ordered choices through the original client
     assert.deepEqual(persisted.data.rules.find((rule: { scope: { workspaceId?: string } }) => rule.scope.workspaceId === '/selected-project').providerKeys, [b, a]);
     assert.equal(brokerStarts, 0);
     assert.equal(writes.length, 11);
+    const beforeInvalid = await readWhileWatching(() => runtime.routing.read());
+    const readRoutingBytes = async () => {
+      const files = await readdir(runtime.storage.directory, { recursive: true });
+      for (const file of files.filter(file => file.endsWith('.json'))) {
+        const bytes = await readFile(join(runtime.storage.directory, file));
+        if (JSON.parse(bytes.toString('utf8')).address.extensionId === 'varin.core.service-routing') return bytes;
+      }
+      throw new Error('Original routing storage file is missing');
+    };
+    const beforeBytes = await readRoutingBytes();
+    const validRule = { allowFallback: false, providerKeys: [a], scope, serviceId, version: 1 };
+    const scalarRule = { allowFallback: false, providerKey: a, scope, serviceId, version: 1 };
+    for (const rule of [scalarRule, { ...validRule, providerKey: a }]) {
+      const request = { expectedRevision: beforeInvalid.document.revision, rule } as unknown as Parameters<typeof api.upsertServiceRoutingRule>[0];
+      await assert.rejects(api.upsertServiceRoutingRule(request), /Unknown service routing rule field: providerKey/);
+      assert.deepEqual(failures.at(-1), { status: 400, payload: { error: {
+        code: 'invalid_request', details: ['Unknown service routing rule field: providerKey'],
+        message: 'Unknown service routing rule field: providerKey', retryable: false,
+      } } });
+      assert.deepEqual((await readWhileWatching(() => runtime.routing.read())).document, beforeInvalid.document);
+      assert.deepEqual(await readRoutingBytes(), beforeBytes);
+    }
+    const writeFailure = vi.spyOn(runtime.storage, 'update').mockRejectedValueOnce(
+      new ExtensionStorageError('storage_write_failed', 'Routing fixture storage write failed'));
+    try {
+      await assert.rejects(api.upsertServiceRoutingRule({ expectedRevision: beforeInvalid.document.revision, rule: validRule }),
+        /Routing fixture storage write failed/);
+      assert.equal(writeFailure.mock.calls.length, 1);
+      assert.deepEqual(failures.at(-1), { status: 500, payload: { error: {
+        code: 'storage_write_failed', message: 'Routing fixture storage write failed', retryable: true,
+      } } });
+      assert.deepEqual((await readWhileWatching(() => runtime.routing.read())).document, beforeInvalid.document);
+      assert.deepEqual(await readRoutingBytes(), beforeBytes);
+    } finally { writeFailure.mockRestore(); }
+
     // A real installed Decision package uses the same public Settings/client/Router path.
     // Merely displaying and selecting its metadata must not activate its broker.
     const installed = await readWhileWatching(() => runtime.installOrStage({
@@ -221,12 +263,12 @@ test('real settings controls persist ordered choices through the original client
     assert.equal(serviceRoutingComposition(budgetState, serviceId, 1), undefined);
     assert.deepEqual(serviceRoutingOptions(budgetState).get(`${serviceId}@1`)?.map(value => value.providerKey), [budgetKey]);
     assert.equal(selectionLabel(), 'Automatic');
-    await React.act(async () => store.setVarinExtensionServiceRoute(serviceId, 1, scope, budgetKey));
+    await React.act(async () => store.setVarinExtensionServiceRoute(serviceId, 1, scope, [budgetKey]));
     assert.equal(selectionLabel(), 'Single provider: Evidence budget');
-    assert.equal(writes.at(-1)?.body.rule?.providerKey, budgetKey);
+    assert.deepEqual(writes.at(-1)?.body.rule?.providerKeys, [budgetKey]);
     const budgetDescription = await readWhileWatching(() => api.queryContracts({ action: 'describe', kind: 'service', serviceId, version: 1 }));
     assert.ok(budgetDescription.action === 'describe' && budgetDescription.kind === 'service');
-    assert.equal(budgetDescription.service?.selection.providerKey, budgetKey);
+    assert.deepEqual(budgetDescription.service?.selection.providerKeys, [budgetKey]);
     assert.equal(brokerStarts, 0);
 
   } finally {

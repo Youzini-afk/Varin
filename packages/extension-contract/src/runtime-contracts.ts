@@ -91,8 +91,6 @@ export interface VarinRuntimeServiceSummary {
   instances: VarinRuntimeServiceInstance[];
   selection: {
     status: 'resolved' | 'ambiguous' | 'unavailable' | 'stale';
-    providerKey?: string;
-    providerId?: string;
     composition?: 'ordered';
     providerKeys?: string[];
     providerIds?: string[];
@@ -253,15 +251,14 @@ export function parseVarinRuntimeContractResult(value: unknown): VarinRuntimeCon
     const selection = record(item.selection, 'Service selection');
     requireValue(['resolved', 'ambiguous', 'unavailable', 'stale'].includes(String(selection.status)));
     strings(selection.codes);
-    for (const key of ['providerId', 'providerKey']) if (selection[key] !== undefined) text(selection[key], key);
+    fields(selection, ['status', 'codes', 'composition', 'providerKeys', 'providerIds'], 'Service selection');
     if (selection.composition !== undefined) requireValue(selection.composition === 'ordered');
     for (const key of ['providerIds', 'providerKeys']) if (selection[key] !== undefined) strings(selection[key]);
-    if (selection.composition === 'ordered') {
-      requireValue(selection.providerId === undefined && selection.providerKey === undefined);
-      if (selection.providerKeys !== undefined) requireValue(new Set(selection.providerKeys as string[]).size === (selection.providerKeys as string[]).length);
-      if (selection.providerIds !== undefined) requireValue(Array.isArray(selection.providerKeys)
-        && (selection.providerIds as string[]).length === selection.providerKeys.length);
-    } else requireValue(selection.providerKeys === undefined && selection.providerIds === undefined);
+    if (selection.status === 'resolved') requireValue(Array.isArray(selection.providerKeys)
+      && (selection.composition === 'ordered' || selection.providerKeys.length === 1));
+    if (selection.providerKeys !== undefined) requireValue(new Set(selection.providerKeys as string[]).size === (selection.providerKeys as string[]).length);
+    if (selection.providerIds !== undefined) requireValue(Array.isArray(selection.providerKeys)
+      && (selection.providerIds as string[]).length === selection.providerKeys.length);
     for (const value of list(item.instances)) {
       const instance = record(value, 'Service instance');
       for (const key of ['providerId', 'providerKey', 'extensionId', 'extensionVersion']) text(instance[key], key);

@@ -8,6 +8,7 @@ Last updated: 2026-10-12
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [唯一数组 routing 合同](runtime-array-routing-2026-10-12.md) | single/ordered、真实设置与原调用消费者、存储 marker/CAS、native Context 组合；不宣称第二选择权威已删除 |
 | [当前扩展声明与严格 Catalog](runtime-current-extension-contracts-2026-10-12.md) | 删除 SDK opt-in、source 吞错与历史 raw repair；真实 broker/source/当前更新与原 native 消费有限验收 |
 | [可替换 Context Budget Decision](runtime-context-budget-2026-10-12.md) | 原设置/选择、冻结摘要配方、真实主子作用域、原收费回执重开及独立后台开关修复 |
 | [有序纯 Context Transform](runtime-context-transforms-2026-10-12.md) | 原选择/配置作用域、真实 broker 与模型序列化、child ContextRead、取消和 GC 重开；有限跨层验收 |

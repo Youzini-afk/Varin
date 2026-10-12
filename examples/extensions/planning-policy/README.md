@@ -25,7 +25,7 @@ Select the provider through existing service routing, with the routing document'
 {
   "serviceId": "varin.agent.policy",
   "version": 4,
-  "providerKey": "example.planning-policy:host:varin.agent.policy@4",
+  "providerKeys": ["example.planning-policy:host:varin.agent.policy@4"],
   "scope": { "projectId": "YOUR_PROJECT_ID" },
   "allowFallback": false
 }

@@ -667,7 +667,7 @@ The existing routing API can select a project or native Thread with a revision-c
 {
   "serviceId": "varin.retrieval.plan",
   "version": 1,
-  "providerKey": "varin.builtin.retrieval-keyword:host:varin.retrieval.plan@1",
+  "providerKeys": ["varin.builtin.retrieval-keyword:host:varin.retrieval.plan@1"],
   "scope": { "projectId": "YOUR_PROJECT_ID" },
   "allowFallback": false
 }
