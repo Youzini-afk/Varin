@@ -10,6 +10,13 @@ import type { ThreadMaterialsAPI } from '@varin/application-client';
 import { createDocumentAuthority } from '../documents/authority.js';
 import { createEgressRuntime } from '../harness/egress.js';
 import { createSemanticInference } from '../knowledge/semantic/runtime-inference.js';
+import { createSemanticInferenceLedger } from '../knowledge/semantic/inference-ledger.js';
+import { createWorkspaceSemanticRuntime } from '../knowledge/semantic/workspace-runtime.js';
+import { createEmbedScheduler } from '../knowledge/semantic/embed-scheduler.js';
+import { createHashEmbedder } from '../knowledge/semantic/embedder.js';
+import { createProjectIndexScope } from '../knowledge/index-scope.js';
+import { createStructureSource } from '../structure/source.js';
+import { createFsSearchRuntime } from '../fs/search.js';
 import { KernelClient, type KernelGrantHandle } from './kernel-client.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { createLiveSourceOwner } from './live-source.js';
@@ -35,6 +42,24 @@ let credentials:HostCredentialAuthority;
 let compute:ReturnType<typeof createKernelComputeService>, syntaxComputations=0;
 let releaseBody:()=>void=()=>{throw new Error('No original body to release');};
 const bodies:unknown[]=[];
+let semantic: ReturnType<typeof createWorkspaceSemanticRuntime> | undefined;
+let indexScope: ReturnType<typeof createProjectIndexScope> | undefined;
+let ledger: ReturnType<typeof createSemanticInferenceLedger> | undefined;
+let embeddingRequests = 0, indexRequests = 0, retrievalCalls = 0;
+const usesSemantic = () => mode.startsWith('semantic-');
+const usesExplore = () => mode.startsWith('llm-') || mode === 'semantic-auto';
+const usesDecision = () => mode.startsWith('decision-') || mode === 'llm-auto' || mode === 'semantic-auto';
+async function embeddingResponse(init: RequestInit): Promise<Response> {
+  const wire = JSON.parse(String(init.body)) as { model: string; input: string[] };
+  const query = wire.input.length === 1 && ['retrievalNeedle', 'How does retrievalNeedle resolve its dependency?'].includes(wire.input[0]!);
+  assert.equal(wire.model, 'encoder');
+  if (query) embeddingRequests++; else indexRequests++;
+  assert(wire.input.every(text => !text.includes('FORBIDDEN_SOURCE')));
+  if (query && mode === 'semantic-stop') return heldResponse(init);
+  return Response.json({ data: wire.input.map((text, index) => ({ index,
+    embedding: query && mode === 'semantic-invalid' ? [1] : text.includes('SOURCE_C') ? [1, 0] : [0.9, 0.1] })),
+    ...(query && mode === 'semantic-missing' ? {} : { usage: { prompt_tokens: 7, total_tokens: 7 } }) });
+}
 function request(method:string,params:unknown,options:{grant?:KernelGrantHandle}={}) {
   if(method==='compute.start'&&(params as {operation?:string}).operation==='structure') syntaxComputations++;
   if(options.grant) kernel.assertGrantForScope(options.grant);
@@ -61,16 +86,17 @@ async function heldResponse(init: RequestInit): Promise<Response> {
 }
 const egress=createEgressRuntime({env:{},resolveAll:async()=>[{address:'93.184.216.34',family:4}],
   systemFetch:async(url,init)=>{
-    if(mode.startsWith('decision-')||mode==='llm-auto') {
+    if(String(url)==='https://embedding.invalid/v1/embeddings') return embeddingResponse(init);
+    if(usesDecision()) {
       assert.equal(String(url),'https://rerank.invalid/models/systemone');
       assert.equal(new Headers(init.headers).get('authorization'),'Bearer controlled-rerank-key');
       const body=JSON.parse(String(init.body)) as {model:string;state:{goal:string;materials:Array<{id:string;text:string;label:string}>};questions:Record<string,unknown>};
       bodies.push(body);requests++;
       assert.equal(body.model,'classifier');
-      assert.equal(body.state.goal,mode.startsWith('llm-')?'How does retrievalNeedle resolve its dependency?':'retrievalNeedle');
+      assert.equal(body.state.goal,usesExplore()?'How does retrievalNeedle resolve its dependency?':'retrievalNeedle');
       assert(body.state.materials.every(material=>!material.text.includes('FORBIDDEN_SOURCE')));
       assert.equal('messages' in body,false);
-      if(mode==='llm-auto') assert(Object.keys(body.questions).every(id=>id.startsWith('a:')),'classifier keeps only its original action duty');
+      if(mode==='llm-auto'||mode==='semantic-auto') assert(Object.keys(body.questions).every(id=>id.startsWith('a:')),'classifier keeps only its original action duty');
       if(mode==='decision-stop') return heldResponse(init);
       const usage=mode==='decision-unknown'?{input_tokens:7}:{input_tokens:requests*7,output_tokens:requests};
       if(mode==='decision-partial'&&body.state.materials.some(material=>material.text.includes('DISCOVERED_HELPER'))) return Response.json({answers:'invalid original second batch',usage});
@@ -99,7 +125,7 @@ async function initialize(frame:Record<string,unknown>) {
   root=String(frame.root);mode=String(frame.mode);sourceMode=String(frame.sourceMode??'live_root');
   const workspace=join(root,'workspace'), agentDir=join(root,'agent');
   await mkdir(join(workspace,'allowed'),{recursive:true});await mkdir(join(workspace,'private'),{recursive:true});await mkdir(agentDir,{recursive:true});
-  if(mode.startsWith('decision-')||mode.startsWith('llm-')) {
+  if(usesDecision()||usesExplore()) {
     await writeFile(join(workspace,'allowed','seed.ts'),'export const retrievalNeedle = hiddenHelper();\n');
     await writeFile(join(workspace,'allowed','helper.ts'),'export function hiddenHelper() { return "DISCOVERED_HELPER"; }\n');
   } else {
@@ -111,11 +137,13 @@ async function initialize(frame:Record<string,unknown>) {
     await writeFile(join(workspace,'allowed','a.ts'),'// original source padding\n'.repeat(4000)+'export const retrievalNeedle = "SOURCE_A";\n');
   await writeFile(join(agentDir,'models.json'),JSON.stringify({providers:{rank:{apiKey:'controlled-rerank-key',baseUrl:'https://rerank.invalid/models',chat:false,
     capabilities:{rerank:{protocol:'http-rerank',models:[{id:'ranker'}]},decision:{protocol:'pi-classifier',models:[{id:'classifier',api:'typesafe-system-one'}]}}},
+    embedding:{baseUrl:'https://embedding.invalid/v1',capabilities:{embedding:{protocol:'openai-compatible',models:[{id:'encoder'}]}}},
     explore:{baseUrl:'https://explore.invalid/v1',apiKey:'controlled-explore-key',api:'openai-responses',models:[{id:'explore-model',name:'Original configured Explore',contextWindow:32768,maxTokens:2000,input:['text']}]}}}));
-  await writeFile(join(agentDir,'settings.json'),JSON.stringify({harness:{codeRetrieval:{decision:mode==='llm-auto'?'auto':mode.startsWith('llm-')||mode==='unconfigured-model'?'llm':mode.startsWith('decision-')?'fast-decision':['source','syntax','semantic'].includes(mode)?'source':'rerank'},
+  await writeFile(join(agentDir,'settings.json'),JSON.stringify({harness:{codeRetrieval:{decision:mode==='llm-auto'||mode==='semantic-auto'?'auto':usesExplore()||mode==='unconfigured-model'?'llm':mode.startsWith('decision-')?'fast-decision':['source','syntax','semantic','semantic-stop','semantic-invalid','semantic-missing','semantic-cold','semantic-cache','semantic-credential'].includes(mode)?'source':'rerank'},
     rerank:{protocol:'http-rerank',providerId:'rank',modelId:'ranker'},
-    models:mode.startsWith('llm-')?{explore:{providerId:'explore',modelId:'explore-model'}}:undefined,
-    fastDecision:mode.startsWith('decision-')||mode==='llm-auto'?{default:{protocol:'pi-classifier',providerId:'rank',modelId:'classifier'}}:undefined}}));
+    embedding:usesSemantic()?{protocol:'openai-compatible',providerId:'embedding',modelId:'encoder',dimensions:2,maxTokens:2048}:undefined,
+    models:usesExplore()?{explore:{providerId:'explore',modelId:'explore-model'}}:undefined,
+    fastDecision:usesDecision()?{default:{protocol:'pi-classifier',providerId:'rank',modelId:'classifier'}}:undefined}}));
   kernel=new KernelClient({hostId:HOST,hostGeneration:GENERATION,storageRoot:String(frame.storageRoot),buildVersion:'0.9.25'});
   // Replace delivery/handshake only. Original grant minting/token checks, bridges and runtime events remain.
   const transport=kernel as unknown as {epoch:string;started:boolean;handshakeResult:KernelHandshakeResult;consumeFrame(value:unknown):void};
@@ -149,24 +177,49 @@ async function initialize(frame:Record<string,unknown>) {
     await kernel.revokeGrant(seed.grantId);
   }
   credentials=HostCredentialAuthority.open(agentDir);
-  inference=createSemanticInference(credentials,undefined,{requests:{kernel,runtime,egress}});
+  if(usesSemantic()) await credentials.modifyWithIntent('embedding','replace',async()=>({type:'api_key',key:'controlled-embedding-key'}));
+  if(usesSemantic()) ledger=createSemanticInferenceLedger({dataDir:join(root,'semantic-data'),hostId:HOST});
+  inference=createSemanticInference(credentials,undefined,{requests:{kernel,runtime,egress},...(ledger?{ledger}:{}),fetchImpl:async(_url,init)=>embeddingResponse(init!)});
   const sources=createRetrievalSourceOwner({kernel,documents,validateLiveSource:live.validate});
-  compute=createKernelComputeService({client:kernel,resolveIdentity:async()=>{throw new Error('Fixed syntax must only consume its admitted supplied text');}});
+  compute=createKernelComputeService({client:kernel,resolveIdentity:async cwd=>{
+    assert(usesSemantic(),'Fixed syntax must only consume its admitted supplied text');
+    const identity=await documents.resolveWorkspace({path:cwd});
+    return {workspaceId:identity.workspaceId,executionWorkspaceId:identity.workspaceId,canonicalRoot:(await documents.inspectWorkspace(identity.workspaceId)).root};
+  }});
   const syntax=createTreeSitterStructureProvider({compute});
+  if(usesSemantic()) {
+    indexScope=createProjectIndexScope([join(workspace,'allowed')]);
+    const filesystem=createFsSearchRuntime({compute});
+    semantic=createWorkspaceSemanticRuntime({dataDir:join(root,'semantic-data'),hostId:HOST,configCwd:agentDir,
+      documents,structureSource:createStructureSource([syntax]),searchFilesystemFiles:filesystem.searchFilesystemFiles,
+      isIndexablePath:async(id,resource,signal,options)=>filesystem.isSearchableFile((await documents.inspectWorkspace(id)).root,resource,signal,options),
+      scheduler:createEmbedScheduler(),embedder:createHashEmbedder(),getIndexScope:indexScope.get,runtimeInference:inference,
+      getBroker:()=>{throw new Error('Native semantic must not create a Pi workspace');},
+      executionViews:{get:()=>undefined},workingBranches:{pinQuery:async()=>null},onError:error=>console.error('semantic fixture',error)});
+    if(mode!=='semantic-cold') {await semantic.scanWorkspace(identity.workspaceId);await semantic.drain();}
+  }
   const model=createRetrievalModelStage({models:createModelAuthority(credentials),inference,readGlobalSettings:()=>credentials.readGlobalInferenceSettings(),kernel,sources});
   extensions=await ApplicationExtensionRuntime.create({dataDir:join(root,'extensions'),varinVersion:'0.9.25',
     brokerScript:resolve('packages/extension-host/broker/broker-child.mjs')});
   await extensions.start();
   await extensions.upsertServiceRoutingRule({expectedRevision:(await extensions.routing.read()).document.revision,
     rule:{scope:{sessionId:'thread:parent'},serviceId:'varin.retrieval.plan',version:1,allowFallback:false,
-      providerKey:`varin.builtin.retrieval-${mode==='syntax'?'structured':mode==='semantic'?'semantic':'keyword'}:host:varin.retrieval.plan@1`}});
+      providerKey:`varin.builtin.retrieval-${mode==='syntax'?'structured':mode==='semantic'||usesSemantic()?'semantic':'keyword'}:host:varin.retrieval.plan@1`}});
   const composition=createRetrievalComposition(extensions,{structure:syntax,syntax,
-    prepareSemantic:async()=>{throw new Error('Non-live retrieval cannot acquire the live published semantic reader');},
-    prepareModel:(scope,signal)=>{assert(scope.query);return model.prepare(scope.query,signal??new AbortController().signal);}});
-  const retrieve=createRetrievalOwner({sources,kernel,
-    preparePipeline:async(query,signal)=>composition.prepare({threadId:query.threadId,workspaceId:await sources.routingWorkspace(query,signal),query},signal)});
+    prepareSemantic:async(scope,signal)=>{
+      if(!semantic||!scope.query||!scope.inference) throw new Error('Non-live retrieval cannot acquire the live published semantic reader');
+      const query=scope.query,active=signal??new AbortController().signal;
+      const roots=query.paths??kernel.retrievalGrant(query).pathScopes;
+      return semantic.acquireQuery({workspaceId:query.source.workspace_id,inference:scope.inference,roots,signal:active,
+        authorize:requestSignal=>sources.validate(query,requestSignal),assertAuthorized:()=>{kernel.retrievalGrant(query);}});
+    },
+    prepareModel:(scope,signal)=>{assert(scope.query);return model.prepare(scope.query,signal??new AbortController().signal,scope.inference);}});
+  const retrieve=createRetrievalOwner({sources,kernel,inferenceRequests:inference.requests!,
+    preparePipeline:async(query,signal,call)=>composition.prepare({threadId:query.threadId,workspaceId:await sources.routingWorkspace(query,signal),query,inference:call},signal)});
   kernel.setRetrievalOwner(async(query,signal)=>{
     const result=await retrieve(query,signal);
+    retrievalCalls++;
+    if(mode==='semantic-credential'&&retrievalCalls===1) await credentials.modifyWithIntent('embedding','replace',async()=>({type:'api_key',key:'controlled-second-account-key'}));
     if(result.status==='failed') console.error('retrieval fixture failure',sourceMode,mode,result.message,result.stages);
     return result;
   });
@@ -241,8 +294,9 @@ async function handle(frame:Record<string,unknown>) {
   if(frame.kind==='fixture-release-body') {if(mode==='llm-stop'){drained=true;write({kind:'fixture-native-release'});}else releaseBody();return;}
   if(frame.kind==='fixture-finish') {
     // Publishing may outlive the detached caller. Wait for that existing owner's completion before exit.
-    await inference.close();await extensions.stop();await compute.dispose();await documents.dispose();
-    write({kind:'fixture-finished',requests,bodies,drained,syntaxComputations});return;
+    const facts=ledger?await ledger.list():[];
+    await semantic?.dispose();indexScope?.dispose();await inference.close();await extensions.stop();await compute.dispose();await documents.dispose();
+    write({kind:'fixture-finished',requests,bodies,drained,syntaxComputations,embeddingRequests,indexRequests,retrievalCalls,ledgerFacts:facts});return;
   }
   (kernel as unknown as {consumeFrame(value:unknown):void}).consumeFrame(frame);
 }

@@ -22,6 +22,7 @@ interface InferenceRequest {
   observe(raw: unknown): { usage?: InferenceReceipt['usage']; rawUsage: unknown; valid: boolean };
 }
 export interface InferenceCall {
+  readonly operationId: string;
   readonly signal: AbortSignal;
   readonly cancelled: boolean;
   assertFresh(): Promise<void>;
@@ -130,7 +131,17 @@ export function createInferenceRequests(options: InferenceRequestsOptions) {
       controllers.add(controller);
       const combined = AbortSignal.any([signal, controller.signal]);
       let ordinal = 0;
+      let accepting = true;
+      const ownedWork = new Set<Promise<unknown>>();
+      const own = <T>(execute: () => Promise<T>): Promise<T> => {
+        if (!accepting) return Promise.reject(new Error('Original inference session is closed'));
+        const task = execute();
+        ownedWork.add(task);
+        void task.then(() => ownedWork.delete(task), () => ownedWork.delete(task));
+        return task;
+      };
       const call: InferenceCall = {
+        operationId: invocation.operationId,
         signal: combined,
         get cancelled() { return signal.aborted || ownerCancelled; },
         async assertFresh() {
@@ -140,7 +151,7 @@ export function createInferenceRequests(options: InferenceRequestsOptions) {
           });
           if (previous.hasRequests) throw new Error('Original inference exists; recovery never restarts its paid request');
         },
-        async generate(input) {
+        generate(input) { return own(async () => {
           const generationSignal = input.signal ? AbortSignal.any([combined, input.signal]) : combined;
           generationSignal.throwIfAborted();
           await input.check(generationSignal);
@@ -201,8 +212,8 @@ export function createInferenceRequests(options: InferenceRequestsOptions) {
             active.delete(id);
             input.release(id);
           }
-        },
-        async request(input) {
+        }); },
+        request(input) { return own(async () => {
           const requestSignal = input.init.signal ? AbortSignal.any([combined, input.init.signal]) : combined;
           requestSignal.throwIfAborted();
           await input.check(requestSignal);
@@ -269,10 +280,18 @@ export function createInferenceRequests(options: InferenceRequestsOptions) {
             if (requestSignal.aborted) throw cancelled();
             throw error;
           } finally { if (active.get(id) === entry) active.delete(id); }
-        },
+        }); },
       };
       try { return await execute(call); }
-      finally { controllers.delete(controller); if (sessions.get(invocation.operationId) === session) sessions.delete(invocation.operationId); }
+      finally {
+        // Search observers may detach before their actual HTTP body or native generation.
+        // Fence late scheduler work, then retain this exact session through real drain.
+        accepting = false;
+        controller.abort(cancelled());
+        await Promise.allSettled([...ownedWork]);
+        controllers.delete(controller);
+        if (sessions.get(invocation.operationId) === session) sessions.delete(invocation.operationId);
+      }
     })();
     calls.add(work);
     void work.finally(() => calls.delete(work)).catch(() => {});

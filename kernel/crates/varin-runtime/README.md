@@ -102,7 +102,7 @@ records typed dependencies in its manifests. Original publication protection spa
 the short identity/epoch/revision-checked commit. GC follows those dependencies from the existing
 history, input, operation, event, policy and request roots. Catalog retains only original metadata;
 byte reads, hash/base64 work and provider serialization stay outside its control lock. Catalog
-format **58**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **13** reject older internal
+format **58**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **14** reject older internal
 formats directly. These are distinct from policy service **4** and private script worker protocol **2**.
 
 `runtime.output.media.read` uses the original caller Thread/branch plus an actual history, queued
@@ -486,6 +486,14 @@ final revision/span/required-group reconstruction. Non-live syntax uses the exis
 provider without a live LSP fallback. Selected semantic coverage remains explicitly unsupported until
 that exact source has its own publication. The actual source/child/cancel evidence and remaining
 admission boundaries are recorded in the [source retrieval review](../../../docs/reviews/runtime-source-retrieval-2026-10-12.md).
+
+Native query embedding now consumes the same original inference session as decision, rerank and
+Explore. Each actual request has one ordinal, Catalog Operation and Goal contribution; the background
+index ledger owns only index builds. The query response no longer carries a second inference receipt
+projection. HTTP body/receipt lifetime survives query-observer cancellation, and existing request
+facts prevent paid replay after recovery. Raw embedding usage is retained before vector validation;
+missing output usage keeps the existing Goal budget barrier. Authorized warm-cache reuse creates no
+HTTP request or charge. This ownership boundary does not add non-live semantic publication support.
 
 Child task records retain ownership/state and references to task text, configuration and launch
 descriptions. Admission prepares those bodies and verifies the original dispatch arguments on a worker;

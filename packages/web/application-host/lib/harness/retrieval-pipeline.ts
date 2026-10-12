@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ExploreFastDecisionDetails, ExploreModelParticipation, FastDecisionMaterial } from '@varin/protocol';
 import type { ExploreDeps, ExploreQueryRun } from './explore.js';
-import type { SemanticInferenceReceipt } from '../knowledge/semantic/runtime-inference.js';
 
 export type RetrievalStageKind = 'keyword' | 'structure' | 'semantic' | 'model';
 export type RetrievalStageStatus = 'ready' | 'empty' | 'partial' | 'unavailable' | 'unsupported' | 'failed' | 'cancelled' | 'stale' | 'disabled';
@@ -59,7 +58,6 @@ export interface BoundRetrievalPipeline {
   readonly plan: PipelinePlan;
   readonly assertAvailable?: () => void;
   readonly validateAvailable?: (signal?: AbortSignal) => Promise<void>;
-  readonly inferenceReceipts?: () => readonly SemanticInferenceReceipt[];
   readonly release?: () => void;
   readonly structure?: NonNullable<ExploreDeps['structure']>;
   readonly semantic?: NonNullable<ExploreDeps['semantic']>;

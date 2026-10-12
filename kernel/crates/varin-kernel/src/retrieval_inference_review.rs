@@ -20,6 +20,7 @@ mod admission;
 use admission::InputAdmission;
 struct Model {
     question: String,
+    repeat: bool,
 }
 impl ModelProvider for Model {
     fn serialize(&self, _: &RequestView) -> Result<Value, ExecutionError> {
@@ -40,7 +41,8 @@ impl ModelProvider for Model {
             },
         })
         .unwrap();
-        if request.view.history.iter().any(|item|matches!(&item.content,Content::ToolResult{result} if result.call_id=="retrieve")) {return Ok(FinishReason::Stop);}
+        let retrieved = request.view.history.iter().any(|item|matches!(&item.content,Content::ToolResult{result} if result.call_id=="retrieve"));
+        if retrieved && (!self.repeat || request.view.history.iter().any(|item|matches!(&item.content,Content::ToolResult{result} if result.call_id=="retrieve-again"))) {return Ok(FinishReason::Stop);}
         let schema = request
             .view
             .binding
@@ -54,7 +56,12 @@ impl ModelProvider for Model {
                 opaque: None,
                 content: Content::ToolCall {
                     call: ToolCall {
-                        call_id: "retrieve".into(),
+                        call_id: if retrieved {
+                            "retrieve-again"
+                        } else {
+                            "retrieve"
+                        }
+                        .into(),
                         name: schema.name.clone(),
                         schema_version: schema.version.clone(),
                         arguments: json!({"question":self.question,"paths":["allowed"],"limit":3}),
@@ -178,9 +185,13 @@ impl Review {
                         branch_id: "branch:parent".into(),
                     },
                     "Rank source under its original scope".into(),
-                    Some(GoalBudget {
-                        max_output_tokens: 100,
-                    }),
+                    if mode.starts_with("semantic-") && mode != "semantic-budget" {
+                        None
+                    } else {
+                        Some(GoalBudget {
+                            max_output_tokens: 100,
+                        })
+                    },
                 )
                 .unwrap()
                 .load()
@@ -331,13 +342,11 @@ impl Review {
                 .unwrap();
             }
             if self.mode == "empty" {
-                assert!(
-                    value["result"]["stages"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .any(|stage| stage["kind"] == "model" && stage["status"] == "failed")
-                );
+                assert!(value["result"]["stages"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|stage| stage["kind"] == "model" && stage["status"] == "failed"));
             }
             self.retrieval.receive(value);
             None
@@ -355,7 +364,11 @@ impl Review {
                     binding: binding(&self.f.runtime, &self.run),
                     policy_state: Value::Null,
                     provider: Arc::new(Model {
-                        question: if self.mode.starts_with("llm-") {
+                        repeat: matches!(
+                            self.mode.as_str(),
+                            "semantic-cache" | "semantic-credential"
+                        ),
+                        question: if self.mode.starts_with("llm-") || self.mode == "semantic-auto" {
                             "How does retrievalNeedle resolve its dependency?".into()
                         } else {
                             "retrievalNeedle".into()
@@ -595,20 +608,19 @@ fn cancelled_cheap_query_preserves_independent_inference_until_real_body_stop() 
             op.result.as_ref().unwrap().control().unwrap()["receipt"]["localExecutorStopped"],
             true
         );
-        assert!(
-            !db.execution_history("branch:parent")
-                .unwrap()
-                .iter()
-                .any(|item| match &item.content {
-                    Content::ToolResult { result } => match &result.completion {
-                        ToolCompletion::Result { content, .. } => content.data["snippets"]
-                            .as_array()
-                            .is_some_and(|snippets| !snippets.is_empty()),
-                        _ => false,
-                    },
+        assert!(!db
+            .execution_history("branch:parent")
+            .unwrap()
+            .iter()
+            .any(|item| match &item.content {
+                Content::ToolResult { result } => match &result.completion {
+                    ToolCompletion::Result { content, .. } => content.data["snippets"]
+                        .as_array()
+                        .is_some_and(|snippets| !snippets.is_empty()),
                     _ => false,
-                })
-        );
+                },
+                _ => false,
+            }));
         drop(db);
         drop(owner);
         let root = review.root.clone();
@@ -768,3 +780,6 @@ mod source;
 
 #[path = "retrieval_child_review.rs"]
 mod child_review;
+
+#[path = "retrieval_semantic_review.rs"]
+mod semantic;

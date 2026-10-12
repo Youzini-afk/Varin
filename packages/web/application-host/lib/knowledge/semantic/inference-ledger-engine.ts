@@ -22,18 +22,7 @@ function identityOf(input: SemanticInferenceLedgerIdentity): SemanticInferenceLe
   if (!input || input.protocol !== "openai-compatible" || !input.operation) return invalid();
   const source = input.operation;
   let operation: SemanticInferenceOperation;
-  if (source.kind === "retrieval-query") {
-    const invocation = source.invocation;
-    if (!invocation || source.stage !== "code-retrieval.semantic.query-embedding") return invalid();
-    operation = { kind: source.kind, hostId: text(source.hostId), threadId: text(source.threadId), runId: text(source.runId),
-      stage: source.stage, invocation: invocation.kind === "model_step"
-        ? { kind: invocation.kind, requestId: text(invocation.requestId), toolCallId: text(invocation.toolCallId) }
-        : invocation.kind === "policy_action"
-          ? { kind: invocation.kind, actionId: text(invocation.actionId), nodeId: text(invocation.nodeId), toolCallId: text(invocation.toolCallId) }
-          : invocation.kind === "nested_call"
-            ? { kind: invocation.kind, parentOperationId: text(invocation.parentOperationId), toolCallId: text(invocation.toolCallId) }
-            : invalid() };
-  } else if (source.kind === "index-build" && source.stage === "document-embedding") {
+  if (source.kind === "index-build" && source.stage === "document-embedding") {
     operation = { kind: source.kind, hostId: text(source.hostId), workspaceId: text(source.workspaceId),
       recipeId: text(source.recipeId), stage: source.stage };
   } else return invalid();
@@ -48,7 +37,7 @@ function identityOf(input: SemanticInferenceLedgerIdentity): SemanticInferenceLe
 function receiptOf(input: SemanticInferenceReceipt, identity: SemanticInferenceLedgerIdentity): SemanticInferenceReceipt {
   if (!input || input.providerId !== identity.providerId || input.modelId !== identity.modelId
     || input.configurationId !== identity.configurationId
-    || input.purpose !== (identity.operation.kind === "retrieval-query" ? "query-embedding" : "index-document-embedding")
+    || input.purpose !== "index-document-embedding"
     || input.inputItems !== identity.inputHashes.length
     || !["not-started", "succeeded", "failed", "indeterminate", "delivery-blocked"].includes(input.state)
     || typeof input.attemptsKnown !== "boolean" || !input.usage
@@ -244,15 +233,14 @@ export function createSemanticInferenceLedgerEngine(options: SemanticInferenceLe
     read(key: string) { return enqueue(() => { const current = lookup({ key: hash(key) }); return current ? outcome(current.entry) : null; }); },
     list(filter: SemanticInferenceFactFilter = {}): Promise<SemanticInferenceFact[]> {
       return enqueue(() => {
-        if ((filter.runId !== undefined && !text(filter.runId)) || (filter.scopeId !== undefined && !text(filter.scopeId))
+        if ((filter.scopeId !== undefined && !text(filter.scopeId))
           || (filter.state !== undefined && filter.state !== "unknown" && filter.state !== "terminal")) return invalid();
         const entries: SemanticInferenceFact[] = [];
         const ids = ["semantic-inference", "semantic-inference-attempt"].flatMap(type => db.indexedLookup({ type }, Math.max(1, db.nodeCount())));
         for (const id of ids) {
           const entry = decode(db.getPayload(id));
           const operation = entry.identity.operation;
-          if (filter.runId !== undefined && (operation.kind !== "retrieval-query" || operation.runId !== filter.runId)) continue;
-          if (filter.scopeId !== undefined && (operation.kind === "retrieval-query" ? operation.threadId : operation.workspaceId) !== filter.scopeId) continue;
+          if (filter.scopeId !== undefined && operation.workspaceId !== filter.scopeId) continue;
           if (filter.state !== undefined && entry.state !== filter.state) continue;
           entries.push(fact(entry));
         }

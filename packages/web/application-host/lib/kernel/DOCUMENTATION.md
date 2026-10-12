@@ -787,13 +787,15 @@ original Run grant before query embedding, before and after authorized Documents
 final delivery. Both the candidate's indexed file revision and the chunk's SHA-256 content hash/range
 must match the current admitted snapshot. Stale indexed spans are omitted, never relabeled. Async
 lease validation fences explicit backend disable, credential/account changes and owner/epoch loss;
-normal replacement retains the originally pinned backend/reader. Inference receipts retain actual
-dispatch attempts, known/unknown attempt counts, input item/byte counts, provider-measured or unknown
-usage, indeterminate outcomes and an explicit reuse flag for ledger/cache replay. Cancellation promptly detaches the
-query rendezvous even if an owner ignores its signal. The semantic store's durable inference ledger
-retains actual dispatch facts independently; a late owner settlement cannot revive source delivery.
-Rust rechecks the Run and suppresses source on cancellation/revocation, retaining safe inference
-receipts when its response was already received. No file lease spans those waits.
+normal replacement retains the originally pinned backend/reader. Native query embedding shares the
+original Catalog inference session and ordinal allocator with decision, rerank and Explore. Its actual
+request/body/usage survives independently of source delivery; no duplicate receipt travels in the
+retrieval result or the background index ledger. A warm query vector cache requires the captured
+credential scope and current source authority, adding no request or usage. Missing output-token usage
+remains missing, including for Goal's original output-budget gate. Cancellation promptly detaches the
+query rendezvous while the original inference owner retains actual HTTP/body drain and receipt
+publication. A late settlement cannot revive source delivery. Rust rechecks the Run and suppresses
+source on cancellation/revocation. No file lease spans those waits.
 
 Results record per-stage availability and omissions. Cold/missing/unsupported/failed stages do not
 become successful empty recall. Large structure units retain the slicer's real kept ranges: native
@@ -805,13 +807,14 @@ Each snippet has path, inclusive one-based line bounds and actual Documents revi
 Documents content revision; verify a follow-up full read against the snippet's content digest/bytes.
 Live observations do not claim an atomic workspace snapshot.
 
-Fixed/materialized retrieval, a complete fixed LSP dependency closure and remote retrieval remain
-separate work. The default Pi route is unchanged; native recall
+Fixed/materialized keyword, source-local structure and model stages use the original source adapter;
+their semantic publication, a complete fixed LSP dependency closure and remote retrieval remain
+separate work. The default Pi route is unchanged; native semantic recall
 uses its own explicit backend/published-reader acquisition through the existing semantic owner rather
 than the Pi wrapper that resolves a mutable backend at search time. Query bindings retain actual owner
 references, not a frozen wrapper around whichever backend/index happens to be current later.
 
-### Model stages in native live-root retrieval
+### Model stages in native source retrieval
 
 `retrieval-model.ts` consumes the existing global `harness.codeRetrieval.decision` selector and
 `harness.rerank` connection. The extension plan still selects structural/semantic composition; it
@@ -868,7 +871,7 @@ worker uses `model_session` adapters and the exact operation-lifetime private cr
 Host HTTP settlement endpoints cannot write native receipts. Request snapshots, original provider
 items/events/opaque output and full usage stay in ContentStore. Recovery keeps durable checkpoint usage
 and never replays generation. Query cancellation may detach before this worker actually drains.
-One Host query session allocates every classifier/native ordinal, and per-request receipt callbacks
+One Host query session allocates every embedding/classifier/rerank/native ordinal, and per-request receipt callbacks
 keep concurrent native charges out of the classifier's batch summary.
 
 ### Model item identity and committed-history recovery

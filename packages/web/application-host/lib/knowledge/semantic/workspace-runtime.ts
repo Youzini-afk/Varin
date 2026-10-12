@@ -2,7 +2,7 @@ import { resolveScopedIndexRoots } from '../index-scope.js';
 import { createHash } from 'node:crypto';
 import { createRemoteEmbedder } from './remote-embedder.js';
 import { DEFAULT_SEMANTIC_RECALL } from '../../harness/explore.js';
-import { SemanticInferenceError, type createSemanticInference, type SemanticInferenceLease, type SemanticInferenceReceipt, type SemanticInferenceDescription } from './runtime-inference.js';
+import { SemanticInferenceError, type createSemanticInference, type SemanticInferenceLease, type SemanticInferenceDescription } from './runtime-inference.js';
 import type { RetrievalSemanticLease } from '../../kernel/retrieval-composition.js';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -17,7 +17,7 @@ import { createSemanticBackend } from './backend.js';
 import type { SemanticEmbedder } from './embedder.js';
 import { isAbortError, waitWithSignal } from '../../cancellation.js';
 import { workspaceScope, defaultRecipeIdentity, recipeIdOf, spaceIdOf } from './identity.js';
-import type { RetrievalInvocation } from '../../kernel/protocol.generated.js';
+import type { InferenceCall } from './inference-requests.js';
 import { pinSemanticQueryView, type SemanticDraftReadResult } from './query-view.js';
 import { createSemanticIndexRuntime, resolveSemanticScanRoots, type SemanticIndexRuntimeOptions, type SemanticScanOptions } from './runtime.js';
 import { requestWorkspaceInference, resolveInferenceBinding } from './workspace-inference.js';
@@ -548,9 +548,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
   };
   const acquireQuery = async (input: {
     workspaceId: string;
-    threadId: string;
-    runId: string;
-    invocation: RetrievalInvocation;
+    inference: InferenceCall;
     /** Synchronous Run-owner fence after asynchronous credential/source checks. */
     assertAuthorized(): void;
     roots: readonly string[];
@@ -578,7 +576,6 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     const inference = current.retain();
     const queryHandle = {};
     retrievalQueries.add(queryHandle);
-    const receipts: SemanticInferenceReceipt[] = [];
     let released = false;
     let pinned: Awaited<ReturnType<typeof state.runtime.acquirePublishedQuery>> | undefined;
     const assertAvailable = (): void => {
@@ -594,30 +591,23 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       await inference.assertAvailable(active);
       active.throwIfAborted(); assertAvailable();
     };
-    const onReceipt = (receipt: SemanticInferenceReceipt): void => {
-      const previous = receipts.findIndex(item => item.batchId === receipt.batchId);
-      if (previous < 0) receipts.push(receipt); else receipts[previous] = receipt;
-    };
     const knownDimensions = state.backend.embedder.space.dim;
     const knownSpaceId = spaceIdOf(state.backend.embedder.space);
     const makeQueryEmbedder = (cached?: number[]): SemanticEmbedder => createRemoteEmbedder({ binding: inference.binding,
       knownDimensions,
-      client: { embed: params => inference.embed({ ...params, operationIdentity: {
-          kind: 'retrieval-query', hostId: options.hostId, threadId: input.threadId, runId: input.runId,
-          invocation: input.invocation, stage: 'code-retrieval.semantic.query-embedding',
-        },
+      client: { embed: params => inference.consume(input.inference, { ...params,
         ...(cached ? { cachedResult: { batchId: params.batchId,
           space: { providerId: params.providerId, modelId: params.modelId, protocol: params.protocol,
             configurationId: params.configurationId, maxTokens: params.maxTokens, dim: cached.length,
             spaceId: knownSpaceId },
           items: params.items.map((item, index) => ({ id: item.id, index, vector: cached })),
         } } : {}),
-        guard: () => validateAvailable(params.signal ?? signal), onReceipt,
+        guard: () => validateAvailable(params.signal ?? signal),
       }) } });
     const embedder = makeQueryEmbedder();
     try {
       pinned = await state.runtime.acquirePublishedQuery(workspaceScope(input.workspaceId), {
-        embedder, roots: input.roots, signal,
+        embedder, roots: input.roots, signal, cacheAuthority: JSON.stringify(inference.identity.credentialScope),
         queryVector: async (question, cached, active) => {
           const [vector] = await makeQueryEmbedder(cached).embed([question], { purpose: 'query', signal: active });
           if (!vector) throw new Error('Native query embedding is missing');
@@ -655,7 +645,6 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
           processEpoch: reader?.ownerEpoch ?? null, credential: { ...inference.identity.credentialScope } },
         assertAvailable,
         validateAvailable,
-        inferenceReceipts: () => receipts.map(receipt => structuredClone(receipt)),
         release: () => {
           if (released) return;
           released = true;

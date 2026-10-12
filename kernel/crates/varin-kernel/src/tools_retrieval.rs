@@ -174,79 +174,6 @@ impl SemanticIdentity {
     }
 }
 #[derive(Deserialize, Serialize)]
-#[serde(tag = "status", rename_all = "camelCase")]
-enum InferenceUsage {
-    Unknown,
-    Known {
-        #[serde(rename = "inputTokens", skip_serializing_if = "Option::is_none")]
-        input_tokens: Option<u64>,
-        #[serde(rename = "totalTokens", skip_serializing_if = "Option::is_none")]
-        total_tokens: Option<u64>,
-    },
-}
-impl InferenceUsage {
-    fn valid(&self) -> bool {
-        match self {
-            Self::Unknown => true,
-            Self::Known {
-                input_tokens,
-                total_tokens,
-            } => {
-                (input_tokens.is_some() || total_tokens.is_some())
-                    && [input_tokens, total_tokens]
-                        .iter()
-                        .all(|value| value.is_none_or(|value| value <= MAX_SAFE_INTEGER))
-            }
-        }
-    }
-}
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct InferenceReceipt {
-    batch_id: String,
-    purpose: String,
-    input_items: u64,
-    input_bytes: u64,
-    provider_id: String,
-    model_id: String,
-    configuration_id: String,
-    attempts: u64,
-    attempts_known: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    reused: Option<bool>,
-    state: String,
-    usage: InferenceUsage,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    http_status: Option<u16>,
-}
-impl InferenceReceipt {
-    fn valid(&self) -> bool {
-        [
-            &self.batch_id,
-            &self.provider_id,
-            &self.model_id,
-            &self.configuration_id,
-        ]
-        .iter()
-        .all(|value| !value.trim().is_empty())
-            && self.attempts <= MAX_SAFE_INTEGER
-            && self.input_items <= MAX_SAFE_INTEGER
-            && self.input_bytes <= MAX_SAFE_INTEGER
-            && matches!(
-                self.purpose.as_str(),
-                "index-document-embedding" | "query-embedding"
-            )
-            && matches!(
-                self.state.as_str(),
-                "not-started" | "succeeded" | "failed" | "indeterminate" | "delivery-blocked"
-            )
-            && self.usage.valid()
-            && self
-                .http_status
-                .is_none_or(|status| (100..=599).contains(&status))
-    }
-}
-#[derive(Deserialize, Serialize)]
 struct Stage {
     kind: String,
     status: String,
@@ -294,8 +221,6 @@ struct Reply {
     snippets: Vec<Snippet>,
     omissions: Omissions,
     stages: Vec<Stage>,
-    #[serde(rename = "inferenceReceipts", default)]
-    inference_receipts: Vec<InferenceReceipt>,
 }
 fn required_components(items: &[Snippet]) -> Vec<Vec<usize>> {
     let mut pending: std::collections::BTreeSet<_> = (0..items.len()).collect();
@@ -480,17 +405,11 @@ impl KernelToolExecutor {
         drop(inference);
         let raw = raw?;
         let mut reply: Reply = serde_json::from_value(raw).map_err(|_| invalid())?;
-        if !STATUSES.contains(&reply.status.as_str())
-            || !reply.omissions.valid()
-            || reply
-                .inference_receipts
-                .iter()
-                .any(|receipt| !receipt.valid())
-        {
+        if !STATUSES.contains(&reply.status.as_str()) || !reply.omissions.valid() {
             return Err(invalid());
         }
-        // A revoked Run cannot deliver source, but its already-dispatched nonsecret inference
-        // receipt is still an execution fact. Preserve it through failed/cancelled settlement.
+        // Catalog retains independently owned inference receipts even when the original
+        // query is cancelled or its source can no longer be delivered.
         if self.admit_retrieval(context, args, cancel).is_err() {
             reply.status = if cancel.is_cancelled() {
                 "cancelled"
@@ -532,7 +451,8 @@ impl KernelToolExecutor {
                         || (stage.kind == "keyword" && stage.status != "ready")
                 })
                 || serde_json::to_value(source).map_err(|_| invalid())? != admitted["source"]
-                || serde_json::to_value(&reply.physical_root).map_err(|_| invalid())? != admitted["physicalRoot"]
+                || serde_json::to_value(&reply.physical_root).map_err(|_| invalid())?
+                    != admitted["physicalRoot"]
                 || !exact_stages(reply.stages.iter().map(|stage| stage.kind.as_str()))
             {
                 return Err(invalid());
@@ -704,8 +624,12 @@ impl KernelToolExecutor {
         // remain with the bound pipeline and inference ledger, outside conversation tool content.
         let mut result =
             json!({"status":reply.status,"snippets":snippets,"omissions":reply.omissions});
-        if let Some(message) = source_message { result["message"] = json!(message); }
-        if let Some(code) = reply.source_failure { result["error"] = json!(code.as_str()); }
+        if let Some(message) = source_message {
+            result["message"] = json!(message);
+        }
+        if let Some(code) = reply.source_failure {
+            result["error"] = json!(code.as_str());
+        }
         if let Some(source) = reply.source {
             result["source"] = json!(source);
             result["physicalRoot"] = json!(reply.physical_root);

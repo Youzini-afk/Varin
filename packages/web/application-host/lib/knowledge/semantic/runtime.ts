@@ -1066,7 +1066,9 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     signal?: AbortSignal;
     assertAvailable(): void;
     authorize(signal: AbortSignal): Promise<void>;
-    /** Durable inference owner checks intent even when its vector cache is warm. */
+    /** Credential-scoped cache reuse does not change the actual vector-space identity. */
+    cacheAuthority: string;
+    /** Original query session checks recovery before any vector cache can be consumed. */
     queryVector(question: string, cached: number[] | undefined, signal: AbortSignal): Promise<number[]>;
   }) => {
     const scopeSnapshot = options.getIndexScope?.();
@@ -1131,7 +1133,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
           return { status: pinnedStatus, hits: [], gaps: [] };
         }
         const spaceId = reader.checkpoint.spaceId;
-        const cached = queryCache.get({ spaceId, purpose: 'query', embedText: question });
+        const cached = queryCache.get({ spaceId, purpose: 'query', embedText: question, authority: request.cacheAuthority });
         const vector = await waitWithSignal(scheduler.enqueue('foreground', async () => {
           active.throwIfAborted(); assertReader();
           await request.authorize(active);
@@ -1144,7 +1146,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         if (!vector || vector.length !== embedder.space.dim || vector.some(value => !Number.isFinite(value))) {
           throw new Error('Semantic query vector is invalid');
         }
-        queryCache.set({ spaceId, purpose: 'query', embedText: question }, vector);
+        queryCache.set({ spaceId, purpose: 'query', embedText: question, authority: request.cacheAuthority }, vector);
         await request.authorize(active);
         active.throwIfAborted(); assertReader();
         const hits = await store.searchPinned(reader.token, vector, limit, {

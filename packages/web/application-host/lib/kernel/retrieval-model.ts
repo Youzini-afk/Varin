@@ -13,23 +13,18 @@ import type { SemanticInference } from '../knowledge/semantic/runtime-inference.
 import type { RetrievalModelLease } from './retrieval-composition.js';
 import type { KernelClient } from './kernel-client.js';
 import type { RetrievalSourceOwner } from './retrieval-source.js';
-import { toolOperationId, type RetrievalQuery, type ToolOrigin } from './protocol.generated.js';
+import type { RetrievalQuery } from './protocol.generated.js';
+import type { InferenceCall } from '../knowledge/semantic/inference-requests.js';
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const identity = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-function origin(query: RetrievalQuery): ToolOrigin {
-  const value = query.invocation;
-  return value.kind === 'model_step' ? { kind: 'model_step', request_id: value.requestId }
-    : value.kind === 'policy_action' ? { kind: 'policy_action', action_id: value.actionId, node_id: value.nodeId }
-      : { kind: 'nested_call', parent_operation_id: value.parentOperationId };
-}
 export function createRetrievalModelStage(options: {
-  inference: Pick<SemanticInference, 'captureRerank' | 'captureDecision' | 'requests'>;
+  inference: Pick<SemanticInference, 'captureRerank' | 'captureDecision'>;
   models?: ThreadModelAuthority;
   readGlobalSettings(): Promise<unknown>;
   kernel: Pick<KernelClient, 'retrievalGrant' | 'scoped' | 'registerCredentialOwner' | 'unregisterCredentialOwner' | 'kernelEpoch'>;
   sources: Pick<RetrievalSourceOwner, 'validate' | 'read'>;
 }) {
-  return { async prepare(query: RetrievalQuery, signal: AbortSignal): Promise<RetrievalModelLease> {
+  return { async prepare(query: RetrievalQuery, signal: AbortSignal, call?: InferenceCall): Promise<RetrievalModelLease> {
     let released = false;
     let mode: HarnessExploreDecisionMode;
     let harness: Record<string, unknown>;
@@ -59,7 +54,7 @@ export function createRetrievalModelStage(options: {
         exploreSelection = resolveHarnessModelSlot('explore', slots, null);
       } catch { return unavailable('llm', 'unavailable', [mode, 'invalid-explore-slot']); }
     }
-    const invocation = { operationId: toolOperationId(origin(query), query.invocation.toolCallId), executorOwner: query.inferenceOwner };
+    if (!call) return unavailable('inference', 'unavailable', ['original-session-unavailable']);
     const verifySelection = async () => {
       assertAvailable();
       const verified = await options.readGlobalSettings();
@@ -70,14 +65,14 @@ export function createRetrievalModelStage(options: {
           object(harness.models) ? harness.models.explore : harness.models)) {
         throw new Error('Retrieval model selection changed during preparation');
       }
-      if (invocation.executorOwner.kind !== 'external') throw new Error('Original inference delegation is unavailable');
+      if (query.inferenceOwner.kind !== 'external') throw new Error('Original inference delegation is unavailable');
     };
     // Explore is an independent, tool-free model role. Never inherit the main model.
     let explore: Awaited<ReturnType<ThreadModelAuthority['resolveModel']>> | undefined;
     let exploreScope: Awaited<ReturnType<NonNullable<typeof explore>['credentialOwner']['scope']>> | undefined;
     if (exploreSelection) {
       try {
-        if (!options.models || !options.inference.requests) throw new Error('Explore model owner unavailable');
+        if (!options.models) throw new Error('Explore model owner unavailable');
         explore = await options.models.resolveModel(exploreSelection);
         exploreScope = await explore.credentialOwner.scope();
       } catch { explore = undefined; exploreScope = undefined; }
@@ -89,7 +84,6 @@ export function createRetrievalModelStage(options: {
       const lease = decision.status === 'ready' ? decision.lease : undefined;
       const llm = explore;
       const scope = exploreScope;
-      const requests = options.inference.requests;
       let revoked = false;
       try {
         await verifySelection();
@@ -115,8 +109,7 @@ export function createRetrievalModelStage(options: {
             configurationId: identity([mode, exploreSelection, llm?.configuration, scope, lease?.binding]), status: 'ready',
             implementation: { kind: 'progressive', select: async ({ run, validateMaterials }, active) => {
               await validate(active);
-              const execute = async (call: import('../knowledge/semantic/inference-requests.js').InferenceCall) => {
-                await call.assertFresh();
+              const execute = async () => {
                 const duties = resolveExploreDuties({ mode, llm: !!exploreSelection, fastDecision: !!lease, rerank: false });
                 let closing = false;
                 let settle!: () => void;
@@ -159,7 +152,7 @@ export function createRetrievalModelStage(options: {
                         release: id => { if (options.kernel.kernelEpoch === epoch) options.kernel.unregisterCredentialOwner(query.runId, id); },
                       });
                     }, llm.configuration.contextWindowTokens ? { inputBytes: llm.configuration.contextWindowTokens } : {}) : undefined;
-                    const queryId = invocation.operationId;
+                    const queryId = call.operationId;
                     const started: ExploreQueryStartResult = { queryId, question: run.question, deadlineAt: run.deadlineAt,
                       parsed: { objects: run.parsed.objects, relation: run.parsed.relation, domain: run.parsed.domain },
                       vocab: run.vocab(), sources: run.sourceStates(), inputSource: query.source.mode === 'live_root' ? 'disk' : query.source.mode, decisionMode: mode, duties,
@@ -186,8 +179,7 @@ export function createRetrievalModelStage(options: {
                 }
                 return { ...(model ? { model } : {}), ...(fastDecision ? { fastDecision } : {}) };
               };
-              if (!requests) throw new Error('Original inference session is unavailable');
-              return requests.run(invocation, active, execute);
+              return execute();
             } },
           },
           assertAvailable, validateAvailable: validate,
@@ -232,12 +224,12 @@ export function createRetrievalModelStage(options: {
               }
               await validate(active);
             };
-            const result = await lease.execute(invocation, { query: input.question, documents: eligible,
+            const result = await lease.consume(call, { query: input.question, documents: eligible,
               provenance: { source: query.source, physicalRoot: query.physicalRoot,
               candidates: eligible.map(document => {
                 const snippet = input.snippets[Number(document.id)]!;
                 return { id: document.id, path: snippet.path, revision: snippet.revision, startLine: snippet.startLine, endLine: snippet.endLine };
-              }) } }, active, guard);
+              }) } }, guard);
             const ordered = [...result.scores].sort((a, b) => b.score - a.score || a.index - b.index).map(row => Number(row.id));
             const ranked = new Set(ordered);
             return { indices: [...ordered, ...original.filter(index => !ranked.has(index))],

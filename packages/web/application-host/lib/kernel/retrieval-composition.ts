@@ -1,3 +1,4 @@
+import type { InferenceCall } from '../knowledge/semantic/inference-requests.js';
 import { createHash } from 'node:crypto';
 import type { ApplicationExtensionRuntime } from '@varin/extension-host';
 import { VARIN_BUILTIN_RETRIEVAL_DEFAULT_PROVIDER_KEY } from '@varin/extension-builtins';
@@ -10,7 +11,6 @@ import {
   createRetrievalPipelineOwner, type BoundRetrievalPipeline, type RetrievalPipelineConfiguration,
   type RetrievalPipelineOwner, type RetrievalSemanticMetadata,
 } from '../harness/retrieval-pipeline.js';
-import type { SemanticInferenceReceipt } from '../knowledge/semantic/runtime-inference.js';
 import type { RetrievalQuery } from './protocol.generated.js';
 
 export interface RetrievalCompositionScope {
@@ -20,6 +20,8 @@ export interface RetrievalCompositionScope {
   workspaceId?: string;
   /** Original Run identity for the capability owner; never sent to the declaration extension. */
   query?: RetrievalQuery;
+  /** Query-owned request session; private to the bound consumers, never extension arguments. */
+  inference?: InferenceCall | undefined;
 }
 export interface RetrievalSelection {
   readonly providerId: string;
@@ -33,7 +35,6 @@ export interface RetrievalSemanticLease {
   readonly metadata: Readonly<RetrievalSemanticMetadata>;
   assertAvailable(): void;
   validateAvailable(signal?: AbortSignal): Promise<void>;
-  inferenceReceipts?(): readonly SemanticInferenceReceipt[];
   release(): void;
 }
 export interface RetrievalModelLease {
@@ -241,7 +242,6 @@ export function createRetrievalComposition(runtime: ApplicationExtensionRuntime,
             await modelLease?.validateAvailable(validationSignal ?? signal);
             assertAvailable(); validationSignal?.throwIfAborted();
           },
-          ...(lease?.inferenceReceipts ? { inferenceReceipts: () => lease.inferenceReceipts!() } : {}),
           release: () => { if (released) return; released = true; try { lease?.release(); } finally { try { modelLease?.release(); } finally { pin.release(); } } },
         });
       } catch (error) { try { semantic?.release(); } finally { try { model?.release(); } finally { pin.release(); } } throw error; }

@@ -504,13 +504,18 @@ Ordinary selection changes retire a lease; explicit capability disablement, prov
 removal and account/credential changes fence its later dispatch and delivery. Failed
 configuration candidates leave retained accepted bindings usable.
 
-Native inference records a durable intent in the original semantic storage process
+Native query inference shares its original Catalog session with decision, rerank and Explore,
+and records each actual request and receipt there with Goal usage. It does not also write the index
+ledger or return duplicate inference receipts in the retrieval response. Query vector cache reuse
+checks its current source/binding/credential scope and creates no request or synthetic usage.
+
+Background source-index inference records a durable intent in the original semantic storage process
 before dispatch. Recovery of an unresolved intent never automatically sends it again.
 An intent alone cannot prove the HTTP request started: recovered receipts explicitly
 mark the attempt count unknown. Index builds can resume a known zero-dispatch admission
 only after the transport has finalized without sending; the old no-send fact remains
-archived under the same durable owner. Native query invocations never restart automatically. Real transport completion may settle usage after a
+archived under the same durable owner. Real transport completion may settle usage after a
 caller cancels, without delivering vectors to that caller. The Host's read-only
-`inferenceFacts()` exposes these facts by Run or source scope without vector contents.
-This ledger currently covers native query and source-index embeddings; legacy Pi
+`inferenceFacts()` exposes background facts by workspace scope without vector contents.
+Native query invocations never restart automatically after an original request exists. Legacy Pi
 queries and knowledge-vector broker calls retain their existing settlement path.

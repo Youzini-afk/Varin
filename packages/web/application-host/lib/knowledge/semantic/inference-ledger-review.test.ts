@@ -1,11 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { createServer, type ServerResponse } from 'node:http';
-import { once } from 'node:events';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { ExistingHostCredentialOwner } from '../../kernel/credential-owner.js';
@@ -16,78 +13,70 @@ const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.
 const { HostCredentialAuthority } = await import(pathToFileURL(path.join(repository, 'packages/pi-host/src/credential-authority.ts')).href);
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { try { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); } finally { vi.restoreAllMocks(); } });
-const secret = 'fake-ledger-loopback-secret-not-for-real-services';
+const secret = 'fake-ledger-secret-not-for-real-services';
 const privateText = 'PRIVATE_INPUT_BODY_MUST_NOT_BE_STORED_77';
-const runOperation = (id = 'one'): SemanticInferenceOperation => ({ kind: 'retrieval-query', hostId: 'ledger-review', threadId: 'thread', runId: `run-${id}`,
-  invocation: { kind: 'model_step', requestId: `persisted-model-step-${id}`, toolCallId: `persisted-tool-call-${id}` }, stage: 'code-retrieval.semantic.query-embedding' });
-async function fixture(reply: (body: { input: string[]; model: string }, response: ServerResponse, before: Awaited<ReturnType<ReturnType<typeof createSemanticInferenceLedger>['list']>>) => void) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-inference-ledger-review-')); cleanups.push(() => fs.rm(root, { recursive: true, force: true }));
+const indexOperation = (id = 'one'): SemanticInferenceOperation => ({ kind: 'index-build', hostId: 'ledger-review', workspaceId: `workspace-${id}`, recipeId: 'recipe-one', stage: 'document-embedding' });
+interface ControlledResponse {
+  writeHead(status: number, headers?: Record<string, string>): ControlledResponse;
+  end(body: string): void;
+  destroy(error?: Error): void;
+}
+async function fixture(reply: (body: { input: string[]; model: string }, response: ControlledResponse, before: Awaited<ReturnType<ReturnType<typeof createSemanticInferenceLedger>['list']>>) => void) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-inference-ledger-review-')); cleanups.push(() => fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   const agentDir = path.join(root, 'agent'); await fs.mkdir(agentDir);
   const authority = HostCredentialAuthority.open(agentDir);
   await authority.modifyWithIntent('ledger-provider', 'replace', async () => ({ type: 'api_key', key: secret }));
   let requests = 0; const observed: unknown[] = [];
   let ledger = createSemanticInferenceLedger({ dataDir: root, hostId: 'ledger-review' });
-  const server = createServer((request, response) => { const chunks: Buffer[] = []; request.on('data', chunk => chunks.push(Buffer.from(chunk))); request.on('end', () => {
-    requests++; const body = JSON.parse(Buffer.concat(chunks).toString());
-    void ledger.list().then(facts => { observed.push(facts); reply(body, response, facts); }).catch(error => response.destroy(error));
-  }); });
-  server.listen(0, '127.0.0.1'); await once(server, 'listening'); const address = server.address(); if (!address || typeof address === 'string') throw new Error('No endpoint');
-  cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
-  const baseUrl = `http://127.0.0.1:${address.port}/v1`;
+  const fetchImpl: typeof fetch = async (_url, init) => {
+    requests++;
+    const body = JSON.parse(String(init?.body));
+    const facts = await ledger.list(); observed.push(facts);
+    return new Promise<Response>((resolve, reject) => {
+      let status = 200, headers: Record<string, string> = {};
+      const response: ControlledResponse = {
+        writeHead(next, selected = {}) { status = next; headers = selected; return response; },
+        end(value) { resolve(new Response(value, { status, headers })); },
+        destroy(error) { reject(error ?? new Error('Controlled transport was lost')); },
+      };
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Original index request cancelled', 'AbortError')), { once: true });
+      reply(body, response, facts);
+    });
+  };
+  const baseUrl = 'https://embedding.invalid/v1';
   const settings = (modelId = 'a') => fs.writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({ harness: { embedding: { protocol: 'openai-compatible', providerId: 'ledger-provider', modelId, dimensions: 2, maxTokens: 4096 } } }));
   const models = (endpoint = baseUrl) => fs.writeFile(path.join(agentDir, 'models.json'), JSON.stringify({ providers: { 'ledger-provider': {
     api: 'openai-completions', baseUrl: endpoint, models: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }],
     capabilities: { chat: false, embedding: { protocol: 'openai-compatible', models: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }] } },
   } } }));
   await settings(); await models();
-  let inference = createSemanticInference(authority, undefined, { ledger });
+  let inference = createSemanticInference(authority, undefined, { ledger, fetchImpl });
   cleanups.push(() => inference.close());
   const reopen = async () => { await inference.close(); ledger = createSemanticInferenceLedger({ dataDir: root, hostId: 'ledger-review' });
-    inference = createSemanticInference(HostCredentialAuthority.open(agentDir), undefined, { ledger }); };
+    inference = createSemanticInference(HostCredentialAuthority.open(agentDir), undefined, { ledger, fetchImpl }); };
   return { root, agentDir, authority, baseUrl, settings, models, observed, requests: () => requests, ledger: () => ledger, inference: () => inference, reopen };
 }
-function input(lease: SemanticInferenceLease, operationIdentity = runOperation(), batchId = 'transport-one', text = privateText) {
-  return { purpose: 'query' as const, ...lease.binding, maxTokens: lease.binding.maxTokens!, batchId,
+function input(lease: SemanticInferenceLease, operationIdentity = indexOperation(), batchId = 'transport-one', text = privateText) {
+  return { purpose: 'document' as const, ...lease.binding, maxTokens: lease.binding.maxTokens!, batchId,
     // This lower-level suite proves dispatch durability; actual Run authorization is exercised by the native suite.
     guard: async () => {}, items: [{ id: 'stable-position-0', text }], operationIdentity };
 }
-const success = (body: { input: string[] }, response: ServerResponse) => response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data: body.input.map((_text, index) => ({ index, embedding: [1, 0] })), usage: { prompt_tokens: 7, total_tokens: 7 } }));
+const success = (body: { input: string[] }, response: ControlledResponse) => response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data: body.input.map((_text, index) => ({ index, embedding: [1, 0] })), usage: { prompt_tokens: 7, total_tokens: 7 } }));
 
-it('actual loopback dispatch observes prior durable admission; lost response and reopened owner never redispatch the same native invocation', async () => {
-  const f = await fixture((_body, response, facts) => { expect(facts).toHaveLength(1); expect(facts[0]).toMatchObject({ state: 'unknown', receipt: { state: 'indeterminate', attempts: 0, attemptsKnown: false } }); response.destroy(); });
+it('completed index vectors survive restart without another HTTP, while changed credentials cannot inherit them', async () => {
+  const f = await fixture(success);
   const first = await f.inference().capture();
-  await expect(first.embed(input(first))).rejects.toMatchObject({ receipt: { state: 'indeterminate', attempts: 1, attemptsKnown: true, usage: { status: 'unknown' } } }); first.release();
-  expect(f.requests()).toBe(1); expect(await f.ledger().list({ runId: 'run-one', state: 'unknown' })).toHaveLength(1);
-  await f.reopen(); const again = await f.inference().capture();
-  await expect(again.embed(input(again, runOperation(), 'different-bridge-batch'))).rejects.toMatchObject({ receipt: { state: 'indeterminate', reused: true } });
+  const original = await first.embed(input(first)); first.release();
+  await f.reopen();
+  const restored = await f.inference().capture();
+  const reused = await restored.embed({ ...input(restored, indexOperation(), 'new-envelope'), items: [{ id: 'new-item', text: privateText }] });
+  expect(reused.items[0]?.vector).toEqual(original.items[0]?.vector);
+  expect(reused.items[0]?.id).toBe('new-item'); expect(reused.receipt.reused).toBe(true);
+  expect(f.requests()).toBe(1); restored.release();
+  await f.authority.modifyWithIntent('ledger-provider', 'replace', async () => ({ type: 'api_key', key: 'fake-other-account' }));
+  const changed = await f.inference().capture();
+  await expect(changed.embed(input(changed))).rejects.toThrow(); changed.release();
   expect(f.requests()).toBe(1);
-  await expect(again.embed(input(again, runOperation(), 'different-input-batch', 'CHANGED_INPUT'))).rejects.toThrow();
-  again.release(); await f.settings('b'); const changedModel = await f.inference().capture();
-  await expect(changedModel.embed(input(changedModel))).rejects.toThrow(); changedModel.release();
-  await f.models(`${f.baseUrl}/changed-endpoint`); const changedEndpoint = await f.inference().capture();
-  await expect(changedEndpoint.embed(input(changedEndpoint))).rejects.toThrow(); changedEndpoint.release();
-  expect(f.requests()).toBe(1); expect(await f.ledger().list()).toHaveLength(1);
-}, 30_000);
-
-it('completed vectors survive owner restart, rebind only ephemeral envelopes, and reject different intent or model space without another dispatch', async () => {
-  const f = await fixture(success); const first = await f.inference().capture();
-  const result = await first.embed(input(first)); first.release();
-  expect(result.receipt).toMatchObject({ state: 'succeeded', attempts: 1, attemptsKnown: true, usage: { status: 'known', inputTokens: 7, totalTokens: 7 } });
-  await f.reopen(); const next = await f.inference().capture();
-  const replay = await next.embed({ ...input(next, runOperation(), 'fresh-transport-batch'), items: [{ id: 'fresh-item-envelope', text: privateText }] });
-  expect(replay.batchId).toBe('fresh-transport-batch'); expect(replay.items.map(item => item.vector)).toEqual(result.items.map(item => item.vector)); expect(replay.items[0]?.id).toBe('fresh-item-envelope'); expect(replay.receipt.reused).toBe(true); expect(f.requests()).toBe(1);
-  await expect(next.embed(input(next, runOperation(), 'changed-input', 'DIFFERENT_INTENT'))).rejects.toThrow(); next.release();
-  await f.settings('b'); const wrongSpace = await f.inference().capture(); await expect(wrongSpace.embed(input(wrongSpace))).rejects.toThrow(); wrongSpace.release(); expect(f.requests()).toBe(1);
-  await f.settings('a'); await f.authority.modifyWithIntent('ledger-provider', 'replace', async () => ({ type: 'api_key', key: 'fake-new-ledger-account' }));
-  const newAccount = await f.inference().capture(); await expect(newAccount.embed(input(newAccount))).rejects.toThrow(); newAccount.release(); expect(f.requests()).toBe(1);
-  await f.inference().close();
-  const { TriviumDB } = createRequire(import.meta.url)('triviumdb') as typeof import('triviumdb');
-  const db = new TriviumDB(path.join(f.root, 'knowledge', 'ledger-review', 'semantic-inference', 'ledger.tdb'), { dim: 1, accessMode: 'readOnly', loadTextIndex: false, autoBuildQuiver: false });
-  try {
-    const stored = JSON.stringify(db.indexedLookup({ type: 'semantic-inference' }, db.nodeCount()).map(id => db.getPayload(id)));
-    expect(stored).not.toContain(privateText); expect(stored).not.toContain(secret); expect(stored).not.toContain('Bearer');
-    expect(stored).toContain('persisted-model-step-one'); expect(stored).toContain('persisted-tool-call-one');
-  } finally { db.close(); }
 }, 30_000);
 
 it('new explicit index input is a separate operation while an older unknown document attempt stays fenced across reopen', async () => {
@@ -122,18 +111,18 @@ it('a malformed provider vector response is a known failed attempt and never tri
   const f = await fixture((_body, response) => response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data: [{ index: 0, embedding: [1] }] })));
   const lease = await f.inference().capture();
   await expect(lease.embed(input(lease))).rejects.toMatchObject({ receipt: { state: 'failed', attempts: 1, attemptsKnown: true, usage: { status: 'unknown' } } });
-  await expect(lease.embed(input(lease, runOperation(), 'retry-envelope'))).rejects.toThrow(); expect(f.requests()).toBe(1);
+  await expect(lease.embed(input(lease, indexOperation(), 'retry-envelope'))).rejects.toThrow(); expect(f.requests()).toBe(1);
   expect(await f.ledger().list()).toMatchObject([{ state: 'terminal', hasResult: false, receipt: { state: 'failed' } }]); lease.release();
 }, 30_000);
 
 it('an isolated child exiting after durable admission without close leaves a recoverable unknown WAL fence', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-ledger-exit-review-')); cleanups.push(() => fs.rm(root, { recursive: true, force: true }));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-ledger-exit-review-')); cleanups.push(() => fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   const digest = (value: string) => createHash('sha256').update(value).digest('hex');
   const identity = { providerId: 'exit-provider', modelId: 'fixture', protocol: 'openai-compatible' as const,
     configurationId: 'exit-config', endpointHash: digest('loopback-only'), credentialScopeHash: digest('fake-scope'),
-    dimensions: 2, maxTokens: 100, operation: runOperation('unclosed'), inputHashes: [digest('no-source-body-persisted')] };
+    dimensions: 2, maxTokens: 100, operation: indexOperation('unclosed'), inputHashes: [digest('no-source-body-persisted')] };
   const receipt = { batchId: 'child-original-batch', providerId: identity.providerId, modelId: identity.modelId, configurationId: identity.configurationId,
-    purpose: 'query-embedding' as const, inputItems: 1, inputBytes: 32, attempts: 0, attemptsKnown: false, state: 'indeterminate' as const, usage: { status: 'unknown' as const } };
+    purpose: 'index-document-embedding' as const, inputItems: 1, inputBytes: 32, attempts: 0, attemptsKnown: false, state: 'indeterminate' as const, usage: { status: 'unknown' as const } };
   const admission = { key: semanticInferenceOperationKey(identity, receipt.purpose), identity, receipt };
   const engineUrl = pathToFileURL(path.join(repository, 'packages/web/application-host/lib/knowledge/semantic/inference-ledger-engine.ts')).href;
   const source = `import { createSemanticInferenceLedgerEngine } from ${JSON.stringify(engineUrl)}; const ledger = createSemanticInferenceLedgerEngine(${JSON.stringify({ dataDir: root, hostId: 'ledger-review' })}); const result = await ledger.admit(${JSON.stringify(admission)}); console.log(JSON.stringify(result)); process.exit(0);`;
@@ -151,15 +140,15 @@ it('an isolated child exiting after durable admission without close leaves a rec
   const reopened = createSemanticInferenceLedger({ dataDir: root, hostId: 'ledger-review' }); cleanups.push(() => reopened.close());
   expect(await reopened.read(admission.key)).toMatchObject({ status: 'indeterminate', receipt: { attempts: 0, attemptsKnown: false, state: 'indeterminate' } });
   expect(await reopened.admit({ ...admission, receipt: { ...receipt, batchId: 'different-bridge-envelope' } })).toMatchObject({ status: 'indeterminate' });
-  expect(await reopened.list({ runId: 'run-unclosed' })).toHaveLength(1);
+  expect(await reopened.list({ scopeId: 'workspace-unclosed' })).toHaveLength(1);
 }, 25_000);
 
 it('empty provider usage stays unknown while an explicitly measured zero remains known', async () => {
   let count = 0;
   const f = await fixture((body, response) => response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data: body.input.map((_text, index) => ({ index, embedding: [1, 0] })), usage: ++count === 1 ? {} : { prompt_tokens: 0, total_tokens: 0 } })));
   const lease = await f.inference().capture();
-  expect((await lease.embed(input(lease, runOperation('unknown-usage')))).receipt.usage).toEqual({ status: 'unknown' });
-  expect((await lease.embed(input(lease, runOperation('zero-usage'), 'zero-batch'))).receipt.usage).toEqual({ status: 'known', inputTokens: 0, totalTokens: 0 });
+  expect((await lease.embed(input(lease, indexOperation('unknown-usage')))).receipt.usage).toEqual({ status: 'unknown' });
+  expect((await lease.embed(input(lease, indexOperation('zero-usage'), 'zero-batch'))).receipt.usage).toEqual({ status: 'known', inputTokens: 0, totalTokens: 0 });
   expect(f.requests()).toBe(2); lease.release();
 }, 30_000);
 

@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { parseHarnessRerankSettings, type HarnessRerankResult, type HarnessResolvedRerankBinding, type HarnessRerankSettings } from '@varin/protocol';
 import { requestHttpRerank, parseHttpRerankScores, RerankResponseError, type HttpRerankScore } from '@varin/pi-host/rerank';
 import type { HostInferenceProviderBinding } from '@varin/pi-host/credentials';
-import type { InferenceInvocationAuthority, InferenceRequests, InferenceRequestsOptions } from './inference-requests.js';
+import type { InferenceCall, InferenceInvocationAuthority, InferenceRequests, InferenceRequestsOptions } from './inference-requests.js';
 export interface RerankInferenceAuthority {
   resolveRerankBinding(providerId: string, modelId: string, endpoint?: string): Promise<HostInferenceProviderBinding>;
 }
@@ -13,6 +13,8 @@ export interface RerankInferenceLease {
   assertAvailable(signal?: AbortSignal): Promise<void>;
   execute(authority: InferenceInvocationAuthority, input: { query: string; documents: Array<{ id: string; text: string; revision?: string }>; provenance?: unknown },
     signal: AbortSignal, guard?: () => Promise<void>): Promise<HarnessRerankResult>;
+  consume(call: InferenceCall, input: { query: string; documents: Array<{ id: string; text: string; revision?: string }>; provenance?: unknown },
+    guard?: () => Promise<void>): Promise<HarnessRerankResult>;
   release(): void;
 }
 export type RerankInferenceCapture = { status: 'ready'; lease: RerankInferenceLease }
@@ -62,11 +64,8 @@ export function createRerankInference(authority: RerankInferenceAuthority, setti
         await provider.assertAvailable();
         signal?.throwIfAborted();
       };
-      return { status: 'ready', lease: { binding, assertAvailable, release() { released = true; },
-        execute(invocation, input, signal, guard) {
-          return requests.run(invocation, signal, async call => {
+      const consume: RerankInferenceLease['consume'] = async (call, input, guard) => {
             await assertAvailable(call.signal);
-            await call.assertFresh();
             const auth = await provider.getAuth();
             await assertAvailable(call.signal);
             const connection = await options.egress.prepare(provider.requestUrl);
@@ -96,6 +95,13 @@ export function createRerankInference(authority: RerankInferenceAuthority, setti
             await guard?.();
             call.signal.throwIfAborted();
             return { batchId: randomUUID(), providerId: binding.providerId, modelId: binding.modelId, scores };
+      };
+      return { status: 'ready', lease: { binding, assertAvailable, consume, release() { released = true; },
+        execute(invocation, input, signal, guard) {
+          return requests.run(invocation, signal, async call => {
+            await assertAvailable(call.signal);
+            await call.assertFresh();
+            return consume(call, input, guard);
           });
         },
       } };
