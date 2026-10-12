@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import {
   access,
   cp,
@@ -21,6 +22,9 @@ import {
   assertVarinExtensionManifestCompatibility,
   isVarinExtensionId,
   parseVarinExtensionManifest,
+  parseVarinRuntimeSourceRequest,
+  type VarinRuntimeSourceRequest,
+  type VarinRuntimeSourceOutcome,
   type VarinExtensionAssetPayload,
   type VarinExtensionPreparedArtifact,
   type VarinExtensionManagedEntrypointPayload,
@@ -34,6 +38,17 @@ import {
   type ExtensionSourceCommandRunner,
   type VarinExtensionPackageSourceRegistry,
 } from "./package-sources.js";
+
+class ArtifactVerificationError extends Error {}
+
+/** Only actual verification failures are corruption; I/O failures retain unavailability. */
+function sourceReadFailure(error: unknown): VarinRuntimeSourceOutcome {
+  if (error instanceof ArtifactVerificationError) return { status: 'corrupt', code: 'artifact_corrupt' };
+  if (error && typeof error === 'object' && 'code' in error && typeof error.code === 'string') {
+    return { status: 'unavailable', code: 'artifact_unavailable' };
+  }
+  throw error;
+}
 
 const INDEX_FILE = "artifact-index.json";
 const MANAGED_RUNTIME_DIRECTORY = "runtime/surface";
@@ -511,6 +526,34 @@ export class ExtensionArtifactStore {
     };
   }
 
+  /** Explicit source read uses the same authenticated index and file verifier as assets. */
+  async readSource(
+    artifactRoot: string,
+    requestValue: VarinRuntimeSourceRequest,
+    expectedManifest: VarinExtensionManifest,
+    signal?: AbortSignal,
+  ): Promise<VarinRuntimeSourceOutcome> {
+    const request = parseVarinRuntimeSourceRequest(requestValue);
+    signal?.throwIfAborted();
+    let verified: { index: ArtifactIndex; root: string };
+    try {
+      verified = await this.#readVerifiedIndex(artifactRoot, request.artifactIntegrity, expectedManifest, false, signal);
+    } catch (error) {
+      signal?.throwIfAborted();
+      return sourceReadFailure(error);
+    }
+    const logicalPath = `package/${request.path}`;
+    if (!Object.hasOwn(verified.index.files, logicalPath)) return { status: 'missing', code: 'source_missing' };
+    try {
+      const result = await this.#readVerifiedFile(verified.root, verified.index, logicalPath, signal,
+        { offset: request.offset ?? 0, maxBytes: request.maxBytes ?? 16_384 });
+      return result.source!;
+    } catch (error) {
+      signal?.throwIfAborted();
+      return sourceReadFailure(error);
+    }
+  }
+
   async readManagedEntrypoint(
     artifactRoot: string,
     artifactIntegrity: string,
@@ -558,9 +601,19 @@ export class ExtensionArtifactStore {
     artifactIntegrity: string,
     expectedManifest?: VarinExtensionManifest,
     verifyAllFiles = false,
+    signal?: AbortSignal,
   ): Promise<{ index: ArtifactIndex; root: string }> {
+    signal?.throwIfAborted();
     const root = await this.#assertArtifactRoot(artifactRoot, artifactIntegrity);
-    const index = parseIndex(JSON.parse(await readFile(join(root, INDEX_FILE), "utf8")) as unknown);
+    let indexBytes: string;
+    try { indexBytes = await readFile(join(root, INDEX_FILE), { encoding: "utf8", signal }); }
+    catch (error) {
+      if (isMissing(error)) throw new ArtifactVerificationError('Varin extension artifact index is missing');
+      throw error;
+    }
+    let index: ArtifactIndex;
+    try { index = parseIndex(JSON.parse(indexBytes) as unknown); }
+    catch { throw new ArtifactVerificationError('Varin extension artifact index is malformed'); }
     const indexContent: Omit<ArtifactIndex, "artifactIntegrity"> = {
       entrypoints: index.entrypoints,
       files: index.files,
@@ -570,22 +623,24 @@ export class ExtensionArtifactStore {
     };
     const canonicalIntegrity = artifactIntegrityForIndex(indexContent);
     if (canonicalIntegrity !== index.artifactIntegrity || index.artifactIntegrity !== artifactIntegrity) {
-      throw new Error("Varin extension artifact canonical index integrity no longer matches its content address");
+      throw new ArtifactVerificationError("Varin extension artifact canonical index integrity no longer matches its content address");
     }
     const manifestLogicalPath = `package/${VARIN_EXTENSION_MANIFEST_FILE}`;
-    const { bytes: manifestBytes } = await this.#readVerifiedFile(root, index, manifestLogicalPath);
-    const artifactManifest = parseVarinExtensionManifest(JSON.parse(manifestBytes.toString("utf8")) as unknown);
+    const { bytes: manifestBytes } = await this.#readVerifiedFile(root, index, manifestLogicalPath, signal);
+    let artifactManifest: VarinExtensionManifest;
+    try { artifactManifest = parseVarinExtensionManifest(JSON.parse(manifestBytes.toString("utf8")) as unknown); }
+    catch { throw new ArtifactVerificationError('Varin extension artifact manifest is malformed'); }
     if (canonicalJson(artifactManifest) !== canonicalJson(index.manifest)) {
-      throw new Error("Varin extension artifact manifest file does not match its authenticated index snapshot");
+      throw new ArtifactVerificationError("Varin extension artifact manifest file does not match its authenticated index snapshot");
     }
     if (expectedManifest && canonicalJson(expectedManifest) !== canonicalJson(index.manifest)) {
-      throw new Error("Varin extension artifact manifest snapshot no longer matches the catalog record");
+      throw new ArtifactVerificationError("Varin extension artifact manifest snapshot no longer matches the catalog record");
     }
     if (verifyAllFiles) {
       const actualFiles = (await walkFiles(root)).filter((logicalPath) => logicalPath !== INDEX_FILE);
       const indexedFiles = Object.keys(index.files).sort();
       if (JSON.stringify(actualFiles) !== JSON.stringify(indexedFiles)) {
-        throw new Error("Varin extension artifact files do not match its authenticated index");
+        throw new ArtifactVerificationError("Varin extension artifact files do not match its authenticated index");
       }
       await Promise.all(indexedFiles.map((logicalPath) => this.#readVerifiedFile(root, index, logicalPath)));
     }
@@ -596,25 +651,70 @@ export class ExtensionArtifactStore {
     root: string,
     index: ArtifactIndex,
     logicalPath: string,
-  ): Promise<{ bytes: Buffer; path: string; record: ArtifactFileRecord }> {
-    const record = index.files[logicalPath];
-    if (!record) throw new Error(`Varin extension artifact does not contain asset: ${logicalPath}`);
-    const path = resolve(root, ...logicalPath.split("/"));
-    const relativePath = relative(root, path);
-    if (!relativePath || relativePath.startsWith("..") || resolve(root, relativePath) !== path) {
-      throw new Error("Varin extension asset path escapes its immutable artifact");
+    signal?: AbortSignal,
+    sourcePage?: { offset: number; maxBytes: number },
+  ): Promise<{ bytes: Buffer; path: string; record: ArtifactFileRecord; source?: VarinRuntimeSourceOutcome }> {
+    try {
+      signal?.throwIfAborted();
+      const record = Object.hasOwn(index.files, logicalPath) ? index.files[logicalPath] : undefined;
+      if (!record) throw new ArtifactVerificationError(`Varin extension artifact does not contain asset: ${logicalPath}`);
+      const path = resolve(root, ...logicalPath.split("/"));
+      const relativePath = relative(root, path);
+      if (!relativePath || relativePath.startsWith("..") || resolve(root, relativePath) !== path) {
+        throw new ArtifactVerificationError("Varin extension asset path escapes its immutable artifact");
+      }
+      const info = await lstat(path);
+      if (!info.isFile() || await realpath(path) !== path) throw new ArtifactVerificationError(`Varin extension artifact asset is not an immutable file: ${logicalPath}`);
+      const hash = createHash('sha256');
+      const chunks: Buffer[] = [];
+      const decoder = sourcePage ? new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }) : undefined;
+      let totalBytes = 0, invalidEncoding = false;
+      const offset = sourcePage?.offset ?? 0;
+      const captureEnd = sourcePage ? Math.min(Number.MAX_SAFE_INTEGER, offset + sourcePage.maxBytes + 3) : Infinity;
+      // Each asynchronous chunk yields to control/cancellation. Only a requested source page is retained,
+      // while the complete original file is checked against its existing authenticated hash.
+      const stream = createReadStream(path, { highWaterMark: 64 * 1024, signal });
+      for await (const chunk of stream) {
+        signal?.throwIfAborted();
+        const bytes = chunk as Buffer;
+        hash.update(bytes);
+        if (decoder && !invalidEncoding) {
+          try { decoder.decode(bytes, { stream: true }); } catch { invalidEncoding = true; }
+        }
+        const start = Math.max(0, offset - totalBytes), end = Math.min(bytes.length, captureEnd - totalBytes);
+        if (start < end) chunks.push(Buffer.from(bytes.subarray(start, end)));
+        totalBytes += bytes.length;
+      }
+      signal?.throwIfAborted();
+      if (`sha256-${hash.digest('hex')}` !== record.integrity) throw new ArtifactVerificationError(`Varin extension asset integrity failed: ${logicalPath}`);
+      if (decoder && !invalidEncoding) { try { decoder.decode(); } catch { invalidEncoding = true; } }
+      const bytes = Buffer.concat(chunks);
+      if (!sourcePage) return { bytes, path, record };
+      let source: VarinRuntimeSourceOutcome;
+      if (invalidEncoding) source = { status: 'invalid_encoding', code: 'source_not_utf8' };
+      else if (offset > totalBytes) source = { status: 'invalid_range', code: 'offset_out_of_range' };
+      else if (bytes.length && (bytes[0]! & 0xc0) === 0x80) source = { status: 'invalid_range', code: 'offset_not_utf8_boundary' };
+      else {
+        let byteLength = Math.min(sourcePage.maxBytes, bytes.length);
+        // A one-byte budget remains valid: complete its final code point, never replace or split it.
+        while (byteLength < bytes.length && (bytes[byteLength]! & 0xc0) === 0x80) byteLength++;
+        const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes.subarray(0, byteLength));
+        source = { status: 'found', fileIntegrity: record.integrity, page: {
+          encoding: 'utf-8', text, offset, byteLength, totalBytes,
+          nextOffset: offset + byteLength < totalBytes ? offset + byteLength : null,
+        } };
+      }
+      return { bytes, path, record, source };
+    } catch (error) {
+      if (isMissing(error)) throw new ArtifactVerificationError(`Varin extension indexed asset is missing: ${logicalPath}`);
+      throw error;
     }
-    const info = await lstat(path);
-    if (!info.isFile()) throw new Error(`Varin extension artifact asset is not an immutable file: ${logicalPath}`);
-    const bytes = await readFile(path);
-    if (sha256(bytes) !== record.integrity) throw new Error(`Varin extension asset integrity failed: ${logicalPath}`);
-    return { bytes, path, record };
   }
 
   async #assertArtifactRoot(artifactRoot: string, artifactIntegrity: string): Promise<string> {
     const expected = join(this.directory, artifactIntegrity.slice("sha256-".length));
     const [actualRoot, actualExpected] = await Promise.all([realpath(artifactRoot), realpath(expected)]);
-    if (actualRoot !== actualExpected) throw new Error("Varin extension artifact path does not match its content address");
+    if (actualRoot !== actualExpected) throw new ArtifactVerificationError("Varin extension artifact path does not match its content address");
     return actualRoot;
   }
 }

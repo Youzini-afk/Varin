@@ -64,6 +64,8 @@ const routeParam = (value: string | string[] | undefined): string => (
   typeof value === 'string' ? value : Array.isArray(value) ? value[0] ?? '' : ''
 );
 
+class ExtensionRequestDisconnectedError extends Error {}
+
 const withRequestSignal = async <Result>(
   req: Request,
   res: Response,
@@ -72,13 +74,17 @@ const withRequestSignal = async <Result>(
   const controller = new AbortController();
   const abort = () => {
     if (!res.writableEnded && !controller.signal.aborted) {
-      controller.abort(new Error('Extension request disconnected'));
+      controller.abort(new ExtensionRequestDisconnectedError('Extension request disconnected'));
     }
   };
   req.once('aborted', abort);
   res.once('close', abort);
+  if (req.aborted || res.destroyed || res.writableEnded) controller.abort(new ExtensionRequestDisconnectedError('Extension request disconnected'));
   try {
     return await operation(controller.signal);
+  } catch (error) {
+    controller.signal.throwIfAborted();
+    throw error;
   } finally {
     req.off('aborted', abort);
     res.off('close', abort);
@@ -176,24 +182,33 @@ export const registerExtensionRoutes = (app: Express, {
         return res.status(400).json({ error: { code: 'invalid_request', message: error instanceof Error ? error.message : 'Invalid contract query', retryable: false } });
       }
       try {
-        // This is the authenticated User's current-catalog view, not a Run view.
-        // Existing workbench and service-routing settings both use the default User.
-        const scope: VarinRuntimeContractScope = {
-          routing: { userId: 'default' },
-          workbench: { surface: context.surface ?? 'web', userId: 'default' },
+        const query = async (signal?: AbortSignal) => {
+          signal?.throwIfAborted();
+          // This is the authenticated User's current-catalog view, not a Run view.
+          // Existing workbench and service-routing settings both use the default User.
+          const scope: VarinRuntimeContractScope = {
+            routing: { userId: 'default' },
+            workbench: { surface: context.surface ?? 'web', userId: 'default' },
+          };
+          if (context.directory !== undefined) {
+            if (!documents) return res.status(501).json({ error: { code: 'workspace_authority_unavailable', retryable: true } });
+            const workspace = await documents.lookupWorkspacePath(context.directory);
+            signal?.throwIfAborted();
+            const project = (await readProjects?.())?.find((entry) => projectContainsPath(entry, workspace.canonicalPath));
+            signal?.throwIfAborted();
+            // Service routing retains its existing canonical-directory namespace;
+            // workbench layout uses only an existing Documents ID. A query never creates one.
+            // Neither namespace grants source access.
+            scope.routing = { userId: 'default', workspaceId: workspace.canonicalPath, ...(project ? { projectId: project.id } : {}) };
+            if (workspace.workspaceId) scope.workbench = { ...scope.workbench!, workspaceId: workspace.workspaceId };
+          }
+          const result = await extensionRuntime.queryContracts(request, scope, signal);
+          signal?.throwIfAborted();
+          return res.json(result);
         };
-        if (context.directory !== undefined) {
-          if (!documents) return res.status(501).json({ error: { code: 'workspace_authority_unavailable', retryable: true } });
-          const workspace = await documents.lookupWorkspacePath(context.directory);
-          const project = (await readProjects?.())?.find((entry) => projectContainsPath(entry, workspace.canonicalPath));
-          // Service routing retains its existing canonical-directory namespace;
-          // workbench layout uses only an existing Documents ID. A query never creates one.
-          // Neither namespace grants source access.
-          scope.routing = { userId: 'default', workspaceId: workspace.canonicalPath, ...(project ? { projectId: project.id } : {}) };
-          if (workspace.workspaceId) scope.workbench = { ...scope.workbench!, workspaceId: workspace.workspaceId };
-        }
-        return res.json(await extensionRuntime.queryContracts(request, scope));
+        return request.kind === 'source' ? await withRequestSignal(req, res, query) : await query();
       } catch (error) {
+        if (error instanceof ExtensionRequestDisconnectedError) return;
         if (isDocumentAuthorityError(error)) {
           return res.status(error.statusCode).json({ error: { code: error.code, message: error.message, retryable: false } });
         }

@@ -4,6 +4,11 @@ import {
   parseVarinExtensionAssetRequest,
   parseVarinExtensionCandidateSelectionRequest,
   parseVarinExtensionManagedEntrypointRequest,
+  parseVarinRuntimeSourceRequest,
+  VARIN_RUNTIME_SOURCE_FAILURES,
+  type VarinRuntimeSourceFailureCode,
+  type VarinRuntimeSourceRequest,
+  type VarinRuntimeSourceResult,
   type VarinExtensionActualState,
   type VarinExtensionAssetPayload,
   type VarinExtensionAssetRequest,
@@ -26,6 +31,10 @@ import type { VarinBuiltinExtensionDefinition } from "@varin/extension-builtins"
 import { ExtensionArtifactStore } from "./artifact-store.js";
 import type { BrokeredHostEntrypointArtifact } from "./artifact-store.js";
 import { ExtensionCatalogRevisionConflictError } from "./errors.js";
+
+class ArtifactSelectionError extends Error {
+  constructor(readonly code: VarinRuntimeSourceFailureCode, message: string) { super(message); }
+}
 
 export interface ExtensionPackageManagerOptions {
   artifacts?: ExtensionArtifactStore;
@@ -188,6 +197,28 @@ export class ExtensionPackageManager {
     return this.artifacts.readAsset(artifact.resolvedPath, request.integrity, request.path, artifact.manifest);
   }
 
+  async readSource(requestValue: VarinRuntimeSourceRequest | unknown, signal?: AbortSignal): Promise<VarinRuntimeSourceResult> {
+    const request = parseVarinRuntimeSourceRequest(requestValue);
+    const { extensionId, slot, artifactIntegrity, path } = request;
+    const basis = { action: 'read' as const, kind: 'source' as const, origin: 'immutable_artifact' as const,
+      permission: 'checked_on_invocation' as const, extensionId, slot, artifactIntegrity, path };
+    signal?.throwIfAborted();
+    try {
+      const artifact = await this.#artifact(extensionId, slot, artifactIntegrity);
+      signal?.throwIfAborted();
+      const result = await this.artifacts.readSource(artifact.resolvedPath, request, artifact.manifest, signal);
+      signal?.throwIfAborted();
+      // Unrelated catalog changes do not restart I/O. A retained old directory is not a current slot.
+      await this.#artifact(extensionId, slot, artifactIntegrity);
+      signal?.throwIfAborted();
+      return { ...basis, ...result };
+    } catch (error) {
+      signal?.throwIfAborted();
+      if (!(error instanceof ArtifactSelectionError)) throw error;
+      return { ...basis, status: VARIN_RUNTIME_SOURCE_FAILURES[error.code], code: error.code } as VarinRuntimeSourceResult;
+    }
+  }
+
   async readManagedEntrypoint(
     requestValue: VarinExtensionManagedEntrypointRequest | unknown,
   ): Promise<VarinExtensionManagedEntrypointPayload> {
@@ -220,12 +251,14 @@ export class ExtensionPackageManager {
     integrity: string,
   ): Promise<{ manifest: VarinExtensionManifest; resolvedPath: string }> {
     const read = await this.catalog.store.read();
-    const record = read.document.extensions[extensionId];
-    if (!record) throw new Error(`Varin extension is not installed: ${extensionId}`);
+    if (!read.authoritative) throw new ArtifactSelectionError('catalog_stale', 'Varin extension catalog is stale');
+    const record = Object.hasOwn(read.document.extensions, extensionId) ? read.document.extensions[extensionId] : undefined;
+    if (!record) throw new ArtifactSelectionError('extension_missing', `Varin extension is not installed: ${extensionId}`);
     const artifact = slot === "candidate" ? record.candidate : record;
-    if (!artifact?.resolvedPath || artifact.integrity !== integrity) {
-      throw new Error(`Varin extension ${slot} artifact is no longer current: ${extensionId}`);
-    }
+    if (!artifact) throw new ArtifactSelectionError('candidate_missing', `Varin extension candidate is missing: ${extensionId}`);
+    if (!artifact.integrity) throw new ArtifactSelectionError('artifact_unmaterialized', `Varin extension has no immutable artifact: ${extensionId}`);
+    if (artifact.integrity !== integrity) throw new ArtifactSelectionError('artifact_changed', `Varin extension ${slot} artifact is no longer current: ${extensionId}`);
+    if (!artifact.resolvedPath) throw new ArtifactSelectionError('artifact_unmaterialized', `Varin extension has no immutable artifact: ${extensionId}`);
     return { manifest: artifact.manifest, resolvedPath: artifact.resolvedPath };
   }
 }

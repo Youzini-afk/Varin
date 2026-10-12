@@ -57,3 +57,25 @@ test('tool execution schemas cannot acquire a second method declaration and quer
     assert.throws(() => parseVarinRuntimeContractRequest({ action: 'describe', kind: 'service', serviceId: 'example.service', version: 1, ...added }), /unknown field/);
   }
 });
+
+test('source query schema and decoder share exact identity, path and byte-page admission', async () => {
+  const { VARIN_RUNTIME_CONTRACT_REQUEST_SCHEMA, parseVarinRuntimeContractResult } = await import('../src/index.js');
+  const Constructor = Ajv2020 as unknown as new (options: object) => { compile(schema: unknown): (input: unknown) => boolean };
+  const validate = new Constructor({ strict: false }).compile(VARIN_RUNTIME_CONTRACT_REQUEST_SCHEMA);
+  const request = { action: 'read', kind: 'source', extensionId: 'example.source', slot: 'selected',
+    artifactIntegrity: 'sha256-' + 'a'.repeat(64), path: 'src/中文.no-extension', offset: 0, maxBytes: 1 };
+  assert.equal(validate(request), true);
+  assert.deepEqual(parseVarinRuntimeContractRequest(request), request);
+  for (const change of [{ runId: 'forged' }, { artifactIntegrity: '1.0.0' }, { slot: 'retained' }, { maxBytes: 0 },
+    { offset: 0.5 }, { offset: Number.MAX_SAFE_INTEGER + 1 }, { path: '../secret' }, { path: '/secret' },
+    { path: 'file:///secret' }, { path: 'foo\\bar' }, { path: 'src/./a' }, { path: 'src//a' }, { path: 'src/' }]) {
+    assert.equal(validate({ ...request, ...change }), false, JSON.stringify(change));
+    assert.throws(() => parseVarinRuntimeContractRequest({ ...request, ...change }), JSON.stringify(change));
+  }
+  const result = { ...request, origin: 'immutable_artifact', permission: 'checked_on_invocation', status: 'found',
+    fileIntegrity: 'sha256-' + 'b'.repeat(64), page: { encoding: 'utf-8', text: '😀', offset: 0, byteLength: 4, totalBytes: 4, nextOffset: null } };
+  assert.equal(parseVarinRuntimeContractResult(result).kind, 'source');
+  assert.throws(() => parseVarinRuntimeContractResult({ ...result, page: { ...result.page, byteLength: 1 } }), /Invalid source page/);
+  assert.throws(() => parseVarinRuntimeContractResult({ ...result, status: 'found', page: { ...result.page, nextOffset: 0 } }), /Invalid source page/);
+  assert.throws(() => parseVarinRuntimeContractResult({ ...result, status: 'missing', code: 'artifact_corrupt' }), /Invalid source failure/);
+});

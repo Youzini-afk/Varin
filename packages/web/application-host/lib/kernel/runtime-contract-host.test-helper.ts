@@ -17,6 +17,7 @@ const { kernel, bridge } = fixture;
 let extensions: ApplicationExtensionRuntime;
 const leases: ExtensionToolLease[] = [];
 let root: string;
+let sourceText: string;
 const probeId = 'review.contract-probe';
 const coldId = 'review.cold-contract';
 const probe = { id: `${probeId}.query`, version: 1, tool: {
@@ -40,7 +41,21 @@ async function installProbe() {
       const described = await call.tools.describe('runtime_contract');
       const missing = await call.tools.describe('future_tool');
       const query = input.nested ? await call.tools.invoke({callId:'own-contract',name:'runtime_contract',arguments:{action:'describe',kind:'ui_slot',id:'workbench.editor.actions'}}) : null;
-      return {listed,described,missing,query};
+      const located = await call.tools.invoke({callId:'source-contract',name:'runtime_contract',arguments:{action:'describe',kind:'service',serviceId:'review.cold-contract.future',version:1,member:{kind:'method',name:'execute'}}});
+      if (located.completion.kind !== 'result' || located.completion.outcome !== 'succeeded') throw Error('Source contract query failed');
+      const metadata = located.completion.content.data;
+      const artifact = metadata.service.implementations[0].artifacts.selected;
+      const pages = [];
+      let offset = 0;
+      do {
+        const response = await call.tools.invoke({callId:'source-page-'+pages.length,name:'runtime_contract',arguments:{action:'read',kind:'source',...artifact,path:metadata.member.contract.source.path,offset,maxBytes:pages.length ? 16384 : 4}});
+        if (response.completion.kind !== 'result' || response.completion.outcome !== 'succeeded') throw Error('Source page invocation failed');
+        const page = response.completion.content.data;
+        if (page.status !== 'found') throw Error('Source page was unavailable: '+page.code);
+        pages.push(page);
+        offset = page.page.nextOffset;
+      } while (offset !== null);
+      return {listed,described,missing,query,source:{metadata,pages}};
     }); }`, resolveDir: path, loader: 'ts' }, bundle: true, platform: 'node', format: 'cjs', outfile: join(path, 'dist/host.cjs'),
     alias: { '@varin/extension-sdk': join(repository, 'packages/extension-sdk/dist/index.js'), '@varin/extension-contract': join(repository, 'packages/extension-contract/dist/index.js') } });
   await extensions.installOrStage({ source: { kind: 'local', display: 'Contract probe', specifier: path }, expectedRevision: (await extensions.catalog.snapshot()).revision });
@@ -51,12 +66,15 @@ async function installProbe() {
   // A configured cold service is discoverable but never callable from this accepted directory.
   const cold = join(root, 'cold'); await mkdir(cold, { recursive: true });
   await writeFile(join(cold, 'package.json'), JSON.stringify({ name: 'varin-contract-cold', version: '1.0.0', private: true }));
-  await writeFile(join(cold, 'host.cjs'), `exports.activate=()=>{require('node:fs').writeFileSync(${JSON.stringify(join(root, 'cold-executed'))},'unexpected');throw Error('Metadata discovery executed a cold provider');}`);
+  sourceText = '// 源🔬 cold implementation\n' + '// unicode source 汉字 🔬\n'.repeat(1800)
+    + `exports.activate=()=>{require('node:fs').writeFileSync(${JSON.stringify(join(root, 'cold-executed'))},'unexpected');throw Error('Metadata discovery executed a cold provider');}`;
+  await writeFile(join(cold, 'host.cjs'), sourceText);
   await writeFile(join(cold, 'varin.extension.json'), JSON.stringify({ schemaVersion: 1, id: coldId, displayName: 'Cold contract', version: '1.0.0', engines: { varin: '*' },
     entrypoints: { host: { file: 'host.cjs', mode: 'brokered', activation: ['service-request'] } },
-    provides: { services: [{ id: `${coldId}.future`, version: 1, tool: { ...probe.tool, name: 'future_tool', description: 'A cold configured tool, never selected for this Run.' } }] } }));
+    provides: { services: [{ id: `${coldId}.future`, version: 1, tool: { ...probe.tool, name: 'future_tool', description: 'A cold configured tool, never selected for this Run.', source: { path: 'host.cjs', line: 1 } } }] } }));
   await extensions.installOrStage({ source: { kind: 'local', display: 'Cold contract', specifier: cold }, expectedRevision: (await extensions.catalog.snapshot()).revision });
   await extensions.setEnabled(coldId, true, (await extensions.catalog.snapshot()).revision);
+  await writeFile(join(cold, 'host.cjs'), 'throw Error("Mutable checkout is not the accepted artifact source");');
 }
 async function select(frame: Record<string, unknown>) {
   const state = await extensions.state();
@@ -71,7 +89,7 @@ async function select(frame: Record<string, unknown>) {
     const registered = bridge.register(String(frame.runId), retained.lease);
     bindings.push({ ownerId: registered.ownerId, generation: retained.generation, binding: retained.binding });
   }
-  write({ kind: 'fixture-prepared', bindings });
+  write({ kind: 'fixture-prepared', bindings, sourceText });
 }
 async function handle(frame: Record<string, unknown>) {
   if (fixture.receive(frame)) return;
