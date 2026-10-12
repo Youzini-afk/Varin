@@ -59,3 +59,7 @@ mod agent_resources_review;
 
 #[cfg(test)]
 mod process_interaction_review;
+
+#[cfg(test)]
+#[path = "../../varin-runtime/tests/fixtures/service_composition.rs"]
+mod service_composition_fixture;

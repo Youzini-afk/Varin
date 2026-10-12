@@ -274,6 +274,10 @@ export const testProject = async (directory = "."): Promise<TestResult> => {
     const module = await moduleFromFile(entrypointTargetPath(project, hostEntrypoint.file));
     const extension = resolveHostExtensionModule(module);
     await runHostExtensionConformance({
+      dependencies: (project.manifest.requires?.services ?? []).filter(requirement => requirement.realms.includes("host")).map(requirement => {
+        if (!requirement.optional) throw new Error(`Host conformance requires explicit dependency fixtures: ${requirement.id}@${requirement.version}`);
+        return { ...requirement, providerIds: [] };
+      }),
       activation: extension.activate,
       extensionId: project.manifest.id,
       packageRoot: project.directory,

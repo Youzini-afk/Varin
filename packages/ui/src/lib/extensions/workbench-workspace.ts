@@ -24,7 +24,7 @@ const publish = (next: WorkbenchWorkspaceResolution): void => {
   for (const listener of listeners) listener();
 };
 
-const subscribe = (listener: () => void): (() => void) => {
+export const subscribeWorkbenchWorkspace = (listener: () => void): (() => void) => {
   listeners.add(listener);
   return () => listeners.delete(listener);
 };
@@ -40,6 +40,7 @@ const comparableDirectory = (value: string): string => {
 
 export const getResolvedWorkbenchWorkspaceId = (directory: string): string | undefined => (
   currentResolution.status === 'ready'
+  && currentResolution.key === workspaceKey(currentResolution.directory, getRuntimeEndpointGeneration())
   && comparableDirectory(currentResolution.directory) === comparableDirectory(directory)
     ? currentResolution.workspaceId
     : undefined
@@ -110,7 +111,7 @@ export const useWorkbenchWorkspace = (): WorkbenchWorkspaceState => {
 
   const generation = getRuntimeEndpointGeneration();
   const expectedKey = currentDirectory ? workspaceKey(currentDirectory, generation) : NONE.key;
-  const resolved = React.useSyncExternalStore(subscribe, snapshot, snapshot);
+  const resolved = React.useSyncExternalStore(subscribeWorkbenchWorkspace, snapshot, snapshot);
 
   React.useEffect(() => {
     ensureResolution(documents, currentDirectory, generation);

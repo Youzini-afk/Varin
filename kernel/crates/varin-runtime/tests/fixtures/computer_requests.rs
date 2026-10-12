@@ -5,7 +5,9 @@ mod child_dispatch;
 mod input_admission;
 pub(crate) use child_dispatch::Fixture as ChildFixture;
 use input_admission::InputAdmission;
-use serde_json::{Value, json};
+#[path = "service_composition.rs"]
+mod service_composition;
+use serde_json::{json, Value};
 use varin_runtime::{
     catalog::{computer_requests::*, launches::*},
     execution::*,
@@ -54,7 +56,7 @@ impl Fixture {
             move |input, launch| {
                 input.tools = Some(computer.iter().map(|t| t.name.clone()).collect());
                 for tool in computer {
-                    let binding:ExtensionToolBinding=serde_json::from_value(json!({"providerKey":format!("computer:{}",tool.name),"extensionId":"varin.builtin.computer","extensionVersion":"1.0.0","serviceId":format!("varin.computer.{}",tool.name.trim_start_matches("computer_")),"serviceVersion":1,"artifactIntegrity":"sha256-controlled-computer","declarationHash":tool.version,"configurationIdentity":"original-computer-desktop","tool":tool})).unwrap();
+                    let binding:ExtensionToolBinding=serde_json::from_value(json!({"providerKey":format!("varin.builtin.computer:host:varin.computer.{}@1",tool.name.trim_start_matches("computer_")),"extensionId":"varin.builtin.computer","extensionVersion":"1.0.0","serviceId":format!("varin.computer.{}",tool.name.trim_start_matches("computer_")),"serviceVersion":1,"artifactIntegrity":"sha256-controlled-computer","composition":service_composition::graph("varin.builtin.computer","1.0.0","sha256-controlled-computer"),"declarationHash":tool.version,"configurationIdentity":"original-computer-desktop","tool":tool})).unwrap();
                     launch.tools.push(binding.tool.clone());
                     launch.extension_bindings.push(binding);
                 }

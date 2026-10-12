@@ -26,7 +26,8 @@ import type {
   VarinExtensionServiceRoutingRuleRemoveRequest,
   VarinExtensionServiceRoutingRuleUpdateRequest,
   VarinExtensionServiceRoutingSnapshot,
-  VarinExtensionServiceSelectionRequest,
+  VarinSurfaceServiceLeaseRequest,
+  VarinSurfaceServiceLeaseEvent,
   VarinWorkbenchLayoutUpdateRequest,
   VarinWorkbenchProfileRemoveRequest,
   VarinWorkbenchProfileApplyRequest,
@@ -1533,7 +1534,9 @@ export interface ExtensionsAPI {
   discardCandidate(request: VarinExtensionCandidateSelectionRequest): Promise<VarinExtensionCatalogSnapshot>;
   hostState(): Promise<VarinExtensionHostStateSnapshot>;
   install(request: VarinExtensionPackageInstallRequest): Promise<VarinExtensionCatalogSnapshot>;
-  invokeService(request: VarinExtensionServiceInvocationRequest): Promise<JsonValue>;
+  invokeService(request: VarinExtensionServiceInvocationRequest, signal?: AbortSignal): Promise<JsonValue>;
+  /** One authenticated stream owns one exact composition until abort/disconnect/revocation. */
+  watchServiceLease(request: VarinSurfaceServiceLeaseRequest, onEvent: (event: VarinSurfaceServiceLeaseEvent) => void, signal: AbortSignal): Promise<void>;
   prepareCandidate(extensionId: string, candidateIntegrity: string, signal?: AbortSignal): Promise<VarinExtensionCandidatePreparationResult>;
   requestCandidateApplication(request: VarinExtensionCandidateSelectionRequest): Promise<VarinExtensionCatalogSnapshot>;
   readAsset(request: VarinExtensionAssetRequest): Promise<VarinExtensionAssetPayload>;
@@ -1544,7 +1547,6 @@ export interface ExtensionsAPI {
   reviewCandidateCapabilities(request: VarinExtensionCandidateCapabilityReviewRequest): Promise<VarinExtensionCatalogSnapshot>;
   selectCandidate(request: VarinExtensionCandidatePublicationRequest, signal?: AbortSignal): Promise<VarinExtensionCatalogSnapshot>;
   setEnabled(extensionId: string, enabled: boolean, expectedRevision: number): Promise<VarinExtensionCatalogSnapshot>;
-  setServiceSelection(request: VarinExtensionServiceSelectionRequest): Promise<VarinExtensionHostStateSnapshot>;
   upsertServiceRoutingRule(request: VarinExtensionServiceRoutingRuleUpdateRequest): Promise<VarinExtensionServiceRoutingSnapshot>;
   removeServiceRoutingRule(request: VarinExtensionServiceRoutingRuleRemoveRequest): Promise<VarinExtensionServiceRoutingSnapshot>;
   removeExtension(request: VarinExtensionRemoveRequest): Promise<VarinExtensionCatalogSnapshot>;

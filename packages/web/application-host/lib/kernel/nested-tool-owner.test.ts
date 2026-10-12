@@ -5,7 +5,7 @@ import { createNestedToolOwner } from './nested-tool-owner.js';
 import type { KernelClient } from './kernel-client.js';
 import { withToolInvocation, type ToolInvocationAuthority } from './tool-invocation.js';
 import { toolOperationId, validToolOrigin, type NestedToolInvokeParams, type NestedToolInspectParams } from './protocol.generated.js';
-const owner = { extensionId: 'example.compose', extensionVersion: '1.0.0', entrypointId: 'host', generation: 4 };
+const owner = { extensionId: 'example.compose', extensionVersion: '1.0.0', entrypointId: 'host', instanceKey: 'nested-tool-owner-fixture', generation: 4 };
 const authority: ToolInvocationAuthority = {
   invocationId: 'invocation', runId: 'run', threadId: 'thread', operationId: 'request:tool:outer', callId: 'outer',
   executorOwner: { kind: 'external', identity: 'retained-host-tool', epoch: 'original-epoch' },

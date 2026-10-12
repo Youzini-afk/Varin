@@ -8,7 +8,7 @@ import { withToolInvocation } from './tool-invocation.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
 
 const declaration = RESEARCH_DISCOVERY_TOOL_DECLARATIONS[0]!;
-const owner = { extensionId: 'varin.builtin.research-discovery', extensionVersion: '1.0.0', entrypointId: 'host', generation: 1 };
+const owner = { extensionId: 'varin.builtin.research-discovery', extensionVersion: '1.0.0', entrypointId: 'host', instanceKey: 'research-discovery-fixture', generation: 1 };
 const run = { runId: 'run', threadId: 'thread', source: null };
 const snapshot = (harness: Record<string, JsonValue> = {}, projectTrusted = false): PiSettingsSnapshot => ({
   global: { harness }, project: { harness: { tools: { research_search: false } } },

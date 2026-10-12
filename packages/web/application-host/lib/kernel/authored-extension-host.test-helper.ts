@@ -17,7 +17,7 @@ import { createExtensionTools } from './extension-tool-owner.js';
 import { createExtensionPackageOwner, VARIN_EXTENSION_PACKAGES_CAPABILITY } from './extension-package-owner.js';
 import { createRuntimeContractOwner, VARIN_RUNTIME_CONTRACTS_CAPABILITY } from './runtime-contract-owner.js';
 import { createNestedToolOwner } from './nested-tool-owner.js';
-import { VARIN_RUNTIME_TOOLS_CAPABILITY } from '@varin/extension-contract';
+import { VARIN_RUNTIME_TOOLS_CAPABILITY, parseVarinSurfaceServiceLeaseEvent, parseVarinToolJson } from '@varin/extension-contract';
 import type { SurfaceExtensionHost } from '../../../../extension-loader/dist/index.js';
 import { savedSourceLaunch } from './source-launch.js';
 import { registerExtensionRoutes } from '../extensions/routes.js';
@@ -75,7 +75,7 @@ function request(method: string, params: unknown, options: { grant?: { grantId: 
 }
 
 /** The ordinary route and auth middleware run directly, without app.listen or supertest. */
-function route(method: string, url: string, body: unknown): Promise<Record<string, unknown>> {
+function route(method: string, url: string, body: unknown, signal?: AbortSignal): Promise<Record<string, unknown>> {
   return new Promise((resolveResponse, reject) => {
     const response = Object.assign(new EventEmitter(), {
       statusCode: 200, writableEnded: false,
@@ -89,6 +89,9 @@ function route(method: string, url: string, body: unknown): Promise<Record<strin
         return this;
       },
     });
+    const abort = () => response.emit('close');
+    signal?.addEventListener('abort', abort, { once: true });
+    response.once('finish', () => signal?.removeEventListener('abort', abort));
     const incoming = Object.assign(new EventEmitter(), { method, url, body, headers: { authorization: 'authored-fixture-user' } });
     const direct = router as unknown as { handle(request: Request, response: ExpressResponse, next: (error?: unknown) => void): void };
     direct.handle(incoming as Request, response as unknown as ExpressResponse, (error?: unknown) => {
@@ -96,6 +99,26 @@ function route(method: string, url: string, body: unknown): Promise<Record<strin
     });
   });
 }
+
+/** A controlled authenticated response stream, with the real Router retaining the lease. */
+const watchServiceLease: SurfaceExtensionHost['watchServiceLease'] = (body, onEvent, signal) => new Promise<void>((done, reject) => {
+  signal.throwIfAborted();
+  const response = Object.assign(new EventEmitter(), {
+    statusCode: 200, writableEnded: false, headersSent: false,
+    status(code: number) { this.statusCode = code; return this; }, setHeader() { return this; },
+    flushHeaders() { this.headersSent = true; },
+    write(frame: string) { onEvent(parseVarinSurfaceServiceLeaseEvent(JSON.parse(frame.slice(6).trim()))); return true; },
+    end() { this.writableEnded = true; signal.removeEventListener('abort', abort); done(); return this; },
+    json(value: unknown) { signal.removeEventListener('abort', abort); reject(new Error(JSON.stringify(value))); return this; },
+  });
+  const abort = () => response.emit('close'); signal.addEventListener('abort', abort, { once: true });
+  const incoming = Object.assign(new EventEmitter(), { method: 'POST', url: '/api/varin/extensions/v1/services/lease', body,
+    headers: { authorization: 'authored-fixture-user' } });
+  const direct = router as unknown as { handle(request: Request, response: ExpressResponse, next: (error?: unknown) => void): void };
+  direct.handle(incoming as Request, response as unknown as ExpressResponse, error => {
+    signal.removeEventListener('abort', abort); reject(error ?? new Error('Unmatched authored Surface lease route'));
+  });
+});
 
 async function initialize(frame: Record<string, unknown>) {
   grouped = frame.grouped === true;
@@ -134,8 +157,10 @@ async function initialize(frame: Record<string, unknown>) {
   selectedSource = { mode: 'materialized', workspace_id: identity.workspaceId, execution_workspace_id: identity.workspaceId,
     branch_id: 'source:authored', revision: 0, environment_run_id: null, live_root: null };
   router = express.Router();
-  const auth = (incoming: Request, response: ExpressResponse, next: () => void) => incoming.headers.authorization === 'authored-fixture-user'
-    ? next() : response.status(401).json({ error: 'unauthorized' });
+  const auth = (incoming: Request, response: ExpressResponse, next: () => void) => {
+    if (incoming.headers.authorization !== 'authored-fixture-user') return response.status(401).json({ error: 'unauthorized' });
+    incoming.varinAuth = { type: 'client', clientId: 'authored-fixture-user', client: { id: 'authored-fixture-user' } }; next();
+  };
   registerExtensionRoutes(router as unknown as Express, { extensionCatalog: extensions.catalog, extensionPackages: extensions.packages,
     extensionRuntime: extensions, uiAuthController: { requireAuth: auth, requireSessionAuth: auth } });
   const example = resolve('examples/extensions/agent-authored-panel');
@@ -166,7 +191,7 @@ async function handle(frame: Record<string, unknown>) {
     assert(!extensions.services.getSnapshot().providers.some(provider => provider.extensionId === id));
     await route('PATCH', `/api/varin/extensions/v1/extensions/${id}/enabled`, { enabled: true, expectedRevision: before.revision });
     const selectedService = await extensions.prepareService({ serviceId: 'example.agent-authored-panel.count', version: 1, method: 'execute', args: [] });
-    originalService = selectedService.pin();
+    try { originalService = selectedService.pin(); } finally { selectedService.release(); }
     assert(extensions.services.getSnapshot().providers.some(provider => provider.extensionId === id && provider.status === 'active'),
       'A selected initial version does not acquire a permanent Surface-presence gate');
     const consumer: { createAuthoredPanelConsumer(host: SurfaceExtensionHost): Promise<PanelConsumer> } = await import(
@@ -175,7 +200,8 @@ async function handle(frame: Record<string, unknown>) {
       activateExtension: extensionId => extensions.activateExtension(extensionId),
       catalog: async () => ({ supported: true, status: 'ready', snapshot: await extensions.catalog.snapshot() }),
       hostState: () => extensions.state(),
-      invokeService: request => extensions.invokeService(request),
+      watchServiceLease,
+      invokeService: async (request, signal) => parseVarinToolJson((await route('POST', '/api/varin/extensions/v1/services/invoke', request, signal)).result),
       prepareCandidate: (extensionId, integrity, signal) => extensions.prepareCandidate(extensionId, integrity, signal),
       requestCandidateApplication: request => extensions.requestCandidateApplication(request),
       selectCandidate: (request, signal) => extensions.selectCandidate(request, signal),
@@ -187,7 +213,7 @@ async function handle(frame: Record<string, unknown>) {
     });
     await panel.start();
     const section = sectionOf(panel);
-    assert(section, 'The generated package must reach its real Workbench mount');
+    assert(section, `The generated package must reach its real Workbench mount: ${JSON.stringify({ loader: panel.loader.getSnapshot(), errors: panel.errors.map(String) })}`);
     assert(panel.styles.some(style => style.committed && !style.disposed));
     firstSection = section; firstStyles = panel.styles.filter(style => style.committed && !style.disposed);
     write({ kind: 'fixture-enabled', catalogRevision: (await extensions.catalog.snapshot()).revision }); return;

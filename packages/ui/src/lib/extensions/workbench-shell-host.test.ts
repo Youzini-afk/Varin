@@ -35,7 +35,6 @@ const surfaceSnapshot = (failed = false): SurfaceRegistrySnapshot => ({
   layoutReferences: [],
   replacementSelections: {},
   revision: 1,
-  serviceSelections: {},
   services: [],
   visibleContributions: [],
 });
@@ -106,7 +105,7 @@ const hostSnapshot = (
     hostId,
     storageState: 'missing',
   },
-  services: { hostId, providers: [], revision: 0, selections: {} },
+  services: { hostId, providers: [], revision: 0 },
   workbench: {
     authoritative: options?.authoritative ?? true,
     diagnostics: [],

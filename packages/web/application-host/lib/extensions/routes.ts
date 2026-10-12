@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   ExtensionCatalogRevisionConflictError,
   ExtensionUpdateReadinessError,
@@ -37,6 +38,7 @@ interface ExtensionRouteDependencies {
   uiAuthController: {
     requireAuth: RequestHandler;
     requireSessionAuth: RequestHandler;
+    resolveAuthContext?(req: Request, res: Response, options?: { allowClientAuth?: boolean; allowUrlToken?: boolean }): Promise<unknown>;
   };
 }
 
@@ -157,6 +159,13 @@ export const registerExtensionRoutes = (app: Express, {
   readProjects,
   uiAuthController,
 }: ExtensionRouteDependencies): void => {
+  const servicePrincipal = async (req: Request, res: Response): Promise<string | undefined> => {
+    const value = req.varinAuth ?? await uiAuthController.resolveAuthContext?.(req, res, { allowClientAuth: true });
+    const auth = asRecord(value);
+    const identity = auth?.type === 'client' && typeof auth.clientId === 'string' ? auth.clientId
+      : auth?.type === 'session' && typeof auth.token === 'string' ? auth.token : undefined;
+    return identity ? `${auth!.type}:${createHash('sha256').update(identity).digest('hex')}` : undefined;
+  };
   app.post(
     '/api/varin/extensions/v1/contracts/query',
     uiAuthController.requireAuth,
@@ -488,7 +497,8 @@ export const registerExtensionRoutes = (app: Express, {
       const abort = () => { if (!res.writableEnded) controller.abort(new Error('Host service client disconnected')); };
       res.once('close', abort);
       try {
-        return res.json({ result: await extensionRuntime.invokeService(req.body, controller.signal) });
+        const principal = asRecord(req.body)?.lease ? await servicePrincipal(req, res) : undefined;
+        return res.json({ result: await extensionRuntime.invokeService(req.body, controller.signal, principal) });
       } catch (error) {
         return res.status(400).json({
           error: {
@@ -504,15 +514,28 @@ export const registerExtensionRoutes = (app: Express, {
   );
 
   app.post(
-    '/api/varin/extensions/v1/services/select',
+    '/api/varin/extensions/v1/services/lease',
     uiAuthController.requireAuth,
     async (req, res) => {
       if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
-      try {
-        return res.json(await extensionRuntime.setServiceSelection(req.body));
-      } catch (error) {
-        return res.status(400).json({ error: { code: 'service_selection_failed', message: error instanceof Error ? error.message : String(error), retryable: false } });
-      }
+      const principal = await servicePrincipal(req, res);
+      if (!principal) return res.status(401).json({ error: { code: 'surface_owner_unavailable', retryable: false } });
+      const controller = new AbortController();
+      const abort = () => controller.abort(new ExtensionRequestDisconnectedError('Surface service lease disconnected'));
+      req.once('aborted', abort); res.once('close', abort);
+      if (req.aborted || res.destroyed || res.writableEnded) abort();
+      const emit = (event: import('@varin/extension-contract').VarinSurfaceServiceLeaseEvent) => {
+        if (controller.signal.aborted || res.destroyed || res.writableEnded) throw new ExtensionRequestDisconnectedError('Surface service lease disconnected');
+        if (!res.headersSent) {
+          res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-cache, no-transform');
+          res.setHeader('Connection', 'keep-alive'); res.setHeader('X-Accel-Buffering', 'no'); res.flushHeaders?.();
+        }
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      };
+      try { await extensionRuntime.watchServiceLease(req.body, principal, emit, controller.signal); }
+      catch (error) { if (!controller.signal.aborted && !res.destroyed && !res.writableEnded) emit({ kind: 'error', message: error instanceof Error ? error.message : String(error) }); }
+      finally { req.off('aborted', abort); res.off('close', abort); if (!res.destroyed && !res.writableEnded) res.end(); }
     },
   );
 

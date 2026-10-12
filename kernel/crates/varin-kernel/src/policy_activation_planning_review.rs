@@ -37,6 +37,11 @@ fn artifact(version: u64) -> AgentPolicyArtifactBinding {
         service_id: "varin.agent.policy".into(),
         service_version: 4,
         artifact_integrity: format!("artifact-{version}"),
+        composition: crate::service_composition_fixture::graph(
+            "planning-policy",
+            &version.to_string(),
+            &format!("artifact-{version}"),
+        ),
         configuration_identity: "configuration".into(),
         declared_identity: PolicyIdentity {
             name: "planning-policy".into(),
@@ -59,11 +64,17 @@ fn ready(
     endpoint: &str,
 ) -> PolicySelection {
     let target = artifact(version);
-    let before = catalog.lock().unwrap().policy_selections(run).unwrap();
+    let before = catalog
+        .lock()
+        .unwrap()
+        .policy_selections(run)
+        .unwrap()
+        .load()
+        .unwrap();
     let selection = catalog
         .lock()
         .unwrap()
-        .select_policy(
+        .prepare_policy_selection(
             run,
             &format!("policy-{version}"),
             before.active.generation,
@@ -78,6 +89,13 @@ fn ready(
             },
         )
         .unwrap();
+    let prepared = selection.store().unwrap();
+    let read = catalog
+        .lock()
+        .unwrap()
+        .publish_policy_selection(prepared)
+        .unwrap();
+    let selection = read.load().unwrap();
     let model = if version == 1 {
         "planner-one"
     } else {
@@ -298,6 +316,8 @@ fn activated_planning_generation_uses_its_exact_model_and_private_credential_own
                                 .lock()
                                 .unwrap()
                                 .policy_selections(&run)
+                                .unwrap()
+                                .load()
                                 .unwrap()
                                 .active
                                 .generation,

@@ -30,6 +30,7 @@ interface Registration {
   accepting: boolean;
   nested: Set<Promise<unknown>>;
   parts: OutputPart<IncomingMedia>[];
+  dependencyOwners: Map<string, number>;
   parent?: Registration;
   cell?: { environmentId: string; computerUsed(desktopId: string): void; usesComputer(desktopId: string): boolean; computerCancellation?(cancel: (reason: unknown) => void): () => void };
   effect?: { domain: string; work: Promise<ToolExecutionReceipt> };
@@ -40,6 +41,11 @@ const registrations = new WeakMap<HostInvocationScope, Registration>();
 // A short-lived index of those same registrations, retained through their actual drain.
 // It carries ancestry, never permission or another Operation/receipt authority.
 const liveOperations = new Map<string, Registration>();
+const serviceOwnerKey = (owner: HostServiceOwnerIdentity) => JSON.stringify([
+  owner.extensionId, owner.entrypointId, owner.extensionVersion, owner.instanceKey, owner.generation,
+]);
+const ownsInvocation = (registration: Registration, owner: HostServiceOwnerIdentity): boolean =>
+  serviceOwnerKey(registration.owner) === serviceOwnerKey(owner) || (registration.dependencyOwners.get(serviceOwnerKey(owner)) ?? 0) > 0;
 
 /** Host-only bridge entry. The caller must first validate the original Catalog invocation and
  * immutable Run launch. `work` must be the real pin.invoke promise, never a cancelled reader race.
@@ -67,8 +73,21 @@ export async function withToolInvocation<T>(options: {
     Object.freeze(authority.source);
   }
   Object.freeze(authority);
-  const scope: HostInvocationScope = Object.freeze({ id: randomUUID(), value: null });
-  const registration: Registration = { authority, owner: Object.freeze({ ...options.owner }), signal: options.signal, accepting: true, nested: new Set(), parts: [] };
+  const registration: Registration = { authority, owner: Object.freeze({ ...options.owner }), signal: options.signal, accepting: true, nested: new Set(), parts: [], dependencyOwners: new Map() };
+  const scope: HostInvocationScope = Object.freeze({ id: randomUUID(), value: null,
+    invokeDependency: <Result>(from: HostServiceOwnerIdentity, to: HostServiceOwnerIdentity, invoke: () => Promise<Result>): Promise<Result> => {
+      if (!registration.accepting || registration.signal.aborted || !ownsInvocation(registration, from)) throw new Error('tool_invocation_unavailable');
+      const key = serviceOwnerKey(to);
+      registration.dependencyOwners.set(key, (registration.dependencyOwners.get(key) ?? 0) + 1);
+      const work = Promise.resolve().then(invoke).finally(() => {
+        const remaining = (registration.dependencyOwners.get(key) ?? 1) - 1;
+        if (remaining) registration.dependencyOwners.set(key, remaining); else registration.dependencyOwners.delete(key);
+      });
+      registration.nested.add(work);
+      void work.then(() => registration.nested.delete(work), () => registration.nested.delete(work));
+      return work;
+    },
+  });
   if (liveOperations.has(authority.operationId)) throw new Error('tool_invocation_already_active');
   if (origin.kind === 'nested_call') {
     const parent = liveOperations.get(origin.parent_operation_id);
@@ -138,10 +157,7 @@ export function assertNoScriptCellCycle(context: HostCapabilityCallContext, envi
 export function requireToolInvocation(context: HostCapabilityCallContext): ToolInvocationAuthority {
   const registration = context.invocation ? registrations.get(context.invocation) : undefined;
   if (!registration || !registration.accepting || registration.signal.aborted || context.signal.aborted
-    || registration.owner.entrypointId !== context.owner.entrypointId
-    || registration.owner.extensionId !== context.owner.extensionId
-    || registration.owner.extensionVersion !== context.owner.extensionVersion
-    || registration.owner.generation !== context.owner.generation) {
+    || !ownsInvocation(registration, context.owner)) {
     throw new Error('tool_invocation_unavailable');
   }
   return registration.authority;

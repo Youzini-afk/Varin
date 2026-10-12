@@ -28,3 +28,7 @@ export * from "./output.js";
 export * from "./runtime-source.js";
 
 export * from "./package-authoring.js";
+
+export * from "./service-composition.js";
+export * from "./surface-service-lease.js";
+export * from "./surface-manifest-owner.js";

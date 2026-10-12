@@ -1,9 +1,9 @@
 //! Tool executor over the existing Application Host MCP authority.
 //! Frames are private, epoch-bound, and name concrete retained tools, never arbitrary Host methods.
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{mpsc, Arc, Mutex};
 use varin_runtime::execution::*;
 use varin_runtime::{Effect, ExecutorOwner, Lifetime, Outcome};
 
@@ -657,7 +657,11 @@ impl HostTools {
             } else {
                 CompletionKind::Result
             },
-            lifetime: if job || matches!(route, varin_runtime::McpRoute::ResourceSubscribe { .. }) { Lifetime::Thread } else { Lifetime::Run },
+            lifetime: if job || matches!(route, varin_runtime::McpRoute::ResourceSubscribe { .. }) {
+                Lifetime::Thread
+            } else {
+                Lifetime::Run
+            },
             resources,
         })
     }
@@ -1061,12 +1065,17 @@ mod tests {
                 }),
             };
             let original = varin_runtime::catalog::launches::ExtensionToolBinding {
-                provider_key: "original-provider".into(),
+                provider_key: "extension:host:helper.service@1".into(),
                 extension_id: "extension".into(),
                 extension_version: "1".into(),
                 service_id: "helper.service".into(),
                 service_version: 1,
                 artifact_integrity: "original-artifact".into(),
+                composition: crate::service_composition_fixture::graph(
+                    "extension",
+                    "1",
+                    "original-artifact",
+                ),
                 declaration_hash: "declaration".into(),
                 configuration_identity: None,
                 tool: schema,

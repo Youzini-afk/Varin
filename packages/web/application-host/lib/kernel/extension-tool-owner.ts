@@ -2,14 +2,14 @@ import type { OutputPart, IncomingMedia } from './protocol.generated.js';
 /** Ordinary installed services, selected and prepared by the existing routing/supervisor owner. */
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import type {
-  ApplicationExtensionRuntime,
-  HostServiceBinding,
+import {
+  HostCompositionPreparationRequiredError,
+  type ApplicationExtensionRuntime,
+  type HostServiceBinding,
 } from '@varin/extension-host';
 import {
   parseVarinExtensionServiceProvision,
   parseVarinToolJson,
-  resolveVarinExtensionServiceRouting,
   type VarinExtensionServiceProvision,
   type VarinExtensionHostStateSnapshot,
 } from '@varin/extension-contract';
@@ -124,7 +124,7 @@ export async function retainExtensionTool(
   required?: ExtensionToolBinding,
 ): Promise<ExtensionToolLease> {
   const { runtime, kernel } = options,
-    pin = selected.pin();
+    pin = (() => { try { return selected.pin(); } catch (error) { selected.release(); throw error; } })();
   try {
     const descriptor = parseVarinExtensionServiceProvision(selected.descriptor),
       schema = extensionToolSchema(descriptor);
@@ -133,7 +133,7 @@ export async function retainExtensionTool(
       .providers.find((p) => p.providerId === selected.providerId);
     const artifact =
       provider && runtime.supervisor.getRetainedArtifactIdentity(provider);
-    if (!provider || !artifact)
+    if (!provider || !artifact || !selected.composition)
       throw new Error('extension_tool_artifact_unavailable');
     let configurationIdentity: string | null;
     try {
@@ -147,6 +147,7 @@ export async function retainExtensionTool(
       serviceId: descriptor.id,
       serviceVersion: descriptor.version,
       artifactIntegrity: artifact,
+      composition: selected.composition,
       declarationHash: schema.version,
       configurationIdentity,
       tool: schema,
@@ -244,6 +245,7 @@ export async function retainExtensionTool(
       };
     };
     const lease: HostToolLease = {
+      releaseSelection: () => selected.release(),
       extensionBinding: binding,
       slot: `extension:${binding.serviceId}@${binding.serviceVersion}`,
       implementationIdentity: selected.providerId,
@@ -382,6 +384,7 @@ export async function retainExtensionTool(
           released = true;
           approved.clear();
           pin.release();
+          selected.release();
         }
       },
     };
@@ -394,6 +397,7 @@ export async function retainExtensionTool(
     };
   } catch (error) {
     pin.release();
+    selected.release();
     throw error;
   }
 }
@@ -496,10 +500,12 @@ export function createExtensionTools(
           args: [],
           routing: routingScope,
         },
-        { expectedRoutingRevision: routingRevision },
+        { expectedRoutingRevision: routingRevision, signal },
       );
-      requireToolSource(id, selected.descriptor.tool?.requirements, run.source);
-      return retainExtensionTool(preparedOptions, selected);
+      try {
+        signal.throwIfAborted(); requireToolSource(id, selected.descriptor.tool?.requirements, run.source);
+        return await retainExtensionTool(preparedOptions, selected);
+      } catch (error) { selected.release(); throw error; }
     };
     const snapshot = await runtime.state();
     signal.throwIfAborted();
@@ -521,7 +527,8 @@ export function createExtensionTools(
               candidate.extensionId === binding.extensionId &&
               candidate.extensionVersion === binding.extensionVersion &&
               runtime.supervisor.getRetainedArtifactIdentity(candidate) ===
-                binding.artifactIntegrity,
+                binding.artifactIntegrity &&
+              runtime.supervisor.getRetainedComposition(candidate)?.root === binding.composition.root,
           );
         if (original) {
           const selected = runtime.services.bindPinned(
@@ -533,132 +540,49 @@ export function createExtensionTools(
           signal.throwIfAborted();
           continue;
         }
-        const entry = snapshot.catalog.extensions.find(
-          (e) =>
-            e.manifest.id === binding.extensionId &&
-            e.desired.enabled &&
-            e.integrity === binding.artifactIntegrity,
-        );
-        if (
-          !entry?.manifest.provides?.services?.some(
-            (d) =>
-              d.id === binding.serviceId &&
-              d.version === binding.serviceVersion &&
-              d.tool,
-          )
-        )
-          throw new Error('extension_tool_exact_artifact_unavailable');
-        // A saved invocation selects its exact artifact/service owner independently of
-        // today's routing. The existing supervisor alone activates that installed package.
-        await runtime.activateExtension(binding.extensionId);
-        signal.throwIfAborted();
-        const provider = runtime.services
-          .getSnapshot()
-          .providers.find(
-            (candidate) =>
-              candidate.status === 'active' &&
-              candidate.providerKey === binding.providerKey &&
-              candidate.extensionId === binding.extensionId &&
-              candidate.extensionVersion === binding.extensionVersion,
-          );
-        if (!provider)
-          throw new Error('extension_tool_exact_binding_unavailable');
-        const selected = runtime.services.bind(
-          binding.serviceId,
-          binding.serviceVersion,
-          provider.providerId,
-        );
+        const selected = await runtime.prepareService({ serviceId: binding.serviceId, version: binding.serviceVersion,
+          method: 'execute', args: [], routing: routingScope }, { signal, frozenComposition: binding.composition });
         const retained = await retainExtensionTool(preparedOptions, selected, binding);
         initial.push(retained);
         signal.throwIfAborted();
       }
-      if (!required.length && !run.fixed)
-        for (const entry of services(snapshot).values()) {
-          // Read the existing routing owner's pure resolution, without starting a cold provider.
-          // Candidate construction and legacy explicit-selection precedence match prepareService.
-          const legacy =
-            snapshot.services.selections[`${entry.id}@${entry.version}`];
-          let providerId = legacy;
-          if (!providerId) {
-            const candidates = snapshot.catalog.extensions
-              .filter(
-                (e) =>
-                  e.desired.enabled &&
-                  e.manifest.entrypoints?.host &&
-                  e.manifest.provides?.services?.some(
-                    (d) => d.id === entry.id && d.version === entry.version,
-                  ),
-              )
-              .map((e) => ({
-                extensionId: e.manifest.id,
-                providerId: e.manifest.id,
-                providerKey: `${e.manifest.id}:host:${entry.id}@${entry.version}`,
-              }));
-            const resolution = resolveVarinExtensionServiceRouting({
-              candidates,
-              document: snapshot.routing.document,
-              serviceId: entry.id,
-              version: entry.version,
-              context: routingScope,
-            });
-            if (resolution.status !== 'resolved' || resolution.providerKeys.length !== 1) continue;
-            providerId = snapshot.services.providers.find(
-              (p) =>
-                p.status === 'active' &&
-                resolution.providerKeys.includes(p.providerKey),
-            )?.providerId;
-          }
-          if (!providerId) continue;
-          const selected = runtime.services.bind(
-            entry.id,
-            entry.version,
-            providerId,
-          );
-          if (!selected.descriptor.tool) continue;
-          try {
-            requireToolSource(entry.id, selected.descriptor.tool.requirements, run.source);
-            initial.push(await retainExtensionTool(preparedOptions, selected));
-          }
-          catch (error) {
-            if (!(error instanceof ExtensionToolConfigurationError) && !(error instanceof ExtensionToolSourceError)) throw error;
-            states.set(`${entry.id}@${entry.version}`, { serviceId: entry.id, version: entry.version,
-              declarations: entry.declarations, status: 'unavailable', error: error.message });
-          }
-          signal.throwIfAborted();
+      if (!required.length && !run.fixed) for (const entry of services(snapshot).values()) {
+        try {
+          const resolved = await runtime.resolveServiceCompositions({ serviceId: entry.id, version: entry.version,
+            method: 'execute', args: [], routing: routingScope }, { signal, expectedRoutingRevision: snapshot.routing.document.revision });
+          const root = resolved.services[0];
+          if (resolved.services.length !== 1 || !root || !snapshot.services.providers.some(provider => provider.status === 'active'
+            && provider.providerKey === root.providerKey && runtime.supervisor.getRetainedComposition(provider)?.root === root.composition.root)) continue;
+          initial.push(await prepare(entry.id, entry.version, snapshot.routing.document.revision));
+        } catch (error) {
+          if (error instanceof HostCompositionPreparationRequiredError) continue;
+          states.set(`${entry.id}@${entry.version}`, { serviceId: entry.id, version: entry.version,
+            declarations: entry.declarations, status: 'unavailable',
+            error: error instanceof ExtensionToolConfigurationError || error instanceof ExtensionToolSourceError ? error.message : 'extension_tool_preparation_failed' });
         }
+        signal.throwIfAborted();
+      }
     } catch (error) {
       for (const retained of initial) retained.lease.release();
       throw error;
     }
-    const tokenFor = (
-      state: VarinExtensionHostStateSnapshot,
-      id: string,
-      version: number,
-    ) =>
-      canonical({
-        routing: state.routing.document,
-        selection: state.services.selections[`${id}@${version}`] ?? null,
-        candidates: state.catalog.extensions
-          .filter((e) =>
-            e.manifest.provides?.services?.some(
-              (d) => d.id === id && d.version === version,
-            ),
-          )
-          .map((e) => ({
-            id: e.manifest.id,
-            integrity: e.integrity,
-            enabled: e.desired.enabled,
-            services: e.manifest.provides?.services?.filter(
-              (d) => d.id === id && d.version === version,
-            ),
-          })),
-      });
+    const tokenFor = async (state: VarinExtensionHostStateSnapshot, id: string, version: number): Promise<string> => {
+      try {
+        const resolved = await runtime.resolveServiceCompositions({ serviceId: id, version, method: 'execute', args: [], routing: routingScope }, { signal });
+        return canonical(resolved.services.map(service => ({ provider: service.providerKey, graph: service.composition.root, descriptor: service.descriptor })));
+      } catch (error) {
+        signal.throwIfAborted();
+        if (error instanceof HostCompositionPreparationRequiredError) return canonical({ needsPreparation: error.extensionId,
+          routing: state.routing.document, declarations: state.catalog.extensions.map(entry => [entry.manifest.id, entry.integrity, entry.desired.enabled, entry.manifest.requires, entry.capabilityGrants]) });
+        return `unavailable:${error instanceof Error ? error.message : String(error)}`;
+      }
+    };
     for (const retained of initial) {
       const slot = extensionToolSlot(retained.binding);
       if (!required.length)
         tokens.set(
           slot,
-          tokenFor(
+          await tokenFor(
             snapshot,
             retained.binding.serviceId,
             retained.binding.serviceVersion,
@@ -686,7 +610,7 @@ export function createExtensionTools(
         return;
       seenRevision = current.revision;
       for (const [slot, entry] of services(current)) {
-        const token = tokenFor(current, entry.id, entry.version);
+        const token = await tokenFor(current, entry.id, entry.version);
         if (tokens.get(slot) === token) continue;
         tokens.set(slot, token);
         states.set(slot, {

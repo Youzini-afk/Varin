@@ -1012,7 +1012,7 @@ is not a prohibition on explicitly selected note/plan mutations. Bot/context-job
 A child uses the ordinary AgentPolicy lifecycle after durable task admission. `preparePolicy` resolves
 its actual Thread/project routing scope, then commits the original artifact and generation through the
 same launch preparation. It neither copies the parent's private checkpoint nor acquires additional tools.
-The built-in loop remains the default until an explicit matching route or registry selection chooses
+The built-in loop remains the default until an explicit matching service-routing rule chooses
 an extension policy. Installing a single provider does not select it for unrelated tasks or children.
 Policy candidates may change at closed decision boundaries while the child ToolDirectory remains static.
 Declared planning roles bind credentials and model Operations to that child Run/generation; saved roles
@@ -1169,10 +1169,12 @@ settings/selection; Rust keeps estimation, waterlines and ancestor selection loc
 full histories, provider credentials or tools cross to an unselected extension. Unknown capacity and
 disabled compaction do not call a budget extension.
 
-`createContextBudget` resolves only an explicit original service-routing/registry selection of
+`createContextBudget` resolves only an explicit original service-routing selection of
 `varin.context.budget@1`; installing its sole provider does not change the native default. Original
-routing and preparation revisions cache scope/binding facts. Selected immutable declarations are reused
-across unrelated routing changes. Only the separate actual `decide` query carries detached estimates
+routing caches only scope selection facts. Description values are bound to the actual provider
+generation and composition; same-instance unrelated routing changes reuse them, while a new worker
+redescribes its activation's configuration. These caches do not hold workers alive. Only the separate
+actual `decide` query carries detached estimates
 and native candidate metadata. Its selected generation is pinned through describe/decide completion;
 ordinary replacement lets it finish, while revocation/cancellation rejects late output. A successful
 Decision is immutable data, not a continuing extension permission or callback state.

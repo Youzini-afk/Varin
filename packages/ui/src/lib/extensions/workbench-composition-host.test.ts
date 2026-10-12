@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createAuthoredPanelConsumer } from './authored-surface-consumer.test-support';
 import { SurfaceExtensionRuntime } from '../../../../extension-surface/src/index';
-import type { VarinExtensionCatalogSnapshot, VarinExtensionHostStateSnapshot, VarinExtensionManifest } from '@varin/extension-contract';
+import type { VarinExtensionCatalogSnapshot, VarinExtensionHostStateSnapshot, VarinExtensionManifest, VarinSurfaceServiceLeaseRequest } from '@varin/extension-contract';
 import type { JsonObject } from '@varin/extension-contract';
 import type { SurfaceContribution } from '@varin/extension-surface';
 import {
@@ -252,7 +252,7 @@ test('a generated ordinary module follows the real loader watch and rolls back f
   };
   const state = (): VarinExtensionHostStateSnapshot => ({
     catalog, revision: catalog.revision,
-    services: { hostId: applicationHostId, providers: [], revision: catalog.revision, selections: {} },
+    services: { hostId: applicationHostId, providers: [], revision: catalog.revision },
     routing: { authoritative: true, diagnostics: [], hostId: applicationHostId, storageState: 'missing',
       document: { schemaVersion: 1, revision: 0, rules: [], updatedAt: new Date().toISOString() } },
     workbench: { authoritative: true, diagnostics: [], hostId: applicationHostId, storageState: 'missing',
@@ -264,6 +264,11 @@ test('a generated ordinary module follows the real loader watch and rolls back f
   const revoked: string[] = [];
   const waiters = new Set<() => void>();
   const reads: string[] = [];
+  const serviceLeases: Array<{ request: VarinSurfaceServiceLeaseRequest; signal: AbortSignal; ready(): void }> = [];
+  const closedServiceLeases: string[] = [];
+  const leaseKey = (request: VarinSurfaceServiceLeaseRequest) => `${request.owner.entrypointId}:${request.owner.generation}`;
+  const leasesFor = (integrity: string) => serviceLeases.filter((lease) => lease.request.artifactIntegrity === integrity);
+  let holdServiceReadiness = true;
   let abortedWaits = 0;
   let discardedCandidates = 0;
   const publish = () => { for (const wake of [...waiters]) wake(); };
@@ -292,6 +297,33 @@ test('a generated ordinary module follows the real loader watch and rolls back f
       },
       reportActualState: async () => undefined,
       selectCandidate: async () => catalog,
+      watchServiceLease: async (request, onEvent, signal) => {
+        signal.throwIfAborted();
+        const entry = catalog.extensions[0]!;
+        expect(entry.desired.enabled).toBe(true);
+        expect(request).toMatchObject({
+          artifactIntegrity: entry.integrity, slot: 'selected', surface: 'web',
+          expectedRoutingRevision: state().routing.document.revision, services: [],
+          owner: { hostId: applicationHostId, realmId: 'authored-panel-consumer', extensionId: manifest.id,
+            extensionVersion: entry.selectedVersion, desiredRevision: entry.desired.revision },
+        });
+        expect([`${manifest.id}.manifest`, 'panel']).toContain(request.owner.entrypointId);
+        await new Promise<void>((resolve) => {
+          const close = () => {
+            signal.removeEventListener('abort', close);
+            closedServiceLeases.push(leaseKey(request));
+            resolve();
+          };
+          const ready = () => {
+            signal.throwIfAborted();
+            onEvent({ kind: 'ready', leaseId: `panel-lease:${leaseKey(request)}`,
+              routingRevision: request.expectedRoutingRevision, providers: [] });
+          };
+          signal.addEventListener('abort', close, { once: true });
+          serviceLeases.push({ request: structuredClone(request), signal, ready });
+          if (!holdServiceReadiness) ready();
+        });
+      },
       waitForHostState: async (request, signal) => {
         signal?.throwIfAborted();
         if (request.revision !== catalog.revision) return state();
@@ -317,7 +349,14 @@ test('a generated ordinary module follows the real loader watch and rolls back f
   try {
     await consumer.start();
     expect(container.children).toHaveLength(0);
-    select(firstIntegrity, '1.0.0'); await until(() => container.children.length === 1 && styleCount() === 1);
+    select(firstIntegrity, '1.0.0'); await until(() => serviceLeases.length === 1);
+    expect(reads).toEqual([]);
+    expect(container.children).toHaveLength(0);
+    holdServiceReadiness = false;
+    serviceLeases[0]!.ready();
+    await until(() => container.children.length === 1 && styleCount() === 1);
+    const originalLeases = [...serviceLeases];
+    expect(originalLeases.map((lease) => lease.request.owner.entrypointId).sort()).toEqual([`${manifest.id}.manifest`, 'panel']);
     expect(container.children).toHaveLength(1);
     const oldMount = container.children[0]!;
     const oldPanel = oldMount.children[0]!;
@@ -332,8 +371,12 @@ test('a generated ordinary module follows the real loader watch and rolls back f
     await until(() => loader.getSnapshot().revision === catalog.revision); await tick();
     expect(reads).toEqual([firstIntegrity]);
     expect(discardedCandidates).toBe(0);
+    expect(serviceLeases).toHaveLength(originalLeases.length);
     select(failedIntegrity, '1.1.0');
     await until(() => loader.getSnapshot().diagnostics.some((item) => item.message.includes('candidate mount failed')));
+    await until(() => leasesFor(failedIntegrity).length === 2 && leasesFor(failedIntegrity).every((lease) => lease.signal.aborted));
+    expect(originalLeases.every((lease) => !lease.signal.aborted)).toBe(true);
+    expect(closedServiceLeases.sort()).toEqual(leasesFor(failedIntegrity).map((lease) => leaseKey(lease.request)).sort());
     expect(container.children).toEqual([oldMount]);
     expect(oldPanel.dataset.closed).toBeUndefined();
     expect(styleCount()).toBe(1);
@@ -343,6 +386,9 @@ test('a generated ordinary module follows the real loader watch and rolls back f
     expect(catalog.extensions[0]?.integrity).toBe(failedIntegrity);
     expect(discardedCandidates).toBe(0);
     select(nextIntegrity, '2.0.0'); await until(() => oldPanel.dataset.closed === 'true' && revoked.length === 2);
+    await until(() => originalLeases.every((lease) => lease.signal.aborted));
+    expect(leasesFor(nextIntegrity)).toHaveLength(2);
+    expect(leasesFor(nextIntegrity).every((lease) => !lease.signal.aborted)).toBe(true);
     expect(container.children).toHaveLength(1);
     expect(container.children[0]).not.toBe(oldMount);
     expect(oldPanel.dataset.closed).toBe('true');
@@ -350,10 +396,13 @@ test('a generated ordinary module follows the real loader watch and rolls back f
     expect(styleCount()).toBe(1);
     expect(revoked).toHaveLength(2);
     select(nextIntegrity, '2.0.0', false); await until(() => revoked.length === 3);
+    await until(() => serviceLeases.every((lease) => lease.signal.aborted));
     expect(container.children).toHaveLength(0);
     expect(styleCount()).toBe(0);
     expect(revoked).toHaveLength(3);
     select(nextIntegrity, '2.0.0'); await until(() => container.children.length === 1 && styleCount() === 1);
+    expect(serviceLeases).toHaveLength(8);
+    expect(serviceLeases.filter((lease) => !lease.signal.aborted)).toHaveLength(2);
     await until(() => waiters.size === 1);
     await consumer.close();
     expect(container.children).toHaveLength(0);
@@ -361,6 +410,9 @@ test('a generated ordinary module follows the real loader watch and rolls back f
     expect(revoked).toHaveLength(4);
     expect(abortedWaits).toBe(1);
     expect(waiters.size).toBe(0);
+    expect(serviceLeases.every((lease) => lease.signal.aborted)).toBe(true);
+    expect(closedServiceLeases).toHaveLength(serviceLeases.length);
+    expect(new Set(closedServiceLeases).size).toBe(serviceLeases.length);
     const readsAtClose = reads.length;
     select(firstIntegrity, '1.0.0'); await tick();
     expect(reads).toHaveLength(readsAtClose);

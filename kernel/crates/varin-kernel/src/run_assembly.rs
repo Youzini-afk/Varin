@@ -3,7 +3,7 @@ use crate::agent_runtime::{bind_policy_model, domain, live_extension_binding, li
 use crate::error::KernelError;
 use crate::protocol::PROTOCOL_VERSION;
 use crate::protocol_generated::{LaunchSelectParams, RunStartParams};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{sync::Arc, thread};
 use varin_runtime::{
     model_session,
@@ -176,12 +176,16 @@ impl RunAssembly {
             .catalog()
             .lock()
             .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-            .launch_metadata(&p.run_id)
+            .capture_launch(&p.run_id)
             .map_err(domain)?;
-        let policy_generation = policy_launch.as_ref().map_or(0, |l| l.policy_generation);
+        let policy_generation = policy_launch
+            .as_ref()
+            .map_or(0, |l| l.metadata.policy_generation);
         let policy_target = policy_launch
             .as_ref()
-            .map(|l| l.policy_target.clone())
+            .map(|l| l.load_policy_target())
+            .transpose()
+            .map_err(domain)?
             .unwrap_or(varin_runtime::catalog::policy_switch::PolicyTarget::Default);
         if let Some(binding) = p.policy_binding {
             if binding.generation < 0

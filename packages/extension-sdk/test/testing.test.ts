@@ -49,7 +49,7 @@ test("the author conformance harness proves contribution and service teardown", 
 
 test("the author conformance harness exercises Host storage, services, and cleanup", async () => {
   let disposed = false;
-  const result = await runHostExtensionConformance({
+  const result = await runHostExtensionConformance({ dependencies: [],
     extensionId: "dev.example.host-conformance",
     activation: async (context) => {
       context.services.provide({ id: "dev.example.host-service", version: 1 }, { read: () => "ok" });
@@ -156,7 +156,7 @@ test("module resolvers preserve extension-object method ownership", async () => 
       return input.data;
     },
   } as never);
-  await runHostExtensionConformance({ activation: host.activate, extensionId: "dev.example.bound-host" });
+  await runHostExtensionConformance({ dependencies: [], activation: host.activate, extensionId: "dev.example.bound-host" });
   assert.deepEqual(await host.migrate?.({ data: { ok: true }, fromSchemaVersion: 1, toSchemaVersion: 2 }), { ok: true });
 
   const isolated = resolveIsolatedExtensionModule({
@@ -294,7 +294,7 @@ test("typed document and language clients forward calls and providers confine pa
       providerId: "md",
     };
   });
-  await runHostExtensionConformance({
+  await runHostExtensionConformance({ dependencies: [],
     activation: provider.activate,
     extensionId: "dev.example.language",
     packageRoot,
@@ -337,11 +337,11 @@ test("debug and test host helpers register through capabilities and unregister o
     command: "node",
   });
   await callWorkspaceTasks(capabilities, "list", { workspaceId: "ws" });
-  const debugResult = await runHostExtensionConformance({
+  const debugResult = await runHostExtensionConformance({ dependencies: [],
     activation: defineDebugAdapter({ adapterId: "node", command: "node" }).activate,
     extensionId: "dev.example.debug",
   });
-  const testResult = await runHostExtensionConformance({
+  const testResult = await runHostExtensionConformance({ dependencies: [],
     activation: defineTestProvider({ providerId: "node-test", command: "node" }).activate,
     extensionId: "dev.example.test",
   });

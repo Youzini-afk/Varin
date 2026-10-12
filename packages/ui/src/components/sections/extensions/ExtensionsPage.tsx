@@ -65,6 +65,7 @@ import {
   WORKBENCH_REPLACEMENT_TARGETS,
 } from '@/lib/extensions/workbench-registry';
 import { varinSurfaceRuntime } from '@/lib/extensions/surface-runtime';
+import { surfaceExtensionLoader } from '@/lib/extensions/managed-runtime';
 import { workbenchExtensionDisplayName, workbenchProfileLabel } from '@/lib/extensions/workbench-profile-label';
 import {
   describeWorkbenchContributionPlacement,
@@ -547,6 +548,7 @@ const serviceName = (serviceId: string): string => {
 
 const ServiceRoutingSection: React.FC = () => {
   const { t } = useI18n();
+  const surfaceRegistry = useSurfaceRegistrySnapshot();
   const catalog = useVarinExtensionCatalog();
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const [scopeKind, setScopeKind] = React.useState<'user' | 'workspace'>(currentDirectory ? 'workspace' : 'user');
@@ -557,7 +559,9 @@ const ServiceRoutingSection: React.FC = () => {
   const snapshot = catalog.snapshot;
   if (!snapshot?.routing.authoritative) return null;
 
-  const providerGroups = serviceRoutingOptions(snapshot);
+  const providerGroups = serviceRoutingOptions(snapshot, {
+    factories: surfaceExtensionLoader.getLocalServiceDeclarations(), services: surfaceRegistry.services,
+  });
   const serviceKeys = new Set([
     ...[...providerGroups].filter(([, providers]) => (
       providers.length > 1 || providers.some((provider) => provider.descriptor.contract?.composition === 'ordered')

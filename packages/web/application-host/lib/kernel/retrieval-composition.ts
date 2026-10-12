@@ -1,6 +1,6 @@
 import type { InferenceCall } from '../knowledge/semantic/inference-requests.js';
 import { createHash } from 'node:crypto';
-import type { ApplicationExtensionRuntime } from '@varin/extension-host';
+import type { ApplicationExtensionRuntime, HostServicePin } from '@varin/extension-host';
 import { VARIN_BUILTIN_RETRIEVAL_DEFAULT_PROVIDER_KEY } from '@varin/extension-builtins';
 import {
   parseVarinRetrievalPlan, VARIN_RETRIEVAL_PLAN_METHOD, VARIN_RETRIEVAL_PLAN_SERVICE_ID,
@@ -54,7 +54,7 @@ interface ScopeCache {
   candidateKey?: string;
   candidate: number;
   owner?: RetrievalPipelineOwner;
-  current?: { selectedKey: string; selection: Readonly<RetrievalSelection>; declaration: Readonly<VarinRetrievalPlan> };
+  current?: { selectedKey: string; declaration: Readonly<VarinRetrievalPlan> };
   publishing?: { identity: string; result: Promise<void> };
 }
 
@@ -86,48 +86,54 @@ export function createRetrievalComposition(runtime: ApplicationExtensionRuntime,
       if (!routing.authoritative) throw new Error('Retrieval plan routing is unavailable');
       const request = { serviceId: VARIN_RETRIEVAL_PLAN_SERVICE_ID, version: VARIN_RETRIEVAL_PLAN_VERSION,
         method: VARIN_RETRIEVAL_PLAN_METHOD, args: [], routing: routingScope };
-      const prepareOptions = { defaultProviderKey: VARIN_BUILTIN_RETRIEVAL_DEFAULT_PROVIDER_KEY };
-      const selected = await waitWithSignal(runtime.prepareService(request, prepareOptions), signal);
-      signal?.throwIfAborted();
-      const pin = selected.pin();
+      const prepareOptions = { defaultProviderKey: VARIN_BUILTIN_RETRIEVAL_DEFAULT_PROVIDER_KEY,
+        expectedRoutingRevision: routing.document.revision, ...(signal ? { signal } : {}) };
+      const selected = await runtime.prepareService(request, prepareOptions);
+      let pin: HostServicePin | undefined;
       let semantic: RetrievalSemanticLease | undefined;
       let model: RetrievalModelLease | undefined;
       try {
+        signal?.throwIfAborted();
+        pin = selected.pin();
+        const queryPin = pin;
+        const callSignal = signal ? AbortSignal.any([signal, queryPin.revocationSignal]) : queryPin.revocationSignal;
         const provider = runtime.services.getSnapshot().providers.find(item => item.providerId === selected.providerId && item.status === 'active');
         const artifactId = provider && runtime.supervisor.getActiveArtifactIdentity(provider);
         if (!provider || !artifactId) throw new Error('Retrieval executing artifact identity is unavailable');
-        const selectedKey = JSON.stringify([selected.providerId, artifactId]);
+        if (!selected.composition) throw new Error('Retrieval composition identity is unavailable');
+        const compositionRoot = selected.composition.root;
+        const selectedKey = JSON.stringify([selected.providerKey, compositionRoot]);
         // An older request finishing activation cannot supersede a newer admitted selection.
         // The exact provider/artifact is still checked below; completion order is not authority.
-        const selectedRouting = await waitWithSignal(runtime.routing.read(), signal);
+        const selectedRouting = await waitWithSignal(runtime.routing.read(), callSignal);
         if (!selectedRouting.authoritative || selectedRouting.document.revision !== routing.document.revision
           || (admission < state.candidateAdmission && state.candidateKey !== selectedKey)) {
           throw new Error('Retrieval plan preparation was superseded');
         }
-        pin.assertAvailable();
+        queryPin.assertAvailable();
         if (runtime.supervisor.getActiveArtifactIdentity(provider) !== artifactId) throw new Error('Retrieval executing artifact changed during preparation');
         if (state.candidateKey !== selectedKey) { state.candidateKey = selectedKey; state.candidate += 1; }
         state.candidateAdmission = Math.max(state.candidateAdmission, admission);
         const ticket = state.candidate;
         const assertCandidate = (): void => {
           signal?.throwIfAborted();
-          pin.assertAvailable();
+          queryPin.assertAvailable();
           if (state.candidate !== ticket) throw new Error('Retrieval plan preparation was superseded');
         };
         const assertSelection = async (): Promise<void> => {
-          const current = await waitWithSignal(runtime.prepareService(request, prepareOptions), signal);
-          const currentRouting = await waitWithSignal(runtime.routing.read(), signal);
+          const current = await runtime.resolveServiceCompositions(request, { ...prepareOptions, signal: callSignal });
           assertCandidate();
-          if (!currentRouting.authoritative || currentRouting.document.revision !== routing.document.revision
-            || current.providerId !== selected.providerId || runtime.supervisor.getActiveArtifactIdentity(provider) !== artifactId) {
+          if (current.services.length !== 1 || current.services[0]!.providerKey !== selected.providerKey
+            || current.services[0]!.composition.root !== compositionRoot
+            || runtime.supervisor.getActiveArtifactIdentity(provider) !== artifactId) {
             throw new Error('Retrieval plan selection changed during preparation');
           }
         };
         const acquireSemantic = async (declaration: Readonly<VarinRetrievalPlan>): Promise<RetrievalSemanticLease | undefined> => {
           if (declaration.semantic !== 'builtin' || !options.prepareSemantic) return undefined;
-          const preparing = options.prepareSemantic(scope, signal);
+          const preparing = options.prepareSemantic(scope, callSignal);
           let acquired: RetrievalSemanticLease;
-          try { acquired = await waitWithSignal(preparing, signal); }
+          try { acquired = await waitWithSignal(preparing, callSignal); }
           catch (error) { void preparing.then(late => late.release(), () => {}); throw error; }
           try {
             await assertSelection();
@@ -142,13 +148,11 @@ export function createRetrievalComposition(runtime: ApplicationExtensionRuntime,
           } catch (error) { acquired.release(); throw error; }
         };
         if (state.current?.selectedKey !== selectedKey) {
-          const declaration = parseVarinRetrievalPlan(await waitWithSignal(pin.invoke(VARIN_RETRIEVAL_PLAN_METHOD, [], signal), signal));
+          const declaration = parseVarinRetrievalPlan(await waitWithSignal(queryPin.invoke(VARIN_RETRIEVAL_PLAN_METHOD, [], callSignal), callSignal));
           await assertSelection();
           semantic = await acquireSemantic(declaration);
-          const selection = Object.freeze({ providerId: selected.providerId, providerKey: selected.providerKey,
-            artifactId, configurationId: declaration.configurationId, selectionRevision: routing.document.revision });
           // Unrelated routing edits do not change the effective immutable declaration identity.
-          const identity = createHash('sha256').update(JSON.stringify({ providerId: selected.providerId,
+          const identity = createHash('sha256').update(JSON.stringify({ compositionRoot,
             providerKey: selected.providerKey, artifactId, declaration })).digest('hex');
           const configuration: RetrievalPipelineConfiguration = {
             configurationId: identity,
@@ -173,14 +177,14 @@ export function createRetrievalComposition(runtime: ApplicationExtensionRuntime,
                   assertPublication();
                   if (state.owner) await state.owner.replace(async () => configuration, assertPublication);
                   else state.owner = createRetrievalPipelineOwner(configuration);
-                  state.current = { selectedKey, selection, declaration: Object.freeze({ ...declaration }) };
+                  state.current = { selectedKey, declaration: Object.freeze({ ...declaration }) };
                 } finally { publicationPin.release(); }
               };
               const publishing = { identity, result: publish() };
               state.publishing = publishing;
               void publishing.result.finally(() => { if (state.publishing === publishing) delete state.publishing; }).catch(() => {});
             }
-            await waitWithSignal(state.publishing.result, signal);
+            await waitWithSignal(state.publishing.result, callSignal);
           }
         } else {
           await assertSelection();
@@ -189,14 +193,15 @@ export function createRetrievalComposition(runtime: ApplicationExtensionRuntime,
         assertCandidate();
         if (state.current?.selectedKey !== selectedKey || !state.owner) throw new Error('Retrieval plan preparation was superseded');
         if (options.prepareModel) {
-          const preparing = options.prepareModel(scope, signal);
-          try { model = await waitWithSignal(preparing, signal); }
+          const preparing = options.prepareModel(scope, callSignal);
+          try { model = await waitWithSignal(preparing, callSignal); }
           catch (error) { void preparing.then(late => late.release(), () => {}); throw error; }
           await assertSelection();
           model.assertAvailable();
         }
         const pipeline = state.owner.capture();
-        const selection = state.current.selection;
+        const selection = Object.freeze({ providerId: selected.providerId, providerKey: selected.providerKey,
+          artifactId, configurationId: state.current.declaration.configurationId, selectionRevision: routing.document.revision });
         // Query resources never enter the shared publication. Each query captures and owns its
         // real backend/reader lease, including independently acquired refs for identical plans.
         const semanticStage = semantic?.stage;
@@ -223,7 +228,7 @@ export function createRetrievalComposition(runtime: ApplicationExtensionRuntime,
         const assertAvailable = (): void => {
           if (released) throw new Error('Retrieval query binding was released');
           signal?.throwIfAborted();
-          pin.assertAvailable();
+          queryPin.assertAvailable();
           lease?.assertAvailable();
           modelLease?.assertAvailable();
         };
@@ -241,9 +246,10 @@ export function createRetrievalComposition(runtime: ApplicationExtensionRuntime,
             await modelLease?.validateAvailable(validationSignal ?? signal);
             assertAvailable(); validationSignal?.throwIfAborted();
           },
-          release: () => { if (released) return; released = true; try { lease?.release(); } finally { try { modelLease?.release(); } finally { pin.release(); } } },
+          release: () => { if (released) return; released = true; try { lease?.release(); } finally { try { modelLease?.release(); } finally { queryPin.release(); } } },
         });
-      } catch (error) { try { semantic?.release(); } finally { try { model?.release(); } finally { pin.release(); } } throw error; }
+      } catch (error) { try { semantic?.release(); } finally { try { model?.release(); } finally { pin?.release(); } } throw error; }
+      finally { selected.release(); }
     },
   };
 }

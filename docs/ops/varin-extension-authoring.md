@@ -249,7 +249,7 @@ metadata; its version must match the manifest version.
     ]
   },
   "requires": {
-    "services": [{ "id": "varin.sessions", "version": 1, "binding": "single" }]
+    "services": [{ "id": "varin.sessions", "version": 1, "binding": "single", "realms": ["surface"] }]
   },
   "provides": {
     "services": [{ "id": "dev.example.memory", "version": 1, "multiple": true }]
@@ -385,7 +385,7 @@ Surface-local service as optional:
 {
   "requires": {
     "services": [
-      { "id": "varin.editor.monaco", "version": 1, "optional": true }
+      { "id": "varin.editor.monaco", "version": 1, "optional": true, "realms": ["surface"] }
     ]
   }
 }
@@ -477,15 +477,21 @@ If the manifest storage schema version changes, export `migrate({ data, fromSche
 toSchemaVersion })`. Candidate migration is staged with activation; failed candidate activation keeps
 the selected generation and selected storage state.
 
-Required services control activation and dependency-safe teardown. Optional services do not block
-activation. Multi-provider services publish stable `providerKey` identities; invocation resolves the
-latest provider generation through application-host routing. Extensions do not inspect or prioritize
-one another.
+Required services control activation and dependency-safe teardown in their explicit `realms` array.
+Use `["host"]`, `["surface"]`, or both; an omitted realm declaration is invalid. Optional services
+do not block activation when absent. Multi-provider services publish stable `providerKey` identities;
+preparation resolves the original scoped routing once, then activation captures exact generations.
+Invocation through those handles does not switch implementations. Extensions do not inspect or
+prioritize one another.
 
 `binding: "single"` requires exactly one compatible provider across Host, Surface-local, and active
-Surface providers. `binding: "selected"` requires an explicit persisted provider selection and never
-falls back to an arbitrary provider merely because one is present. `binding: "all"` exposes every
-compatible provider through `useServices`.
+Surface providers visible to that realm. `binding: "selected"` uses the same persisted scoped routing
+resolver, including its sole/default choice and explicitly permitted whole-rule fallback; ambiguity
+or a failed explicit choice is not silently replaced. `binding: "all"` exposes every compatible
+provider through Host `context.services.useAll` or Surface `useServices`. Host `use` and Surface
+`useService` require one exact bound member. A replacement prepares a new combination while accepted
+calls retain the original one. A closed Surface releases its composition stream; backend jobs retain
+their own declared owners.
 
 ## Build mapping
 

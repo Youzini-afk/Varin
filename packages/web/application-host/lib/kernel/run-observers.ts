@@ -23,7 +23,6 @@ interface Selection {
   revision: number;
   catalog: VarinExtensionCatalogSnapshot;
   routing: VarinExtensionServiceRoutingDocument;
-  legacy?: string;
 }
 
 /** Host-owned, non-blocking consumer of committed facts. No callback runs in the control process:
@@ -71,8 +70,7 @@ export class RunObservers {
     this.epoch.abort();
     this.sourceEnabled = false;
     for (const remove of this.removers) remove();
-    for (const subscription of this.subscriptions.values()) subscription.controller.abort();
-    this.subscriptions.clear();
+    for (const key of this.subscriptions.keys()) this.remove(key);
     this.preparing.clear();
     this.pendingSelections.clear();
   }
@@ -96,16 +94,18 @@ export class RunObservers {
     this.notifiedCursor = 0;
     this.selection = undefined;
     this.fingerprint = '';
-    for (const subscription of this.subscriptions.values()) subscription.controller.abort();
-    this.subscriptions.clear();
+    for (const key of this.subscriptions.keys()) this.remove(key);
     this.preparing.clear();
     this.pendingSelections.clear();
     this.runThreads.clear();
   }
 
   private remove(key: string): void {
-    this.subscriptions.get(key)?.controller.abort();
+    const subscription = this.subscriptions.get(key);
+    if (!subscription) return;
     this.subscriptions.delete(key);
+    subscription.controller.abort();
+    subscription.binding.release();
   }
 
   private async refresh(): Promise<void> {
@@ -124,14 +124,15 @@ export class RunObservers {
         const relevant = catalog.extensions.filter(entry => entry.manifest.provides?.services?.some(service =>
           service.id === VARIN_RUN_ACTIVITY_SERVICE_ID && service.version === VARIN_RUN_ACTIVITY_VERSION));
         const rules = routing.document.rules.filter(rule => rule.serviceId === VARIN_RUN_ACTIVITY_SERVICE_ID && rule.version === VARIN_RUN_ACTIVITY_VERSION);
-        const legacy = services.selections[`${VARIN_RUN_ACTIVITY_SERVICE_ID}@${VARIN_RUN_ACTIVITY_VERSION}`];
-        const fingerprint = JSON.stringify({ rules, legacy,
+        // A dependency can change without changing the observer's own rule or artifact.
+        // Re-admit through the shared composition resolver on declaration/routing changes.
+        const fingerprint = JSON.stringify({ rules, catalogRevision: catalog.revision, routingRevision: routing.document.revision,
           extensions: relevant.map(entry => [entry.manifest.id, entry.desired, entry.selectedVersion, entry.integrity]),
           providers: services.providers.filter(provider => provider.descriptor.id === VARIN_RUN_ACTIVITY_SERVICE_ID)
             .map(provider => [provider.providerId, provider.status]) });
         if (fingerprint === this.fingerprint && !this.discoveryPending) continue;
         this.fingerprint = fingerprint;
-        this.selection = { revision: ++this.revision, catalog, routing: routing.document, ...(legacy ? { legacy } : {}) };
+        this.selection = { revision: ++this.revision, catalog, routing: routing.document };
         // Publish route/enablement revocation synchronously, before any thread/context lookup.
         // A normal generation replacement keeps the same stable selected provider and its pin.
         for (const subscription of this.subscriptions.values()) {
@@ -142,7 +143,7 @@ export class RunObservers {
             this.onError(subscription.threadId, error);
           }
         }
-        if (!rules.length && !legacy) {
+        if (!rules.length) {
           this.sourceEnabled = false;
           this.sourceCursor = undefined;
           for (const threadId of this.subscriptions.keys()) this.remove(threadId);
@@ -207,19 +208,12 @@ export class RunObservers {
     const candidates = selection.catalog.extensions.filter(entry => entry.desired.enabled && entry.manifest.entrypoints?.host
       && entry.manifest.provides?.services?.some(service => service.id === VARIN_RUN_ACTIVITY_SERVICE_ID && service.version === VARIN_RUN_ACTIVITY_VERSION))
       .map(entry => ({ providerId: entry.manifest.id, providerKey: `${entry.manifest.id}:host:${VARIN_RUN_ACTIVITY_SERVICE_ID}@${VARIN_RUN_ACTIVITY_VERSION}` }));
-    const resolved = resolveVarinExtensionServiceRouting({ candidates, document: selection.routing, context: routing,
+    const resolved = resolveVarinExtensionServiceRouting({ candidates, document: selection.routing, context: { userId: 'default', ...routing },
       serviceId: VARIN_RUN_ACTIVITY_SERVICE_ID, version: VARIN_RUN_ACTIVITY_VERSION });
     // This observer is opt-in. Merely installing its package is not a subscription.
-    if (!selection.legacy && !selection.routing.rules.some(rule => rule.serviceId === VARIN_RUN_ACTIVITY_SERVICE_ID
-      && rule.version === VARIN_RUN_ACTIVITY_VERSION && Object.entries(rule.scope).every(([key, value]) => routing[key as keyof typeof routing] === value))) {
-      return undefined;
-    }
-    const legacyProvider = selection.legacy ? this.extensions.services.getSnapshot().providers.find(provider => provider.providerId === selection.legacy) : undefined;
-    const providerKey = legacyProvider?.providerKey ?? (resolved.status === 'resolved' && resolved.providerKeys.length === 1
-      ? resolved.providerKeys[0] : undefined);
-    if ((!selection.legacy && resolved.status !== 'resolved') || !providerKey) {
-      throw new Error('Selected activity observer is unavailable or ambiguous');
-    }
+    if (!resolved.matchedRule && !resolved.diagnostics.some(diagnostic => diagnostic.code.startsWith('service_selection_'))) return undefined;
+    const providerKey = resolved.status === 'resolved' && resolved.providerKeys.length === 1 ? resolved.providerKeys[0] : undefined;
+    if (!providerKey) throw new Error('Selected activity observer is unavailable or ambiguous');
     return providerKey;
   }
 
@@ -232,21 +226,32 @@ export class RunObservers {
     const id = JSON.stringify([`${VARIN_RUN_ACTIVITY_SERVICE_ID}@${VARIN_RUN_ACTIVITY_VERSION}`, providerKey, threadId, projectId]);
     const previous = this.subscriptions.get(key);
     if (previous && previous.id !== id) this.remove(key);
+    const signal = AbortSignal.any([this.lifetime.signal, this.epoch.signal]);
     const binding = await this.extensions.prepareService({ serviceId: VARIN_RUN_ACTIVITY_SERVICE_ID,
-      version: VARIN_RUN_ACTIVITY_VERSION, method: 'observe', args: [], routing });
-    if (this.selection !== selection || this.lifetime.signal.aborted) return;
-    if (binding.providerKey !== providerKey) throw new Error('Activity observer selection changed during preparation');
-    const current = this.subscriptions.get(key);
-    if (current?.id === id) {
-      // Ordinary replacement keeps the old invocation pin alive. New facts use the new binding.
-      current.binding = binding;
-      this.kick(current);
-    } else {
-      const subscription: Subscription = { id, key, threadId, scope: routing, binding,
-        controller: new AbortController(), dirty: false, pumping: false };
-      this.subscriptions.set(key, subscription);
-      this.kick(subscription);
-    }
+      version: VARIN_RUN_ACTIVITY_VERSION, method: 'observe', args: [], routing: { userId: 'default', ...routing } },
+    { expectedRoutingRevision: selection.routing.revision, signal });
+    let adopted = false;
+    try {
+      if (this.selection !== selection || signal.aborted) return;
+      if (binding.providerKey !== providerKey) throw new Error('Activity observer selection changed during preparation');
+      binding.assertAvailable();
+      const current = this.subscriptions.get(key);
+      if (current?.id === id) {
+        // Delivery pins own callbacks already in flight. The subscription replaces only its
+        // independent preparation lease, so a slow old delivery drains on its original worker.
+        const previousBinding = current.binding;
+        current.binding = binding;
+        adopted = true;
+        previousBinding.release();
+        this.kick(current);
+      } else {
+        const subscription: Subscription = { id, key, threadId, scope: routing, binding,
+          controller: new AbortController(), dirty: false, pumping: false };
+        this.subscriptions.set(key, subscription);
+        adopted = true;
+        this.kick(subscription);
+      }
+    } finally { if (!adopted) binding.release(); }
   }
 
   private async readSource(): Promise<void> {

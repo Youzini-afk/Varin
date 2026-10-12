@@ -14,12 +14,19 @@
 - 推理用途接入不等于每个用途都有本地推理包。已有提供商 decision/rerank/embedding 的配置、真实消费者与原生执行合同仍需保留/接通；本地包当前只有已有 Bekko。用户本轮明确暂缓 native 图像生成，不计剩余交付范围；旧 Pi 的 `models.generateImages()` 基础不等于 native 已实现。§18.1/§24 的建议/评估限定已有配置的辅助请求，不能扩成默认模型链；没有另设独立“材料 rerank”产品的任务。此前清单混用用途、消费者和本地包，现以这些明确边界纠正，历史台账不充当新需求。
 - 已有本地嵌入是 `bekko-embedding-v1-a8m` 的 `local-semantic` ONNX 组件。下述增量已将其原安装/校验/worker 接入 native query 和前台文档向量，HTTP 仍是显式配置的另一执行器。HTTP 或受控本地模型的执行验证不代表用户配置了外部服务，也不代表实际 ONNX 权重、硬件质量/性能已验收；当前组件协议需按原 builder 构建 v3 包后导入。
 
+## 2026-10-12 增量：Scoped 冻结依赖与共享实例
+
+- 原 ServiceRoutingStore 统一可变选择；旧 registry/Surface 全局 selection 与公开 setter 删除。Host/Surface requirement 明确 `realms`，activate 前冻结实际 selected/single/all/optional 图。同图共享，不同依赖图隔离，当前 selection、旧调用 pin 与实际 callback 分别持有原实例引用；不把 Thread ID 或 routing revision 当实例身份。
+- SDK、broker、trusted-native、Context/Budget/retrieval/observer、tool/policy、Surface/client 和实际 Settings 同步消费。嵌套依赖调用沿原 Run/Operation/权限，撤权沿确切图；旧代的普通排空不变成已取消。Surface 的单认证响应 stream 持有真实 owner 组合，关闭后在途调用独立排空，无静默重连换 handle。
+- Catalog **62**、wire **22**。完整 policy/tool graph 沿原 ContentStore/launch/delegated 引用持久化，短控制事实不内联大图；GC、重开与 child 恢复消费原图，不用当前 routing 替换旧选择。原生 WorkbenchLayout 保留真实非包 owner，不造 artifact 或 alias。
+- [本片合同、反例与复跑入口](../reviews/runtime-scoped-composition-2026-10-12.md)记录真实 client/认证 Router/broker、原 policy/工具及恢复链。独审五条原反例与原作者产包整链的 manifest owner 挂载回归均已闭合，普通和 grouped 两条原业务全链通过。后续已有自动记忆/Bot 等按设计原文及真实消费者推进；容量估算与反馈也须区分当前合同和可选优化，不把推测性功能扩成必做产品。
+
 ## 2026-10-12 增量：已有 Bekko 原生推理归属
 
 - 原已安装组件在 embedding 未配置时供 native semantic 查询；明确 provider 选择、禁用和无效状态不暗回退。主任务与 child 的 query、fixed/materialized 文档计算沿原 InferenceCall parent/ordinal、Catalog、Goal 与 ContentStore，每个实际 CPU 粒度有原回执。Catalog **61**、wire **21**，HTTP/local tagged 执行器共同接线，无假 endpoint/credential 或第二前台账本。
 - 原共享 worker 区分排队 ACK、实际派发、观察者取消与真正排空；晚到结果/错误/estimated 用量保留，execute 后丢失 started ACK 保持 Unknown，pending 和重开不改成 no-send、不重跑。组件代与 query/scan pin 在真实停止后释放，同字节重新导入复用，旧组件协议直接拒绝且保留资产。
 - [本片证据与复跑入口](../reviews/runtime-bekko-inference-2026-10-12.md)记录原组件导入/active/default→主与 child→Source→worker→Catalog/Goal 的真实链、原 HTTP 回归和证据边界。模型模块受控；实际 ONNX 包构建/安装、质量/性能和完整产品/平台验收仍待外层验证，本片未发布 Release 或下载权重。
-- 后续回到扩展唯一 scoped 选择、冻结依赖及共享实例/组合引用寿命。数组合同已统一，但 registry/Surface 旧全局选择权威仍待以完整实例生命周期替代，不能直接删 map。容量反馈、自动记忆/Bot 与其余两设计的确认范围继续推进。
+- 本片当时将扩展唯一 scoped 选择、冻结依赖及共享实例/组合引用寿命留给下一增量；当前接线见上方新记录，不能把早期数组改名当作该生命周期已经完成的证据。容量反馈、自动记忆/Bot 与其余两设计的确认范围继续推进。
 
 ## 2026-10-12 增量：唯一数组 routing 合同
 
@@ -837,8 +844,8 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 | 能力 | 当前入口/权威 | 目标交付 | 原生实现状态 |
 | --- | --- | --- | --- |
 | 会话、分支、运行中输入 | `packages/pi-host/src/session-host.ts`、`packages/runtime-broker` | ConversationStore + RunCoordinator；队列编辑、steering、停止、重连、历史回读 | 局部实现：持久队列、编辑/取消、边界输入/中断/nextRun；显式原生界面、固定 head 分页与对话分支已接入；默认路由迁移与完整恢复未完成 |
-| 模型、认证、推理用途 | Pi SDK、Host `connections`/`pi-config`/`small-model` | 各实际配置 transport、OAuth/云身份、模型覆盖、reasoning/opaque、多模态、usage；chat与embedding/rerank等各自合同 | 局部实现：native query/index embedding 与 TypeSafe/Cloudflare/llama.cpp decision 复用真实配置/凭据 owner、原transport和持久dispatch/usage事实，dedicated rerank、原渐进 fast-decision 与 Explore LLM 规划/联合选材已接 live_root 检索；其他用途/已知 rerank 计量及完整认证/模型覆盖未完成 |
-| 上下文、记忆checkpoint、压缩 | Pi harness/session history、Host `memory` | 原文保留；来源角色；冻结快照；祖先范围压缩；交付去重；即时记忆写入与稳定system快照 | 原生 checkpoint、自动容量水位与分段摘要 Run 已实现；可替换预算策略、provider 容量反馈与完整自动记忆产品流程仍待 |
+| 模型、认证、推理用途 | Pi SDK、Host `connections`/`pi-config`/`small-model` | 各实际配置 transport、OAuth/云身份、模型覆盖、reasoning/opaque、多模态、usage；chat与embedding/rerank等各自合同 | native query/index 的 HTTP 与已有 Bekko 执行器、TypeSafe/Cloudflare/llama.cpp decision 复用原配置、凭据、dispatch 与 usage；dedicated rerank、渐进 fast-decision 与 Explore LLM 已接原检索消费者。Bekko 真实权重/安装与完整认证/平台验证另待；本轮图像生成已由用户暂缓 |
+| 上下文、记忆checkpoint、压缩 | Pi harness/session history、Host `memory` | 原文保留；来源角色；冻结快照；祖先范围压缩；交付去重；即时记忆写入与稳定system快照 | 原生 checkpoint、自动容量水位、分段摘要 Run 与可替换预算 Decision 已接；完整自动记忆产品流程仍待。容量的无法精确部分应诚实标记估算，不据此默认新增模型反馈学习或自动收费重试 |
 | 文件、草稿、恢复 | Rust `storage`；Host `documents`/`recovery`；UI Document Registry | 复用内容对象/条件写入/恢复；明确草稿owner；分支与磁盘效果区分；组合恢复可核对 | 原生文件工具、固定/可写来源、结果保留与逐项集成已有闭环；完整草稿与历史/磁盘组合恢复的产品接线仍需完成 |
 | 工作分支、基线与dispatch | Host `harness/thread-services.ts`、`thread-runtime.ts`、`kernel/storage-adapter.ts` | 持久受理立即回执；准备独立作业；批量capture；真实一致性标记；无变更报告与代码集成分开 | 固定与可写 child 持久受理、原来源准备、递归取消、报告/WorkingResult 与逐项集成已接；更广捕获与恢复产品组合仍待 |
 | Shell、PTY、输出、进程树 | Rust `process` guardian；Host `kernel/process-service.ts`/`terminal` | 保留真实进程回执；推送I/O与stdin确认；控制独立；取消观察不同于终止进程 | 原生 spawn/持久观察/停止、PTY input/resize 回执、原进程终端与恢复已接；平台和产品完整验收仍待 |
@@ -849,7 +856,7 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 | 问题、follow-up、日历 | Pi extension UI bridge；Host `harness/followups.ts`/`scheduled-tasks` | 问答持久记录；到期非批准；发生项幂等；登记后重查防丢唤醒；时区/遗漏策略 | 问题/回答、一次 At/ProcessStopped、Any/All 与带时区日历发生项已接；原来源文件 exists/changed/ready 已接，其他领域来源继续 |
 | Computer Use、人工接管 | Host `computer`、`packages/computer-driver` | 实际桌面控制epoch；观察/动作/效果分开；紧急停止独立；释放按键与资源有证据 | 原 Computer 工具、精确停止、source-less child 请求/Wait/handback 与持久脚本已接；真实桌面平台/远端及完整产品验收仍待 |
 | MCP、脚本、用户扩展 | Pi MCP/codemode adapters；`extension-contract`/`extension-host`/`extension-sdk` | 原生MCP；单registry；脚本嵌套调用同权限/回执；完整async单元格；不另造插件管理器 | 原 MCP tools/content/Tasks/resource observers/有限 interaction/sampling、普通扩展 tools/SDK、child/nested、持久 async 脚本与 typed media 已接；更广协议/provider/平台组合与完整产品验收仍待 |
-| 深层策略、发现与工作台 | 既有扩展service registry、Host/Surface和UI shells | CompositionPlan；Provider/Transform/Decision/Observer；AgentPolicy；按需合同查询；无UI后端 | 一般 ToolGraph、直接 child、Deliver/Pause、策略换绑、context/Decision/Observer、真实扩展/SDK 发现已有闭环；完整领域 Provider/Transform 覆盖与工作台仍待 |
+| 深层策略、发现与工作台 | 原 ServiceRoutingStore、扩展 registry、Host/Surface和UI shells | CompositionPlan；Provider/Transform/Decision/Observer；AgentPolicy；按需合同查询；无UI后端 | ToolGraph、child、Deliver/Pause、策略换绑、有序 Context Transform、预算 Decision、Observer、合同/源码发现和作者产包已接。Scoped DAG、跨消费者共享准备/实例、真实 Surface lease 与冻结恢复本片闭合；不能共存的 trusted-native 热接管及完整工作台/平台验证仍待 |
 | Web/材料/科研/Bot领域工具 | 现有Host领域服务与harness工具 | 通过相同Operations接入；保留材料来源、产物及用户配置行为 | 原 Web/固定材料/PDF 原来源、材料集合/明确分享、学术 metadata 与 research_decide 已接同一 owner，原科研作业/产物/观察已接；其他 decision provider、Bot 等其余领域继续 |
 | Web/Electron/Mobile、远端、发行 | `application-client`/`protocol`、各surface、Host环境服务、kernel packaging | 同一后端生命周期；snapshot/cursor投影；环境绑定/fencing；平台驱动与安装升级实际验证 | 未完成 |
 | 用户资产与Pi退出 | Pi JSONL/配置/凭据引用/用户扩展源文件 | 一次性导入保留entry ID、分支、工具配对、压缩、opaque及未知项；原文件保留；切换结算在途工作 | 交付迁移前验收入口与清单；用户验收后负责默认切换、Pi 删除及资产全面迁移，当前未执行 |

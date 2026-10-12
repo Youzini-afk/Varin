@@ -160,7 +160,9 @@
               },
               {
                 "type": "object",
+                "required": ["realms"],
                 "properties": {
+                  "realms": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["host", "surface"]}},
                   "optional": {
                     "type": "boolean"
                   },

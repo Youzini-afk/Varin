@@ -20,12 +20,10 @@ pub(super) fn execute(
             let expected = u64::try_from(p.expected_generation).map_err(|_| {
                 KernelError::Protocol("policy generation must be nonnegative".into())
             })?;
-            let mut db = owner
+            let preparation = owner
                 .lock()
-                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
-            let before = db.policy_selections(&p.run_id).map_err(domain)?.desired;
-            let selection = db
-                .select_policy(
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                .prepare_policy_selection(
                     &p.run_id,
                     &p.selection_id,
                     expected,
@@ -34,30 +32,43 @@ pub(super) fn execute(
                     p.state_mode,
                 )
                 .map_err(domain)?;
+            let prepared = preparation.store().map_err(domain)?;
+            if cancelled.load(Ordering::Acquire) {
+                return Err(KernelError::Cancelled);
+            }
+            let mut db = owner
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+            let before = db
+                .policy_selections(&p.run_id)
+                .map_err(domain)?
+                .desired_selection_id()
+                .map(str::to_owned);
+            let read = db.publish_policy_selection(prepared).map_err(domain)?;
             let current = db
                 .policy_selections(&p.run_id)
                 .map_err(domain)?
-                .desired
-                .map(|s| s.selection_id);
+                .desired_selection_id()
+                .map(str::to_owned);
             drop(db);
+            let selection = read.load().map_err(domain)?;
             if let Some(before) = before {
                 if current.as_deref() == Some(&selection.selection_id)
-                    && before.selection_id != selection.selection_id
+                    && before != selection.selection_id
                 {
-                    bridge.cancel_candidate(&p.run_id, &before.selection_id);
+                    bridge.cancel_candidate(&p.run_id, &before);
                 }
             }
             Ok(serde_json::to_value(selection)?)
         }
         "runtime.policy.inspect" => {
             let p: RunParams = serde_json::from_value(params)?;
-            Ok(serde_json::to_value(
-                owner
-                    .lock()
-                    .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                    .policy_selections(&p.run_id)
-                    .map_err(domain)?,
-            )?)
+            let read = owner
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                .policy_selections(&p.run_id)
+                .map_err(domain)?;
+            Ok(serde_json::to_value(read.load().map_err(domain)?)?)
         }
         "runtime.policy.cancel" => {
             let p: PolicyCancelParams = serde_json::from_value(params)?;
@@ -67,7 +78,7 @@ pub(super) fn execute(
                 .cancel_policy_selection(&p.run_id, &p.selection_id)
                 .map_err(domain)?;
             bridge.cancel_candidate(&p.run_id, &p.selection_id);
-            Ok(serde_json::to_value(receipt)?)
+            Ok(serde_json::to_value(receipt.load().map_err(domain)?)?)
         }
         "runtime.policy.fail" => {
             let p: PolicyFailParams = serde_json::from_value(params)?;
@@ -77,7 +88,7 @@ pub(super) fn execute(
                 .fail_policy_selection(&p.run_id, &p.selection_id, p.code.code())
                 .map_err(domain)?;
             bridge.cancel_candidate(&p.run_id, &p.selection_id);
-            Ok(serde_json::to_value(receipt)?)
+            Ok(serde_json::to_value(receipt.load().map_err(domain)?)?)
         }
         "runtime.policy.ready" => {
             let p: PolicyReadyParams = serde_json::from_value(params)?;
@@ -86,6 +97,7 @@ pub(super) fn execute(
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
                 .policy_selection(&p.run_id, &p.selection_id)
                 .map_err(domain)?;
+            let selection = selection.load().map_err(domain)?;
             if p.generation < 0 || p.generation as u64 != selection.generation {
                 return Err(KernelError::Authorization(
                     "policy candidate generation changed".into(),

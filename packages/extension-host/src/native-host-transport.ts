@@ -6,7 +6,10 @@ import type {
   JsonValue,
   VarinExtensionStorageOpenRequest,
   VarinExtensionStorageSnapshot,
+  VarinHostServiceConsumers,
+  VarinHostServiceDependencyBinding,
 } from "@varin/extension-contract";
+import { createHostServiceDependencyClients } from '@varin/extension-contract';
 import type { BrokeredHostTransport } from "./broker-supervisor.js";
 
 interface NativeInvocationContext { signal: AbortSignal; invocationId?: string; active: boolean }
@@ -22,9 +25,8 @@ interface NativeHostContext {
   assets: { path(logicalPath: string): string };
   capabilities: { call(capability: string, method: string, params: JsonValue): Promise<JsonValue> };
   effect(disposer: () => void | Promise<void>): void;
-  services: {
+  services: VarinHostServiceConsumers & {
     provide(descriptor: unknown, handler: NativeServiceHandler): void;
-    use(id: string, version: number, providerId?: string): { call(method: string, ...args: JsonValue[]): Promise<JsonValue> };
   };
   signal: AbortSignal;
   storage: {
@@ -193,12 +195,14 @@ export class NativeHostTransport implements BrokeredHostTransport {
               stagedHandlers.set(key, handler);
               provisions.push(descriptorValue);
             },
-            use: (id, version, providerId) => ({
-              call: (serviceMethod, ...args) => this.#requestFromExtension(
-                "service.invoke",
-                { args, method: serviceMethod, providerId, serviceId: id, version },
-                this.#controller?.signal ?? new AbortController().signal,
-              ),
+            ...createHostServiceDependencyClients(params.dependencies as VarinHostServiceDependencyBinding[], request => {
+              const scope = this.#invocationContext.getStore();
+              if (scope && !scope.active) return Promise.reject(new Error('Host dependency invocation has expired'));
+              const signal = scope?.signal ?? this.#controller?.signal ?? AbortSignal.abort(new Error('Host owner is inactive'));
+              if (signal.aborted) return Promise.reject(signal.reason);
+              return this.#requestFromExtension('service.invoke', { ...request,
+                ...(scope?.invocationId ? { invocationId: scope.invocationId } : {}),
+              }, signal);
             }),
           },
           signal: this.#controller.signal,

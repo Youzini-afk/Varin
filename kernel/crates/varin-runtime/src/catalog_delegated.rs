@@ -109,7 +109,7 @@ pub struct DelegatedExecution {
     pub input_ref: Value,
     pub configuration_ref: Value,
     pub launch: launch_content::LaunchSelectionMetadata,
-    pub policy_target: policy_switch::PolicyTarget,
+    pub policy_target: policy_switch::PolicyTargetMetadata,
     pub source_basis: Option<ChildSourceBasis>,
     pub source: Option<ChildSource>,
     pub code_result: ChildCodeResult,
@@ -237,7 +237,7 @@ pub(super) fn insert_initial(db: &Connection, child: &ChildTask) -> Result<()> {
         input_ref: child.input_ref.clone(),
         configuration_ref: child.configuration_ref.clone(),
         launch: child.launch.clone(),
-        policy_target: policy_switch::PolicyTarget::Default,
+        policy_target: policy_switch::PolicyTargetMetadata::Default,
         source_basis: None,
         source: Some(child.source.clone()),
         code_result: child.code_result.clone(),
@@ -348,7 +348,7 @@ impl DelegatedExecutionRead {
             )?,
             launch: execution.launch.load_child_intent(&self.content)?,
             trigger: execution.trigger,
-            policy_target: execution.policy_target,
+            policy_target: execution.policy_target.load(&self.content)?,
             source_basis,
             source,
             code_result: execution.code_result,
@@ -742,7 +742,7 @@ impl Catalog {
                 _ => {
                     return Err(RuntimeError::Conflict(
                         "previous source has no exact settled continuation basis".into(),
-                    ))
+                    ));
                 }
             };
             Some(basis)
@@ -839,7 +839,7 @@ impl Catalog {
                     _ => {
                         return Err(RuntimeError::Invalid(
                             "continuation ingress is not activating".into(),
-                        ))
+                        ));
                     }
                 }
             } else {

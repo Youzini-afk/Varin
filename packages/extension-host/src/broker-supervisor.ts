@@ -17,10 +17,12 @@ import {
   type VarinExtensionManifest,
   type VarinExtensionServiceProvision,
   type VarinExtensionServiceInvocationRequest,
-  type VarinExtensionServiceProviderSnapshot,
-  type VarinExtensionServiceRequirement,
   type VarinExtensionStorageSnapshot,
   type VarinExtensionStorageAddress,
+  type VarinExtensionServiceRoutingContext,
+  type VarinHostServiceComposition,
+  type VarinHostServiceDependencyBinding,
+  canonicalServiceComposition,
 } from "@varin/extension-contract";
 import { ApplicationExtensionCatalog } from "./application-catalog.js";
 import type { HostCapabilityRegistry } from "./capability-registry.js";
@@ -31,11 +33,18 @@ import {
   type HostServiceOwnerIdentity,
   type HostInvocationScope,
   type HostServiceProvision,
+  type HostServiceBinding,
+  type HostServicePin,
 } from "./service-registry.js";
 import {
   ExtensionStorageStore,
   type ExtensionStorageMigrationTransaction,
 } from "./storage-store.js";
+
+import { ServiceRoutingStore } from './service-routing-store.js';
+import { resolveDeclaredServiceRouting } from './runtime-contracts.js';
+import { compositionHash, compositionForNode, createHostCompositionPlan, restoreHostCompositionPlan, resolveHostRequirement,
+  type HostCompositionNode, type HostCompositionPlan } from './service-composition.js';
 
 interface BrokerRequestMessage {
   id: string;
@@ -94,6 +103,17 @@ interface BrokeredHostInstance {
   provisions: HostServiceProvision[];
   slot: "candidate" | "selected";
   storages: Map<string, BrokerStorageSession>;
+  composition: VarinHostServiceComposition;
+  dependencies: VarinHostServiceDependencyBinding[];
+  dependencyPins: HostServicePin[];
+  references: number;
+  referenceReleases: Set<() => void>;
+  onUnreferenced: Array<() => void>;
+  published: boolean;
+  retiring: boolean;
+  revoked: boolean;
+  disposed: boolean;
+  revocation: AbortController;
 }
 
 interface BrokerStorageSession {
@@ -119,7 +139,8 @@ export interface BrokeredHostSupervisorOptions {
   services: HostServiceRegistry;
   storage: ExtensionStorageStore;
   transportFactory?: BrokeredHostTransportFactory;
-  invokeService?(request: VarinExtensionServiceInvocationRequest | unknown, signal?: AbortSignal): Promise<JsonValue>;
+  routing: ServiceRoutingStore;
+  prepareBuiltin?(extensionId: string): Promise<void>;
 }
 
 const hostGrants = (grants: readonly VarinExtensionCapabilityGrant[], version: string): VarinExtensionCapabilityGrant[] => (
@@ -363,10 +384,36 @@ export class ExtensionUpdateReadinessError extends Error {
   }
 }
 
+interface HostNodeLease {
+  instance: BrokeredHostInstance;
+  release(): void;
+}
+export interface HostCompositionLease {
+  readonly owner: HostServiceOwnerIdentity;
+  readonly composition: VarinHostServiceComposition;
+  readonly routingRevision: number;
+  readonly revocationSignal: AbortSignal;
+  bind(serviceId: string, version: number): HostServiceBinding;
+  release(): void;
+}
+interface RootConsumer {
+  plan: HostCompositionPlan;
+  instance: BrokeredHostInstance;
+  current: HostNodeLease;
+}
+interface CandidateGroup {
+  extensionId: string;
+  integrity: string;
+  desiredRevision: number;
+  preparationId: string;
+  generation: number;
+  roots: Array<{ plan: HostCompositionPlan; lease: HostCompositionLease; consumer?: RootConsumer }>;
+  instances: BrokeredHostInstance[];
+}
+
 export class BrokeredHostSupervisor {
   readonly #active = new Map<string, BrokeredHostInstance>();
-  // Authority stays in the Host and is retained until the real callback settles or its broker exits.
-  readonly #invocations = new Map<string, { scope: HostInvocationScope; signal: AbortSignal }>();
+  readonly #invocations = new Map<string, { scope?: HostInvocationScope; signal: AbortSignal; active: boolean }>();
   readonly #brokerScript: string;
   readonly #capabilities: HostCapabilityRegistry;
   readonly #catalog: ApplicationExtensionCatalog;
@@ -374,49 +421,29 @@ export class BrokeredHostSupervisor {
   readonly #packages: ExtensionPackageManager;
   readonly #onStateChange: () => void;
   readonly #services: HostServiceRegistry;
-  readonly #invokeService: (request: VarinExtensionServiceInvocationRequest | unknown, signal?: AbortSignal) => Promise<JsonValue>;
-  readonly #staged = new Map<string, BrokeredHostInstance>();
+  readonly #routing: ServiceRoutingStore;
+  readonly #prepareBuiltin: (extensionId: string) => Promise<void>;
+  readonly #staged = new Map<string, CandidateGroup>();
   readonly #nativeRestartRequired = new Set<string>();
   readonly #storage: ExtensionStorageStore;
+  readonly #ownerDependencies = new Map<string, { bindings: VarinHostServiceDependencyBinding[]; pins: HostServicePin[] }>();
   readonly #storageSessions = new Map<string, Map<string, BrokerStorageSession>>();
   readonly #transportFactory: BrokeredHostTransportFactory;
   readonly #operations = new Map<string, Promise<void>>();
-  // Publication is independent of old model pins. This original owner retains the actual
-  // instance and drain promise until retirement ends (or explicit teardown collects failure).
   readonly #retirements = new Map<string, { instance: BrokeredHostInstance; promise: Promise<void> }>();
-  readonly #selectedPreparations = new Map<string, { identity: string; promise: Promise<void> }>();
-  readonly #candidatePreparations = new Map<string, { identity: string; promise: Promise<VarinExtensionCandidatePreparationResult> }>();
-  readonly #candidateSelections = new Set<{ extensionId: string; integrity: string }>();
+  readonly #pending = new Map<string, { node: HostCompositionNode; promise: Promise<BrokeredHostInstance>; controller: AbortController; waiters: number; settled: boolean }>();
+  readonly #candidatePreparations = new Map<string, Promise<VarinExtensionCandidatePreparationResult>>();
+  readonly #candidateSelections = new Set<string>();
   readonly #preparations = new Map<string, AbortController>();
-  readonly #preparationTargets = new Map<string, { integrity: string; slot: "candidate" | "selected"; desiredRevision: number; grantIdentity: string; version: string }>();
-  // These arrays are also captured by the transport's privileged-call callback. Keep them
-  // alive through retirement so an explicit revocation reaches old pinned generations too.
+  readonly #roots = new Set<RootConsumer>();
+  readonly #anchors = new Map<string, HostCompositionLease>();
   readonly #ownerGrants = new Map<string, {
-    owner: HostServiceOwnerIdentity;
-    artifactIntegrity: string;
-    grants: VarinExtensionCapabilityGrant[];
-    desiredRevision: number;
-    slot: "candidate" | "selected";
-    broker: BrokeredHostTransport;
-    native: boolean;
+    owner: HostServiceOwnerIdentity; artifactIntegrity: string; grants: VarinExtensionCapabilityGrant[];
+    desiredRevision: number; slot: 'candidate' | 'selected'; broker: BrokeredHostTransport; native: boolean;
   }>();
   readonly #epochs = new Map<string, number>();
   #stopping = false;
   #shutdown: Promise<void> | undefined;
-
-  /** Exact executing artifact, for consumers persisting implementation-private checkpoints. */
-  getActiveArtifactIdentity(owner: HostServiceOwnerIdentity): string | undefined {
-    const instance = this.#active.get(owner.extensionId);
-    return instance && instance.owner.entrypointId === owner.entrypointId
-      && instance.owner.generation === owner.generation && instance.owner.extensionVersion === owner.extensionVersion
-      ? instance.artifactIntegrity : undefined;
-  }
-
-  /** Identity of the original live owner, including pinned draining generations. */
-  getRetainedArtifactIdentity(owner: HostServiceOwnerIdentity): string | undefined {
-    const retained = this.#ownerGrants.get(ownerStorageKey(owner));
-    return retained?.owner.extensionVersion === owner.extensionVersion ? retained.artifactIntegrity : undefined;
-  }
 
   constructor(options: BrokeredHostSupervisorOptions) {
     this.#brokerScript = options.brokerScript;
@@ -425,783 +452,556 @@ export class BrokeredHostSupervisor {
     this.#packages = options.packages;
     this.#onStateChange = options.onStateChange ?? (() => undefined);
     this.#services = options.services;
-    this.#invokeService = options.invokeService ?? ((request, signal) => this.#services.invoke(request, signal));
     this.#storage = options.storage;
-    this.#transportFactory = options.transportFactory ?? ((transportOptions) => new ChildBrokeredHostTransport({
+    this.#routing = options.routing;
+    this.#prepareBuiltin = options.prepareBuiltin ?? (async () => {});
+    this.#transportFactory = options.transportFactory ?? (transportOptions => new ChildBrokeredHostTransport({
       brokerScript: this.#brokerScript,
       ...(options.brokerShutdownGraceMs === undefined ? {} : { shutdownGraceMs: options.brokerShutdownGraceMs }),
       onCrash: transportOptions.onCrash,
       requestFromChild: (method, params, signal) => this.#handleChildRequest(transportOptions.owner, transportOptions.grants, method, params, signal),
     }));
   }
-
-  reconcile(_snapshot?: VarinExtensionCatalogSnapshot): Promise<void> {
-    // Callers may have spent time preparing or deleting data after obtaining their snapshot.
-    // Re-read the authority rather than retract a newer owner from that stale observation.
-    return this.#reconcileSnapshot();
+  getActiveArtifactIdentity(owner: HostServiceOwnerIdentity): string | undefined {
+    const instance = this.#active.get(owner.instanceKey);
+    return instance && !instance.retiring && instance.owner.generation === owner.generation ? instance.artifactIntegrity : undefined;
   }
-
-  /** Withdraw only obsolete candidate owners; staging must not cold-activate selected providers. */
-  async reconcileCandidatePreparations(): Promise<void> {
-    const snapshot = await this.#catalog.snapshot();
-    if (!snapshot.authoritative) return;
-    const disposals: Promise<void>[] = [];
-    for (const [extensionId, target] of this.#preparationTargets) {
-      if (target.slot !== "candidate") continue;
-      const entry = snapshot.extensions.find(value => value.manifest.id === extensionId);
-      // An exact promotion is already committed, not an obsolete unpublished candidate.
-      const current = entry?.candidate?.integrity === target.integrity ? entry.candidate
-        : entry?.integrity === target.integrity ? entry : undefined;
-      if (entry?.desired.enabled && entry.desired.revision === target.desiredRevision && current
-        && grantIdentity(current.capabilityGrants, target.version) === target.grantIdentity) continue;
-      const controller = this.#preparations.get(extensionId);
-      controller?.abort(new Error(`Host candidate preparation was cancelled: ${extensionId}`));
-      const staged = this.#staged.get(extensionId);
-      disposals.push(this.#enqueue(extensionId, async () => {
-        if (!staged || this.#staged.get(extensionId) !== staged) return;
-        this.#staged.delete(extensionId);
-        await this.#disposeInstance(staged, false);
-      }));
-    }
-    await Promise.all(disposals);
+  getRetainedArtifactIdentity(owner: HostServiceOwnerIdentity): string | undefined {
+    const retained = this.#ownerGrants.get(ownerStorageKey(owner));
+    return retained?.owner.extensionVersion === owner.extensionVersion ? retained.artifactIntegrity : undefined;
   }
-
-  prepareCandidate(extensionId: string, integrity: string): Promise<VarinExtensionCandidatePreparationResult> {
-    return this.#prepareCandidate(extensionId, integrity);
+  getRetainedComposition(owner: HostServiceOwnerIdentity): VarinHostServiceComposition | undefined {
+    return this.#instance(owner)?.composition;
   }
-
-  async selectCandidate(extensionId: string, integrity: string, expectedRevision: number, signal?: AbortSignal, surfaceReadiness?: VarinExtensionSurfaceReadiness): Promise<VarinExtensionCatalogSnapshot> {
-    signal?.throwIfAborted();
-    const current = await this.#catalog.snapshot();
-    const selected = current.extensions.find(entry => entry.manifest.id === extensionId);
-    if (current.authoritative && selected?.desired.enabled && selected.integrity === integrity) return current;
-    if (selected?.desired.enabled && selected.candidate?.integrity === integrity
-      && selected.candidate.manifest.updateReadiness && !surfaceReadiness) {
-      await this.#reportUpdateReadinessWaiting(selected, current);
-      throw new ExtensionUpdateReadinessError("required_surface_readiness", "Open a compatible Surface to prepare the required update group");
-    }
-    const selection = { extensionId, integrity };
-    this.#candidateSelections.add(selection);
-    try {
-      signal?.throwIfAborted();
-      // Preparation is shared by independent Host/Surface consumers. Cancelling this
-      // waiter does not revoke that instance, and still awaits its real preparation.
-      await this.#prepareCandidate(extensionId, integrity);
-      signal?.throwIfAborted();
-      return await this.#enqueue(extensionId, () => {
-        signal?.throwIfAborted();
-        // Once publication starts, finish its actual transaction. Global lifecycle
-        // revocation still invalidates the instance; one caller's signal does not.
-        return this.#selectCandidate(extensionId, integrity, expectedRevision, signal, surfaceReadiness);
-      });
-    } finally {
-      this.#candidateSelections.delete(selection);
-    }
+  #instance(owner: HostServiceOwnerIdentity): BrokeredHostInstance | undefined {
+    const current = this.#active.get(owner.instanceKey);
+    if (current?.owner.generation === owner.generation) return current;
+    return this.#retirements.get(ownerStorageKey(owner))?.instance;
   }
-
-  discardPreparedCandidate(extensionId: string, integrity: string): Promise<void> {
-    return this.#enqueue(extensionId, async () => {
-      // Optional consumer cleanup cannot revoke another exact selection, including
-      // the interval between shared preparation and its queued publication.
-      const staged = this.#staged.get(extensionId);
-      if (!staged || staged.artifactIntegrity !== integrity) return;
-      if (staged.manifest.updateReadiness && !staged.preparation.signal.aborted) {
-        const entry = (await this.#catalog.snapshot()).extensions.find(value => value.manifest.id === extensionId);
-        if (entry?.desired.enabled && entry.desired.revision === staged.desiredRevision
-          && entry.candidate?.integrity === integrity && entry.candidate.applyRequested
-          && grantIdentity(entry.candidate.capabilityGrants, entry.candidate.resolvedVersion) === staged.grantIdentity) return;
-      }
-      if (!staged.preparation.signal.aborted
-        && [...this.#candidateSelections].some(value => value.extensionId === extensionId && value.integrity === integrity)) return;
-      this.#staged.delete(extensionId);
-      await this.#disposeInstance(staged, false);
-    });
+  #latest(extensionId: string): BrokeredHostInstance | undefined {
+    return [...this.#active.values()].filter(instance => instance.owner.extensionId === extensionId && instance.slot === 'selected' && !instance.revoked)
+      .sort((a, b) => b.owner.generation - a.owner.generation)[0];
   }
-
-  forceTerminate(extensionId: string): void {
-    const active = this.#active.get(extensionId);
-    if (active) {
-      this.#services.revokeOwner(active.owner);
-      for (const grant of active.grants) grant.granted = false;
-      this.#ownerGrants.delete(ownerStorageKey(active.owner));
-      if (active.manifest.entrypoints?.host?.mode === "native") this.#nativeRestartRequired.add(extensionId);
-    }
-    const staged = this.#staged.get(extensionId);
-    if (staged) {
-      for (const grant of staged.grants) grant.granted = false;
-      this.#ownerGrants.delete(ownerStorageKey(staged.owner));
-      if (staged.manifest.entrypoints?.host?.mode === "native") this.#nativeRestartRequired.add(extensionId);
-    }
-    this.#invalidate(extensionId);
-    this.#active.get(extensionId)?.broker.forceTerminate();
-    this.#staged.get(extensionId)?.broker.forceTerminate();
-    for (const { instance } of this.#retirements.values()) {
-      if (instance.owner.extensionId !== extensionId || !this.#ownerGrants.has(ownerStorageKey(instance.owner))) continue;
-      this.#services.revokeOwner(instance.owner);
-      for (const grant of instance.grants) grant.granted = false;
-      this.#ownerGrants.delete(ownerStorageKey(instance.owner));
-      instance.broker.forceTerminate();
-    }
-  }
-
-  activeExtensions(): string[] {
-    return [...this.#active.keys()].sort();
-  }
-
-  async activateExtension(extensionId: string): Promise<void> {
-    this.#assertRunning();
-    const snapshot = await this.#catalog.snapshot();
-    const entry = snapshot.extensions.find((value) => value.manifest.id === extensionId);
-    if (!entry?.desired.enabled || !entry.manifest.entrypoints?.host) return;
-    await this.#ensureSelectedActive(entry, snapshot, []);
-  }
-
-  async deactivateExtension(extensionId: string, afterDeactivate?: () => Promise<void>): Promise<void> {
-    const snapshot = await this.#catalog.snapshot();
-    await this.#deactivateWithDependents(extensionId, snapshot, new Set(), afterDeactivate);
-  }
-
-  async activateForService(requestValue: VarinExtensionServiceInvocationRequest | unknown): Promise<void> {
-    this.#assertRunning();
-    const request = parseVarinExtensionServiceInvocationRequest(requestValue);
-    const snapshot = await this.#catalog.snapshot();
-    const providers = snapshot.extensions.filter((entry) => (
-      entry.desired.enabled
-      && Boolean(entry.manifest.entrypoints?.host)
-      && (entry.manifest.provides?.services ?? []).some((service) => (
-        service.id === request.serviceId && service.version === request.version
-      ))
-    ));
-    await Promise.all(providers.map((provider) => this.#ensureSelectedActive(provider, snapshot, [])));
-  }
-
-  hasStagedProvider(providerId: string): boolean {
-    return [...this.#staged.values()].some((instance) => instance.provisions.some((provision) => (
-      this.#providerId(instance.owner, provision.descriptor) === providerId
-    )));
-  }
-
-  invokeStagedService(
-    requestValue: VarinExtensionServiceInvocationRequest | unknown,
-    signal?: AbortSignal,
-  ): Promise<JsonValue> {
-    const request = parseVarinExtensionServiceInvocationRequest(requestValue);
-    if (!request.providerId) throw new Error("Candidate Host service invocation requires providerId");
-    for (const instance of this.#staged.values()) {
-      const provision = instance.provisions.find((value) => (
-        value.descriptor.id === request.serviceId
-        && value.descriptor.version === request.version
-        && this.#providerId(instance.owner, value.descriptor) === request.providerId
-      ));
-      if (provision) return Promise.resolve(provision.handler(request.method, request.args, { signal: signal ?? new AbortController().signal }));
-    }
-    throw new Error(`Candidate Host service provider is unavailable: ${request.providerId}`);
-  }
-
-  shutdown(): Promise<void> {
-    if (this.#shutdown) return this.#shutdown;
-    this.#stopping = true;
-    this.#stopRevokedCalls();
-    for (const [id, controller] of this.#preparations) {
-      this.#invalidate(id);
-      controller.abort(new Error("Host supervisor is shutting down"));
-    }
-    this.#shutdown = (async () => {
-      const operations = await Promise.allSettled([...this.#operations.values()]);
-      const snapshot = await this.#catalog.snapshot();
-      const owners = await Promise.allSettled([...new Set([...this.#active.keys(), ...this.#staged.keys(),
-        ...[...this.#retirements.values()].map(({ instance }) => instance.owner.extensionId)])]
-        .map((id) => this.#deactivateWithDependents(id, snapshot)));
-      const failures = [...operations, ...owners].filter((result): result is PromiseRejectedResult => result.status === "rejected");
-      if (failures.length) throw new AggregateError(failures.map(result => result.reason), "Some extension owners failed during shutdown");
-    })();
-    return this.#shutdown;
-  }
-
-  #assertRunning(): void {
-    if (this.#stopping) throw new Error("Host supervisor is shutting down");
-  }
-
-  #invalidate(extensionId: string): void {
-    this.#epochs.set(extensionId, (this.#epochs.get(extensionId) ?? 0) + 1);
-    this.#preparations.get(extensionId)?.abort(new Error(`Host activation was cancelled: ${extensionId}`));
-  }
-
-  // Only a single owner's preparation and publication transaction are serialized.
-  // Dependencies are resolved before entering this queue, so waiters share their provider's
-  // completed generation without holding an owner lock while traversing the graph.
-  #enqueue<T>(extensionId: string, operation: () => Promise<T>): Promise<T> {
-    const result = (this.#operations.get(extensionId) ?? Promise.resolve()).then(operation, operation);
+  #assertRunning(): void { if (this.#stopping) throw new Error('Host supervisor is shutting down'); }
+  #enqueue<T>(key: string, operation: () => Promise<T>): Promise<T> {
+    const result = (this.#operations.get(key) ?? Promise.resolve()).then(operation, operation);
     const settled = result.then(() => undefined, () => undefined);
-    this.#operations.set(extensionId, settled);
-    void settled.then(() => {
-      if (this.#operations.get(extensionId) === settled) this.#operations.delete(extensionId);
-    });
+    this.#operations.set(key, settled);
+    void settled.then(() => { if (this.#operations.get(key) === settled) this.#operations.delete(key); });
     return result;
   }
 
-  #retirePrevious(instance: BrokeredHostInstance, finalize: () => Promise<void>): void {
-    const key = ownerStorageKey(instance.owner);
-    const promise = (async () => {
-      try {
-        await finalize();
-        if (!await this.#disposeInstance(instance, false)) throw new Error("Retired Host cleanup was not confirmed");
-      } catch (error) {
-        // Keep the latest owner's status and identity; an old disposer cannot fail the new owner.
-        try {
-          const snapshot = await this.#catalog.snapshot();
-          const entry = snapshot.extensions.find(value => value.manifest.id === instance.owner.extensionId);
-          const current = entry?.actual.find(value => value.realmKind === "host" && value.entrypointId === "host");
-          if (current) await this.#reportActual(instance.owner.extensionId, { ...current, diagnostics: [...current.diagnostics, {
-            code: "host_retirement_failed", severity: "error", timestamp: new Date().toISOString(),
-            message: `Retiring generation ${instance.owner.generation}: ${error instanceof Error ? error.message : String(error)}`,
-          }] });
-        } catch (reportError) {
-          throw new AggregateError([error, reportError], "Host retirement and its diagnostic reporting failed");
+  async #plan(extensionId: string, scope: VarinExtensionServiceRoutingContext,
+    candidate?: { extensionId: string; integrity: string }): Promise<HostCompositionPlan> {
+    let catalog = await this.#catalog.snapshot();
+    const routing = await this.#routing.read();
+    if (!catalog.authoritative || !routing.authoritative) throw new Error('Cannot prepare a Host service from stale selection state');
+    const visited = new Set<string>();
+    const materialize = async (id: string, stack: string[]): Promise<void> => {
+      if (stack.includes(id)) throw new Error(`Host service dependency cycle: ${[...stack, id].join(' -> ')}`);
+      if (visited.has(id)) return;
+      visited.add(id);
+      const entry = catalog.extensions.find(entry => entry.manifest.id === id);
+      if (!entry?.desired.enabled) throw new Error(`Host dependency is unavailable: ${id}`);
+      const manifest = id === candidate?.extensionId ? entry.candidate?.manifest : entry.manifest;
+      if (!manifest) throw new Error(`Host candidate is unavailable: ${id}`);
+      await Promise.all((manifest.requires?.services ?? []).filter(requirement => requirement.realms.includes('host')).flatMap(requirement => resolveHostRequirement(catalog, routing, requirement, scope)
+        .map(provider => materialize(provider.manifest.id, [...stack, id]))));
+      await this.#prepareBuiltin(id);
+    };
+    await materialize(extensionId, []);
+    catalog = await this.#catalog.snapshot();
+    return createHostCompositionPlan(catalog, routing, extensionId, scope, candidate);
+  }
+  async prepareExtension(extensionId: string, scope: VarinExtensionServiceRoutingContext = {}, signal?: AbortSignal,
+    frozen?: VarinHostServiceComposition): Promise<HostCompositionLease> {
+    this.#assertRunning(); signal?.throwIfAborted();
+    const plan = frozen ? restoreHostCompositionPlan(frozen, await this.#catalog.snapshot()) : await this.#plan(extensionId, scope);
+    return this.prepareComposition(plan, signal, frozen === undefined);
+  }
+  async prepareSurfaceExtension(extensionId: string, scope: VarinExtensionServiceRoutingContext, signal: AbortSignal,
+    candidate?: { extensionId: string; integrity: string }): Promise<HostCompositionLease> {
+    return this.prepareComposition(await this.#plan(extensionId, scope, candidate), signal, true);
+  }
+  async prepareComposition(plan: HostCompositionPlan, signal?: AbortSignal, selectionOwner = true): Promise<HostCompositionLease> {
+    this.#assertRunning(); signal?.throwIfAborted();
+    const acquired = await this.#acquireNode(plan.root, signal);
+    let released = false;
+    const consumer: RootConsumer = { plan, instance: acquired.instance, current: acquired };
+    if (selectionOwner) this.#roots.add(consumer);
+    return {
+      get owner() { return consumer.current.instance.owner; },
+      get composition() { return consumer.plan.composition; },
+      get routingRevision() { return consumer.plan.routingRevision; },
+      revocationSignal: acquired.instance.revocation.signal,
+      bind: (id, version) => {
+        if (released) throw new Error('Host composition lease has been released');
+        return this.#bindInstance(consumer.current.instance, id, version);
+      },
+      release: () => {
+        if (released) return; released = true;
+        this.#roots.delete(consumer);
+        consumer.current.release();
+      },
+    };
+  }
+  #retain(instance: BrokeredHostInstance): HostNodeLease {
+    if (instance.revoked || instance.disposed) throw new Error('Host composition instance is unavailable');
+    instance.references += 1;
+    let released = false;
+    const release = () => {
+      if (released) return; released = true; instance.referenceReleases.delete(release); instance.references -= 1;
+      if (instance.references === 0) for (const resolve of instance.onUnreferenced.splice(0)) resolve();
+      this.#unused(instance);
+    };
+    instance.referenceReleases.add(release);
+    return { instance, release };
+  }
+
+  async #acquireNode(node: HostCompositionNode, signal?: AbortSignal): Promise<HostNodeLease> {
+    signal?.throwIfAborted(); this.#assertRunning();
+    const identity = `${node.node.id}:${this.#epochs.get(node.node.extensionId) ?? 0}`;
+    let pending = this.#pending.get(identity);
+    if (!pending) {
+      const controller = new AbortController();
+      pending = { node, controller, waiters: 0, settled: false, promise: Promise.resolve(undefined as never) };
+      const current = pending;
+      current.promise = this.#activateNode(node, controller.signal).finally(() => {
+        current.settled = true;
+        if (this.#pending.get(identity) === current) this.#pending.delete(identity);
+      });
+      this.#pending.set(identity, current);
+    }
+    const current = pending; current.waiters += 1;
+    return new Promise<HostNodeLease>((resolve, reject) => {
+      let done = false;
+      const finish = () => { if (done) return false; done = true; signal?.removeEventListener('abort', abort); current.waiters -= 1; return true; };
+      const abort = () => {
+        if (!finish()) return;
+        if (!current.waiters && !current.settled) current.controller.abort(signal?.reason ?? new Error('Host preparation has no remaining consumer'));
+        reject(signal?.reason ?? new Error('Host preparation cancelled'));
+      };
+      signal?.addEventListener('abort', abort, { once: true });
+      void current.promise.then(instance => {
+        if (!finish()) { if (!current.waiters) this.#unused(instance); return; }
+        try { resolve(this.#retain(instance)); } catch (error) { reject(error); }
+      }, error => { if (finish()) reject(error); });
+      if (signal?.aborted) abort();
+    });
+  }
+  async #activateNode(node: HostCompositionNode, signal: AbortSignal): Promise<BrokeredHostInstance> {
+    const dependencyPins: HostServicePin[] = [];
+    const dependencies: VarinHostServiceDependencyBinding[] = [];
+    const preparation = new AbortController();
+    const dependencySignal = AbortSignal.any([signal, preparation.signal]);
+    try {
+      // Every accepted child preparation settles its lease even if a sibling fails first.
+      const resolved = await Promise.allSettled(node.dependencies.map(async ({ requirement, providers }) => {
+        const acquired = await Promise.allSettled(providers.map(async provider => {
+          try {
+            const lease = await this.#acquireNode(provider, dependencySignal);
+            try {
+            const binding = this.#bindInstance(lease.instance, requirement.id, requirement.version);
+              try { dependencyPins.push(binding.pin()); return binding.providerId; } finally { binding.release(); }
+            } finally { lease.release(); }
+          } catch (error) { preparation.abort(error); throw error; }
+        }));
+        const failure = acquired.find(value => value.status === 'rejected');
+        if (failure?.status === 'rejected') throw failure.reason;
+        return { ...requirement, providerIds: acquired.map(value => (value as PromiseFulfilledResult<string>).value) };
+      }));
+      const failure = resolved.find(value => value.status === 'rejected');
+      if (failure?.status === 'rejected') throw failure.reason;
+      dependencies.push(...resolved.map(value => (value as PromiseFulfilledResult<VarinHostServiceDependencyBinding>).value));
+      signal.throwIfAborted();
+      const instanceKey = compositionHash({ node: node.node.id, dependencies: dependencies.map(dependency => [dependency.id, dependency.version, dependency.providerIds]) });
+      const existing = this.#active.get(instanceKey);
+      if (existing && !existing.revoked && !existing.retiring && !existing.preparation.signal.aborted) {
+        for (const pin of dependencyPins.splice(0)) pin.release();
+        return existing;
+      }
+      const candidate = node.slot === 'candidate' ? node.entry.candidate : undefined;
+      const manifest = candidate?.manifest ?? node.entry.manifest;
+      if (manifest.entrypoints?.host?.mode === 'native') {
+        if (this.#nativeRestartRequired.has(node.node.extensionId)
+          || [...this.#ownerGrants.values()].some(owner => owner.native && owner.owner.extensionId === node.node.extensionId && owner.artifactIntegrity !== node.node.artifactIntegrity)) {
+          this.#nativeRestartRequired.add(node.node.extensionId);
+          throw new Error('Trusted-native Host generation requires an application-host restart');
         }
-        throw error;
       }
-    })();
-    this.#retirements.set(key, { instance, promise });
-    void promise.then(() => {
-      if (this.#retirements.get(key)?.promise === promise) this.#retirements.delete(key);
-    }, () => { /* Retain the failure and exact instance for explicit teardown/error aggregation. */ });
-  }
-
-  async #drainRetirements(extensionId: string): Promise<void> {
-    const retirements = [...this.#retirements.entries()].filter(([, value]) => value.instance.owner.extensionId === extensionId);
-    const results = await Promise.allSettled(retirements.map(([, value]) => value.promise));
-    const failures: unknown[] = [];
-    for (const [index, [key, { instance }]] of retirements.entries()) {
-      const result = results[index]!;
-      if (result.status === "rejected") {
-        failures.push(result.reason);
-        // A failed finalization may still retain an instance. Only this explicit revocation
-        // path may drop its pins, and it still waits for callbacks and real transport cleanup.
-        if (this.#ownerGrants.has(key)) {
-          try { await this.#services.drainOwner(instance.owner); await this.#disposeInstance(instance, true); }
-          catch (error) { failures.push(error); }
-        }
-      }
-      this.#retirements.delete(key);
-    }
-    if (failures.length) throw new AggregateError(failures, "Some retired Host owners failed during cleanup");
-  }
-
-  async #reconcileSnapshot(): Promise<void> {
-    this.#assertRunning();
-    await this.#reconcile(await this.#catalog.snapshot());
-  }
-
-  async #assertCurrent(instance: BrokeredHostInstance): Promise<void> {
-    this.#assertRunning();
-    instance.preparation.signal.throwIfAborted();
-    const snapshot = await this.#catalog.snapshot();
-    this.#assertRunning();
-    instance.preparation.signal.throwIfAborted();
-    if ((this.#epochs.get(instance.owner.extensionId) ?? 0) !== instance.epoch) {
-      throw new Error(`Host activation was cancelled: ${instance.owner.extensionId}`);
-    }
-    const entry = snapshot.extensions.find((value) => value.manifest.id === instance.owner.extensionId);
-    const integrity = instance.slot === "candidate" ? entry?.candidate?.integrity : entry?.integrity;
-    if (!entry?.desired.enabled || entry.desired.revision !== instance.desiredRevision
-      || integrity !== instance.artifactIntegrity) throw new Error(`Host activation is stale: ${instance.owner.extensionId}`);
-    const grants = instance.slot === "candidate" ? entry.candidate?.capabilityGrants : entry.capabilityGrants;
-    if (!grants || grantIdentity(grants, instance.owner.extensionVersion) !== instance.grantIdentity) {
-      throw new Error(`Host capability review changed during activation: ${instance.owner.extensionId}`);
-    }
-    this.#assertDependencies(instance.manifest);
-  }
-
-  #assertDependencies(manifest: VarinExtensionManifest): void {
-    for (const requirement of manifest.requires?.services ?? []) {
-      if (!requirement.optional && this.#services.providersFor(requirement).length === 0) {
-        throw new Error(`Required Host service is unavailable: ${serviceKey(requirement.id, requirement.version)}`);
-      }
-    }
-  }
-
-  async #reportUpdateReadinessWaiting(entry: VarinExtensionCatalogEntry, snapshot: VarinExtensionCatalogSnapshot): Promise<void> {
-    const active = this.#active.get(entry.manifest.id);
-    const native = entry.candidate?.manifest.entrypoints?.host?.mode === "native";
-    await this.#reportActual(entry.manifest.id, diagnosticState(
-      snapshot.hostId, entry.desired.revision, active?.owner.generation ?? 0,
-      active ? "active" : native ? "restart-required" : "waiting",
-      native ? "trusted_native_group_update_requires_restart_handoff" : "required_surface_readiness",
-      native
-        ? "This trusted-native update cannot prepare beside its loaded Host. Disable the extension, apply the reviewed update, then restart the application Host."
-        : "The requested update is waiting for a compatible Surface to prepare its declared update group; the selected version remains available",
-    ));
-  }
-
-  #assertUpdateReadiness(instance: BrokeredHostInstance, evidence?: VarinExtensionSurfaceReadiness): void {
-    const required = instance.manifest.updateReadiness?.surfaceEntrypoints;
-    if (!required) {
-      if (evidence) throw new ExtensionUpdateReadinessError("surface_readiness_not_declared", "This candidate does not declare a Surface update group");
-      return;
-    }
-    if (!evidence) throw new ExtensionUpdateReadinessError("required_surface_readiness", "The candidate requires a prepared Surface update group");
-    const prepared = evidence.hostPreparation;
-    const members = new Set(evidence.members.map(member => member.entrypointId));
-    if (prepared.id !== instance.preparationId || prepared.hostId !== this.#services.hostId
-      || prepared.desiredRevision !== instance.desiredRevision || prepared.generation !== instance.owner.generation
-      || members.size !== evidence.members.length || members.size !== required.length
-      || required.some(member => !members.has(member)
-        || !instance.manifest.entrypoints?.surfaces?.find(entry => entry.id === member)?.supports.includes(evidence.surface))) {
-      throw new ExtensionUpdateReadinessError("stale_surface_readiness", "Surface update readiness does not match the current Host preparation and required members");
-    }
-  }
-
-  async #prepareCandidate(extensionId: string, integrity: string): Promise<VarinExtensionCandidatePreparationResult> {
-    this.#assertRunning();
-    const snapshot = await this.#catalog.snapshot();
-    const entry = snapshot.extensions.find((candidate) => candidate.manifest.id === extensionId);
-    if (snapshot.authoritative && entry?.desired.enabled && entry.integrity === integrity) {
-      return { extensionId, integrity, providers: this.#services.getSnapshot().providers.filter(provider =>
-        provider.extensionId === extensionId && provider.status === "active" && this.getRetainedArtifactIdentity(provider) === integrity) };
-    }
-    if (!entry?.candidate || entry.candidate.integrity !== integrity) throw new Error(`Host candidate is no longer current: ${extensionId}`);
-    const preparing = this.#preparationTargets.get(extensionId);
-    if (preparing?.slot === "candidate" && (preparing.integrity !== integrity
-      || preparing.grantIdentity !== grantIdentity(entry.candidate.capabilityGrants, entry.candidate.resolvedVersion))) {
-      this.#invalidate(extensionId);
-    }
-    const epoch = this.#epochs.get(extensionId) ?? 0;
-    if (!entry.candidate.capabilitiesReviewed) throw new Error(`Host candidate capability changes require review: ${extensionId}`);
-    if (!entry.desired.enabled) return { extensionId, integrity, providers: [] };
-    if (entry.candidate.manifest.entrypoints?.host?.mode === "native") {
-      if (this.#active.has(extensionId)) {
-        this.#nativeRestartRequired.add(extensionId);
-        await this.#reportActual(extensionId, diagnosticState(
-          snapshot.hostId,
-          entry.desired.revision,
-          this.#active.get(extensionId)?.owner.generation ?? 0,
-          "restart-required",
-          "trusted_native_update_requires_restart",
-          "The trusted-native Host candidate will activate after the application host restarts",
-        )).catch(() => undefined);
-        throw new Error("Trusted-native Host candidate requires an application-host restart");
-      }
-      if (entry.candidate.manifest.updateReadiness) {
-        await this.#reportUpdateReadinessWaiting(entry, snapshot);
-        throw new Error("Trusted-native grouped update requires disabling the extension, applying it, and restarting the application Host");
-      }
-      return { extensionId, integrity, providers: [] };
-    }
-    if (entry.candidate.manifest.entrypoints?.host?.mode !== "brokered") return { extensionId, integrity, providers: [] };
-    for (const requirement of entry.candidate.manifest.requires?.services ?? []) {
-      if (requirement.optional || this.#services.providersFor(requirement).length > 0) continue;
-      for (const provider of this.#providerEntries(requirement, snapshot)) {
-        await this.#ensureSelectedActive(provider, snapshot, [extensionId]);
-      }
-      if (this.#services.providersFor(requirement).length === 0) {
-        throw new Error(`Required Host service is unavailable: ${serviceKey(requirement.id, requirement.version)}`);
-      }
-    }
-    const candidate = entry.candidate;
-    const identity = `${integrity}:${entry.desired.revision}:${epoch}:${grantIdentity(candidate.capabilityGrants, candidate.resolvedVersion)}`;
-    const pending = this.#candidatePreparations.get(extensionId);
-    if (pending?.identity === identity) return pending.promise;
-    const promise = this.#enqueue(extensionId, async () => {
-      this.#assertRunning();
-      if ((this.#epochs.get(extensionId) ?? 0) !== epoch) throw new Error("Host activation was cancelled");
-      const current = this.#staged.get(extensionId);
-      if (current?.artifactIntegrity === integrity && !current.preparation.signal.aborted
-        && current.desiredRevision === entry.desired.revision && current.epoch === epoch
-        && current.grantIdentity === grantIdentity(candidate.capabilityGrants, candidate.resolvedVersion)) {
-        await this.#assertCurrent(current);
-        return this.#candidatePreparation(current);
-      }
-      if (current) {
-        this.#staged.delete(extensionId);
-        await this.#disposeInstance(current, false);
-      }
-      const instance = await this.#prepareInstance(entry, {
-        capabilityGrants: candidate.capabilityGrants,
-        integrity,
-        manifest: candidate.manifest,
-        slot: "candidate",
-        version: candidate.resolvedVersion,
-      }, snapshot);
+      const instance = await this.#prepareInstance(node.entry, {
+        capabilityGrants: candidate?.capabilityGrants ?? node.entry.capabilityGrants,
+        integrity: node.node.artifactIntegrity, manifest, slot: node.slot, version: node.node.extensionVersion,
+      }, await this.#catalog.snapshot(), { instanceKey, dependencies, dependencyPins,
+        composition: compositionForNode(node), signal });
+      // A selected package depending on an unpublished candidate is itself unpublished.
+      const staged = node.slot === 'candidate' || dependencyPins.some(pin => this.#services.getSnapshot().providers
+        .some(provider => provider.providerId === pin.providerId && provider.status === 'candidate'));
+      const publication = this.#services.prepareOwnerReplacement(instance.owner, instance.provisions, {
+        composition: instance.composition, onUnused: () => this.#unused(instance), previousOwners: [], candidate: staged,
+      });
       try {
         await this.#assertCurrent(instance);
-        this.#staged.set(extensionId, instance);
-        return this.#candidatePreparation(instance);
+        if (!staged) { await this.#commitInstanceStorage(instance); await this.#assertCurrent(instance); }
+        publication.commit();
+        instance.published = !staged;
+        this.#active.set(instanceKey, instance);
+        if (!staged) this.#finalizeInstanceStorage(instance);
+        await this.#reportOwner(node.entry.manifest.id);
+        return instance;
       } catch (error) {
+        await publication.rollback();
+        await this.#rollbackInstanceStorage(instance);
         await this.#disposeInstance(instance, false);
         throw error;
       }
+    } catch (error) { for (const pin of dependencyPins.splice(0)) pin.release(); throw error; }
+  }
+  #bindInstance(instance: BrokeredHostInstance, id: string, version: number): HostServiceBinding {
+    if (instance.revoked || instance.disposed) throw new Error('Host composition instance is unavailable');
+    const provision = instance.provisions.find(provision => provision.descriptor.id === id && provision.descriptor.version === version);
+    if (!provision) throw new Error(`Host activation did not provide ${id}@${version}`);
+    const providerId = this.#providerId(instance.owner, provision.descriptor);
+    return instance.published ? this.#services.bindPinned(id, version, providerId) : this.#services.bindPrepared(id, version, providerId);
+  }
+  #unused(instance: BrokeredHostInstance): void {
+    if (!instance.disposed && !instance.references && !this.#services.ownerInUse(instance.owner)) this.#retire(instance);
+  }
+  #retire(instance: BrokeredHostInstance): void {
+    if (instance.retiring || instance.disposed) return;
+    instance.retiring = true;
+    if (this.#active.get(instance.owner.instanceKey) === instance) this.#active.delete(instance.owner.instanceKey);
+    const drain = this.#services.retireOwner(instance.owner);
+    const promise = (async () => {
+      if (instance.references) await new Promise<void>(resolve => instance.onUnreferenced.push(resolve));
+      await drain;
+      this.#services.removeOwner(instance.owner);
+      await this.#disposeInstance(instance, true);
+      await this.#reportOwner(instance.owner.extensionId);
+    })();
+    const key = ownerStorageKey(instance.owner);
+    this.#retirements.set(key, { instance, promise });
+    void promise.then(() => { if (this.#retirements.get(key)?.promise === promise) this.#retirements.delete(key); }, async error => {
+      await this.#reportOwner(instance.owner.extensionId, 'host_retirement_failed', new Error(`Retiring generation ${instance.owner.generation}: ${error instanceof Error ? error.message : String(error)}`)).catch(() => undefined);
     });
-    this.#candidatePreparations.set(extensionId, { identity, promise });
-    try { return await promise; }
-    finally {
-      if (this.#candidatePreparations.get(extensionId)?.promise === promise) this.#candidatePreparations.delete(extensionId);
+  }
+  async #assertCurrent(instance: BrokeredHostInstance): Promise<void> {
+    this.#assertRunning(); instance.preparation.signal.throwIfAborted();
+    if ((this.#epochs.get(instance.owner.extensionId) ?? 0) !== instance.epoch) throw new Error('Host activation was superseded');
+    const entry = (await this.#catalog.snapshot()).extensions.find(entry => entry.manifest.id === instance.owner.extensionId);
+    const selected = instance.slot === 'candidate' ? entry?.candidate : entry;
+    if (!entry?.desired.enabled || entry.desired.revision !== instance.desiredRevision || selected?.integrity !== instance.artifactIntegrity
+      || grantIdentity(selected.capabilityGrants, instance.owner.extensionVersion) !== instance.grantIdentity) throw new Error(`Host activation is stale: ${instance.owner.extensionId}`);
+    for (const pin of instance.dependencyPins) pin.assertAvailable();
+  }
+  async activateExtension(extensionId: string): Promise<void> {
+    const acquired = await this.prepareExtension(extensionId);
+    const previous = this.#anchors.get(extensionId);
+    this.#anchors.set(extensionId, acquired); previous?.release();
+    // Explicit/startup selection moves its owner without waiting for old independent exchanges.
+    if (previous && previous.owner.instanceKey !== acquired.owner.instanceKey) {
+      const old = this.#instance(previous.owner); if (old) this.#retire(old);
     }
   }
-
-  async #selectCandidate(
-    extensionId: string,
-    integrity: string,
-    expectedRevision: number,
-    signal?: AbortSignal,
-    surfaceReadiness?: VarinExtensionSurfaceReadiness,
-  ): Promise<VarinExtensionCatalogSnapshot> {
-    const snapshot = await this.#catalog.snapshot();
-    const existing = snapshot.extensions.find(entry => entry.manifest.id === extensionId);
-    if (snapshot.authoritative && existing?.desired.enabled && existing.integrity === integrity) return snapshot;
-    const staged = this.#staged.get(extensionId);
+  activeExtensions(): string[] { return [...new Set([...this.#active.values()].filter(instance => instance.published && !instance.revoked).map(instance => instance.owner.extensionId))].sort(); }
+  async activateForService(requestValue: VarinExtensionServiceInvocationRequest | unknown): Promise<void> {
+    const request = parseVarinExtensionServiceInvocationRequest(requestValue);
+    const catalog = await this.#catalog.snapshot(), routing = await this.#routing.read();
+    const resolved = resolveDeclaredServiceRouting(catalog, routing, request.serviceId, request.version, request.routing);
+    if (resolved.status !== 'resolved') throw new Error('Host service selection is unavailable');
+    await Promise.all(resolved.extensionIds.map(id => this.activateExtension(id)));
+  }
+  #revoke(extensionId: string): void {
+    this.#epochs.set(extensionId, (this.#epochs.get(extensionId) ?? 0) + 1);
+    for (const pending of this.#pending.values()) if (pending.node.node.extensionId === extensionId) pending.controller.abort(new Error(`Host owner revoked: ${extensionId}`));
+    for (const [key, controller] of this.#preparations) if (key.startsWith(`${extensionId}\0`)) controller.abort(new Error(`Host owner revoked: ${extensionId}`));
+    this.#revokeOwners([...this.#ownerGrants.values()].filter(owner => owner.owner.extensionId === extensionId).map(owner => owner.owner));
+  }
+  /** Revoke actual owner edges. A failed/denied candidate never sweeps selected instances by name. */
+  #revokeOwners(owners: readonly HostServiceOwnerIdentity[]): void {
+    const revoked = new Set(owners.map(ownerStorageKey));
+    const instances = [...this.#active.values(), ...[...this.#retirements.values()].map(retirement => retirement.instance)];
+    for (;;) {
+      let changed = false;
+      const providerIds = new Set(this.#services.getSnapshot().providers.filter(provider => revoked.has(ownerStorageKey(provider))).map(provider => provider.providerId));
+      for (const [key, dependencies] of this.#ownerDependencies) {
+        if (!revoked.has(key) && dependencies.pins.some(pin => providerIds.has(pin.providerId))) { revoked.add(key); changed = true; }
+      }
+      if (!changed) break;
+    }
+    for (const key of revoked) {
+      const tracked = this.#ownerGrants.get(key); if (!tracked) continue;
+      for (const grant of tracked.grants) grant.granted = false;
+      this.#preparations.get(`${tracked.owner.extensionId}\0${tracked.owner.instanceKey}`)?.abort(new Error('Host owner revoked'));
+      this.#services.revokeOwner(tracked.owner);
+      if (!tracked.native && this.#services.hasPendingOwnerCalls(tracked.owner)) tracked.broker.forceTerminate();
+    }
+    for (const instance of instances) {
+      if (!revoked.has(ownerStorageKey(instance.owner))) continue;
+      instance.revoked = true;
+      instance.revocation.abort(new Error('Host composition was revoked'));
+      this.#services.revokeOwner(instance.owner);
+      for (const release of [...instance.referenceReleases]) release();
+      if (instance.manifest.entrypoints?.host?.mode !== 'native' && this.#services.hasPendingOwnerCalls(instance.owner)) instance.broker.forceTerminate();
+      for (const root of [...this.#roots]) if (root.instance === instance) {
+        this.#roots.delete(root);
+        this.#anchors.get(root.plan.root.node.extensionId)?.release(); this.#anchors.delete(root.plan.root.node.extensionId);
+      }
+      this.#retire(instance);
+    }
+  }
+  forceTerminate(extensionId: string): void {
+    this.#revoke(extensionId);
+    for (const tracked of this.#ownerGrants.values()) if (tracked.owner.extensionId === extensionId) {
+      if (tracked.native) this.#nativeRestartRequired.add(extensionId);
+      tracked.broker.forceTerminate();
+    }
+  }
+  async deactivateExtension(extensionId: string, afterDeactivate?: () => Promise<void>): Promise<void> {
+    this.#revoke(extensionId);
+    this.#anchors.get(extensionId)?.release(); this.#anchors.delete(extensionId);
+    await this.discardPreparedCandidate(extensionId, this.#staged.get(extensionId)?.integrity ?? '');
+    const retirements = [...this.#retirements.entries()].filter(([, value]) => value.instance.composition.nodes.some(node => node.extensionId === extensionId));
+    const outcomes = await Promise.allSettled(retirements.map(([, value]) => value.promise));
+    for (const [key, value] of retirements) if (this.#retirements.get(key) === value) this.#retirements.delete(key);
+    const failures = outcomes.filter((value): value is PromiseRejectedResult => value.status === 'rejected');
+    if (failures.length) throw new AggregateError(failures.map(value => value.reason), 'Extension Host teardown reported failures');
+    await afterDeactivate?.();
+  }
+  async reconcile(_snapshot?: VarinExtensionCatalogSnapshot): Promise<void> {
     this.#assertRunning();
-    if (!staged) {
-      if (existing?.desired.enabled && existing.candidate?.manifest.entrypoints?.host?.mode === "brokered") throw new Error(`Host candidate is not prepared: ${extensionId}`);
-      return this.#packages.selectCandidate({ candidateIntegrity: integrity, expectedRevision, extensionId }, () => signal?.throwIfAborted());
-    }
-    if (staged.artifactIntegrity !== integrity) throw new Error(`Prepared Host candidate is stale: ${extensionId}`);
-    signal?.throwIfAborted();
-    this.#assertUpdateReadiness(staged, surfaceReadiness);
-    const previous = this.#active.get(extensionId);
-    const replacement = this.#services.prepareOwnerReplacement(staged.owner, staged.provisions);
-    let storageCommitted = false;
-    let catalogCommitted = false;
-    let selected: VarinExtensionCatalogSnapshot;
-    if (previous) this.#setStoragePhase(previous, "draining");
-    try {
-      await this.#assertCurrent(staged);
-      await this.#commitInstanceStorage(staged);
-      storageCommitted = true;
-      await this.#assertCurrent(staged);
-      selected = await this.#packages.selectCandidate({ candidateIntegrity: integrity, expectedRevision, extensionId }, () => {
-        // This callback runs synchronously inside the original catalog mutator, after
-        // its lock/revision/hash checks. Once it returns, finish the real write even
-        // if this Surface request disconnects; a connection is not process liveness.
-        signal?.throwIfAborted();
-        this.#assertRunning();
-        if (this.#staged.get(extensionId) !== staged || staged.preparation.signal.aborted
-          || (this.#epochs.get(extensionId) ?? 0) !== staged.epoch) throw new Error(`Host candidate publication was cancelled: ${extensionId}`);
-        this.#assertUpdateReadiness(staged, surfaceReadiness);
-      });
-      catalogCommitted = true;
-      this.#finalizeInstanceStorage(staged);
-      // Durable selection may finish after shutdown or an explicit disable cancelled this owner.
-      // The committed catalog can recover that artifact next startup; never publish a killed worker.
-      this.#assertRunning();
-      if ((this.#epochs.get(extensionId) ?? 0) !== staged.epoch || staged.preparation.signal.aborted) {
-        throw new Error(`Host candidate publication was cancelled: ${extensionId}`);
-      }
-      this.#assertDependencies(staged.manifest);
-    } catch (error) {
-      await replacement.rollback();
-      if (catalogCommitted) {
-        // The artifact and its storage migration are already selected. Do not restore
-        // the old schema or admit new work through its old provider. Exact old pins
-        // may still finish through their existing registry/retirement owner.
-        const retained = previous && this.#services.getSnapshot().providers.some(provider =>
-          provider.extensionId === extensionId && provider.generation === previous.owner.generation && provider.status === "active");
-        const withdrawal = this.#services.prepareOwnerReplacement(staged.owner, []);
-        withdrawal.commit();
-        this.#active.delete(extensionId);
-        this.#staged.delete(extensionId);
-        if (previous) this.#retirePrevious(previous, async () => {
-          await withdrawal.finalize();
-          if (!retained) await this.#services.drainOwner(previous.owner);
-          this.#services.removeOwner(previous.owner);
-        });
-        else await withdrawal.finalize();
-        await this.#disposeInstance(staged, false);
-      } else {
-        if (storageCommitted) await this.#rollbackInstanceStorage(staged);
-        this.#setStoragePhase(staged, "activating");
-        if (previous) this.#setStoragePhase(previous, "active");
-      }
-      throw error;
-    }
-    replacement.commit();
-    this.#finalizeInstanceStorage(staged);
-    this.#active.set(extensionId, { ...staged, slot: "selected" });
-    this.#staged.delete(extensionId);
-    await this.#reportActual(extensionId, diagnosticState(
-      selected.hostId,
-      staged.desiredRevision,
-      staged.owner.generation,
-      "active",
-    )).catch(() => undefined);
-    if (previous) this.#retirePrevious(previous, () => replacement.finalize());
-    else await replacement.finalize();
-    return selected;
-  }
-
-  #refreshOwnerGrants(snapshot: VarinExtensionCatalogSnapshot): void {
-    for (const tracked of this.#ownerGrants.values()) {
-      const entry = snapshot.extensions.find((value) => value.manifest.id === tracked.owner.extensionId);
-      if (!entry) continue;
-      const source = tracked.slot === "candidate" ? entry.candidate : entry;
+    const snapshot = await this.#catalog.snapshot(); if (!snapshot.authoritative) return;
+    const disabled = new Set<string>();
+    const deniedOwners: HostServiceOwnerIdentity[] = [];
+    // A composition owns its dependency waiters before it has a transport/generation.
+    // Cancel only that node's preparation; other consumers keep their shared dependency.
+    for (const pending of this.#pending.values()) {
+      const { node, slot } = pending.node;
+      const entry = snapshot.extensions.find(entry => entry.manifest.id === node.extensionId);
+      if (!entry?.desired.enabled) { disabled.add(node.extensionId); continue; }
+      const source = slot === 'candidate' ? entry.candidate : entry;
       if (!source) continue;
-      const version = source.manifest.version;
-      if (version === tracked.owner.extensionVersion) {
-        const next = hostGrants(source.capabilityGrants, version);
-        tracked.grants.splice(0, tracked.grants.length, ...next);
-      } else if (entry.desired.revision > tracked.desiredRevision) {
-        // Ordinary version replacement preserves old calls. A later explicit review may
-        // revoke the same capability for a still-draining, older-version generation.
-        const denied = new Set(source.capabilityGrants.filter((grant) => grant.realm === "host" && !grant.granted).map((grant) => grant.capability));
-        for (const grant of tracked.grants) if (denied.has(grant.capability)) grant.granted = false;
-      }
-      tracked.desiredRevision = entry.desired.revision;
+      const denied = new Set(source.capabilityGrants.filter(grant => grant.realm === 'host' && !grant.granted).map(grant => grant.capability));
+      if (node.grants.some(grant => grant.granted && denied.has(grant.capability))) pending.controller.abort(new Error(`Host owner revoked: ${node.extensionId}`));
     }
-  }
-
-  async #reconcile(snapshot: VarinExtensionCatalogSnapshot): Promise<void> {
-    if (!snapshot.authoritative) return;
-    this.#refreshOwnerGrants(snapshot);
-    const candidateCleanup = this.reconcileCandidatePreparations();
-    const enabled = new Map(snapshot.extensions.filter((entry) => entry.desired.enabled).map((entry) => [entry.manifest.id, entry]));
-    for (const [extensionId, target] of this.#preparationTargets) {
-      if (target.slot === "candidate") continue;
-      const entry = enabled.get(extensionId);
-      const integrity = entry?.integrity;
-      const grants = entry?.capabilityGrants;
-      if (!entry || integrity !== target.integrity || entry.desired.revision !== target.desiredRevision
-        || !grants || grantIdentity(grants, target.version) !== target.grantIdentity) {
-        this.#invalidate(extensionId);
-      }
+    for (const tracked of this.#ownerGrants.values()) {
+      const entry = snapshot.extensions.find(entry => entry.manifest.id === tracked.owner.extensionId);
+      if (!entry?.desired.enabled) { disabled.add(tracked.owner.extensionId); continue; }
+      const source = tracked.slot === 'candidate' ? entry.candidate : entry;
+      if (!source) continue;
+      const denied = new Set(source.capabilityGrants.filter(grant => grant.realm === 'host' && !grant.granted).map(grant => grant.capability));
+      if (tracked.grants.some(grant => grant.granted && denied.has(grant.capability))) deniedOwners.push(tracked.owner);
+      for (const grant of tracked.grants) if (denied.has(grant.capability)) grant.granted = false;
     }
-    const owners = new Set([...this.#active.keys(), ...this.#staged.keys(), ...this.#preparations.keys(),
-      ...this.#selectedPreparations.keys(), ...this.#candidatePreparations.keys(),
-      ...[...this.#retirements.values()].map(({ instance }) => instance.owner.extensionId)]);
-    const deactivations = [...owners].filter((extensionId) => {
-      const entry = enabled.get(extensionId);
-      return !entry || !entry.manifest.entrypoints?.host;
-    }).map((extensionId) => this.#deactivateWithDependents(extensionId, snapshot));
-    await Promise.all([candidateCleanup, ...deactivations, ...[...enabled.values()].map(async (entry) => {
-      if (entry.candidate?.applyRequested && entry.candidate.manifest.updateReadiness) {
-        if (entry.manifest.entrypoints?.host) await this.#ensureSelectedActive(entry, snapshot, []);
-        await this.#reportUpdateReadinessWaiting(entry, snapshot);
-        return;
-      }
-      if (entry.candidate?.applyRequested
-        && !this.#active.has(entry.manifest.id)) {
-        try {
-          const current = await this.#catalog.snapshot();
-          const candidate = current.extensions.find((value) => value.manifest.id === entry.manifest.id)?.candidate;
-          if (!candidate?.applyRequested || candidate.integrity !== entry.candidate.integrity) return;
-          const selected = candidate.manifest.entrypoints?.host?.mode === "native"
-            ? await this.#packages.selectCandidate({
-              candidateIntegrity: candidate.integrity,
-              expectedRevision: current.revision,
-              extensionId: entry.manifest.id,
-            })
-            : await this.selectCandidate(entry.manifest.id, candidate.integrity, current.revision);
-          const selectedEntry = selected.extensions.find((value) => value.manifest.id === entry.manifest.id);
-          if (selectedEntry) await this.#ensureSelectedActive(selectedEntry, selected, []);
-        } catch (error) {
-          // A persisted application request is independent of optional Surface consumers.
-          // If preparing it fails on restart, recover the still-selected previous Host.
-          const current = await this.#catalog.snapshot();
-          const selectedEntry = current.extensions.find(value => value.manifest.id === entry.manifest.id);
-          let recoveryError: unknown;
-          if (selectedEntry?.desired.enabled && selectedEntry.manifest.entrypoints?.host) {
-            try { await this.#ensureSelectedActive(selectedEntry, current, []); }
-            catch (failure) { recoveryError = failure; }
-          }
-          await this.#reportActual(entry.manifest.id, diagnosticState(
-            snapshot.hostId,
-            entry.desired.revision,
-            this.#active.get(entry.manifest.id)?.owner.generation ?? 0,
-            this.#active.has(entry.manifest.id) ? "active" : "failed",
-            "requested_candidate_activation_failed",
-            [error, recoveryError].filter(value => value !== undefined)
-              .map(value => value instanceof Error ? value.message : String(value)).join("; "),
-          )).catch(() => undefined);
-        }
-        return;
+    for (const id of disabled) this.#revoke(id);
+    this.#revokeOwners(deniedOwners);
+    await this.reconcileCandidatePreparations();
+    await Promise.all(snapshot.extensions.filter(entry => entry.desired.enabled).map(async entry => {
+      if (entry.candidate?.applyRequested && !entry.candidate.manifest.updateReadiness) {
+        try { await this.selectCandidate(entry.manifest.id, entry.candidate.integrity, (await this.#catalog.snapshot()).revision); }
+        catch (error) { await this.#reportOwner(entry.manifest.id, 'requested_candidate_activation_failed', error); }
       }
       if (!entry.manifest.entrypoints?.host) return;
       const activation = entry.manifest.entrypoints.host.activation ?? [];
-      const startsWithApplication = activation.length === 0
-        || activation.includes("application-startup")
-        || activation.includes("background");
-      if (!startsWithApplication && !this.#active.has(entry.manifest.id)) {
-        const reported = entry.actual.find((state) => state.realmKind === "host" && state.entrypointId === "host");
-        if (!reported || reported.status !== "inactive") {
-          await this.#reportActual(entry.manifest.id, diagnosticState(
-            snapshot.hostId,
-            entry.desired.revision,
-            reported?.generation ?? 0,
-            "inactive",
-          )).catch(() => undefined);
-        }
-        return;
-      }
-      try {
-        await this.#ensureSelectedActive(entry, snapshot, []);
-      } catch (error) {
-        const native = entry.manifest.entrypoints.host.mode === "native";
-        if (native) this.#nativeRestartRequired.add(entry.manifest.id);
-        await this.#reportActual(entry.manifest.id, diagnosticState(
-          snapshot.hostId,
-          entry.desired.revision,
-          this.#active.get(entry.manifest.id)?.owner.generation ?? 0,
-          native ? "restart-required" : this.#active.has(entry.manifest.id) ? "active" : "failed",
-          native ? "trusted_native_host_activation_failed" : "brokered_host_activation_failed",
-          error instanceof Error ? error.message : String(error),
-        )).catch(() => undefined);
-        return;
-      }
-    })]);
+      if (activation.length && !activation.includes('application-startup') && !activation.includes('background') && !this.#anchors.has(entry.manifest.id)) return;
+      try { await this.activateExtension(entry.manifest.id); }
+      catch (error) { await this.#reportOwner(entry.manifest.id, 'host_activation_failed', error); }
+    }));
+    // Explicit disable owns completion of the actual teardown, including disposer failures.
+    // Independent preparation has no global queue and remains callable while this awaits its owners.
+    await Promise.all([...disabled].map(id => this.deactivateExtension(id)));
   }
-
-  async #ensureSelectedActive(
-    entry: VarinExtensionCatalogEntry,
-    snapshot: VarinExtensionCatalogSnapshot,
-    stack: string[],
-  ): Promise<void> {
+  async #reportOwner(extensionId: string, code?: string, error?: unknown): Promise<void> {
+    const snapshot = await this.#catalog.snapshot();
+    const entry = snapshot.extensions.find(entry => entry.manifest.id === extensionId); if (!entry) return;
+    const active = this.#latest(extensionId);
+    const status = this.#nativeRestartRequired.has(extensionId) ? 'restart-required' : active ? 'active' : code ? 'failed' : 'inactive';
+    const state = diagnosticState(snapshot.hostId, entry.desired.revision, active?.owner.generation ?? this.#generations.get(extensionId) ?? 0,
+      status, code, error instanceof Error ? error.message : error === undefined ? undefined : String(error));
+    const cleanupDiagnostics = entry.actual.filter(actual => actual.realmKind === 'host' && actual.hostId === snapshot.hostId)
+      .flatMap(actual => actual.diagnostics.filter(diagnostic => (diagnostic.code === 'broker_cleanup_unconfirmed' || diagnostic.code === 'host_retirement_failed')
+        && (!active || diagnostic.message.startsWith(`Broker generation ${state.generation} `) || diagnostic.message.startsWith(`Retiring generation ${state.generation}:`))));
+    state.diagnostics = [...new Map([...cleanupDiagnostics, ...state.diagnostics].map(diagnostic => [`${diagnostic.code}\0${diagnostic.message}`, diagnostic])).values()];
+    await this.#reportActual(extensionId, state);
+  }
+  async reconcileCandidatePreparations(): Promise<void> {
+    const snapshot = await this.#catalog.snapshot(); if (!snapshot.authoritative) return;
+    for (const group of [...this.#staged.values()]) {
+      const entry = snapshot.extensions.find(entry => entry.manifest.id === group.extensionId);
+      if (entry?.desired.enabled && entry.desired.revision === group.desiredRevision
+        && (entry.candidate?.integrity === group.integrity || entry.integrity === group.integrity)) continue;
+      await this.discardPreparedCandidate(group.extensionId, group.integrity);
+    }
+  }
+  prepareCandidate(extensionId: string, integrity: string): Promise<VarinExtensionCandidatePreparationResult> {
+    const key = `${extensionId}\0${integrity}`;
+    const pending = this.#candidatePreparations.get(key); if (pending) return pending;
+    const promise = this.#prepareCandidate(extensionId, integrity);
+    this.#candidatePreparations.set(key, promise);
+    void promise.finally(() => { if (this.#candidatePreparations.get(key) === promise) this.#candidatePreparations.delete(key); }).catch(() => undefined);
+    return promise;
+  }
+  async #prepareCandidate(extensionId: string, integrity: string): Promise<VarinExtensionCandidatePreparationResult> {
     this.#assertRunning();
-    const preparing = this.#preparationTargets.get(entry.manifest.id);
-    if (preparing?.slot === "selected" && (preparing.integrity !== entry.integrity
-      || preparing.desiredRevision !== entry.desired.revision
-      || preparing.grantIdentity !== grantIdentity(entry.capabilityGrants, entry.selectedVersion))) {
-      this.#invalidate(entry.manifest.id);
+    const snapshot = await this.#catalog.snapshot(), entry = snapshot.extensions.find(entry => entry.manifest.id === extensionId);
+    if (entry?.integrity === integrity) return { extensionId, integrity, providers: this.#services.getSnapshot().providers.filter(provider => provider.extensionId === extensionId && provider.status === 'active') };
+    if (!entry?.candidate || entry.candidate.integrity !== integrity) throw new Error(`Host candidate is stale: ${extensionId}`);
+    if (!entry.candidate.capabilitiesReviewed) throw new Error(`Host candidate capabilities require review: ${extensionId}`);
+    if (!entry.desired.enabled || !entry.candidate.manifest.entrypoints?.host) return { extensionId, integrity, providers: [] };
+    if (entry.candidate.manifest.entrypoints.host.mode === 'native') {
+      if (this.#ownerGrants.size && [...this.#ownerGrants.values()].some(owner => owner.owner.extensionId === extensionId)) throw new Error('Trusted-native Host candidate requires an application-host restart');
+      if (entry.candidate.manifest.updateReadiness) throw new ExtensionUpdateReadinessError('required_surface_readiness', 'Trusted-native grouped update requires disable, apply and restart');
+      return { extensionId, integrity, providers: [] };
     }
-    const epoch = this.#epochs.get(entry.manifest.id) ?? 0;
-    if (stack.includes(entry.manifest.id)) {
-      throw new Error(`Host service dependency cycle: ${[...stack, entry.manifest.id].join(" -> ")}`);
+    const existing = this.#staged.get(extensionId);
+    const consumers = [...this.#roots].filter(root => root.plan.composition.nodes.some(node => node.extensionId === extensionId));
+    if (existing?.integrity === integrity && existing.desiredRevision === entry.desired.revision
+      && existing.roots.filter(root => root.consumer).length === consumers.length
+      && consumers.every(consumer => existing.roots.some(root => root.consumer === consumer))) {
+      for (const instance of existing.instances) await this.#assertCurrent(instance);
+      return this.#candidatePreparation(existing);
     }
-    const nextStack = [...stack, entry.manifest.id];
-    for (const requirement of entry.manifest.requires?.services ?? []) {
-      if (requirement.optional || this.#services.providersFor(requirement).length > 0) continue;
-      const providers = this.#providerEntries(requirement, snapshot);
-      for (const provider of providers) {
-        await this.#ensureSelectedActive(provider, snapshot, nextStack).catch((error: unknown) => {
-          if (error instanceof Error && error.message.startsWith("Host service dependency cycle:")) throw error;
-        });
-      }
-      if (this.#services.providersFor(requirement).length === 0) {
-        await this.#reportActual(entry.manifest.id, diagnosticState(
-          snapshot.hostId,
-          entry.desired.revision,
-          this.#active.get(entry.manifest.id)?.owner.generation ?? 0,
-          "waiting",
-          "required_host_service_unavailable",
-          `Required Host service is unavailable: ${serviceKey(requirement.id, requirement.version)}`,
-        ));
-        return;
-      }
+    if (existing) {
+      // An already queued publication owns its preparation. A new caller cannot tear it down.
+      if (this.#operations.has(extensionId)) throw new Error('Host candidate publication is already in progress');
+      await this.#releaseCandidateGroup(existing);
     }
-    // Publication is already complete even when the owner's replacement operation is still
-    // draining an older Run pin. The ready generation must not queue behind that retirement.
-    const ready = this.#active.get(entry.manifest.id);
-    if (ready && ready.epoch === epoch && !ready.preparation.signal.aborted
-      && this.#ownerGrants.has(ownerStorageKey(ready.owner)) && ready.artifactIntegrity === entry.integrity
-      && ready.desiredRevision === entry.desired.revision
-      && ready.grantIdentity === grantIdentity(entry.capabilityGrants, entry.selectedVersion)) return;
-    const identity = `${entry.integrity}:${entry.desired.revision}:${epoch}:${grantIdentity(entry.capabilityGrants, entry.selectedVersion)}`;
-    const pending = this.#selectedPreparations.get(entry.manifest.id);
-    if (pending?.identity === identity) return pending.promise;
-    const promise = this.#enqueue(entry.manifest.id, async () => {
-      this.#assertRunning();
-      if ((this.#epochs.get(entry.manifest.id) ?? 0) !== epoch) throw new Error("Host activation was cancelled");
-      const current = (await this.#catalog.snapshot()).extensions.find((value) => value.manifest.id === entry.manifest.id);
-      if (!current?.desired.enabled || current.integrity !== entry.integrity || current.desired.revision !== entry.desired.revision
-        || grantIdentity(current.capabilityGrants, current.selectedVersion) !== grantIdentity(entry.capabilityGrants, entry.selectedVersion)) {
-        throw new Error(`Host activation is stale: ${entry.manifest.id}`);
+    const activation = entry.candidate.manifest.entrypoints.host.activation ?? [];
+    if (!consumers.length && !entry.candidate.manifest.updateReadiness && activation.length
+      && !activation.includes('application-startup') && !activation.includes('background')) {
+      // A lazy declaration without a live selection owner has no scope to compose yet.
+      // An old exact exchange pin is deliberately not a replacement selection owner.
+      return { extensionId, integrity, providers: [] };
+    }
+    const contexts = consumers.length ? consumers.map(consumer => ({ extensionId: consumer.plan.root.node.extensionId, scope: consumer.plan.scope, consumer }))
+      : [{ extensionId, scope: {} as VarinExtensionServiceRoutingContext, consumer: undefined }];
+    const roots: CandidateGroup['roots'] = [];
+    try {
+      for (const context of contexts) {
+        const plan = await this.#plan(context.extensionId, context.scope, { extensionId, integrity });
+        const lease = await this.prepareComposition(plan, undefined, false);
+        roots.push({ plan, lease, ...(context.consumer ? { consumer: context.consumer } : {}) });
       }
-      this.#assertRunning();
-      const active = this.#active.get(entry.manifest.id);
-      const native = entry.manifest.entrypoints?.host?.mode === "native";
-      if (native && (this.#nativeRestartRequired.has(entry.manifest.id) || (active && active.artifactIntegrity !== entry.integrity))) {
-        this.#nativeRestartRequired.add(entry.manifest.id);
-        await this.#reportActual(entry.manifest.id, diagnosticState(
-          snapshot.hostId,
-          entry.desired.revision,
-          active?.owner.generation ?? 0,
-          "restart-required",
-          "trusted_native_restart_required",
-          "The trusted-native Host generation can change only after the application host restarts",
-        )).catch(() => undefined);
-        return;
-      }
-      if (active && this.#ownerGrants.has(ownerStorageKey(active.owner)) && active.artifactIntegrity === entry.integrity && active.desiredRevision === entry.desired.revision
-        && active.grantIdentity === grantIdentity(entry.capabilityGrants, entry.selectedVersion)) return;
-      if (native && active && active.artifactIntegrity === entry.integrity) {
-        active.grants.splice(0, active.grants.length, ...hostGrants(entry.capabilityGrants, active.owner.extensionVersion));
-        active.grantIdentity = grantIdentity(active.grants, active.owner.extensionVersion);
-        active.desiredRevision = entry.desired.revision;
-        await this.#reportActual(entry.manifest.id, diagnosticState(
-          snapshot.hostId,
-          entry.desired.revision,
-          active.owner.generation,
-          "active",
-        )).catch(() => undefined);
-        return;
-      }
-      if (!entry.integrity) throw new Error(`Host extension has no selected artifact: ${entry.manifest.id}`);
-      const candidate = await this.#prepareInstance(entry, {
-        capabilityGrants: entry.capabilityGrants,
-        integrity: entry.integrity,
-        manifest: entry.manifest,
-        slot: "selected",
-        version: entry.selectedVersion,
-      }, snapshot);
-      let replacement: ReturnType<HostServiceRegistry["prepareOwnerReplacement"]> | undefined;
-      let storageCommitted = false;
-      if (active) this.#setStoragePhase(active, "draining");
-      try {
-        await this.#assertCurrent(candidate);
-        replacement = this.#services.prepareOwnerReplacement(candidate.owner, candidate.provisions);
-        await this.#commitInstanceStorage(candidate);
-        storageCommitted = true;
-        await this.#assertCurrent(candidate);
-        replacement.commit();
-        this.#finalizeInstanceStorage(candidate);
-        this.#active.set(entry.manifest.id, candidate);
-        await this.#reportActual(entry.manifest.id, diagnosticState(
-          snapshot.hostId,
-          entry.desired.revision,
-          candidate.owner.generation,
-          "active",
-        )).catch(() => undefined);
-      } catch (error) {
-        await replacement?.rollback().catch(() => undefined);
-        if (storageCommitted) await this.#rollbackInstanceStorage(candidate);
-        await this.#disposeInstance(candidate, false);
-        if (active) {
-          this.#setStoragePhase(active, "active");
-          this.#active.set(entry.manifest.id, active);
-          await this.#reportActual(entry.manifest.id, diagnosticState(
-            snapshot.hostId,
-            active.desiredRevision,
-            active.owner.generation,
-            "active",
-            "host_candidate_activation_failed",
-            error instanceof Error ? error.message : String(error),
-          ));
-          return;
+      const instances = [...this.#active.values()].filter(instance => !instance.published && roots.some(root => root.plan.composition.nodes.some(node => node.id === instance.composition.root)));
+      const group: CandidateGroup = { extensionId, integrity, desiredRevision: entry.desired.revision, preparationId: randomUUID(),
+        generation: Math.max(0, ...instances.filter(instance => instance.owner.extensionId === extensionId).map(instance => instance.owner.generation)), roots, instances };
+      this.#staged.set(extensionId, group);
+      return this.#candidatePreparation(group);
+    } catch (error) { for (const root of roots) root.lease.release(); throw error; }
+  }
+  #candidatePreparation(group: CandidateGroup): VarinExtensionCandidatePreparationResult {
+    const providers = this.#services.getSnapshot().providers.filter(provider => group.instances.some(instance => instance.owner.extensionId === provider.extensionId && instance.owner.generation === provider.generation));
+    return { extensionId: group.extensionId, integrity: group.integrity,
+      hostPreparation: { id: group.preparationId, hostId: this.#services.hostId, desiredRevision: group.desiredRevision, generation: group.generation }, providers };
+  }
+  async selectCandidate(extensionId: string, integrity: string, expectedRevision: number, signal?: AbortSignal,
+    surfaceReadiness?: VarinExtensionSurfaceReadiness): Promise<VarinExtensionCatalogSnapshot> {
+    signal?.throwIfAborted();
+    const snapshot = await this.#catalog.snapshot(), entry = snapshot.extensions.find(entry => entry.manifest.id === extensionId);
+    if (entry?.integrity === integrity) return snapshot;
+    if (entry?.desired.enabled && entry.candidate?.manifest.updateReadiness && !surfaceReadiness) throw new ExtensionUpdateReadinessError('required_surface_readiness', 'The update requires a compatible Surface to prepare its declared group');
+    this.#candidateSelections.add(extensionId);
+    try {
+      await this.prepareCandidate(extensionId, integrity);
+      return await this.#enqueue(extensionId, async () => {
+        signal?.throwIfAborted(); this.#assertRunning();
+        const group = this.#staged.get(extensionId);
+        if (!group) return this.#packages.selectCandidate({ extensionId, candidateIntegrity: integrity, expectedRevision }, () => signal?.throwIfAborted());
+        if (group.integrity !== integrity) throw new Error('Host candidate preparation changed');
+        const current = (await this.#catalog.snapshot()).extensions.find(entry => entry.manifest.id === extensionId);
+        const manifest = current?.candidate?.manifest;
+        const required = manifest?.updateReadiness?.surfaceEntrypoints;
+        let routingRevision: number | undefined;
+        const validate = (checkConnection = true) => {
+          if (checkConnection && routingRevision !== undefined) this.#routing.assertCurrentRevision(routingRevision);
+          if (checkConnection) signal?.throwIfAborted(); this.#assertRunning();
+          if (this.#staged.get(extensionId) !== group || group.instances.some(instance => instance.preparation.signal.aborted || instance.revoked)) throw new Error('Host candidate publication was cancelled');
+          if (!required && surfaceReadiness) throw new ExtensionUpdateReadinessError('surface_readiness_not_declared', 'This candidate does not declare a Surface update group');
+          if (required) {
+            const prepared = surfaceReadiness?.hostPreparation, members = new Set(surfaceReadiness?.members.map(member => member.entrypointId));
+            if (!prepared || prepared.id !== group.preparationId || prepared.hostId !== this.#services.hostId
+              || prepared.generation !== group.generation || prepared.desiredRevision !== group.desiredRevision
+              || members.size !== surfaceReadiness!.members.length || members.size !== required.length
+              || required.some(id => !members.has(id) || !manifest?.entrypoints?.surfaces?.find(entry => entry.id === id)?.supports.includes(surfaceReadiness!.surface))) {
+              throw new ExtensionUpdateReadinessError('stale_surface_readiness', 'Surface update readiness does not match the current Host preparation and required members');
+            }
+          }
+        };
+        validate();
+        const committed: BrokeredHostInstance[] = [];
+        let catalogCommitted = false;
+        try {
+          for (const instance of group.instances) { await this.#assertCurrent(instance); await this.#commitInstanceStorage(instance); committed.push(instance); }
+          for (const root of group.roots) {
+            const fresh = await this.#plan(root.plan.root.node.extensionId, root.plan.scope, { extensionId, integrity });
+            if (canonicalServiceComposition(fresh.composition) !== canonicalServiceComposition(root.plan.composition)) throw new Error('Host candidate composition changed');
+            if (routingRevision !== undefined && routingRevision !== fresh.routingRevision) throw new Error('Host service routing changed during candidate preparation');
+            routingRevision = fresh.routingRevision;
+          }
+          const selected = await this.#packages.selectCandidate({ extensionId, candidateIntegrity: integrity, expectedRevision }, validate);
+          catalogCommitted = true;
+          validate(false);
+          for (const instance of group.instances) {
+            instance.slot = 'selected'; instance.published = true;
+            this.#finalizeInstanceStorage(instance); this.#services.publishOwner(instance.owner);
+          }
+          for (const root of group.roots) if (root.consumer && this.#roots.has(root.consumer)) {
+            const replacement = this.#active.get(root.lease.owner.instanceKey);
+            if (replacement) {
+              const old = root.consumer.instance, previous = root.consumer.current;
+              if (old === replacement) { root.consumer.plan = root.plan; continue; }
+              root.consumer.current = this.#retain(replacement); root.consumer.instance = replacement; root.consumer.plan = root.plan;
+              previous.release(); this.#retire(old);
+            }
+          }
+          this.#staged.delete(extensionId);
+          for (const root of group.roots) root.lease.release();
+          await this.#reportOwner(extensionId);
+          return selected;
+        } catch (error) {
+          if (!catalogCommitted) for (const instance of committed.reverse()) await this.#rollbackInstanceStorage(instance);
+          else {
+            for (const root of group.roots) if (root.consumer && this.#roots.has(root.consumer)) this.#retire(root.consumer.instance);
+            this.#staged.delete(extensionId);
+            for (const root of group.roots) root.lease.release();
+          }
+          throw error;
         }
-        this.#active.delete(entry.manifest.id);
-        throw error;
-      }
-      // Publication succeeded. A retirement/cleanup failure cannot resurrect the old owner
-      // after its service registrations or storage session have already been released.
-      if (active) this.#retirePrevious(active, () => replacement!.finalize());
-      else await replacement.finalize();
-    });
-    this.#selectedPreparations.set(entry.manifest.id, { identity, promise });
-    try { await promise; }
-    finally {
-      if (this.#selectedPreparations.get(entry.manifest.id)?.promise === promise) this.#selectedPreparations.delete(entry.manifest.id);
-    }
+      });
+    } finally { this.#candidateSelections.delete(extensionId); }
   }
-
-  #providerEntries(requirement: VarinExtensionServiceRequirement, snapshot: VarinExtensionCatalogSnapshot): VarinExtensionCatalogEntry[] {
-    const providers = snapshot.extensions.filter((entry) => (
-      entry.desired.enabled
-      && Boolean(entry.manifest.entrypoints?.host)
-      && (entry.manifest.provides?.services ?? []).some((service) => service.id === requirement.id && service.version === requirement.version)
-    ));
-    if (requirement.binding === "all") return providers;
-    if (requirement.binding === "selected") return [];
-    return providers.length === 1 ? providers : [];
+  async discardPreparedCandidate(extensionId: string, integrity: string): Promise<void> {
+    const group = this.#staged.get(extensionId);
+    if (!group || group.integrity !== integrity || this.#candidateSelections.has(extensionId)) return;
+    await this.#releaseCandidateGroup(group);
   }
-
+  async #releaseCandidateGroup(group: CandidateGroup): Promise<void> {
+    if (this.#staged.get(group.extensionId) === group) this.#staged.delete(group.extensionId);
+    for (const root of group.roots) root.lease.release();
+    await Promise.all(group.instances.map(instance => this.#retirements.get(ownerStorageKey(instance.owner))?.promise));
+  }
+  hasStagedProvider(providerId: string): boolean { return this.#services.getSnapshot().providers.some(provider => provider.providerId === providerId && provider.status === 'candidate'); }
+  async invokeStagedService(requestValue: VarinExtensionServiceInvocationRequest | unknown, signal?: AbortSignal): Promise<JsonValue> {
+    const request = parseVarinExtensionServiceInvocationRequest(requestValue);
+    if (!request.providerId) throw new Error('Candidate invocation requires an exact provider ID');
+    const binding = this.#services.bindPrepared(request.serviceId, request.version, request.providerId);
+    try { return await binding.invoke(request.method, request.args, signal); } finally { binding.release(); }
+  }
+  shutdown(): Promise<void> {
+    if (this.#shutdown) return this.#shutdown;
+    this.#stopping = true;
+    for (const pending of this.#pending.values()) pending.controller.abort(new Error('Host supervisor is shutting down'));
+    for (const anchor of this.#anchors.values()) anchor.release(); this.#anchors.clear();
+    for (const group of this.#staged.values()) for (const root of group.roots) root.lease.release(); this.#staged.clear();
+    for (const id of new Set([...this.#ownerGrants.values()].map(owner => owner.owner.extensionId))) this.#revoke(id);
+    this.#shutdown = (async () => {
+      await Promise.allSettled([...this.#pending.values()].map(pending => pending.promise));
+      const results = await Promise.allSettled([...this.#retirements.values()].map(retirement => retirement.promise));
+      const errors = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+      if (errors.length) throw new AggregateError(errors.map(result => result.reason), 'Extension Host shutdown reported failures');
+    })();
+    return this.#shutdown;
+  }
   async #prepareInstance(
     entry: VarinExtensionCatalogEntry,
     selection: {
@@ -1212,16 +1012,17 @@ export class BrokeredHostSupervisor {
       version: string;
     },
     snapshot: VarinExtensionCatalogSnapshot,
+    composition: { instanceKey: string; composition: VarinHostServiceComposition; dependencies: VarinHostServiceDependencyBinding[]; dependencyPins: HostServicePin[]; signal: AbortSignal },
   ): Promise<BrokeredHostInstance> {
     this.#assertRunning();
     const epoch = this.#epochs.get(entry.manifest.id) ?? 0;
     const controller = new AbortController();
     let prepared = false;
-    this.#preparations.set(entry.manifest.id, controller);
-    this.#preparationTargets.set(entry.manifest.id, {
-      integrity: selection.integrity, slot: selection.slot, desiredRevision: entry.desired.revision,
-      grantIdentity: grantIdentity(selection.capabilityGrants, selection.version), version: selection.version,
-    });
+    const preparationKey = `${entry.manifest.id}\0${composition.instanceKey}`;
+    this.#preparations.set(preparationKey, controller);
+    const abort = () => controller.abort(composition.signal.reason);
+    composition.signal.addEventListener('abort', abort, { once: true });
+    if (composition.signal.aborted) abort();
     try {
       const current = (await this.#catalog.snapshot()).extensions.find((value) => value.manifest.id === entry.manifest.id);
       const currentSelection = selection.slot === "candidate" ? current?.candidate : current;
@@ -1240,6 +1041,7 @@ export class BrokeredHostSupervisor {
         extensionId: entry.manifest.id,
         extensionVersion: selection.version,
         generation,
+        instanceKey: composition.instanceKey,
       };
       const grants = hostGrants(selection.capabilityGrants, selection.version);
       const preparedGrantIdentity = grantIdentity(grants, selection.version);
@@ -1256,9 +1058,10 @@ export class BrokeredHostSupervisor {
             crashed = error;
             // A crash belongs to this actual process, including an unpublished candidate.
             controller.abort(error);
-            void this.#handleCrash(entry.manifest.id, owner, error, snapshot.hostId, entry.desired.revision);
+            this.#handleCrash(owner, error);
           },
         });
+      this.#ownerDependencies.set(ownerStorageKey(owner), { bindings: composition.dependencies, pins: composition.dependencyPins });
       this.#ownerGrants.set(ownerStorageKey(owner), { owner, artifactIntegrity: selection.integrity, grants, desiredRevision: entry.desired.revision, slot: selection.slot, broker, native: selection.manifest.entrypoints?.host?.mode === "native" });
       const cancelPreparation = () => broker.forceTerminate();
       controller.signal.addEventListener("abort", cancelPreparation, { once: true });
@@ -1296,6 +1099,7 @@ export class BrokeredHostSupervisor {
           modulePath: artifact.modulePath,
           packageRoot: artifact.packageRoot,
           storage: storageSnapshot,
+          dependencies: composition.dependencies,
         }, controller.signal) as BrokerActivationResult;
         controller.signal.throwIfAborted();
         if ((this.#epochs.get(entry.manifest.id) ?? 0) !== epoch) throw new Error("Host activation was superseded");
@@ -1316,19 +1120,23 @@ export class BrokeredHostSupervisor {
           provisions,
           slot: selection.slot,
           storages,
+          composition: composition.composition, dependencies: composition.dependencies, dependencyPins: composition.dependencyPins,
+          references: 0, referenceReleases: new Set(), onUnreferenced: [], published: false, retiring: false, revoked: false, disposed: false, revocation: new AbortController(),
         };
       } catch (error) {
         for (const session of this.#storageSessions.get(ownerStorageKey(owner))?.values() ?? []) session.phase = "disposed";
         this.#storageSessions.delete(ownerStorageKey(owner));
         for (const grant of grants) grant.granted = false;
         this.#ownerGrants.delete(ownerStorageKey(owner));
+        this.#ownerDependencies.delete(ownerStorageKey(owner));
         broker.forceTerminate();
+        await broker.terminate().catch(() => undefined);
         if (selection.manifest.entrypoints?.host?.mode === "native") this.#nativeRestartRequired.add(entry.manifest.id);
         // Direct service preparation has no startup/reconcile catch to publish its failure.
         // Retain a real old generation, and never overwrite a later selection/cancellation.
         if (!controller.signal.aborted && (this.#epochs.get(entry.manifest.id) ?? 0) === epoch
           && this.#generations.get(entry.manifest.id) === generation) {
-          const active = this.#active.get(entry.manifest.id);
+          const active = this.#latest(entry.manifest.id);
           await this.#reportActual(entry.manifest.id, diagnosticState(
             snapshot.hostId, entry.desired.revision, active?.owner.generation ?? generation,
             active ? 'active' : 'failed', active ? 'host_candidate_activation_failed' : 'host_activation_failed',
@@ -1338,10 +1146,8 @@ export class BrokeredHostSupervisor {
         throw error;
       }
     } finally {
-      if (!prepared && this.#preparations.get(entry.manifest.id) === controller) {
-        this.#preparations.delete(entry.manifest.id);
-        this.#preparationTargets.delete(entry.manifest.id);
-      }
+      composition.signal.removeEventListener('abort', abort);
+      if (!prepared && this.#preparations.get(preparationKey) === controller) this.#preparations.delete(preparationKey);
     }
   }
 
@@ -1368,12 +1174,11 @@ export class BrokeredHostSupervisor {
       return {
         descriptor: { ...descriptor },
         handler: async (method, args, context) => {
-          const invocationId = context.invocation ? randomUUID() : undefined;
-          const lifetime = context.invocation ? new AbortController() : undefined;
+          const invocationId = randomUUID();
+          const lifetime = new AbortController();
           const invocationKey = invocationId ? `${ownerStorageKey(owner)}\0${invocationId}` : undefined;
-          if (invocationKey && context.invocation && lifetime) {
-            this.#invocations.set(invocationKey, { scope: context.invocation, signal: AbortSignal.any([context.signal, lifetime.signal]) });
-          }
+          if (invocationKey) this.#invocations.set(invocationKey, { ...(context.invocation ? { scope: context.invocation } : {}),
+            signal: AbortSignal.any([context.signal, lifetime.signal]), active: true });
           try {
             return asJsonValue(await broker.request("service.invoke", {
               args,
@@ -1396,124 +1201,16 @@ export class BrokeredHostSupervisor {
     return provisions;
   }
 
+
   #providerId(owner: HostServiceOwnerIdentity, descriptor: VarinExtensionServiceProvision): string {
     return `${owner.extensionId}:${owner.entrypointId}:${owner.generation}:${serviceKey(descriptor.id, descriptor.version)}`;
   }
 
-  #providerKey(owner: HostServiceOwnerIdentity, descriptor: VarinExtensionServiceProvision): string {
-    return `${owner.extensionId}:${owner.entrypointId}:${serviceKey(descriptor.id, descriptor.version)}`;
-  }
-
-  #candidatePreparation(instance: BrokeredHostInstance): VarinExtensionCandidatePreparationResult {
-    const providers = instance.provisions.map<VarinExtensionServiceProviderSnapshot>((provision) => ({
-      descriptor: { ...provision.descriptor },
-      entrypointId: instance.owner.entrypointId,
-      extensionId: instance.owner.extensionId,
-      extensionVersion: instance.owner.extensionVersion,
-      generation: instance.owner.generation,
-      providerId: this.#providerId(instance.owner, provision.descriptor),
-      providerKey: this.#providerKey(instance.owner, provision.descriptor),
-      status: "candidate",
-    }));
-    return {
-      extensionId: instance.owner.extensionId,
-      integrity: instance.artifactIntegrity,
-      hostPreparation: { id: instance.preparationId, hostId: this.#services.hostId,
-        desiredRevision: instance.desiredRevision, generation: instance.owner.generation },
-      providers,
-    };
-  }
-
-  /** Explicit disable/shutdown must not wait on an uncooperative callback before stopping its
-   * execution process. This does not assert that any external effect was undone. Replacement
-   * never calls this path: its old generation remains available to valid exchange pins. */
-  #stopRevokedCalls(extensionId?: string): void {
-    for (const tracked of this.#ownerGrants.values()) {
-      if (extensionId && tracked.owner.extensionId !== extensionId) continue;
-      this.#services.revokeOwner(tracked.owner);
-      if (!tracked.native && this.#services.hasPendingOwnerCalls(tracked.owner)) {
-        for (const grant of tracked.grants) grant.granted = false;
-        tracked.broker.forceTerminate();
-      }
-    }
-  }
-
-  async #deactivateWithDependents(
-    extensionId: string,
-    snapshot: VarinExtensionCatalogSnapshot,
-    visited = new Set<string>(),
-    afterDeactivate?: () => Promise<void>,
-  ): Promise<void> {
-    if (visited.has(extensionId)) return;
-    visited.add(extensionId);
-    // Close exchange admission before waiting for the owner queue: replacement finalization
-    // may itself be awaiting an old pin. Explicit revocation also stops retained callbacks.
-    this.#stopRevokedCalls(extensionId);
-    this.#invalidate(extensionId);
-    const manifest = this.#active.get(extensionId)?.manifest
-      ?? snapshot.extensions.find((entry) => entry.manifest.id === extensionId)?.manifest;
-    const provided = new Set((manifest?.provides?.services ?? []).map((service) => serviceKey(service.id, service.version)));
-    for (const entry of snapshot.extensions) {
-      const dependentId = entry.manifest.id;
-      if (dependentId === extensionId) continue;
-      const dependent = this.#active.get(dependentId)?.manifest ?? entry.manifest;
-      const requiresProvider = (dependent.requires?.services ?? []).some((requirement) => (
-        !requirement.optional && provided.has(serviceKey(requirement.id, requirement.version))
-      ));
-      if (requiresProvider) await this.#deactivateWithDependents(dependentId, snapshot, visited);
-    }
-    return this.#enqueue(extensionId, async () => {
-      const results = await Promise.allSettled([
-        this.#deactivateOwner(extensionId, snapshot), this.#drainRetirements(extensionId),
-      ]);
-      const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
-      if (failures.length) throw new AggregateError(failures.map(result => result.reason), "Host owner teardown failed");
-      await afterDeactivate?.();
-    });
-  }
-
-  async #deactivateOwner(extensionId: string, snapshot: VarinExtensionCatalogSnapshot): Promise<void> {
-    const staged = this.#staged.get(extensionId);
-    if (staged) {
-      this.#staged.delete(extensionId);
-      await this.#disposeInstance(staged, false);
-    }
-    const instance = this.#active.get(extensionId);
-    if (!instance) return;
-    await this.#services.drainOwner(instance.owner);
-    this.#active.delete(extensionId);
-    this.#services.removeOwner(instance.owner);
-    const entry = snapshot.extensions.find((candidate) => candidate.manifest.id === extensionId);
-    let cleanupConfirmed = true;
-    try {
-      cleanupConfirmed = await this.#disposeInstance(instance, true);
-    } catch (error) {
-      if (instance.manifest.entrypoints?.host?.mode !== "native") throw error;
-      this.#nativeRestartRequired.add(extensionId);
-      if (entry) await this.#reportActual(extensionId, diagnosticState(
-        snapshot.hostId,
-        entry.desired.revision,
-        instance.owner.generation + 1,
-        "restart-required",
-        "trusted_native_cleanup_failed",
-        error instanceof Error ? error.message : String(error),
-      )).catch(() => undefined);
-      return;
-    }
-    if (entry) await this.#reportActual(extensionId, diagnosticState(
-      snapshot.hostId,
-      entry.desired.revision,
-      instance.owner.generation + 1,
-      "inactive",
-      ...(cleanupConfirmed ? [] : ["broker_cleanup_unconfirmed", "Broker process exited; extension cleanup was not confirmed"]),
-    ));
-  }
-
   async #disposeInstance(instance: BrokeredHostInstance, terminate: boolean): Promise<boolean> {
-    if (this.#preparations.get(instance.owner.extensionId) === instance.preparation) {
-      this.#preparations.delete(instance.owner.extensionId);
-      this.#preparationTargets.delete(instance.owner.extensionId);
-    }
+    if (instance.disposed) return true;
+    instance.disposed = true;
+    const preparationKey = `${instance.owner.extensionId}\0${instance.owner.instanceKey}`;
+    if (this.#preparations.get(preparationKey) === instance.preparation) this.#preparations.delete(preparationKey);
     this.#setStoragePhase(instance, "disposed");
     this.#storageSessions.delete(ownerStorageKey(instance.owner));
     try {
@@ -1538,59 +1235,19 @@ export class BrokeredHostSupervisor {
       // leave those captured grants usable after the owner is no longer tracked.
       for (const grant of instance.grants) grant.granted = false;
       this.#ownerGrants.delete(ownerStorageKey(instance.owner));
+      this.#ownerDependencies.delete(ownerStorageKey(instance.owner));
+      for (const pin of instance.dependencyPins.splice(0)) pin.release();
     }
   }
 
-  #handleCrash(
-    extensionId: string,
-    owner: HostServiceOwnerIdentity,
-    error: Error,
-    hostId: string,
-    desiredRevision: number,
-  ): void {
-    const active = this.#active.get(extensionId);
-    // An unpublished newer candidate must not revoke the still-valid selected process.
-    if (active && owner.generation <= active.owner.generation) this.#services.revokeOwner(owner);
-    void this.#enqueue(extensionId, async () => {
-      await this.#handleCrashNow(extensionId, owner, error, hostId, desiredRevision);
-    }).catch(() => undefined);
+  #handleCrash(owner: HostServiceOwnerIdentity, error: Error): void {
+    const instance = this.#instance(owner);
+    if (!instance || instance.revoked) return;
+    instance.revoked = true;
+    instance.revocation.abort(error);
+    this.#revokeOwners([owner]);
+    void this.#reportOwner(owner.extensionId, 'brokered_host_crashed', error).catch(() => undefined);
   }
-
-  async #handleCrashNow(
-    extensionId: string,
-    owner: HostServiceOwnerIdentity,
-    error: Error,
-    hostId: string,
-    desiredRevision: number,
-  ): Promise<void> {
-    const active = this.#active.get(extensionId);
-    if (!active || active.owner.generation !== owner.generation) return;
-    await this.#services.drainOwner(owner);
-    const snapshot = await this.#catalog.snapshot();
-    const provided = new Set(active.provisions.map((provision) => serviceKey(provision.descriptor.id, provision.descriptor.version)));
-    for (const [dependentId, dependent] of [...this.#active]) {
-      if (dependentId === extensionId) continue;
-      const requiresProvider = (dependent.manifest.requires?.services ?? []).some((requirement) => (
-        !requirement.optional && provided.has(serviceKey(requirement.id, requirement.version))
-      ));
-      if (requiresProvider) await this.#deactivateWithDependents(dependentId, snapshot, new Set([extensionId]));
-    }
-    this.#services.removeOwner(owner);
-    this.#active.delete(extensionId);
-    this.#setStoragePhase(active, "disposed");
-    this.#storageSessions.delete(ownerStorageKey(owner));
-    for (const grant of active.grants) grant.granted = false;
-    this.#ownerGrants.delete(ownerStorageKey(owner));
-    await this.#reportActual(extensionId, diagnosticState(
-      hostId,
-      desiredRevision,
-      owner.generation,
-      "failed",
-      "brokered_host_crashed",
-      error.message,
-    )).catch(() => undefined);
-  }
-
   async #handleChildRequest(
     owner: HostServiceOwnerIdentity,
     grants: VarinExtensionCapabilityGrant[],
@@ -1604,7 +1261,7 @@ export class BrokeredHostSupervisor {
         : typeof params.invocationId === "string"
           ? this.#invocations.get(`${ownerStorageKey(owner)}\0${params.invocationId}`)
           : undefined;
-      if (params.invocationId !== undefined && !scoped) throw new Error("Host capability invocation is expired or belongs to another owner");
+      if (params.invocationId !== undefined && (!scoped || !scoped.active)) throw new Error("Host capability invocation is expired or belongs to another owner");
       const callSignal = scoped ? AbortSignal.any([signal, scoped.signal]) : signal;
       return this.#capabilities.invoke(
         owner,
@@ -1669,7 +1326,22 @@ export class BrokeredHostSupervisor {
       );
       return asJsonValue(session.snapshot);
     }
-    if (method === "service.invoke") return this.#invokeService(params, signal);
+    if (method === 'service.invoke') {
+      const request = parseVarinExtensionServiceInvocationRequest(params);
+      const dependencies = this.#ownerDependencies.get(ownerStorageKey(owner));
+      const binding = dependencies?.bindings.find(binding => binding.id === request.serviceId && binding.version === request.version);
+      const providerId = request.providerId ?? (binding?.providerIds.length === 1 ? binding.providerIds[0] : undefined);
+      if (!providerId || !binding?.providerIds.includes(providerId)) throw new Error('Host dependency is undeclared or differs from its frozen binding');
+      const pin = dependencies?.pins.find(pin => pin.providerId === providerId);
+      if (!pin) throw new Error('Host dependency binding is unavailable');
+      const invocation = typeof params.invocationId === 'string' ? this.#invocations.get(`${ownerStorageKey(owner)}\0${params.invocationId}`) : undefined;
+      if (params.invocationId !== undefined && (!invocation || !invocation.active)) throw new Error('Host dependency invocation has expired or belongs to another owner');
+      const callSignal = invocation ? AbortSignal.any([signal, invocation.signal]) : signal;
+      const invoke = () => pin.invoke(request.method, request.args, callSignal, invocation?.scope);
+      const target = this.#services.getSnapshot().providers.find(provider => provider.providerId === pin.providerId);
+      if (!target) throw new Error('Bound dependency provider is unavailable');
+      return invocation?.scope?.invokeDependency ? invocation.scope.invokeDependency(owner, target, invoke) : invoke();
+    }
     throw new Error(`Unknown Brokered Host child request: ${method}`);
   }
 
@@ -1742,10 +1414,8 @@ export class BrokeredHostSupervisor {
   #finalizeInstanceStorage(instance: BrokeredHostInstance): void {
     const grantOwner = this.#ownerGrants.get(ownerStorageKey(instance.owner));
     if (grantOwner) grantOwner.slot = "selected";
-    if (this.#preparations.get(instance.owner.extensionId) === instance.preparation) {
-      this.#preparations.delete(instance.owner.extensionId);
-      this.#preparationTargets.delete(instance.owner.extensionId);
-    }
+    const preparationKey = `${instance.owner.extensionId}\0${instance.owner.instanceKey}`;
+    if (this.#preparations.get(preparationKey) === instance.preparation) this.#preparations.delete(preparationKey);
     for (const session of instance.storages.values()) {
       session.phase = "active";
       session.transaction = null;

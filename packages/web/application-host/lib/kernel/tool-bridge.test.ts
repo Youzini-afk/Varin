@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import { HostToolAdmissionError } from './tool-admission.js';
+import { leafHostComposition } from './host-composition.test-helper.js';
 import {
   ToolBridge,
   type HostToolLease,
@@ -352,6 +353,7 @@ it('keeps accepted child owners through parent completion and channel reset, the
       serviceId: 'example.query',
       serviceVersion: 1,
       artifactIntegrity: 'original-artifact',
+      composition: leafHostComposition({ extensionId: 'example', extensionVersion: '1.0.0', artifactIntegrity: 'original-artifact' }),
       declarationHash: schema.version,
       configurationIdentity: null,
       tool: schema,

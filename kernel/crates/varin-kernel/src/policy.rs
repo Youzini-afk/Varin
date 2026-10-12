@@ -217,12 +217,15 @@ impl PolicyBridge {
         let slot = self.slot(run)?;
         let catalog = self.catalog()?;
         {
-            let db = catalog.lock().map_err(storage)?;
-            let launch = db.launch_metadata(run).map_err(storage)?;
+            let launch = catalog
+                .lock()
+                .map_err(storage)?
+                .capture_launch(run)
+                .map_err(storage)?;
             if let Some(launch) = launch {
-                if launch.policy_generation != generation
-                    || launch.policy_target != target
-                    || effective_identity(policy.identity()) != launch.selection.policy
+                if launch.metadata.policy_generation != generation
+                    || launch.load_policy_target().map_err(storage)? != target
+                    || effective_identity(policy.identity()) != launch.metadata.selection.policy
                 {
                     return Err(failed("policy_rebind_changed"));
                 }
@@ -310,7 +313,7 @@ impl PolicyBridge {
                 _ => {
                     return Err(KernelError::Authorization(
                         "candidate binding differs from exact policy target".into(),
-                    ))
+                    ));
                 }
             };
         let mut models = BTreeMap::new();
@@ -377,6 +380,7 @@ impl PolicyBridge {
             .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
             .publish_policy_ready(prepared)
             .map_err(crate::agent_runtime::domain)?;
+        let committed = committed.load().map_err(crate::agent_runtime::domain)?;
         if committed.status == PolicySelectionStatus::Ready {
             if state
                 .candidate
@@ -611,7 +615,7 @@ impl AgentPolicy for SelectedPolicy {
         };
         let selected_state = if capture.state_mode() == PolicyStateMode::RestartState {
             Ok(Value::Null)
-        } else if capture.previous_target() == &candidate.binding.target {
+        } else if capture.previous_target().map_err(storage)? == candidate.binding.target {
             Ok(state.clone())
         } else {
             match &candidate.binding.host {

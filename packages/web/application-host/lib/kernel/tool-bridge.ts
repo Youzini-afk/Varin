@@ -53,6 +53,8 @@ export interface HostToolLease {
     owner: ExecutorOwner,
   ): Promise<ToolExecutionReceipt>;
   release(): void;
+  /** End a current Run/candidate selection context while accepted exchanges retain this exact lease. */
+  releaseSelection?(): void;
 }
 /** MCP configuration provenance is required only for MCP, never synthesized for a service. */
 export interface McpToolLease extends HostToolLease {
@@ -265,6 +267,7 @@ export class ToolBridge {
       const previous = entries!.get(previousKey);
       if (previous) {
         previous.selected = false;
+        if (!previous.retained) previous.lease.releaseSelection?.();
         this.#collect(runId, previousKey, previous);
       }
     }
@@ -293,6 +296,7 @@ export class ToolBridge {
     const e = this.#owners.get(runId)?.get(binding.ownerId);
     if (e) {
       e.retained = false;
+      if (!e.selected) e.lease.releaseSelection?.();
       this.#collect(runId, binding.ownerId, e);
     }
   }
@@ -371,6 +375,7 @@ export class ToolBridge {
       entry.closing = true;
       entry.selected = false;
       entry.retained = false;
+      entry.lease.releaseSelection?.();
       entry.holders.clear();
       for (const c of entry.active.values()) c.abort();
       this.#collect(runId, key, entry);
@@ -583,6 +588,7 @@ export class ToolBridge {
       const e = key ? this.#owners.get(v.runId)?.get(key) : undefined;
       if (e) {
         e.selected = false;
+        if (!e.retained) e.lease.releaseSelection?.();
         this.#collect(v.runId, key!, e);
       }
       return true;

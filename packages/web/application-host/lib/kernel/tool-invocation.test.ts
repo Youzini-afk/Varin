@@ -4,7 +4,7 @@ import type { HostCapabilityCallContext } from '@varin/extension-host';
 import { withToolInvocation, runToolDomainCall, requireToolInvocation, type ToolInvocationAuthority } from './tool-invocation.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
 
-const owner = { extensionId: 'example.integration', extensionVersion: '1.0.0', entrypointId: 'host', generation: 1 };
+const owner = { extensionId: 'example.integration', extensionVersion: '1.0.0', entrypointId: 'host', instanceKey: 'invocation-fixture', generation: 1 };
 const authority: ToolInvocationAuthority = {
   callId: 'merge', executorOwner: { kind: 'kernel' }, invocationId: 'invocation', runId: 'run', threadId: 'thread', operationId: 'action:node:merge',
   origin: { kind: 'policy_action', action_id: 'action', node_id: 'merge' }, source: null,
@@ -133,4 +133,75 @@ test('explicit output retains accepted order on callback failure and job output 
   await withToolInvocation({ authority: { ...authority, completion: 'job' }, owner, signal, onOutput: value => assert.deepEqual(value, []) }, async invocation => {
     assert.throws(() => emitToolOutput({ owner, signal, invocation }, image), /owning domain.*acceptance or terminal/);
   });
+});
+
+test('frozen broker/native dependencies borrow only each actual root invocation and retain its real drain', { timeout: 30_000 }, async () => {
+  const { ApplicationExtensionRuntime } = await import('@varin/extension-host');
+  const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const { runNestedToolCall } = await import('./tool-invocation.js');
+  for (const mode of ['brokered', 'native'] as const) {
+    const root = await mkdtemp(join(tmpdir(), 'varin-dependency-authority-'));
+    const runtime = await ApplicationExtensionRuntime.create({ dataDir: join(root, 'data'), varinVersion: '1.2.3',
+      brokerScript: fileURLToPath(new URL('../../../../extension-host/broker/broker-child.mjs', import.meta.url)) });
+    await runtime.start();
+    const contexts: HostCapabilityCallContext[] = [];
+    let effects = 0, finish!: () => void, entered!: () => void;
+    const blocked = new Promise<void>(resolve => { finish = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    runtime.capabilities.register('example.domain', (method, _params, context) => {
+      contexts.push(context);
+      const admitted = requireToolInvocation(context);
+      if (method === 'effect') return runToolDomainCall(context, input, async () => { effects++; return receipt; });
+      if (method === 'block') return runNestedToolCall(context, async () => { entered(); await blocked; return null; });
+      return { runId: admitted.runId, operation: admitted.operation, toolName: admitted.toolName };
+    });
+    const install = async (id: string, dependency: boolean) => {
+      const path = join(root, id); await mkdir(path);
+      const descriptor = { id: dependency ? 'example.authority-dependency' : 'example.authority-root', version: 1 };
+      await writeFile(join(path, 'package.json'), JSON.stringify({ name: id, version: '1.0.0' }));
+      await writeFile(join(path, 'varin.extension.json'), JSON.stringify({ schemaVersion: 1, id, version: '1.0.0', engines: { varin: '*' },
+        entrypoints: { host: { mode, file: 'host.cjs', activation: ['service-request'] } }, provides: { services: [descriptor] },
+        ...(dependency ? { capabilities: { host: ['example.domain'] } } : { requires: { services: [{ realms: ['host'], id: 'example.authority-dependency', version: 1 }] } }) }));
+      await writeFile(join(path, 'host.cjs'), `module.exports={activate(ctx){
+        ${dependency ? '' : "const dependency=ctx.services.use('example.authority-dependency',1);"}
+        ctx.services.provide(${JSON.stringify(descriptor)},{execute(method){return ${dependency ? "ctx.capabilities.call('example.domain',method,null)" : "dependency.call('execute',method)"}}});
+      }};`);
+      await runtime.installOrStage({ expectedRevision: (await runtime.catalog.snapshot()).revision, source: { kind: 'local', display: id, specifier: path } });
+      if (dependency) await runtime.reviewCapabilities({ extensionId: id, expectedRevision: (await runtime.catalog.snapshot()).revision,
+        decisions: [{ capability: 'example.domain', realm: 'host', granted: true }] });
+      await runtime.setEnabled(id, true, (await runtime.catalog.snapshot()).revision);
+    };
+    let binding: Awaited<ReturnType<typeof runtime.prepareService>> | undefined;
+    let pin: ReturnType<NonNullable<typeof binding>['pin']> | undefined;
+    try {
+      await install('example.authority-b', true); await install('example.authority-a', false);
+      binding = await runtime.prepareService({ serviceId: 'example.authority-root', version: 1, method: 'execute', args: [] });
+      pin = binding.pin();
+      const selected = runtime.services.getSnapshot().providers.find(provider => provider.providerId === binding!.providerId)!;
+      const invoke = (runId: string, operation: 'read' | 'effect', method: string, signal = new AbortController().signal) => {
+        const callId = `call-${runId}`;
+        return withToolInvocation({ owner: selected, signal, authority: { ...authority, runId, operation,
+          callId, invocationId: runId, operationId: `action:node:${callId}`, origin: { kind: 'policy_action', action_id: 'action', node_id: callId } } },
+        scope => pin!.invoke('execute', [method], signal, scope));
+      };
+      assert.deepEqual(await Promise.all([invoke('one', 'read', 'read'), invoke('two', 'effect', 'read')]), [
+        { runId: 'one', operation: 'read', toolName: 'integrate_child' }, { runId: 'two', operation: 'effect', toolName: 'integrate_child' },
+      ]);
+      assert(contexts.every(context => context.owner.extensionId === 'example.authority-b'));
+      for (const context of contexts) assert.throws(() => requireToolInvocation(context), /tool_invocation_unavailable/);
+      await assert.rejects(invoke('read-denied', 'read', 'effect'), /tool_domain_call_changed/);
+      assert.equal(effects, 0, 'a write-capable dependency cannot expand the root read admission');
+      await invoke('effect-admitted', 'effect', 'effect'); assert.equal(effects, 1);
+      const cancel = new AbortController(); let settled = false;
+      const pending = invoke('cancelled', 'read', 'block', cancel.signal).then(value => ({ value }), error => ({ error })).finally(() => { settled = true; });
+      await started; cancel.abort(new Error('root cancelled')); binding.release(); pin.release();
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(settled, false, 'cancellation cannot settle while the original dependent domain still owns real work');
+      assert.throws(() => requireToolInvocation(contexts.at(-1)!), /tool_invocation_unavailable/);
+      finish(); await pending;
+    } finally { finish(); pin?.release(); binding?.release(); await runtime.stop(); await rm(root, { recursive: true, force: true }); }
+  }
 });

@@ -5,6 +5,15 @@ Extensions export an `activate` function or use `defineSurfaceExtension`, `defin
 or `defineHostExtension`. Activation contexts own contributions, services, disposers, authenticated
 assets, styles, revisioned storage, and capability clients without importing Varin's product UI.
 
+Every service requirement declares `realms: ['host']`, `['surface']`, or both. Required dependencies
+are resolved before that realm activates. Host `context.services.use(id, version)` captures one exact
+client; `useAll(id, version)` captures a declared collection. Surface `useService`/`useServices` use the
+same frozen-choice rule. Selection comes from the original scoped routing configuration, never a
+second global selector. An exact provider option can choose a member of the already bound collection;
+it cannot introduce another implementation. Captured handles keep their original generation while
+calls drain. Call-specific authority and cancellation still come from the current invocation, not
+from the shared activation context.
+
 Managed Surface extensions write custom context keys with `context.context.set(localKey, value)` and
 `delete(localKey)`. Varin prefixes the extension ID, stages candidate values until activation commits,
 and returns `false` to a disposed or superseded writer. Isolated extensions receive the same owner-scoped

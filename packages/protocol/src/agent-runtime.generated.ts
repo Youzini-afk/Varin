@@ -1324,7 +1324,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 21; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 22; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -1395,6 +1395,41 @@ export interface HostToolCall {
   arguments: unknown;
 }
 
+export interface HostCompositionProvider {
+  nodeId: string;
+  providerKey: string;
+}
+
+export interface HostCompositionDependency {
+  id: string;
+  version: number;
+  binding: 'single' | 'selected' | 'all';
+  optional: boolean;
+  providers: HostCompositionProvider[];
+}
+
+export interface HostCompositionGrant {
+  capability: string;
+  granted: boolean;
+}
+
+export interface HostCompositionNode {
+  id: string;
+  extensionId: string;
+  entrypointId: 'host';
+  extensionVersion: string;
+  artifactIntegrity: string;
+  activationConfiguration: null;
+  grants: HostCompositionGrant[];
+  dependencies: HostCompositionDependency[];
+}
+
+export interface HostServiceComposition {
+  schemaVersion: 1;
+  root: string;
+  nodes: HostCompositionNode[];
+}
+
 export interface ExtensionToolBinding {
   providerKey: string;
   extensionId: string;
@@ -1402,6 +1437,7 @@ export interface ExtensionToolBinding {
   serviceId: string;
   serviceVersion: number;
   artifactIntegrity: string;
+  composition: HostServiceComposition;
   declarationHash: string;
   configurationIdentity: string | null;
   tool: LaunchTool;
@@ -1440,6 +1476,7 @@ export interface AgentPolicyArtifactBinding {
   serviceId: 'varin.agent.policy';
   serviceVersion: 4;
   artifactIntegrity: string;
+  composition: HostServiceComposition;
   configurationIdentity: string;
   declaredIdentity: LaunchPolicy;
   identity: LaunchPolicy;

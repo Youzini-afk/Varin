@@ -392,11 +392,13 @@ impl Fixture {
             .lock()
             .unwrap()
             .policy_selections(&self.run.id)
+            .unwrap()
+            .load()
             .unwrap();
         let selected = catalog
             .lock()
             .unwrap()
-            .select_policy(
+            .prepare_policy_selection(
                 &self.run.id,
                 &format!("candidate-{generation}"),
                 before.active.generation,
@@ -407,6 +409,13 @@ impl Fixture {
                 PolicyStateMode::Preserve,
             )
             .unwrap();
+        let prepared = selected.store().unwrap();
+        let read = catalog
+            .lock()
+            .unwrap()
+            .publish_policy_selection(prepared)
+            .unwrap();
+        let selected = read.load().unwrap();
         self.assembly
             .policy
             .ready(
@@ -505,6 +514,11 @@ fn artifact(g: u64) -> AgentPolicyArtifactBinding {
         service_id: "varin.agent.policy".into(),
         service_version: 4,
         artifact_integrity: format!("child-artifact-{g}"),
+        composition: crate::service_composition_fixture::graph(
+            "child-strategy",
+            &g.to_string(),
+            &format!("child-artifact-{g}"),
+        ),
         configuration_identity: format!("child-policy-config-{g}"),
         declared_identity: PolicyIdentity {
             name: "child-strategy".into(),
@@ -733,6 +747,8 @@ fn child_assembly_plans_with_own_credentials_switches_policy_and_keeps_frozen_to
                                 .lock()
                                 .unwrap()
                                 .policy_selections(&f.run.id)
+                                .unwrap()
+                                .load()
                                 .unwrap()
                                 .active
                                 .generation,
@@ -1082,6 +1098,8 @@ fn child_cancel_after_dispatch_intent_rejects_late_credentials_and_candidate() {
             .unwrap()
             .policy_selections(&f.run.id)
             .unwrap()
+            .load()
+            .unwrap()
             .active
             .generation,
         0
@@ -1091,6 +1109,8 @@ fn child_cancel_after_dispatch_intent_rejects_late_credentials_and_candidate() {
             .lock()
             .unwrap()
             .policy_selection(&f.run.id, &ready.selection_id)
+            .unwrap()
+            .load()
             .unwrap()
             .status,
         PolicySelectionStatus::Cancelled

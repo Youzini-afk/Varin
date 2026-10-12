@@ -1,9 +1,9 @@
 use crate::types::OperationMetadata as Operation;
 use crate::types::*;
 use fs2::FileExt;
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
-use serde::{Serialize, de::DeserializeOwned};
-use serde_json::{Value, json};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use serde::{de::DeserializeOwned, Serialize};
+use serde_json::{json, Value};
 use std::{
     fs::{File, OpenOptions},
     path::Path,
@@ -40,7 +40,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 61;
+pub(crate) const FORMAT: i64 = 62;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -524,7 +524,7 @@ impl Catalog {
             let intent = launch_content::LaunchMetadata {
                 dispatch_context_ref: None,
                 policy_generation: 0,
-                policy_target: policy_switch::PolicyTarget::Default,
+                policy_target: policy_switch::PolicyTargetMetadata::Default,
                 run_id: run_id.clone(),
                 revision: 1,
                 selection,
@@ -1653,6 +1653,9 @@ pub mod submissions;
 
 #[path = "catalog_launch.rs"]
 pub mod launches;
+
+#[path = "catalog_service_composition.rs"]
+pub mod service_composition;
 
 #[path = "catalog_launch_content.rs"]
 pub mod launch_content;

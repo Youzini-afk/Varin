@@ -27,6 +27,8 @@ export interface SurfaceService<TImplementation = unknown> {
   descriptor: VarinExtensionServiceProvision;
   implementation: TImplementation;
   owner: SurfaceOwnerIdentity;
+  providerId: string;
+  providerKey: string;
 }
 
 export interface SurfaceExternalService<TImplementation = unknown> {
@@ -56,7 +58,6 @@ export interface SurfaceRegistrySnapshot {
   layoutReferences: readonly SurfaceLayoutReference[];
   replacementSelections: Readonly<Record<string, string>>;
   revision: number;
-  serviceSelections: Readonly<Record<string, string>>;
   services: readonly SurfaceService[];
   visibleContributions: readonly SurfaceContribution[];
 }
@@ -65,11 +66,13 @@ export interface SurfaceActivationOptions {
   externalServices?: readonly SurfaceExternalService[];
   grantedCapabilities?: Iterable<string>;
   owner: SurfaceOwnerIdentity;
+  /** Withdraw an external lifetime immediately; admitted calls keep their own resource pins. */
+  onRetire?: () => void;
   /** Cancels this local preparation; an already committed external publication remains committed. */
   signal?: AbortSignal;
   requirements?: VarinExtensionServiceRequirement[];
-  /** Provider IDs already resolved by the owning Host/profile for selected bindings. */
-  serviceSelections?: Readonly<Record<string, string>>;
+  /** Exact immutable implementation references resolved before activation, never mutable routing. */
+  exactProviderIds?: Readonly<Record<string, readonly string[]>>;
 }
 
 export interface SurfaceActivationContext {

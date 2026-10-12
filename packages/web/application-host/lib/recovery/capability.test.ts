@@ -16,6 +16,7 @@ let harness: DocumentAuthorityHarness | undefined;
 const context: HostCapabilityCallContext = {
   owner: {
     entrypointId: 'builtin-recovery',
+    instanceKey: 'recovery-capability-fixture',
     extensionId: 'varin.builtin.recovery',
     extensionVersion: '0.3.0',
     generation: 1,

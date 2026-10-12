@@ -143,3 +143,80 @@ describe('createWebExtensionsAPI', () => {
     });
   });
 });
+
+describe('Surface composition lease stream', () => {
+  const request = {
+    owner: { hostId: '2d7b1dc1-7ccd-4be7-9fd1-23f31dc8cf1a', realmId: 'window-test', extensionId: 'dev.example.consumer',
+      extensionVersion: '1.0.0', entrypointId: 'main', generation: 1, desiredRevision: 1 },
+    surface: 'web' as const, artifactIntegrity: 'sha256-lease', slot: 'selected' as const,
+    expectedRoutingRevision: 7, routing: { sessionId: 'thread-p' }, services: [],
+  };
+  const setup = () => Object.defineProperty(globalThis, 'window', { configurable: true,
+    value: { __VARIN_LOCAL_ORIGIN__: 'http://127.0.0.1:57123', location: { href: 'varin-ui://app/', origin: 'varin-ui://app' } } });
+
+  it('holds one authenticated POST until EOF, parsing fragmented UTF-8 SSE events without renewing', async () => {
+    setup();
+    refreshLocalRuntimeUrlAuthToken.mockResolvedValue('application-token');
+    let stream!: ReadableStreamDefaultController<Uint8Array>;
+    const cancelled = vi.fn();
+    fetchWithoutRuntimeRouting.mockResolvedValue(new Response(new ReadableStream<Uint8Array>({ start(controller) { stream = controller; }, cancel: cancelled }),
+      { headers: { 'Content-Type': 'text/event-stream; charset=utf-8' } }));
+    const { createWebExtensionsAPI } = await import('./extensions');
+    const events: unknown[] = [];
+    let finished = false;
+    const watching = createWebExtensionsAPI().watchServiceLease(request, event => { events.push(event); }, new AbortController().signal).then(() => { finished = true; });
+    await vi.waitFor(() => expect(fetchWithoutRuntimeRouting).toHaveBeenCalledTimes(1));
+    const encoder = new TextEncoder();
+    const bytes = encoder.encode('data: {"kind":"ready","leaseId":"lease-p","routingRevision":7,"providers":[]}\r\n\r\ndata: {"kind":"error","message":"连接断开"}\n\n');
+    for (const byte of bytes) stream.enqueue(Uint8Array.of(byte));
+    await vi.waitFor(() => expect(events).toHaveLength(2));
+    expect(finished).toBe(false);
+    const [url, init] = fetchWithoutRuntimeRouting.mock.calls[0] as [URL, RequestInit];
+    expect(url.pathname).toBe('/api/varin/extensions/v1/services/lease');
+    expect(init.method).toBe('POST');
+    expect(init.credentials).toBe('include');
+    expect(new Headers(init.headers).get('X-Varin-Application-Token')).toBe('application-token');
+    expect(new Headers(init.headers).get('Accept')).toBe('text/event-stream');
+    expect(JSON.parse(String(init.body))).toEqual(request);
+    expect(events[1]).toEqual({ kind: 'error', message: '连接断开' });
+    stream.close();
+    await watching;
+    expect(fetchWithoutRuntimeRouting).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels a blocked reader and keeps the original invocation routing and AbortSignal', async () => {
+    setup();
+    refreshLocalRuntimeUrlAuthToken.mockResolvedValue('application-token');
+    const cancelled = vi.fn();
+    fetchWithoutRuntimeRouting.mockResolvedValueOnce(new Response(new ReadableStream({ cancel: cancelled }), { headers: { 'Content-Type': 'text/event-stream' } }));
+    const { createWebExtensionsAPI } = await import('./extensions');
+    const controller = new AbortController();
+    const watching = createWebExtensionsAPI().watchServiceLease(request, () => undefined, controller.signal);
+    const failed = expect(watching).rejects.toThrow('owner closed');
+    await vi.waitFor(() => expect(fetchWithoutRuntimeRouting).toHaveBeenCalledTimes(1));
+    controller.abort(new Error('owner closed'));
+    await failed;
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    fetchWithoutRuntimeRouting.mockResolvedValueOnce(Response.json({ result: 'p' }));
+    const callController = new AbortController();
+    const invocation = { args: [], method: 'read', serviceId: 'dev.example.service', version: 1, providerId: 'instance-p',
+      routing: request.routing, lease: { id: 'lease-p', owner: { realmId: 'window-test', extensionId: 'dev.example.consumer', entrypointId: 'main', generation: 1 } } };
+    await expect(createWebExtensionsAPI().invokeService(invocation, callController.signal)).resolves.toBe('p');
+    const init = fetchWithoutRuntimeRouting.mock.calls[1]?.[1] as RequestInit;
+    expect(init.signal).toBe(callController.signal);
+    expect(JSON.parse(String(init.body))).toEqual(invocation);
+  });
+
+  it('rejects malformed lease events and cancels the stream', async () => {
+    setup();
+    refreshLocalRuntimeUrlAuthToken.mockResolvedValue('application-token');
+    const cancelled = vi.fn();
+    fetchWithoutRuntimeRouting.mockResolvedValue(new Response(new ReadableStream({
+      start(controller) { controller.enqueue(new TextEncoder().encode('data: {"kind":"ready","leaseId":"missing-provider-fields"}\n\n')); }, cancel: cancelled,
+    }), { headers: { 'Content-Type': 'text/event-stream' } }));
+    const { createWebExtensionsAPI } = await import('./extensions');
+    await expect(createWebExtensionsAPI().watchServiceLease(request, () => undefined, new AbortController().signal)).rejects.toThrow();
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    expect(fetchWithoutRuntimeRouting).toHaveBeenCalledTimes(1);
+  });
+});

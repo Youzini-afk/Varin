@@ -374,6 +374,9 @@ impl ContentCollection {
         roots.push_str(" UNION ALL SELECT json_extract(data,'$.content_ref') FROM events WHERE kind='followup.source_observed' AND json_extract(data,'$.content_ref') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.instruction_ref') FROM followups WHERE json_extract(body,'$.instruction_ref') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT json_extract(m.value,'$.body') FROM policy_selections p,json_each(p.body,'$.models') m");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.selection.target.body') FROM policy_selections WHERE json_extract(body,'$.selection.target.kind')='extension'
+            UNION ALL SELECT json_extract(body,'$.policy_target.body') FROM run_launches WHERE json_extract(body,'$.policy_target.kind')='extension'
+            UNION ALL SELECT json_extract(body,'$.policy_target.body') FROM delegated_executions WHERE json_extract(body,'$.policy_target.kind')='extension'");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.result.value.answer_ref') FROM operations WHERE json_extract(body,'$.executor')='ask_user' AND json_extract(body,'$.result.value.answer_ref') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT state_ref FROM policy_checkpoints UNION ALL SELECT pending_state_ref FROM policy_checkpoints WHERE pending_state_ref IS NOT NULL UNION ALL SELECT action_ref FROM policy_checkpoints WHERE action_ref IS NOT NULL UNION ALL SELECT continuation_ref FROM policy_checkpoints WHERE continuation_ref IS NOT NULL");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.arguments_ref') FROM tool_calls

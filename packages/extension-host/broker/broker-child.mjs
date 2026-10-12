@@ -1,3 +1,4 @@
+import { createHostServiceDependencyClients } from '@varin/extension-contract';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createRequire } from 'node:module';
 import { isAbsolute, relative, resolve } from 'node:path';
@@ -159,19 +160,14 @@ const handleParentRequest = async (message, signal) => {
             stagedHandlers.set(key, handler);
             stagedProvisions.push(descriptor);
           },
-          use: (id, version, provider) => {
-            const options = typeof provider === 'string' ? { providerId: provider } : (provider ?? {});
-            return {
-              call: (method, ...args) => requestParent('service.invoke', {
-                args,
-                method,
-                ...(options.providerId ? { providerId: options.providerId } : {}),
-                ...(options.routing ? { routing: options.routing } : {}),
-                serviceId: id,
-                version,
-              }),
-            };
-          },
+          ...createHostServiceDependencyClients(message.params.dependencies, (request) => {
+            const scope = invocationContext.getStore();
+            if (scope && !scope.active) return Promise.reject(new Error('Host dependency invocation has expired'));
+            if (scope?.signal.aborted) return Promise.reject(scope.signal.reason);
+            return requestParent('service.invoke', { ...request,
+              ...(scope?.invocationId ? { invocationId: scope.invocationId } : {}),
+            });
+          }),
         },
         signal: activationController.signal,
         storage: {

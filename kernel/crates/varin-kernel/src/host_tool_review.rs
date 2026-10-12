@@ -1,7 +1,7 @@
 //! Portable real bridge + Catalog tests. No socket/Host process success is claimed here.
 use crate::host_tools::{LateReceipt, ToolBridge};
-use serde_json::{Value, json};
-use std::sync::{Arc, Mutex, mpsc};
+use serde_json::{json, Value};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 use varin_runtime::execution::*;
 use varin_runtime::{Catalog, Effect, ExecutorOwner, Outcome, RunState, SubmitInput};
@@ -15,8 +15,8 @@ fn recv(frames: &mpsc::Receiver<Value>, kind: &str) -> Value {
     }
 }
 #[test]
-fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_and_late_owner_recovery()
- {
+fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_and_late_owner_recovery(
+) {
     for policy in [false, true] {
         let root =
             std::env::temp_dir().join(format!("varin-host-tools-review-{}", uuid::Uuid::new_v4()));
@@ -41,7 +41,7 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
             .unwrap();
         let live = json!({"ownerId":"original-host-owner","generation":7,"binding":{
             "providerKey":"installed:host:read@1","extensionId":"installed","extensionVersion":"1.0.0","serviceId":"read","serviceVersion":1,
-            "artifactIntegrity":"sha256-original","declarationHash":"decl-original","configurationIdentity":null,
+            "artifactIntegrity":"sha256-original","composition":crate::service_composition_fixture::graph("installed", "1.0.0", "sha256-original"),"declarationHash":"decl-original","configurationIdentity":null,
             "tool":{"name":"material_read","version":"decl-original","description":"Read an immutable material snapshot","schema":{"type":"object"},"output_schema":{"type":"object"},
                 "metadata":{"service_id":"read","service_version":1,"completion":"result","operation":"read"}}
         }});
@@ -398,12 +398,10 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
                 op.result.as_ref().unwrap().output().unwrap().data,
                 json!({"error":"observer_cancelled"})
             );
-            assert!(
-                catalog
-                    .resource_admission()
-                    .inspect(&context.operation_id)
-                    .is_none()
-            );
+            assert!(catalog
+                .resource_admission()
+                .inspect(&context.operation_id)
+                .is_none());
             assert_eq!(catalog.run(run).unwrap(), before);
         }
         let original_text = if policy {
@@ -416,12 +414,10 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
             "receipt":{"completion":{"kind":"result","outcome":"succeeded","effect":"confirmed","content":{"data":{"text":original_text},"parts":[{"kind":"text","text":"before"},{"kind":"media","media":{"media_type":"image/png","data_base64":"not base64"}},{"kind":"media","media":{"media_type":"image/png","data_base64":"AQID"}},{"kind":"text","text":"after"}]}},"executor_stopped":true}});
         let mut forged = late.clone();
         forged["executionOwner"]["epoch"] = json!("replacement-owner");
-        assert!(
-            serde_json::from_value::<LateReceipt>(forged)
-                .unwrap()
-                .apply(&db)
-                .is_err()
-        );
+        assert!(serde_json::from_value::<LateReceipt>(forged)
+            .unwrap()
+            .apply(&db)
+            .is_err());
         for _ in 0..2 {
             serde_json::from_value::<LateReceipt>(late.clone())
                 .unwrap()
@@ -468,12 +464,10 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
             op.external_receipt.as_ref().unwrap().result,
             *op.result.as_ref().unwrap().output().unwrap()
         );
-        assert!(
-            catalog
-                .resource_admission()
-                .inspect(&context.operation_id)
-                .is_none()
-        );
+        assert!(catalog
+            .resource_admission()
+            .inspect(&context.operation_id)
+            .is_none());
         assert_eq!(
             catalog.run(run).unwrap(),
             before,
@@ -554,7 +548,7 @@ fn rejected_newer_candidate_can_restore_the_prior_ready_directory_before_next_re
     let extension = |id: &str| {
         crate::agent_runtime::live_extension_binding(serde_json::from_value(json!({"ownerId":id,"generation":1,"binding":{
         "providerKey":format!("{id}:host:read@1"),"extensionId":id,"extensionVersion":"1.0.0","serviceId":"read","serviceVersion":1,
-        "artifactIntegrity":format!("artifact-{id}"),"declarationHash":format!("declaration-{id}"),"configurationIdentity":null,
+        "artifactIntegrity":format!("artifact-{id}"),"composition":crate::service_composition_fixture::graph(id, "1.0.0", &format!("artifact-{id}")),"declarationHash":format!("declaration-{id}"),"configurationIdentity":null,
         "tool":{"name":"read","version":format!("declaration-{id}"),"description":format!("Read {id}"),"schema":{"type":"object"},"output_schema":null,
         "metadata":{"service_id":"read","service_version":1,"completion":"result","operation":"read"}}
     }})).unwrap()).unwrap()
@@ -562,11 +556,9 @@ fn rejected_newer_candidate_can_restore_the_prior_ready_directory_before_next_re
     let a = extension("A");
     let b = extension("B");
     tools.desire(&run, "A-ready").unwrap();
-    assert!(
-        tools
-            .ready(&run, "A-ready", None, vec![a.clone()], || false)
-            .unwrap()
-    );
+    assert!(tools
+        .ready(&run, "A-ready", None, vec![a.clone()], || false)
+        .unwrap());
     assert!(
         db.lock()
             .unwrap()
@@ -579,18 +571,14 @@ fn rejected_newer_candidate_can_restore_the_prior_ready_directory_before_next_re
         "ready ACK is not activation"
     );
     tools.desire(&run, "B-invalid").unwrap();
-    assert!(
-        tools
-            .ready(&run, "B-invalid", None, vec![a.clone(), b], || false)
-            .is_err()
-    );
+    assert!(tools
+        .ready(&run, "B-invalid", None, vec![a.clone(), b], || false)
+        .is_err());
     // The publication owner restores its valid snapshot immediately after the rejected selection.
     tools.desire(&run, "A-restored").unwrap();
-    assert!(
-        tools
-            .ready(&run, "A-restored", None, vec![a], || false)
-            .unwrap()
-    );
+    assert!(tools
+        .ready(&run, "A-restored", None, vec![a], || false)
+        .unwrap());
     let selected = executor
         .select_for_request(&run, epoch, &CancellationToken::default())
         .unwrap()

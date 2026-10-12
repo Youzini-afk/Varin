@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import {
   assertVarinApplicationVersion,
   parseVarinExtensionActualState,
@@ -10,7 +12,6 @@ import {
   parseVarinExtensionPackageInstallRequest,
   parseVarinExtensionRemoveRequest,
   parseVarinExtensionServiceInvocationRequest,
-  parseVarinExtensionServiceSelectionRequest,
   parseVarinWorkbenchProfileApplyRequest,
   resolveVarinExtensionServiceRouting,
   type JsonValue,
@@ -31,10 +32,16 @@ import {
   type VarinExtensionPackageResult,
   type VarinExtensionRemoveRequest,
   type VarinExtensionServiceInvocationRequest,
+  type VarinExtensionServiceProvision,
   type VarinExtensionServiceRoutingRuleRemoveRequest,
   type VarinExtensionServiceRoutingRuleUpdateRequest,
   type VarinExtensionServiceRoutingSnapshot,
-  type VarinExtensionServiceSelectionRequest,
+  type VarinHostServiceComposition,
+  parseVarinSurfaceServiceLeaseRequest,
+  resolveVarinSurfaceManifestOwner,
+  type VarinSurfaceServiceLeaseRequest,
+  type VarinSurfaceServiceLeaseEvent,
+  type VarinSurfaceServiceInvocationLease,
   parseVarinRuntimeContractRequest,
   type VarinRuntimeContractRequest,
   type VarinRuntimeContractScope,
@@ -51,20 +58,25 @@ import {
   VARIN_BUILTIN_EXTENSION_PREFIX,
   VARIN_BUNDLED_LANGUAGE_SERVERS,
 } from "@varin/extension-builtins";
-import { queryRuntimeContracts, resolveDeclaredServiceRouting } from "./runtime-contracts.js";
+import { queryRuntimeContracts, resolveDeclaredServiceRouting, registeredWorkbenchDeclarations } from "./runtime-contracts.js";
 import { ApplicationExtensionCatalog } from "./application-catalog.js";
-import { BrokeredHostSupervisor, ExtensionUpdateReadinessError, type BrokeredHostTransportFactory } from "./broker-supervisor.js";
+import { BrokeredHostSupervisor, ExtensionUpdateReadinessError, type BrokeredHostTransportFactory, type HostCompositionLease } from "./broker-supervisor.js";
 import { HostCapabilityRegistry } from "./capability-registry.js";
 import { ExtensionPackageManager } from "./package-manager.js";
-import { HostServiceRegistry, HostServiceBindingError, type HostServiceBinding } from "./service-registry.js";
+import { HostServiceRegistry, HostServiceBindingError, type HostServiceBinding, type HostServicePin } from "./service-registry.js";
 import { ServiceRoutingStore } from "./service-routing-store.js";
+import { createHostCompositionPlan } from "./service-composition.js";
 import { ExtensionStorageError } from "./errors.js";
 import { ExtensionStorageStore } from "./storage-store.js";
 import { WorkbenchProfileStore } from "./workbench-profile-store.js";
 
-export interface HostServicePreparationOptions { defaultProviderKey?: string; expectedRoutingRevision?: number }
+export interface HostServicePreparationOptions { defaultProviderKey?: string; expectedRoutingRevision?: number; signal?: AbortSignal; frozenComposition?: VarinHostServiceComposition }
 export interface PreparedHostServiceCollection {
   readonly bindings: readonly HostServiceBinding[];
+  readonly routingRevision: number;
+}
+export interface ResolvedHostServiceCompositions {
+  readonly services: readonly { providerKey: string; descriptor: Readonly<VarinExtensionServiceProvision>; composition: VarinHostServiceComposition }[];
   readonly routingRevision: number;
 }
 
@@ -106,6 +118,8 @@ export class ApplicationExtensionRuntime {
   #revision = 0;
   readonly #mutations = new Set<Promise<void>>();
   readonly #builtinPreparations = new Map<string, Promise<void>>();
+  readonly #surfaceLeases = new Map<string, { principal: string; owner: VarinSurfaceServiceInvocationLease['owner'];
+    services: Map<string, { pin: HostServicePin; serviceId: string; version: number }>; revoke(): void }>();
   #stop: Promise<void> | undefined;
   #stopped = false;
 
@@ -141,10 +155,8 @@ export class ApplicationExtensionRuntime {
       packages: this.packages,
       services: this.services,
       storage: this.storage,
-      invokeService: async (request, signal) => {
-        const parsed = parseVarinExtensionServiceInvocationRequest(request);
-        return (await this.#bindRegisteredService(parsed)).invoke(parsed.method, parsed.args, signal);
-      },
+      routing: this.routing,
+      prepareBuiltin: (extensionId) => this.#ensureBuiltinArtifact(extensionId),
       ...(options.transportFactory ? { transportFactory: options.transportFactory } : {}),
     });
     this.#serviceUnsubscribe = this.services.subscribe(() => this.#publish());
@@ -196,7 +208,7 @@ export class ApplicationExtensionRuntime {
       const routing = await this.routing.read();
       const workbench = await this.workbench.snapshot();
       if (revision === this.#revision) return queryRuntimeContracts({ catalog, services, routing, workbench, revision }, request, scope,
-        owner => this.supervisor.getRetainedArtifactIdentity(owner));
+        owner => this.supervisor.getRetainedArtifactIdentity(owner), owner => this.supervisor.getRetainedComposition(owner));
     }
   }
 
@@ -521,14 +533,131 @@ export class ApplicationExtensionRuntime {
     });
   }
 
-  invokeService(request: VarinExtensionServiceInvocationRequest | unknown, signal?: AbortSignal): Promise<JsonValue> {
+  invokeService(request: VarinExtensionServiceInvocationRequest | unknown, signal?: AbortSignal, principal?: string): Promise<JsonValue> {
     if (this.#stopped) return Promise.reject(new Error("Application extension runtime is stopped"));
     const parsed = parseVarinExtensionServiceInvocationRequest(request);
+    if (parsed.lease) {
+      const lease = this.#surfaceLeases.get(parsed.lease.id), service = lease?.services.get(parsed.providerId!);
+      if (!principal || lease?.principal !== principal || !isDeepStrictEqual(lease.owner, parsed.lease.owner)
+        || !service || service.serviceId !== parsed.serviceId || service.version !== parsed.version) {
+        return Promise.reject(new Error('Surface service invocation does not belong to this authenticated composition owner'));
+      }
+      return service.pin.invoke(parsed.method, parsed.args, signal);
+    }
     const providerId = parsed.providerId;
     if (typeof providerId === "string" && this.supervisor.hasStagedProvider(providerId)) {
       return this.supervisor.invokeStagedService(parsed, signal);
     }
-    return this.prepareService(parsed).then((binding) => binding.invoke(parsed.method, parsed.args, signal));
+    return this.prepareService(parsed, { ...(signal ? { signal } : {}) }).then(async binding => {
+      try { return await binding.invoke(parsed.method, parsed.args, signal); } finally { binding.release(); }
+    });
+  }
+
+  /** The authenticated response stream is the sole owner of these preparation references. */
+  async watchServiceLease(requestValue: VarinSurfaceServiceLeaseRequest | unknown, principal: string,
+    emit: (event: VarinSurfaceServiceLeaseEvent) => void, signal: AbortSignal): Promise<void> {
+    if (!principal || this.#stopped) throw new Error('Authenticated Surface owner is unavailable');
+    const request = parseVarinSurfaceServiceLeaseRequest(requestValue);
+    signal.throwIfAborted();
+    const catalog = await this.catalog.snapshot(), routing = await this.routing.read();
+    if (!catalog.authoritative || !routing.authoritative || catalog.hostId !== request.owner.hostId
+      || routing.document.revision !== request.expectedRoutingRevision) throw new Error('Surface composition selection is stale');
+    const entry = catalog.extensions.find(value => value.manifest.id === request.owner.extensionId);
+    const source = request.slot === 'candidate' ? entry?.candidate : entry;
+    const manifest = source?.manifest;
+    const surface = manifest?.entrypoints?.surfaces?.find(value => value.id === request.owner.entrypointId);
+    const declarative = manifest && request.owner.entrypointId === resolveVarinSurfaceManifestOwner(manifest, request.surface)?.entrypointId;
+    if (!entry?.desired.enabled || !manifest || source?.integrity !== request.artifactIntegrity || manifest.version !== request.owner.extensionVersion
+      || entry.desired.revision !== request.owner.desiredRevision || (!surface?.supports.includes(request.surface) && !declarative)
+      || (request.slot === 'candidate' && !entry.candidate?.capabilitiesReviewed)) throw new Error('Surface composition does not match its canonical owner declaration');
+    const selectedCatalog = { ...catalog, extensions: catalog.extensions.map(value => value === entry ? { ...entry,
+      manifest, integrity: request.artifactIntegrity, capabilityGrants: source.capabilityGrants } : value) };
+    const roots = new Map<string, HostCompositionLease>();
+    const bindings: HostServiceBinding[] = [], pins: HostServicePin[] = [];
+    const revoked = new AbortController();
+    const lifetime = AbortSignal.any([signal, revoked.signal]);
+    const id = randomUUID();
+    let unwatch = () => {}, ready = false;
+    const revoke = () => revoked.abort(new Error('Surface composition was revoked'));
+    const candidate = request.slot === 'candidate' ? { extensionId: entry.manifest.id, integrity: request.artifactIntegrity } : undefined;
+    const acquire = async (extensionId: string) => {
+      let root = roots.get(extensionId);
+      if (!root) {
+        root = await this.supervisor.prepareSurfaceExtension(extensionId, request.routing, lifetime, candidate);
+        roots.set(extensionId, root);
+        root.revocationSignal.addEventListener('abort', revoke, { once: true });
+        if (root.revocationSignal.aborted) revoke();
+      }
+      return root;
+    };
+    try {
+      if (manifest.entrypoints?.host && surface) await acquire(entry.manifest.id);
+      const grouped = new Map<string, typeof request.services>();
+      for (const service of request.services) {
+        const key = `${service.serviceId}@${service.version}`;
+        grouped.set(key, [...(grouped.get(key) ?? []), service]);
+      }
+      for (const choices of grouped.values()) {
+        const service = choices[0]!;
+        const requirement = manifest.requires?.services?.find(value => value.realms.includes('surface') && value.id === service.serviceId && value.version === service.version);
+        const own = manifest.provides?.services?.some(value => value.id === service.serviceId && value.version === service.version);
+        if (!requirement && !own) throw new Error('Surface service is not declared by its canonical consumer');
+        if (requirement?.binding !== 'all' && choices.length !== 1) throw new Error('Surface service declaration requires one exact implementation');
+        const candidates = selectedCatalog.extensions.flatMap(value => value.desired.enabled && value.manifest.entrypoints?.host
+          && value.manifest.provides?.services?.some(item => item.id === service.serviceId && item.version === service.version)
+          ? [{ providerId: value.manifest.id, providerKey: `${value.manifest.id}:host:${service.serviceId}@${service.version}` }] : []);
+        const native = registeredWorkbenchDeclarations(selectedCatalog, this.services.getSnapshot().providers, service.serviceId, service.version);
+        const declared = [...candidates, ...native.map(provider => ({ providerId: provider.extensionId, providerKey: provider.providerKey }))];
+        const resolution = requirement?.binding === 'selected' ? resolveVarinExtensionServiceRouting({ candidates: declared,
+          document: routing.document, context: request.routing, serviceId: service.serviceId, version: service.version }) : undefined;
+        if (resolution && (resolution.status !== 'resolved' || choices.some(choice => !resolution.providerKeys.includes(choice.providerKey)))) throw new Error('Surface service differs from its original scoped routing selection');
+        for (const choice of choices) {
+          const declaration = declared.find(value => value.providerKey === choice.providerKey);
+          if (!declaration || (!requirement && declaration.providerId !== entry.manifest.id)) throw new Error('Surface Host provider is not a canonical declaration');
+          const nativeMatches = native.filter(value => value.providerKey === choice.providerKey);
+          const binding = nativeMatches.length === 1 ? this.services.bind(service.serviceId, service.version, nativeMatches[0]!.providerId)
+            : (await acquire(declaration.providerId)).bind(service.serviceId, service.version);
+          bindings.push(binding);
+          const pin = binding.pin(); pins.push(pin);
+          pin.revocationSignal.addEventListener('abort', revoke, { once: true });
+          if (pin.revocationSignal.aborted) revoke();
+        }
+      }
+      lifetime.throwIfAborted();
+      const latest = await this.routing.read();
+      if (!latest.authoritative || latest.document.revision !== request.expectedRoutingRevision) throw new Error('Surface service routing changed during preparation');
+      const owner = { realmId: request.owner.realmId, extensionId: request.owner.extensionId,
+        entrypointId: request.owner.entrypointId, generation: request.owner.generation };
+      this.#surfaceLeases.set(id, { principal, owner, revoke, services: new Map(bindings.map((binding, index) => [binding.providerId,
+        { pin: pins[index]!, serviceId: binding.descriptor.id, version: binding.descriptor.version }])) });
+      let checking = false, dirty = false;
+      const check = async () => {
+        dirty = true; if (checking) return; checking = true;
+        try { while (dirty && !lifetime.aborted) {
+          dirty = false;
+          const snapshot = await this.catalog.snapshot(), current = snapshot.extensions.find(value => value.manifest.id === entry.manifest.id);
+          if (!snapshot.authoritative || !current?.desired.enabled) { revoke(); return; }
+          const grants = current.candidate?.integrity === request.artifactIntegrity ? current.candidate.capabilityGrants : current.capabilityGrants;
+          if (source.capabilityGrants.some(grant => grant.realm === 'surface' && grant.granted
+            && grants.some(value => value.realm === grant.realm && value.capability === grant.capability && !value.granted))) revoke();
+        } } finally { checking = false; }
+      };
+      unwatch = this.subscribe(() => { void check().catch(revoke); });
+      await check(); lifetime.throwIfAborted();
+      const providers = bindings.map(binding => this.services.getSnapshot().providers.find(provider => provider.providerId === binding.providerId)!);
+      if (providers.some(provider => !provider)) throw new Error('Surface service provider retired during preparation');
+      emit({ kind: 'ready', leaseId: id, routingRevision: request.expectedRoutingRevision, providers }); ready = true;
+      await new Promise<void>(resolve => { if (lifetime.aborted) resolve(); else lifetime.addEventListener('abort', () => resolve(), { once: true }); });
+      if (!signal.aborted && revoked.signal.aborted) emit({ kind: 'revoked', code: 'binding_revoked' });
+    } catch (error) {
+      if (!signal.aborted) emit({ kind: 'error', message: error instanceof Error ? error.message : String(error) });
+      if (!ready && signal.aborted) signal.throwIfAborted();
+    } finally {
+      this.#surfaceLeases.delete(id); unwatch();
+      for (const pin of pins) { pin.revocationSignal.removeEventListener('abort', revoke); pin.release(); }
+      for (const binding of bindings) binding.release();
+      for (const root of roots.values()) { root.revocationSignal.removeEventListener('abort', revoke); root.release(); }
+    }
   }
 
   /** Resolve once at a caller's preparation boundary, then invoke the exact bound implementation.
@@ -537,7 +666,7 @@ export class ApplicationExtensionRuntime {
    */
   async prepareService(request: VarinExtensionServiceInvocationRequest | unknown, options?: HostServicePreparationOptions): Promise<HostServiceBinding> {
     const { bindings } = await this.#prepareServices(request, options, false);
-    if (bindings.length !== 1) throw new HostServiceBindingError("selected_unavailable", "Single-service preparation requires exactly one provider");
+    if (bindings.length !== 1) { bindings.forEach(binding => binding.release()); throw new HostServiceBindingError("selected_unavailable", "Single-service preparation requires exactly one provider"); }
     const [binding] = bindings;
     return binding!;
   }
@@ -548,62 +677,88 @@ export class ApplicationExtensionRuntime {
     return this.#prepareServices(request, options, true);
   }
 
+  /** Pure declaration/configuration resolution for immutable value caches. No worker or lease
+   * is acquired, and ordinary worker retirement cannot invalidate unchanged composition identity. */
+  async resolveServiceCompositions(request: VarinExtensionServiceInvocationRequest | unknown,
+    options?: Pick<HostServicePreparationOptions, 'defaultProviderKey' | 'expectedRoutingRevision' | 'signal'> & { collection?: boolean }): Promise<ResolvedHostServiceCompositions> {
+    if (this.#stopped) throw new Error('Application extension runtime is stopped');
+    const parsed = parseVarinExtensionServiceInvocationRequest(request);
+    if (parsed.providerId) throw new Error('Declaration resolution does not accept a live provider identity');
+    for (;;) {
+      options?.signal?.throwIfAborted();
+      const revision = this.#revision;
+      const [catalog, routing] = await Promise.all([this.catalog.snapshot(), this.routing.read()]);
+      if (!catalog.authoritative || !routing.authoritative) throw new Error('Cannot resolve a Host composition from stale selection state');
+      if (options?.expectedRoutingRevision !== undefined && options.expectedRoutingRevision !== routing.document.revision) throw new Error('Host service routing changed during resolution');
+      const resolution = resolveDeclaredServiceRouting(catalog, routing, parsed.serviceId, parsed.version, parsed.routing,
+        options?.defaultProviderKey, options?.collection ? 'ordered' : undefined);
+      if (resolution.status !== 'resolved') throw new HostServiceBindingError(resolution.status === 'ambiguous' ? 'ambiguous'
+        : resolution.matchedRule ? 'selected_unavailable' : 'missing', resolution.diagnostics.map(diagnostic => diagnostic.message).join('; '));
+      const services = resolution.extensionIds.map(extensionId => {
+        const plan = createHostCompositionPlan(catalog, routing, extensionId, parsed.routing);
+        const descriptor = plan.root.entry.manifest.provides!.services!.find(service => service.id === parsed.serviceId && service.version === parsed.version)!;
+        if (options?.collection && descriptor.contract?.composition !== 'ordered') throw new HostServiceBindingError('selected_unavailable', 'Every selected provider must declare ordered composition');
+        return { providerKey: `${extensionId}:host:${parsed.serviceId}@${parsed.version}`, descriptor: structuredClone(descriptor), composition: plan.composition };
+      });
+      options?.signal?.throwIfAborted();
+      if (revision === this.#revision) return { services, routingRevision: routing.document.revision };
+    }
+  }
+
   async #prepareServices(request: VarinExtensionServiceInvocationRequest | unknown,
     options: HostServicePreparationOptions | undefined, collection: boolean): Promise<PreparedHostServiceCollection> {
     if (this.#stopped) throw new Error("Application extension runtime is stopped");
     const parsed = parseVarinExtensionServiceInvocationRequest(request);
-    if (parsed.providerId && !collection) return { bindings: [this.services.bind(parsed.serviceId, parsed.version, parsed.providerId)], routingRevision: 0 };
-    const [catalog, routing] = await Promise.all([this.catalog.snapshot(), this.routing.read()]);
-    if (!catalog.authoritative || !routing.authoritative) throw new Error("Cannot prepare a Host service from stale selection state");
-    if (options?.expectedRoutingRevision !== undefined && routing.document.revision !== options.expectedRoutingRevision) {
-      throw new Error("Host service routing changed during preparation");
-    }
-    const result = (bindings: HostServiceBinding[]): PreparedHostServiceCollection => {
+    options?.signal?.throwIfAborted();
+    const result = (bindings: HostServiceBinding[], routingRevision: number): PreparedHostServiceCollection => {
       if (collection && bindings.some(binding => binding.descriptor.contract?.composition !== 'ordered')) {
+        bindings.forEach(binding => binding.release());
         throw new HostServiceBindingError("selected_unavailable", "Every selected provider must declare ordered composition");
       }
-      return { bindings, routingRevision: routing.document.revision };
+      return { bindings, routingRevision };
     };
-    const explicit = parsed.providerId ?? this.services.getSnapshot().selections[`${parsed.serviceId}@${parsed.version}`];
-    if (explicit) return result([this.services.bind(parsed.serviceId, parsed.version, explicit)]);
-    const resolution = resolveDeclaredServiceRouting(catalog, routing, parsed.serviceId, parsed.version,
-      parsed.routing, options?.defaultProviderKey, collection ? 'ordered' : undefined);
-    if (resolution.status !== "resolved") {
-      throw new HostServiceBindingError(resolution.status === "ambiguous" ? "ambiguous"
-        : resolution.matchedRule ? "selected_unavailable" : "missing",
-        resolution.diagnostics.map(diagnostic => diagnostic.message).join("; ") || "Host service provider is unavailable");
-    }
-    const ids = resolution.extensionIds;
-    const keys = resolution.providerKeys;
-    // Independent selected roots reuse the original supervisor's preparation identities. The
-    // consumer may cancel its wait without destroying preparation shared with another caller.
-    await Promise.all(ids.map(async id => {
-      await this.#ensureBuiltinArtifact(id);
-      await this.supervisor.activateExtension(id);
+    if (parsed.providerId) return result([this.services.bind(parsed.serviceId, parsed.version, parsed.providerId)], 0);
+    const [catalog, routing] = await Promise.all([this.catalog.snapshot(), this.routing.read()]);
+    if (!catalog.authoritative || (!options?.frozenComposition && !routing.authoritative)) throw new Error("Cannot prepare a Host service from stale selection state");
+    if (options?.expectedRoutingRevision !== undefined && routing.document.revision !== options.expectedRoutingRevision) throw new Error("Host service routing changed during preparation");
+    const frozen = options?.frozenComposition;
+    const root = frozen?.nodes.find(node => node.id === frozen.root);
+    const resolution = frozen && root ? { status: 'resolved' as const, extensionIds: [root.extensionId],
+      providerKeys: [`${root.extensionId}:host:${parsed.serviceId}@${parsed.version}`] }
+      : resolveDeclaredServiceRouting(catalog, routing, parsed.serviceId, parsed.version,
+        parsed.routing, options?.defaultProviderKey, collection ? 'ordered' : undefined, this.services.getSnapshot().providers);
+    if (resolution.status !== 'resolved') throw new HostServiceBindingError(resolution.status === 'ambiguous' ? 'ambiguous'
+      : resolution.matchedRule ? 'selected_unavailable' : 'missing', resolution.diagnostics.map(diagnostic => diagnostic.message).join('; '));
+    const bindings: HostServiceBinding[] = [];
+    const prepared = await Promise.allSettled(resolution.extensionIds.map(async (id, index) => {
+      const native = registeredWorkbenchDeclarations(catalog, this.services.getSnapshot().providers, parsed.serviceId, parsed.version)
+        .filter(provider => provider.providerKey === resolution.providerKeys[index]);
+      if (native.length) {
+        if (native.length !== 1 || frozen) throw new Error('Workbench service owner identity is unavailable');
+        return this.services.bind(parsed.serviceId, parsed.version, native[0]!.providerId);
+      }
+      const lease = await this.supervisor.prepareExtension(id, parsed.routing, options?.signal, frozen);
+      try {
+        const binding = lease.bind(parsed.serviceId, parsed.version);
+        let released = false;
+        const selected: HostServiceBinding = Object.freeze({ ...binding, release: () => {
+          if (released) return; released = true; binding.release(); lease.release();
+        } });
+        return selected;
+      } catch (error) { lease.release(); throw error; }
     }));
-    if (this.#stopped) throw new Error("Application extension runtime is stopped");
-    const currentRouting = await this.routing.read();
-    if (!currentRouting.authoritative || currentRouting.document.revision !== routing.document.revision) {
-      throw new Error("Host service routing changed during preparation");
-    }
-    const providers = this.services.getSnapshot().providers;
-    const bindings = keys.map(key => {
-      const provider = providers.find(candidate => candidate.status === "active" && candidate.providerKey === key);
-      if (!provider) throw new HostServiceBindingError("selected_unavailable", "Selected Host service provider did not become ready");
-      return this.services.bind(parsed.serviceId, parsed.version, provider.providerId);
-    });
-    // Registry/supervisor lifecycle owners publish actual changes. A pure binding read must
-    // not invalidate otherwise unchanged preparation caches in another scope.
-    return result(bindings);
-  }
-
-  setServiceSelection(requestValue: VarinExtensionServiceSelectionRequest | unknown): Promise<VarinExtensionHostStateSnapshot> {
-    const request = parseVarinExtensionServiceSelectionRequest(requestValue);
-    return this.#mutate(async () => {
-      this.services.setSelection(request.serviceId, request.version, request.providerId);
-      this.#publish();
-      return this.state();
-    });
+    for (const value of prepared) if (value.status === 'fulfilled') bindings.push(value.value);
+    try {
+      const failure = prepared.find(value => value.status === 'rejected');
+      if (failure?.status === 'rejected') throw failure.reason;
+      options?.signal?.throwIfAborted();
+      if (this.#stopped) throw new Error('Application extension runtime is stopped');
+      if (!frozen) {
+        const current = await this.routing.read();
+        if (!current.authoritative || current.document.revision !== routing.document.revision) throw new Error('Host service routing changed during preparation');
+      }
+      return result(bindings, routing.document.revision);
+    } catch (error) { bindings.forEach(binding => binding.release()); throw error; }
   }
 
   upsertServiceRoutingRule(
@@ -685,6 +840,7 @@ export class ApplicationExtensionRuntime {
   stop(): Promise<void> {
     if (this.#stop) return this.#stop;
     this.#stopped = true;
+    for (const lease of this.#surfaceLeases.values()) lease.revoke();
     // Close supervisor admission and cancel unpublished workers before waiting for callers.
     const shutdown = this.supervisor.shutdown();
     this.#stop = (async () => {
@@ -696,44 +852,6 @@ export class ApplicationExtensionRuntime {
       if (failures.length) throw new AggregateError(failures.map(result => result.reason), "Extension Host shutdown reported failures");
     })();
     return this.#stop;
-  }
-
-  async #bindRegisteredService(
-    request: VarinExtensionServiceInvocationRequest,
-    defaultProviderKey?: string,
-  ): Promise<HostServiceBinding> {
-    const parsed = parseVarinExtensionServiceInvocationRequest(request);
-    if (parsed.providerId) return this.services.bind(parsed.serviceId, parsed.version, parsed.providerId);
-    const services = this.services.getSnapshot();
-    const key = `${parsed.serviceId}@${parsed.version}`;
-    const legacySelection = services.selections[key];
-    if (legacySelection) return this.services.bind(parsed.serviceId, parsed.version, legacySelection);
-    const candidates = services.providers.filter((provider) => (
-      provider.status === "active"
-      && provider.descriptor.id === parsed.serviceId
-      && provider.descriptor.version === parsed.version
-    ));
-    const routing = await this.routing.read();
-    if (!routing.authoritative) throw new Error("Cannot bind a Host service from stale routing state");
-    const resolution = resolveVarinExtensionServiceRouting({
-      candidates: candidates.map((provider) => ({
-        providerId: provider.providerId,
-        providerKey: provider.providerKey,
-      })),
-      document: routing.document,
-      ...(defaultProviderKey ? { defaultProviderKey } : {}),
-      serviceId: parsed.serviceId,
-      version: parsed.version,
-      ...(parsed.routing ? { context: parsed.routing } : {}),
-    });
-    if (resolution.status !== "resolved" || resolution.providerIds.length !== 1) {
-      const detail = resolution.diagnostics.map((diagnostic) => diagnostic.message).join("; ");
-      throw new HostServiceBindingError(resolution.status === "ambiguous" ? "ambiguous"
-        : resolution.matchedRule ? "selected_unavailable" : "missing",
-        detail || `Host service provider is unavailable or ambiguous: ${key}`);
-    }
-    const [providerId] = resolution.providerIds;
-    return this.services.bind(parsed.serviceId, parsed.version, providerId);
   }
 
   async #ensureBuiltinArtifact(extensionId: string): Promise<void> {

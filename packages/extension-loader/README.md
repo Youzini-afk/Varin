@@ -17,7 +17,7 @@ byte, evaluates self-contained browser bundles without credential-bearing module
 styles, object URLs, isolated realms, capability bindings, service requirements, actual state, and
 generation-safe cleanup across disable, host switch, update, and rollback.
 
-Surface hosts can inject `externalServiceFactories`. Each factory declares one service descriptor and
+Surface hosts can inject `externalServiceFactories`. Each factory declares one service descriptor and stable `providerKey`, then
 creates an instance from the loader-supplied consumer `SurfaceOwnerIdentity`; extension code cannot
 submit its own owner. Returned disposers transfer to the activation owner scope. Host service proxies
 keep their existing application-host routing, while managed and isolated entrypoints can call a
@@ -51,3 +51,24 @@ same selected artifact; an unavailable result remains unconfirmed and the ordina
 later. Local resource rollback never asserts that a Host selection or a tool receipt was rolled back.
 Already selected artifacts, initial enable, and Host restart do not acquire this update-only barrier.
 Readiness without a connected mount establishes prepared modules/resources, not a presented screen.
+
+Service requirements declare `realms: ["surface"]`, `["host"]`, or both explicitly; each realm consumes
+only its own requirements. The loader resolves Surface requirements from canonical Host declarations,
+its local factories, and mounted Surface declarations, using the Host routing document and the actual
+session/runtime/workspace/profile context. Routing remains the only mutable choice authority. A
+scope or dependency change prepares a replacement even when the package artifact is unchanged;
+failure keeps the old visible owner and its original clients.
+
+Every prepared Surface owner opens one authenticated `watchServiceLease` POST event stream, including
+local-only owners with an empty Host service list. Host readiness supplies exact provider instance
+snapshots and pins the consumer's own Host root when present. All candidate streams become ready
+before group `prepareCandidate`; module reads then use the authoritative artifact slot. Local
+factories remain local and are created only for the resolved choices. `exactProviderIds` records the
+frozen Host/local references passed to activation, not a second routing table.
+
+Invocation carries the original routing context, lease identity, exact provider ID, and owner
+cancellation signal. Closing a stream withdraws its Host roots while admitted Host calls retain their
+own pins; ordinary replacement does not cancel those calls through the stream signal. Rollback,
+retirement, and loader stop close the original streams. An error, revocation, or unexpected stream end
+invalidates that combination and retires its consumers; the stream client never reconnects or silently
+reselects an existing handle. The separate catalog watcher continues ordinary catalog reconciliation.

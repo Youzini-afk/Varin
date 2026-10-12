@@ -31,7 +31,6 @@ const snapshot = (contributions: SurfaceContribution[]): SurfaceRegistrySnapshot
   layoutReferences: [],
   replacementSelections: {},
   revision: 1,
-  serviceSelections: {},
   services: [],
   visibleContributions: contributions,
 });

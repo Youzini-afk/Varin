@@ -1,4 +1,5 @@
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
+import { leafHostComposition } from './host-composition.test-helper.js';
 import { ApplicationExtensionRuntime } from '@varin/extension-host';
 import { createAgentPolicy, AgentPolicyBridge } from './agent-policy.js';
 import { createContextComposition } from './context-composition.js';
@@ -223,6 +224,7 @@ it('late old-epoch response send failure cannot close replacement kernel',async(
  let epoch='one';let rejectOld!:(e:Error)=>void;let failures=0;let sent=0;
  const bridge=new AgentPolicyBridge(()=>epoch,async()=>{sent++;await new Promise<void>((_resolve,reject)=>{rejectOld=reject})},()=>{failures++});
  const artifact = { providerKey:'fixture:host:varin.agent.policy@4', extensionId:'fixture', extensionVersion:'1', serviceId:'varin.agent.policy' as const, serviceVersion:4 as const,
+   composition: leafHostComposition({ extensionId: 'fixture', extensionVersion: '1', artifactIntegrity: 'artifact' }),
    artifactIntegrity:'artifact', configurationIdentity:'config', declaredIdentity:{name:'policy',version:'1'}, identity:{name:'policy',version:'hash'}, modelRoles:[], stateTransition:'unsupported' as const };
  const binding=bridge.register('r',0,{binding:{reference:'p',artifact},revocationSignal:new AbortController().signal,release(){},async transitionState(){return {kind:'incompatible',reason:'Unsupported'}},async decide(){return {action:{kind:'complete'},state:null}}});
  bridge.consume({v:1,kind:'agent-policy-request',id:'decision1',kernelEpoch:'one',runId:'r',generation:0,binding,input:{view:{run_id:'r',state:'runnable',history_count:0,history_head_id:null,pending_tool_calls:0,model_capabilities:[]},event:{kind:'started'},state:null}});

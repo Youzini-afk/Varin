@@ -103,7 +103,7 @@ test('actual service preparation and its exact method query share the original d
     assert.ok(draining.action === 'describe' && draining.kind === 'service');
     assert.equal(draining.service?.instances.find(instance => instance.providerId === binding.providerId)?.status, 'draining');
     assert.equal(await pin.invoke('read', []), 'actual result');
-    pin.release(); await replacement.finalize();
+    pin.release(); binding.release(); await replacement.finalize();
   } finally { await h.close(); }
 });
 
@@ -178,11 +178,12 @@ for (const change of ['contract', 'source'] as const) test(`same-version ${chang
     assert.equal(h.runtime.supervisor.getRetainedArtifactIdentity(oldProvider), snapshot.extensions.find(entry => entry.manifest.id === id)!.integrity);
     assert.notEqual(h.runtime.supervisor.getRetainedArtifactIdentity(oldProvider), candidate.integrity);
     assert.deepEqual(during.member?.contract, next.contract!.methods.read);
-    h.runtime.services.setSelection(serviceId, 1, binding.providerId);
+    // An exact old handle remains an invocation identity, never a second metadata selection.
     const explicit = await h.query(request);
     assert.ok(explicit.action === 'describe' && explicit.kind === 'service');
-    assert.equal(explicit.status, 'unresolved');
-    assert.equal(explicit.service?.selection.status, 'stale');
+    assert.equal(explicit.status, 'found');
+    assert.equal(explicit.service?.selection.status, 'resolved');
+    assert.equal(explicit.service?.selection.providerIds, undefined);
     assert.equal(explicit.service?.instances[0]?.providerId, binding.providerId);
     assert.equal(await binding.invoke('read', []), 'actual result');
     release();
@@ -193,6 +194,7 @@ for (const change of ['contract', 'source'] as const) test(`same-version ${chang
     assert.equal(ready.service?.implementations[0]?.registration, 'registered');
     assert.equal(ready.service?.selection.providerIds?.length, 1);
     assert.notDeepEqual(ready.service?.selection.providerIds, [binding.providerId]);
+    binding.release();
   } finally { release(); await selecting?.catch(() => undefined); await h.close(); }
 });
 

@@ -258,6 +258,20 @@ describe('ui auth client credential seam', () => {
     });
     expect(extensionEnabledCalled).toBe(true);
 
+    for (const [endpoint, allowed] of [['invoke', true], ['lease', true], ['select', false]] as const) {
+      const request = {
+        method: 'POST',
+        url: `/api/varin/extensions/v1/services/${endpoint}`,
+        headers: { 'x-varin-application-token': urlToken },
+      };
+      const response = createResponse();
+      let admitted = false;
+      await auth.requireAuth(request, response, () => { admitted = true; });
+      expect(admitted).toBe(allowed);
+      if (allowed) expect(await auth.ensureSessionToken(request, response)).toBe('client:device-1');
+      else expect(response.statusCode).toBe(401);
+    }
+
     const unrelatedHeaderReq = {
       method: 'POST',
       path: '/api/fs/raw',

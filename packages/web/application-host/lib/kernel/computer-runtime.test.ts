@@ -14,7 +14,7 @@ import type { ToolExecutionReceipt } from './tool-bridge.js';
 import type { KernelRecordResult, ToolOrigin, ComputerRequestRecord, ComputerEventCommand, ComputerEventCancellation } from './protocol.generated.js';
 
 const work = (threadId = 'root'): ComputerWorkRef => ({ runtime: 'agent', threadId, branchId: `${threadId}-branch` });
-const owner = { extensionId: 'varin.builtin.computer', extensionVersion: '1.0.0', entrypointId: 'host', generation: 1 };
+const owner = { extensionId: 'varin.builtin.computer', extensionVersion: '1.0.0', entrypointId: 'host', instanceKey: 'computer-runtime-fixture', generation: 1 };
 const response = (extra: Partial<DriverResponse> = {}): DriverResponse => ({ id: 'controlled', ok: true, ...extra });
 const deferred = <T>() => { let resolve!: (value: T) => void, reject!: (reason: Error) => void; const promise = new Promise<T>((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 async function fixture(records = new Map<string, KernelRecordResult>()) {

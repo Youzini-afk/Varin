@@ -1,4 +1,5 @@
 import { expect, it, vi } from 'vitest';
+import { leafHostComposition } from './host-composition.test-helper.js';
 import { AgentRuntimeClient, type McpPreparation } from './agent-runtime-client.js';
 import type { KernelClient } from './kernel-client.js';
 import type {
@@ -48,6 +49,7 @@ function contribution(
       serviceId: service,
       serviceVersion: 1,
       artifactIntegrity: `artifact-${service}-${version}`,
+      composition: leafHostComposition({ extensionId: `extension-${service}-${version}`, extensionVersion: version, artifactIntegrity: `artifact-${service}-${version}` }),
       declarationHash: version,
       configurationIdentity: null,
       tool: schema,
