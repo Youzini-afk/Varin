@@ -76,7 +76,7 @@ impl ModelProvider for DispatchModel {
     }
 }
 
-fn dispatch(review: &mut Review, preset: &'static str) -> ChildTask {
+pub(super) fn dispatch(review: &mut Review, preset: &'static str) -> ChildTask {
     let owner = review.f.runtime.catalog();
     let directory = Arc::new(
         ToolDirectory::assemble(crate::collaboration::declarations(
@@ -180,7 +180,7 @@ fn storage_call(review: &Review, actor: &str, method: &str, params: Value) -> Va
         .unwrap_or_else(|error| panic!("{method}: {error}"))
 }
 
-fn prepare_source(review: &mut Review, child: &ChildTask, mode: SourceMode) -> ChildTask {
+pub(super) fn prepare_source(review: &mut Review, child: &ChildTask, mode: SourceMode) -> ChildTask {
     let handoff = child.source.handoff().unwrap();
     let ChildSourceRoot::Fixed { pin: parent_pin } = &handoff.root else {
         panic!("the original fixed parent must transfer its durable pin")
@@ -322,7 +322,7 @@ fn prepare_source(review: &mut Review, child: &ChildTask, mode: SourceMode) -> C
     child
 }
 
-fn select_child(review: &mut Review, child: &ChildTask) -> SourceSelection {
+pub(super) fn select_child(review: &mut Review, child: &ChildTask) -> SourceSelection {
     let run = child.receipt.as_ref().unwrap().run_id.clone();
     let owner = review.f.runtime.catalog();
     let launch = owner

@@ -8,6 +8,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { parseManifest, componentManifestDigest, type LocalSemanticComponentManifest } from "./local-component-manifest.js";
 import { type VectorSpaceIdentity } from "./identity.js";
 
 export interface SemanticModelRecipe {
@@ -37,6 +38,7 @@ export interface ResolvedModelPack {
   onnxPath: string | null;
   tokenizerPath: string | null;
   source: "bundled" | "component";
+  component?: { componentId: string; componentVersion: string; manifestDigest: string; workerProtocol: number };
   /** Absolute path to the component's transformers.node.mjs entry. */
   transformersEntry?: string;
   inferenceWorkerEntry?: string;
@@ -86,9 +88,10 @@ const safeComponentPath = (root: string, relativePath: string): string | null =>
 /** Resolve one extracted component without loading its optional runtime. */
 export const resolveModelPackAtComponentRoot = (
   componentRoot: string,
-  manifest: { modelPath: string; transformersEntry: string; workerEntry: string },
+  manifest: LocalSemanticComponentManifest,
   pathExists: (candidate: string) => boolean = existsSync,
 ): ResolvedModelPack | null => {
+  const manifestDigest = componentManifestDigest(manifest);
   const modelRoot = safeComponentPath(componentRoot, manifest.modelPath);
   const transformersEntry = safeComponentPath(componentRoot, manifest.transformersEntry);
   const inferenceWorkerEntry = safeComponentPath(componentRoot, manifest.workerEntry);
@@ -102,7 +105,8 @@ export const resolveModelPackAtComponentRoot = (
     id: recipe.model,
     root: modelRoot,
     recipe,
-    space: spaceFromRecipe(recipe),
+    space: { ...spaceFromRecipe(recipe), configurationId: `local-component:${manifestDigest}` },
+    component: { componentId: manifest.id, componentVersion: manifest.version, manifestDigest, workerProtocol: manifest.workerProtocol },
     onnxPath: pathExists(onnxPath) ? onnxPath : null,
     tokenizerPath: pathExists(tokenizerPath) ? tokenizerPath : null,
     source: "component",
@@ -111,27 +115,22 @@ export const resolveModelPackAtComponentRoot = (
   };
 };
 
-const activeComponentRoot = (dataDir: string): { root: string; manifest: { modelPath: string; transformersEntry: string; workerEntry: string } } | null => {
+const activeComponentRoot = (dataDir: string): { root: string; manifest: LocalSemanticComponentManifest } | null => {
   const parent = join(dataDir, COMPONENT_ROOT);
-  let raw: { root?: unknown };
+  let raw: { schemaVersion?: unknown; root?: unknown };
   try {
-    raw = JSON.parse(readFileSync(join(parent, "active.json"), "utf8")) as { root?: unknown };
+    raw = JSON.parse(readFileSync(join(parent, "active.json"), "utf8")) as { schemaVersion?: unknown; root?: unknown };
   } catch {
     return null;
   }
-  if (typeof raw.root !== "string" || !raw.root.trim() || raw.root.includes("\\")) return null;
+  if (raw.schemaVersion !== 1 || typeof raw.root !== "string" || !raw.root.trim() || raw.root.includes("\\")) return null;
   const relative = raw.root.replace(/\\/g, "/");
   if (relative.split("/").some((part) => part === ".." || !part)) return null;
   const root = safeComponentPath(parent, relative);
   if (!root) return null;
   try {
-    const manifest = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8")) as {
-      modelPath?: unknown;
-      transformersEntry?: unknown;
-      workerEntry?: unknown;
-    };
-    if (typeof manifest.modelPath !== "string" || typeof manifest.transformersEntry !== "string" || typeof manifest.workerEntry !== "string") return null;
-    return { root, manifest: { modelPath: manifest.modelPath, transformersEntry: manifest.transformersEntry, workerEntry: manifest.workerEntry } };
+    const manifest = parseManifest(JSON.parse(readFileSync(join(root, "manifest.json"), "utf8")));
+    return { root, manifest };
   } catch {
     return null;
   }

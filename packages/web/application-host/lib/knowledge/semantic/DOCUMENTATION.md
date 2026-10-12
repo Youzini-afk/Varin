@@ -7,7 +7,7 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this local-m
 ## Purpose-specific Host inference
 
 `runtime-inference.ts` owns retained embedding leases and assembles purpose-specific Host inference.
-Native retrieval's query embedding, decision, rerank and Explore generation consume one original
+Native retrieval's query/document embedding, decision, rerank and Explore generation consume one original
 query session in `inference-requests.ts`, with one ordinal allocator for actual requests. The
 `HostCredentialAuthority`, global purpose settings, egress and original protocol adapters remain
 their owners; no Pi AgentSession/workspace worker is started. Catalog owns native request admission,
@@ -20,9 +20,36 @@ original Goal/parent control fence dispatch. Runtime events reconcile the exact 
 kernel exit aborts local transports immediately. Stop acknowledgement does not prove remote work
 stopped: the Host waits for its actual fetch/body reader and records known/unknown effects separately.
 The session closes new scheduler admission when its query callback finishes, retaining already-owned
-HTTP/body work until its receipt or existing unknown-usage barrier is acknowledged. Kernel generation
+HTTP/body or local worker work until its receipt or existing unknown-usage barrier is acknowledged. Kernel generation
 keeps its original execution owner. An unpublished observed receipt remains with its owner for same-identity publication, and prevents
 the SDK from interpreting the persistence failure as permission to send another paid request.
+
+`local-inference.ts` adapts the existing installed encoder for native query and foreground fixed-view
+vectors. An unconfigured embedding selection uses the installed component; explicit remote, disabled,
+invalid or unavailable selections never fall back. The existing HTTP settings DTO remains unconfigured
+for Pi/knowledge-vector consumers, so this does not enroll a knowledge index or change Pi defaults.
+Workspace native selection is one tagged HTTP/local lease. Local Catalog bindings carry the component
+ID/version, canonical verified-manifest digest, model revision and worker protocol, with no endpoint or
+credential. The digest includes the manifest's model/tokenizer/recipe/runtime hashes and enters the
+vector-space/cache identity; it does not reread model weights per query.
+
+Each actual local grain uses the original InferenceCall session/ordinal and Catalog Operation/Goal.
+The shared worker selects a queued grain, requests dispatch permission, then enters the encoder only
+after original Catalog, settings, source/grant and document-revision fences. Native gated grains are
+not coalesced across callers, so an already-authorized grain cannot wait behind another caller's source
+check. Existing ungated CPU batches keep their coalescing. A queued cancel is settled by the worker's
+never-started acknowledgement; aborting an observer does not settle active forward. Active completion,
+error or worker exit supplies the physical-stop evidence. Worker exit after execute but without a
+started acknowledgement leaves execution entry unknown, never false. Original results/errors/usage
+remain in ContentStore even when their observer has left; current-format recovery never reruns them.
+
+The worker reports untruncated tokenizer counts as estimated input, not actual pipeline tokenization.
+Encoder output tokens are known zero after encoder entry; unavailable input evidence remains missing.
+There is no invented price. Each completed/failed grain retains its own receipt, including partial
+multi-grain requests. Verified query-cache hits make no worker request or Catalog inference receipt.
+Component replacement retains accepted query/scan generations until their pins and actual worker work
+drain; reimporting identical bytes reuses the active generation. Shutdown closes admission, releases
+selection pins and starts real worker termination before waiting for cancelled scans/callbacks.
 
 Raw provider usage, including missing dimensions, is recorded before answer validation. The SDK's
 normalized zero defaults are not accounting evidence. Legitimate SDK retries each re-enter original
@@ -83,15 +110,16 @@ observer semantics were replaced.
   forward passes and inference tokenization off the Application Host event loop.
   The Host retains the synchronous tokenizer used for source packing. The worker
   admits query batches ahead of queued background calls; an active forward runs
-  to completion. Idle workers do not keep a process alive. Retained model
-  bindings close with the semantic Host owner after pending work shuts down.
+  to completion. Idle workers do not keep a process alive. Accepted query/scan pins retain
+  their generation across preparation and batch gaps; unused retired generations close after drain.
   The default Bekko export enables adaptive batching (its FP32 transformer was
   verified across batch compositions). Batch size follows padded token work and
   observed inference duration, within the measured 32-input working grain; every
   input is processed. Host token-length preparation yields between short work
   intervals. Already queued foreground requests can share an immediate inference
-  batch without waiting to fill it. Cancellation removes queued calls and rejects
-  the caller immediately; a native forward already in progress completes.
+  batch without waiting to fill it, except native grains awaiting per-call dispatch authorization.
+  Cancellation removes queued calls with a worker acknowledgement; a native forward already in
+  progress completes. Observer cancellation and owning physical settlement remain distinct.
   `local-cpu-policy.ts` owns auto/efficient/performance preferences and an optional
   user thread ceiling. The model's four-thread hint is a measured starting point,
   not a reserved core count or a universal ceiling. Auto starts within half of
@@ -283,7 +311,7 @@ observer semantics were replaced.
   retaining the model identity held by an in-flight query. Remote bindings are not replaced.
   The encoder loads the exact ONNX graph named by the recipe, with the recipe's
   pooling and dimensions; an installed multilingual graph is not routed to a
-  hardcoded MiniLM Q8 filename. Graph filenames distinguish local vector spaces.
+  hardcoded MiniLM Q8 filename. The verified manifest digest binds graph, tokenizer, recipe and worker bytes in local vector-space identity.
 - `scripts/build-local-semantic-component.mjs` builds and verifies the separate target-specific archive.
   Its Node inference dependencies and model weights never enter the normal Host or desktop build.
   `--model-source <directory>` builds from a prepared `recipe.json`, tokenizer,
@@ -291,7 +319,12 @@ observer semantics were replaced.
   the staged Electron runtime before writing the archive. The release's default
   build fetches pinned Bekko a8m source with per-file SHA256 checks; other model packs are explicit
   imports until their release model choice is updated.
-  Component manifest v2 includes the worker entry and its file hash. Activation
+  Component manifest v3 requires worker protocol 1. One shared manifest parser is used by
+  installation and active selection. Existing v2 component assets remain on disk, but the current Host
+  will not start their old worker. Rebuild with the current builder and import its v3 archive;
+  there is no old reader or automatic migration. Format/protocol errors report this required action.
+  This native-wiring slice does not publish a component release or download real model weights.
+  The builder and activation validator both execute the packaged worker protocol. Activation
   checks the real worker transport and inference in a child before committing
   the pointer; it retains the previous package if that check fails.
 

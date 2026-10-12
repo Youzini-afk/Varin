@@ -1,6 +1,11 @@
 /** Original retrieval/configuration/credential owners over test stdio, never product IPC.
  * Storage authorizes actual files/compute; only inference provider bytes are controlled. */
 import assert from 'node:assert/strict';
+import { create as createTar } from 'tar';
+import { localComponentFixture } from '../knowledge/semantic/fixtures/local-component.test-helper.js';
+import { createLocalSemanticComponentManager } from '../knowledge/semantic/local-component.js';
+import { resolveInstalledModelPack } from '../knowledge/semantic/model-store.js';
+import { createLocalSemanticEmbedder } from '../knowledge/semantic/local-embedder.js';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -53,7 +58,20 @@ let releaseLexical!: () => void;
 const lexicalStarted = new Promise<void>(resolve => { releaseLexical = resolve; });
 const documentInputs: string[][] = [], backgroundInputs: string[][] = [], queryFacts: unknown[] = [];
 const originalDocuments: Record<string, { content: string; revision: string }> = {};
-const fixedSemantic = () => mode.startsWith('semantic-fixed-');
+const localSemantic = () => mode.startsWith('semantic-local-');
+const fixedSemantic = () => mode.startsWith('semantic-fixed-') || localSemantic();
+let localModelRoot: string | undefined, localValidationCalls = 0;
+let localEncoder: ReturnType<typeof createLocalSemanticEmbedder> | undefined, localBackground: Promise<number[][]> | undefined;
+let localCancelScheduled = false;
+async function waitForLocalForward() {
+  const deadline = Date.now() + 10000;
+  while (true) {
+    try { await readFile(join(localModelRoot!, 'started')); return; } catch { /* The controlled forward has not entered yet. */ }
+    if (Date.now() > deadline) throw new Error('Controlled local forward did not start');
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+}
+const localCalls = async (): Promise<string[][]> => localModelRoot ? (await readFile(join(localModelRoot, 'calls.jsonl'), 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as string[]) : [];
 const semanticQuestions = ['quasar rendezvous', 'nebula docking'];
 const semanticBody = (marker: string) => `export const capsule = "${marker}";\n`;
 async function sourceDocuments() {
@@ -105,10 +123,17 @@ function request(method:string,params:unknown,options:{grant?:KernelGrantHandle}
     && (params as {lane?:string}).lane==='foreground') fixedUnits++;
   if(options.grant) kernel.assertGrantForScope(options.grant);
   const id=`rerank-review:${++sequence}`;
-  return new Promise((resolve,reject)=>{
+  const response = new Promise((resolve,reject)=>{
     pending.set(id,{resolve,reject});
     write({kind:'fixture-request',id,method,params,...(options.grant?{grantId:options.grant.grantId}:{})});
   });
+  if (mode === 'semantic-local-queued' && method === 'runtime.inference.admit' && !localCancelScheduled) {
+    localCancelScheduled = true;
+    void response.then(() => new Promise<void>(resolve => setImmediate(resolve))).then(async () => {
+      await withMaterialReviewClient(runtime, {} as ThreadMaterialsAPI, api => api.cancelRun(runId));
+    }).catch(error => write({ kind: 'fixture-failed', error: String(error) }));
+  }
+  return response;
 }
 async function heldResponse(init: RequestInit): Promise<Response> {
   assert(init.signal);
@@ -171,7 +196,7 @@ async function initialize(frame:Record<string,unknown>) {
   await mkdir(join(workspace,'allowed'),{recursive:true});await mkdir(join(workspace,'private'),{recursive:true});await mkdir(agentDir,{recursive:true});
   if(fixedSemantic()) {
     for (const [file, marker] of [['a', 'PINNED_MAGENTA_CAPSULE_紫'], ['b', 'STABLE_AMBER'], ['c', 'STABLE_CYAN']])
-      await writeFile(join(workspace, 'allowed', `${file}.ts`), semanticBody(marker!));
+      await writeFile(join(workspace, 'allowed', `${file}.ts`), semanticBody(mode === 'semantic-local-partial' && file === 'c' ? 'FAIL_FORWARD' : marker!));
   } else if(usesDecision()||usesExplore()) {
     await writeFile(join(workspace,'allowed','seed.ts'),'export const retrievalNeedle = hiddenHelper();\n');
     await writeFile(join(workspace,'allowed','helper.ts'),'export function hiddenHelper() { return "DISCOVERED_HELPER"; }\n');
@@ -188,7 +213,7 @@ async function initialize(frame:Record<string,unknown>) {
     explore:{baseUrl:'https://explore.invalid/v1',apiKey:'controlled-explore-key',api:'openai-responses',models:[{id:'explore-model',name:'Original configured Explore',contextWindow:32768,maxTokens:2000,input:['text']}]}}}));
   await writeFile(join(agentDir,'settings.json'),JSON.stringify({harness:{codeRetrieval:{decision:mode==='llm-auto'||mode==='semantic-auto'?'auto':usesExplore()||mode==='unconfigured-model'?'llm':mode.startsWith('decision-')?'fast-decision':fixedSemantic()?'source':['source','syntax','semantic','semantic-stop','semantic-invalid','semantic-missing','semantic-cold','semantic-cache','semantic-credential'].includes(mode)?'source':'rerank'},
     rerank:{protocol:'http-rerank',providerId:'rank',modelId:'ranker'},
-    embedding:usesSemantic()?{protocol:'openai-compatible',providerId:'embedding',modelId:'encoder',dimensions:2,maxTokens:2048}:undefined,
+    embedding:usesSemantic()&&!localSemantic()?{protocol:'openai-compatible',providerId:'embedding',modelId:'encoder',dimensions:2,maxTokens:2048}:undefined,
     models:usesExplore()?{explore:{providerId:'explore',modelId:'explore-model'}}:undefined,
     fastDecision:usesDecision()?{default:{protocol:'pi-classifier',providerId:'rank',modelId:'classifier'}}:undefined}}));
   kernel=new KernelClient({hostId:HOST,hostGeneration:GENERATION,storageRoot:String(frame.storageRoot),buildVersion:'0.9.25'});
@@ -225,8 +250,8 @@ async function initialize(frame:Record<string,unknown>) {
     await kernel.revokeGrant(seed.grantId);
   }
   credentials=HostCredentialAuthority.open(agentDir);
-  if(usesSemantic()) await credentials.modifyWithIntent('embedding','replace',async()=>({type:'api_key',key:'controlled-embedding-key'}));
-  if(usesSemantic()) ledger=createSemanticInferenceLedger({dataDir:join(root,'semantic-data'),hostId:HOST});
+  if(usesSemantic()&&!localSemantic()) await credentials.modifyWithIntent('embedding','replace',async()=>({type:'api_key',key:'controlled-embedding-key'}));
+  if(usesSemantic()&&!localSemantic()) ledger=createSemanticInferenceLedger({dataDir:join(root,'semantic-data'),hostId:HOST});
   inference=createSemanticInference(credentials,undefined,{requests:{kernel,runtime,egress},...(ledger?{ledger}:{}),fetchImpl:async(_url,init)=>embeddingResponse(init!)});
   const sources=createRetrievalSourceOwner({kernel,documents,validateLiveSource:live.validate});
   compute=createKernelComputeService({client:kernel,resolveIdentity:async cwd=>{
@@ -235,6 +260,12 @@ async function initialize(frame:Record<string,unknown>) {
     return {workspaceId:identity.workspaceId,executionWorkspaceId:identity.workspaceId,canonicalRoot:(await documents.inspectWorkspace(identity.workspaceId)).root};
   }});
   const syntax=createTreeSitterStructureProvider({compute});
+  const unitsFixed = syntax.unitsFixed!;
+  syntax.unitsFixed = async request => {
+    const result = await unitsFixed(request);
+    if (localSemantic() && !['ready', 'empty'].includes(result.status)) console.error('local fixture source units', request.path, result.status, result.message);
+    return result;
+  };
   if(usesSemantic()) {
     indexScope=createProjectIndexScope([fixedSemantic() ? workspace : join(workspace,'allowed')]);
     if(mode==='semantic-fixed-warm') {
@@ -242,11 +273,32 @@ async function initialize(frame:Record<string,unknown>) {
       for(let index=0;index<5;index++) await writeFile(join(workspace,'allowed',`live-only-${index}.ts`),semanticBody(`LIVE_ONLY_${index}`));
       for(let index=0;index<5;index++) await writeFile(join(workspace,'private',`secret-${index}.ts`),semanticBody(`FORBIDDEN_SOURCE_${index}`));
     }
+    let encoder = createHashEmbedder();
+    if (localSemantic()) {
+      const candidateRoot = join(root, 'component-fixture');
+      const component = await localComponentFixture(candidateRoot, { batchSize: 2 });
+      const archive = join(root, 'local-semantic.tar.gz');
+      await createTar({ file: archive, cwd: candidateRoot, gzip: true }, ['manifest.json', ...Object.keys(component.manifest.files)]);
+      const manager = createLocalSemanticComponentManager({ dataDir: join(root, 'semantic-data'), version: 'fixture' });
+      await manager.importArchive(archive);
+      assert.equal(manager.status().status, 'ready', JSON.stringify(manager.status()));
+      await manager.dispose();
+      localModelRoot = resolveInstalledModelPack(join(root, 'semantic-data'))!.root;
+      localValidationCalls = (await localCalls()).length;
+      assert.equal(localValidationCalls, 1, 'the original component validator executed the real worker protocol');
+      encoder = createLocalSemanticEmbedder({ dataDir: join(root, 'semantic-data') });
+      localEncoder = encoder;
+      if (mode === 'semantic-local-queued') {
+        await encoder.prepare();
+        localBackground = encoder.embed(['HOLD_FORWARD independent-background']);
+        await waitForLocalForward();
+      }
+    }
     const filesystem=createFsSearchRuntime({compute});
     semantic=createWorkspaceSemanticRuntime({dataDir:join(root,'semantic-data'),hostId:HOST,configCwd:agentDir,
       documents,structureSource:createStructureSource([syntax]),searchFilesystemFiles:filesystem.searchFilesystemFiles,
       isIndexablePath:async(id,resource,signal,options)=>filesystem.isSearchableFile((await documents.inspectWorkspace(id)).root,resource,signal,options),
-      scheduler:createEmbedScheduler(),embedder:createHashEmbedder(),getIndexScope:indexScope.get,runtimeInference:inference,
+      scheduler:createEmbedScheduler(),embedder:encoder,getIndexScope:indexScope.get,runtimeInference:inference,
       getBroker:()=>{throw new Error('Native semantic must not create a Pi workspace');},
       executionViews:{get:()=>undefined},workingBranches:{pinQuery:async()=>null},onError:error=>console.error('semantic fixture',error)});
     if(mode!=='semantic-cold' && (!fixedSemantic() || mode==='semantic-fixed-warm')) {
@@ -291,9 +343,16 @@ async function initialize(frame:Record<string,unknown>) {
     if(mode==='semantic-fixed-chain' && retrievalCalls===3)
       await credentials.modifyWithIntent('embedding','replace',async()=>({type:'api_key',key:'controlled-second-account-key'}));
     const expected=fixedSemantic()?await sourceDocuments():undefined;
+    if (mode === 'semantic-local-stop' && !localCancelScheduled) {
+      localCancelScheduled = true;
+      void waitForLocalForward().then(async () => {
+        await withMaterialReviewClient(runtime, {} as ThreadMaterialsAPI, api => api.cancelRun(runId));
+        write({ kind: 'fixture-body-cancelled', drained: false });
+      }).catch(error => write({ kind: 'fixture-failed', error: String(error) }));
+    }
     const result=await retrieve(query,signal);
     retrievalCalls++;
-    if(fixedSemantic()) queryFacts.push({question:query.question,documentRequests,indexRequests,embeddingRequests,fixedUnits,expected,
+    if(fixedSemantic()) queryFacts.push({question:query.question,localCalls: (await localCalls()).length - localValidationCalls,documentRequests,indexRequests,embeddingRequests,fixedUnits,expected,
       status:result.status,stages:result.stages});
     if(mode==='semantic-credential'&&retrievalCalls===1) await credentials.modifyWithIntent('embedding','replace',async()=>({type:'api_key',key:'controlled-second-account-key'}));
     if(result.status==='failed') console.error('retrieval fixture failure',sourceMode,mode,result.message,result.stages);
@@ -325,6 +384,9 @@ async function handle(frame:Record<string,unknown>) {
     runId=String(frame.runId);
     const source=frame.source as LaunchSource;
     const child=frame.kind==='fixture-select-child', threadId=child?String(frame.threadId):'thread:parent';
+    if (child && localSemantic()) await extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision,
+      rule: { scope: { sessionId: threadId }, serviceId: 'varin.retrieval.plan', version: 1, allowFallback: false,
+        providerKeys: ['varin.builtin.retrieval-semantic:host:varin.retrieval.plan@1'] } });
     if(source.mode!=='live_root') {
       const seed=await kernel.issueGrant({grantId:`source-view-fixture-materialize:${runId}`,threadId,runId,
         owningWorkspace:source.workspace_id,executionWorkspace:source.execution_workspace_id,capabilities:['storage.read','storage.write'],pathScopes:['']});
@@ -367,12 +429,17 @@ async function handle(frame:Record<string,unknown>) {
     await withMaterialReviewClient(runtime,{} as ThreadMaterialsAPI,api=>api.cancelRun(runId));return;
   }
   if(frame.kind==='fixture-native-body-cancelled') {write({kind:'fixture-body-cancelled',drained:false});return;}
-  if(frame.kind==='fixture-release-body') {if(mode==='llm-stop'){drained=true;write({kind:'fixture-native-release'});}else releaseBody();return;}
+  if(frame.kind==='fixture-release-body') {if(mode==='semantic-local-stop'){await writeFile(join(localModelRoot!, 'release'), 'yes');}else if(mode==='llm-stop'){drained=true;write({kind:'fixture-native-release'});}else releaseBody();return;}
   if(frame.kind==='fixture-finish') {
     // Publishing may outlive the detached caller. Wait for that existing owner's completion before exit.
     const facts=ledger?await ledger.list():[];
+    if (mode === 'semantic-local-stop') { await inference.requests!.close(); drained = true; }
+    if (mode === 'semantic-local-queued') {
+      await writeFile(join(localModelRoot!, 'release'), 'yes'); await localBackground;
+      await localEncoder!.embed(['unrelated-after-cancel']);
+    }
     await semantic?.dispose();indexScope?.dispose();await inference.close();await extensions.stop();await compute.dispose();await documents.dispose();
-    write({kind:'fixture-finished',requests,bodies,drained,syntaxComputations,embeddingRequests,indexRequests,documentRequests,documentInputs,backgroundInputs,fixedUnits,lexicalSearches,queryFacts,guardMutation,guardPath,retrievalCalls,ledgerFacts:facts});return;
+    write({kind:'fixture-finished',localCalls:(await localCalls()).slice(localValidationCalls),localValidationCalls,requests,bodies,drained,syntaxComputations,embeddingRequests,indexRequests,documentRequests,documentInputs,backgroundInputs,fixedUnits,lexicalSearches,queryFacts,guardMutation,guardPath,retrievalCalls,ledgerFacts:facts});return;
   }
   (kernel as unknown as {consumeFrame(value:unknown):void}).consumeFrame(frame);
 }

@@ -446,10 +446,10 @@ fn semantic_decision_and_explore_use_one_query_session_with_contiguous_ordinals(
     ));
     assert!(operations
         .iter()
-        .any(|operation| operation.intent["binding"]["api"] == "typesafe-system-one"));
+        .any(|operation| operation.intent["binding"]["executor"]["api"] == "typesafe-system-one"));
     assert!(operations
         .iter()
-        .any(|operation| operation.intent["binding"]["api"] == "openai-responses"));
+        .any(|operation| operation.intent["binding"]["executor"]["api"] == "openai-responses"));
     for (index, operation) in operations.iter().enumerate() {
         assert_eq!(operation.intent["ordinal"], (index + 1) as u64);
         assert_eq!(

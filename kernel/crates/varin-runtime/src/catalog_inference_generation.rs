@@ -84,10 +84,11 @@ impl Catalog {
                 purpose: p.purpose.clone(),
                 provider_id: p.configuration.provider_id.clone().ok_or_else(conflict)?,
                 model_id: p.configuration.model.clone(),
-                api: p.configuration.provider_family.clone(),
-                endpoint: p.configuration.endpoint.clone(),
                 configuration_id,
-                credential_scope: p.credential_scope.clone(),
+                executor: InferenceExecutor::Http {
+                    api: p.configuration.provider_family.clone(), endpoint: p.configuration.endpoint.clone(),
+                    credential_scope: p.credential_scope.clone(),
+                },
             },
             request: Value::Null,
         };

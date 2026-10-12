@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 20;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 21;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -154,7 +154,7 @@ pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
 pub(crate) struct InferenceReceiptPendingParams {
     pub(crate) operation_id: String,
     pub(crate) execution_owner: varin_runtime::ExecutorOwner,
-    pub(crate) request_started: bool,
+    pub(crate) request_started: RequiredNullable<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

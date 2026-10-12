@@ -35,6 +35,11 @@ export interface SemanticEmbedResult {
 }
 
 export interface SemanticEmbedder {
+  localExecution?: import("./local-execution.js").LocalEmbeddingExecution;
+  /** Pins the selected local generation across asynchronous query/scan preparation. */
+  retain?(): () => void;
+  /** Releases selection ownership; accepted pins/work drain before disposal. */
+  retire?(): Promise<void>;
   status: SemanticEmbedderStatus;
   space: VectorSpaceIdentity;
   /** Local inference grain, not an input quota. Shared scheduling releases its

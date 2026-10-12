@@ -177,10 +177,14 @@ impl Fixture {
         self.admit_kind(ordinal, InferenceRequestKind::ModelCompute)
     }
     fn admit_kind(&mut self, ordinal: u64, kind: InferenceRequestKind) -> InferenceOwnerParams {
-        let input:InferenceAdmitParams=serde_json::from_value(json!({"parentOperationId":self.context.operation_id,"executionOwner":self.owner,"ordinal":ordinal,
-            "binding":{"requestKind":kind,"purpose":"web","providerId":"fixture","modelId":"classifier","api":"typesafe-system-one","endpoint":"https://fixture.invalid/systemone","configurationId":"frozen-config",
-                "credentialScope":{"reference":"provider:fixture","authority":"original-store","account":"original-account","generation":1}},
+        self.admit_executor(ordinal, kind, None)
+    }
+    fn admit_executor(&mut self, ordinal: u64, kind: InferenceRequestKind, executor: Option<InferenceExecutor>) -> InferenceOwnerParams {
+        let mut input:InferenceAdmitParams=serde_json::from_value(json!({"parentOperationId":self.context.operation_id,"executionOwner":self.owner,"ordinal":ordinal,
+            "binding":{"requestKind":kind,"purpose":"web","providerId":"fixture","modelId":"classifier","configurationId":"frozen-config","executor":{"kind":"http","api":"typesafe-system-one","endpoint":"https://fixture.invalid/systemone",
+                "credentialScope":{"reference":"provider:fixture","authority":"original-store","account":"original-account","generation":1}}},
             "request":{"materials":[{"snapshotId":"original","text":"原始材料".repeat(5000)}],"questions":[{"id":"a"}]}})).unwrap();
+        if let Some(executor) = executor { input.binding.executor = executor; }
         let body = self
             .db
             .prepare_inference_content()
@@ -393,7 +397,7 @@ fn undurable_drained_receipt_keeps_original_send_knowledge_and_late_barrier_is_i
         let pending = InferenceReceiptPendingParams {
             operation_id: request.operation_id.clone(),
             execution_owner: request.execution_owner.clone(),
-            request_started: started,
+            request_started: Some(started),
         };
         let status = f.db.inference_receipt_pending(&pending).unwrap();
         assert!(status.receipt_pending);
@@ -404,7 +408,7 @@ fn undurable_drained_receipt_keeps_original_send_knowledge_and_late_barrier_is_i
         f.db.inference_receipt_pending(&pending).unwrap();
         assert_eq!(f.db.event_cursor().unwrap(), before);
         let mut wrong = pending.clone();
-        wrong.request_started = !started;
+        wrong.request_started = Some(!started);
         assert!(f.db.inference_receipt_pending(&wrong).is_err());
         let final_receipt = f.settle(&request, started, Some(7));
         let usage = f.usage();
@@ -461,7 +465,7 @@ fn preparations_keep_original_receipts_without_model_usage_or_replay() {
     f.db.inference_receipt_pending(&InferenceReceiptPendingParams {
         operation_id: request.operation_id.clone(),
         execution_owner: f.owner.clone(),
-        request_started: true,
+        request_started: Some(true),
     })
     .unwrap();
     assert_eq!(f.usage().actual.output_tokens.known, expected_output);
@@ -490,4 +494,58 @@ fn preparations_keep_original_receipts_without_model_usage_or_replay() {
     assert_eq!(f.usage().pending_inferences, 0);
     drop(f.db);
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn local_unknown_entry_keeps_the_original_goal_barrier_and_late_receipt_refines_once() {
+    for pending_first in [false, true] {
+        let mut f = Fixture::new(100);
+        let original_actual = f.usage().actual.inferences;
+        let request = f.admit_executor(1, InferenceRequestKind::ModelCompute, Some(InferenceExecutor::LocalComponent {
+            component_id: "local-semantic".into(), component_version: "fixture".into(), manifest_digest: "a".repeat(64),
+            model_revision: "original-model".into(), worker_protocol: 1,
+        }));
+        f.db.dispatch_inference(&request).unwrap();
+        if pending_first {
+            let pending = f.db.inference_receipt_pending(&InferenceReceiptPendingParams {
+                operation_id: request.operation_id.clone(), execution_owner: request.execution_owner.clone(), request_started: None,
+            }).unwrap();
+            assert_eq!(pending.receipt.unwrap().request_started, None);
+            assert_eq!(f.usage().missing_inferences, 1);
+        }
+        let root = f.root.clone();
+        drop(f.db); f.db = Catalog::open(&root).unwrap();
+        let recovered = f.db.inference_status(&request.operation_id, &request.execution_owner).unwrap();
+        assert_eq!(recovered.receipt.as_ref().unwrap().request_started, None);
+        assert_eq!(recovered.receipt.unwrap().local_executor_stopped, pending_first);
+        assert!(f.db.dispatch_inference(&request).is_err(), "original computation must never replay");
+        assert_eq!(f.usage().missing_inferences, 1);
+        let receipt = InferenceSettleParams {
+            operation_id: request.operation_id.clone(), execution_owner: request.execution_owner.clone(),
+            receipt: InferenceReceipt { request_started: Some(true), provider_completed: true, local_executor_stopped: true,
+                usage: InferenceUsage { measurement: UsageMeasurement::Estimated, input_tokens: Some(19), output_tokens: Some(0), ..Default::default() },
+                http_status: None, problem: None }, response: json!({"vectors":[[1,0]],"basis":"untruncated-tokenizer-estimate"}),
+        };
+        for _ in 0..2 {
+            let body = f.db.prepare_inference_content().write(&receipt.response).unwrap();
+            f.db.settle_inference(&receipt, body).unwrap();
+        }
+        assert_eq!(f.usage().missing_inferences, 0);
+        assert_eq!(f.usage().pending_inferences, 0);
+        assert_eq!(f.usage().estimated.inferences, 1);
+        assert_eq!(f.usage().estimated.input_tokens.known, 19);
+        assert_eq!(f.usage().estimated.output_tokens.known, 0);
+        assert_eq!(f.usage().actual.inferences, original_actual);
+        let operation = f.db.capture_operation_read(f.db.operation(&request.operation_id).unwrap()).load().unwrap();
+        assert_eq!(operation.executor.as_deref(), Some("inference.local.v1"));
+        assert!(operation.intent["binding"]["executor"].get("credentialScope").is_none());
+        assert!(operation.intent["binding"]["executor"].get("endpoint").is_none());
+        drop(f.db); std::fs::remove_dir_all(root).unwrap();
+    }
+    let mut f = Fixture::new(100);
+    let request = f.admit(1); f.db.dispatch_inference(&request).unwrap();
+    assert!(f.db.inference_receipt_pending(&InferenceReceiptPendingParams {
+        operation_id: request.operation_id, execution_owner: request.execution_owner, request_started: None,
+    }).is_err(), "the local unknown-entry case does not relax HTTP owner evidence");
+    let root = f.root.clone(); drop(f.db); std::fs::remove_dir_all(root).unwrap();
 }

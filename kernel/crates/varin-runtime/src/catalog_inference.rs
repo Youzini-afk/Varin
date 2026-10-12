@@ -20,10 +20,18 @@ pub struct InferenceBinding {
     pub purpose: String,
     pub provider_id: String,
     pub model_id: String,
-    pub api: String,
-    pub endpoint: String,
     pub configuration_id: String,
-    pub credential_scope: CredentialScope,
+    pub executor: InferenceExecutor,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase", deny_unknown_fields)]
+pub enum InferenceExecutor {
+    Http { api: String, endpoint: String, credential_scope: CredentialScope },
+    LocalComponent { component_id: String, component_version: String, manifest_digest: String,
+        model_revision: String, worker_protocol: u64 },
+}
+impl InferenceExecutor {
+    fn local(&self) -> bool { matches!(self, Self::LocalComponent { .. }) }
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -116,6 +124,7 @@ pub struct InferenceReceipt {
 pub enum InferenceProblem {
     Cancelled,
     TransportFailed,
+    ExecutorFailed,
     HttpRejected,
     InvalidResponse,
     OwnerInterrupted,
@@ -127,7 +136,7 @@ pub enum InferenceProblem {
 pub struct InferenceReceiptPendingParams {
     pub operation_id: String,
     pub execution_owner: ExecutorOwner,
-    pub request_started: bool,
+    pub request_started: Option<bool>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -396,6 +405,8 @@ impl Catalog {
             executor: Some(
                 if native {
                     "inference.model.v1"
+                } else if p.binding.executor.local() {
+                    "inference.local.v1"
                 } else {
                     "inference.http.v1"
                 }
@@ -538,26 +549,27 @@ impl Catalog {
         if s.receipt
             .as_ref()
             .and_then(|receipt| receipt.request_started)
-            .is_some_and(|started| started != p.request_started)
+            .is_some_and(|started| Some(started) != p.request_started)
         {
             return Err(conflict());
         }
         if (s.receipt.is_some() && !s.recovered) || s.receipt_pending {
             return self.inference_status(&p.operation_id, &p.execution_owner);
         }
-        if !s.dispatched && p.request_started {
+        if (!s.dispatched && p.request_started != Some(false))
+            || (p.request_started.is_none() && !i.binding.executor.local()) {
             return Err(conflict());
         }
         let tx = self.db.transaction()?;
         if s.dispatched && i.binding.request_kind == InferenceRequestKind::ModelCompute {
             if !s.accounted {
-                if p.request_started {
+                if p.request_started != Some(false) {
                     goals::measured(&tx, i.goal.as_ref(), &UsageReceipt::default())?;
                 } else {
                     goals::not_dispatched(&tx, i.goal.as_ref())?;
                 }
                 s.accounted = true;
-            } else if !p.request_started
+            } else if p.request_started == Some(false)
                 && s.receipt
                     .as_ref()
                     .is_some_and(|receipt| receipt.request_started != Some(false))
@@ -572,7 +584,7 @@ impl Catalog {
         }
         s.receipt_pending = true;
         s.receipt = Some(InferenceReceipt {
-            request_started: Some(p.request_started),
+            request_started: p.request_started,
             provider_completed: false,
             local_executor_stopped: true,
             usage: InferenceUsage::default(),
@@ -580,14 +592,14 @@ impl Catalog {
             problem: Some(InferenceProblem::ReceiptPending),
         });
         op.phase = OperationPhase::Terminal;
-        op.outcome = Some(if p.request_started {
+        op.outcome = Some(if p.request_started != Some(false) {
             Outcome::Indeterminate
         } else if op.cancel_requested {
             Outcome::Cancelled
         } else {
             Outcome::Failed
         });
-        op.effect = if p.request_started {
+        op.effect = if p.request_started != Some(false) {
             Effect::Unknown
         } else {
             Effect::None
@@ -624,7 +636,7 @@ impl Catalog {
             return self.inference_status(&p.operation_id, &p.execution_owner);
         }
         if !p.receipt.local_executor_stopped
-            || (!native && p.receipt.request_started.is_none())
+            || (!native && !i.binding.executor.local() && p.receipt.request_started.is_none())
             || (p.receipt.provider_completed && p.receipt.request_started != Some(true))
             || (p.receipt.request_started == Some(false)
                 && p.receipt.usage != InferenceUsage::default())

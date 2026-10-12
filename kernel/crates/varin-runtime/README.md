@@ -443,7 +443,7 @@ permission audit events and original invocation completions. Original decision/r
 references and their historical settlement event roots are also retained. It verifies each distinct live object
 before sweeping and preserves unknown files; it never deletes history or invokes system-kernel GC.
 
-`catalog_inference.rs` owns purpose-specific decision/rerank HTTP and native auxiliary generation under
+`catalog_inference.rs` owns purpose-specific HTTP, installed local embedding and native auxiliary generation under
 an already admitted tool/query.
 One parent/ordinal identifies one actual request, with the original external executor, frozen binding
 and Goal. Progressive retrieval retains that same query session across classifier batches and SDK
@@ -468,7 +468,7 @@ retry loop or another provider request. This does not serialize unrelated valid 
 Native text generation shares these records through `catalog_inference_generation.rs`, with Kernel
 execution ownership and a separately retained original query caller proof. Only internal native methods
 prepare/checkpoint/settle those operations; public Host receipt writes still require the actual External
-HTTP executor. The supervised worker uses the original model adapter and operation-bound private
+HTTP/local executor. The supervised worker uses the original model adapter and operation-bound private
 credential owner, with a tool-free auxiliary request origin. Immutable snapshot and full provider output
 remain referenced body data; durable known usage survives interruption, and unknown dimensions stay
 unknown. An already recorded occurrence is never automatically regenerated after reopen. The session
@@ -510,6 +510,19 @@ can retain an admitted no-send receipt; late source invalidation cannot erase al
 Cold source preparation begins only with semantic search, leaving keyword work independent. Original
 Storage/Catalog and final-history evidence is recorded in the
 [fixed semantic review](../../../docs/reviews/runtime-fixed-semantic-2026-10-12.md).
+
+Catalog 61 / wire 21 tags the frozen inference executor as HTTP or a local component. Local bindings
+retain the verified component-manifest digest and original model identity, without invented endpoints
+or credentials. Installed Bekko query and foreground document grains use this same parent/ordinal,
+ContentStore and Goal authority; background indexing retains its existing separate owner. The CPU
+worker requests dispatch only when its queue selects the grain, then the original source/grant and
+Catalog fences authorize entry. Worker cancellation acknowledgement proves queued no-send; an active
+forward retains its original receipt and model pin until physical completion or actual worker exit.
+Execute sent without a started acknowledgement remains nullable unknown on worker exit, including
+`receipt_pending`; HTTP still requires its original boolean evidence. Received estimates survive exit,
+and completed/error/late worker bodies are retained even when the query observer has cancelled.
+Current-format recovery never automatically reexecutes the original grain. See the
+[local embedding integration review](../../../docs/reviews/runtime-bekko-inference-2026-10-12.md).
 
 Child task records retain ownership/state and references to task text, configuration and launch
 descriptions. Admission prepares those bodies and verifies the original dispatch arguments on a worker;
