@@ -27,6 +27,8 @@ import {
 import { createVectorCache, type SemanticVectorCache } from "./vector-cache.js";
 import type { SemanticDocumentState, SemanticSourceMetadata, SemanticSourceMetadataUpdate } from "./store-contract.js";
 import { isAbortError, waitWithSignal } from "../../cancellation.js";
+import type { SemanticSourceView } from "./query-view.js";
+import { acquireSourceQuery } from "./source-query.js";
 
 const STRUCTURAL_LANGUAGES: ReadonlySet<string> = new Set(Object.keys(TREE_SITTER_LANGUAGE_SPECS));
 const semanticLanguage = (file: string): string | null => languageIdForPath(file);
@@ -1070,6 +1072,8 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     cacheAuthority: string;
     /** Original query session checks recovery before any vector cache can be consumed. */
     queryVector(question: string, cached: number[] | undefined, signal: AbortSignal): Promise<number[]>;
+    sourceView?: SemanticSourceView;
+    documentVectors?(texts: readonly string[], documents: readonly { path: string; revision: string }[], signal: AbortSignal): Promise<number[][]>;
   }) => {
     const scopeSnapshot = options.getIndexScope?.();
     const signal = AbortSignal.any([lifecycleController.signal,
@@ -1081,6 +1085,16 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     };
     assertAvailable();
     const embedder = request.embedder;
+    if (request.sourceView) {
+      if (!request.documentVectors) throw new Error('Source document inference session is unavailable');
+      return acquireSourceQuery({ scope, source: request.sourceView, embedder, roots: request.roots,
+        ...(scopeSnapshot ? { indexScope: scopeSnapshot } : {}),
+        ...(options.indexDirectories === undefined ? {} : { indexDirectories: options.indexDirectories }),
+        ...(options.includeIgnoredDirectories ? { includeIgnoredDirectories: options.includeIgnoredDirectories } : {}),
+        structure: options.structureSource, cache: queryCache, scheduler, signal,
+        store: () => storeFor(scope, embedder, false), assertAvailable, authorize: request.authorize,
+        cacheAuthority: request.cacheAuthority, queryVector: request.queryVector, documentVectors: request.documentVectors });
+    }
     const status = statusForEmbedder(scope, embedder);
     const resourceRoot = (await options.documents.inspectWorkspace(scope.scopeId)).root;
     const requested = request.roots.map(root => path.resolve(resourceRoot, root));

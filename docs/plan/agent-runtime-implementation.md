@@ -19,6 +19,12 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-12 增量：固定与物化来源的语义候选
+
+- 原 Source owner 枚举实际固定 revision 或 managed copy；配置目录只提供集合限制，不读取旧 live 根。原 units/packing、已捕获 publication 的精确 revision/recipe/space 与差分缓存共同形成 query-owned transient view，完整遮蔽不属于该来源的旧行，不新增按分支复制的索引库。
+- 冷准备延迟至 semantic search，原关键词工作可独立推进。实际 document/query HTTP 共用原 InferenceCall/Catalog/Goal；完整文件版本在真实外发和候选安装处检查，短授权独立重复。缓存只复用派生资产，不复用旧付费请求；换 key 保兼容 document 数值，query cache 仍分账号。
+- semantic-only 原生产至 Rust history、真实 working copy 修改/陈旧窗口、cheap search 与取消排空、原 Storage/Catalog 重开及共享 owner 证据见[本片记录](../reviews/runtime-fixed-semantic-2026-10-12.md)。本片没有建立持久的固定来源索引；完整 LSP/远端来源、本地 native embedding 与其余设计能力继续推进。
+
 ## 2026-10-12 增量：原查询 embedding 与统一推理会话
 
 - native query embedding 接原 Catalog/Goal，与同查询的 decision/rerank/Explore 共用一次真实调用准入和连续 ordinal。原配置、凭据、egress 与 wire parser 保持，后台 index ledger 只管 index-build，移除 retrieval response 重复 receipt；Catalog **58** 保持、私有 wire **14**直接拒旧。

@@ -8,7 +8,7 @@ import type { RetrievalQuery } from './protocol.generated.js';
 import { createRetrievalComposition, type RetrievalSemanticLease } from './retrieval-composition.js';
 import type { StructureOutlineRequest, StructureClassifyRequest } from '../structure/types.js';
 
-it('keeps fixed and materialized syntax separate from live LSP and semantic leases in the same selected configuration', async () => {
+it('keeps fixed and materialized syntax separate from live LSP while acquiring their own semantic leases', async () => {
   const pin = () => ({ assertAvailable() {}, release: vi.fn(), invoke: vi.fn(async () => ({ configurationId: 'explicit', structure: 'builtin', semantic: 'builtin' })) });
   const provider = { providerId: 'selected', providerKey: 'selected-key', status: 'active' };
   const runtime = {
@@ -43,22 +43,22 @@ it('keeps fixed and materialized syntax separate from live LSP and semantic leas
     expect(binding.structure).toBe(syntax);
     expect((await binding.structure!.outline(request)).status).toBe('unsupported');
     expect(binding.plan.stages.find(stage => stage.kind === 'structure')).toMatchObject({ providerId: 'varin.kernel.tree-sitter', status: 'ready' });
-    expect(binding.plan.stages.find(stage => stage.kind === 'semantic')?.status).toBe('unsupported');
+    expect(binding.plan.stages.find(stage => stage.kind === 'semantic')?.status).toBe('unavailable');
     expect(binding.semantic).toBeUndefined();
     binding.release();
   }
   expect(structure.outline).not.toHaveBeenCalled();
-  expect(prepareSemantic).not.toHaveBeenCalled();
+  expect(prepareSemantic).toHaveBeenCalledTimes(2);
   const live = await composition.prepare({ ...scope, query: { ...query, source: { workspace_id: 'workspace', execution_workspace_id: 'workspace', mode: 'live_root', branch_id: null, revision: null, live_root: root }, physicalRoot: root } });
   expect((await live.structure!.outline(request)).status).toBe('ready');
   expect(structure.outline).toHaveBeenCalledOnce();
-  expect(prepareSemantic).toHaveBeenCalledOnce();
+  expect(prepareSemantic).toHaveBeenCalledTimes(3);
   expect(live.plan.stages.find(stage => stage.kind === 'semantic')?.status).toBe('unavailable');
   live.release();
   const fixedAgain = await composition.prepare({ ...scope, query });
   expect(fixedAgain.structure).toBe(syntax);
-  expect(fixedAgain.plan.stages.find(stage => stage.kind === 'semantic')?.status).toBe('unsupported');
-  expect(prepareSemantic).toHaveBeenCalledOnce();
+  expect(fixedAgain.plan.stages.find(stage => stage.kind === 'semantic')?.status).toBe('unavailable');
+  expect(prepareSemantic).toHaveBeenCalledTimes(4);
   fixedAgain.release();
 });
 

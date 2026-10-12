@@ -483,8 +483,9 @@ and immutable blob continuations supply complete bytes; materialized queries rea
 copy rather than its base. Documents retains text-decoding semantics and persisted routing identity.
 Original model guards check material before egress; short Host path checks do not duplicate Rust's
 final revision/span/required-group reconstruction. Non-live syntax uses the existing tree-sitter
-provider without a live LSP fallback. Selected semantic coverage remains explicitly unsupported until
-that exact source has its own publication. The actual source/child/cancel evidence and remaining
+provider without a live LSP fallback. Non-live semantic recall enumerates that exact source and
+combines matching rows from a retained publication with query-owned derived chunks/vectors. It masks
+every unrelated live row; it does not publish a second durable branch index. The actual source/child/cancel evidence and remaining
 admission boundaries are recorded in the [source retrieval review](../../../docs/reviews/runtime-source-retrieval-2026-10-12.md).
 
 Native query embedding now consumes the same original inference session as decision, rerank and
@@ -493,7 +494,12 @@ index ledger owns only index builds. The query response no longer carries a seco
 projection. HTTP body/receipt lifetime survives query-observer cancellation, and existing request
 facts prevent paid replay after recovery. Raw embedding usage is retained before vector validation;
 missing output usage keeps the existing Goal budget barrier. Authorized warm-cache reuse creates no
-HTTP request or charge. This ownership boundary does not add non-live semantic publication support.
+HTTP request or charge. Non-live foreground document misses use this same original session, with
+separate document/query purposes. A version fence after dispatch intent but before actual transport
+can retain an admitted no-send receipt; late source invalidation cannot erase already observed usage.
+Cold source preparation begins only with semantic search, leaving keyword work independent. Original
+Storage/Catalog and final-history evidence is recorded in the
+[fixed semantic review](../../../docs/reviews/runtime-fixed-semantic-2026-10-12.md).
 
 Child task records retain ownership/state and references to task text, configuration and launch
 descriptions. Admission prepares those bodies and verifies the original dispatch arguments on a worker;

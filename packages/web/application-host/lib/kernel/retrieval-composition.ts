@@ -124,7 +124,7 @@ export function createRetrievalComposition(runtime: ApplicationExtensionRuntime,
           }
         };
         const acquireSemantic = async (declaration: Readonly<VarinRetrievalPlan>): Promise<RetrievalSemanticLease | undefined> => {
-          if (declaration.semantic !== 'builtin' || !options.prepareSemantic || scope.query && scope.query.source.mode !== 'live_root') return undefined;
+          if (declaration.semantic !== 'builtin' || !options.prepareSemantic) return undefined;
           const preparing = options.prepareSemantic(scope, signal);
           let acquired: RetrievalSemanticLease;
           try { acquired = await waitWithSignal(preparing, signal); }
@@ -205,7 +205,6 @@ export function createRetrievalComposition(runtime: ApplicationExtensionRuntime,
         const sourceStages = sourceLimited ? Object.freeze(pipeline.plan.stages.map(stage => {
           if (stage.kind === 'structure' && stage.status !== 'disabled') return Object.freeze({ ...stage,
             providerId: 'varin.kernel.tree-sitter', status: syntax ? 'ready' as const : 'unavailable' as const });
-          if (stage.kind === 'semantic' && stage.status !== 'disabled') return Object.freeze({ ...stage, status: 'unsupported' as const });
           return stage;
         })) : pipeline.plan.stages;
         const semanticStages = semanticStage ? Object.freeze(sourceStages.map(stage => stage.kind === 'semantic'

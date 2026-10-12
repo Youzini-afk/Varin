@@ -148,15 +148,15 @@ export function createSemanticGenerationStore(options: {
     if (closed || closing || owner?.failed) return closing ?? Promise.resolve();
     return track(() => call<void>("releasePinned", [token]));
   };
-  const retainPublished = (signal?: AbortSignal): Promise<SemanticPublishedReader | null> => {
+  const retainReader = (empty: boolean, signal?: AbortSignal): Promise<SemanticPublishedReader | null> => {
     const acquisition = track(async () => {
       signal?.throwIfAborted();
       if (initializationFailed || owner?.failed) throw new Error("Semantic storage owner is unavailable");
       // Initialization may recover and checkpoint existing data. Only the
       // background/explicit ready path may start or await that work; a query
       // acquires the currently available publication or reports a cold source.
-      if (!initialized) return null;
-      const reader = await call<SemanticPublishedReader | null>("retainPublished", [], signal);
+      if (!initialized && !empty) return null;
+      const reader = await call<SemanticPublishedReader | null>(empty ? "retainEmpty" : "retainPublished", [], signal);
       // IPC may already have admitted an acquire when cancellation or close
       // arrives. Observe its late result and release it before ending this task.
       if (reader && (signal?.aborted || closed || closing)) {
@@ -175,6 +175,8 @@ export function createSemanticGenerationStore(options: {
       throw error;
     });
   };
+  const retainPublished = (signal?: AbortSignal) => retainReader(false, signal);
+  const retainEmpty = (signal?: AbortSignal) => retainReader(true, signal);
 
   return {
     scope: options.scope, space, spaceId, recipeId,
@@ -206,7 +208,16 @@ export function createSemanticGenerationStore(options: {
     search: (query: number[], limit: number, searchOptions?: readonly string[] | SemanticSearchOptions): Promise<SemanticHit[]> =>
       track(() => call("search", [query, limit, searchOptions])),
     retainPublished,
+    retainEmpty,
     assertPublishedReaderAvailable,
+    listDocumentStatesPinned: (token: string, signal?: AbortSignal): Promise<SemanticDocumentState[]> => track(() => {
+      assertPublishedReaderAvailable(token);
+      return call("listDocumentStatesPinned", [token], signal);
+    }),
+    lookupVectorsPinned: (token: string, texts: readonly string[], signal?: AbortSignal): Promise<Array<number[] | undefined>> => track(() => {
+      assertPublishedReaderAvailable(token);
+      return call("lookupVectorsPinned", [token, texts], signal);
+    }),
     searchPinned: (token: string, query: number[], limit: number,
       searchOptions?: readonly string[] | SemanticSearchOptions, signal?: AbortSignal): Promise<SemanticHit[]> =>
       track(() => {

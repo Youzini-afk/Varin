@@ -18,7 +18,7 @@ import type { SemanticEmbedder } from './embedder.js';
 import { isAbortError, waitWithSignal } from '../../cancellation.js';
 import { workspaceScope, defaultRecipeIdentity, recipeIdOf, spaceIdOf } from './identity.js';
 import type { InferenceCall } from './inference-requests.js';
-import { pinSemanticQueryView, type SemanticDraftReadResult } from './query-view.js';
+import { pinSemanticQueryView, type SemanticDraftReadResult, type SemanticSourceView } from './query-view.js';
 import { createSemanticIndexRuntime, resolveSemanticScanRoots, type SemanticIndexRuntimeOptions, type SemanticScanOptions } from './runtime.js';
 import { requestWorkspaceInference, resolveInferenceBinding } from './workspace-inference.js';
 import { isBotScopeId, isSessionScopeId } from '../../harness/owner-scope.js';
@@ -388,14 +388,14 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     })();
     try { await state.watching; } finally { state.watching = null; }
   };
-  const getWorkspace = async (workspaceId: string, autoScan = true, queryOnly = false): Promise<WorkspaceState> => {
+  const getWorkspace = async (workspaceId: string, autoScan = true, queryOnly = false, configurationRoot?: string): Promise<WorkspaceState> => {
     await maintenance.get(workspaceId);
     assertActive();
     const loading = loads.get(workspaceId);
     if (loading) return loading;
     const existing = states.get(workspaceId);
     if (existing) {
-      existing.indexingEnabled = workspaceId !== GLOBAL_INFERENCE_SCOPE
+      if (configurationRoot === undefined) existing.indexingEnabled = workspaceId !== GLOBAL_INFERENCE_SCOPE
         && (await selectedRoots(existing.root)).length > 0;
       if (existing.indexingEnabled && !queryOnly) await ensureDocumentWatch(existing, true);
       await watch(existing);
@@ -409,10 +409,10 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       // Resolve the resource root so missing/unavailable directories fail here,
       // not inside an inference or scan task. The shared inference state has no
       // resource root at all — bindings resolve global configuration only.
-      const inspected = workspaceId === GLOBAL_INFERENCE_SCOPE
+      const inspected = configurationRoot !== undefined ? { root: configurationRoot } : workspaceId === GLOBAL_INFERENCE_SCOPE
         ? { root: '' }
         : await options.documents.inspectWorkspace(workspaceId);
-      const indexingEnabled = workspaceId !== GLOBAL_INFERENCE_SCOPE
+      const indexingEnabled = configurationRoot === undefined && workspaceId !== GLOBAL_INFERENCE_SCOPE
         && (await selectedRoots(inspected.root)).length > 0;
       assertActive();
       const backend = createSemanticBackend({
@@ -554,13 +554,14 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     roots: readonly string[];
     signal?: AbortSignal;
     authorize(signal: AbortSignal): Promise<void>;
+    sourceView?: SemanticSourceView;
   }): Promise<RetrievalSemanticLease> => {
     if (!options.runtimeInference) throw new Error('Native semantic inference owner is unavailable');
     const signal = input.signal ?? new AbortController().signal;
     signal.throwIfAborted();
     // This admission only refreshes cheap configuration bindings. It neither
     // enrolls a folder nor starts or waits for its background index build.
-    const state = await waitWithSignal(getWorkspace(input.workspaceId, false, true), signal);
+    const state = await waitWithSignal(getWorkspace(input.workspaceId, false, true, input.sourceView?.configurationRoot), signal);
     const current = state.queryEmbedding;
     if (!current || state.binding.embedding.status !== 'ready') {
       return {
@@ -592,22 +593,36 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       active.throwIfAborted(); assertAvailable();
     };
     const knownDimensions = state.backend.embedder.space.dim;
-    const knownSpaceId = spaceIdOf(state.backend.embedder.space);
-    const makeQueryEmbedder = (cached?: number[]): SemanticEmbedder => createRemoteEmbedder({ binding: inference.binding,
-      knownDimensions,
+    const makeQueryEmbedder = (cached?: number[], documents?: readonly { path: string; revision: string }[]): SemanticEmbedder => createRemoteEmbedder({ binding: inference.binding,
+      knownDimensions: pinnedEmbedder?.space.dim || knownDimensions,
       client: { embed: params => inference.consume(input.inference, { ...params,
         ...(cached ? { cachedResult: { batchId: params.batchId,
           space: { providerId: params.providerId, modelId: params.modelId, protocol: params.protocol,
             configurationId: params.configurationId, maxTokens: params.maxTokens, dim: cached.length,
-            spaceId: knownSpaceId },
+            spaceId: spaceIdOf(pinnedEmbedder!.space) },
           items: params.items.map((item, index) => ({ id: item.id, index, vector: cached })),
         } } : {}),
         guard: () => validateAvailable(params.signal ?? signal),
+        ...(documents ? { beforeDispatch: (active: AbortSignal) => input.sourceView!.validateDocuments(documents, active) } : {}),
       }) } });
-    const embedder = makeQueryEmbedder();
+    let pinnedEmbedder: SemanticEmbedder | undefined;
+    const embedder = pinnedEmbedder = makeQueryEmbedder();
     try {
       pinned = await state.runtime.acquirePublishedQuery(workspaceScope(input.workspaceId), {
         embedder, roots: input.roots, signal, cacheAuthority: JSON.stringify(inference.identity.credentialScope),
+        ...(input.sourceView ? { sourceView: input.sourceView,
+          documentVectors: async (texts: readonly string[], documents: readonly { path: string; revision: string }[], active: AbortSignal) => {
+            const documentEmbedder = makeQueryEmbedder(undefined, documents);
+            const vectors = await documentEmbedder.embed(texts, { purpose: 'document', signal: active });
+            await validateAvailable(active);
+            Object.assign(embedder.space, documentEmbedder.space);
+            // Remember a dimension learned from real source work in the same
+            // current backend; this is not a paid preparation probe.
+            if (state.queryEmbedding === current && state.backend.embedder.space.dim === 0) {
+              Object.assign(state.backend.embedder.space, documentEmbedder.space);
+            }
+            return vectors;
+          } } : {}),
         queryVector: async (question, cached, active) => {
           const [vector] = await makeQueryEmbedder(cached).embed([question], { purpose: 'query', signal: active });
           if (!vector) throw new Error('Native query embedding is missing');
@@ -630,7 +645,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
         stage: { providerId: 'varin.semantic', configurationId: inference.binding.configurationId, status: 'ready',
           implementation: { search: async (question, limit, active) => {
             const response = await selected.search(question, limit ?? DEFAULT_SEMANTIC_RECALL, active);
-            const watchUnavailable = !state.documentWatchReady;
+            const watchUnavailable = !input.sourceView && !state.documentWatchReady;
             return { status: watchUnavailable && ['ready', 'empty'].includes(response.status.status) ? 'incomplete' : response.status.status,
               coverage: watchUnavailable && response.status.coverage === 'complete' ? 'partial' : response.status.coverage,
               lifecycle: response.status.lifecycle, ...(response.status.generation ? { generation: response.status.generation } : {}),

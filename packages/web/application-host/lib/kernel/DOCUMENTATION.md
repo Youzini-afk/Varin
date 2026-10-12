@@ -776,8 +776,9 @@ its actual backend/configuration/account and published-reader generation, record
 identity in `plan.semantic`, and releases that lease with its real service generation pin. The
 metadata retains explicit binding state, nullable unavailable backend IDs, and the captured
 publication's coverage/lifecycle; a capability implementation ID never substitutes for a missing
-model configuration. Cold or
-missing publications do not start indexing or wait for first publication. Semantic selection never
+model configuration. Live cold or
+missing publications do not start indexing or wait for first publication. Non-live queries lazily
+prepare their own source view as described below. Semantic selection never
 chooses another model, silently selects local embeddings, or performs a paid preparation probe.
 The existing embedding settings configure the explicit remote backend. The separately selected
 model stage uses the original code-retrieval settings and dedicated rerank binding described below.
@@ -807,9 +808,19 @@ Each snippet has path, inclusive one-based line bounds and actual Documents revi
 Documents content revision; verify a follow-up full read against the snippet's content digest/bytes.
 Live observations do not claim an atomic workspace snapshot.
 
-Fixed/materialized keyword, source-local structure and model stages use the original source adapter;
-their semantic publication, a complete fixed LSP dependency closure and remote retrieval remain
-separate work. The default Pi route is unchanged; native semantic recall
+Fixed/materialized semantic recall also uses the original source adapter: fixed inventories use tree
+revision metadata; actual materialized files use per-file capture revisions. Collection paths are
+intersected lexically with registered configuration identity, without resolving an old live root.
+The first semantic search lazily prepares missing source units/vectors; acquiring the lease never
+waits for that work before keyword search starts. A captured immutable publication supplies only
+matching source revision/recipe/space rows; the view masks all other base rows and adds exact-source
+extras. Completed chunks and vectors use the original byte-budgeted cache. Empty original-owner
+readers need no copied publication or new database, and transient coverage is distinct from captured
+publication metadata. Foreground document HTTP uses the same native InferenceCall as query embedding,
+with a complete source-version check immediately before transport and before candidate installation.
+Short Run/source/binding checks remain independent; admitted no-send and already-paid usage remain
+original Catalog facts. There is no whole-working-copy atomic snapshot claim. Complete fixed LSP
+dependency closure and remote retrieval remain separate work. The default Pi route is unchanged; native semantic recall
 uses its own explicit backend/published-reader acquisition through the existing semantic owner rather
 than the Pi wrapper that resolves a mutable backend at search time. Query bindings retain actual owner
 references, not a frozen wrapper around whichever backend/index happens to be current later.

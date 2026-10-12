@@ -3759,6 +3759,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       };
       await authorize(active);
       return semanticRuntime.acquireQuery({ workspaceId: query.source.workspace_id, inference: scope.inference, roots, signal: active, authorize,
+        ...(query.source.mode === 'live_root' ? {} : { sourceView: await retrievalSources.semanticView(query, active) }),
         assertAuthorized: () => { kernelClient.retrievalGrant(query); } });
     },
   });

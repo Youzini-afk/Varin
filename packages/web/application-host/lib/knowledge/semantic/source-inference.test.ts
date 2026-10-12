@@ -1,0 +1,100 @@
+import { expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { createSemanticInference } from './runtime-inference.js';
+import { createWorkspaceSemanticRuntime } from './workspace-runtime.js';
+import { createHashEmbedder } from './embedder.js';
+import { createEmbedScheduler } from './embed-scheduler.js';
+import type { InferenceRequestsOptions } from './inference-requests.js';
+import type { SemanticSourceView } from './query-view.js';
+import type { StructureSource } from '../../structure/types.js';
+import type { DocumentAuthority } from '../../documents/authority.js';
+
+async function fixture(failSource: boolean) {
+  const directory = mkdtempSync(join(tmpdir(), 'varin-source-inference-'));
+  const credentials = { reference: 'fixture', authority: 'fixture-owner', account: 'fixture-account', generation: 1 };
+  const embedding = { providerId: 'embedding', modelId: 'fixture', protocol: 'openai-compatible', dimensions: 2, maxTokens: 4096, enabled: true };
+  const frames: Array<{ method: string; params: Record<string, unknown> }> = [];
+  const kernel = { agentRuntimeRequest: async (method: string, params: Record<string, unknown>) => {
+    frames.push({ method, params });
+    if (method === 'runtime.inference.session') return { hasRequests: false };
+    const id = params.operationId ?? `inference:${params.parentOperationId}:${params.ordinal}`;
+    if (method === 'runtime.inference.settle') return { operationId: id, phase: 'terminal', outcome: 'succeeded',
+      live: false, dispatched: true, recovered: false, cancelRequested: false, receipt: params.receipt };
+    return { operationId: id, phase: 'running', outcome: null, live: true,
+      dispatched: method === 'runtime.inference.dispatch', recovered: false, cancelRequested: false, receipt: null };
+  } } as unknown as InferenceRequestsOptions['kernel'];
+  const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
+    const { input } = JSON.parse(String(init?.body)) as { input: string[] };
+    return new Response(JSON.stringify({ data: input.map((_, index) => ({ index, embedding: [1, 0] })), usage: { prompt_tokens: 7, total_tokens: 7 } }),
+      { headers: { 'content-type': 'application/json' } });
+  });
+  const inference = createSemanticInference({ readGlobalInferenceSettings: async () => ({ harness: { embedding } }),
+    resolveEmbeddingBinding: async () => ({ providerId: 'embedding', modelId: 'fixture', baseUrl: 'https://embedding.invalid/v1',
+      requestUrl: 'https://embedding.invalid/v1/embeddings', configurationId: 'source-inference-fixture', credentialRef: 'fixture',
+      credentialScope: credentials, currentScope: async () => credentials, assertAvailable: async () => {},
+      getAuth: async () => ({ auth: { apiKey: 'controlled-fixture-key' } }) }),
+  }, undefined, { requests: { kernel,
+    runtime: { onEvent: () => () => {}, onExit: () => () => {}, onReady: () => () => {} },
+    egress: { prepare: async () => ({ policy: { version: 1, mode: 'direct', noProxy: [], source: 'default' } as never, fetch }) },
+  } });
+  const versionCheck = vi.fn(async () => { if (failSource) throw new Error('Original source changed'); });
+  const source: SemanticSourceView = { mode: 'fixed_branch', configurationRoot: '/removed/original',
+    listFiles: async () => ({ complete: true, files: [{ path: 'a.ts', revision: 'original-revision' }] }),
+    compute: async () => { throw new Error('The structure port supplies controlled units'); }, validateDocuments: versionCheck };
+  const structure: StructureSource = { unitsRecipe: async () => 'recipe-1', unitsFixed: async () => ({ status: 'ready', revision: 'original-revision', recipeId: 'recipe-1',
+    units: [{ startLine: 1, endLine: 1, parentName: '', parentKind: 'file', parentSignature: '', docComments: '', text: 'export const source = 42;', fallback: true }] }),
+    outline: async () => { throw new Error('not used'); }, classifyHits: async () => { throw new Error('not used'); },
+    literalCalls: async () => { throw new Error('not used'); }, imports: async () => { throw new Error('not used'); } };
+  const unavailable = () => { throw new Error('A source query must not inspect or watch the old live directory'); };
+  const documents = { inspectWorkspace: unavailable, read: unavailable, watch: unavailable,
+    agentInputDraftPaths: unavailable, readAgentInputSnapshot: unavailable } as unknown as DocumentAuthority;
+  const runtime = createWorkspaceSemanticRuntime({ dataDir: directory, hostId: 'source-inference', configCwd: directory,
+    documents, structureSource: structure, scheduler: createEmbedScheduler(), embedder: createHashEmbedder(), runtimeInference: inference,
+    getBroker: unavailable, executionViews: { get: () => undefined }, workingBranches: { pinQuery: async () => null } });
+  let invocation = 0;
+  const run = (beforeSearch?: () => void) => inference.requests!.run({ operationId: `original-query-${++invocation}`,
+    executorOwner: { kind: 'external', identity: 'source-test', epoch: 'original-epoch' } }, new AbortController().signal, async call => {
+    await call.assertFresh();
+    const lease = await runtime.acquireQuery({ workspaceId: 'original-workspace', inference: call, roots: [''], signal: call.signal,
+      sourceView: source, assertAuthorized() {}, authorize: async () => {} });
+    try {
+      expect(versionCheck).not.toHaveBeenCalled(); beforeSearch?.();
+      if (lease.stage.status !== 'ready' || !lease.stage.implementation) throw new Error('Embedding binding unavailable');
+      return await lease.stage.implementation.search('source meaning', 5, call.signal);
+    } finally { lease.release(); }
+  });
+  return { frames, fetch, versionCheck, embedding, run, close: async () => {
+    await runtime.dispose(); await inference.close(); rmSync(directory, { recursive: true, force: true });
+  } };
+}
+
+it('checks complete document versions once at real egress and once before source publication', async () => {
+  const f = await fixture(false);
+  try {
+    const result = await f.run();
+    expect(result.hits).toHaveLength(1); expect(f.fetch).toHaveBeenCalledTimes(2); expect(f.versionCheck).toHaveBeenCalledTimes(2);
+    expect(f.frames.filter(frame => frame.method === 'runtime.inference.admit').map(frame => (frame.params.binding as { purpose: string }).purpose))
+      .toEqual(['code-retrieval-document-embedding', 'code-retrieval-query-embedding']);
+    const settled = f.frames.filter(frame => frame.method === 'runtime.inference.settle');
+    expect(settled).toHaveLength(2);
+    expect(settled.every(frame => (frame.params.receipt as { requestStarted: boolean }).requestStarted)).toBe(true);
+    f.versionCheck.mockClear(); f.fetch.mockClear();
+    await expect(f.run(() => { f.embedding.enabled = false; })).rejects.toThrow();
+    expect(f.fetch).not.toHaveBeenCalled(); expect(f.versionCheck).not.toHaveBeenCalled();
+  } finally { await f.close(); }
+});
+
+it('keeps original admission and dispatch intent when the last document fence prevents all HTTP', async () => {
+  const f = await fixture(true);
+  try {
+    const result = await f.run();
+    expect(result.hits).toEqual([]); expect(f.fetch).not.toHaveBeenCalled(); expect(f.versionCheck).toHaveBeenCalledOnce();
+    expect(f.frames.filter(frame => frame.method === 'runtime.inference.admit')).toHaveLength(1);
+    expect(f.frames.filter(frame => frame.method === 'runtime.inference.dispatch')).toHaveLength(1);
+    const settled = f.frames.filter(frame => frame.method === 'runtime.inference.settle');
+    expect(settled).toHaveLength(1);
+    expect(settled[0]?.params.receipt).toMatchObject({ requestStarted: false, providerCompleted: false, localExecutorStopped: true, problem: 'not_dispatched' });
+  } finally { await f.close(); }
+});

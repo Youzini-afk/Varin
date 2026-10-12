@@ -5,6 +5,7 @@
 
 import type { SemanticEmbedPurpose } from "./embedder.js";
 import { embedTextKey } from "./identity.js";
+import type { SemanticChunk } from "./chunker.js";
 
 export const DEFAULT_VECTOR_CACHE_BYTES = 64 * 1024 * 1024;
 
@@ -17,14 +18,16 @@ export type VectorCacheKey = {
 };
 
 const keyOf = (input: VectorCacheKey): string => (
-  `${input.spaceId}\0${input.purpose}\0${embedTextKey(input.embedText)}\0${input.authority ?? ""}`
+  `vector\0${input.spaceId}\0${input.purpose}\0${embedTextKey(input.embedText)}\0${input.authority ?? ""}`
 );
+export type SemanticDocumentCacheKey = { documentId: string; revision: string; spaceId: string; recipeId: string; sourceRecipeId: string };
+const documentKeyOf = (input: SemanticDocumentCacheKey): string => `document\0${JSON.stringify(input)}`;
 
 const vectorBytes = (vector: readonly number[]): number => vector.length * 8 + 64;
 
 export function createVectorCache(options?: { maxBytes?: number }) {
   const maxBytes = options?.maxBytes ?? DEFAULT_VECTOR_CACHE_BYTES;
-  const entries = new Map<string, { vector: number[]; bytes: number }>();
+  const entries = new Map<string, { vector?: number[]; chunks?: SemanticChunk[]; bytes: number }>();
   const inFlight = new Map<string, {
     promise: Promise<number[]>;
     resolve(vector: number[]): void;
@@ -50,6 +53,22 @@ export function createVectorCache(options?: { maxBytes?: number }) {
   return {
     get usedBytes() { return usedBytes; },
     get size() { return entries.size; },
+    getDocument(input: SemanticDocumentCacheKey): SemanticChunk[] | undefined {
+      const key = documentKeyOf(input), entry = entries.get(key);
+      if (!entry?.chunks) return undefined;
+      entries.delete(key); entries.set(key, entry);
+      return structuredClone(entry.chunks);
+    },
+    setDocument(input: SemanticDocumentCacheKey, chunks: readonly SemanticChunk[]): void {
+      const key = documentKeyOf(input);
+      const bytes = Buffer.byteLength(JSON.stringify(chunks), "utf8") + Buffer.byteLength(key, "utf8") + 64;
+      const previous = entries.get(key);
+      if (previous) usedBytes = Math.max(0, usedBytes - previous.bytes);
+      entries.delete(key);
+      if (bytes > maxBytes) return;
+      evict(bytes);
+      entries.set(key, { chunks: structuredClone([...chunks]), bytes }); usedBytes += bytes;
+    },
     get(input: VectorCacheKey): number[] | undefined {
       const entry = entries.get(keyOf(input));
       if (!entry) return undefined;
@@ -81,7 +100,7 @@ export function createVectorCache(options?: { maxBytes?: number }) {
     } {
       const key = keyOf(input);
       const cached = entries.get(key);
-      if (cached) {
+      if (cached?.vector) {
         entries.delete(key);
         entries.set(key, cached);
         return {

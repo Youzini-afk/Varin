@@ -18,6 +18,8 @@ interface InferenceRequest {
   init: RequestInit;
   connection: Awaited<ReturnType<EgressRuntime['prepare']>>;
   check(signal: AbortSignal): Promise<void>;
+  /** Exact source-byte fence after durable dispatch intent, immediately before transport. */
+  beforeDispatch?(signal: AbortSignal): Promise<void>;
   onReceipt?(receipt: InferenceReceipt): void;
   observe(raw: unknown): { usage?: InferenceReceipt['usage']; rawUsage: unknown; valid: boolean };
 }
@@ -244,6 +246,11 @@ export function createInferenceRequests(options: InferenceRequestsOptions) {
             observeStatus(ready);
             if (!ready.live) throw new Error('inference-dispatch-cancelled');
             requestSignal.throwIfAborted();
+            if (input.beforeDispatch) {
+              await input.beforeDispatch(requestSignal);
+              await input.check(requestSignal);
+              requestSignal.throwIfAborted();
+            }
             started = true;
             // Egress alone owns the dispatcher; SDK transport hints cannot replace its route.
             const { dispatcher: _dispatcher, ...requestInit } = input.init;
