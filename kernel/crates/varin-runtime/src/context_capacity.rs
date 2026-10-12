@@ -1,5 +1,7 @@
 //! Local request estimates. They are never reported as provider measurements.
-use crate::execution::{Content, RequestView};
+use crate::execution::{
+    Content, RequestOrigin, RequestSnapshot, RequestView, UsageMeasurement, UsageReceipt,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -20,6 +22,108 @@ pub struct InputEstimate {
     pub unmeasured_media: u64,
     pub unmeasured_provider_items: u64,
     pub method: &'static str,
+}
+
+/// The selected serializer declares its actual transcript layout and usage interpretation.
+/// This is a derived, worker-local capability, not another usage record or provider registry.
+#[derive(Clone, Copy)]
+pub struct RequestBudgetProtocol {
+    pub transcript: &'static [&'static str],
+    /// Some serializers append same-role blocks to the final message instead of adding a message.
+    pub coalesced_content: Option<&'static str>,
+    pub complete_input_tokens: fn(&UsageReceipt) -> Option<u64>,
+}
+
+impl RequestBudgetProtocol {
+    fn serialized_prefix(self, previous: &Value, current: &Value) -> bool {
+        fn along(previous: &Value, current: &Value, path: &[&str], content: Option<&str>) -> bool {
+            if let Some((key, rest)) = path.split_first() {
+                let (Some(left), Some(right)) = (previous.as_object(), current.as_object()) else {
+                    return false;
+                };
+                return left.len() == right.len()
+                    && left.iter().all(|(field, value)| {
+                        right.get(field).is_some_and(|next| {
+                            if field == key {
+                                along(value, next, rest, content)
+                            } else {
+                                value == next
+                            }
+                        })
+                    })
+                    && left.contains_key(*key);
+            }
+            let (Some(left), Some(right)) = (previous.as_array(), current.as_array()) else {
+                return false;
+            };
+            left.len() <= right.len()
+                && left
+                    .iter()
+                    .zip(right)
+                    .enumerate()
+                    .all(|(index, (value, next))| {
+                        value == next
+                            || (index + 1 == left.len()
+                                && content.is_some_and(|field| {
+                                    // Only the serializer's declared final block array may grow. Role, opaque
+                                    // fields and every existing block remain exact; no semantic fields are erased.
+                                    along(value, next, &[field], None)
+                                }))
+                    })
+        }
+        along(previous, current, self.transcript, self.coalesced_content)
+    }
+}
+
+/// Apply one latest successful observation. A mismatch never searches for an older match.
+pub fn calibrated_estimate(
+    view: &RequestView,
+    serialized: &Value,
+    previous: &RequestSnapshot,
+    usage: &UsageReceipt,
+    protocol: RequestBudgetProtocol,
+) -> InputEstimate {
+    let mut estimate = estimate_request(view, serialized);
+    let old = &previous.view;
+    let a = &old.binding;
+    let b = &view.binding;
+    if usage.measurement != UsageMeasurement::Actual
+        || !matches!(
+            (&old.origin, &view.origin),
+            (
+                RequestOrigin::Conversation { .. },
+                RequestOrigin::Conversation { .. }
+            )
+        )
+        || a.history_range.branch_id != b.history_range.branch_id
+        || a.history_range.ancestor_id != b.history_range.ancestor_id
+        || a.connection_identity != b.connection_identity
+        || a.provider_family != b.provider_family
+        || a.model != b.model
+        || a.credential_ref != b.credential_ref
+        || a.configuration_generation != b.configuration_generation
+        || a.tool_schema_generation != b.tool_schema_generation
+        || a.tools != b.tools
+        || a.instruction_sources != b.instruction_sources
+        || a.memory_checkpoint != b.memory_checkpoint
+        || a.resource_checkpoint_id != b.resource_checkpoint_id
+        || a.child_dispatch != b.child_dispatch
+        || a.goal != b.goal
+        || !view.history.starts_with(&old.history)
+        || !protocol.serialized_prefix(&previous.serialized, serialized)
+    {
+        return estimate;
+    }
+    if let Some(input) = (protocol.complete_input_tokens)(usage) {
+        let old_estimate = estimate_request(old, &previous.serialized).estimated_tokens;
+        // Keep signed deltas until the final clamp. Saturating input+current first would lose
+        // precision near u64::MAX; an actual zero is a valid measurement.
+        estimate.estimated_tokens = (i128::from(input) + i128::from(estimate.estimated_tokens)
+            - i128::from(old_estimate))
+        .clamp(0, i128::from(u64::MAX)) as u64;
+        estimate.method = "actual-input-calibrated; utf8-bytes/4 delta; media unmeasured";
+    }
+    estimate
 }
 fn media(object: &serde_json::Map<String, Value>) -> bool {
     matches!(

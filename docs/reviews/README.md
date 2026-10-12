@@ -8,6 +8,7 @@ Last updated: 2026-10-12
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [原成功 usage 与请求预算校准](runtime-context-usage-2026-10-12.md) | 原请求/回执、adapter 计数语义、锁外完整前缀、真实 main/Goal 预算消费及取消恢复边界 |
 | [Scoped 服务依赖与组合寿命](runtime-scoped-composition-2026-10-12.md) | 唯一选择、冻结图/共享实例、原授权及排空、Surface 响应 lease 与实际跨层消费者；整合证据与边界 |
 | [已有 Bekko 本地原生推理](runtime-bekko-inference-2026-10-12.md) | 原组件安装/选择、主与 child Source、共享 worker、Catalog/Goal、取消排空和恢复；受控模型与真实 ONNX 验收边界 |
 | [唯一数组 routing 合同](runtime-array-routing-2026-10-12.md) | single/ordered、真实设置与原调用消费者、存储 marker/CAS、native Context 组合；不宣称第二选择权威已删除 |

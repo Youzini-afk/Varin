@@ -22,6 +22,46 @@ use crate::execution::*;
 use serde_json::Value;
 use std::sync::{Arc, OnceLock};
 
+// OpenAI prompt/input and Google promptTokenCount already include cached input. The locked
+// Pi adapters subtract caches when mapping these to their different Usage contract; our receipt
+// retains the original protocol count, so do not add caches here.
+fn inclusive_input_tokens(usage: &UsageReceipt) -> Option<u64> {
+    usage.input_tokens
+}
+// Anthropic Messages and normalized pi-messages split uncached input, reads and writes.
+// A missing component is unknown here, not a synthetic zero in the original receipt.
+fn separate_cache_input_tokens(usage: &UsageReceipt) -> Option<u64> {
+    usage
+        .input_tokens?
+        .checked_add(usage.cached_input_tokens?)?
+        .checked_add(usage.cache_write_tokens?)
+}
+// ConverseStream's required totalTokens is the total input plus generated tokens. Cache fields
+// are optional subdivisions and must not be added again (AWS TokenUsage; locked Pi handleMetadata).
+fn bedrock_input_tokens(usage: &UsageReceipt) -> Option<u64> {
+    usage
+        .raw
+        .as_ref()?
+        .get("totalTokens")?
+        .as_u64()?
+        .checked_sub(usage.output_tokens?)
+}
+fn pi_input_tokens(usage: &UsageReceipt) -> Option<u64> {
+    if let Some(total) = usage
+        .raw
+        .as_ref()
+        .and_then(|raw| raw.get("usage"))
+        .and_then(|raw| raw.get("totalTokens"))
+    {
+        let total = total.as_u64()?;
+        // Locked Pi calculateContextTokens uses a nonzero native total, otherwise components.
+        if total != 0 {
+            return total.checked_sub(usage.output_tokens?);
+        }
+    }
+    separate_cache_input_tokens(usage)
+}
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct CredentialDispatch {

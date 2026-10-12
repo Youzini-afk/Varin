@@ -348,6 +348,10 @@ struct ConfiguredProvider {
     fields: Value,
 }
 impl ModelProvider for ConfiguredProvider {
+    fn request_budget_protocol(&self) -> Option<crate::context_capacity::RequestBudgetProtocol> {
+        self.inner.request_budget_protocol()
+    }
+
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         let mut value = self.inner.serialize(view)?;
         merge(&mut value, &self.fields);

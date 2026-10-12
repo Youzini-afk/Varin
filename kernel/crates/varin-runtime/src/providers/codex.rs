@@ -54,6 +54,10 @@ impl CodexProvider {
     }
 }
 impl ModelProvider for CodexProvider {
+    fn request_budget_protocol(&self) -> Option<crate::context_capacity::RequestBudgetProtocol> {
+        self.inner.request_budget_protocol()
+    }
+
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         validate_view(view, FAMILY)?;
         let mut compiled = view.clone();

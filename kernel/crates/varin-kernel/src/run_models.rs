@@ -298,6 +298,12 @@ impl ModelProvider for SelectedProvider {
     ) -> Result<Option<SelectedModel>, ExecutionError> {
         self.owner.select(run_id, epoch, cancel)
     }
+    fn request_budget_protocol(
+        &self,
+    ) -> Option<varin_runtime::context_capacity::RequestBudgetProtocol> {
+        self.primary.request_budget_protocol()
+    }
+
     fn serialize(&self, view: &RequestView) -> Result<serde_json::Value, ExecutionError> {
         self.primary.serialize(view)
     }

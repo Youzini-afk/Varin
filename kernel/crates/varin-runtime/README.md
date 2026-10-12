@@ -87,8 +87,8 @@ writing Pi session files or the Host harness's existing execution records.
   summary and publish only after every part completes. Partition budgets are local estimates, not a
   guarantee of provider tokenization. `varin.context.budget@1` can replace the budget Decision at the
   named pre-dispatch boundary. The native default keeps its local waterline/boundary algorithm; only
-  an explicitly selected extension receives detached estimates and legal ancestor metadata. Provider
-  capacity-error feedback remains separate work.
+  an explicitly selected extension receives detached estimates and legal ancestor metadata. Successful
+  usage calibrates the same-binding request prefix as described below; unknown samples stay local.
 
 Negotiated MCP Tasks share the original Operation/HostJob ledger and original MCP owner. Accepted
 remote identity is separate from local dispatch, immutable caller acceptance, eventual typed output
@@ -1240,11 +1240,34 @@ request. Ordinary provider replacement does not invalidate an accepted candidate
 rejects an unfinished Decision. The continuation's ancestor/tool-pair and memory/checkpoint CAS remain
 unchanged. This is not a complete migration of the existing Pi memory workflow.
 
+### Successful-usage request calibration
+
+Before a new conversation request, the selected adapter declares its actual transcript layout and
+complete-input usage interpretation. The original Catalog captures only Run/branch/epoch metadata
+and a content publication lease. A worker reads the latest completed ModelStep with actual input,
+hydrates its original snapshot outside the control lock, and requires the same binding and exact
+semantic/serialized prefix. It can reuse a preceding Run on the same branch; it cannot use another
+branch, revive an older matching configuration, or reuse pre-compaction input after the prefix changes.
+Failed, interrupted, missing and estimated input do not become successful measurements.
+
+The derived estimate is measured previous input plus the difference between the two complete local
+serialization estimates. The result remains an estimate with explicit unmeasured media/provider items;
+it never updates raw receipts or Goal billing. OpenAI/Google inclusive input does not add cache tokens
+again, Anthropic requires its separate components, Bedrock uses original total minus output, and Pi
+uses its native nonzero total or complete components. Unknown adapters or incomplete measurements
+retain local estimation. There is no token-count request, extra inference or automatic paid replay.
+
+Current binding instructions precede growing history after the original system prefix. The current
+Goal item keeps its user-level provenance; dispatch discovery identity derives from its original
+frozen reference and complete text. Existing history and already prepared snapshots are not rewritten.
+See [the calibration review](../../../docs/reviews/runtime-context-usage-2026-10-12.md) for the real
+main/Goal/Host budget consumer and the original recovery/child/summary regression boundaries.
+
 ## Remaining integration
 
 The provider adapters and control boundary are foundations for the full cutover, not evidence
-of provider/platform parity. Remaining domain and MCP capabilities,
-provider capacity-error recovery, broader UI/product coverage and
+of provider/platform parity. Remaining domain capabilities, the existing Bot memory workflow,
+broader UI/product coverage and
 single-writer ownership transfer remain tracked in
 [`docs/plan/agent-runtime-implementation.md`](../../../docs/plan/agent-runtime-implementation.md).
 That matrix owns actual validation and incomplete capabilities. No measured speedup or platform

@@ -51,6 +51,14 @@ fn pi_parts(parts: Vec<crate::output::OutputPart>) -> Result<Vec<Value>, Executi
     Ok(blocks)
 }
 impl ModelProvider for PiMessagesProvider {
+    fn request_budget_protocol(&self) -> Option<crate::context_capacity::RequestBudgetProtocol> {
+        Some(crate::context_capacity::RequestBudgetProtocol {
+            transcript: &["context", "messages"],
+            coalesced_content: Some("content"),
+            complete_input_tokens: pi_input_tokens,
+        })
+    }
+
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         validate_view(view, FAMILY)?;
         validate_images(view, &self.connection)?;

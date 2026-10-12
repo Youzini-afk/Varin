@@ -1,6 +1,6 @@
 //! Bedrock ConverseStream over AWS binary eventstream, with dispatch-bound bearer or SigV4 auth.
 use super::*;
-use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -67,6 +67,14 @@ fn bedrock_parts(parts: Vec<crate::output::OutputPart>) -> Result<Vec<Value>, Ex
     Ok(blocks)
 }
 impl ModelProvider for BedrockProvider {
+    fn request_budget_protocol(&self) -> Option<crate::context_capacity::RequestBudgetProtocol> {
+        Some(crate::context_capacity::RequestBudgetProtocol {
+            transcript: &["messages"],
+            coalesced_content: Some("content"),
+            complete_input_tokens: bedrock_input_tokens,
+        })
+    }
+
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         validate_view(view, FAMILY)?;
         validate_images(view, &self.connection)?;

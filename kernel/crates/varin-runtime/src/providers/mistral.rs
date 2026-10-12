@@ -65,6 +65,10 @@ impl Ids {
     }
 }
 impl ModelProvider for MistralProvider {
+    fn request_budget_protocol(&self) -> Option<crate::context_capacity::RequestBudgetProtocol> {
+        self.inner.request_budget_protocol()
+    }
+
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         let mut body = self.inner.serialize(view)?;
         body.as_object_mut().expect("compiled object").remove("n");

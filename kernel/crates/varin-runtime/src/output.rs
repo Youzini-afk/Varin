@@ -1,6 +1,6 @@
 //! One immutable output body for every invocation origin. JSON is data; presentation is explicit.
 use crate::execution::{Provenance, ToolExecutionContext};
-use base64::{Engine, engine::general_purpose::STANDARD};
+use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -299,9 +299,16 @@ impl crate::content::ContentStore {
         &self,
         reference: &Value,
     ) -> Result<crate::execution::RequestSnapshot, crate::catalog::RuntimeError> {
+        self.load_snapshot_cancellable(reference, &|| false)
+    }
+    pub(crate) fn load_snapshot_cancellable(
+        &self,
+        reference: &Value,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<crate::execution::RequestSnapshot, crate::catalog::RuntimeError> {
         let snapshot: crate::execution::RequestSnapshot<StoredMedia> =
-            serde_json::from_value(self.load(reference)?)?;
-        snapshot.map_media(|media| self.resolve_media(media))
+            serde_json::from_value(self.load_cancellable(reference, cancelled)?)?;
+        snapshot.map_media(|media| self.resolve_media_cancellable(media, cancelled))
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
