@@ -95,6 +95,10 @@ Tool execute schema 从原 tool declaration 生成，context-fragments 用其原
   两条新旧 protocol/API DTO 差异单列排除）。本片没有新增剩余 Web 诊断，也没有
   放宽 compiler 或改 Host 生产实现掩盖错误；原跨层测试类型归属仍需专门收口。
 
+上述完整 Web 类型欠账已由[后续原类型边界修复](runtime-type-boundary-2026-10-12.md)
+收口，正式 aggregate 全部通过。这里保留本片发布时的失败及归因证据，不把后续修复
+反写成当时已通过，也不据此改变未运行 IPC 的边界。
+
 ## 复跑与未验范围
 
 需先按各 package 脚本构建 contract/SDK/builtins/extension-host；受限环境可使用既有

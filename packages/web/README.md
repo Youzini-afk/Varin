@@ -36,6 +36,16 @@ node artifacts/cloud-runtime/packages/web/bin/cli.js serve --foreground
 The canonical cloud builder compiles the Pi host/broker and Web UI, creates a production lockfile,
 and preserves the workspace layout required by `resolveBundledPiHostEntry()`.
 
+## Type and test boundaries
+
+`bun run --cwd packages/web type-check` first validates the private protocol, prepares/checks the
+Application Host and emits its declarations, then checks browser and CLI consumers. Host bodies use
+their Node compiler settings; browser code retains its DOM settings. The existing `#application-host`
+imports let cross-layer tests use those generated signatures without recompiling the Host as browser
+code. Native Vitest resolves those same imports to the original Host source, so it does not substitute
+declarations or a mock implementation at runtime. `*.native.test.ts` still runs only through the
+[dedicated kernel acceptance entry](../../docs/development.md#repository-and-build-facts).
+
 ## Generated blocks in the HTML entry points
 
 `index.html` and `mini-chat.html` paint the splash before any module is evaluated, so they cannot

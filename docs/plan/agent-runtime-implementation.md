@@ -8,6 +8,12 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-12 增量：Web 跨层测试类型归属收口
+
+- 旧 disk/editor Integration native test 改用既有 `#application-host` 边界：编译时是原 Host 新生成声明，运行时仍是原 Host source。Host Node 与 browser DOM 编译范围保持，测试体及 native 发现入口未变。
+- 原完整 Web aggregate 现在先检查/生成 Host 声明，再检查 Host tests、browser 与 CLI；正式命令 exit 0，上一片记录的 113 条旧诊断已清零。独审用真实 consumer 的三条错误参数/DTO 验证仍能拒绝，未通过 any、扩大 lib 或排除测试吞错。
+- [精确验收](../reviews/runtime-type-boundary-2026-10-12.md)区分类型闭合与仍未运行的产品 IPC fixture。Catalog 58/wire 18、全部生产行为与两设计剩余能力范围保持，下一片继续能力实现。
+
 ## 2026-10-12 增量：同源合同发现与真实调用工具目录
 
 - 普通 `runtime_contract` 区分 `current_catalog` 的 service/method/event/UI slot 与 `accepted_run` 的原冻结工具。SDK `call.tools.list/describe` 本片才真正补齐，旧能力表的提前完成表述已纠正。Catalog **58**、私有 wire **18**。
