@@ -29,7 +29,7 @@ revision you just read:
 {
   "serviceId": "varin.agent.policy",
   "version": 4,
-  "providerKey": "example.domain-policy:host:varin.agent.policy@4",
+  "providerKeys": ["example.domain-policy:host:varin.agent.policy@4"],
   "scope": { "sessionId": "YOUR_NATIVE_THREAD_ID" },
   "allowFallback": false
 }

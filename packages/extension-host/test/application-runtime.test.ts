@@ -79,7 +79,10 @@ module.exports = {
   activate(context) {
     // Ordinary service activation identifies its implementation; multiplicity belongs to the manifest.
     context.services.provide({ id: '${serviceId}', version: 1 }, {
-      read() { return '${value}'; }
+      read() { return '${value}'; },
+      async readRouted([routing]) {
+        return context.services.use('${serviceId}', 1, { routing }).call('read');
+      }
     });
   }
 };
@@ -617,7 +620,7 @@ test("persistent routes select different real providers by session and isolate p
       expectedRevision: 0,
       rule: {
         allowFallback: false,
-        providerKey: alphaProvider.providerKey,
+        providerKeys: [alphaProvider.providerKey],
         scope: { sessionId: "session-alpha" },
         serviceId,
         version: 1,
@@ -627,7 +630,7 @@ test("persistent routes select different real providers by session and isolate p
       expectedRevision: alphaRoute.document.revision,
       rule: {
         allowFallback: false,
-        providerKey: betaProvider.providerKey,
+        providerKeys: [betaProvider.providerKey],
         scope: { sessionId: "session-beta" },
         serviceId,
         version: 1,
@@ -639,11 +642,26 @@ test("persistent routes select different real providers by session and isolate p
     assert.equal(await runtime.invokeService({
       args: [], method: "read", routing: { sessionId: "session-beta" }, serviceId, version: 1,
     }), "beta");
+    assert.equal(await runtime.invokeService({ args: [{ sessionId: "session-beta" }], method: "readRouted",
+      providerId: alphaProvider.providerId, serviceId, version: 1 }), "beta",
+      "An actual broker nested service call resolves the same scoped array through the registered owner");
+
+
+    for (const providerKeys of [[], [alphaProvider.providerKey, betaProvider.providerKey]]) {
+      await runtime.upsertServiceRoutingRule({ expectedRevision: (await runtime.routing.read()).document.revision,
+        rule: { allowFallback: true, providerKeys, scope: { sessionId: "invalid-single" }, serviceId, version: 1 } });
+      await assert.rejects(runtime.prepareService({ args: [], method: "read", routing: { sessionId: "invalid-single" }, serviceId, version: 1 }),
+        /requires exactly one provider/);
+      await assert.rejects(runtime.invokeService({ args: [{ sessionId: "invalid-single" }], method: "readRouted",
+        providerId: alphaProvider.providerId, serviceId, version: 1 }), /requires exactly one provider/);
+    }
+    await assert.rejects(runtime.prepareServiceCollection({ args: [], method: "read", routing: { sessionId: "session-beta" }, serviceId, version: 1 }),
+      /declare ordered composition/);
 
     await runtime.setEnabled("dev.example.alpha", false, (await runtime.state()).catalog.revision);
     await assert.rejects(
       runtime.invokeService({ args: [], method: "read", routing: { sessionId: "session-alpha" }, serviceId, version: 1 }),
-      /Selected provider .* is unavailable/,
+      /Selected providers .* are unavailable/,
     );
     assert.equal(await runtime.invokeService({
       args: [], method: "read", routing: { sessionId: "session-beta" }, serviceId, version: 1,

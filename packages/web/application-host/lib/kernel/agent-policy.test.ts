@@ -32,7 +32,7 @@ async function fixture() {
   };
   const route = async (version: number, providerKey: string, scope: { projectId?: string; sessionId?: string }, allowFallback = false) =>
     runtime.upsertServiceRoutingRule({ expectedRevision: (await runtime.routing.read()).document.revision,
-      rule: { serviceId: 'varin.agent.policy', version, providerKey, scope, allowFallback } });
+      rule: { serviceId: 'varin.agent.policy', version, providerKeys: [providerKey], scope, allowFallback } });
   return { root, runtime, install, route, prepare: createAgentPolicy(runtime) };
 }
 
@@ -71,7 +71,7 @@ it('conflicting unsupported rules cannot disappear into optional-policy absence'
   await f.route(1, 'review.one:host:varin.agent.policy@1', { projectId: 'current', sessionId: 'thread' });
   // User and project context have the same precedence within a session-specific rule.
   await f.runtime.upsertServiceRoutingRule({ expectedRevision: (await f.runtime.routing.read()).document.revision,
-    rule: { serviceId: 'varin.agent.policy', version: 1, providerKey: 'review.two:host:varin.agent.policy@1', scope: { userId: 'owner', sessionId: 'thread' }, allowFallback: false } });
+    rule: { serviceId: 'varin.agent.policy', version: 1, providerKeys: ['review.two:host:varin.agent.policy@1'], scope: { userId: 'owner', sessionId: 'thread' }, allowFallback: false } });
   const scope = { sessionId: 'thread', projectId: 'current', userId: 'owner' };
   expect(resolveVarinExtensionServiceRouting({ candidates: [], document: (await f.runtime.routing.read()).document, serviceId: 'varin.agent.policy', version: 1, context: scope }).status).toBe('ambiguous');
   await expect(f.prepare(scope)).rejects.toThrow(/version 1 is unsupported/);

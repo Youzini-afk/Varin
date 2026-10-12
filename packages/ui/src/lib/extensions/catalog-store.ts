@@ -311,11 +311,11 @@ export const setVarinExtensionServiceRoute = (
   serviceId: string,
   version: number,
   scope: VarinExtensionServiceRoutingContext,
-  selection: string | readonly string[] | null,
+  selection: readonly string[] | null,
 ): Promise<void> => {
   // Capture the user's ordered choice before it enters the shared mutation queue. Empty is an
   // explicit collection; only null removes the override and restores automatic routing.
-  const selected = typeof selection === 'string' || selection === null ? selection : [...selection];
+  const selected = selection === null ? null : [...selection];
   const operation = mutationQueue.then(async () => {
     await startVarinExtensionCatalog();
     const current = state.snapshot;
@@ -336,7 +336,7 @@ export const setVarinExtensionServiceRoute = (
         expectedRevision: current.routing.document.revision,
         rule: parseVarinExtensionServiceRoutingRule({
           allowFallback: existing?.allowFallback ?? false,
-          ...(typeof selected === 'string' ? { providerKey: selected } : { providerKeys: selected }),
+          providerKeys: selected,
           scope,
           serviceId,
           version,

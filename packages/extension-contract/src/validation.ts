@@ -1,3 +1,5 @@
+import { VarinExtensionContractError } from "./contract-error.js";
+export { VarinExtensionContractError } from "./contract-error.js";
 import { parseVarinExtensionSourceViewProvenance } from "./package-authoring.js";
 import { parseVarinExtensionServiceContract } from './runtime-contracts.js';
 import {
@@ -129,16 +131,6 @@ const ACTUAL_STATUSES = new Set<VarinExtensionActualStatus>([
   "waiting",
 ]);
 const STORAGE_STATES = new Set(["missing", "ready", "stale"]);
-
-export class VarinExtensionContractError extends Error {
-  readonly issues: string[];
-
-  constructor(message: string, issues: string[]) {
-    super(message);
-    this.name = "VarinExtensionContractError";
-    this.issues = issues;
-  }
-}
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

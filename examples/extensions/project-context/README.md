@@ -22,7 +22,7 @@ In the existing service-routing settings/API, add a rule with:
 {
   "serviceId": "varin.context.fragments",
   "version": 1,
-  "providerKey": "example.project-context:host:varin.context.fragments@1",
+  "providerKeys": ["example.project-context:host:varin.context.fragments@1"],
   "scope": { "projectId": "YOUR_PROJECT_ID" },
   "allowFallback": false
 }
@@ -43,8 +43,7 @@ digests; their containing composition retains its original scope and selection r
 
 
 This example explicitly declares `contract.composition: "ordered"` in its manifest and registration.
-To retain the packaged instruction first and append this project's contribution, replace `providerKey`
-with the ordered field in the same original routing rule:
+To retain the packaged instruction first and append this project's contribution, list both identities in the same routing rule:
 
 ```json
 "providerKeys": [
@@ -53,9 +52,9 @@ with the ordered field in the same original routing rule:
 ]
 ```
 
-Do not include both fields. `providerKeys: []` explicitly selects no fragments and does not fall
+`providerKeys: []` explicitly selects no fragments and does not fall
 through to the default. Every selected provider is required; missing or incompatible members report
 preparation failure. Two providers may use the same local section name without overwriting each
-other. A one-member collection still requires the collection consumer; ordinary service invocation
-keeps its original single-provider result. Default-user and original admitted workspace configuration
+other. The Context Fragments consumer accepts an ordered list, including zero or one member. Ordinary
+single-service invocation requires exactly one member in the same `providerKeys` field. Default-user and original admitted workspace configuration
 rules also participate in the same routing precedence.

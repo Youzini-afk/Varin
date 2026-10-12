@@ -16,14 +16,14 @@ test("service routing resolves the most specific matching scope with a stable pr
   document.rules = [
     {
       allowFallback: false,
-      providerKey: candidates[0]!.providerKey,
+      providerKeys: [candidates[0]!.providerKey],
       scope: { userId: "youzi" },
       serviceId: "memory",
       version: 1,
     },
     {
       allowFallback: false,
-      providerKey: candidates[1]!.providerKey,
+      providerKeys: [candidates[1]!.providerKey],
       scope: { sessionId: "session-a", userId: "youzi" },
       serviceId: "memory",
       version: 1,
@@ -37,7 +37,7 @@ test("service routing resolves the most specific matching scope with a stable pr
     version: 1,
   });
   assert.equal(resolution.status, "resolved");
-  assert.equal(resolution.providerId, "beta-generation-4");
+  assert.deepEqual(resolution.providerIds, ["beta-generation-4"]);
 });
 
 test("service routing falls through only when the missing selection allows fallback", () => {
@@ -45,14 +45,14 @@ test("service routing falls through only when the missing selection allows fallb
   document.rules = [
     {
       allowFallback: true,
-      providerKey: "dev.missing:host:memory@1",
+      providerKeys: ["dev.missing:host:memory@1"],
       scope: { sessionId: "session-a" },
       serviceId: "memory",
       version: 1,
     },
     {
       allowFallback: false,
-      providerKey: candidates[0]!.providerKey,
+      providerKeys: [candidates[0]!.providerKey],
       scope: { userId: "youzi" },
       serviceId: "memory",
       version: 1,
@@ -66,7 +66,7 @@ test("service routing falls through only when the missing selection allows fallb
     version: 1,
   });
   assert.equal(resolution.status, "resolved");
-  assert.equal(resolution.providerKey, candidates[0]!.providerKey);
+  assert.deepEqual(resolution.providerKeys, [candidates[0]!.providerKey]);
   assert.equal(resolution.diagnostics[0]?.code, "service_selection_fallback");
 
   document.rules[0]!.allowFallback = false;
@@ -85,14 +85,14 @@ test("equally specific conflicting rules are explicit instead of load-order depe
   document.rules = [
     {
       allowFallback: false,
-      providerKey: candidates[0]!.providerKey,
+      providerKeys: [candidates[0]!.providerKey],
       scope: { sessionId: "session-a", userId: "youzi" },
       serviceId: "memory",
       version: 1,
     },
     {
       allowFallback: false,
-      providerKey: candidates[1]!.providerKey,
+      providerKeys: [candidates[1]!.providerKey],
       scope: { sessionId: "session-a", workspaceId: "/workspace" },
       serviceId: "memory",
       version: 1,
@@ -117,11 +117,11 @@ test("ordered routing keeps explicit order and emptiness without changing single
     scope: { userId: "default" }, serviceId: "memory", version: 1 };
   document.rules = [rule];
   const input = { candidates: ordered, document, context: { userId: "default" }, serviceId: "memory", version: 1 };
-  assert.equal(resolveVarinExtensionServiceRouting(input).diagnostics[0]?.code, "service_selection_collection_required");
+  assert.equal(resolveVarinExtensionServiceRouting(input).diagnostics[0]?.code, "service_selection_single_required");
   assert.deepEqual(resolveVarinExtensionServiceRouting({ ...input, composition: "ordered" }).providerIds,
     [candidates[1]!.providerId, candidates[0]!.providerId]);
   rule.providerKeys = [candidates[0]!.providerKey];
-  assert.equal(resolveVarinExtensionServiceRouting(input).status, "unavailable");
+  assert.equal(resolveVarinExtensionServiceRouting(input).status, "resolved");
   rule.providerKeys = [];
   const empty = resolveVarinExtensionServiceRouting({ ...input, composition: "ordered", defaultProviderKey: candidates[0]!.providerKey });
   assert.equal(empty.status, "resolved");
@@ -144,6 +144,6 @@ test("ordered routing reports conflicts, missing required members and undeclared
   assert.throws(() => parseVarinExtensionServiceRoutingRule({ ...rule, providerKey: candidates[0]!.providerKey }));
   assert.throws(() => parseVarinExtensionServiceRoutingRule({ ...rule, providerKeys: ["same", "same"] }));
   document.rules = [{ ...rule, allowFallback: true, providerKeys: ["missing"] },
-    { allowFallback: false, providerKey: candidates[0]!.providerKey, serviceId: "memory", version: 1, scope: { userId: "default" } }];
-  assert.equal(resolveVarinExtensionServiceRouting(input).providerId, candidates[0]!.providerId);
+    { allowFallback: false, providerKeys: [candidates[0]!.providerKey], serviceId: "memory", version: 1, scope: { userId: "default" } }];
+  assert.deepEqual(resolveVarinExtensionServiceRouting(input).providerIds, [candidates[0]!.providerId]);
 });

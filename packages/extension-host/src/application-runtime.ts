@@ -536,7 +536,10 @@ export class ApplicationExtensionRuntime {
    * Callers with a frozen exchange can pin the handle and must release it when that exchange settles.
    */
   async prepareService(request: VarinExtensionServiceInvocationRequest | unknown, options?: HostServicePreparationOptions): Promise<HostServiceBinding> {
-    return (await this.#prepareServices(request, options, false)).bindings[0]!;
+    const { bindings } = await this.#prepareServices(request, options, false);
+    if (bindings.length !== 1) throw new HostServiceBindingError("selected_unavailable", "Single-service preparation requires exactly one provider");
+    const [binding] = bindings;
+    return binding!;
   }
 
   /** Explicit ordered-contract consumer. Never changes the ordinary service invocation shape. */
@@ -555,7 +558,12 @@ export class ApplicationExtensionRuntime {
     if (options?.expectedRoutingRevision !== undefined && routing.document.revision !== options.expectedRoutingRevision) {
       throw new Error("Host service routing changed during preparation");
     }
-    const result = (bindings: HostServiceBinding[]): PreparedHostServiceCollection => ({ bindings, routingRevision: routing.document.revision });
+    const result = (bindings: HostServiceBinding[]): PreparedHostServiceCollection => {
+      if (collection && bindings.some(binding => binding.descriptor.contract?.composition !== 'ordered')) {
+        throw new HostServiceBindingError("selected_unavailable", "Every selected provider must declare ordered composition");
+      }
+      return { bindings, routingRevision: routing.document.revision };
+    };
     const explicit = parsed.providerId ?? this.services.getSnapshot().selections[`${parsed.serviceId}@${parsed.version}`];
     if (explicit) return result([this.services.bind(parsed.serviceId, parsed.version, explicit)]);
     const resolution = resolveDeclaredServiceRouting(catalog, routing, parsed.serviceId, parsed.version,
@@ -565,8 +573,8 @@ export class ApplicationExtensionRuntime {
         : resolution.matchedRule ? "selected_unavailable" : "missing",
         resolution.diagnostics.map(diagnostic => diagnostic.message).join("; ") || "Host service provider is unavailable");
     }
-    const ids = resolution.providerIds ?? (resolution.providerId ? [resolution.providerId] : []);
-    const keys = resolution.providerKeys ?? (resolution.providerKey ? [resolution.providerKey] : []);
+    const ids = resolution.extensionIds;
+    const keys = resolution.providerKeys;
     // Independent selected roots reuse the original supervisor's preparation identities. The
     // consumer may cancel its wait without destroying preparation shared with another caller.
     await Promise.all(ids.map(async id => {
@@ -718,13 +726,14 @@ export class ApplicationExtensionRuntime {
       version: parsed.version,
       ...(parsed.routing ? { context: parsed.routing } : {}),
     });
-    if (resolution.status !== "resolved" || !resolution.providerId) {
+    if (resolution.status !== "resolved" || resolution.providerIds.length !== 1) {
       const detail = resolution.diagnostics.map((diagnostic) => diagnostic.message).join("; ");
       throw new HostServiceBindingError(resolution.status === "ambiguous" ? "ambiguous"
         : resolution.matchedRule ? "selected_unavailable" : "missing",
         detail || `Host service provider is unavailable or ambiguous: ${key}`);
     }
-    return this.services.bind(parsed.serviceId, parsed.version, resolution.providerId);
+    const [providerId] = resolution.providerIds;
+    return this.services.bind(parsed.serviceId, parsed.version, providerId);
   }
 
   async #ensureBuiltinArtifact(extensionId: string): Promise<void> {

@@ -205,7 +205,7 @@ async function install(f: Fixture, decision: string, capabilities: string[] = ['
   await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision,
     source: { kind: 'local', display: id, specifier: folder } });
   await f.extensions.upsertServiceRoutingRule({ expectedRevision: (await f.extensions.routing.read()).document.revision,
-    rule: { serviceId: 'varin.agent.policy', version: 4, providerKey: `${id}:host:varin.agent.policy@4`, scope: { projectId: 'planning-review' }, allowFallback: false } });
+    rule: { serviceId: 'varin.agent.policy', version: 4, providerKeys: [`${id}:host:varin.agent.policy@4`], scope: { projectId: 'planning-review' }, allowFallback: false } });
 }
 async function installBundledExample(f: Fixture) {
   const folder = path.join(f.root, 'bundled-planning-policy'); await fs.mkdir(folder);
@@ -217,7 +217,7 @@ async function installBundledExample(f: Fixture) {
   await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision,
     source: { kind: 'local', display: 'Bundled planning example', specifier: folder } });
   await f.extensions.upsertServiceRoutingRule({ expectedRevision: (await f.extensions.routing.read()).document.revision,
-    rule: { serviceId: 'varin.agent.policy', version: 4, providerKey: 'example.planning-policy:host:varin.agent.policy@4',
+    rule: { serviceId: 'varin.agent.policy', version: 4, providerKeys: ['example.planning-policy:host:varin.agent.policy@4'],
       scope: { projectId: 'planning-review' }, allowFallback: false } });
 }
 async function submitBundledExample(f: Fixture, key: string) {

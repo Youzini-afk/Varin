@@ -20,7 +20,7 @@ async function fixture() {
   const context = { userId: 'default', workspaceId: '/retrieval-picker-workspace' };
   const request = { serviceId, version: 1, method: 'describe', args: [], routing: context };
   const route = async (providerKey: string) => runtime.upsertServiceRoutingRule({ expectedRevision: (await runtime.routing.read()).document.revision,
-    rule: { allowFallback: false, providerKey, serviceId, version: 1, scope: { workspaceId: context.workspaceId } } });
+    rule: { allowFallback: false, providerKeys: [providerKey], serviceId, version: 1, scope: { workspaceId: context.workspaceId } } });
   const view = async () => {
     const snapshot = await runtime.state(); const groups = serviceRoutingOptions(snapshot); const choices = groups.get(`${serviceId}@1`) ?? [];
     const resolution = resolveVarinExtensionServiceRouting({ candidates: choices.map(provider => ({ providerId: provider.providerId ?? provider.providerKey, providerKey: provider.providerKey })),
@@ -36,10 +36,10 @@ it('the settings selector lists installed lazy plans before activation, selects 
   expect(before.choices.find(option => option.providerKey === structured)).toMatchObject({ status: 'declared' });
   expect(before.choices.find(option => option.providerKey === keyword)?.providerId).toBeUndefined();
   await f.route(keyword);
-  const selected = await f.view(); expect(selected.resolution).toMatchObject({ status: 'resolved', providerKey: keyword });
+  const selected = await f.view(); expect(selected.resolution).toMatchObject({ status: 'resolved', providerKeys: [keyword] });
   expect(selected.choices.find(option => option.providerKey === keyword)?.status).toBe('declared');
   const binding = await f.runtime.prepareService(f.request, { defaultProviderKey: structured });
-  expect(await binding.invoke('describe', [])).toEqual({ configurationId: 'keyword-only-v1', structure: 'disabled' });
+  expect(await binding.invoke('describe', [])).toEqual({ configurationId: 'keyword-only-v1', structure: 'disabled', semantic: 'disabled' });
   const active = await f.view();
   expect(active.choices.filter(option => option.providerKey === keyword)).toHaveLength(1);
   expect(active.choices.find(option => option.providerKey === keyword)).toMatchObject({ status: 'active', providerId: binding.providerId });
@@ -47,7 +47,7 @@ it('the settings selector lists installed lazy plans before activation, selects 
   await f.runtime.setEnabled('varin.builtin.retrieval-keyword', false, (await f.runtime.state()).catalog.revision);
   const disabled = await f.view();
   expect(disabled.choices.some(option => option.providerKey === keyword)).toBe(false);
-  expect(disabled.resolution).toMatchObject({ status: 'unavailable', providerKey: keyword });
+  expect(disabled.resolution).toMatchObject({ status: 'unavailable', providerKeys: [keyword] });
   await expect(f.runtime.prepareService(f.request, { defaultProviderKey: structured })).rejects.toThrow();
 }, 20_000);
 
@@ -64,7 +64,7 @@ it('the actual selector and Host do not admit a provider from another service or
   expect(installed.choices.some(option => option.extensionId === id)).toBe(false);
   for (const providerKey of [`${id}:host:${otherService}@1`, 'review.not-installed:host:varin.retrieval.plan@1']) {
     await f.route(providerKey);
-    expect((await f.view()).resolution).toMatchObject({ status: 'unavailable', providerKey });
+    expect((await f.view()).resolution).toMatchObject({ status: 'unavailable', providerKeys: [providerKey] });
     await expect(f.runtime.prepareService(f.request, { defaultProviderKey: structured })).rejects.toThrow();
   }
 }, 20_000);

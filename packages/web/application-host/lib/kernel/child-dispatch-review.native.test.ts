@@ -179,7 +179,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
     const selectParentPolicy = async (threadId: string) => {
       if (!extensions) throw new Error('Policy example is not installed');
       await extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision,
-        rule: { serviceId: 'varin.agent.policy', version: 4, providerKey: 'example.collaboration-policy:host:varin.agent.policy@4',
+        rule: { serviceId: 'varin.agent.policy', version: 4, providerKeys: ['example.collaboration-policy:host:varin.agent.policy@4'],
           scope: { sessionId: threadId }, allowFallback: false } });
     };
     const policyDecisions: VarinAgentPolicyInput[] = [];

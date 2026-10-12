@@ -26,7 +26,7 @@ Select the provider through existing service routing, using the routing document
 {
   "serviceId": "varin.agent.policy",
   "version": 4,
-  "providerKey": "example.collaboration-policy:host:varin.agent.policy@4",
+  "providerKeys": ["example.collaboration-policy:host:varin.agent.policy@4"],
   "scope": { "sessionId": "YOUR_PARENT_THREAD_ID" },
   "allowFallback": false
 }

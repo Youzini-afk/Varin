@@ -76,7 +76,7 @@ async function fixture(hooks: { concurrency?: number; conversation?: (body: Reco
   const extensions = await ApplicationExtensionRuntime.create({ dataDir: path.join(f.documents.root, 'extensions'), varinVersion: '0.9.24', brokerScript: path.join(repository, 'packages/extension-host/broker/broker-child.mjs') });
   await extensions.start(); cleanups.push(() => extensions.stop());
   await extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision,
-    rule: { allowFallback: false, providerKey: semanticKey, scope: { projectId: 'semantic-review-project' }, serviceId: 'varin.retrieval.plan', version: 1 } });
+    rule: { allowFallback: false, providerKeys: [semanticKey], scope: { projectId: 'semantic-review-project' }, serviceId: 'varin.retrieval.plan', version: 1 } });
   const authorize = async (query: RetrievalQuery, signal: AbortSignal) => { signal.throwIfAborted(); await f.liveSources.validate({ workspaceId: query.source.workspace_id, executionWorkspaceId: query.source.execution_workspace_id, liveRoot: query.source.live_root! }, signal); f.kernel.sourceGrant(query); };
   const composition = createRetrievalComposition(extensions, { structure, prepareSemantic: async (selection, signal) => {
     const query = selection.query; if (!query || !selection.inference) throw new Error('Query identity and session required');

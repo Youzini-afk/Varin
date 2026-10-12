@@ -99,7 +99,7 @@ async function initialize(frame: Record<string, unknown>) {
   if (frame.child) {
     const child = frame.child as ChildTask;
     await extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision,
-      rule: { serviceId: 'varin.context.budget', version: 1, providerKey: 'example.context-budget:host:varin.context.budget@1',
+      rule: { serviceId: 'varin.context.budget', version: 1, providerKeys: ['example.context-budget:host:varin.context.budget@1'],
         scope: { sessionId: child.child_thread_id }, allowFallback: false } });
     const childContext = await context({ runtime: 'agent', threadId: child.child_thread_id, branchId: child.child_branch_id }, null,
       { mode: 'agent', threadRole: 'worker', projectId: child.project_id, childProfile: child.selected_profile });
@@ -150,7 +150,7 @@ async function handle(frame: Record<string, unknown>) {
       source: { kind: 'local', display: 'Controlled invalid background strategy', specifier: packageRoot } });
     await extensions.setEnabled(manifest.id, true, installed.revision);
     await extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision,
-      rule: { serviceId: 'varin.context.budget', version: 1, providerKey: 'review.invalid-background:host:varin.context.budget@1',
+      rule: { serviceId: 'varin.context.budget', version: 1, providerKeys: ['review.invalid-background:host:varin.context.budget@1'],
         scope: { userId: 'default' }, allowFallback: false } });
     const branch = (await runtime.thread(threadId)).branches.find(value => value.branch_id === branchId); assert(branch);
     const receipt = await runtime.submit({ key: 'budget-invalid', threadId, branchId, expectedHead: branch.head,
@@ -165,7 +165,7 @@ async function handle(frame: Record<string, unknown>) {
     await settings(12000);
     await extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision,
       rule: { serviceId: 'varin.context.budget', version: 1,
-        providerKey: 'example.context-budget:host:varin.context.budget@1', scope: { userId: 'default' }, allowFallback: false } });
+        providerKeys: ['example.context-budget:host:varin.context.budget@1'], scope: { userId: 'default' }, allowFallback: false } });
     const branch = (await runtime.thread(threadId)).branches.find(value => value.branch_id === branchId); assert(branch);
     const receipt = await runtime.submit({ key: 'budget-second', threadId, branchId, expectedHead: branch.head,
       input: { text: 'SECOND USER QUESTION must remain after the fixed summary' }, configuration,

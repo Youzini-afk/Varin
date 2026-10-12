@@ -158,7 +158,7 @@ async function installExample(f: Awaited<ReturnType<typeof fixture>>) {
 }
 async function route(f: Awaited<ReturnType<typeof fixture>>, providerKey: string, scope: {projectId?: string; sessionId?: string}) {
   return f.extensions.upsertServiceRoutingRule({ expectedRevision: (await f.extensions.routing.read()).document.revision,
-    rule: { allowFallback: false, providerKey, scope, serviceId: 'varin.agent.policy', version: 4 } });
+    rule: { allowFallback: false, providerKeys: [providerKey], scope, serviceId: 'varin.agent.policy', version: 4 } });
 }
 async function installCustom(f: Awaited<ReturnType<typeof fixture>>, id: string, handlers: string) {
   const folder=path.join(f.root,id); await fs.mkdir(folder);

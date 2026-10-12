@@ -31,7 +31,7 @@ async function fixture() {
     return installed;
   };
   const route=async(scope:{sessionId?:string;projectId?:string})=>runtime.upsertServiceRoutingRule({expectedRevision:(await runtime.routing.read()).document.revision,
-    rule:{serviceId:'varin.context.budget',version:1,providerKey:'review.budget-owner:host:varin.context.budget@1',scope,allowFallback:false}});
+    rule:{serviceId:'varin.context.budget',version:1,providerKeys: ['review.budget-owner:host:varin.context.budget@1'],scope,allowFallback:false}});
   return {runtime,install,route,budget:createContextBudget(runtime),close:async()=>{await runtime.stop();await fs.rm(root,{recursive:true,force:true});}};
 }
 test('an installed-only budget stays cold; scoped selection uses the actual broker and reuses its declaration',async()=>{
@@ -51,6 +51,14 @@ test('an installed-only budget stays cold; scoped selection uses the actual brok
     await f.route({projectId:'unrelated'});
     const third=await f.budget.decide({sessionId:'main'},input,signal());
     assert.equal(third?.decision.kind==='compact' && third.decision.summaryInstructions,'v1:describe-1');
+    await f.runtime.upsertServiceRoutingRule({expectedRevision:(await f.runtime.routing.read()).document.revision,
+      rule:{serviceId:'varin.context.budget',version:1,providerKeys:[],scope:{sessionId:'main'},allowFallback:true}});
+    assert.equal(await f.budget.selected({sessionId:'main'},signal()),true,'An explicit empty single selection is not absence');
+    await assert.rejects(f.budget.decide({sessionId:'main'},input,signal()),/requires exactly one provider/);
+    await f.runtime.removeServiceRoutingRule({expectedRevision:(await f.runtime.routing.read()).document.revision,
+      serviceId:'varin.context.budget',version:1,scope:{sessionId:'main'}});
+    assert.equal(await f.budget.selected({sessionId:'main'},signal()),false);
+
   } finally {await f.close();}
 });
 test('withdrawal during an unfinished decision rejects late output from the captured pin',async()=>{

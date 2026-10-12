@@ -601,11 +601,11 @@ export function createExtensionTools(
               version: entry.version,
               context: routingScope,
             });
-            if (resolution.status !== 'resolved') continue;
+            if (resolution.status !== 'resolved' || resolution.providerKeys.length !== 1) continue;
             providerId = snapshot.services.providers.find(
               (p) =>
                 p.status === 'active' &&
-                p.providerKey === resolution.providerKey,
+                resolution.providerKeys.includes(p.providerKey),
             )?.providerId;
           }
           if (!providerId) continue;

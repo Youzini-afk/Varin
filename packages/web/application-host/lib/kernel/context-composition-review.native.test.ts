@@ -1,3 +1,4 @@
+import { VARIN_CONTEXT_FRAGMENTS_SERVICE } from '@varin/extension-contract';
 import { createScheduledTasksHttpAPI } from '@varin/application-client';
 import { createProjectConfigRuntime } from '../projects/project-config.js';
 import { createScheduledTasksRuntime } from '../scheduled-tasks/runtime.js';
@@ -120,7 +121,7 @@ async function installExample(f: Awaited<ReturnType<typeof fixture>>) {
 }
 async function route(f: Awaited<ReturnType<typeof fixture>>, providerKey: string, scope: {projectId?: string; sessionId?: string}) {
   return f.extensions.upsertServiceRoutingRule({ expectedRevision: (await f.extensions.routing.read()).document.revision,
-    rule: { allowFallback: false, providerKey, scope, serviceId: 'varin.context.fragments', version: 1 } });
+    rule: { allowFallback: false, providerKeys: [providerKey], scope, serviceId: 'varin.context.fragments', version: 1 } });
 }
 it('packaged default and installable scoped example reach captured model requests and refresh without changing frozen bytes', async () => {
   let held!: ServerResponse; let count = 0;
@@ -197,8 +198,8 @@ it('optional unavailable default is empty, but explicit missing and failing prov
   await f.extensions.setEnabled('varin.builtin.context-fragments', true, (await f.extensions.state()).catalog.revision);
   const bad = path.join(f.root, 'bad-context'); await fs.mkdir(bad);
   await fs.writeFile(path.join(bad, 'package.json'), JSON.stringify({ name: 'bad-context', version: '1.0.0' }));
-  await fs.writeFile(path.join(bad, 'varin.extension.json'), JSON.stringify({ schemaVersion: 1, id: 'review.bad-context', version: '1.0.0', engines: { varin: '*' }, entrypoints: { host: { file: 'host.cjs', mode: 'brokered', activation: ['service-request'] } }, provides: { services: [{ id: 'varin.context.fragments', version: 1, multiple: true }] } }));
-  await fs.writeFile(path.join(bad, 'host.cjs'), "module.exports={activate(context){context.services.provide({id:'varin.context.fragments',version:1,multiple:true},{describe(){throw new Error('deliberate describe failure')}})}}");
+  await fs.writeFile(path.join(bad, 'varin.extension.json'), JSON.stringify({ schemaVersion: 1, id: 'review.bad-context', version: '1.0.0', engines: { varin: '*' }, entrypoints: { host: { file: 'host.cjs', mode: 'brokered', activation: ['service-request'] } }, provides: { services: [VARIN_CONTEXT_FRAGMENTS_SERVICE] } }));
+  await fs.writeFile(path.join(bad, 'host.cjs'), `module.exports={activate(context){context.services.provide(${JSON.stringify(VARIN_CONTEXT_FRAGMENTS_SERVICE)},{describe(){throw new Error('deliberate describe failure')}})}}`);
   await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision, source: { kind: 'local', display: 'Bad context', specifier: bad } });
   await f.composition(scope);
   expect((await f.extensions.state()).services.providers.some(provider => provider.extensionId === 'review.bad-context')).toBe(false);
@@ -247,8 +248,8 @@ it('selected describe failure preserves the checkpoint and data fragments stay o
   ]) {
     const folder = path.join(f.root, id!); await fs.mkdir(folder);
     await fs.writeFile(path.join(folder, 'package.json'), JSON.stringify({ name: id, version: '1.0.0' }));
-    await fs.writeFile(path.join(folder, 'varin.extension.json'), JSON.stringify({ schemaVersion: 1, id, version: '1.0.0', engines: { varin: '*' }, entrypoints: { host: { file: 'host.cjs', mode: 'brokered', activation: ['service-request'] } }, provides: { services: [{ id: 'varin.context.fragments', version: 1, multiple: true }] } }));
-    await fs.writeFile(path.join(folder, 'host.cjs'), `module.exports={activate(context){context.services.provide({id:'varin.context.fragments',version:1,multiple:true},{describe(){${implementation}}})}}`);
+    await fs.writeFile(path.join(folder, 'varin.extension.json'), JSON.stringify({ schemaVersion: 1, id, version: '1.0.0', engines: { varin: '*' }, entrypoints: { host: { file: 'host.cjs', mode: 'brokered', activation: ['service-request'] } }, provides: { services: [VARIN_CONTEXT_FRAGMENTS_SERVICE] } }));
+    await fs.writeFile(path.join(folder, 'host.cjs'), `module.exports={activate(context){context.services.provide(${JSON.stringify(VARIN_CONTEXT_FRAGMENTS_SERVICE)},{describe(){${implementation}}})}}`);
     await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision, source: { kind: 'local', display: id!, specifier: folder } });
   }
   await route(f, 'review.fail-fragments:host:varin.context.fragments@1', { sessionId: identity.threadId });

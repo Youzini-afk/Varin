@@ -14,6 +14,13 @@
 - 推理用途接入不等于每个用途都有本地推理包。已有提供商 decision/rerank/embedding 的配置、真实消费者与原生执行合同仍需保留/接通；本地包当前只有已有 Bekko。用户本轮明确暂缓 native 图像生成，不计剩余交付范围；旧 Pi 的 `models.generateImages()` 基础不等于 native 已实现。§18.1/§24 的建议/评估限定已有配置的辅助请求，不能扩成默认模型链；没有另设独立“材料 rerank”产品的任务。此前清单混用用途、消费者和本地包，现以这些明确边界纠正，历史台账不充当新需求。
 - 已有本地嵌入是 `bekko-embedding-v1-a8m` 的 `local-semantic` ONNX 组件，安装、校验、worker 与 CPU 调度已实现。当前 native query 入口只接已配置的 OpenAI-compatible HTTP lease（端点可以本机或外部），尚未接通该已有本地执行器。HTTP 模拟响应下的 Catalog/Goal 验证不代表用户配置了此后端，也不代表本地路径已迁移；后续优先补原 Bekko 路径。
 
+## 2026-10-12 增量：唯一数组 routing 合同
+
+- 原规则、resolution 和公开 selection 统一 `providerKeys`/`providerIds` 数组，删除旧 scalar 解析/写入/投影。一个 provider 的稳定 `providerKey` 和精确 generation `providerId` 仍各指一个实现；准备阶段的 extension 身份不冒充实际 generation。
+- single 消费必须恰一项；ordered 按完整顺序及每成员声明执行，显式 `[]` 不等于 unset。单候选/default/显式 handle 同样不能绕过 ordered 合同；缺成员只允许原整规则 fallback，不截断集合。组合语义来自消费合同和同源 descriptor 投影，不新增配置名单。
+- 原 Settings 控件/store、client、认证 Router、文件 CAS/重开和 metadata 同步迁移；存储真实 schema marker 不再被覆盖成当前常量。Budget/Policy/tool/observer 的 single 与 Context Transform 的 collection 继续沿原准备和冻结 owner，[本片证据](../reviews/runtime-array-routing-2026-10-12.md)区分真实 native 组合、Node broker、DOM/direct Router 和未执行入口。
+- 旧 registry/Surface 全局选择表尚未删除。其 selected 冷依赖及不同项目捕获不同依赖的实例共享/释放需要一个完整生命周期片，不能用数组改名冒充单权威已完成。下一先接已有 Bekko 本地执行器，再闭合该设计项。
+
 ## 2026-10-12 增量：声明与 Catalog 的有界历史兼容删除
 
 - `provideContextFragments` 固定注册同源完整 descriptor，发行内置与作者示例同时迁移；删除 `declareContract` opt-in，不影响其他合法未声明 metadata 的异构服务。

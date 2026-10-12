@@ -581,7 +581,7 @@ const ServiceRoutingSection: React.FC = () => {
   const selectProvider = async (
     serviceId: string,
     version: number,
-    selection: string | readonly string[] | null,
+    selection: readonly string[] | null,
   ): Promise<void> => {
     const key = `${serviceId}@${version}`;
     setBusyKey(key);
@@ -621,7 +621,7 @@ const ServiceRoutingSection: React.FC = () => {
             && rule.version === version
             && serviceRoutingScopeKey(rule.scope) === editableScopeKey
           ));
-          const selection = exactRule?.providerKeys ?? exactRule?.providerKey ?? null;
+          const selection = exactRule?.providerKeys ?? null;
           const composition = serviceRoutingComposition(snapshot, id, version);
           const resolution = resolveVarinExtensionServiceRouting({
             // The pure resolver uses an opaque candidate identity. A declared option has no
@@ -639,7 +639,7 @@ const ServiceRoutingSection: React.FC = () => {
             ...(id === VARIN_RETRIEVAL_PLAN_SERVICE_ID && version === VARIN_RETRIEVAL_PLAN_VERSION
               ? { defaultProviderKey: VARIN_BUILTIN_RETRIEVAL_DEFAULT_PROVIDER_KEY } : {}),
           });
-          const resolvedKeys = resolution.providerKeys ?? (resolution.providerKey ? [resolution.providerKey] : []);
+          const resolvedKeys = resolution.providerKeys ?? [];
           const allReady = resolvedKeys.length > 0 && resolvedKeys.every((providerKey) => (
             providers.find((provider) => provider.providerKey === providerKey)?.status === 'active'
           ));
@@ -668,7 +668,7 @@ const ServiceRoutingSection: React.FC = () => {
                 busy={busyKey === key}
                 composition={composition}
                 extensionNames={extensionNames}
-                inheritedSelection={!exactRule ? resolution.matchedRule?.providerKeys ?? resolution.matchedRule?.providerKey : undefined}
+                inheritedSelection={!exactRule ? resolution.matchedRule?.providerKeys : undefined}
                 onSelect={(next) => { void selectProvider(id, version, next); }}
                 providers={providers}
                 selection={selection}

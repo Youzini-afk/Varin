@@ -360,8 +360,8 @@ test('routing mutations preserve ordered and unavailable members through refresh
   await setVarinExtensionServiceRoute(serviceId, 1, scope, null);
   expect(removals).toEqual([{ expectedRevision: 2, scope, serviceId, version: 1 }]);
   expect(getVarinExtensionCatalogState().snapshot?.routing.document.rules).toEqual([]);
-  await setVarinExtensionServiceRoute(serviceId, 1, scope, a);
-  expect(updates[2]).toMatchObject({ expectedRevision: 3, rule: { providerKey: a } });
-  expect(updates[2].rule).not.toHaveProperty('providerKeys');
+  await setVarinExtensionServiceRoute(serviceId, 1, scope, [a]);
+  expect(updates[2]).toMatchObject({ expectedRevision: 3, rule: { providerKeys: [a] } });
+  expect(updates[2].rule).not.toHaveProperty('providerKey');
   stopVarinExtensionCatalog();
 });

@@ -36,7 +36,7 @@ async function fixture() {
   await runtime.installOrStage({ expectedRevision: (await runtime.state()).catalog.revision,
     source: { kind: 'local', display: 'Collaboration policy example', specifier: source } });
   await runtime.upsertServiceRoutingRule({ expectedRevision: (await runtime.routing.read()).document.revision,
-    rule: { serviceId: 'varin.agent.policy', version: 4, providerKey: 'example.collaboration-policy:host:varin.agent.policy@4',
+    rule: { serviceId: 'varin.agent.policy', version: 4, providerKeys: ['example.collaboration-policy:host:varin.agent.policy@4'],
       scope: { sessionId: 'parent-thread' }, allowFallback: false } });
   const prepare = async (owner = runtime) => {
     const lease = await createAgentPolicy(owner)({ sessionId: 'parent-thread' });

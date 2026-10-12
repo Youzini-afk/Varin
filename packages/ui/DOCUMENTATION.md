@@ -87,10 +87,11 @@ keyword-and-structure default and keyword-only declaration through this same pic
 
 Service contracts that explicitly declare `composition: 'ordered'` expose an ordered provider editor;
 `multiple` registration alone does not enable composition. The original routing CAS stores additions,
-removals and reordering as `providerKeys`, preserving order through Host refresh. Automatic removes the
-exact scope override, a single choice retains `providerKey`, and an explicit empty list suppresses
-providers. Inherited choices stay read-only until the user selects an override. Missing members and
-collections whose contract is unavailable remain visible in full with the shared resolver's diagnostics;
+removals and reordering as `providerKeys`, preserving order through Host refresh. Every routing rule
+uses this array: a single-service consumer requires exactly one member, while an ordered consumer
+accepts an explicit empty list to suppress contributions. Automatic removes the exact scope override.
+Inherited choices stay read-only until the user selects an override. Missing members, invalid
+cardinality and collections whose contract is unavailable remain visible with the shared resolver's diagnostics;
 the UI never truncates a collection or includes another installed provider automatically.
 
 `components/sections/assistant` owns the ordinary Agent memory and system-prompt settings pages.

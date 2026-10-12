@@ -186,8 +186,11 @@ export function createAgentPolicy(runtime: ApplicationExtensionRuntime): AgentPo
             if (!selected && !resolution.matchedRule
               && !resolution.diagnostics.some(item => item.code.startsWith('service_selection_'))) return [];
             const provider = state.services.providers.find(item => item.status === 'active'
-              && (selected ? item.providerId === selected : item.providerKey === resolution.providerKey));
-            const entry = state.catalog.extensions.find(item => item.manifest.id === (provider?.extensionId ?? resolution.providerId));
+              && (selected ? item.providerId === selected : resolution.status === 'resolved' && resolution.providerKeys.length === 1
+                && resolution.providerKeys.includes(item.providerKey)));
+            const extensionId = provider?.extensionId ?? (resolution.status === 'resolved' && resolution.providerIds.length === 1
+              ? resolution.providerIds[0] : undefined);
+            const entry = state.catalog.extensions.find(item => item.manifest.id === extensionId);
             return [{ version, selected: selected ?? null, resolution, provider: provider?.providerId ?? null,
               package: entry ? { id: entry.manifest.id, version: entry.manifest.version, artifact: entry.integrity, enabled: entry.desired.enabled } : null }];
           });

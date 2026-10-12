@@ -21,14 +21,14 @@ test("service routing persists stable provider selections and rejects stale revi
       expectedRevision: 0,
       rule: {
         allowFallback: false,
-        providerKey: "dev.example.provider:host:dev.example.echo@1",
+        providerKeys: ["dev.example.provider:host:dev.example.echo@1"],
         scope: { workspaceId: "/workspace" },
         serviceId: "dev.example.echo",
         version: 1,
       },
     });
     assert.equal(saved.document.revision, 1);
-    assert.equal(saved.document.rules[0]?.providerKey, "dev.example.provider:host:dev.example.echo@1");
+    assert.deepEqual(saved.document.rules[0]?.providerKeys, ["dev.example.provider:host:dev.example.echo@1"]);
     const reloaded = await new ServiceRoutingStore({ hostId, storage }).read();
     assert.deepEqual(reloaded.document, saved.document);
     await assert.rejects(
@@ -51,6 +51,19 @@ test("service routing persists stable provider selections and rejects stale revi
     assert.deepEqual(empty.document.rules[0]?.providerKeys, []);
     assert.throws(() => reopened.upsertRule({ expectedRevision: empty.document.revision,
       rule: { allowFallback: false, providerKeys: ["repeat", "repeat"], scope: { userId: "default" }, serviceId: "varin.context.fragments", version: 1 } }));
+    // The storage envelope's marker is authoritative even when its rule data is otherwise valid.
+    const address = { extensionId: "varin.core.service-routing", key: "rules", scope: "application" } as const;
+    await storage.update(address, empty.document.revision, 2, { rules: JSON.parse(JSON.stringify(empty.document.rules)) });
+    const stale = await reopened.read();
+    assert.equal(stale.authoritative, false);
+    assert.equal(stale.storageState, "stale");
+    assert.deepEqual(stale.document, empty.document);
+    assert.match(stale.diagnostics[0]!.message, /schemaVersion is unsupported/);
+    const cold = await new ServiceRoutingStore({ hostId, storage: new ExtensionStorageStore(dataDir) }).read();
+    assert.equal(cold.authoritative, false);
+    assert.equal(cold.storageState, "stale");
+    await assert.rejects(reopened.removeRule({ expectedRevision: empty.document.revision, scope: { userId: "default" },
+      serviceId: "varin.context.fragments", version: 1 }), /Cannot update stale/);
   } finally {
     await rm(dataDir, { force: true, recursive: true });
   }
