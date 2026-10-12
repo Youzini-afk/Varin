@@ -26,6 +26,21 @@ export const VARIN_CONTEXT_FRAGMENTS_CONTRACT = {
     } } },
   },
 } as const;
+/** Manifest, registration and discovery use the same existing method schema. */
+export const VARIN_CONTEXT_FRAGMENTS_SERVICE = {
+  id: VARIN_CONTEXT_FRAGMENTS_SERVICE_ID,
+  version: VARIN_CONTEXT_FRAGMENTS_VERSION,
+  multiple: true,
+  contract: {
+    participation: VARIN_CONTEXT_FRAGMENTS_CONTRACT.participation,
+    methods: {
+      [VARIN_CONTEXT_FRAGMENTS_METHOD]: {
+        inputSchema: VARIN_CONTEXT_FRAGMENTS_CONTRACT.inputSchema,
+        outputSchema: VARIN_CONTEXT_FRAGMENTS_CONTRACT.outputSchema,
+      },
+    },
+  },
+} as const;
 export function parseVarinContextFragments(value: unknown): VarinContextFragments {
   if (value === null || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).some(key => key !== 'sections') || !('sections' in value) || !Array.isArray(value.sections)) {

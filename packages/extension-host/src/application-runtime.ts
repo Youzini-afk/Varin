@@ -31,6 +31,9 @@ import {
   type VarinExtensionServiceRoutingRuleUpdateRequest,
   type VarinExtensionServiceRoutingSnapshot,
   type VarinExtensionServiceSelectionRequest,
+  type VarinRuntimeContractRequest,
+  type VarinRuntimeContractScope,
+  type VarinRuntimeContractResult,
   type VarinWorkbenchLayoutUpdateRequest,
   type VarinWorkbenchProfileRemoveRequest,
   type VarinWorkbenchProfileApplyRequest,
@@ -43,6 +46,7 @@ import {
   VARIN_BUILTIN_EXTENSION_PREFIX,
   VARIN_BUNDLED_LANGUAGE_SERVERS,
 } from "@varin/extension-builtins";
+import { queryRuntimeContracts, resolveDeclaredServiceRouting } from "./runtime-contracts.js";
 import { ApplicationExtensionCatalog } from "./application-catalog.js";
 import { BrokeredHostSupervisor, type BrokeredHostTransportFactory } from "./broker-supervisor.js";
 import { HostCapabilityRegistry } from "./capability-registry.js";
@@ -153,6 +157,17 @@ export class ApplicationExtensionRuntime {
       const workbench = await this.workbench.read();
       const after = this.#revision;
       if (before === after) return { catalog, revision: after, routing, services, workbench };
+    }
+  }
+
+  async queryContracts(request: VarinRuntimeContractRequest | unknown, scope: VarinRuntimeContractScope = {}): Promise<VarinRuntimeContractResult> {
+    for (;;) {
+      const revision = this.#revision;
+      const catalog = await this.catalog.snapshot();
+      const services = this.services.getSnapshot();
+      const routing = await this.routing.read();
+      const workbench = await this.workbench.snapshot();
+      if (revision === this.#revision) return queryRuntimeContracts({ catalog, services, routing, workbench, revision }, request, scope);
     }
   }
 
@@ -434,16 +449,8 @@ export class ApplicationExtensionRuntime {
     }
     const legacySelection = this.services.getSnapshot().selections[`${parsed.serviceId}@${parsed.version}`];
     if (legacySelection) return this.services.bind(parsed.serviceId, parsed.version, legacySelection);
-    const candidates = catalog.extensions.filter(entry => entry.desired.enabled && entry.manifest.entrypoints?.host
-      && entry.manifest.provides?.services?.some(service => service.id === parsed.serviceId && service.version === parsed.version))
-      .map(entry => ({ extensionId: entry.manifest.id,
-        providerKey: `${entry.manifest.id}:host:${parsed.serviceId}@${parsed.version}`,
-        providerId: entry.manifest.id }));
-    const resolution = resolveVarinExtensionServiceRouting({ candidates, document: routing.document,
-      serviceId: parsed.serviceId, version: parsed.version,
-      ...(parsed.routing ? { context: parsed.routing } : {}),
-      ...(options?.defaultProviderKey ? { defaultProviderKey: options.defaultProviderKey } : {}),
-    });
+    const resolution = resolveDeclaredServiceRouting(catalog, routing, parsed.serviceId, parsed.version,
+      parsed.routing, options?.defaultProviderKey);
     if (resolution.status !== "resolved" || !resolution.providerId || !resolution.providerKey) {
       throw new HostServiceBindingError(resolution.status === "ambiguous" ? "ambiguous"
         : resolution.matchedRule ? "selected_unavailable" : "missing",

@@ -19,6 +19,7 @@ export * from "./run-activity.js";
 export * from "./retrieval-plan.js";
 
 export * from "./tools.js";
+export * from "./runtime-contracts.js";
 export * from "./nested-tools.generated.js";
 
 export * from "./output.js";

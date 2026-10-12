@@ -4,7 +4,7 @@ import type { HostCapabilityCallContext } from '@varin/extension-host';
 import { createNestedToolOwner } from './nested-tool-owner.js';
 import type { KernelClient } from './kernel-client.js';
 import { withToolInvocation, type ToolInvocationAuthority } from './tool-invocation.js';
-import { toolOperationId, validToolOrigin, type NestedToolInvokeParams } from './protocol.generated.js';
+import { toolOperationId, validToolOrigin, type NestedToolInvokeParams, type NestedToolInspectParams } from './protocol.generated.js';
 const owner = { extensionId: 'example.compose', extensionVersion: '1.0.0', entrypointId: 'host', generation: 4 };
 const authority: ToolInvocationAuthority = {
   invocationId: 'invocation', runId: 'run', threadId: 'thread', operationId: 'request:tool:outer', callId: 'outer',
@@ -63,4 +63,30 @@ test('shared origin helper preserves Unicode bytes and distinct deep invocation 
   assert.notEqual(toolOperationId(origin, 'x:nested:y'), toolOperationId({ kind: 'nested_call', parent_operation_id: toolOperationId(origin, 'x') }, 'y'));
   assert.equal(validToolOrigin(origin), true);
   assert.equal(validToolOrigin({ ...origin, request_id: 'invented' }), false);
+});
+
+test('tool discovery sends only the live original invocation and expires with its callback', async () => {
+  const calls: NestedToolInspectParams[] = [];
+  const handler = createNestedToolOwner({ async agentRuntimeRequest(method: string, params: NestedToolInspectParams) {
+    assert.equal(method, 'runtime.tools.inspect'); calls.push(params);
+    return params.name ? { action: 'describe', origin: 'accepted_run', permission: 'checked_on_invocation', runId: 'run', generation: 9, tool: null }
+      : { action: 'list', origin: 'accepted_run', permission: 'checked_on_invocation', runId: 'run', generation: 9, tools: [] };
+  } } as KernelClient);
+  const signal = new AbortController().signal;
+  let context!: HostCapabilityCallContext;
+  await withToolInvocation({ authority, owner, signal }, async invocation => {
+    context = { owner, signal, invocation };
+    await handler('list', {}, context);
+    await handler('describe', { name: 'not-selected' }, context);
+    assert.deepEqual(calls, [
+      { parentOperationId: authority.operationId, executorOwner: authority.executorOwner },
+      { parentOperationId: authority.operationId, executorOwner: authority.executorOwner, name: 'not-selected' },
+    ]);
+    for (const [method, params] of [['list', { runId: 'other' }], ['describe', { name: 'read', generation: 100 }], ['describe', { name: '' }]] as const) {
+      await assert.rejects(async () => handler(method, params, context), /inspection_invalid/);
+    }
+    await assert.rejects(async () => handler('list', {}, { ...context, owner: { ...owner, generation: 5 } }), /invocation_unavailable/);
+  });
+  await assert.rejects(async () => handler('list', {}, context), /invocation_unavailable/);
+  assert.equal(calls.length, 2);
 });

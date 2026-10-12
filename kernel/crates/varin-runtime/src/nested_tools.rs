@@ -18,6 +18,32 @@ pub struct NestedToolReceipt {
     pub operation_id: String,
     pub completion: ToolCompletion,
 }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NestedToolSummary {
+    pub name: String,
+    pub version: String,
+    pub description: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum NestedToolInspection {
+    List {
+        origin: String,
+        permission: String,
+        #[serde(rename = "runId")]
+        run_id: String,
+        generation: u64,
+        tools: Vec<NestedToolSummary>,
+    },
+    Describe {
+        origin: String,
+        permission: String,
+        #[serde(rename = "runId")]
+        run_id: String,
+        generation: u64,
+        tool: Option<ToolSchema>,
+    },
+}
 type Invoke = dyn Fn(ToolExecutionContext, Arc<ToolCall>) -> Result<ToolExecutionReceipt, ExecutionError>
     + Send
     + Sync;
@@ -103,6 +129,39 @@ fn error(message: &str) -> ExecutionError {
     ExecutionError::new("nested_tool", message)
 }
 impl NestedTools {
+    /// Observe only this live invocation's original frozen directory. Inspection cannot
+    /// register work, select a provider, or change the executing Run's capabilities.
+    pub fn inspect(
+        &self,
+        parent_operation_id: &str,
+        owner: &ExecutorOwner,
+        name: Option<&str>,
+    ) -> Result<NestedToolInspection, ExecutionError> {
+        let scope = self.scopes.lock().map_err(|_| error("invocation scopes unavailable"))?
+            .get(parent_operation_id).cloned().ok_or_else(|| error("parent invocation has ended"))?;
+        let frozen = {
+            let state = scope.state.lock().map_err(|_| error("invocation scope unavailable"))?;
+            if &scope.owner != owner || !state.accepting || scope.cancel.is_cancelled() {
+                return Err(error("parent invocation is unavailable"));
+            }
+            scope.frozen.clone()
+        };
+        // Schemas can be large. Clone/serialize them outside the admission/cancellation fences.
+        let origin = "accepted_run".to_owned();
+        let permission = "checked_on_invocation".to_owned();
+        let run_id = frozen.run_id.clone();
+        let generation = frozen.tool_schema_generation;
+        if let Some(name) = name {
+            if name.trim().is_empty() { return Err(error("tool name is required")); }
+            Ok(NestedToolInspection::Describe { origin, permission, run_id, generation,
+                tool: frozen.tools.iter().find(|tool| tool.name == name).cloned() })
+        } else {
+            Ok(NestedToolInspection::List { origin, permission, run_id, generation,
+                tools: frozen.tools.iter().map(|tool| NestedToolSummary {
+                    name: tool.name.clone(), version: tool.version.clone(), description: tool.description.clone(),
+                }).collect() })
+        }
+    }
     pub(crate) fn register(
         self: &Arc<Self>,
         context: ToolExecutionContext,
@@ -485,7 +544,7 @@ mod tests {
         let registry = Arc::new(NestedTools::default());
         let count = Arc::new(AtomicUsize::new(0));
         let executed = count.clone();
-        let _guard = scope(
+        let guard = scope(
             &registry,
             Arc::new(move |_, _| {
                 executed.fetch_add(1, Ordering::SeqCst);
@@ -519,6 +578,17 @@ mod tests {
                 .invoke("request:tool:outer", &owner, input("one"))
                 .is_err()
         );
+        assert!(registry.inspect("request:tool:outer", &owner, None).is_err());
+        let inspection = registry.inspect("request:tool:outer", &ExecutorOwner::Kernel, None).unwrap();
+        let NestedToolInspection::List { generation, tools, .. } = inspection else { panic!("expected list") };
+        assert_eq!(generation, 8);
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].version, "original");
+        let description = registry.inspect("request:tool:outer", &ExecutorOwner::Kernel, Some("selected")).unwrap();
+        let NestedToolInspection::Describe { tool, .. } = description else { panic!("expected description") };
+        assert_eq!(tool.as_ref(), guard.scope.frozen.tools.first());
+        assert!(matches!(registry.inspect("request:tool:outer", &ExecutorOwner::Kernel, Some("not-selected")).unwrap(),
+            NestedToolInspection::Describe { tool: None, .. }));
         let first = registry
             .invoke("request:tool:outer", &ExecutorOwner::Kernel, input("one"))
             .unwrap();
@@ -543,6 +613,10 @@ mod tests {
                 .is_err()
         );
         assert_eq!(count.load(Ordering::SeqCst), 1);
+        guard.close();
+        assert!(registry.inspect("request:tool:outer", &ExecutorOwner::Kernel, None).is_err());
+        drop(guard);
+        assert!(registry.inspect("request:tool:outer", &ExecutorOwner::Kernel, None).is_err());
     }
     #[test]
     fn inference_delegation_is_bound_to_the_actual_scope_and_revoked_before_query_release() {
@@ -573,6 +647,7 @@ mod tests {
         let next = registry.delegate_inference(&context).unwrap();
         assert_ne!(next.owner(), &owner);
         parent.scope.cancel.cancel();
+        assert!(registry.inspect(&context.operation_id, &ExecutorOwner::Kernel, None).is_err());
         assert!(
             registry
                 .with_inference_context(&context.operation_id, next.owner(), |_| Ok(()))

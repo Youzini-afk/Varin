@@ -196,6 +196,9 @@
                   },
                   "tool": {
                     "$ref": "#/$defs/tool"
+                  },
+                  "contract": {
+                    "$ref": "#/$defs/serviceContract"
                   }
                 }
               }
@@ -1000,6 +1003,113 @@
           "additionalProperties": false
         }
       ]
+    },
+    "contractSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?![a-zA-Z][a-zA-Z0-9+.-]*:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000])(?!.*//)(?!.*\\/$).+$"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "serviceMethodContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inputSchema",
+        "outputSchema"
+      ],
+      "properties": {
+        "inputSchema": {
+          "type": [
+            "object",
+            "boolean"
+          ]
+        },
+        "outputSchema": {
+          "type": [
+            "object",
+            "boolean"
+          ]
+        },
+        "description": {
+          "$ref": "#/$defs/text"
+        },
+        "examples": {
+          "type": "array"
+        },
+        "source": {
+          "$ref": "#/$defs/contractSource"
+        }
+      }
+    },
+    "serviceEventContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema"
+      ],
+      "properties": {
+        "schema": {
+          "type": [
+            "object",
+            "boolean"
+          ]
+        },
+        "description": {
+          "$ref": "#/$defs/text"
+        },
+        "source": {
+          "$ref": "#/$defs/contractSource"
+        }
+      }
+    },
+    "serviceContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "methods"
+      ],
+      "properties": {
+        "participation": {
+          "enum": [
+            "provider",
+            "transform",
+            "decision",
+            "observer"
+          ]
+        },
+        "methods": {
+          "type": "object",
+          "propertyNames": {
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/serviceMethodContract"
+          }
+        },
+        "events": {
+          "type": "object",
+          "propertyNames": {
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/serviceEventContract"
+          }
+        }
+      }
     }
   }
 }

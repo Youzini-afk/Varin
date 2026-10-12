@@ -1,4 +1,5 @@
 import {
+  parseVarinRuntimeContractResult,
   parseVarinExtensionCatalogAvailability,
   parseVarinExtensionAssetPayload,
   parseVarinExtensionCatalogSnapshot,
@@ -88,6 +89,11 @@ const readJsonOrThrow = async (response: Response): Promise<unknown> => {
 };
 
 export const createWebExtensionsAPI = (): ExtensionsAPI => ({
+  queryContracts: async (request, context, signal) => parseVarinRuntimeContractResult(
+    await readJsonOrThrow(await applicationHostRequest(
+      '/api/varin/extensions/v1/contracts/query', { request, ...(context ? { context } : {}) }, signal,
+    )),
+  ),
   activateExtension: async (extensionId) => {
     const response = await applicationHostRequest(`/api/varin/extensions/v1/extensions/${encodeURIComponent(extensionId)}/activate`, {});
     if (!response.ok) await readJsonOrThrow(response);

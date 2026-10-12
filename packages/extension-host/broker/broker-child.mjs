@@ -152,6 +152,9 @@ const handleParentRequest = async (message, signal) => {
               throw new Error('Host service descriptor is invalid');
             }
             if (!handler || typeof handler !== 'object') throw new Error(`Host service handler is invalid: ${key}`);
+            for (const method of Object.keys(descriptor.contract?.methods ?? {})) {
+              if (typeof handler[method] !== 'function') throw new Error(`Host service declared method is unavailable: ${key}.${method}`);
+            }
             if (stagedHandlers.has(key)) throw new Error(`Host service provided more than once: ${key}`);
             stagedHandlers.set(key, handler);
             stagedProvisions.push(descriptor);

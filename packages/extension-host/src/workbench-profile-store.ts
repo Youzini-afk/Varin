@@ -52,6 +52,11 @@ export class WorkbenchProfileStore {
     this.#resolveWorkspaceScopeId = resolver;
   }
 
+  /** Observe the stored profile without migrations, workspace resolution or persistence. */
+  snapshot(): Promise<VarinWorkbenchProfileSnapshot> {
+    return this.#load();
+  }
+
   async read(): Promise<VarinWorkbenchProfileSnapshot> {
     const snapshot = await this.#load();
     if (!snapshot.authoritative) return snapshot;

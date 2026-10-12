@@ -190,6 +190,8 @@ export const createPlatformRoutesRuntime = ({
       extensionCatalog,
       extensionPackages,
       uiAuthController,
+      ...(documents ? { documents } : {}),
+      readProjects: async () => sanitizeProjects((await readSettingsFromDisk()).projects) ?? [],
       ...(extensionRuntime !== undefined ? { extensionRuntime } : {}),
     });
 

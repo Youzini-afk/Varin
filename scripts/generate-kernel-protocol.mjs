@@ -48,7 +48,7 @@ const renderRequestUnion = () => {
 };
 const renderMethodParams = () => `export type KernelMethodParams = {\n${Object.entries(methodParams).map(([method, paramsType]) => `  ${JSON.stringify(method)}: ${paramsType};`).join('\n')}\n};`;
 const dtoEntries = Object.entries(schema.dto ?? {}).filter(([name]) => !(schema.requestUnion && name === 'KernelRequest'));
-const extensionToolNames = ['Outcome', 'Effect', 'Lifetime', 'OperationCallCompletion', 'NestedToolInput', 'NestedToolReceipt', 'OutputEvidenceRef', 'ContentProvenance', 'OutputSource', 'ContentRef', 'IncomingMedia', 'StoredMedia', 'ResolvedMedia', 'OutputPart', 'OutputBody', 'ToolOrigin'];
+const extensionToolNames = ['Outcome', 'Effect', 'Lifetime', 'OperationCallCompletion', 'NestedToolInput', 'NestedToolReceipt', 'NestedToolSummary', 'NestedToolInspection', 'LaunchTool', 'ToolMetadata', 'ToolRequirements', 'OutputEvidenceRef', 'ContentProvenance', 'OutputSource', 'ContentRef', 'IncomingMedia', 'StoredMedia', 'ResolvedMedia', 'OutputPart', 'OutputBody', 'ToolOrigin'];
 const extensionToolsGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\n\n'
   + extensionToolNames.map(name => renderDto(name, schema.dto[name])).join('\n\n') + '\n';
 const protocolGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\n\n' + dtoEntries.filter(([name]) => (schema.runtimeExports ?? []).includes(name)).map(([name, spec]) => renderDto(name, spec)).join('\n\n') + '\n';

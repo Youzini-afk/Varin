@@ -1,17 +1,23 @@
 import {
   parseVarinExtensionServiceProvision, parseVarinToolJson,
   type JsonValue, type VarinExtensionServiceProvision, type VarinExtensionToolDeclaration,
-  type NestedToolInput, type NestedToolReceipt, type OutputPart, type IncomingMedia, parseIncomingOutputPart,
+  type NestedToolInput, type NestedToolReceipt, type NestedToolInspection, type OutputPart, type IncomingMedia, parseIncomingOutputPart,
 } from "@varin/extension-contract";
 import type { VarinBrokeredHostContext, VarinHostServiceInvocationContext } from "./index.js";
 
 export type VarinToolServiceDeclaration = VarinExtensionServiceProvision & { tool: VarinExtensionToolDeclaration };
 import { VARIN_RUNTIME_TOOLS_CAPABILITY } from '@varin/extension-contract';
 export { VARIN_RUNTIME_TOOLS_CAPABILITY } from '@varin/extension-contract';
-export type { NestedToolInput, NestedToolReceipt } from '@varin/extension-contract';
+export type { NestedToolInput, NestedToolReceipt, NestedToolInspection } from '@varin/extension-contract';
+export type NestedToolList = Extract<NestedToolInspection, { action: 'list' }>;
+export type NestedToolDescription = Extract<NestedToolInspection, { action: 'describe' }>;
 export interface VarinToolInvocationContext extends VarinHostServiceInvocationContext {
   output(part: OutputPart<IncomingMedia>): Promise<void>;
-  readonly tools: { invoke(input: NestedToolInput): Promise<NestedToolReceipt> };
+  readonly tools: {
+    list(): Promise<NestedToolList>;
+    describe(name: string): Promise<NestedToolDescription>;
+    invoke(input: NestedToolInput): Promise<NestedToolReceipt>;
+  };
 }
 
 /** Register the exact descriptor imported from the package's manifest. The Host compiles its
@@ -35,6 +41,8 @@ export function provideTool<TInput extends JsonValue = JsonValue>(
       const input = parseVarinToolJson(args[0], "tool input") as TInput;
       // A late result is still a real callback completion. Its disposition belongs to the Host.
       const scoped: VarinToolInvocationContext = { ...call, output: async part => { await call.capabilities.call(VARIN_RUNTIME_TOOLS_CAPABILITY, 'output', parseVarinToolJson(parseIncomingOutputPart(part))); }, tools: {
+        list: async () => await call.capabilities.call(VARIN_RUNTIME_TOOLS_CAPABILITY, 'list', {}) as unknown as NestedToolList,
+        describe: async name => await call.capabilities.call(VARIN_RUNTIME_TOOLS_CAPABILITY, 'describe', { name }) as unknown as NestedToolDescription,
         invoke: async value => await call.capabilities.call(VARIN_RUNTIME_TOOLS_CAPABILITY, 'invoke',
           parseVarinToolJson(value)) as unknown as NestedToolReceipt,
       } };

@@ -7,6 +7,16 @@ export { VARIN_RUNTIME_TOOLS_CAPABILITY };
 export function createNestedToolOwner(kernel: KernelClient): HostCapabilityHandler {
   return async (method, params, context) => {
     if (method === 'output') { emitToolOutput(context, params); return null; }
+    if (method === 'list' || method === 'describe') {
+      if (!params || typeof params !== 'object' || Array.isArray(params)
+        || Object.keys(params).some(key => method === 'list' || key !== 'name')
+        || (method === 'describe' && (typeof params.name !== 'string' || !params.name.trim()))) {
+        throw new Error('nested_tool_inspection_invalid');
+      }
+      return runNestedToolCall(context, async authority => parseVarinToolJson(await kernel.agentRuntimeRequest(
+        'runtime.tools.inspect', { parentOperationId: authority.operationId, executorOwner: authority.executorOwner,
+          ...(method === 'describe' ? { name: params.name as string } : {}) }, context.signal)));
+    }
     if (method !== 'invoke') throw new Error('nested_tool_method_invalid');
     return runNestedToolCall(context, async authority => {
       // Do not race this execution receipt with the broker observer's AbortSignal. Runtime

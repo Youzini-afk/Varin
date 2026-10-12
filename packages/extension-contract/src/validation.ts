@@ -1,3 +1,4 @@
+import { parseVarinExtensionServiceContract } from './runtime-contracts.js';
 import {
   VARIN_EXTENSION_CATALOG_SCHEMA_VERSION,
   VARIN_EXTENSION_MANIFEST_SCHEMA_VERSION,
@@ -345,10 +346,17 @@ function parseServices<T extends VarinExtensionServiceRequirement | VarinExtensi
       try { tool = parseVarinExtensionToolDeclaration(raw.tool); }
       catch (error) { issues.push(`${itemPath}: ${error instanceof Error ? error.message : String(error)}`); }
     }
+    let contract: VarinExtensionServiceProvision['contract'];
+    if (kind === 'provide' && raw.contract !== undefined) {
+      try { contract = parseVarinExtensionServiceContract(raw.contract); }
+      catch (error) { issues.push(`${itemPath}: ${error instanceof Error ? error.message : String(error)}`); }
+      if (tool && contract?.methods.execute) issues.push(`${itemPath}.contract must not duplicate the tool execute contract`);
+    }
     result.push({
       id,
       version,
       ...(tool ? { tool } : {}),
+      ...(contract ? { contract } : {}),
       ...(typeof flag === "boolean" ? { [flagKey]: flag } : {}),
       ...(binding ? { binding } : {}),
     } as T);
