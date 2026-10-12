@@ -23,6 +23,8 @@ export interface WatchPosition {
 }
 
 export interface WorkspaceWatcher {
+  /** Whether the original native watch handle is currently attached. */
+  readonly connected: boolean;
   readonly sourceId: string;
   readonly generation: number;
   readonly position: WatchPosition;
@@ -217,6 +219,9 @@ export const createWorkspaceWatcher = ({
   start();
 
   return {
+    get connected() {
+      return !closed && watcher !== null;
+    },
     get sourceId() {
       return sourceId;
     },
@@ -230,6 +235,8 @@ export const createWorkspaceWatcher = ({
       reset('overflow');
     },
     reconnect() {
+      // A pending original reconnect already owns the next attempt.
+      if (closed || reconnectScheduled) return;
       watcher?.close();
       watcher = null;
       start();

@@ -1,21 +1,20 @@
 //! Agent control is independent of the file/process Storage execution queue.
 //! Only the authenticated parent Host may use this management channel. It is not a tool grant.
-use crate::error::{KernelError, response_error};
+use crate::error::{response_error, KernelError};
 use crate::protocol::{
-    PROTOCOL_VERSION, reject_unknown_fields, response_ok, validate_method_params,
+    reject_unknown_fields, response_ok, validate_method_params, PROTOCOL_VERSION,
 };
 use crate::protocol_generated::*;
 use base64::Engine as _;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::{
-    Arc,
     atomic::{AtomicBool, Ordering},
-    mpsc,
+    mpsc, Arc,
 };
 use std::thread::{self, JoinHandle};
-use varin_runtime::{Catalog, SubmitInput, model_session, supervisor::RunSupervisor};
+use varin_runtime::{model_session, supervisor::RunSupervisor, Catalog, SubmitInput};
 
 #[path = "agent_computer.rs"]
 mod computer_commands;
@@ -257,18 +256,16 @@ pub(crate) fn spawn(
     // own execution slot; the receiver lock is released before any file I/O or decoding.
     for _ in 0..KERNEL_REQUEST_WINDOW {
         let jobs = content_jobs.clone();
-        thread::spawn(move || {
-            loop {
-                let job = {
-                    jobs.lock()
-                        .unwrap_or_else(|error| error.into_inner())
-                        .recv()
-                };
-                let Ok(job) = job else {
-                    break;
-                };
-                job();
-            }
+        thread::spawn(move || loop {
+            let job = {
+                jobs.lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .recv()
+            };
+            let Ok(job) = job else {
+                break;
+            };
+            job();
         });
     }
 
@@ -933,7 +930,12 @@ pub(crate) fn spawn(
                             let cancelled = cancellation.clone();
                             thread::spawn(move || {
                                 let result = if method == "runtime.inference.generate" {
-                                    inference_generation_commands::generate(runtime, credentials, params, &cancelled)
+                                    inference_generation_commands::generate(
+                                        runtime,
+                                        credentials,
+                                        params,
+                                        &cancelled,
+                                    )
                                 } else if method.starts_with("runtime.inference.") {
                                     inference_commands::execute(
                                         runtime, &method, params, &cancelled,
@@ -1181,6 +1183,23 @@ pub(crate) fn spawn(
                                 .operation(&p.operation_id)
                                 .map_err(domain)?;
                             return Ok(operation_cancellation_receipt(&operation));
+                        }
+                        if method == "runtime.source.tools" {
+                            let p: crate::protocol_generated::SourceToolsParams =
+                                serde_json::from_value(params)?;
+                            let tools = crate::tools::KernelToolExecutor::selected_schemas(
+                                &crate::tools::ToolKind::all().collect(),
+                            )
+                            .into_iter()
+                            .filter(|schema| {
+                                schema
+                                    .requirements
+                                    .as_ref()
+                                    .is_some_and(|required| required.accepts_mode(p.mode))
+                            })
+                            .map(|schema| schema.name)
+                            .collect::<Vec<_>>();
+                            return Ok(json!(tools));
                         }
                         if method == "runtime.child.capabilities" {
                             if !params.as_object().is_some_and(|value| value.is_empty()) {
@@ -1763,15 +1782,13 @@ pub(crate) fn spawn(
                                     .map_err(domain)?
                             } else {
                                 let p: RunParams = serde_json::from_value(params)?;
-                                vec![
-                                    owner
-                                        .lock()
-                                        .map_err(|_| {
-                                            KernelError::Storage("catalog owner failed".into())
-                                        })?
-                                        .capture_context_job(&p.run_id)
-                                        .map_err(domain)?,
-                                ]
+                                vec![owner
+                                    .lock()
+                                    .map_err(|_| {
+                                        KernelError::Storage("catalog owner failed".into())
+                                    })?
+                                    .capture_context_job(&p.run_id)
+                                    .map_err(domain)?]
                             };
                             let response_id = id.clone();
                             let response_sender = responses.clone();
@@ -3068,3 +3085,7 @@ mod background_decision_review;
 #[cfg(test)]
 #[path = "retrieval_inference_review.rs"]
 mod retrieval_inference_review;
+
+#[cfg(test)]
+#[path = "language_source_review.rs"]
+mod language_source_review;

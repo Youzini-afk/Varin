@@ -27,7 +27,8 @@ export type ThreadMcpSamplingRequestReview = ThreadIdentity & Omit<McpSamplingRe
 interface ThreadSourceBase {
   workspaceId: string;
   executionWorkspaceId: string;
-  tools: Array<'file_read' | 'file_list' | 'file_search' | 'file_write' | 'file_edit' | 'process_inspect' | 'process_read' | 'process_spawn' | 'process_write' | 'process_resize' | 'language_definition' | 'language_references' | 'language_diagnostics' | 'code_retrieval'>;
+  /** Names are admitted by the Rust source-tool directory, not a client-side capability list. */
+  tools: string[];
 }
 export type ThreadSource = ThreadSourceBase & (
   | { mode: 'fixed_branch' | 'materialized'; branchId: string; revision: number; liveRoot?: never }

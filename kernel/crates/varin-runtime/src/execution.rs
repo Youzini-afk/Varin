@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{mpsc, Arc};
 
 #[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize, PartialEq, Eq)]
 #[error("{code}: {message}")]
@@ -174,7 +174,10 @@ impl CancellationToken {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Provenance {
-    Sampling { interaction_id: String, role: crate::mcp_sampling::SamplingRole },
+    Sampling {
+        interaction_id: String,
+        role: crate::mcp_sampling::SamplingRole,
+    },
     SystemInstruction {
         source: String,
     },
@@ -208,8 +211,27 @@ pub enum Provenance {
 }
 
 impl Provenance {
-    pub fn is_system(&self) -> bool { matches!(self, Self::SystemInstruction { .. } | Self::Sampling { role: crate::mcp_sampling::SamplingRole::System, .. }) }
-    pub fn is_assistant(&self) -> bool { matches!(self, Self::Assistant | Self::PolicyOutput { .. } | Self::Sampling { role: crate::mcp_sampling::SamplingRole::Assistant, .. }) }
+    pub fn is_system(&self) -> bool {
+        matches!(
+            self,
+            Self::SystemInstruction { .. }
+                | Self::Sampling {
+                    role: crate::mcp_sampling::SamplingRole::System,
+                    ..
+                }
+        )
+    }
+    pub fn is_assistant(&self) -> bool {
+        matches!(
+            self,
+            Self::Assistant
+                | Self::PolicyOutput { .. }
+                | Self::Sampling {
+                    role: crate::mcp_sampling::SamplingRole::Assistant,
+                    ..
+                }
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -283,11 +305,14 @@ pub struct ToolRequirements {
 }
 impl ToolRequirements {
     pub fn accepts(&self, source: Option<&crate::catalog::launches::SourceSelection>) -> bool {
-        source.is_some_and(|source| match self.source {
+        source.is_some_and(|source| self.accepts_mode(source.mode))
+    }
+    pub fn accepts_mode(&self, mode: crate::SourceMode) -> bool {
+        match self.source {
             ToolSourceRequirement::Source => true,
-            ToolSourceRequirement::Physical => source.mode != crate::SourceMode::FixedBranch,
-            ToolSourceRequirement::Live => source.mode == crate::SourceMode::LiveRoot,
-        })
+            ToolSourceRequirement::Physical => mode != crate::SourceMode::FixedBranch,
+            ToolSourceRequirement::Live => mode == crate::SourceMode::LiveRoot,
+        }
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -368,8 +393,16 @@ pub struct RequestView<M = ResolvedMedia> {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RequestOrigin {
-    AuxiliaryInference { operation_id: String, parent_operation_id: String, purpose: String },
-    McpSampling { interaction_id: String, operation_id: String, parent_operation_id: String },
+    AuxiliaryInference {
+        operation_id: String,
+        parent_operation_id: String,
+        purpose: String,
+    },
+    McpSampling {
+        interaction_id: String,
+        operation_id: String,
+        parent_operation_id: String,
+    },
     Conversation {
         step: u64,
         history_range: HistoryRange,
@@ -770,7 +803,7 @@ pub trait PreparedToolCall: Send {
     fn plan(&self, cancel: &CancellationToken) -> Result<ToolPreparation, ExecutionError>;
     fn prepare(&self, cancel: &CancellationToken) -> Result<ToolContract, ExecutionError>;
     fn execution_class(&self, contract: &ToolContract)
-    -> crate::execution_capacity::ExecutionClass;
+        -> crate::execution_capacity::ExecutionClass;
     fn watch_admission(
         &self,
         context: &ToolExecutionContext,
@@ -1618,11 +1651,11 @@ pub struct ExecutionEngine<P: ?Sized, M: ?Sized, T: ?Sized, A: ?Sized> {
 }
 
 impl<
-    P: Persistence + ?Sized,
-    M: ModelProvider + ?Sized,
-    T: ToolExecutor + ?Sized,
-    A: AgentPolicy + ?Sized,
-> ExecutionEngine<P, M, T, A>
+        P: Persistence + ?Sized,
+        M: ModelProvider + ?Sized,
+        T: ToolExecutor + ?Sized,
+        A: AgentPolicy + ?Sized,
+    > ExecutionEngine<P, M, T, A>
 {
     /// Run on a worker, never a Catalog/control thread. The input must identify an admitted run.
     /// Re-entering with an old run is rejected by Persistence's durable request/epoch checks.

@@ -109,7 +109,7 @@ async function initialize(frame: Record<string, unknown>) {
       console.error('Source lifecycle launch result:', error instanceof Error ? error.name : typeof error,
         error && typeof error === 'object' && 'code' in error ? error.code : 'unclassified');
     },
-    createThreadSourcePreparer({ documents, workingStates, liveSources, prepareResources: resources.prepareSourceCapture }), prepareContext);
+    createThreadSourcePreparer({ sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, liveSources, prepareResources: resources.prepareSourceCapture }), prepareContext);
   kernel.setContextOwner(new ContextService(runtime, prepareContext, async (_run, launch) => {
     const selected = launch?.selection.source;
     const registration = selected ? await documents.admitWorkspaceRegistration(selected.workspace_id) : undefined;

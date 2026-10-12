@@ -653,7 +653,7 @@ export class KernelClient {
       () => this.failAll(new KernelClientError({ code: "language-channel-failed", message: "Private language channel failed", retryable: false }), true));
     this.toolBridge = new ToolBridge(() => this.epoch, response => this.write(response),
       () => this.failAll(new KernelClientError({ code: "mcp-channel-failed", message: "Private MCP channel failed", retryable: false }), true),
-      runId => { for (const listener of this.mcpReleaseListeners) { try { listener(runId); } catch { this.mcpReleaseListeners.delete(listener); } } });
+      runId => { void this.languageBridge.releaseSource({ runId }).catch(() => undefined); for (const listener of this.mcpReleaseListeners) { try { listener(runId); } catch { this.mcpReleaseListeners.delete(listener); } } });
     this.credentialBridge = new CredentialBridge(() => this.epoch,
       response => this.write(response),
       () => this.failAll(new KernelClientError({ code: "credential-channel-failed", message: "Private credential channel failed", retryable: false }), true));
@@ -699,12 +699,12 @@ export class KernelClient {
   }
   setRetrievalOwner(owner: RetrievalOwner): void { this.retrievalBridge.setOwner(owner); }
   /** Resolve only an actual Host-issued native Run grant, never caller-created scope metadata. */
-  retrievalGrant(query: { grantId: string; runId: string; threadId: string; source: import('./protocol.generated.js').LaunchSource }): KernelGrantHandle {
+  sourceGrant(query: { grantId: string; runId: string; threadId: string; source: import('./protocol.generated.js').LaunchSource }): KernelGrantHandle {
     const grant = this.issuedGrants.get(query.grantId);
     if (!grant || this.inactiveGrants.has(query.grantId) || grant.runId !== query.runId || grant.threadId !== query.threadId
       || grant.owningWorkspace !== query.source.workspace_id || grant.executionWorkspace !== query.source.execution_workspace_id
       || grant.sessionId !== null || grant.workerId !== null) {
-      throw new KernelClientError({ code: 'forbidden', message: 'Native retrieval Run grant is unavailable or mismatched' });
+      throw new KernelClientError({ code: 'forbidden', message: 'Native source Run grant is unavailable or mismatched' });
     }
     return this.assertGrant(grant);
   }
@@ -717,6 +717,8 @@ export class KernelClient {
   setFileObservationOwner(owner: FileObservationOwner): void { this.fileObservationBridge.setOwner(owner); }
   setPlanOwner(owner: PlanOwner): void { this.planBridge.setOwner(owner); }
   setLanguageOwner(owner: LanguageToolOwner): void { this.languageBridge.setOwner(owner); }
+  /** Await the actual shared language view retirement before capturing a stopped source. */
+  releaseLanguageSource(runId: string): Promise<void> { return this.languageBridge.releaseSource({ runId }); }
   toolCallbackEnded(runId: string, owner: import('./protocol.generated.js').ExecutorOwner, operationId: string): boolean | undefined {
     return this.toolBridge.callbackEnded(runId, owner, operationId);
   }
@@ -1633,6 +1635,7 @@ export class KernelClient {
 
   private closeGrantCaller(grantId: string): void {
     this.inactiveGrants.add(grantId);
+    void this.languageBridge.releaseSource({ grantId }).catch(() => undefined);
     this.issuedGrants.delete(grantId);
     for (const [id, entry] of this.processSubscriptions) {
       if (entry.grant.grantId !== grantId) continue;

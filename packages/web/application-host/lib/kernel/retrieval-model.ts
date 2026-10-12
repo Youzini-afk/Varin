@@ -21,14 +21,14 @@ export function createRetrievalModelStage(options: {
   inference: Pick<SemanticInference, 'captureRerank' | 'captureDecision'>;
   models?: ThreadModelAuthority;
   readGlobalSettings(): Promise<unknown>;
-  kernel: Pick<KernelClient, 'retrievalGrant' | 'scoped' | 'registerCredentialOwner' | 'unregisterCredentialOwner' | 'kernelEpoch'>;
+  kernel: Pick<KernelClient, 'sourceGrant' | 'scoped' | 'registerCredentialOwner' | 'unregisterCredentialOwner' | 'kernelEpoch'>;
   sources: Pick<RetrievalSourceOwner, 'validate' | 'read'>;
 }) {
   return { async prepare(query: RetrievalQuery, signal: AbortSignal, call?: InferenceCall): Promise<RetrievalModelLease> {
     let released = false;
     let mode: HarnessExploreDecisionMode;
     let harness: Record<string, unknown>;
-    const assertAvailable = () => { signal.throwIfAborted(); if (released) throw new Error('Retrieval model binding was released'); options.kernel.retrievalGrant(query); };
+    const assertAvailable = () => { signal.throwIfAborted(); if (released) throw new Error('Retrieval model binding was released'); options.kernel.sourceGrant(query); };
     const validateAvailable = async (active: AbortSignal = signal) => {
       active.throwIfAborted(); assertAvailable(); await options.sources.validate(query, active); assertAvailable();
     };

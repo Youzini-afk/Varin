@@ -260,15 +260,23 @@ it('time and composite registration preserve exact leaf identities, original tex
 
 it('normal source retirement uses the original grants while failed preparation still explicitly revokes its grant', async () => {
   const retireRunGrants = vi.fn(async (_grantId: string) => ({})); const revokeGrant = vi.fn(async (_grantId: string) => ({}));
-  const runtime = new AgentRuntimeClient({ subscribeExit() {}, onToolReleased() {}, retireRunGrants, revokeGrant } as unknown as KernelClient);
+  let stopped!: () => void;
+  const drain = new Promise<void>(resolve => { stopped = resolve; });
+  const releaseLanguageSource = vi.fn(async (_runId: string) => drain);
+  const runtime = new AgentRuntimeClient({ subscribeExit() {}, onToolReleased() {}, releaseLanguageSource, retireRunGrants, revokeGrant } as unknown as KernelClient);
   runtime.retainSourceGrant('old-child-run', 'original-creating-grant');
   runtime.retainSourceGrant('old-child-run', 'rebound-child-grant');
   runtime.retainSourceGrant('failed-preparation', 'unaccepted-grant');
-  await runtime.retireSourceGrants('old-child-run'); await runtime.retireSourceGrants('old-child-run');
+  const retiring = runtime.retireSourceGrants('old-child-run');
+  await vi.waitFor(() => expect(releaseLanguageSource).toHaveBeenCalledWith('old-child-run'));
+  expect(retireRunGrants).not.toHaveBeenCalled();
+  stopped(); await retiring;
+  await runtime.retireSourceGrants('old-child-run');
   expect(retireRunGrants.mock.calls.map(args => args[0])).toEqual(['old-child-run', 'old-child-run']);
-  const restarted = new AgentRuntimeClient({ subscribeExit() {}, onToolReleased() {}, retireRunGrants, revokeGrant } as unknown as KernelClient);
+  const restarted = new AgentRuntimeClient({ subscribeExit() {}, onToolReleased() {}, releaseLanguageSource, retireRunGrants, revokeGrant } as unknown as KernelClient);
   await restarted.retireSourceGrants('previous-host-child-run');
   expect(retireRunGrants).toHaveBeenLastCalledWith('previous-host-child-run');
+  expect(releaseLanguageSource.mock.calls.map(args => args[0])).toEqual(['old-child-run', 'old-child-run', 'previous-host-child-run']);
   expect(revokeGrant).not.toHaveBeenCalled();
   await runtime.releaseSourceGrant('failed-preparation', 'unaccepted-grant');
   expect(revokeGrant).toHaveBeenCalledWith('unaccepted-grant');

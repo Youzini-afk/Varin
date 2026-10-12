@@ -13,21 +13,23 @@ interface SourcePreparationOwners {
   prepareResources?: StableSourcePreparationOwners['prepareResources'];
   workingStates: WorkspaceWorkingStateRootAccess;
   liveSources?: LiveSourceOwner;
+  sourceTools(mode: ThreadSource['mode']): Promise<string[]>;
 }
 
 /** Preparation uses the existing Documents admission and immutable WorkingState owner.
  * The map only joins concurrent requests; the branch's fixed base is the durable receipt.
  */
-export function createThreadSourcePreparer({ documents, workingStates, liveSources, prepareResources }: SourcePreparationOwners) {
+export function createThreadSourcePreparer({ documents, workingStates, liveSources, prepareResources, sourceTools }: SourcePreparationOwners) {
   const preparing = new Map<string, Promise<ThreadPreparedSource>>();
   return async (input: ThreadPrepareSource): Promise<ThreadPreparedSource> => {
     const workspace = await documents.resolveWorkspace({ path: input.path });
     const { root } = await documents.inspectWorkspace(workspace.workspaceId);
+    const tools = await sourceTools(input.mode);
     if (input.mode === 'live_root') {
       if (!liveSources) throw new Error('Live workspace access is unavailable');
       const liveRoot = await liveSources.prepare(workspace.workspaceId, workspace.workspaceId, input.threadId);
       return { path: root, source: { workspaceId: workspace.workspaceId, executionWorkspaceId: workspace.workspaceId,
-        mode: 'live_root', liveRoot, tools: ['file_read', 'file_list', 'file_search', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn', 'process_write', 'process_resize', 'language_definition', 'language_references', 'language_diagnostics', 'code_retrieval'] } };
+        mode: 'live_root', liveRoot, tools } };
     }
     const mode = input.mode;
     const key = createHash('sha256').update(JSON.stringify([input.threadId, input.branchId, workspace.workspaceId, input.key, input.mode])).digest('hex');
@@ -46,7 +48,7 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
       // do not recapture a changed directory or substitute the branch's mutable write root.
       return { path: root, source: { workspaceId: workspace.workspaceId, executionWorkspaceId: workspace.workspaceId,
         branchId: branch.branchId, revision: 0, mode,
-        tools: mode === 'fixed_branch' ? ['file_read', 'file_list', 'file_search', 'code_retrieval'] : ['file_read', 'file_list', 'file_search', 'code_retrieval', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn', 'process_write', 'process_resize'],
+        tools,
       } } satisfies ThreadPreparedSource;
     }, 'shared', { threadId: input.threadId });
     preparing.set(key, preparation);

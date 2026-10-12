@@ -2,6 +2,14 @@ import type { SpawnOptions, SpawnOptionsWithStdioTuple, StdioPipe } from "node:c
 import type { EventEmitter } from "node:events";
 import type { Readable, Writable } from "node:stream";
 
+/** Trusted Host source admission; not accepted from process requests or extension JSON. */
+export interface ManagedProcessIdentity {
+  workspaceId: string;
+  executionWorkspaceId: string;
+  canonicalRoot: string;
+}
+export type ManagedProcessAdmission = (signal: AbortSignal) => Promise<ManagedProcessIdentity>;
+
 /** A stream adapter to an owned process, not permission to spawn or kill a PID. */
 export interface ManagedProcessHandle extends EventEmitter {
   readonly pid?: number | undefined;

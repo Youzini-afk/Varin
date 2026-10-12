@@ -266,7 +266,7 @@ async function initialize(frame:Record<string,unknown>) {
     prepareSemantic:async(scope,signal)=>{
       if(!semantic||!scope.query||!scope.inference) throw new Error('Semantic inference is not configured');
       const query=scope.query,active=signal??new AbortController().signal;
-      const roots=query.paths??kernel.retrievalGrant(query).pathScopes;
+      const roots=query.paths??kernel.sourceGrant(query).pathScopes;
       const sourceView=query.source.mode==='live_root'?undefined:await sources.semanticView(query,active);
       if(sourceView && mode==='semantic-fixed-guard-stale') {
         const validate=sourceView.validateDocuments;
@@ -280,7 +280,7 @@ async function initialize(frame:Record<string,unknown>) {
       }
       return semantic.acquireQuery({workspaceId:query.source.workspace_id,inference:scope.inference,roots,signal:active,
         ...(sourceView?{sourceView}:{}),
-        authorize:requestSignal=>sources.validate(query,requestSignal),assertAuthorized:()=>{kernel.retrievalGrant(query);}});
+        authorize:requestSignal=>sources.validate(query,requestSignal),assertAuthorized:()=>{kernel.sourceGrant(query);}});
     },
     prepareModel:(scope,signal)=>{assert(scope.query);return model.prepare(scope.query,signal??new AbortController().signal,scope.inference);}});
   const retrieve=createRetrievalOwner({sources,kernel,inferenceRequests:inference.requests!,

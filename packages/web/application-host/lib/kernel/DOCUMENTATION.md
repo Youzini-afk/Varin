@@ -691,13 +691,26 @@ The initial live AGENTS.md is read through Documents and its actual revision is 
 existing context checkpoint. Later disk changes remain live for file tools but do not retroactively
 rewrite that instruction checkpoint. Ordinary instruction/memory refresh retains its existing owner.
 
-Live selections also expose `language_definition`, `language_references`, and
+Live and materialized selections also expose `language_definition`, `language_references`, and
 `language_diagnostics`. Native tool contracts, grant admission and history remain in Rust;
-`language-owner.ts` binds saved text through the existing LanguageViewBinder and selected
+`language-owner.ts` reads the exact original source through the shared `source-query.ts` owner and binds
+its text through the existing LanguageViewBinder and selected
 LanguageSupervisor. The private epoch-bound language bridge does not own another process, provider
 registry or configuration store. It starts no language service during source preparation. Shared
 startup and per-query cancellation remain with the existing supervisor; no file lease or Catalog
 transaction spans a language wait.
+
+The original project namespace selects provider configuration, while the admitted physical source
+selects cwd/root URI/workspace folders and the watcher. The original process service rechecks a trusted
+source-owner callback immediately before spawn. Run/grant references retain `agent:source:` views;
+query cancellation leaves those references intact. Terminal notification or grant withdrawal starts
+retirement, but child result capture separately awaits actual language drain and the existing Rust
+directory-writer barrier. A notification/withdrawal ACK is not a stopped-process receipt.
+
+`runtime.source.tools` projects the original Rust declarations and source requirements. Source
+preparation and saved launch continuation consume that directory instead of maintaining parallel
+Host tool-name lists. Private wire 15 carries the original selection/root/grant, and result provenance
+nests source selection separately from the queried document revision. Catalog 58 is unchanged.
 
 Navigation positions are zero-based UTF-16. The query records its actual bound document revision,
 view, provider and generation, and explicitly reports live dependency semantics. Both Host and Rust
@@ -721,9 +734,14 @@ result chunking is not implemented. Oversized transient Rust progress is omitted
 writer; durable tool content remains available through existing chunked history reads. Transport loss
 still retires the actual private channel.
 
-Fixed-branch and materialized language selection is explicitly unavailable. Materialized files do not
-pin external symlinks, project configuration outside the copy, or compiler libraries; a workspace cwd
-and didOpen overlay do not establish a fixed dependency closure.
+Fixed-branch language selection remains explicitly unavailable. Materialized language queries use the
+actual working copy and explicitly report live dependencies; they do not pin external symlinks,
+project configuration outside the copy or compiler libraries. A workspace cwd and didOpen overlay
+do not establish a fixed dependency closure.
+
+The current physical-source behavior, actual TypeScript/Storage/history evidence and remaining
+child/fixed/platform limits are recorded in the
+[materialized language review](../../../../../docs/reviews/runtime-source-language-2026-10-12.md).
 
 The native `run_launches` domain is format 3; current Catalog/content versions are recorded in the
 [runtime README](../../../../../kernel/crates/varin-runtime/README.md).
@@ -951,8 +969,10 @@ Schema-2 dispatch takes task/preset?/workMode?/tools?. Native children can use t
 file, resource, question, recursive collaboration and managed process capabilities. The read-only
 source projection and private text-write projection remain explicit; process capability additionally
 requires real configured/delegated authority and existing permission gates. A private cwd is not an
-OS sandbox. Ordinary extensions and MCP use the exact original frozen Host declarations. LSP,
-Goal and remote child bindings remain unavailable until
+OS sandbox. Ordinary extensions and MCP use the exact original frozen Host declarations. Language
+tools use the actual private materialized source and original supervisor/process owners; Worker defaults
+include them, while read-only Retrieval defaults remain source-compatible. Explicit read-only language
+selection reports the required physical work mode. Goal and remote child bindings remain unavailable until
 their complete owner contracts are connected; no unsupported list is silently trimmed. The UI displays
 the frozen native descriptors together with actual Launch Host bindings and selected profile facts.
 

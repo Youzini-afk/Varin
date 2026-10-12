@@ -42,6 +42,8 @@ const createHarness = () => {
   });
   return {
     controller,
+    fsModule,
+    native,
     events,
     files,
     fsPromises,
@@ -78,4 +80,26 @@ describe('workspace document watcher', () => {
     expect('readFile' in harness.fsPromises).toBe(false);
     harness.controller.close();
   });
+});
+
+
+it('exposes original connection loss and joins the scheduled retry before explicit recovery', async () => {
+  const harness = createHarness();
+  try {
+    expect(harness.controller.connected).toBe(true);
+    vi.mocked(harness.fsModule.watch).mockImplementationOnce(() => { throw new Error('Original directory temporarily unavailable'); });
+    harness.native.emit('error', new Error('Original watch disconnected'));
+    expect(harness.controller.connected).toBe(false);
+    harness.controller.reconnect();
+    expect(harness.fsModule.watch).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(harness.fsModule.watch).toHaveBeenCalledTimes(2));
+    expect(harness.controller.connected).toBe(false);
+    harness.controller.reconnect();
+    expect(harness.fsModule.watch).toHaveBeenCalledTimes(3);
+    expect(harness.controller.connected).toBe(true);
+    harness.controller.close();
+    expect(harness.controller.connected).toBe(false);
+    harness.controller.reconnect();
+    expect(harness.fsModule.watch).toHaveBeenCalledTimes(3);
+  } finally { harness.controller.close(); }
 });

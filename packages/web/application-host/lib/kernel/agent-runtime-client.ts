@@ -421,6 +421,7 @@ export class AgentRuntimeClient {
   async releaseMcpResourceSource(runId:string):Promise<void> { await Promise.all([this.mcpResourceOwner?.releaseSource(runId), this.mcpInteractionOwner?.releaseSource(runId)]); }
   async retireSourceGrants(runId: string): Promise<void> {
     await this.releaseMcpResourceSource(runId);
+    await this.kernel.releaseLanguageSource(runId);
     // The durable Storage grant owner resolves this Run, including grants from a previous Host.
     await this.kernel.retireRunGrants(runId);
     this.sourceGrants.delete(runId);
@@ -1007,6 +1008,9 @@ export class AgentRuntimeClient {
       signal,
     );
   }
+  sourceTools(mode: import('./protocol.generated.js').SourceMode, signal?: AbortSignal): Promise<string[]> {
+    return this.kernel.agentRuntimeRequest('runtime.source.tools', { mode }, signal);
+  }
   childCapabilities(signal?: AbortSignal): Promise<ChildCapabilityDescriptor[]> {
     return this.kernel.agentRuntimeRequest('runtime.child.capabilities', {}, signal);
   }
@@ -1224,29 +1228,7 @@ export class AgentRuntimeClient {
           : this.startRun(runId, options.signal);
       }
 
-      const names = {
-        file_read: 'file_read',
-        file_list: 'file_list',
-        file_search: 'file_search',
-        file_write: 'file_write',
-        file_edit: 'file_edit',
-        process_inspect: 'process_inspect',
-        process_read: 'process_read',
-        process_spawn: 'process_spawn',
-        process_resize: 'process_resize',
-        process_write: 'process_write',
-        language_definition: 'language_definition',
-        language_references: 'language_references',
-        language_diagnostics: 'language_diagnostics',
-        code_retrieval: 'code_retrieval',
-      } as const;
-      const tools = sourceToolSchemas(launch.selection).map((tool) => {
-        if (!(tool.name in names))
-          throw new Error(
-            'Saved capability requires its original extension owner',
-          );
-        return names[tool.name as keyof typeof names];
-      });
+      const tools = sourceToolSchemas(launch.selection).map(tool => tool.name);
       return this.startFromSource(
         savedSourceLaunch(runId, source, tools),
         options,
@@ -1306,29 +1288,7 @@ export class AgentRuntimeClient {
           : this.startRun(runId, options.signal);
       }
 
-      const names = {
-        file_read: 'file_read',
-        file_list: 'file_list',
-        file_search: 'file_search',
-        file_write: 'file_write',
-        file_edit: 'file_edit',
-        process_inspect: 'process_inspect',
-        process_read: 'process_read',
-        process_spawn: 'process_spawn',
-        process_resize: 'process_resize',
-        process_write: 'process_write',
-        language_definition: 'language_definition',
-        language_references: 'language_references',
-        language_diagnostics: 'language_diagnostics',
-        code_retrieval: 'code_retrieval',
-      } as const;
-      const tools = sourceToolSchemas(previous.selection).map((tool) => {
-        if (!(tool.name in names))
-          throw new Error(
-            'Saved capability requires its original extension owner',
-          );
-        return names[tool.name as keyof typeof names];
-      });
+      const tools = sourceToolSchemas(previous.selection).map(tool => tool.name);
       return this.startFromSource(
         savedSourceLaunch(runId, source, tools, previousRunId),
         options,

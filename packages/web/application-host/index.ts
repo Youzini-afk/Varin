@@ -28,6 +28,7 @@ import { createRetrievalOwner } from './lib/kernel/retrieval-owner.js';
 import { createRetrievalSourceOwner } from './lib/kernel/retrieval-source.js';
 import { createRetrievalComposition } from './lib/kernel/retrieval-composition.js';
 import { createLanguageOwner } from './lib/kernel/language-owner.js';
+import { createSourceQueryOwner } from './lib/kernel/source-query.js';
 import { createLiveSourceOwner } from './lib/kernel/live-source.js';
 import { createThreadSourcePreparer, createThreadSourceAdmission } from './lib/kernel/thread-sources.js';
 import { createThreadContext } from './lib/kernel/thread-context.js';
@@ -1500,6 +1501,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     documents: documentsAuthority,
     spawn: kernelProcesses.spawn,
+    spawnAdmitted: kernelProcesses.spawnAdmitted,
     pathModule: path,
     env: process.env,
     // Workspaces become executable only after their canonical root is an
@@ -2981,7 +2983,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const prepareAgentPolicy = createAgentPolicy(extensionRuntime);
   const modelAuthority = createModelAuthority(hostCredentialAuthority);
   const liveSources = createLiveSourceOwner({ documents: documentsAuthority, kernel: kernelClient });
-  kernelClient.setLanguageOwner(createLanguageOwner({ documents: documentsAuthority, supervisor: languageSupervisor, validateSource: liveSources.validate }));
+  kernelClient.setLanguageOwner(createLanguageOwner({ documents: documentsAuthority, supervisor: languageSupervisor,
+    sources: createSourceQueryOwner({ kernel: kernelClient, documents: documentsAuthority, validateLiveSource: liveSources.validate }) }));
   const prepareChildMcp = createChildMcpPreparer({ authority: mcpAuthority, tasks:()=>mcpTaskRuntime, resources:()=>mcpResourceRuntime, kernel: kernelClient, agentDir: mcpAgentDir, hostId,
     admitWorkspaceRegistration: (id, signal) => documentsAuthority.admitWorkspaceRegistration(id, signal),
     projectTrusted: cwd => mcpHostProjectTrusted(mcpAgentDir, cwd),
@@ -3115,7 +3118,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       withSourceRead: (input, consume) => kernelStorageAdapter.withResourceRead(input, consume), runtime: agentRuntime }), (runId, _error) => {
       // Durable launch remains inspectable/resumable. Never log credentials or provider responses.
       console.error('[Thread] Launch preparation requires attention:', runId);
-    }, createThreadSourcePreparer({ documents: documentsAuthority, liveSources, workingStates: threadWorkingStates, prepareResources: threadResources.prepareSourceCapture }),
+    }, createThreadSourcePreparer({ sourceTools: mode => agentRuntime.sourceTools(mode),  documents: documentsAuthority, liveSources, workingStates: threadWorkingStates, prepareResources: threadResources.prepareSourceCapture }),
     threadContext, new PlanService(agentRuntime, getUserKnowledgeStore), createThreadSkillInputPreparer(threadResources), createThreadProcesses({ runtime: agentRuntime, kernel: kernelClient,
       terminal: () => terminalRuntime, resolveLiveSource: liveSources.validate,
       onError: () => console.error('[Thread] Original process terminal requires attention'),
@@ -3746,12 +3749,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           || value.split('/').includes('..')) throw new Error('Invalid native semantic root');
         return value.split('/').filter(part => part && part !== '.').join('/');
       };
-      const grant = kernelClient.retrievalGrant(query);
+      const grant = kernelClient.sourceGrant(query);
       const roots = (query.paths ?? grant.pathScopes).map(relative);
       const authorize = async (requestSignal: AbortSignal): Promise<void> => {
         requestSignal.throwIfAborted();
         await retrievalSources.validate(query, requestSignal);
-        const current = kernelClient.retrievalGrant(query);
+        const current = kernelClient.sourceGrant(query);
         const granted = current.pathScopes.map(relative);
         if (!roots.length || roots.some(root => !granted.some(parent => !parent || root === parent || root.startsWith(`${parent}/`)))) {
           throw new Error('Native semantic roots are outside the Run grant');
@@ -3760,7 +3763,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await authorize(active);
       return semanticRuntime.acquireQuery({ workspaceId: query.source.workspace_id, inference: scope.inference, roots, signal: active, authorize,
         ...(query.source.mode === 'live_root' ? {} : { sourceView: await retrievalSources.semanticView(query, active) }),
-        assertAuthorized: () => { kernelClient.retrievalGrant(query); } });
+        assertAuthorized: () => { kernelClient.sourceGrant(query); } });
     },
   });
   kernelClient.setRetrievalOwner(createRetrievalOwner({ sources: retrievalSources, kernel: kernelClient, inferenceRequests: semanticInference.requests!,
