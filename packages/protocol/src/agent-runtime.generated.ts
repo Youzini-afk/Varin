@@ -1,5 +1,70 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
 
+export interface InferenceReceiptPendingParams {
+  operationId: string;
+  executionOwner: ExecutorOwner;
+  requestStarted: boolean;
+}
+
+export interface InferenceBinding {
+  purpose: string;
+  providerId: string;
+  modelId: string;
+  api: string;
+  endpoint: string;
+  configurationId: string;
+  credentialScope: CredentialScope;
+}
+
+export interface InferenceUsage {
+  measurement: "missing" | "estimated" | "actual";
+  inputTokens: number | null;
+  outputTokens: number | null;
+}
+
+export interface InferenceReceipt {
+  requestStarted: boolean | null;
+  providerCompleted: boolean;
+  localExecutorStopped: boolean;
+  usage: InferenceUsage;
+  httpStatus: number | null;
+  problem: InferenceProblem | null;
+}
+
+export interface InferenceAdmitParams {
+  parentOperationId: string;
+  executionOwner: ExecutorOwner;
+  ordinal: number;
+  binding: InferenceBinding;
+  request: unknown;
+}
+
+export interface InferenceOwnerParams {
+  operationId: string;
+  executionOwner: ExecutorOwner;
+}
+
+export interface InferenceSettleParams {
+  operationId: string;
+  executionOwner: ExecutorOwner;
+  receipt: InferenceReceipt;
+  response: unknown;
+}
+
+export interface InferenceStatus {
+  operationId: string;
+  phase: OperationPhase;
+  outcome: Outcome | null;
+  live: boolean;
+  cancelRequested: boolean;
+  dispatched: boolean;
+  recovered: boolean;
+  receiptPending: boolean;
+  receipt: InferenceReceipt | null;
+}
+
+export type InferenceProblem = 'cancelled' | 'transport_failed' | 'http_rejected' | 'invalid_response' | 'owner_interrupted' | 'not_dispatched' | 'receipt_pending';
+
 export interface McpInteractionPending extends McpInteractionRecord {
   generation?: McpSamplingGeneration;
 }

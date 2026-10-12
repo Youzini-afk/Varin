@@ -1,3 +1,5 @@
+import { mergeHarnessWebDomainPolicy } from '@varin/protocol';
+import { createResearchDecisionRuntime, RESEARCH_DECISION_CAPABILITY } from './lib/kernel/research-decision.js';
 import { createResearchDiscoveryRuntime, RESEARCH_DISCOVERY_CAPABILITY } from './lib/kernel/research-discovery.js';
 import { readHostSettingsSnapshot } from '@varin/pi-host/settings-authority';
 import { createWebRuntime, WEB_CAPABILITY } from './lib/kernel/web-runtime.js';
@@ -1932,6 +1934,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const desktopControlHolder = `desktop:${hostId}`;
   const scriptRuntimeOwner: { current?: ReturnType<typeof createScriptRuntime> } = {};
   const computerRuntimeOwner: { current?: ReturnType<typeof createComputerRuntime> } = {};
+  const researchDecisionOwner: { current?: ReturnType<typeof createResearchDecisionRuntime> } = {};
   const researchDiscoveryOwner: { current?: ReturnType<typeof createResearchDiscoveryRuntime> } = {};
   const webRuntimeOwner: { current?: ReturnType<typeof createWebRuntime> } = {};
   const resolveComputerWork = async (work: import('@varin/protocol').ComputerWorkRef) => {
@@ -2279,7 +2282,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // service reads them at call time so an unconfigured purpose reports
   // honestly instead of being absent.
   const researchDecideDeps: ResearchDecideDeps = {
-    materials: webMaterials,
+    readCandidateText: async (request, authority, signal) => {
+      const sessionId = authority.sessionId;
+      const binding = sessionId ? harnessServiceHost.getWebBinding(sessionId) : undefined;
+      const policy = binding?.settings?.domains ?? (sessionId ? await harnessServiceHost.materialWebPolicy?.(sessionId) : undefined);
+      return webFetchService.fetch({ snapshotId: request.snapshotId, view: 'text',
+        ...(request.startLine === undefined ? {} : { position: { kind: 'lines', startLine: request.startLine,
+          ...(request.endLine === undefined ? {} : { endLine: request.endLine }) } }) }, {
+        workspaceId: authority.owningWorkspaceId, authority, signal, domainPolicy: mergeHarnessWebDomainPolicy(policy, undefined),
+        issueReceipt: false,
+      });
+    },
     resolveThreadId: async (sessionId) => {
       const binding = await threadRegistry.getSessionBinding(sessionId);
       return binding?.threadId;
@@ -3031,9 +3044,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     if (!computerRuntimeOwner.current) throw new ComputerError('computer-owner-unavailable', 'Computer tool preparation is unavailable');
     if (!webRuntimeOwner.current) throw new Error('Web tool preparation is unavailable');
     if (!researchDiscoveryOwner.current) throw new Error('Scholarly search tool preparation is unavailable');
-    return researchDiscoveryOwner.current.prepareConfiguration(run, required,
+    if (!researchDecisionOwner.current) throw new Error('Research decision tool preparation is unavailable');
+    return researchDecisionOwner.current.prepareConfiguration(run, required, await researchDiscoveryOwner.current.prepareConfiguration(run, required,
       await webRuntimeOwner.current.prepareConfiguration(run, required,
-        await scriptRuntimeOwner.current.prepareConfiguration(await computerRuntimeOwner.current.prepareConfiguration(run, required))));
+        await scriptRuntimeOwner.current.prepareConfiguration(await computerRuntimeOwner.current.prepareConfiguration(run, required)))));
   },currentPolicy:async runId=>{
     const launch=await kernelClient.agentRuntimeRequest<import('./lib/kernel/protocol.generated.js').LaunchIntent|null,'runtime.launch.inspect'>('runtime.launch.inspect',{runId});
     const workspace=launch?.selection.source?await documentsAuthority.inspectWorkspace(launch.selection.source.workspace_id):undefined;
@@ -3659,7 +3673,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const semanticVectorCache = createVectorCache();
   const semanticInference = createSemanticInference(hostCredentialAuthority, {
     readGlobalSettings: () => hostCredentialAuthority.readGlobalInferenceSettings(),
-  }, { ledger: createSemanticInferenceLedger({ dataDir: VARIN_DATA_DIR, hostId }) });
+  }, { ledger: createSemanticInferenceLedger({ dataDir: VARIN_DATA_DIR, hostId }),
+    decision: { kernel: kernelClient, runtime: agentRuntime, egress: egressRuntime,
+      onError: () => console.error('[Decision] Original inference receipt requires attention') } });
+  researchDecisionOwner.current = createResearchDecisionRuntime({ inference: semanticInference, materials: webRuntimeOwner.current,
+    settings: async source => {
+      const root = source ? (await documentsAuthority.inspectWorkspace(source.workspace_id)).root : undefined;
+      return readHostSettingsSnapshot(mcpAgentDir, root, root !== undefined && mcpHostProjectTrusted(mcpAgentDir, root));
+    },
+  });
   const semanticRuntime = createWorkspaceSemanticRuntime({
     runtimeInference: semanticInference,
     dataDir: semanticIndexConfig.storageDirectory ?? VARIN_DATA_DIR,
@@ -4283,6 +4305,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
   const unregisterMaterialToolCapability = extensionRuntime.capabilities.register(MATERIAL_SNAPSHOT_CAPABILITY, webRuntimeOwner.current.snapshotCapability);
+  const unregisterResearchDecisionCapability = extensionRuntime.capabilities.register(RESEARCH_DECISION_CAPABILITY, researchDecisionOwner.current.capability);
   const unregisterResearchDiscoveryCapability = extensionRuntime.capabilities.register(RESEARCH_DISCOVERY_CAPABILITY, researchDiscoveryOwner.current.capability);
   const unregisterWebCapability = extensionRuntime.capabilities.register(WEB_CAPABILITY, webRuntimeOwner.current.capability);
   const unregisterNestedToolCapability = extensionRuntime.capabilities.register(VARIN_RUNTIME_TOOLS_CAPABILITY, createNestedToolOwner(kernelClient));
@@ -4844,6 +4867,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       unregisterPiRuntimeCapability();
       unregisterMaterialToolCapability();
       unregisterWebCapability();
+      unregisterResearchDecisionCapability();
       unregisterResearchDiscoveryCapability();
       unregisterChildIntegrationCapability();
       unregisterScheduleCapability();

@@ -10,12 +10,16 @@ import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { KernelClient, KernelScopedClient, type KernelGrantHandle } from './kernel-client.js';
 import { permissionService } from './permission-service.js';
 import { ToolBridge } from './tool-bridge.js';
+import type { AgentRuntimeStreamEvent } from '@varin/protocol';
 
 export const writeMaterialFixtureFrame = (value: unknown) => process.stdout.write(`${JSON.stringify(value)}\n`);
 export function createMaterialReviewFixture(verifyGrant: (params: Record<string, unknown>) => void) {
   const write = writeMaterialFixtureFrame;
   const pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
   const issued = new Set<KernelGrantHandle>();
+  const events = new Set<(event: AgentRuntimeStreamEvent) => void>();
+  const exits = new Set<(error: Error) => void>();
+  const ready = new Set<() => void>();
   let sequence = 0, epoch = '', storageRoot = '';
   function request<T>(method: string, params: unknown, grant?: KernelGrantHandle): Promise<T> {
     const id = `material-review:${++sequence}`;
@@ -34,8 +38,10 @@ export function createMaterialReviewFixture(verifyGrant: (params: Record<string,
   const transport = {
     get kernelEpoch() { return epoch; },
     get handshake() { return { storageRoot, hostId: 'web-domain-host' }; },
-    subscribeReady() { return () => {}; }, subscribeExit() { return () => {}; },
-    onAgentRuntimeEvent() { return () => {}; }, onToolReleased() { return () => {}; },
+    subscribeReady(listener: () => void) { ready.add(listener); return () => { ready.delete(listener); }; },
+    subscribeExit(listener: (error: Error) => void) { exits.add(listener); return () => { exits.delete(listener); }; },
+    onAgentRuntimeEvent(listener: (event: AgentRuntimeStreamEvent) => void) { events.add(listener); return () => { events.delete(listener); }; },
+    onToolReleased() { return () => {}; },
     toolCallbackEnded: (...args: Parameters<ToolBridge['callbackEnded']>) => bridge.callbackEnded(...args),
     publishRecoveredToolReceipt: (...args: Parameters<ToolBridge['publishRecoveredReceipt']>) => bridge.publishRecoveredReceipt(...args),
     cancelRunPreparation() {}, unregisterCredentialOwner() {}, releaseRunPolicyOwners() {},
@@ -73,8 +79,10 @@ export function createMaterialReviewFixture(verifyGrant: (params: Record<string,
   const runtime = new AgentRuntimeClient(kernel);
   const bridge = new ToolBridge(() => epoch, async frame => { write(frame); }, () => write({ kind: 'fixture-failed', error: 'original tool bridge failed' }));
   return { kernel, runtime, bridge, request,
-    initialize(frame: Record<string, unknown>) { epoch = String(frame.epoch); storageRoot = String(frame.storageRoot); },
+    initialize(frame: Record<string, unknown>) { epoch = String(frame.epoch); storageRoot = String(frame.storageRoot); for (const listener of ready) listener(); },
     receive(frame: Record<string, unknown>) {
+      if (frame.kind === 'runtime-event') { for (const listener of events) listener(frame as AgentRuntimeStreamEvent); return true; }
+      if (frame.kind === 'fixture-kernel-exit') { for (const listener of exits) listener(new Error('Controlled original kernel exit')); return true; }
       if (frame.kind === 'fixture-response') {
         const waiting = pending.get(String(frame.id)); assert(waiting); pending.delete(String(frame.id));
         if (frame.ok) waiting.resolve(frame.result); else waiting.reject(new Error(String(frame.error)));

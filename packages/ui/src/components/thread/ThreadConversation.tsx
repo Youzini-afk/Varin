@@ -18,7 +18,7 @@ import { ThreadPermission } from './ThreadPermission';
 import { ThreadQuestion } from './ThreadQuestion';
 import { ThreadMcpInteractions } from './ThreadMcpInteraction';
 import { ThreadSourcePicker } from './ThreadSourcePicker';
-import type { ImageAttachment } from '@varin/protocol';
+import type { ImageAttachment, InferenceBinding, InferenceReceipt } from '@varin/protocol';
 import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachmentStrip';
 import { fileToImageAttachment } from '@/components/chat/composer/imageAttachments';
 import { useI18n } from '@/lib/i18n';
@@ -36,6 +36,7 @@ import { ThreadQueuedInput } from './ThreadQueuedInput';
 import { ThreadChildReport } from './ThreadChildReport';
 
 const operationCancelLabel = (operation: ThreadSnapshot['operations'][number]): string => {
+  if ((operation.intent as { kind?: string } | null)?.kind === 'decision_request_v1') return 'Stop decision request';
   if (operation.mcp_resource_subscription) return 'Stop resource observation';
   if (operation.host_job?.mcpTask) return 'Request remote task cancellation';
   if (operation.executor === 'dispatch') return 'Cancel child task';
@@ -46,6 +47,29 @@ const operationCancelLabel = (operation: ThreadSnapshot['operations'][number]): 
   }
   return 'Cancel operation';
 };
+
+function InferenceStatus({ operation }: { operation: ThreadSnapshot['operations'][number] }) {
+  const intent = operation.intent as { kind?: string; binding?: InferenceBinding } | null;
+  if (intent?.kind !== 'decision_request_v1' || !intent.binding) return null;
+  const state = operation.result?.kind === 'control'
+    ? operation.result.value as { dispatched: boolean; recovered: boolean; receipt?: InferenceReceipt } : undefined;
+  const receipt = state?.receipt;
+  const problem = receipt?.problem;
+  const explanation = problem === 'receipt_pending' ? 'The transport has stopped, but its original response is awaiting durable publication. Usage remains unknown until that receipt is stored.'
+    : problem === 'owner_interrupted' ? 'The original executor was interrupted. Remote usage is unconfirmed; this request will not be replayed.'
+    : problem === 'invalid_response' ? 'The provider response was stored, but valid answers were missing. Check the selected classifier protocol.'
+    : problem === 'http_rejected' ? 'The provider rejected this request. Check the original connection and account.'
+    : problem === 'transport_failed' ? 'The transport stopped without a complete response. Check the original service before requesting another decision.'
+    : problem === 'not_dispatched' ? 'This request was not sent. Check its parent operation, Goal and current access before starting a new decision.'
+    : problem === 'cancelled' ? 'Cancellation was requested. Any usage already received remains accounted.' : null;
+  return <section aria-label="Decision inference" className="space-y-1 text-xs text-muted-foreground">
+    <p>{intent.binding.purpose} · {intent.binding.providerId} / {intent.binding.modelId}</p>
+    <p>{receipt?.requestStarted === false ? 'Not sent' : receipt?.requestStarted === true ? 'Transport started' : state?.dispatched ? 'Dispatch recorded; sending unconfirmed' : 'Awaiting dispatch'}
+      {' · '}{receipt?.localExecutorStopped ? 'Local executor stopped' : 'Local executor stop unconfirmed'}</p>
+    <p>Input tokens: {receipt?.usage.inputTokens ?? 'unknown'} · Output tokens: {receipt?.usage.outputTokens ?? 'unknown'}</p>
+    {explanation && <p role="status">{explanation}</p>}
+  </section>;
+}
 
 function McpTaskStatus({ operation }: { operation: ThreadSnapshot['operations'][number] }) {
   const job = operation.host_job;
@@ -343,6 +367,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         <ThreadPermission operation={operation} enabled={!pending && operation.run_id === run?.id && !run?.cancel_requested} onDecide={(permissionId, decision) => act(() => api.decidePermission({ ...identity, operationId: operation.id, permissionId, decision }))} />
         {operation.executor === 'ask_user' && <ThreadQuestion operation={operation} enabled={!pending && run?.state === 'waiting' && run.waiting_on === operation.waiting_on} onAnswer={answer => act(() => api.answerQuestion({ ...identity, operationId: operation.id, answer }))} />}
         <div>Background operation · {operation.phase} · {operation.outcome ?? 'In progress'} · effect: {operation.effect}</div>
+        <InferenceStatus operation={operation} />
         <McpTaskStatus operation={operation} />
         <McpResourceStatus operation={operation} />
         {operation.host_job?.mcpTaskResult && <details><summary>Remote task result</summary><ThreadOutput api={api} identity={identity}

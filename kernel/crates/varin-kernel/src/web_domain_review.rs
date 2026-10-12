@@ -84,7 +84,25 @@ impl Fixture {
             let command = FamilyCommand::capture(&owner.lock().unwrap(), method, params)?;
             return command.load(&|| false);
         }
+        if method.starts_with("runtime.inference.") {
+            return inference_commands::execute(self.runtime.clone(),method,params,&AtomicBool::new(false));
+        }
         match method {
+            "runtime.operation.status" => {
+                let p: OperationParams=serde_json::from_value(params)?;
+                Ok(operation_cancellation_receipt(&owner.lock().unwrap().operation(&p.operation_id).map_err(domain)?))
+            }
+            "runtime.operation.cancel" => {
+                let (sender,_)=mpsc::sync_channel(16);
+                let controls=control_commands::ControlCommands {
+                    runtime:self.runtime.clone(),
+                    resources:crate::tools::KernelResourceClient::new(|_|Err(KernelError::Operation("unrequested resource effect".into())), |_|Ok(()),Default::default()),
+                    models:crate::run_models::RunModels::new(owner.clone(),crate::credential_bridge::CredentialBridge::new(sender)),
+                    tools:crate::run_tools::RunTools::new(owner.clone(),self.bridge.clone()),
+                };
+                if let Some(value)=controls.admit_control(method,&params)? { return Ok(value); }
+                controls.execute(method,params,&AtomicBool::new(false))
+            }
             "runtime.thread.list"
             | "runtime.thread.inspect"
             | "runtime.run.inspect"
@@ -198,6 +216,14 @@ impl Fixture {
     /// Drop a selected delivery only after the original authority returned its result.
     pub(super) fn pump_reply(
         &mut self,
+        deliver: impl FnMut(&Value, &Result<Value, KernelError>) -> bool,
+    ) -> Option<Value> {
+        self.pump_request(|_|None,deliver)
+    }
+    /// A finite original boundary error, distinct from a successful commit with a lost ACK.
+    pub(super) fn pump_request(
+        &mut self,
+        mut reject: impl FnMut(&Value) -> Option<KernelError>,
         mut deliver: impl FnMut(&Value, &Result<Value, KernelError>) -> bool,
     ) -> Option<Value> {
         while let Ok(frame) = self.outgoing.try_recv() {
@@ -210,7 +236,12 @@ impl Fixture {
         };
         match frame["kind"].as_str().unwrap() {
             "fixture-request" => {
-                let result = self.rpc(&frame);
+                let before = self.runtime.catalog().lock().unwrap().event_cursor().unwrap();
+                let result = match reject(&frame) { Some(error)=>Err(error),None=>self.rpc(&frame) };
+                let cursor = self.runtime.catalog().lock().unwrap().event_cursor().unwrap();
+                if cursor != before {
+                    self.host.send(json!({"v":9,"kind":"runtime-event","kernelEpoch":EPOCH,"stream":"durable","cursor":cursor}));
+                }
                 if !deliver(&frame, &result) {
                     return Some(frame);
                 }

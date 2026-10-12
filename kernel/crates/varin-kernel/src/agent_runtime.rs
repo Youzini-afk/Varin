@@ -19,14 +19,16 @@ use varin_runtime::{Catalog, SubmitInput, model_session, supervisor::RunSupervis
 
 #[path = "agent_computer.rs"]
 mod computer_commands;
-#[path = "agent_mcp_resources.rs"]
-mod mcp_resource_commands;
-#[path = "agent_mcp_interactions.rs"]
-mod mcp_interaction_commands;
 #[path = "agent_host_jobs.rs"]
 mod host_job_commands;
+#[path = "agent_inference.rs"]
+mod inference_commands;
 #[path = "agent_managed_process.rs"]
 mod managed_process_commands;
+#[path = "agent_mcp_interactions.rs"]
+mod mcp_interaction_commands;
+#[path = "agent_mcp_resources.rs"]
+mod mcp_resource_commands;
 
 #[path = "agent_policy.rs"]
 mod policy_commands;
@@ -912,7 +914,8 @@ pub(crate) fn spawn(
                             deferred = true;
                             return Ok(Value::Null);
                         }
-                        if method.starts_with("runtime.mcp.resource.")
+                        if method.starts_with("runtime.inference.")
+                            || method.starts_with("runtime.mcp.resource.")
                             || method.starts_with("runtime.mcp.interaction.")
                             || method.starts_with("runtime.mcp.sampling.")
                             || method.starts_with("runtime.host_job.")
@@ -927,10 +930,24 @@ pub(crate) fn spawn(
                             let done = finished.clone();
                             let cancelled = cancellation.clone();
                             thread::spawn(move || {
-                                let result = if method.starts_with("runtime.mcp.interaction.") || method.starts_with("runtime.mcp.sampling.") {
-                                    mcp_interaction_commands::execute(runtime, &credentials, &method, params, &cancelled)
+                                let result = if method.starts_with("runtime.inference.") {
+                                    inference_commands::execute(
+                                        runtime, &method, params, &cancelled,
+                                    )
+                                } else if method.starts_with("runtime.mcp.interaction.")
+                                    || method.starts_with("runtime.mcp.sampling.")
+                                {
+                                    mcp_interaction_commands::execute(
+                                        runtime,
+                                        &credentials,
+                                        &method,
+                                        params,
+                                        &cancelled,
+                                    )
                                 } else if method.starts_with("runtime.mcp.resource.") {
-                                    mcp_resource_commands::execute(runtime, &method, params, &cancelled)
+                                    mcp_resource_commands::execute(
+                                        runtime, &method, params, &cancelled,
+                                    )
                                 } else if method.starts_with("runtime.computer.") {
                                     computer_commands::execute(runtime, &method, params, &cancelled)
                                 } else {
@@ -3037,3 +3054,7 @@ mod material_collection_review;
 #[cfg(test)]
 #[path = "scholarly_discovery_review.rs"]
 mod scholarly_discovery_review;
+
+#[cfg(test)]
+#[path = "background_decision_review.rs"]
+mod background_decision_review;

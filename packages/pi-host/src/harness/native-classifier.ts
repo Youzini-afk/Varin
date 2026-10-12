@@ -1,4 +1,5 @@
 /** Varin question/result semantics over Pi native classifiers. Pi owns transport and retries. */
+import { classify as classifyCloudflare } from "@earendil-works/pi-ai/api/cloudflare-workers-ai-system-one";
 import { classify as classifySystemOne } from "@earendil-works/pi-ai/api/typesafe-system-one";
 import type { ClassifierContext, ClassifierFunction, ClassifierModel, ClassifierApi } from "@earendil-works/pi-ai";
 import { toJsonValue } from "../json.js";
@@ -42,7 +43,7 @@ export class ClassifierRequestError extends Error {
 }
 
 export class ClassifierResponseError extends Error {
-  constructor(message: string) {
+  constructor(message: string, readonly result?: ClassifierResponse) {
     super(message);
     this.name = "ClassifierResponseError";
   }
@@ -159,6 +160,41 @@ function readAnswer(question: FastDecisionQuestion, raw: unknown): FastDecisionA
   }
 }
 
+/** Interpret only the selected API's documented envelope, never guess nested answers. */
+export function classifierWireOutput(api: string, body: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(body)) return undefined;
+  if (api === "typesafe-system-one") return body;
+  if (api !== "cloudflare-workers-ai-system-one" || body.success === false || !isRecord(body.result)) return undefined;
+  if ("answers" in body.result) return body.result;
+  return body.result.state === "Completed" && isRecord(body.result.result) ? body.result.result : undefined;
+}
+/** Missing fields remain missing. The SDK's normalized zeroes are not provider receipts. */
+export function classifierWireUsage(api: string, body: unknown): ClassifierResponse["usage"] {
+  const raw = classifierWireOutput(api, body)?.usage;
+  if (!isRecord(raw)) return undefined;
+  const valid = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) >= 0;
+  const inputTokens = valid(raw.input_tokens) ? raw.input_tokens : undefined;
+  const outputTokens = valid(raw.output_tokens) ? raw.output_tokens : undefined;
+  return inputTokens === undefined && outputTokens === undefined ? undefined : {
+    ...(inputTokens === undefined ? {} : { inputTokens }), ...(outputTokens === undefined ? {} : { outputTokens }),
+  };
+}
+
+/** Pure response interpretation is shared by durable transport receipts and caller projection. */
+export function classifierWireResult(api: string, modelId: string, questions: readonly FastDecisionQuestion[], body: unknown): ClassifierResponse {
+  const original = classifierWireOutput(api, body);
+  const wire = original && isRecord(original.answers) ? original.answers : {};
+  const answers: FastDecisionAnswer[] = [];
+  const missing: string[] = [];
+  for (const question of questions) {
+    const answer = readAnswer(question, wire[question.id]);
+    if (answer) answers.push(answer); else missing.push(question.id);
+  }
+  const usage = classifierWireUsage(api, body);
+  const servedModelId = typeof original?.model === "string" && original.model !== modelId ? original.model : undefined;
+  return { answers, missing, ...(usage ? { usage } : {}), ...(servedModelId ? { servedModelId } : {}) };
+}
+
 export async function requestClassifier(request: ClassifierRequest): Promise<ClassifierResponse> {
   const questions = Object.create(null) as ClassifierContext["questions"];
   for (const question of request.questions) {
@@ -175,7 +211,7 @@ export async function requestClassifier(request: ClassifierRequest): Promise<Cla
   }
   let captured: Record<string, unknown> | undefined;
   const fetchImpl = request.fetchImpl ?? fetch;
-  const result = await (request.classify ?? classifySystemOne)(nativeModel, {
+  const result = await (request.classify ?? (nativeModel.api === "cloudflare-workers-ai-system-one" ? classifyCloudflare : classifySystemOne))(nativeModel, {
     state: isRecord(request.state) ? toJsonValue(request.state) as ClassifierContext["state"] : { input: toJsonValue(request.state) },
     questions,
   }, {
@@ -196,11 +232,8 @@ export async function requestClassifier(request: ClassifierRequest): Promise<Cla
       return response;
     },
   });
-  request.signal?.throwIfAborted();
-  const wireAnswers = captured && isRecord(captured.answers) ? captured.answers : undefined;
-  if (result.stopReason !== "stop" && !wireAnswers) {
-    throw new ClassifierResponseError(result.errorMessage ?? `Classifier request ended with ${result.stopReason}`);
-  }
+  const original = classifierWireOutput(nativeModel.api, captured);
+  const wireAnswers = original && isRecord(original.answers) ? original.answers : undefined;
   const answers: FastDecisionAnswer[] = [];
   const missing: string[] = [];
   for (const question of request.questions) {
@@ -211,9 +244,16 @@ export async function requestClassifier(request: ClassifierRequest): Promise<Cla
     const answer = readAnswer(question, wire ?? wireAnswers?.[question.id]);
     if (answer) answers.push(answer); else missing.push(question.id);
   }
-  const served = typeof captured?.model === "string" && captured.model !== request.model ? captured.model : undefined;
-  return {
+  const served = typeof original?.model === "string" && original.model !== request.model ? original.model : undefined;
+  const usage = nativeModel.api === "typesafe-system-one" || nativeModel.api === "cloudflare-workers-ai-system-one"
+    ? classifierWireUsage(nativeModel.api, captured)
+    : result.usage ? { inputTokens: result.usage.input, outputTokens: result.usage.output } : undefined;
+  const response: ClassifierResponse = {
     ...(served ? { servedModelId: served } : {}), answers, missing,
-    ...(result.usage ? { usage: { inputTokens: result.usage.input, outputTokens: result.usage.output } } : {}),
+    ...(usage ? { usage } : {}),
   };
+  if (request.signal?.aborted || result.stopReason !== "stop" && !wireAnswers) {
+    throw new ClassifierResponseError(request.signal?.aborted ? "Classifier request cancelled" : "Classifier response is unavailable or invalid", response);
+  }
+  return response;
 }

@@ -301,7 +301,10 @@ Global singleton that owns:
 
 ### HarnessRouter (`router.ts`)
 
-Embedding, reranking and fast decisions resolve operation-specific provider capabilities in Pi.
+The Pi adapter resolves embedding, reranking and fast decisions through its original provider capabilities.
+Native embedding and TypeSafe/Cloudflare decisions use the existing Host inference/credential owner
+directly; native decision HTTP/Goal facts belong to Catalog. Rerank and other classifier APIs still
+require their own native integration.
 Their connection/credential defaults and model declarations are independent of the native chat API;
 the Host receives only frozen, credential-free bindings. User/operator metadata can override the
 operation's address, path and credential owner; project configuration cannot redirect background
@@ -343,8 +346,9 @@ stopped. Abort prevents a dependent relation request; malformed required provide
 fail instead of becoming an empty success, while absent optional fields remain valid. Metadata and
 open-access locations are ordinary external result data, not instructions or downloaded content.
 Selecting a paper identity into `materials`, or explicitly fetching its URL and reading the resulting
-snapshot, uses the original material/Storage/public-reader owners. Native fast decisions/reranking
-remain a separate inference/Goal integration; this adapter does not open a Pi model session.
+snapshot, uses the original material/Storage/public-reader owners. Fast decisions use the separate
+ordinary `research_decide` tool described below; reranking remains separate integration work.
+This metadata adapter does not open a Pi model session.
 
 `web.fetch` pins fetched bodies as `web.snapshot` kernel records (`web-materials.ts`): content-hash
 deduplicated bodies, explicit `refresh` minting a new snapshot id, snapshot-id rereads re-checking
@@ -405,8 +409,8 @@ unavailable under that original research source contract. No public local-path s
 Full and ranged material body/source reads page the same immutable record proof through Rust getBlob;
 the wire-frame maximum is not a PDF size limit. Metadata-only reader checks request zero body bytes but
 still validate the record and object. Cancellation awaits each started read/iterator and material
-commit before reporting drain. Scholarly/decision services and extra reader-model prompts still need
-native integration.
+commit before reporting drain. Scholarly discovery and TypeSafe/Cloudflare decision now have ordinary
+native tools; extra reader-model prompts and other inference purposes remain separate integration work.
 
 `materials` uses the same explicit collection domain as the thin Pi adapter. It resolves its Thread,
 family and namespace from the original invocation, and checks sharing recipients in that family.
@@ -523,6 +527,16 @@ The service resolves the `web`/`scholarly` purpose binding through `fastDecision
 caller's authority, and maps answers to ranked results. Disabled, unconfigured, unavailable,
 failed, and cancelled states return honestly with the caller's order preserved (`fallback:"order"`);
 missing answers are reported, never zero.
+
+`executeResearchDecide` is the shared domain; the Pi service is a thin authority adapter. The ordinary
+native builtin enters through `kernel/research-decision.ts`, original invocation and material owners.
+Snapshot/section candidates use real text/PDF readers, not the raw snapshot container body. Invalid
+ranges and all-unreadable candidates do not dispatch, and Storage errors are not ACL-denied nulls.
+The trusted native inference adapter preserves original usage on malformed answers and cancellation;
+the old Pi broker's failure/cancellation projection is not replaced by this phase. Each native HTTP
+request, including an authorized SDK retry, is a separate original Catalog Operation with immutable
+input/configuration and exactly-once Goal accounting. No second inference ledger or main-chat fallback
+is introduced. See the [inference owner](../knowledge/semantic/DOCUMENTATION.md).
 
 Consumes `harness.request` events from the broker stream and dispatches
 to registered services. Responds via `harness.respond` on the broker. The

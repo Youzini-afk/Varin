@@ -559,6 +559,7 @@ fn cancel_resource_observers(tx: &Transaction<'_>, goal_id: &str) -> Result<()> 
     for run in runs {
         super::mcp_resources::cancel_run(tx, &run, false)?;
         super::mcp_interactions::cancel_run(tx, &run, false)?;
+        super::inference::cancel_children(tx, None, Some(&run))?;
     }
     Ok(())
 }
@@ -1284,4 +1285,68 @@ impl Catalog {
         tx.commit()?;
         Ok(p.completion)
     }
+}
+
+/// Only the exact original inference owner may refine a recovery estimate. Replacing its
+/// contribution in the same settlement transaction does not create a second dispatch.
+pub(super) fn refine_measurement(
+    tx: &Transaction<'_>,
+    binding: Option<&FrozenGoal>,
+    previous: &UsageReceipt,
+    next: Option<&UsageReceipt>,
+) -> Result<()> {
+    let Some(binding) = binding else {
+        return Ok(());
+    };
+    let mut usage: GoalUsage = record(tx, "goal_usage", &binding.id)?;
+    fn subtract(n: &mut u64, amount: u64) -> Result<()> {
+        *n = n.checked_sub(amount).ok_or_else(|| {
+            RuntimeError::Invalid("Goal usage refinement lacks original receipt".into())
+        })?;
+        Ok(())
+    }
+    fn token(value: &mut TokenAmount, amount: Option<u64>) -> Result<()> {
+        match amount {
+            Some(n) => subtract(&mut value.known, n),
+            None => subtract(&mut value.unknown_receipts, 1),
+        }
+    }
+    let bucket = match previous.measurement {
+        UsageMeasurement::Missing => {
+            subtract(&mut usage.missing_inferences, 1)?;
+            None
+        }
+        UsageMeasurement::Actual => Some(&mut usage.actual),
+        UsageMeasurement::Estimated => Some(&mut usage.estimated),
+    };
+    if let Some(bucket) = bucket {
+        subtract(&mut bucket.inferences, 1)?;
+        token(&mut bucket.input_tokens, previous.input_tokens)?;
+        token(&mut bucket.output_tokens, previous.output_tokens)?;
+        token(
+            &mut bucket.cached_input_tokens,
+            previous.cached_input_tokens,
+        )?;
+        token(&mut bucket.cache_write_tokens, previous.cache_write_tokens)?;
+        token(&mut bucket.reasoning_tokens, previous.reasoning_tokens)?;
+    }
+    add(&mut usage.pending_inferences, 1)?;
+    put(tx, "goal_usage", &binding.id, &usage)?;
+    match next {
+        Some(next) => measured(tx, Some(binding), next),
+        None => not_dispatched(tx, Some(binding)),
+    }
+}
+
+pub(super) fn not_dispatched(tx: &Transaction<'_>, binding: Option<&FrozenGoal>) -> Result<()> {
+    let Some(binding) = binding else {
+        return Ok(());
+    };
+    let mut usage: GoalUsage = record(tx, "goal_usage", &binding.id)?;
+    usage.pending_inferences = usage.pending_inferences.checked_sub(1).ok_or_else(|| {
+        RuntimeError::Invalid("Goal inference cancellation lacks dispatch intent".into())
+    })?;
+    put(tx, "goal_usage", &binding.id, &usage)?;
+    event(tx, &binding.id, 0, "goal.usage_changed", Value::Null)?;
+    Ok(())
 }

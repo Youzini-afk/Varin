@@ -1,4 +1,5 @@
 /** Application Host inference leases. No Pi worker, project configuration or secret DTOs. */
+import { createDecisionInference, type DecisionInferenceAuthority, type DecisionInferenceOptions, type DecisionInferenceCapture } from './decision-inference.js';
 import { createHash } from 'node:crypto';
 import {
   HarnessInferenceSettingsValidationError, parseHarnessEmbeddingSettings,
@@ -24,7 +25,7 @@ export interface SemanticProviderBinding {
   currentScope(): Promise<CredentialScope>;
   getAuth(): ReturnType<ExistingModelAuthRuntime['getAuth']>;
 }
-export interface SemanticInferenceAuthority {
+export interface SemanticInferenceAuthority extends Partial<DecisionInferenceAuthority> {
   resolveEmbeddingBinding(providerId: string, modelId: string): Promise<SemanticProviderBinding>;
   readGlobalInferenceSettings(): Promise<unknown>;
 }
@@ -106,8 +107,10 @@ const frozenReceipt = (receipt: SemanticInferenceReceipt): SemanticInferenceRece
 export function createSemanticInference(
   authority: SemanticInferenceAuthority,
   settingsOwner: SemanticInferenceSettingsOwner = { readGlobalSettings: () => authority.readGlobalInferenceSettings() },
-  options: { ledger?: SemanticInferenceLedger; fetchImpl?: typeof fetch; onReceipt?(receipt: SemanticInferenceReceipt): void } = {},
+  options: { decision?: DecisionInferenceOptions; ledger?: SemanticInferenceLedger; fetchImpl?: typeof fetch; onReceipt?(receipt: SemanticInferenceReceipt): void } = {},
 ) {
+  const decision = options.decision && authority.resolveDecisionBinding ? createDecisionInference({ resolveDecisionBinding: authority.resolveDecisionBinding.bind(authority) },
+    () => settingsOwner.readGlobalSettings(), options.decision) : undefined;
   let closed = false;
   let closing: Promise<void> | undefined;
   const controllers = new Set<AbortController>();
@@ -362,6 +365,8 @@ export function createSemanticInference(
   };
   return {
     readGlobalSettings, capture,
+    captureDecision: (purpose: import("@varin/protocol").HarnessFastDecisionPurpose): Promise<DecisionInferenceCapture> => decision
+      ? decision.capture(purpose) : Promise.resolve({ status: "unavailable", message: "Native decision inference is unavailable." }),
     inferenceFacts: (filter?: SemanticInferenceFactFilter) => options.ledger
       ? options.ledger.list(filter) : Promise.reject(new SemanticInferenceError('unavailable', 'embedding-ledger-unavailable')),
     stats: () => ({ activeLeases: controllers.size, activeRequests: transports.size,
@@ -378,6 +383,7 @@ export function createSemanticInference(
         controllers.clear();
         await Promise.all([...pending]);
         await Promise.allSettled([...transports]);
+        await decision?.close();
         await options.ledger?.close();
       })().catch(error => { closing = undefined; throw error; });
       return closing;

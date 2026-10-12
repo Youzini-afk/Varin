@@ -149,3 +149,76 @@ test('ambient API key rotation and owner restart invalidate only opaque in-memor
   assert.ok((await authority.listModels()).some(model => model.providerId === 'openai'));
   assert.equal((await readFile(join(directory, 'auth.json'), 'utf8')).includes('fake-ambient'), false);
 });
+
+test('decision bindings retain accepted protocol routes, fence model-header credentials, and never publish header values', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'varin-decision-binding-review-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, 'models.json');
+  const document = { providers: { decision: { apiKey: 'fixture-provider-secret', baseUrl: 'https://classifier.invalid',
+    models: [{ id: 'judge', type: 'classifier', api: 'typesafe-system-one', headers: { 'x-account': 'fixture-model-header-secret' } }],
+    capabilities: { decision: { protocol: 'pi-classifier', endpoint: '/original', enabled: true } } } } };
+  await writeFile(file, JSON.stringify(document));
+  const authority = HostCredentialAuthority.open(directory);
+  const binding = await authority.resolveDecisionBinding('decision', 'judge');
+  assert.equal(binding.requestUrl, 'https://classifier.invalid/original');
+  assert.equal((await binding.getAuth())?.auth.headers?.['x-account'], 'fixture-model-header-secret');
+  const publicBinding = JSON.stringify({ configurationId: binding.configurationId, scope: binding.credentialScope });
+  assert.equal(publicBinding.includes('fixture-provider-secret'), false);
+  assert.equal(publicBinding.includes('fixture-model-header-secret'), false);
+  document.providers.decision.capabilities.decision.endpoint = '/replacement';
+  await writeFile(file, JSON.stringify(document));
+  await binding.assertAvailable();
+  assert.equal(binding.requestUrl, 'https://classifier.invalid/original');
+  assert.notEqual((await authority.resolveDecisionBinding('decision', 'judge')).configurationId, binding.configurationId);
+  await writeFile(file, '{bad candidate');
+  await binding.assertAvailable();
+  assert.equal((await binding.getAuth())?.auth.apiKey, 'fixture-provider-secret');
+  document.providers.decision.models[0]!.headers['x-account'] = 'fixture-model-header-relinked';
+  await writeFile(file, JSON.stringify(document));
+  await assert.rejects(binding.assertAvailable(), /credential-scope-changed/);
+  const fresh = await authority.resolveDecisionBinding('decision', 'judge');
+  assert.notDeepEqual(fresh.credentialScope, binding.credentialScope);
+  document.providers.decision.capabilities.decision.enabled = false;
+  await writeFile(file, JSON.stringify(document));
+  await assert.rejects(fresh.assertAvailable(), /decision-provider-disabled/);
+});
+
+test('decision capability keeps Cloudflare protocol and explicitly reports the pending llama connection', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'varin-decision-api-review-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(join(directory, 'models.json'), JSON.stringify({ providers: { decision: {
+    apiKey: 'fixture-only', baseUrl: 'https://cloudflare.invalid/accounts/fixture/ai',
+    models: [{ id: 'remote', type: 'classifier', api: 'cloudflare-workers-ai-system-one' },
+      { id: 'local', type: 'classifier', api: 'llama-cpp-classify', baseUrl: 'http://localhost:8080' }],
+  } } }));
+  const authority = HostCredentialAuthority.open(directory);
+  const cloudflare = await authority.resolveDecisionBinding('decision', 'remote');
+  assert.equal(cloudflare.api, 'cloudflare-workers-ai-system-one');
+  assert.equal(cloudflare.requestUrl, 'https://cloudflare.invalid/accounts/fixture/ai/run');
+  await assert.rejects(authority.resolveDecisionBinding('decision', 'local'), /decision-api-unavailable/);
+});
+
+test('dynamic decision model headers keep one private owner and revoke old leases on environment rotation', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'varin-decision-dynamic-header-'));
+  const variable = `VARIN_FAKE_DECISION_HEADER_${randomUUID().replaceAll('-', '')}`;
+  t.after(async () => { delete process.env[variable]; await rm(directory, { recursive: true, force: true }); });
+  process.env[variable] = 'fixture-header-first';
+  const file = join(directory, 'models.json');
+  await writeFile(file, JSON.stringify({ providers: { decision: { apiKey: 'fixture-only', baseUrl: 'https://classifier.invalid',
+    modelOverrides: { judge: { headers: { 'x-chat-only': 'must-not-leak' } } },
+    models: [{ id: 'judge', type: 'classifier', api: 'typesafe-system-one', headers: { 'x-account': `$${variable}` } }],
+  } } }));
+  const originalFile = await readFile(file, 'utf8');
+  const authority = HostCredentialAuthority.open(directory);
+  const first = await authority.resolveDecisionBinding('decision', 'judge');
+  const same = await authority.resolveDecisionBinding('decision', 'judge');
+  assert.deepEqual(same.credentialScope, first.credentialScope);
+  assert.equal((await first.getAuth())?.auth.headers?.['x-account'], 'fixture-header-first');
+  assert.equal((await first.getAuth())?.auth.headers?.['x-chat-only'], undefined);
+  process.env[variable] = 'fixture-header-next';
+  await assert.rejects(first.assertAvailable(), /credential-scope-changed/);
+  const second = await authority.resolveDecisionBinding('decision', 'judge');
+  assert.notDeepEqual(second.credentialScope, first.credentialScope);
+  assert.equal((await second.getAuth())?.auth.headers?.['x-account'], 'fixture-header-next');
+  assert.equal(await readFile(file, 'utf8'), originalFile, 'capturing private leases never rewrites user configuration');
+});

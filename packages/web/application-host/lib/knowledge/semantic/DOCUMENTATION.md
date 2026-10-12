@@ -4,6 +4,35 @@ Code-semantic index for explore’s third recall path (design 6.1 / 3.16, D-166�
 Host-only writer. Not the authoritative workspace `.tdb`. Knowledge-base vectors are a sibling
 derived store (`../vectors/`); they reuse `harness.embed` but never this local-model fallback.
 
+## Purpose-specific Host inference
+
+`runtime-inference.ts` owns both retained embedding leases and native decision transport lifetimes.
+`decision-inference.ts` uses the original `HostCredentialAuthority`, global purpose settings, egress
+owner and pure classifier adapter; it does not start a Pi AgentSession/workspace worker. Its actual
+TypeSafe/Cloudflare HTTP attempts are linked to the original tool by stable ordinal. Catalog, not the
+semantic index ledger or a second batch table, owns decision admission, dispatch, original receipt,
+Goal usage and recovery. Request/response/raw-usage bodies live in ContentStore. Private retained
+credentials/headers never enter those records.
+
+Ordinary configuration edits do not redirect an accepted request. Explicit disable/revocation and
+original Goal/parent control fence dispatch. Runtime events reconcile the exact active Operation;
+kernel exit aborts local transports immediately. Stop acknowledgement does not prove remote work
+stopped: the Host waits for its actual fetch/body reader and records known/unknown effects separately.
+An unpublished observed receipt remains with that owner for same-identity publication, and prevents
+the SDK from interpreting the persistence failure as permission to send another paid request.
+
+Raw provider usage, including missing dimensions, is recorded before answer validation. The SDK's
+normalized zero defaults are not accounting evidence. Legitimate SDK retries each re-enter original
+Goal/config/permission admission as another HTTP Operation; recovery never restarts the paid batch.
+Original owner evidence can refine a recovered unknown receipt once without charging twice.
+`research_decide` is the first native consumer; it uses the original Thread material reader, including
+PDF extraction, and rechecks retained material authority before each dispatch. Native llama.cpp,
+rerank and other auxiliary consumers remain separate work. The older Pi workspace broker retains
+its existing failure/cancellation projection; this native lifecycle is not a claim that those older
+observer semantics were replaced.
+
+## Index and embedding owners
+
 - Identities: `identity.ts` — vector space, index recipe, `{ scopeKind, scopeId }`. Remote spaces use
   `remoteEmbeddingSpaceId` from protocol parts (no credentials).
 - Embedder: `backend.ts` — unconfigured → the installed local encoder only when the optional component is installed;
