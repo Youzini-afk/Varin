@@ -98,7 +98,7 @@ describe("surface identity and durable compensation", () => {
       const context = await harness.authority.captureAgentInputSnapshot({
         generation: 1,
         ownerId: "surface-owner",
-        sessionId: "session-crlf",
+        consumer: { kind: 'pi-session', sessionId: "session-crlf" },
         resources: [{ ...binding, content: "B\r\n" }],
       });
       harness.authority.commitAgentInputSnapshot("session-crlf", context);
@@ -282,7 +282,7 @@ describe("surface identity and durable compensation", () => {
       const context = await harness.authority.captureAgentInputSnapshot({
         generation: 1,
         ownerId: "surface-owner",
-        sessionId: "session-group",
+        consumer: { kind: 'pi-session', sessionId: "session-group" },
         resources: [
           { ...bindingA, content: "A\n" },
           { ...bindingB, content: "B\n" },
@@ -419,7 +419,7 @@ describe("surface identity and durable compensation", () => {
       const context = await harness.authority.captureAgentInputSnapshot({
         generation: 1,
         ownerId: "surface-owner",
-        sessionId: "session-utf16",
+        consumer: { kind: 'pi-session', sessionId: "session-utf16" },
         resources: [{ ...binding, content: "B\n" }],
       });
       harness.authority.commitAgentInputSnapshot("session-utf16", context);
@@ -518,7 +518,7 @@ describe("surface identity and durable compensation", () => {
       const context = await harness.authority.captureAgentInputSnapshot({
         generation: 1,
         ownerId: "surface-owner",
-        sessionId: "session-throw",
+        consumer: { kind: 'pi-session', sessionId: "session-throw" },
         resources: [{ ...binding, content: "B\n" }],
       });
       harness.authority.commitAgentInputSnapshot("session-throw", context);
@@ -753,7 +753,7 @@ describe("surface identity and durable compensation", () => {
       const context = await activeHarness.authority.captureAgentInputSnapshot({
         generation: 1,
         ownerId: "surface-owner",
-        sessionId: "session-stale-source",
+        consumer: { kind: 'pi-session', sessionId: "session-stale-source" },
         resources: [{ ...binding, content: "draft\n" }],
       });
       activeHarness.authority.commitAgentInputSnapshot(

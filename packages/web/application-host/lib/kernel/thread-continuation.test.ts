@@ -510,7 +510,8 @@ it('public source failure projection accepts typed owners and rejects forged res
     return Response.json(output, { status });
   });
   const api = createThreadsHttpAPI();
-  const request = { ...identity, key: 'source', path: '/selected', mode: 'fixed_branch' as const };
+  const request = { ...identity, key: 'source', workspaceId: 'workspace', mode: 'fixed_branch' as const,
+    content: { mode: 'saved-files' as const }, captureScopes: [] };
   prepare.mockRejectedValueOnce(new DocumentWorkspaceUnregisteredError());
   await expect(api.prepareSource(request)).rejects.toMatchObject({ status: 404, code: 'source_registration_missing',
     message: 'The source is not registered on this Host. Restore its original registration or select a new source.' });

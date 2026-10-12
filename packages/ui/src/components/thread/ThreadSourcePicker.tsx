@@ -1,9 +1,39 @@
 import React from 'react';
-import type { ThreadIdentity, ThreadPreparedSource, ThreadSnapshot, ThreadsAPI } from '@varin/application-client';
+import { getRuntimeEndpointGeneration, registerRuntimeEndpointSwitchBlocker, subscribeRuntimeEndpointChanged } from '@varin/application-client';
+import type { ThreadIdentity, ThreadPreparedSource, ThreadPrepareSource, ThreadSnapshot, ThreadsAPI } from '@varin/application-client';
+import type { AgentInputContext, AgentInputSnapshotConsumer } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { getDocumentRegistry } from '@/lib/documents/session';
+import type { DocumentRegistry } from '@/lib/documents/registry';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
+
+// A retry keeps the original snapshot and request identity, even if editors keep changing.
+// The registry remains the only mutable text owner; this holds only its opaque snapshot lease.
+type SourceRequest = {
+  key: string;
+  consumer: AgentInputSnapshotConsumer;
+  input?: ThreadPrepareSource;
+  workspace?: Promise<string>;
+  registry?: DocumentRegistry;
+  capture?: Promise<AgentInputContext>;
+  controller?: AbortController;
+  releasing?: Promise<void>;
+};
+
+function releaseRequest(request: SourceRequest): Promise<void> {
+  request.controller?.abort();
+  request.releasing ??= (async () => {
+    // A late capture must also be released when cancellation preceded its reply.
+    const context = await request.capture?.catch(() => undefined);
+    if (context) await request.registry?.releaseAgentInputContext(request.consumer, context);
+  })();
+  return request.releasing;
+}
 
 export function ThreadSourcePicker({ api, identity, initialPath, active, launch, prepared, onPrepared, onPreparingChange }: {
-  api: ThreadsAPI;
+  api: Pick<ThreadsAPI, 'prepareSource'>;
   identity: ThreadIdentity;
   initialPath?: string;
   active: boolean;
@@ -12,59 +42,143 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
   onPrepared(value: ThreadPreparedSource | null): void;
   onPreparingChange(value: boolean): void;
 }) {
+  const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const [path, setPath] = React.useState(initialPath ?? '');
   const [mode, setMode] = React.useState<'fixed_branch' | 'materialized' | 'live_root'>('fixed_branch');
+  const [contentMode, setContentMode] = React.useState<'saved-files' | 'surface-drafts'>('saved-files');
+  const [scopes, setScopes] = React.useState('');
   const [preparing, setPreparing] = React.useState(false);
   const [error, setError] = React.useState<string>();
   const generation = React.useRef(0);
-  const inFlight = React.useRef(false);
-  const request = React.useRef<{ fingerprint: string; key: string } | undefined>(undefined);
+  const request = React.useRef<SourceRequest | undefined>(undefined);
   const callbacks = React.useRef({ onPrepared, onPreparingChange, initialPath });
   callbacks.current = { onPrepared, onPreparingChange, initialPath };
+  const retire = React.useCallback(() => {
+    generation.current += 1;
+    const previous = request.current;
+    request.current = undefined;
+    return previous ? releaseRequest(previous) : Promise.resolve();
+  }, []);
   React.useEffect(() => {
-    generation.current += 1; inFlight.current = false; request.current = undefined;
     setPreparing(false); setError(undefined); setPath(callbacks.current.initialPath ?? '');
     callbacks.current.onPrepared(null); callbacks.current.onPreparingChange(false);
-    return () => { generation.current += 1; };
-  }, [api, identity.threadId, identity.branchId]);
-  const prepare = async () => {
-    if (inFlight.current) return;
+    return () => { void retire().catch(() => { /* The original Host may already be disconnected. */ }); };
+  }, [api, host, identity.threadId, identity.branchId, retire]);
+  React.useEffect(() => registerRuntimeEndpointSwitchBlocker(async () => {
+    // Release on the original Host before the endpoint changes, including a late capture reply.
+    const releasing = retire();
+    setPreparing(false); callbacks.current.onPreparingChange(false); callbacks.current.onPrepared(null);
+    await releasing;
+  }), [retire]);
+  const invalidate = () => {
+    const releasing = retire();
     const current = generation.current;
-    const fingerprint = JSON.stringify([identity.threadId, identity.branchId, path, mode]);
-    if (request.current?.fingerprint !== fingerprint) request.current = { fingerprint, key: crypto.randomUUID() };
-    inFlight.current = true; setPreparing(true); onPreparingChange(true); setError(undefined);
+    setPreparing(false); setError(undefined); onPreparingChange(false); onPrepared(null);
+    void releasing.catch(() => {
+      if (generation.current === current) setError('The draft snapshot could not be released on its original Host.');
+    });
+  };
+  const prepare = async () => {
+    if (active || request.current?.controller) return;
+    const current = generation.current;
+    const pending: SourceRequest = request.current ?? {
+      key: crypto.randomUUID(), consumer: { kind: 'thread', threadId: identity.threadId, branchId: identity.branchId },
+    };
+    request.current = pending;
+    const controller = new AbortController();
+    pending.controller = controller;
+    const isCurrent = () => current === generation.current && request.current === pending && !controller.signal.aborted;
+    setPreparing(true); onPreparingChange(true); setError(undefined);
     try {
-      const result = await api.prepareSource({ ...identity, key: request.current.key, path, mode });
-      if (current === generation.current) { onPrepared(result); request.current = undefined; }
+      if (!pending.input) {
+        if (!pending.workspace) {
+          const documents = getRegisteredRuntimeAPIs()?.documents;
+          if (!documents) throw new Error('Documents is unavailable on this Host. The workspace was not resolved.');
+          pending.workspace = documents.resolveWorkspace({ path }).then(workspace => workspace.workspaceId);
+        }
+        const workspaceId = await pending.workspace;
+        if (!isCurrent()) return;
+        let content: ThreadPrepareSource['content'] = { mode: 'saved-files' };
+        if (mode !== 'live_root' && contentMode === 'surface-drafts') {
+          if (!pending.capture) {
+            const registry = getDocumentRegistry();
+            pending.registry = registry;
+            pending.capture = registry.captureAgentInputContext(pending.consumer, workspaceId);
+          }
+          const context = await pending.capture;
+          if (!isCurrent()) return;
+          if (context.source === 'surface' && context.snapshot.status !== 'ready') {
+            throw new Error('Editor drafts could not be captured. Capture drafts again to start a new request.');
+          }
+          content = { mode: 'surface-drafts', context };
+        }
+        pending.input = { ...identity, key: pending.key, workspaceId, mode, content,
+          captureScopes: mode === 'live_root' ? [] : scopes.split(/\r?\n/).map(value => value.trim()).filter(Boolean) };
+      }
+      if (!isCurrent()) return;
+      const result = await api.prepareSource(pending.input, controller.signal);
+      if (!isCurrent()) return;
+      onPrepared(result);
+      pending.controller = undefined;
+      request.current = undefined;
+      // Preparation has pinned immutable bytes; the temporary editor snapshot can now go.
+      await releaseRequest(pending);
     } catch (value) {
       if (current === generation.current) setError(value instanceof Error ? value.message : 'Workspace preparation failed');
     } finally {
-      if (current === generation.current) { inFlight.current = false; setPreparing(false); onPreparingChange(false); }
+      pending.controller = undefined;
+      if (current === generation.current) { setPreparing(false); onPreparingChange(false); }
     }
   };
   const source = launch?.selection.source;
+  const provenance = prepared?.provenance;
   return <details className="mx-auto max-h-64 w-full max-w-3xl shrink-0 overflow-y-auto px-4 text-xs text-muted-foreground">
     <summary className="cursor-pointer">Workspace · {prepared ? 'Prepared for next run' : source ? source.mode === 'live_root' ? 'Live workspace' : source.mode === 'materialized' ? 'Isolated editable copy' : 'Read-only snapshot' : 'Chat only'}</summary>
     <div className="space-y-2 py-2">
       {source && <p>Current source: workspace {source.workspace_id}{source.mode !== 'live_root' && ` · revision ${source.revision}`}. {source.mode === 'live_root' ? 'Following runs use this same live workspace. Edits change its actual files.' : source.mode === 'materialized' ? 'Following runs keep this working copy.' : 'Following runs read the same fixed snapshot.'}</p>}
       <label className="block">Workspace folder
-        <input aria-label="Workspace folder" className="mt-1 w-full rounded border bg-background px-2 py-1 text-sm"
-          disabled={active || preparing} value={path} onChange={event => setPath(event.target.value)} />
+        <Input aria-label="Workspace folder" className="mt-1 w-full rounded border bg-background px-2 py-1 text-sm"
+          disabled={active} value={path} onChange={event => { invalidate(); setPath(event.target.value); }} />
       </label>
-      {initialPath && <Button type="button" variant="ghost" size="sm" disabled={active || preparing} onClick={() => setPath(initialPath)}>Use current workspace folder</Button>}
-      <select aria-label="Workspace access" className="w-full rounded border bg-background px-2 py-1 text-sm" disabled={active || preparing}
-        value={mode} onChange={event => setMode(event.target.value as typeof mode)}>
+      {initialPath && <Button type="button" variant="ghost" size="sm" disabled={active} onClick={() => { invalidate(); setPath(initialPath); }}>Use current workspace folder</Button>}
+      <select aria-label="Workspace access" className="w-full rounded border bg-background px-2 py-1 text-sm" disabled={active}
+        value={mode} onChange={event => { invalidate(); setMode(event.target.value as typeof mode); if (event.target.value === 'live_root') setContentMode('saved-files'); }}>
         <option value="fixed_branch">Read-only file snapshot: read, list and search</option>
         <option value="materialized">Isolated editable copy and commands</option>
         <option value="live_root">Live workspace: files, commands and language tools</option>
       </select>
-      {mode === 'live_root' ? <p>Uses saved files directly, without capturing a snapshot. External file and dependency changes remain live; unsaved editor changes are not included. Edits change the selected workspace immediately. Commands can have external effects; this is not a security sandbox.</p> : <p>Captures saved files using the workspace inventory. Unsaved editor changes are not included.</p>}
+      {mode === 'live_root' ? <p>Uses saved files directly, without capturing a snapshot. External file and dependency changes remain live; unsaved editor changes are not included. Edits change the selected workspace immediately. Commands can have external effects; this is not a security sandbox.</p> : <>
+        <label className="block">Snapshot content
+          <select aria-label="Snapshot content" className="mt-1 w-full rounded border bg-background px-2 py-1 text-sm" disabled={active}
+            value={contentMode} onChange={event => { invalidate(); setContentMode(event.target.value as typeof contentMode); }}>
+            <option value="saved-files">Saved files only</option>
+            <option value="surface-drafts">Saved files with this window's editor drafts</option>
+          </select>
+        </label>
+        <p>{contentMode === 'saved-files' ? 'Unsaved editor changes are not included.' : 'Captures drafts only in the selected workspace. Editors and saved files stay unchanged. Later editor changes do not alter the captured request.'}</p>
+        <label className="block">Additional capture paths, one per line
+          <Textarea aria-label="Additional capture paths" className="mt-1 w-full rounded border bg-background px-2 py-1 text-sm" rows={2}
+            disabled={active} value={scopes} onChange={event => { invalidate(); setScopes(event.target.value); }} />
+        </label>
+        <p>The default workspace inventory is always captured. Additional paths include ignored files or folders; they do not narrow the snapshot. Leave blank to use the default inventory.</p>
+      </>}
       {mode === 'materialized' && <p>File edits start in a separate working copy. Commands can have external effects; this is not a security sandbox. Changes are not copied back automatically.</p>}
       {active && <p>Workspace selection applies to a new run. Wait for the current run to finish before preparing another source.</p>}
       <Button type="button" variant="outline" size="sm" disabled={active || preparing || !path.trim()} onClick={() => void prepare()}>{preparing ? 'Preparing workspace' : 'Prepare workspace'}</Button>
+      {request.current && <Button type="button" variant="ghost" size="sm" onClick={invalidate}>{preparing ? 'Cancel preparation' : 'Discard captured request'}</Button>}
+      {error && contentMode === 'surface-drafts' && <Button type="button" variant="ghost" size="sm" disabled={active || preparing} onClick={() => { invalidate(); void prepare(); }}>Capture drafts again</Button>}
       {prepared && <div aria-label="Prepared workspace">
         <p>{prepared.path} · {prepared.source.mode === 'live_root' ? 'Live files and commands' : prepared.source.mode === 'materialized' ? 'Editable copy and commands' : 'Read-only'} · ready for the next send</p>
-        <Button type="button" variant="ghost" size="sm" disabled={preparing} onClick={() => onPrepared(null)}>{source ? 'Keep current workspace' : 'Remove prepared workspace'}</Button>
+        {prepared.source.mode !== 'live_root' && <p>Fixed revision: {prepared.source.revision}</p>}
+        {provenance && <div aria-label="Capture provenance">
+          <p>Consistency: {provenance.consistency}</p>
+          {provenance.consistency === 'fixed-root' ? <p>Fixed root: {provenance.root}</p> : <>
+            <p>Content: {provenance.contentMode}</p>
+            <p>Additional capture paths: {provenance.captureScopes.length ? provenance.captureScopes.join(', ') : 'Default inventory only'}</p>
+            <p>Omitted draft paths: {provenance.omittedDraftPaths.length ? provenance.omittedDraftPaths.join(', ') : 'None'}</p>
+          </>}
+        </div>}
+        <Button type="button" variant="ghost" size="sm" disabled={preparing} onClick={invalidate}>{source ? 'Keep current workspace' : 'Remove prepared workspace'}</Button>
       </div>}
       {error && <p role="alert" className="text-destructive">{error}</p>}
     </div>

@@ -620,6 +620,25 @@ it('gives overlapping project roots one physical coordination identity and separ
     const childIdentity = await harness.authority.resolveResourceIdentity({ workspaceId: child.workspaceId, resourceId: 'same.txt' });
     expect(childIdentity.coordinationId).toBe(parentIdentity.coordinationId);
     expect(childIdentity.aliases).toEqual(expect.arrayContaining([harness.resource('child/same.txt'), { workspaceId: child.workspaceId, resourceId: 'same.txt' }]));
+    expect(await harness.authority.resolveResourceIdentity(harness.resource('child/same.txt'), { withinWorkspaceId: child.workspaceId }))
+      .toEqual(parentIdentity);
+    expect(await harness.authority.resolveResourceIdentity({ workspaceId: child.workspaceId, resourceId: 'same.txt' }, { withinWorkspaceId: harness.identity.workspaceId }))
+      .toEqual(childIdentity);
+    const siblingRoot = path.join(harness.workspaceRoot, 'sibling');
+    await fs.promises.mkdir(siblingRoot);
+    const sibling = await harness.authority.resolveWorkspace({ path: siblingRoot });
+    await fs.promises.rename(siblingRoot, `${siblingRoot}-offline`);
+    const offline = { workspaceId: sibling.workspaceId, resourceId: 'private.txt' };
+    expect(await harness.authority.resolveResourceIdentity(offline, { withinWorkspaceId: child.workspaceId })).toBeNull();
+    await expect(harness.authority.resolveResourceIdentity(offline)).rejects.toMatchObject({ code: 'workspace-unavailable' });
+    await expect(harness.authority.resolveResourceIdentity(offline, { withinWorkspaceId: harness.identity.workspaceId }))
+      .rejects.toMatchObject({ code: 'workspace-unavailable' });
+    const file = await harness.authority.ensureResourceRoot(path.join(nestedRoot, 'same.txt'), 'file');
+    expect(await harness.authority.resolveResourceIdentity({ workspaceId: file.workspaceId, resourceId: '' }, { withinWorkspaceId: child.workspaceId }))
+      .toMatchObject({ coordinationId: parentIdentity.coordinationId });
+    harness.setTrusted(false);
+    await expect(harness.authority.resolveResourceIdentity(offline, { withinWorkspaceId: child.workspaceId })).rejects.toBeInstanceOf(DocumentUntrustedError);
+    harness.setTrusted(true);
     const remote = await otherHost.resolveWorkspace({ path: nestedRoot });
     const remoteIdentity = await otherHost.resolveResourceIdentity({ workspaceId: remote.workspaceId, resourceId: 'same.txt' });
     expect(remoteIdentity.coordinationId).not.toBe(parentIdentity.coordinationId);
@@ -682,7 +701,7 @@ it('captures distinct dirty files in two roots under one fixed snapshot without 
     await harness.authority.publishDirtyBuffers({ ownerId, generation, workspaceId: first.workspaceId, resources: [{ resource: first, baseRevision: null, localEditRevision: 1 }] });
     await harness.authority.publishDirtyBuffers({ ownerId, generation, workspaceId: second.workspaceId, resources: [{ resource: second, baseRevision: null, localEditRevision: 1 }] });
     const context = await harness.authority.captureAgentInputSnapshot({
-      ownerId, generation, sessionId: 'two-root-session',
+      ownerId, generation, consumer: { kind: 'pi-session', sessionId: 'two-root-session' },
       resources: [
         { resource: first, baseRevision: null, localEditRevision: 1, content: 'A draft\n', encoding: 'utf-8', bom: false },
         { resource: second, baseRevision: null, localEditRevision: 1, content: 'B draft\n', encoding: 'utf-8', bom: false },
@@ -698,7 +717,7 @@ it('captures distinct dirty files in two roots under one fixed snapshot without 
     expect(harness.authority.readAgentInputSnapshot('two-root-session', context, 'same.txt', second.workspaceId)).toMatchObject({ status: 'ready', content: 'B draft\n' });
     await harness.authority.publishDirtyBuffers({ ownerId, generation, workspaceId: second.workspaceId, resources: [{ resource: second, baseRevision: null, localEditRevision: 2 }] });
     await expect(harness.authority.captureAgentInputSnapshot({
-      ownerId, generation, sessionId: 'stale-two-root-session',
+      ownerId, generation, consumer: { kind: 'pi-session', sessionId: 'stale-two-root-session' },
       resources: [
         { resource: first, baseRevision: null, localEditRevision: 1, content: 'A draft\n', encoding: 'utf-8', bom: false },
         { resource: second, baseRevision: null, localEditRevision: 1, content: 'B draft\n', encoding: 'utf-8', bom: false },
@@ -730,7 +749,7 @@ it('supersedes every project alias after a write to their shared physical file',
       });
     }
     const context = await harness.authority.captureAgentInputSnapshot({
-      ownerId: 'shared-owner', generation: 1, sessionId: 'shared-session',
+      ownerId: 'shared-owner', generation: 1, consumer: { kind: 'pi-session', sessionId: 'shared-session' },
       resources: [parentAlias, childAlias].map((resource) => ({
         resource, baseRevision: null, localEditRevision: 1, content: 'draft\n', encoding: 'utf-8', bom: false,
       })),
@@ -863,13 +882,13 @@ it('advances the matching fixed input snapshot after a confirmed surface apply a
   try {
     const oldTarget = await publish(6, 'older\n');
     const oldContext = await harness.authority.captureAgentInputSnapshot({
-      ownerId, generation, sessionId: 'old-session',
+      ownerId, generation, consumer: { kind: 'pi-session', sessionId: 'old-session' },
       resources: [{ ...oldTarget, content: 'older\n' }],
     });
     harness.authority.commitAgentInputSnapshot('old-session', oldContext);
     const target = await publish(7, 'current\n');
     const currentContext = await harness.authority.captureAgentInputSnapshot({
-      ownerId, generation, sessionId: 'current-session',
+      ownerId, generation, consumer: { kind: 'pi-session', sessionId: 'current-session' },
       resources: [{ ...target, content: 'current\n' }],
     });
     harness.authority.commitAgentInputSnapshot('current-session', currentContext);
@@ -946,7 +965,7 @@ it('invalidates a fixed input snapshot when a dispatched surface write is cancel
     const context = await harness.authority.captureAgentInputSnapshot({
       ownerId,
       generation,
-      sessionId: 'surface-cancelled-session',
+      consumer: { kind: 'pi-session', sessionId: 'surface-cancelled-session' },
       resources: [{ ...target, content: 'draft\n' }],
     });
     harness.authority.commitAgentInputSnapshot('surface-cancelled-session', context);
@@ -1458,7 +1477,7 @@ it('stops answering a path from its captured draft once a write is observed', as
     await harness.authority.publishDirtyBuffers(publication);
     const context = await harness.authority.captureAgentInputSnapshot({
       ...publication,
-      sessionId: 'session-1',
+      consumer: { kind: 'pi-session', sessionId: 'session-1' },
       resources: publication.resources.map((resource) => ({ ...resource, content: 'unsaved draft\n' })),
     });
     expect(harness.authority.readAgentInputSnapshot('session-1', context, 'draft.ts', harness.identity.workspaceId)).toMatchObject({
@@ -1575,7 +1594,7 @@ it('edits the fixed surface buffer and refuses a later user edit without touchin
     const context = await harness.authority.captureAgentInputSnapshot({
       generation: 1,
       ownerId: 'surface-owner',
-      sessionId: 'session-1',
+      consumer: { kind: 'pi-session', sessionId: 'session-1' },
       resources: [{ ...binding, content: 'B\n' }],
     });
     harness.authority.commitAgentInputSnapshot('session-1', context);
@@ -1669,7 +1688,7 @@ it('captures immutable agent input snapshots only from the complete current dirt
     await harness.authority.publishDirtyBuffers(publication);
     const first = await harness.authority.captureAgentInputSnapshot({
       ...publication,
-      sessionId: 'session-1',
+      consumer: { kind: 'pi-session', sessionId: 'session-1' },
       resources: publication.resources.map((resource) => ({ ...resource, content: 'fixed draft\n' })),
     });
     expect(first).toMatchObject({ source: 'surface', snapshot: { status: 'ready' } });
@@ -1704,7 +1723,7 @@ it('captures immutable agent input snapshots only from the complete current dirt
     });
     await expect(harness.authority.captureAgentInputSnapshot({
       ...publication,
-      sessionId: 'session-1',
+      consumer: { kind: 'pi-session', sessionId: 'session-1' },
       resources: publication.resources.map((resource) => ({ ...resource, content: 'stale capture\n' })),
     })).rejects.toMatchObject({ code: 'stale-completion', statusCode: 409 });
     expect(harness.authority.readAgentInputSnapshot('session-1', first, 'draft.ts', harness.identity.workspaceId)).toMatchObject({
@@ -1718,7 +1737,7 @@ it('captures immutable agent input snapshots only from the complete current dirt
     };
     const second = await harness.authority.captureAgentInputSnapshot({
       ...secondPublication,
-      sessionId: 'session-1',
+      consumer: { kind: 'pi-session', sessionId: 'session-1' },
       resources: secondPublication.resources.map((resource) => ({ ...resource, content: 'new fixed draft\n' })),
     });
     expect(harness.authority.commitAgentInputSnapshot('session-1', first)).toEqual({ committed: true });
@@ -1730,7 +1749,7 @@ it('captures immutable agent input snapshots only from the complete current dirt
     });
     const pendingCleared = await harness.authority.captureAgentInputSnapshot({
       ...secondPublication,
-      sessionId: 'session-1',
+      consumer: { kind: 'pi-session', sessionId: 'session-1' },
       resources: secondPublication.resources.map((resource) => ({ ...resource, content: 'clear pending draft\n' })),
     });
     await harness.authority.clearDirtyBuffers({
@@ -1743,7 +1762,7 @@ it('captures immutable agent input snapshots only from the complete current dirt
     await harness.authority.publishDirtyBuffers(secondPublication);
     const pending = await harness.authority.captureAgentInputSnapshot({
       ...secondPublication,
-      sessionId: 'session-1',
+      consumer: { kind: 'pi-session', sessionId: 'session-1' },
       resources: secondPublication.resources.map((resource) => ({ ...resource, content: 'pending draft\n' })),
     });
     surface.close();
@@ -1784,7 +1803,7 @@ it('preserves explicit surface snapshot encoding and BOM metadata while rejectin
     await harness.authority.publishDirtyBuffers(publication);
     const context = await harness.authority.captureAgentInputSnapshot({
       ...publication,
-      sessionId: 'session-metadata',
+      consumer: { kind: 'pi-session', sessionId: 'session-metadata' },
       resources: [{
         ...publication.resources[0]!,
         content: 'draft\r\n',
@@ -1803,7 +1822,7 @@ it('preserves explicit surface snapshot encoding and BOM metadata while rejectin
 
     await expect(harness.authority.captureAgentInputSnapshot({
       ...publication,
-      sessionId: 'session-invalid-encoding',
+      consumer: { kind: 'pi-session', sessionId: 'session-invalid-encoding' },
       resources: [{
         ...publication.resources[0]!,
         content: 'draft',
@@ -1813,7 +1832,7 @@ it('preserves explicit surface snapshot encoding and BOM metadata while rejectin
     })).rejects.toMatchObject({ code: 'failed', statusCode: 400 });
     await expect(harness.authority.captureAgentInputSnapshot({
       ...publication,
-      sessionId: 'session-unsupported-encoding',
+      consumer: { kind: 'pi-session', sessionId: 'session-unsupported-encoding' },
       resources: [{
         ...publication.resources[0]!,
         content: 'draft',
@@ -1823,7 +1842,7 @@ it('preserves explicit surface snapshot encoding and BOM metadata while rejectin
     })).rejects.toMatchObject({ code: 'failed', statusCode: 400 });
     await expect(harness.authority.captureAgentInputSnapshot({
       ...publication,
-      sessionId: 'session-invalid-bom',
+      consumer: { kind: 'pi-session', sessionId: 'session-invalid-bom' },
       resources: [{
         ...publication.resources[0]!,
         content: 'draft',

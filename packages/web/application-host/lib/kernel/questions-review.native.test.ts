@@ -62,7 +62,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const storage = new KernelStorageAdapter({ client: kernel, hostId: 'http-review', storageRoot: root, resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root });
   const workingStates = createKernelWorkspaceWorkingStateAccess(storage);
   const resources = resourceScopeFixture(root, workingStates, documents, undefined, (input, consume) => storage.withResourceRead(input, consume));
-  const prepare = createThreadSourcePreparer({ sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, prepareResources: resources.prepareSourceCapture });
+  const prepare = createThreadSourcePreparer({ inspectInventory: async () => ({ kind: 'directory' }), sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, prepareResources: resources.prepareSourceCapture });
   const personalization = createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'selected-project' }) });
   const prepareContext = createThreadContext({ personalization, resources, projectForWorkspace: async () => 'selected-project' });
   kernel.setMemoryOwner(createMemoryOwner({personalization,prepareContext}));
@@ -176,7 +176,7 @@ it('pending question survives Host/kernel reopen and answer resumes its original
   const f = await fixture(reply);
   await fs.writeFile(path.join(f.workspace, 'source.txt'), 'pinned before asking');
   const identity = await f.api.create('restart-question');
-  const prepared = await f.api.prepareSource({ ...identity, key: 'question-source', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await f.api.prepareSource({ ...identity, key: 'question-source', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   const receipt = await f.api.submit({ ...identity, key: 'restart-question-input', expectedHead: null, text: 'ask before reading', model, source: prepared.source });
   await expect.poll(async () => (await f.api.run(receipt.run_id)).state).toBe('waiting');
   const operation = (await f.api.snapshot(identity)).operations.find(op => op.executor === 'ask_user')!;

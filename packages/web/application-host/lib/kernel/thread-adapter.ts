@@ -42,7 +42,7 @@ export class ThreadAdapter {
   constructor(readonly runtime: AgentRuntimeClient, private readonly models: ThreadModelAuthority,
     private readonly admitSource: (source: ThreadSource, identity: ThreadIdentity, runId?: string, signal?: AbortSignal) => Promise<void>,
     private readonly onLaunchError: (runId: string, error: unknown) => void,
-    private readonly prepareWorkspace?: (input: ThreadPrepareSource) => Promise<ThreadPreparedSource>,
+    private readonly prepareWorkspace?: (input: ThreadPrepareSource, signal?: AbortSignal) => Promise<ThreadPreparedSource>,
     private readonly prepareContext?: ContextPreparer, private readonly plans?: PlanService,
     private readonly prepareSkillInput?: ThreadSkillInputPreparer,
     private readonly processTerminals?: import('@varin/application-client').ThreadProcessesAPI,
@@ -305,10 +305,11 @@ export class ThreadAdapter {
     return identity;
   }
 
-  async prepareSource(input: ThreadPrepareSource): Promise<ThreadPreparedSource> {
+  async prepareSource(input: ThreadPrepareSource, signal?: AbortSignal): Promise<ThreadPreparedSource> {
     await this.requireIdentity(input);
     if (!this.prepareWorkspace) throw new Error('Workspace source preparation is unavailable');
-    return this.prepareWorkspace(input);
+    signal?.throwIfAborted();
+    return this.prepareWorkspace(input, signal);
   }
 
   async readPlan(identity: ThreadIdentity, signal?: AbortSignal) {
@@ -407,13 +408,13 @@ export class ThreadAdapter {
 
   /** Cold calendar work is prepared by the same source/model/context owners as User submission.
    * Catalog supplies the occurrence identity and original instruction; this cannot forge User input. */
-  async prepareCalendarWork(preparation: import('./protocol.generated.js').CalendarPreparation, path: string, signal: AbortSignal) {
+  async prepareCalendarWork(preparation: import('./protocol.generated.js').CalendarPreparation, workspaceId: string, signal: AbortSignal) {
     const { occurrence, definition } = preparation;
     if (definition.target.kind !== 'new_work') throw new Error('Calendar work is not a cold submission');
     const identity: ThreadIdentity = { runtime: 'agent', threadId: occurrence.thread_id, branchId: occurrence.branch_id };
     await this.requireIdentity(identity);
     signal.throwIfAborted();
-    const { source } = await this.prepareSource({ ...identity, key: occurrence.id, path, mode: definition.target.sourceMode });
+    const { source } = await this.prepareSource({ ...identity, key: occurrence.id, workspaceId, mode: definition.target.sourceMode, content: { mode: 'saved-files' }, captureScopes: [] }, signal);
     signal.throwIfAborted();
     await this.admitSource(source, identity);
     const model = await this.models.resolveModel(definition.target.model as ThreadModel);

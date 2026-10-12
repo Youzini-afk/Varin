@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -61,6 +62,7 @@ async function fixture(files: Record<string, string>) {
     listWorkspaceBaselinePaths: vi.fn(async () => inventory([''])),
     listCaptureScopePaths: vi.fn(async (_root: string, scopes: string[]) => { scans.push([...scopes]); return inventory(scopes); }),
     captureDirectory: vi.fn(capture), releaseCapturedStates: vi.fn(async () => undefined),
+    putObject: vi.fn(async (bytes: Buffer) => { const hash = `sha256-${contentVersion(bytes)}`; objects.set(hash, bytes); return { hash, byteLength: bytes.length }; }),
     createBranch: vi.fn(async (_workspace: string, id: string, states: Record<string, RecoveryState>, _ref: string, _drafts: string[], scopes: string[], options: WorkingBranchCreateOptions) => {
       const hash = contentVersion(JSON.stringify(states));
       const branch = { branchId: id, workspaceId: 'workspace', root: hash, baseRoot: hash, headRevision: 0, writeRevision: 0,
@@ -117,7 +119,30 @@ async function read(f: Awaited<ReturnType<typeof fixture>>, snapshot: PreparedAg
   return f.scope.withScope(identity, f.source, admitted, ({ readers }) => authority.read({ snapshot, readers }, request), { snapshot, request, runId: 'run' });
 }
 
+async function reviewDraftResourceClosure() {
+  const f = await fixture({ 'AGENTS.md': 'ROOT', '.gitignore': '.pi', '.pi/settings.json': '{}' });
+  await f.write('extra/SKILL.md', skill('external-draft', 'ORIGINAL EXTERNAL'));
+  const editorDrafts = [
+    { path: '.pi/settings.json', content: Buffer.from(JSON.stringify({ skills: ['../../extra/SKILL.md'] })) },
+    { path: '.pi/skills/fresh/SKILL.md', content: Buffer.from(skill('fresh-draft', 'UNSAVED LOCAL')) },
+  ];
+  const prepared = await captureStableSourceBaseline({ store: f.store, workspaceId: 'workspace', captureWorkspaceId: 'workspace', branchId: 'source',
+    directory: f.root, captureScopes: [], content: { mode: 'fixed-draft-baseline' }, editorDrafts },
+  { documents: f.documents, prepareResources: f.scope.prepareSourceCapture,
+    inspectInventory: async () => ({ kind: 'git', baseRef: 'git-base', unborn: false, paths: ['AGENTS.md', '.gitignore'], gitlinks: [] }) });
+  assert.equal(prepared.provenance.resources?.configuredPaths.length, 1);
+  await f.write('extra/SKILL.md', skill('external-draft', 'LATER EXTERNAL'));
+  const snapshot = await f.candidate();
+  for (const [name, original] of [['external-draft', 'ORIGINAL EXTERNAL'], ['fresh-draft', 'UNSAVED LOCAL']]) {
+    const result = await read(f, snapshot, name!);
+    assert(result.status === 'ready' && result.kind === 'skill');
+    assert(result.file.content.includes(original!));
+  }
+  assert.equal(await readFile(path.join(f.root, '.pi/settings.json'), 'utf8'), '{}');
+}
+
 describe('Thread source resource admission', () => {
+  it('captures draft settings dependencies and draft-only skill directories through the same fixed source', reviewDraftResourceClosure);
   it('captures only required ignored roots in the original source transaction, retaining original bytes after live changes', async () => {
     const f = await fixture({ 'AGENTS.md': 'ROOT', '.gitignore': '.pi\nignored\n', '.pi/settings.json': '{}',
       '.pi/skills/review/SKILL.md': skill('review', 'ORIGINAL'), '.pi/skills/review/reference.txt': 'ORIGINAL SUPPORT', 'ignored/unrelated.txt': 'EXCLUDED' });

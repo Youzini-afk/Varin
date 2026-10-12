@@ -66,7 +66,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const storage = new KernelStorageAdapter({ client: kernel, hostId: 'http-review', storageRoot: root, resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root });
   const workingStates = createKernelWorkspaceWorkingStateAccess(storage);
   const resources = resourceScopeFixture(root, workingStates, documents, undefined, (input, consume) => storage.withResourceRead(input, consume));
-  const prepare = createThreadSourcePreparer({ sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, prepareResources: resources.prepareSourceCapture });
+  const prepare = createThreadSourcePreparer({ inspectInventory: async () => ({ kind: 'directory' }), sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, prepareResources: resources.prepareSourceCapture });
   let refresh = () => Promise.resolve();
   const refreshTasks: Promise<void>[] = [];
   const personalization = createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'selected-project' }), onChanged: () => { const task = refresh(); void task.catch(() => undefined); refreshTasks.push(task); } });
@@ -125,7 +125,7 @@ it('real installed policy settles read exchange and completes with pinned durabl
   const f=await fixture((body,response)=>{ if(++turn===1){ response.writeHead(200,{'content-type':'text/event-stream'}); response.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[{id:'item-1',type:'function_call',call_id:'call-1',name:'file_read',arguments:JSON.stringify({path:'evidence.txt'})}]}})}\n\n`); } else complete(response,'done-item','done'); });
   await installExample(f); await route(f,'example.evidence-policy:host:varin.agent.policy@4',{projectId:'selected-project'});
   const identity=await f.api.create('policy-review'); await fs.writeFile(path.join(f.workspace,'evidence.txt'),'SENSITIVE_EVIDENCE_BODY');
-  const source=await f.api.prepareSource({...identity,key:'source',path:f.workspace,mode:'fixed_branch'});
+  const source=await f.api.prepareSource({...identity,key:'source',workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [],mode:'fixed_branch'});
   const first=await f.api.submit({...identity,key:'first',expectedHead:null,text:'PRIVATE_USER_BODY',model,source:source.source});
   await expect.poll(async()=>(await f.kernel.agentRuntimeRequest<{state:string}, 'runtime.run.inspect'>('runtime.run.inspect',{runId:first.run_id})).state).toBe('completed');
   expect(f.requests).toHaveLength(2);
@@ -170,13 +170,13 @@ it('cancel hung decision releases Run and unrelated selected run still completes
   await expect.poll(()=>f.decisions.length).toBe(1);
   await f.runtime.cancelRun(first.run_id); await expect.poll(async()=>(await f.runtime.run(first.run_id)).state).toBe('cancelled');
   await installExample(f); await route(f,'example.evidence-policy:host:varin.agent.policy@4',{projectId:'selected-project'});
-  const b=await f.api.create('other'); const source=await f.api.prepareSource({...b,key:'source',path:f.workspace,mode:'fixed_branch'}); const other=await f.api.submit({...b,key:'other',expectedHead:null,text:'done',model,source:source.source});
+  const b=await f.api.create('other'); const source=await f.api.prepareSource({...b,key:'source',workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [],mode:'fixed_branch'}); const other=await f.api.submit({...b,key:'other',expectedHead:null,text:'done',model,source:source.source});
   await expect.poll(async()=>(await f.runtime.run(other.run_id)).state).toBe('completed');
 });
 it('illegal policy complete cannot skip registered tool exchange or run tool effects',async()=>{
  let turn=0;const f=await fixture((_body,response)=>{turn++;response.writeHead(200,{'content-type':'text/event-stream'});response.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[{id:'bad-item',type:'function_call',call_id:'bad-call',name:'file_read',arguments:JSON.stringify({path:'evidence.txt'})}]}})}\n\n`)});
  await installCustom(f,'review.illegal-policy',"describe(){return {identity:{name:'bad',version:'1'},configuration:{},modelRoles:[],stateTransition:'unsupported'}},decide([input]){return {action:{kind:input.event.kind==='started'?'request_model':'complete'},state:null}}");
- const a=await f.api.create('illegal');await fs.writeFile(path.join(f.workspace,'evidence.txt'),'DO_NOT_READ');const source=await f.api.prepareSource({...a,key:'source',path:f.workspace,mode:'fixed_branch'});
+ const a=await f.api.create('illegal');await fs.writeFile(path.join(f.workspace,'evidence.txt'),'DO_NOT_READ');const source=await f.api.prepareSource({...a,key:'source',workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [],mode:'fixed_branch'});
  const first=await f.api.submit({...a,key:'illegal',expectedHead:null,text:'illegal',model,source:source.source});
  await expect.poll(async()=>(await f.runtime.run(first.run_id)).state).toBe('failed');expect(turn).toBe(1);
  const snap=await f.api.snapshot(a);expect(JSON.stringify(snap.history)).toContain('illegal_policy_action');expect(JSON.stringify(snap.history)).not.toContain('DO_NOT_READ');
@@ -201,7 +201,7 @@ it('actual artifact replacement pins old implementation; later lease differs des
 });
 it('retry launch while model in flight cannot detach policy lease of active Run',async()=>{
  let held!:ServerResponse;const f=await fixture((_body,response)=>{held=response});await installExample(f);await route(f,'example.evidence-policy:host:varin.agent.policy@4',{projectId:'selected-project'});
- const a=await f.api.create('retry');const source=await f.api.prepareSource({...a,key:'source',path:f.workspace,mode:'fixed_branch'});const first=await f.api.submit({...a,key:'retry',expectedHead:null,text:'retry',model,source:source.source});await expect.poll(()=>f.requests.length).toBe(1);
+ const a=await f.api.create('retry');const source=await f.api.prepareSource({...a,key:'source',workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [],mode:'fixed_branch'});const first=await f.api.submit({...a,key:'retry',expectedHead:null,text:'retry',model,source:source.source});await expect.poll(()=>f.requests.length).toBe(1);
  await f.runtime.rebindLaunch(first.run_id,{credentialOwner:f.owner}).catch(()=>undefined);
  expect(f.kernel.policyBinding(first.run_id, 0)).toBeDefined();complete(held,'retry-complete','done');
  await expect.poll(async()=>(await f.runtime.run(first.run_id)).state).toBe('completed');expect(f.requests).toHaveLength(1);
@@ -209,7 +209,7 @@ it('retry launch while model in flight cannot detach policy lease of active Run'
 it('restart accepts exact policy identity and rejects changed artifact or config with unchanged author version before inference',async()=>{
  const f=await fixture((_body,response)=>{response.writeHead(200,{'content-type':'text/event-stream'});response.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[{id:'ask',type:'function_call',call_id:'ask-call',name:'ask_user',arguments:JSON.stringify({question:'Choose',options:['A','B']})}]}})}\n\n`)});
  await installExample(f);await route(f,'example.evidence-policy:host:varin.agent.policy@4',{projectId:'selected-project'});
- const a=await f.api.create('restart');const source=await f.api.prepareSource({...a,key:'source',path:f.workspace,mode:'fixed_branch'});const first=await f.api.submit({...a,key:'restart',expectedHead:null,text:'ask',model,source:source.source});await expect.poll(async()=>(await f.runtime.run(first.run_id)).state).toBe('waiting');const saved=(await f.runtime.launch(first.run_id))!.selection.policy;
+ const a=await f.api.create('restart');const source=await f.api.prepareSource({...a,key:'source',workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [],mode:'fixed_branch'});const first=await f.api.submit({...a,key:'restart',expectedHead:null,text:'ask',model,source:source.source});await expect.poll(async()=>(await f.runtime.run(first.run_id)).state).toBe('waiting');const saved=(await f.runtime.launch(first.run_id))!.selection.policy;
  await f.close();await f.extensions.stop();
  const second=await fixture((_body,response)=>complete(response,'unexpected','unexpected'),f.root,f.endpoint);
  const same=await second.runtime.preparePolicy(first.run_id);expect(same).toBeDefined();expect((await second.runtime.launch(first.run_id))!.selection.policy).toEqual(saved);second.kernel.releaseRunPolicyOwners(first.run_id);

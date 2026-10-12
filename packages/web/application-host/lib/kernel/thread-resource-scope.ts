@@ -364,16 +364,43 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
     };
     const base = createDocumentResourceReader({ domainId: projectId, viewId: sourceView, workspaceId: input.captureWorkspaceId,
       documents: owners.documents, list: (relative, signal) => listSourceDirectory(store, root, { domainId: projectId, viewId: sourceView }, relative, signal) });
+    const draftFiles = new Map((input.editorDrafts ?? []).map(draft => [normalize(draft.path), Buffer.from(draft.content)]));
+    const draftChildren = (relative: string): ResourceDirectoryEntry[] => {
+      const prefix = relative ? `${relative}/` : '';
+      const entries = new Map<string, ResourceDirectoryEntry>();
+      for (const file of draftFiles.keys()) {
+        if (!file.startsWith(prefix) || file === relative) continue;
+        const rest = file.slice(prefix.length); const name = rest.split('/')[0]!;
+        entries.set(name, { name, kind: rest.includes('/') ? 'directory' : 'file' });
+      }
+      return [...entries.values()];
+    };
+    const draftReference = (relative: string, version: string) => ({ domainId: projectId, viewId: sourceView,
+      path: relative, canonicalId: `resource:${projectId}/${relative}`, version });
     const source: ResourceReader = { ...base,
       async read(relative, signal) {
+        signal?.throwIfAborted();
         relative = normalize(relative); sourcePaths.add(relative);
+        const draft = draftFiles.get(relative);
+        if (draft) return { status: 'ready', reference: draftReference(relative, contentVersion(draft)), content: draft.toString('utf8') };
+        if (draftChildren(relative).length) return resourceFailure(source, relative, 'invalid', 'Captured draft path is a directory');
         try { const link = await external(relative); return link ? remap(source, relative, await link.reader.read(link.path, signal)) : base.read(relative, signal); }
         catch (error) { if ((error as NodeJS.ErrnoException).code === 'ELOOP') return resourceFailure(source, relative, 'invalid', 'Resource symlink cycle'); throw error; }
       },
       async list(relative, signal) {
+        signal?.throwIfAborted();
         relative = normalize(relative);
-        try { const link = await external(relative); if (link) return remap(source, relative, await link.reader.list(link.path, signal));
-          scopes.add(relative); return base.list(relative, signal); }
+        if (draftFiles.has(relative)) return resourceFailure(source, relative, 'invalid', 'Captured draft path is a file');
+        const children = draftChildren(relative);
+        try { const link = children.length ? undefined : await external(relative); if (link) return remap(source, relative, await link.reader.list(link.path, signal));
+          scopes.add(relative);
+          const listing = await base.list(relative, signal);
+          if (!children.length) return listing;
+          if (listing.status !== 'ready' && listing.status !== 'missing' && listing.status !== 'invalid') return listing;
+          const entries = new Map((listing.status === 'ready' ? listing.entries : []).map(entry => [entry.name, entry]));
+          for (const entry of children) entries.set(entry.name, entry);
+          const merged = [...entries.values()].sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+          return { status: 'ready', reference: draftReference(relative, contentVersion(JSON.stringify(merged))), entries: merged }; }
         catch (error) { if ((error as NodeJS.ErrnoException).code === 'ELOOP') return resourceFailure(source, relative, 'invalid', 'Resource symlink cycle'); throw error; }
       },
     };
@@ -483,7 +510,7 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
       async validate(states, signal) {
         for (const [file, observation] of observed.reads) {
           if (capture.sourceLinks.some(link => file === link.path || file.startsWith(`${link.path}/`))) continue;
-          const actualPath = normalize(path.relative(root, await canonicalizePathIdentity(path.join(root, file), { allowMissing: true })));
+          const actualPath = draftFiles.has(file) ? file : normalize(path.relative(root, await canonicalizePathIdentity(path.join(root, file), { allowMissing: true })));
           const state = states[actualPath];
           if (observation.status === 'ready' && (state?.kind !== 'regular-file' || state.objectHash !== `sha256-${contentVersion(observation.content)}`)) throw new Error('Source resource bytes changed during capture');
           if (observation.status === 'missing' && state && state.kind !== 'missing') throw new Error('Source resource absence changed during capture');

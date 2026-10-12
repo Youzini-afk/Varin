@@ -228,6 +228,23 @@ impl Review {
                         );
                     }
                     match method {
+                        "runtime.source.tools" => {
+                            let p: crate::protocol_generated::SourceToolsParams =
+                                serde_json::from_value(params)?;
+                            let tools = crate::tools::KernelToolExecutor::selected_schemas(
+                                &crate::tools::ToolKind::all().collect(),
+                            )
+                            .into_iter()
+                            .filter(|schema| {
+                                schema
+                                    .requirements
+                                    .as_ref()
+                                    .is_some_and(|required| required.accepts_mode(p.mode))
+                            })
+                            .map(|schema| schema.name)
+                            .collect::<Vec<_>>();
+                            Ok(json!(tools))
+                        }
                         "runtime.context.inspect" => {
                             let p: HistoryParams = serde_json::from_value(params)?;
                             let read = owner

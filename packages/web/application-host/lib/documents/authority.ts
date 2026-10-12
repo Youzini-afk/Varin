@@ -5,6 +5,8 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   parseAgentInputContext,
+  parseAgentInputSnapshotConsumer,
+  type AgentInputSnapshotConsumer,
   type AgentInputContext,
   type DocumentSurfaceWritePathResult,
   type DocumentSurfaceWriteResult,
@@ -316,7 +318,7 @@ interface CaptureAgentInputSnapshotRequest {
   generation: number;
   ownerId: string;
   resources: unknown[];
-  sessionId: string;
+  consumer: AgentInputSnapshotConsumer;
 }
 
 interface BeginDirtyStateBarrierOptions {
@@ -595,7 +597,38 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     throw new DocumentPathError('Path is outside workspace');
   };
 
-  const resolveResourceIdentity = async (resource: DocumentResource): Promise<{ coordinationId: string; aliases: DocumentResource[] }> => {
+  type ResourceIdentity = { coordinationId: string; aliases: DocumentResource[] };
+  function resolveResourceIdentity(resource: DocumentResource): Promise<ResourceIdentity>;
+  function resolveResourceIdentity(resource: DocumentResource, options: { withinWorkspaceId: string }): Promise<ResourceIdentity | null>;
+  async function resolveResourceIdentity(resource: DocumentResource, options?: { withinWorkspaceId: string }): Promise<ResourceIdentity | null> {
+    if (options !== undefined) {
+      if (!options || typeof options !== 'object' || Array.isArray(options)
+        || Object.keys(options).some((key) => key !== 'withinWorkspaceId')
+        || typeof options.withinWorkspaceId !== 'string' || !options.withinWorkspaceId) {
+        throw new DocumentPathError('A selected workspace identity is required', 400);
+      }
+      const selected = await admitWorkspaceRegistration(options.withinWorkspaceId);
+      const reference = await registry.get(resource.workspaceId);
+      if (!reference || reference.hostId !== hostId) throw new DocumentWorkspaceUnregisteredError();
+      try {
+        const relative = normalizeWorkspaceRelativePath(resource.resourceId);
+        if (reference.kind === 'file' && relative !== '') {
+          throw new DocumentPathError('A file resource root addresses only that file');
+        }
+      } catch (error) { return fail(error); }
+      const contains = (container: WorkspaceMapping, target: WorkspaceMapping): boolean => {
+        const root = normalizePathIdentity(container.canonicalPath, { pathModule, platform });
+        const candidate = normalizePathIdentity(target.canonicalPath, { pathModule, platform });
+        if (root === candidate) return true;
+        if (container.kind === 'file') return false;
+        const relative = pathModule.relative(root, candidate);
+        return Boolean(relative) && !pathModule.isAbsolute(relative)
+          && relative !== '..' && !relative.startsWith(`..${pathModule.sep}`);
+      };
+      // Only the original registered root kinds and canonical paths can prove
+      // disjointness. Overlapping roots still go through physical admission.
+      if (!contains(selected, reference) && !contains(reference, selected)) return null;
+    }
     const { resolved } = await resolveResourcePath(resource, true);
     const canonical = await canonicalizePathIdentity(resolved.absolutePath, {
       allowMissing: true, fsPromises, pathModule,
@@ -616,7 +649,8 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       let workspace: LoadedWorkspace;
       try {
         workspace = await loadWorkspace(mapping.workspaceId);
-      } catch {
+      } catch (error) {
+        if (mapping.workspaceId === options?.withinWorkspaceId) throw error;
         continue;
       }
       if (workspace.kind === 'file') {
@@ -633,7 +667,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       }
     }
     return { coordinationId: coordinationIdFor(hostId, canonical, pathModule, platform), aliases: [...aliases.values()] };
-  };
+  }
 
   const withResolvedResourceOperation = async <Result>(
     requests: ReadonlyArray<{ resource: DocumentResource; scope: 'exact' | 'subtree' }>,
@@ -2029,7 +2063,8 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   };
 
   const captureAgentInputSnapshot = async (request: CaptureAgentInputSnapshotRequest): Promise<AgentInputContext> => {
-    if (!request || typeof request.sessionId !== 'string' || !request.sessionId
+    const consumer = parseAgentInputSnapshotConsumer(request?.consumer);
+    if (!consumer
       || typeof request.ownerId !== 'string' || !request.ownerId
       || !Number.isSafeInteger(request.generation) || request.generation < 0
       || !Array.isArray(request.resources) || request.resources.length === 0) {
@@ -2046,6 +2081,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         || typeof resource.resourceId !== 'string'
         || (candidate.baseRevision !== null && typeof candidate.baseRevision !== 'string')
         || !Number.isSafeInteger(candidate.localEditRevision) || Number(candidate.localEditRevision) < 0
+        || (candidate.documentInstanceId !== undefined && (typeof candidate.documentInstanceId !== 'string' || !candidate.documentInstanceId))
         || typeof candidate.content !== 'string'
         || (candidate.encoding !== undefined && candidate.encoding !== 'utf-8')
         || (candidate.bom !== undefined && typeof candidate.bom !== 'boolean')
@@ -2067,6 +2103,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         bom: candidate.bom === undefined ? false : candidate.bom,
         content: candidate.content,
         localEditRevision: Number(candidate.localEditRevision),
+        ...(typeof candidate.documentInstanceId === 'string' ? { documentInstanceId: candidate.documentInstanceId } : {}),
         resource: { workspaceId: resource.workspaceId, resourceId: resource.resourceId },
         bufferHash,
         lineEnding,
@@ -2100,6 +2137,10 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
             || published.resource.workspaceId !== workspaceId
             || published.baseRevision !== resource.baseRevision
             || published.localEditRevision !== resource.localEditRevision
+            || published.documentInstanceId !== resource.documentInstanceId
+            || (published.encoding !== undefined && published.encoding !== resource.encoding)
+            || (published.bom !== undefined && published.bom !== resource.bom)
+            || (published.lineEnding !== undefined && published.lineEnding !== resource.lineEnding)
             || (publishedHash !== undefined && publishedHash !== serializedHash)
             || (resource.bufferHash !== undefined && resource.bufferHash !== serializedHash);
         })) {
@@ -2125,19 +2166,20 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       ownerId: request.ownerId,
       ownerGeneration: request.generation,
       resources: resolvedResources,
-      sessionId: request.sessionId,
+      consumer,
     });
   };
 
-  const releaseAgentInputSnapshot = (sessionId: unknown, value: unknown): { released: boolean } => {
-    if (typeof sessionId !== 'string' || !sessionId) {
-      throw new DocumentAuthorityError('Agent input snapshot session is malformed', { code: 'failed', statusCode: 400 });
+  const releaseAgentInputSnapshot = (valueConsumer: unknown, value: unknown): { released: boolean } => {
+    const consumer = parseAgentInputSnapshotConsumer(valueConsumer);
+    if (!consumer) {
+      throw new DocumentAuthorityError('Agent input snapshot consumer is malformed', { code: 'failed', statusCode: 400 });
     }
     const context = parseAgentInputContext(value);
     if (!context) {
       throw new DocumentAuthorityError('Agent input context is malformed', { code: 'failed', statusCode: 400 });
     }
-    return surfaceSnapshots.release(sessionId, context);
+    return surfaceSnapshots.release(consumer, context);
   };
 
   const commitAgentInputSnapshot = (sessionId: string, value: unknown): { committed: boolean } => {
@@ -2148,7 +2190,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     if (!context) {
       throw new DocumentAuthorityError('Agent input context is malformed', { code: 'failed', statusCode: 400 });
     }
-    return surfaceSnapshots.commit(sessionId, context);
+    return surfaceSnapshots.commit({ kind: 'pi-session', sessionId }, context);
   };
 
   const overlayAgentInputSnapshot = (
@@ -2156,7 +2198,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     context: AgentInputContext,
     resourceId: string,
     workspaceId: string,
-  ) => surfaceSnapshots.overlay(sessionId, context, resourceId, workspaceId);
+  ) => surfaceSnapshots.overlay({ kind: 'pi-session', sessionId }, context, resourceId, workspaceId);
 
   const applyAgentSurfaceWrite = async (
     sessionId: string,
@@ -2176,10 +2218,10 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       const { result } = await applyAgentSurfaceMutation({
         inspectSnapshot: fixedView
           ? (_sessionId, _context, resourceId, targetWorkspaceId) => fixedView.inspect(resourceId, targetWorkspaceId)
-          : surfaceSnapshots.inspect,
+          : (sessionId, context, resourceId, workspaceId) => surfaceSnapshots.inspect({ kind: 'pi-session', sessionId }, context, resourceId, workspaceId),
         surfaceOwner: fixedView
           ? (_sessionId, _context, targetWorkspaceId) => fixedView.owner(targetWorkspaceId)
-          : surfaceSnapshots.owner,
+          : (sessionId, context, workspaceId) => surfaceSnapshots.owner({ kind: 'pi-session', sessionId }, context, workspaceId),
         inspectDirtyBuffers,
         requestSurfaceOperation,
         inspectWorkspace: async (id) => mutations.inspect(id),
@@ -2271,7 +2313,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     resourceId: string,
     workspaceId: string,
   ): Promise<DocumentWriteGuardResult> => {
-    const draft = surfaceSnapshots.read(sessionId, context, resourceId, workspaceId);
+    const draft = surfaceSnapshots.read({ kind: 'pi-session', sessionId }, context, resourceId, workspaceId);
     // No draft owns this path: either the turn reads disk anyway, or a write
     // already superseded the draft, so reads and writes share one source.
     if (draft.status === 'disk') return { status: 'allow' };
@@ -2402,11 +2444,12 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     releaseAgentInputSnapshot,
     commitAgentInputSnapshot,
     overlayAgentInputSnapshot,
-    readAgentInputSnapshot: surfaceSnapshots.read,
-    inspectAgentInputSnapshot: surfaceSnapshots.inspect,
-    cloneAgentInputSnapshot: surfaceSnapshots.clone,
-    agentInputDraftPaths: surfaceSnapshots.draftPaths,
-    agentInputSurfaceOwner: surfaceSnapshots.owner,
+    readAgentInputSnapshot: (sessionId: string, context: AgentInputContext, resourceId: string, workspaceId: string) => surfaceSnapshots.read({ kind: 'pi-session', sessionId }, context, resourceId, workspaceId),
+    inspectAgentInputSnapshot: (sessionId: string, context: AgentInputContext, resourceId: string, workspaceId: string) => surfaceSnapshots.inspect({ kind: 'pi-session', sessionId }, context, resourceId, workspaceId),
+    cloneInputSnapshot: surfaceSnapshots.clone,
+    cloneAgentInputSnapshot: (sessionId: string, context: AgentInputContext) => surfaceSnapshots.clone({ kind: 'pi-session', sessionId }, context),
+    agentInputDraftPaths: (sessionId: string, context: AgentInputContext, workspaceId: string) => surfaceSnapshots.draftPaths({ kind: 'pi-session', sessionId }, context, workspaceId),
+    agentInputSurfaceOwner: (sessionId: string, context: AgentInputContext, workspaceId: string) => surfaceSnapshots.owner({ kind: 'pi-session', sessionId }, context, workspaceId),
     applyAgentSurfaceWrite,
     confirmedAgentSurfaceOperation,
     bindDurableMutationStorage: (fn: DurableMutationStorageFn | null) => {
@@ -2414,7 +2457,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     },
     inspectAgentWriteTarget,
     observeAgentWrite,
-    dropAgentInputSnapshots: surfaceSnapshots.dropSession,
+    dropAgentInputSnapshots: (sessionId: string) => surfaceSnapshots.dropConsumer({ kind: 'pi-session', sessionId }),
     registerDirtySurface,
     beginDirtyStateBarrier,
     acknowledgeDirtyStateBarrier,

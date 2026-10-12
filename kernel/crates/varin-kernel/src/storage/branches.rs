@@ -14,6 +14,9 @@ impl Storage {
                 let path = value.as_str().ok_or_else(|| {
                     KernelError::Operation(format!("{field} contains a non-string path"))
                 })?;
+                if field == "captureScopes" && path == "." {
+                    return Ok(".".to_string());
+                }
                 Self::validate_path(path).map(|segments| segments.join("/"))
             })
             .collect::<Result<Vec<_>, _>>()?;

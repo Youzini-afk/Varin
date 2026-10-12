@@ -2,9 +2,9 @@
 import type { createDocumentAuthority, DirtyBufferPublication } from '../../documents/authority.js';
 import type { CaptureToken } from '../../documents/mutation-authority.js';
 import { stateIdentity } from '../../recovery/journal-files.js';
-import type { ChildSourceProvenance, SourceResourceCapture } from '../../kernel/protocol.generated.js';
+import type { ChildSourceProvenance, SourceResourceCapture, SourceDraftProvenance } from '../../kernel/protocol.generated.js';
 type CapturedSourceProvenance = Exclude<ChildSourceProvenance, { consistency: 'fixed-root' }>;
-import { createBranchWithDraftBaseline } from './draft-baseline.js';
+import { createBranchWithDraftBaseline, overlayDraftsOnBaseline } from './draft-baseline.js';
 import type { RecoveryState, WorkingBranchRoot, WorkingStateRootStore, WorkingBranchCreateOptions } from './types.js';
 import { directoryBaselineFingerprint, gitBaselineFingerprint, withAncestorDirectories, type BaselineInventory } from './workspace-baseline.js';
 
@@ -108,7 +108,7 @@ export interface SourceResourceCapturePlan {
 }
 export interface StableSourcePreparationOwners {
   prepareResources?(input: { store: WorkingStateRootStore; directory: string; workspaceId: string;
-    captureWorkspaceId: string; branchId: string; signal?: AbortSignal }): Promise<SourceResourceCapturePlan>;
+    captureWorkspaceId: string; branchId: string; editorDrafts?: readonly { path: string; content: Buffer }[]; signal?: AbortSignal }): Promise<SourceResourceCapturePlan>;
   documents: SourceCaptureDocuments;
   inspectInventory: StableDirectoryCaptureInput['inspectInventory'];
 }
@@ -121,7 +121,10 @@ export interface StableSourceCaptureInput {
   branchId: string;
   directory: string;
   captureScopes: readonly string[];
-  content: { mode: 'saved-files' } | { mode: 'fixed-draft-baseline'; draftBaselineId: string };
+  content: { mode: 'saved-files' } | { mode: 'fixed-draft-baseline'; draftBaselineId?: string };
+  captureIdentity?: string;
+  drafts?: SourceDraftProvenance;
+  editorDrafts?: readonly { path: string; content: Buffer }[];
   signal?: AbortSignal;
   onProgress?: (completed: number, total: number) => void;
 }
@@ -147,6 +150,7 @@ export async function captureStableSourceBaseline(
   const restored = await store.readSourcePreparation(input.branchId, signal ? { signal } : undefined);
   if (restored) {
     if (restored.provenance.consistency === 'fixed-root' || restored.provenance.contentMode !== input.content.mode
+      || restored.provenance.captureIdentity !== input.captureIdentity
       || JSON.stringify(restored.provenance.captureScopes) !== JSON.stringify([...new Set(input.captureScopes)].sort())) {
       throw new Error('Source preparation has different fixed provenance');
     }
@@ -157,6 +161,7 @@ export async function captureStableSourceBaseline(
   const barrier = await documents.beginDirtyStateBarrier(captureWorkspaceId, ['.'], { signal });
   let token: CaptureToken | undefined;
   let captured: StableDirectoryCapture | undefined;
+  const draftOwners: Array<() => Promise<void>> = [];
   try {
     token = await documents.beginCapture(captureWorkspaceId, {}, signal);
     const assertWriters = async (): Promise<void> => {
@@ -164,12 +169,27 @@ export async function captureStableSourceBaseline(
       if (state.activeWriters.length) throw new SourceCaptureError('controlled writers are active');
     };
     await assertWriters();
+    let editorDrafts = input.editorDrafts ? [...input.editorDrafts] : [];
+    if (input.content.mode === 'fixed-draft-baseline' && input.content.draftBaselineId) {
+      if (input.editorDrafts) throw new Error('Source capture cannot select two draft owners');
+      const baseline = await store.getDraftBaseline(input.content.draftBaselineId);
+      if (!baseline || baseline.workspaceId !== input.workspaceId) throw new Error('Source draft baseline is unavailable');
+      editorDrafts = await Promise.all(Object.entries(baseline.pathStates).map(async ([path, state]) => {
+        if (state.kind !== 'regular-file') throw new Error('Source draft baseline contains a non-file');
+        const content = await store.getObject(state.objectHash);
+        if (!content) throw new Error('Source draft baseline bytes are unavailable');
+        return { path, content };
+      }));
+    }
     const resources = await owners.prepareResources?.({ store, directory: input.directory, workspaceId: input.workspaceId,
-      captureWorkspaceId, branchId: input.branchId, ...(signal ? { signal } : {}) });
+      captureWorkspaceId, branchId: input.branchId, editorDrafts, ...(signal ? { signal } : {}) });
     captured = await captureStableDirectoryBaseline({ ...input,
       captureScopes: [...input.captureScopes, ...resources?.captureScopes ?? []],
       ...(resources ? { capturePaths: resources.observedPaths } : {}), inspectInventory: owners.inspectInventory });
-    await resources?.validate(captured.states, signal);
+    const effective = editorDrafts.length ? await overlayDraftsOnBaseline({ baseState: captured.states, drafts: editorDrafts,
+      putObject: async bytes => { signal?.throwIfAborted(); const object = await store.putObject(bytes);
+        if (object.release) draftOwners.push(object.release); return object; } }) : { effectiveState: captured.states, changedPaths: [] };
+    await resources?.validate(effective.effectiveState, signal);
     await barrier.settle();
     const dirty = await documents.inspectDirtyBuffers(captureWorkspaceId);
     await assertWriters();
@@ -179,12 +199,15 @@ export async function captureStableSourceBaseline(
     signal?.throwIfAborted();
     const scopes = [...new Set(input.captureScopes)].sort();
     const provenance: CapturedSourceProvenance = { consistency: captured.consistency, contentMode: input.content.mode,
+      ...(input.captureIdentity ? { captureIdentity: input.captureIdentity } : {}), ...(input.drafts ? { drafts: input.drafts } : {}),
       omittedDraftPaths: input.content.mode === 'saved-files' ? draftPaths(dirty) : [], captureScopes: scopes,
       ...(resources ? { resources: { ...resources.resources, coverage: captured.consistency === 'stable-capture' ? { kind: 'complete' as const }
-        : { kind: 'selected' as const, paths: [...new Set([...Object.keys(captured.states), ...resources.observedPaths])].sort(),
-          subtrees: [...new Set([...scopes, ...resources.captureScopes])].filter(file => file === '.' || captured!.states[file]?.kind === 'directory').map(file => file === '.' ? '' : file).sort() } } } : {}) };
-    const branch = await createCapturedSourceBranch(store, input.workspaceId, input.branchId, captured.states, captured.baseRef,
-      scopes, input.content.mode === 'fixed-draft-baseline' ? input.content.draftBaselineId : undefined, { sourceProvenance: provenance });
+        : { kind: 'selected' as const, paths: [...new Set([...Object.keys(effective.effectiveState), ...resources.observedPaths])].sort(),
+          subtrees: [...new Set([...scopes, ...resources.captureScopes])].filter(file => file === '.' || effective.effectiveState[file]?.kind === 'directory').map(file => file === '.' ? '' : file).sort() } } } : {}) };
+    const branch = await store.createBranch(input.workspaceId, input.branchId, effective.effectiveState, captured.baseRef,
+      effective.changedPaths, scopes, { sourceProvenance: provenance });
+    // Draft overlays can replace captured disk objects; only the committed root keeps bytes.
+    await store.releaseCapturedStates(captured.states);
     return { branch, provenance };
   } catch (error) {
     if (captured) await store.releaseCapturedStates(captured.states);
@@ -193,7 +216,12 @@ export async function captureStableSourceBaseline(
     // Cleanup does not reuse an aborted signal: the existing capture subscription
     // and barrier still need to release their actual owner resources.
     if (token) await documents.completeCapture(token).catch(() => undefined);
-    await barrier.release();
+    try { await barrier.release(); }
+    finally {
+      const releases = await Promise.allSettled(draftOwners.map(release => release()));
+      const failures = releases.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+      if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Source draft upload cleanup failed');
+    }
   }
 }
 

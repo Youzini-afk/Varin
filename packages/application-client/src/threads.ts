@@ -1,4 +1,4 @@
-import type { ContextSummaryRecipe, SourceFailureCode } from '@varin/protocol';
+import type { AgentInputContext, ChildSourceProvenance, ContextSummaryRecipe, SourceFailureCode } from '@varin/protocol';
 import type { DocumentReadRequest, FetchResult } from '@varin/protocol';
 import type { McpInteractionListParams, McpInteractionReadParams, McpInteractionRespondParams, McpInteractionPage, McpInteractionView, McpSamplingRequestReviewParams, McpSamplingOutputReviewParams } from '@varin/protocol';
 import type { MediaReadParams, MediaReadChunk } from '@varin/protocol';
@@ -36,12 +36,15 @@ export type ThreadSource = ThreadSourceBase & (
 );
 export interface ThreadPrepareSource extends ThreadIdentity {
   key: string;
-  path: string;
+  workspaceId: string;
   mode: ThreadSource['mode'];
+  content: { mode: 'saved-files' } | { mode: 'surface-drafts'; context: AgentInputContext };
+  captureScopes: string[];
 }
 export interface ThreadPreparedSource {
   path: string;
   source: ThreadSource;
+  provenance?: ChildSourceProvenance;
 }
 export interface ThreadSubmit extends ThreadIdentity {
   key: string;
@@ -247,7 +250,7 @@ export interface ThreadsAPI {
   selectModel(input: ThreadIdentity & { runId: string; key: string; model: ThreadModel }): Promise<RunModelSelection>;
   list(): Promise<ThreadSummary[]>;
   create(key: string): Promise<ThreadIdentity>;
-  prepareSource(input: ThreadPrepareSource): Promise<ThreadPreparedSource>;
+  prepareSource(input: ThreadPrepareSource, signal?: AbortSignal): Promise<ThreadPreparedSource>;
   /** Fork immutable conversation ancestry; live runs and resource grants are not copied. */
   fork(input: ThreadIdentity & { key: string; headId: string | null }): Promise<ThreadIdentity>;
   compact(input: ThreadCompact): Promise<ContextJob>;

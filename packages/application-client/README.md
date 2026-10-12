@@ -22,6 +22,18 @@ selection validation and object cleanup; the UI sends a frozen branch/revision s
 referenced by a version and bytes actually removed by cleanup are distinct fields. These DTOs do not
 add an Agent tool or a second state store.
 
+`ThreadsAPI.prepareSource` takes a Documents-resolved `workspaceId`, stable key, source mode,
+explicit saved-files or surface-drafts content, and capture scopes. A draft context belongs to the
+exact Thread/branch consumer. The picker preserves that entire intent for an uncertain retry; it
+does not resolve the folder again or capture newer editor bytes under the same key. The Host owns
+durable preparation receipts and resource cleanup. Cancelling one observer does not cancel another
+observer of the same preparation; the last cancellation waits for that preparation's work to drain.
+
+`DocumentsAPI.resolveResourceIdentity(resource, { withinWorkspaceId })` scopes alias discovery to a
+selected registered root. A `null` result means the Host proved the registered roots disjoint;
+unavailable or untrusted overlapping roots still fail. Calling without a scope returns the ordinary
+physical identity. Consumers do not parse the opaque coordination ID as a filesystem path.
+
 `ThreadsAPI.resume(runId, waitId)` explicitly consumes the displayed policy Pause and returns its
 durable receipt. Retrying the same command preserves that receipt and cannot resume a later Pause.
 `retryPreparation(runId)` is a separate launch-preparation retry; queueing input is not a resume

@@ -132,7 +132,7 @@ async function fixture(options: {
       generation: 1,
       ownerId: "surface",
       resources: [{ baseRevision, bom, content, encoding: "utf-8", localEditRevision, resource }],
-      sessionId: actor.sessionId,
+      consumer: { kind: 'pi-session', sessionId: actor.sessionId },
     });
   };
   return { actor, capture, documents, paths, request, workspace, write };
@@ -157,7 +157,7 @@ describe("native read source through Host router and Documents", () => {
     const snapshots = createSurfaceSnapshotStore({ caseSensitive: false });
     const context = snapshots.capture({
       ownerId: "surface",
-      sessionId: "session",
+      consumer: { kind: 'pi-session', sessionId: "session" },
       resources: [{
         baseRevision: null,
         bom: false,
@@ -168,7 +168,7 @@ describe("native read source through Host router and Documents", () => {
       }],
     });
 
-    expect(snapshots.read("session", context, "SRC/draft.ts", "workspace")).toMatchObject({
+    expect(snapshots.read({ kind: 'pi-session', sessionId: "session" }, context, "SRC/draft.ts", "workspace")).toMatchObject({
       status: "ready",
       content: "fixed\n",
     });
@@ -261,7 +261,7 @@ describe("native read source through Host router and Documents", () => {
       await f.documents.publishDirtyBuffers({ ownerId: "two-root-surface", generation: 1, workspaceId: row.resource.workspaceId, resources: [row] });
     }
     const context = await f.documents.captureAgentInputSnapshot({
-      ownerId: "two-root-surface", generation: 1, sessionId: f.actor.sessionId, resources: rows,
+      ownerId: "two-root-surface", generation: 1, consumer: { kind: 'pi-session', sessionId: f.actor.sessionId }, resources: rows,
     });
     for (const [target, expected] of [["same.txt", "A draft\n"], [path.join(outside, "same.txt"), "B draft\n"]] as const) {
       const response = await f.request(target, context);
@@ -323,7 +323,7 @@ describe("native read source through Host router and Documents", () => {
       generation: 1,
       ownerId: "surface",
       resources: [{ ...binding, content: "B\n" }],
-      sessionId: f.actor.sessionId,
+      consumer: { kind: 'pi-session', sessionId: f.actor.sessionId },
     });
     f.documents.commitAgentInputSnapshot(f.actor.sessionId, context);
     try {

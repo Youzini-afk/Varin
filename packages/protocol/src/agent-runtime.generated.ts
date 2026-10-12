@@ -2297,7 +2297,11 @@ export interface ChildSourceHandoff {
 
 export type ChildSourceRoot = { kind: 'fixed'; pin: ChildSourcePin } | { kind: 'physical'; root: LiveRoot };
 
-export type ChildSourceProvenance = { consistency: 'fixed-root'; root: string; resources?: SourceResourceCapture } | { consistency: 'stable-capture' | 'git-base-with-overlay'; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; resources?: SourceResourceCapture };
+export interface SourceDraftResource { workspaceId: string; resourceId: string; baseRevision: string | null; localEditRevision: number; revision: string; encoding: string; bom: boolean; coordinationId?: string; documentInstanceId?: string; bufferHash?: string; lineEnding?: 'lf' | 'crlf' | 'cr'; }
+
+export interface SourceDraftProvenance { threadId: string; branchId: string; snapshotRef: string; ownerId: string; ownerGeneration: number; resources: SourceDraftResource[]; }
+
+export type ChildSourceProvenance = { consistency: 'fixed-root'; root: string; resources?: SourceResourceCapture } | { consistency: 'stable-capture' | 'git-base-with-overlay'; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; captureIdentity?: string; drafts?: SourceDraftProvenance; resources?: SourceResourceCapture };
 
 export type ChildSource = { kind: 'absent' } | { kind: 'pending'; handoff: ChildSourceHandoff } | { kind: 'ready'; handoff: ChildSourceHandoff | null; pin: ChildSourcePin; selection: LaunchSource; provenance: ChildSourceProvenance };
 

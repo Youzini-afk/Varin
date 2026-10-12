@@ -1,3 +1,4 @@
+import { normalizeThreadSourcePreparation } from './thread-sources.js';
 import { threadSourceFailureMessage } from '@varin/application-client';
 import { sourceFailureCode } from './source-admission-error.js';
 import type { McpElicitationResponse, McpSamplingRequestAction, McpSamplingOutputAction } from '@varin/protocol';
@@ -94,7 +95,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'mcp/interactions/respond': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId', 'expectedRevision', 'response'],
     'mcp/interactions/sampling/request': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId', 'expectedRevision', 'action', 'model', 'editedRequest'],
     'mcp/interactions/sampling/output': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId', 'expectedRevision', 'action'],
-    'source/prepare': ['runtime', 'threadId', 'branchId', 'key', 'path', 'mode'],
+    'source/prepare': ['runtime', 'threadId', 'branchId', 'key', 'workspaceId', 'mode', 'content', 'captureScopes'],
     'context/compact': ['runtime', 'threadId', 'branchId', 'key', 'throughId', 'expectedRevision', 'model'],
     'context/publish': ['runtime', 'threadId', 'branchId', 'runId'], 'context/cancel': ['runtime', 'threadId', 'branchId', 'runId'], 'context/resume': ['runtime', 'threadId', 'branchId', 'runId'],
     'messages/send': ['runtime', 'threadId', 'branchId', 'request'],
@@ -343,9 +344,10 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('list', async () => (await adapter.runtime.threads()).filter(thread => thread.thread_id.startsWith('thread:')));
   post('create', body => adapter.create(text(body.key)));
   post('fork', (body, signal) => adapter.fork({ ...identity(body), key: text(body.key), headId: body.headId === null ? null : text(body.headId) }, signal));
-  post('source/prepare', body => {
+  post('source/prepare', (body, signal) => {
     if (body.mode !== 'fixed_branch' && body.mode !== 'materialized' && body.mode !== 'live_root') throw new Error('Invalid source mode');
-    return adapter.prepareSource({ ...identity(body), key: text(body.key), path: text(body.path), mode: body.mode });
+    return adapter.prepareSource(normalizeThreadSourcePreparation({ ...identity(body), key: text(body.key), workspaceId: text(body.workspaceId), mode: body.mode,
+      content: body.content, captureScopes: body.captureScopes } as import('@varin/application-client').ThreadPrepareSource), signal);
   });
   post('context/compact', body => {
     return adapter.compact({ ...identity(body), key: text(body.key), throughId: text(body.throughId), expectedRevision: revision(body.expectedRevision),

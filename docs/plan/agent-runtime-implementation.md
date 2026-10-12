@@ -14,12 +14,19 @@
 - 推理用途接入不等于每个用途都有本地推理包。已有提供商 decision/rerank/embedding 的配置、真实消费者与原生执行合同仍需保留/接通；本地包当前只有已有 Bekko。用户本轮明确暂缓 native 图像生成，不计剩余交付范围；旧 Pi 的 `models.generateImages()` 基础不等于 native 已实现。§18.1/§24 的建议/评估限定已有配置的辅助请求，不能扩成默认模型链；没有另设独立“材料 rerank”产品的任务。此前清单混用用途、消费者和本地包，现以这些明确边界纠正，历史台账不充当新需求。
 - 已有本地嵌入是 `bekko-embedding-v1-a8m` 的 `local-semantic` ONNX 组件。下述增量已将其原安装/校验/worker 接入 native query 和前台文档向量，HTTP 仍是显式配置的另一执行器。HTTP 或受控本地模型的执行验证不代表用户配置了外部服务，也不代表实际 ONNX 权重、硬件质量/性能已验收；当前组件协议需按原 builder 构建 v3 包后导入。
 
+## 2026-10-12 增量：Documents 草稿与固定来源
+
+- 原 Source picker/client/认证 Router 用一次 Documents 注册后的 workspaceId，显式选择 saved-files/surface-drafts/captureScopes，并冻结完整重试意图。Thread 快照不可变，Pi 原 own-write 消费保持；BOM/行尾、文档实例/修订经原 provenance 引用保存，正文进入既有 WorkingState root。
+- 设置/指令/skills 与文件正文消费同一草稿覆盖视图。Git 子目录的 inventory/hash 使用真实选定根，原 index identity 参与稳定性判断；原 branch-create receipt 先读，移根/过期快照重试仍返回同一固定来源，当前信任及物理执行准入不混用。
+- 共享准备取消只在最后观察者退出时排空原作业，未转移对象沿原 owner 释放。fixed child 继承原 pin/baseRef 与来源关系，没有第二草稿库。[本轮记录](../reviews/runtime-document-source-2026-10-12.md)区分 UI/Documents、受控树、真实 Rust/Host 与构建证据。Catalog **65**、wire **24**保持。
+- 对话回退与组合文件恢复另沿原 affected-file journal/HistoryBranch 实现中；本片捕获不等于恢复 Git index、外部修改或编辑器缓冲。
+
 ## 2026-10-12 增量：Bot 产品与原记忆/Plan、摘要准备
 
 - 新建 Agent Bot 的实际 Thread/branch 已沿原 BotProfile、client、认证 Router 与共享工作台接通；默认仍 Pi。原 MemoryService/Knowledge 处理 typed native 历史来源、Bot/user/current-Thread 召回及原事务回执，实际 RequestSnapshot 消费同一状态。Sleep/Wake 保留原等待与手动暂停，加入原 Host domain/preparation、子任务与 Computer 执行停止证据；删除另沿原 owner 释放确切引用。
 - Bot 记忆随原 ContextJob 配方冻结，并由原 ContentStore manifest/checkpoint 引用持有；只有发布 CAS 推进摘要基线。后台摘要按实际耗时/输入增长提前准备，当前 Decision 及实际 provider 序列化的完整输入决定自动发布，超预算保留原候选与原文，不自动重新收费。
 - 原 Plan 域接实际 Bot 身份和 selected Tool/Operation。文件 source 的 read-only 不是所有领域只读；不新增禁止独立 notes/plan 修改的权限表。原持久 mutation receipt 与同 epoch 执行停止事实各保其语义。
-- Catalog **65**、wire **24**。[本轮记录](../reviews/runtime-bot-product-context-2026-10-12.md)分列真实 Bot stdio、记忆基线 GC、Plan child/Host 和 UI/direct Router 的证据，未把受控 provider 当实际模型验收。下一实际实现缺口是原 Documents 草稿、Git 来源和明确恢复在 native 产品中的消费者，复用已有存储及捕获 owner。
+- Catalog **65**、wire **24**。[本轮记录](../reviews/runtime-bot-product-context-2026-10-12.md)分列真实 Bot stdio、记忆基线 GC、Plan child/Host 和 UI/direct Router 的证据，未把受控 provider 当实际模型验收。后续 Documents 草稿/Git 来源的当前合同见上方增量；明确恢复继续复用原 journal 和历史 owner。
 
 ## 2026-10-12 增量：私有 Bot 身份与可恢复暂停基础
 

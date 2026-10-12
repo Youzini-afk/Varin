@@ -72,7 +72,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const storage = new KernelStorageAdapter({ client: kernel, hostId: 'http-review', storageRoot: root, resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root });
   const workingStates = createKernelWorkspaceWorkingStateAccess(storage);
   const resources = resourceScopeFixture(root, workingStates, documents, undefined, (input, consume) => storage.withResourceRead(input, consume));
-  const prepare = createThreadSourcePreparer({ sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, prepareResources: resources.prepareSourceCapture });
+  const prepare = createThreadSourcePreparer({ inspectInventory: async () => ({ kind: 'directory' }), sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, prepareResources: resources.prepareSourceCapture });
   let refresh = () => Promise.resolve();
   const refreshTasks: Promise<void>[] = [];
   const personalization = createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'selected-project' }), onChanged: () => { const task = refresh(); void task.catch(() => undefined); refreshTasks.push(task); } });
@@ -128,7 +128,7 @@ it('packaged default and installable scoped example reach captured model request
   const f = await fixture((_body, response) => { if (++count === 1) held = response; else complete(response, `composition-${count}`, 'done'); });
   const identity = await f.api.create('composition-review');
   await fs.writeFile(path.join(f.workspace, 'AGENTS.md'), 'FROZEN WORKSPACE');
-  const source = await f.api.prepareSource({ ...identity, key: 'source', path: f.workspace, mode: 'fixed_branch' });
+  const source = await f.api.prepareSource({ ...identity, key: 'source', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   const first = await f.api.submit({ ...identity, key: 'first', expectedHead: null, text: 'first', model, source: source.source });
   await expect.poll(() => f.requests.length).toBe(1);
   const oldBytes = structuredClone(f.requests[0]!.body);
@@ -277,7 +277,7 @@ it('calendar GUI assets reach original source/model/context owners, consume a ge
     const scheduler = createScheduledTasksRuntime({ projectConfigRuntime: config, listProjects: projects, executeTask: async () => { throw new Error('Native calendar cannot dispatch Pi'); } });
     const errors: unknown[] = [];
     scheduler.setCalendarOwner(new CalendarOwner({ runtime: f.runtime, projects, hasPiWork: scheduler.hasPiWork,
-      prepare: (work, project, signal) => f.adapter.prepareCalendarWork(work, project, signal), onChanged() {}, onError: error => errors.push(error) }));
+      prepare: async (work, project, signal) => f.adapter.prepareCalendarWork(work, (await f.documents.resolveWorkspace({ path: project })).workspaceId, signal), onChanged() {}, onError: error => errors.push(error) }));
     const service = createScheduledTaskService({ projectConfigRuntime: config, scheduledTasksRuntime: scheduler, readSettingsFromDisk: async () => ({ projects: await projects() }), sanitizeProjects: value => value as Awaited<ReturnType<typeof projects>> });
     registerScheduledTaskRoutes(f.app, { scheduledTaskService: service, projectConfigRuntime: config, scheduledTasksRuntime: scheduler,
       readSettingsFromDisk: async () => ({ projects: await projects() }), sanitizeProjects: value => value as Awaited<ReturnType<typeof projects>>,

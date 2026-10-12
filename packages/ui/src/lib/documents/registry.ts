@@ -10,7 +10,7 @@ import type {
   Subscription,
 } from '@varin/application-client';
 import { DocumentsError } from '@varin/application-client';
-import { parseAgentInputContext, type AgentInputContext } from '@varin/protocol';
+import { parseAgentInputContext, type AgentInputContext, type AgentInputSnapshotConsumer } from '@varin/protocol';
 import { peekAgentFileChangeHint } from '@/lib/agent-editor/hints';
 import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import { detectLineEnding, normalizeEditorLineEndings, serializeEditorContent } from './line-ending';
@@ -464,12 +464,14 @@ export class DocumentRegistry {
     return { generation: this.getGeneration(), ownerId: this.dirtyOwnerId };
   }
 
-  async captureAgentInputContext(sessionId: string): Promise<AgentInputContext> {
+  async captureAgentInputContext(consumer: AgentInputSnapshotConsumer, workspaceId?: string): Promise<AgentInputContext> {
     this.assertActive();
     const generation = this.getGeneration();
+    const selectedAliases = (record: DocumentRecord) => this.aliasesFor(record.identity)
+      .filter((alias) => workspaceId === undefined || alias.workspaceId === workspaceId);
     const dirtyBuffers = [...this.records.values()].filter((record) => record.dirty);
     if (dirtyBuffers.length === 0) return { source: 'disk' };
-    const knownRecords = dirtyBuffers.flatMap((record) => this.aliasesFor(record.identity)
+    const knownRecords = dirtyBuffers.flatMap((record) => selectedAliases(record)
       .map((alias) => ({ record, alias })));
     const rootsOf = (entries: typeof knownRecords) => [...new Set(entries.map(({ alias }) => alias.workspaceId))].map((workspaceId) => ({
       workspaceId,
@@ -480,30 +482,40 @@ export class DocumentRegistry {
       roots: rootsOf(entries),
       snapshot: { status: 'unavailable', reason: 'surface-unavailable' },
     });
-    // Registered aliases can go offline between editor operations. Recheck the
-    // physical identity once per dirty buffer so an unavailable secondary root
-    // neither blocks a valid source nor makes a different target inherit it.
+    // Newly selected parent/nested roots may not be in the editor aliases yet.
+    // The Host excludes disjoint registrations before physical admission; only
+    // verified selected aliases enter capture. Failed candidates are not clean disk.
     const verifiedRecords = await Promise.all(dirtyBuffers.map(async (record): Promise<typeof knownRecords | null> => {
       let verified: VarinResourceReference[] | null = null;
+      let excluded = workspaceId !== undefined;
       for (const alias of this.aliasesFor(record.identity)) {
         try {
-          const result = await this.documents.resolveResourceIdentity(alias);
+          const result = workspaceId === undefined
+            ? await this.documents.resolveResourceIdentity(alias)
+            : await this.documents.resolveResourceIdentity(alias, { withinWorkspaceId: workspaceId });
+          if (result === null) continue;
+          excluded = false;
           if (result.coordinationId === this.keyFor(record.identity)) {
             verified = result.aliases;
             break;
           }
-        } catch { /* Another known alias may still address this buffer. */ }
+        } catch {
+          excluded = false;
+          // Another known alias may still address this buffer.
+        }
       }
-      if (!verified) return null;
-      const unique = new Map(verified.map((alias) => [`${alias.workspaceId}\0${alias.resourceId}`, alias]));
+      if (!verified) return excluded ? [] : null;
+      const unique = new Map(verified.filter((alias) => workspaceId === undefined || alias.workspaceId === workspaceId)
+        .map((alias) => [`${alias.workspaceId}\0${alias.resourceId}`, alias]));
       return [...unique.values()].map((alias) => ({ record, alias }));
     }));
     if (verifiedRecords.some((entries) => entries === null)
       || this.disposed || generation !== this.getGeneration()
-      || dirtyBuffers.some((record) => this.records.get(this.keyFor(record.identity)) !== record)) {
+      || verifiedRecords.some((entries) => entries?.some(({ record }) => this.records.get(this.keyFor(record.identity)) !== record))) {
       return unavailable(knownRecords);
     }
     const dirtyRecords: typeof knownRecords = verifiedRecords.flatMap((entries) => entries ?? []);
+    if (dirtyRecords.length === 0) return { source: 'disk' };
     dirtyRecords.sort((left, right) => left.alias.workspaceId.localeCompare(right.alias.workspaceId)
       || left.alias.resourceId.localeCompare(right.alias.resourceId));
     const roots = rootsOf(dirtyRecords);
@@ -520,7 +532,7 @@ export class DocumentRegistry {
       resource: { workspaceId: alias.workspaceId, resourceId: alias.resourceId },
     })));
     if (this.disposed || generation !== this.getGeneration()
-      || dirtyBuffers.some((record) => this.records.get(this.keyFor(record.identity)) !== record)) {
+      || dirtyRecords.some(({ record }) => this.records.get(this.keyFor(record.identity)) !== record)) {
       return unavailable(dirtyRecords);
     }
     try {
@@ -535,24 +547,34 @@ export class DocumentRegistry {
         generation,
         ownerId: this.dirtyOwnerId,
         resources,
-        sessionId,
+        consumer,
       }));
+      if (captured?.source === 'surface' && captured.snapshot.status === 'ready'
+        && (this.disposed || generation !== this.getGeneration())) {
+        await this.releaseAgentInputContext(consumer, captured);
+        return unavailable(dirtyRecords);
+      }
       if (!captured || captured.source !== 'surface'
         || captured.snapshot.status !== 'ready'
         || captured.roots.length !== roots.length
         || roots.some((root) => {
           const actual = captured.roots.find((entry) => entry.workspaceId === root.workspaceId);
           return !actual || !sameResourceSet(new Set(actual.dirtyPaths), new Set(root.dirtyPaths));
-        })) return unavailable(dirtyRecords);
+        })) {
+        if (captured?.source === 'surface' && captured.snapshot.status === 'ready') {
+          await this.releaseAgentInputContext(consumer, captured);
+        }
+        return unavailable(dirtyRecords);
+      }
       return captured;
     } catch {
       return unavailable(dirtyRecords);
     }
   }
 
-  async releaseAgentInputContext(sessionId: string, context: AgentInputContext): Promise<void> {
+  async releaseAgentInputContext(consumer: AgentInputSnapshotConsumer, context: AgentInputContext): Promise<void> {
     if (context.source !== 'surface' || context.snapshot.status !== 'ready') return;
-    await this.documents.releaseAgentInputSnapshot?.({ context, sessionId });
+    await this.documents.releaseAgentInputSnapshot?.({ context, consumer });
   }
 
   private barrierPath(value: string, caseSensitive: boolean): string {

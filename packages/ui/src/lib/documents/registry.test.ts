@@ -9,6 +9,7 @@ import type {
   VarinDocumentSurfaceOperationPayload,
   VarinDocumentWatchEvent,
   VarinResourceReference,
+  VarinResourceIdentity,
 } from '@varin/application-client';
 import { DocumentRegistry } from './registry';
 import { documentKey } from './types';
@@ -62,6 +63,7 @@ const createMemoryDocuments = () => {
   let workspaceEpoch = 1;
   let watchSequence = 0;
   const coordinationOverrides = new Map<string, string>();
+  const unavailableWorkspaceIds = new Set<string>();
   const keyOf = (ref: VarinResourceReference) => {
     const alias = `${ref.workspaceId}\0${ref.resourceId}`;
     return coordinationOverrides.get(alias) ?? alias;
@@ -70,6 +72,18 @@ const createMemoryDocuments = () => {
   const emit = (event: VarinDocumentWatchEvent) => {
     for (const listener of listeners) listener(event);
   };
+  function resolveResourceIdentity(ref: VarinResourceReference): Promise<VarinResourceIdentity>;
+  function resolveResourceIdentity(ref: VarinResourceReference, options: { withinWorkspaceId: string }): Promise<VarinResourceIdentity | null>;
+  async function resolveResourceIdentity(ref: VarinResourceReference, options?: { withinWorkspaceId: string }): Promise<VarinResourceIdentity | null> {
+    const aliases = [...coordinationOverrides.entries()].filter(([, physical]) => physical === keyOf(ref))
+      .map(([alias]) => {
+        const separator = alias.indexOf('\0');
+        return { workspaceId: alias.slice(0, separator), resourceId: alias.slice(separator + 1) };
+      }).concat(ref);
+    if (options && !aliases.some((alias) => alias.workspaceId === options.withinWorkspaceId)) return null;
+    if (unavailableWorkspaceIds.has(ref.workspaceId)) throw new Error('Workspace is unavailable');
+    return { coordinationId: `host-1\0${keyOf(ref)}`, aliases };
+  }
 
   const api: DocumentsAPI = {
     ackDirtyStateBarrier: async (request) => {
@@ -96,14 +110,7 @@ const createMemoryDocuments = () => {
       return { ...request, updatedAt: '2026-08-28T00:00:00.000Z' };
     },
     resolveWorkspace: async ({ workspaceId }) => ({ workspaceId: workspaceId ?? resource().workspaceId, hostId: 'host-1', epoch: workspaceEpoch }),
-    resolveResourceIdentity: async (ref) => ({
-      coordinationId: `host-1\0${keyOf(ref)}`,
-      aliases: [...coordinationOverrides.entries()].filter(([, physical]) => physical === keyOf(ref))
-        .map(([alias]) => {
-          const separator = alias.indexOf('\0');
-          return { workspaceId: alias.slice(0, separator), resourceId: alias.slice(separator + 1) };
-        }).concat(ref),
-    }),
+    resolveResourceIdentity,
     read: async (ref) => {
       const file = files.get(keyOf(ref));
       if (!file) return { status: 'missing', epoch: workspaceEpoch, resource: ref };
@@ -247,6 +254,7 @@ const createMemoryDocuments = () => {
   return {
     api,
     coordinationOverrides,
+    unavailableWorkspaceIds,
     barrierAcknowledged,
     barrierAcknowledgements,
     dirtyPublications,
@@ -442,7 +450,7 @@ describe('DocumentRegistry', () => {
       await registry.open(secondary);
       registry.applyTransaction(primary, 'unsaved\n', { origin: 'editor' });
       secondaryOnline = false;
-      const context = await registry.captureAgentInputContext('session-1');
+      const context = await registry.captureAgentInputContext({ kind: 'pi-session', sessionId: 'session-1' });
       expect(context).toEqual({
         source: 'surface',
         roots: [{ workspaceId: primary.workspaceId, dirtyPaths: [primary.resourceId] }],
@@ -509,7 +517,7 @@ describe('DocumentRegistry', () => {
       await Promise.all([registry.open(first), registry.open(second)]);
       registry.applyTransaction(first, 'A draft\n', { origin: 'editor-a' });
       registry.applyTransaction(second, 'B draft\n', { origin: 'editor-b' });
-      const context = await registry.captureAgentInputContext('two-root-session');
+      const context = await registry.captureAgentInputContext({ kind: 'pi-session', sessionId: 'two-root-session' });
       expect(context).toEqual({
         source: 'surface',
         roots: [
@@ -526,6 +534,79 @@ describe('DocumentRegistry', () => {
     } finally {
       await registry.dispose();
     }
+  });
+
+  test('captures only the selected Thread root, including a shared buffer alias, and releases with the same consumer', async () => {
+    const memory = createMemoryDocuments();
+    const selected = { workspaceId: 'selected', resourceId: 'draft.txt' };
+    const alias = { workspaceId: 'parent', resourceId: 'selected/draft.txt' };
+    const unrelated = { workspaceId: 'unrelated', resourceId: 'private.txt' };
+    for (const ref of [selected, alias]) memory.coordinationOverrides.set(`${ref.workspaceId}\0${ref.resourceId}`, 'shared-file');
+    memory.files.set('shared-file', { content: 'saved', revision: 'disk-1' });
+    memory.files.set(`${unrelated.workspaceId}\0${unrelated.resourceId}`, { content: 'private saved', revision: 'disk-2' });
+    const capture = vi.fn<NonNullable<DocumentsAPI['captureAgentInputSnapshot']>>(async request => ({
+      source: 'surface', roots: [{ workspaceId: selected.workspaceId, dirtyPaths: request.resources.map(entry => entry.resource.resourceId) }],
+      snapshot: { status: 'ready', ref: 'selected-snapshot' },
+    }));
+    const release = vi.fn<NonNullable<DocumentsAPI['releaseAgentInputSnapshot']>>(async () => ({ released: true }));
+    const identityRequests: Array<{ withinWorkspaceId?: string }> = [];
+    function resolve(ref: VarinResourceReference): Promise<VarinResourceIdentity>;
+    function resolve(ref: VarinResourceReference, options: { withinWorkspaceId: string }): Promise<VarinResourceIdentity | null>;
+    function resolve(ref: VarinResourceReference, options?: { withinWorkspaceId: string }): Promise<VarinResourceIdentity | null> {
+      identityRequests.push(options ?? {});
+      return options ? memory.api.resolveResourceIdentity(ref, options) : memory.api.resolveResourceIdentity(ref);
+    }
+    const registry = new DocumentRegistry({ documents: { ...memory.api, resolveResourceIdentity: resolve,
+      captureAgentInputSnapshot: capture, releaseAgentInputSnapshot: release }, getGeneration: () => 1 });
+    const consumer = { kind: 'thread' as const, threadId: 'thread-real', branchId: 'branch-real' };
+    try {
+      await registry.open(alias); await registry.open(selected); await registry.open(unrelated);
+      registry.applyTransaction(alias, 'selected draft', { origin: 'editor' });
+      registry.applyTransaction(unrelated, 'unrelated draft', { origin: 'editor' });
+      memory.unavailableWorkspaceIds.add(unrelated.workspaceId);
+      identityRequests.length = 0;
+      const context = await registry.captureAgentInputContext(consumer, selected.workspaceId);
+      expect(capture).toHaveBeenCalledOnce();
+      expect(capture.mock.calls[0]![0]).toMatchObject({ consumer, resources: [{ resource: selected, content: 'selected draft' }] });
+      expect(capture.mock.calls[0]![0].resources).toHaveLength(1);
+      expect(identityRequests.length).toBeGreaterThan(0);
+      expect(identityRequests.every((options) => options.withinWorkspaceId === selected.workspaceId)).toBe(true);
+      expect(context).toMatchObject({ source: 'surface', roots: [{ workspaceId: selected.workspaceId, dirtyPaths: ['draft.txt'] }] });
+      await registry.releaseAgentInputContext(consumer, context);
+      expect(release).toHaveBeenCalledExactlyOnceWith({ consumer, context });
+      expect(await registry.captureAgentInputContext(consumer, 'clean-selected')).toEqual({ source: 'disk' });
+      expect(capture).toHaveBeenCalledOnce();
+      expect(registry.get(selected)?.buffer).toBe('selected draft');
+      expect(registry.get(unrelated)?.buffer).toBe('unrelated draft');
+      expect(memory.files.get('shared-file')?.content).toBe('saved');
+      memory.unavailableWorkspaceIds.add(selected.workspaceId);
+      memory.unavailableWorkspaceIds.add(alias.workspaceId);
+      expect(await registry.captureAgentInputContext(consumer, selected.workspaceId)).toMatchObject({
+        source: 'surface', snapshot: { status: 'unavailable' },
+      });
+      expect(capture).toHaveBeenCalledOnce();
+    } finally { await registry.dispose(); }
+  });
+
+  test('discovers a newly selected nested root before deciding whether its files have drafts', async () => {
+    const memory = createMemoryDocuments();
+    const parent = { workspaceId: 'parent', resourceId: 'nested/draft.txt' };
+    const nested = { workspaceId: 'new-nested-root', resourceId: 'draft.txt' };
+    memory.coordinationOverrides.set(`${parent.workspaceId}\0${parent.resourceId}`, 'physical-draft');
+    memory.files.set('physical-draft', { content: 'saved', revision: 'disk' });
+    const capture = vi.fn<NonNullable<DocumentsAPI['captureAgentInputSnapshot']>>(async () => ({
+      source: 'surface', roots: [{ workspaceId: nested.workspaceId, dirtyPaths: [nested.resourceId] }], snapshot: { status: 'ready', ref: 'new-root-draft' },
+    }));
+    const registry = new DocumentRegistry({ documents: { ...memory.api, captureAgentInputSnapshot: capture }, getGeneration: () => 1 });
+    try {
+      await registry.open(parent);
+      registry.applyTransaction(parent, 'unsaved before root registration', { origin: 'editor' });
+      memory.coordinationOverrides.set(`${nested.workspaceId}\0${nested.resourceId}`, 'physical-draft');
+      const context = await registry.captureAgentInputContext({ kind: 'thread', threadId: 'thread', branchId: 'branch' }, nested.workspaceId);
+      expect(context).toMatchObject({ source: 'surface', roots: [{ workspaceId: nested.workspaceId, dirtyPaths: [nested.resourceId] }] });
+      expect(capture.mock.calls[0]![0].resources.map(entry => [entry.resource, entry.content])).toEqual([[nested, 'unsaved before root registration']]);
+      expect(registry.get(parent)?.buffer).toBe('unsaved before root registration');
+    } finally { await registry.dispose(); }
   });
 
   test('verifies independent dirty files concurrently before sending a prompt', async () => {
@@ -554,7 +635,7 @@ describe('DocumentRegistry', () => {
       registry.applyTransaction(first, 'A draft', { origin: 'editor' });
       registry.applyTransaction(second, 'B draft', { origin: 'editor' });
       delayIdentity = true;
-      const capture = registry.captureAgentInputContext('session-1');
+      const capture = registry.captureAgentInputContext({ kind: 'pi-session', sessionId: 'session-1' });
       await new Promise((resolve) => setTimeout(resolve, 0));
       const startedTogether = releaseIdentity.length;
       delayIdentity = false;
@@ -610,7 +691,7 @@ describe('DocumentRegistry', () => {
       expect(registry.dirtyResourceIds(child.workspaceId).has(child.resourceId)).toBe(true);
       await waitForDirtyPublication((publication) => publication.workspaceId === child.workspaceId
         && publication.resources[0]?.resource.resourceId === child.resourceId);
-      const childContext = await registry.captureAgentInputContext('child-session');
+      const childContext = await registry.captureAgentInputContext({ kind: 'pi-session', sessionId: 'child-session' });
       expect(childContext.source).toBe('surface');
       if (childContext.source !== 'surface') throw new Error('Expected child draft');
       expect(childContext.roots).toEqual([
@@ -618,7 +699,7 @@ describe('DocumentRegistry', () => {
         { workspaceId: parent.workspaceId, dirtyPaths: [parent.resourceId] },
       ]);
       expect(captures[0]?.resources[0]?.resource).toEqual(child);
-      const parentContext = await registry.captureAgentInputContext('parent-session');
+      const parentContext = await registry.captureAgentInputContext({ kind: 'pi-session', sessionId: 'parent-session' });
       expect(parentContext.source).toBe('surface');
       if (parentContext.source !== 'surface') throw new Error('Expected parent draft');
       expect(parentContext.roots).toEqual(childContext.roots);
@@ -718,7 +799,7 @@ describe('DocumentRegistry', () => {
     await registry.open(identity);
     registry.applyTransaction(identity, 'edited\nnext\n', { origin: 'test' });
 
-    const captured = await registry.captureAgentInputContext('session-1');
+    const captured = await registry.captureAgentInputContext({ kind: 'pi-session', sessionId: 'session-1' });
     expect(captured).toEqual({
       source: 'surface',
       roots: [{ workspaceId: identity.workspaceId, dirtyPaths: [identity.resourceId] }],

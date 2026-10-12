@@ -14,6 +14,7 @@ import type {
   VarinDocumentWriteRequest,
   VarinDocumentWriteResult,
   VarinResourceReference,
+  VarinResourceIdentity,
   VarinWorkspaceFileEvent,
   VarinWorkspaceIdentity,
   Subscription,
@@ -53,6 +54,12 @@ const postJson = async (path: string, body: unknown): Promise<unknown> => {
   }
   return response.json();
 };
+
+function resolveResourceIdentity(resource: VarinResourceReference): Promise<VarinResourceIdentity>;
+function resolveResourceIdentity(resource: VarinResourceReference, options: { withinWorkspaceId: string }): Promise<VarinResourceIdentity | null>;
+function resolveResourceIdentity(resource: VarinResourceReference, options?: { withinWorkspaceId: string }): Promise<VarinResourceIdentity | null> {
+  return postJson('/api/documents/resource/identity', { resource, options }) as Promise<VarinResourceIdentity | null>;
+}
 
 const isResource = (value: unknown): value is VarinResourceReference => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -176,7 +183,7 @@ export const createWebDocumentsAPI = (): DocumentsAPI => ({
   readSurfaceOperation: (request) => postJson('/api/documents/surface-operation/read', request) as ReturnType<NonNullable<DocumentsAPI['readSurfaceOperation']>>,
   completeSurfaceOperation: (request) => postJson('/api/documents/surface-operation/complete', request) as ReturnType<NonNullable<DocumentsAPI['completeSurfaceOperation']>>,
   resolveWorkspace: (input) => postJson('/api/documents/workspace/resolve', input) as Promise<VarinWorkspaceIdentity>,
-  resolveResourceIdentity: (resource) => postJson('/api/documents/resource/identity', { resource }) as ReturnType<DocumentsAPI['resolveResourceIdentity']>,
+  resolveResourceIdentity,
   read: (resource: VarinResourceReference) => postJson('/api/documents/read', { resource }) as Promise<VarinDocumentReadResult>,
   write: (request: VarinDocumentWriteRequest) => postJson('/api/documents/write', request) as Promise<VarinDocumentWriteResult>,
   move: (request: VarinDocumentMoveRequest) => postJson('/api/documents/move', request) as Promise<VarinDocumentMoveResult>,

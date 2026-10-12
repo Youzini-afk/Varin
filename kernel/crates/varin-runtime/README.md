@@ -1454,6 +1454,16 @@ outside Catalog. The existing input writer commits prepared context, child Run, 
 receipt together after rechecking cancellation and source/credential authority. Late cancelled
 preparation cannot launch a child.
 
+The product source picker also prepares fixed roots from an explicit Documents dirty-buffer snapshot.
+The authenticated request uses the registered `workspaceId`, a stable intent key, saved-files or
+surface-drafts content, and explicit capture scopes. Frozen editor bytes preserve encoding/BOM and
+line endings. The same overlaid view supplies source-derived settings, instructions and skills,
+including newly created draft files; external resources retain their original admission owner.
+Draft identity travels through the original source-provenance blob. Fixed children inherit the exact
+root pin rather than recapturing the live editor. Git inventory remains scoped to the selected
+directory and records the original index identity as well as working bytes. These are capture
+facts, not a promise to restore the Git index or overwrite editor buffers during history navigation.
+
 `child_tasks` retains the stable dispatch relationship; `delegated_executions` owns preparation,
 source, Run association, report and fixed result for both the original dispatch and later explicit
 User continuations. Run/Launch/Operation remain the execution and effect authorities. Original

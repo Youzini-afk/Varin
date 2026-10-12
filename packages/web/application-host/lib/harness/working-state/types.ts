@@ -176,7 +176,7 @@ export interface WorkingStateRootStore {
   /** Reopen the exact durable pin after Host restart; never substitutes the current branch root. */
   openBranchHandoffPin?(branchId: string, pinId: string, expected: { root: string; revision: number; writeRevision: number }, signal?: AbortSignal): Promise<WorkingStatePin>;
   releaseBranchHandoffPin?(branchId: string, pinId: string): Promise<void>;
-  putObject(bytes: Buffer): Promise<{ hash: string; byteLength: number }>;
+  putObject(bytes: Buffer): Promise<{ hash: string; byteLength: number; release?: () => Promise<void> }>;
   createDraftBaseline(workspaceId: string, paths: readonly { path: string; content: string | Buffer; mode?: number; provenance: DraftBaselinePathProvenance }[]): Promise<DraftBaseline>;
   getDraftBaseline(id: string): Promise<DraftBaseline | null>;
   deleteDraftBaseline(id: string): Promise<void>;

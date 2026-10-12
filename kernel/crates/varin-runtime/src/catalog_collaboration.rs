@@ -17,6 +17,39 @@ pub struct ChildSourcePin {
     pub root: String,
     pub source: launches::SourceSelection,
 }
+/// Original Documents capture evidence; text lives only in the WorkingState fixed root.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SourceDraftResource {
+    pub workspace_id: String,
+    pub resource_id: String,
+    pub base_revision: Option<String>,
+    pub local_edit_revision: u64,
+    pub revision: String,
+    pub encoding: String,
+    pub bom: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coordination_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document_instance_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub buffer_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_ending: Option<SourceDraftLineEnding>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SourceDraftLineEnding { Lf, Crlf, Cr }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SourceDraftProvenance {
+    pub thread_id: String,
+    pub branch_id: String,
+    pub snapshot_ref: String,
+    pub owner_id: String,
+    pub owner_generation: u64,
+    pub resources: Vec<SourceDraftResource>,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "consistency", deny_unknown_fields)]
 pub enum ChildSourceProvenance {
@@ -34,6 +67,11 @@ pub enum ChildSourceProvenance {
         capture_scopes: Vec<String>,
         #[serde(rename = "omittedDraftPaths")]
         omitted_draft_paths: Vec<String>,
+        // Product preparations bind a public key; physical child captures have no such request.
+        #[serde(rename = "captureIdentity", skip_serializing_if = "Option::is_none")]
+        capture_identity: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        drafts: Option<SourceDraftProvenance>,
         #[serde(skip_serializing_if = "Option::is_none")]
         resources: Option<Value>,
     },
@@ -45,6 +83,11 @@ pub enum ChildSourceProvenance {
         capture_scopes: Vec<String>,
         #[serde(rename = "omittedDraftPaths")]
         omitted_draft_paths: Vec<String>,
+        // Product preparations bind a public key; physical child captures have no such request.
+        #[serde(rename = "captureIdentity", skip_serializing_if = "Option::is_none")]
+        capture_identity: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        drafts: Option<SourceDraftProvenance>,
         #[serde(skip_serializing_if = "Option::is_none")]
         resources: Option<Value>,
     },

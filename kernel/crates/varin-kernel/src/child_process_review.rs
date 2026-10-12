@@ -337,6 +337,8 @@ impl Harness {
                     content_mode: ChildSourceContentMode::SavedFiles,
                     capture_scopes: vec![],
                     omitted_draft_paths: vec![],
+                    capture_identity: None,
+                    drafts: None,
                     resources: None,
                 }
             }

@@ -1,12 +1,14 @@
 /** Public Thread source lifecycle with original owners; only HTTP/IPC delivery and model bytes are controlled. */
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { Express, Request, RequestHandler, Response as ExpressResponse } from 'express';
-import { createThreadsHttpAPI, ThreadRequestError, type ThreadIdentity, type ThreadSource } from '@varin/application-client';
+import { createThreadsHttpAPI, ThreadRequestError, type ThreadIdentity, type ThreadSource, type ThreadPrepareSource, type ThreadPreparedSource } from '@varin/application-client';
 import { createDocumentAuthority } from '../documents/authority.js';
+import { createThreadWorktreeRuntime } from '../harness/thread-worktree.js';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
 import { KernelClient, KernelClientError, type KernelGrantHandle } from './kernel-client.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
@@ -32,6 +34,7 @@ let kernel: KernelClient, runtime: AgentRuntimeClient, storage: KernelStorageAda
 let documents: ReturnType<typeof createDocumentAuthority>, adapter: ThreadAdapter;
 let api: ReturnType<typeof createThreadsHttpAPI>;
 let identity: ThreadIdentity, source: ThreadSource, firstRun = '', pendingRun = '';
+let sourceRequest: ThreadPrepareSource, preparedSource: ThreadPreparedSource;
 const grants: string[] = [], failures: string[] = [];
 const methods: string[] = [];
 const model = { providerId: 'controlled', modelId: 'source-lifecycle' };
@@ -87,8 +90,12 @@ async function initialize(frame: Record<string, unknown>) {
   documents = createDocumentAuthority({ hostId: 'web-domain-host', dataDir: join(root, 'documents'), isTrusted: async () => trusted,
     isAllowedRoot: async candidate => candidate === workspace });
   storage = new KernelStorageAdapter({ client: kernel, hostId: 'web-domain-host', storageRoot,
-    resolveWorkspaceRoot: async workspaceId => (await documents.inspectWorkspace(workspaceId)).root });
+    resolveWorkspaceRoot: async workspaceId => (await documents.admitWorkspaceRegistration(workspaceId)).canonicalPath });
   const workingStates = createKernelWorkspaceWorkingStateAccess(storage), liveSources = createLiveSourceOwner({ documents, kernel });
+  const worktrees = createThreadWorktreeRuntime({
+    createWorktree: async () => { throw new Error('Source capture must not create a Git worktree'); },
+    getWorktreeBootstrapStatus: async () => { throw new Error('Source capture must not bootstrap a worktree'); },
+  });
   const withSourceRead = storage.withResourceRead.bind(storage);
   const resources = createThreadResourceScope({ agentDir, homeDir: join(root, 'home'), documents, workingStates,
     validateLiveSource: liveSources.validate, projectTrusted: async () => trusted, configuration: async () => ({ packages: [] }), withSourceRead });
@@ -102,6 +109,9 @@ async function initialize(frame: Record<string, unknown>) {
   const credentialOwner = new ExistingHostCredentialOwner({ providerId: model.providerId, providerFamily: configuration.providerFamily,
     endpoint: configuration.endpoint, currentScope: async () => ({ reference: 'controlled-source', authority: 'fixture-owner', account: 'controlled', generation: 1 }),
     runtime: { getAuth: async () => { throw new Error('Controlled model must not request external credentials'); } } });
+  const prepareSource = createThreadSourcePreparer({ inspectInventory: worktrees.inspectGitBaselineInventory,
+    sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }), documents, workingStates, liveSources,
+    prepareResources: resources.prepareSourceCapture });
   adapter = new ThreadAdapter(runtime, { resolveModel: async selected => { assert.deepEqual(selected, model); return { configuration, credentialOwner }; },
     rebindModel: async () => credentialOwner }, createThreadSourceAdmission({ documents, liveSources, runtime, withSourceRead }),
     (_run, error) => {
@@ -109,7 +119,10 @@ async function initialize(frame: Record<string, unknown>) {
       console.error('Source lifecycle launch result:', error instanceof Error ? error.name : typeof error,
         error && typeof error === 'object' && 'code' in error ? error.code : 'unclassified');
     },
-    createThreadSourcePreparer({ sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, liveSources, prepareResources: resources.prepareSourceCapture }), prepareContext);
+    async (input, signal) => {
+      try { return await prepareSource(input, signal); }
+      catch (error) { console.error('Source lifecycle preparation:', error); throw error; }
+    }, prepareContext);
   kernel.setContextOwner(new ContextService(runtime, prepareContext, async (run, launch, signal) => {
     const selected = launch?.selection.source;
     const registration = selected ? await documents.admitWorkspaceRegistration(selected.workspace_id) : undefined;
@@ -121,22 +134,66 @@ async function initialize(frame: Record<string, unknown>) {
   }, async runId => adapter.continueLaunch(runId), null));
   installHttp();
   if (frame.reopen) {
-    const saved = JSON.parse(await readFile(join(root, 'lifecycle.json'), 'utf8')) as { identity: ThreadIdentity; source: ThreadSource; firstRun: string; pendingRun: string };
-    ({ identity, source, firstRun, pendingRun } = saved);
+    const saved = JSON.parse(await readFile(join(root, 'lifecycle.json'), 'utf8')) as { identity: ThreadIdentity; source: ThreadSource; firstRun: string; pendingRun: string; sourceRequest: ThreadPrepareSource; preparedSource: ThreadPreparedSource };
+    ({ identity, source, firstRun, pendingRun, sourceRequest, preparedSource } = saved);
     await documents.admitWorkspaceRegistration(source.workspaceId);
+    assert.deepEqual(await api.prepareSource(sourceRequest), preparedSource);
     console.error('Source lifecycle: original registration reopened', source.mode);
     write({ kind: 'fixture-ready', reopened: true }); return;
   }
   await mkdir(workspace, { recursive: true });
-  await writeFile(join(workspace, 'AGENTS.md'), 'ORIGINAL_SOURCE_INSTRUCTIONS: Always identify the preserved source.\n');
-  await writeFile(join(workspace, 'source.txt'), 'ORIGINAL_SOURCE_BYTES\n');
+  await writeFile(join(workspace, 'AGENTS.md'), 'WRONG_SAVED_INSTRUCTIONS\n');
+  await writeFile(join(workspace, 'source.txt'), 'WRONG_SAVED_SOURCE_BYTES\n');
   authentication = false;
   await assert.rejects(api.create('unauthenticated'), error => error instanceof ThreadRequestError && error.status === 401);
   authentication = true;
   identity = await api.create('source-lifecycle');
-  const prepared = await api.prepareSource({ ...identity, key: 'baseline', path: workspace, mode: frame.sourceMode as 'fixed_branch' | 'materialized' });
+  const workspaceId = (await documents.resolveWorkspace({ path: workspace })).workspaceId;
+  const consumer = { kind: 'thread' as const, threadId: identity.threadId, branchId: identity.branchId };
+  const ownerId = 'source-lifecycle-editor', generation = 1;
+  const draftResources = [
+    { resource: { workspaceId, resourceId: 'AGENTS.md' }, baseRevision: null, localEditRevision: 1,
+      content: 'ORIGINAL_SOURCE_INSTRUCTIONS: Always identify the preserved source.\n', encoding: 'utf-8', bom: false, lineEnding: 'lf' as const },
+    { resource: { workspaceId, resourceId: 'source.txt' }, baseRevision: null, localEditRevision: 1,
+      content: 'ORIGINAL_SOURCE_BYTES\r\n', encoding: 'utf-8', bom: true, lineEnding: 'crlf' as const },
+  ].map(resource => ({ ...resource, documentInstanceId: `document:${resource.resource.resourceId}`,
+    bufferHash: `sha256-${createHash('sha256').update(resource.content.replace(/\r\n/g, '\n')).digest('hex')}` }));
+  let editorResources = draftResources;
+  const publishDrafts = () => documents.publishDirtyBuffers({ ownerId, generation, workspaceId,
+    resources: editorResources.map(({ content: _content, ...resource }) => resource) });
+  const surface = documents.registerDirtySurface({ ownerId, generation, workspaceId }, event => {
+    if (!event || typeof event !== 'object' || !('kind' in event) || event.kind !== 'dirty-state-barrier'
+      || !('action' in event) || event.action !== 'acquire' || !('barrierId' in event) || typeof event.barrierId !== 'string') return;
+    const barrierId = event.barrierId;
+    void publishDrafts().then(() => documents.acknowledgeDirtyStateBarrier({ ownerId, generation, workspaceId, barrierId }))
+      .catch(error => { failures.push(String(error)); });
+  });
+  await publishDrafts();
+  const context = await documents.captureAgentInputSnapshot({ ownerId, generation, consumer, resources: draftResources });
+  assert.equal(context.source, 'surface');
+  // A later editor change must neither replace this fixed input nor be overwritten by capture.
+  editorResources = draftResources.map(resource => ({ ...resource, localEditRevision: 2, content: 'LATER_UNSAVED_DRAFT\n',
+    bufferHash: `sha256-${createHash('sha256').update('LATER_UNSAVED_DRAFT\n').digest('hex')}` }));
+  await publishDrafts();
+  const fixedRequest = { ...identity, key: 'baseline', workspaceId, mode: frame.sourceMode as 'fixed_branch' | 'materialized',
+    content: { mode: 'surface-drafts' as const, context }, captureScopes: [] };
+  const prepared = await api.prepareSource(fixedRequest);
+  sourceRequest = fixedRequest; preparedSource = prepared;
+  assert(prepared.provenance && prepared.provenance.consistency !== 'fixed-root');
+  assert.equal(prepared.provenance.contentMode, 'fixed-draft-baseline');
+  assert.equal(prepared.provenance.drafts?.snapshotRef, context.source === 'surface' && context.snapshot.status === 'ready' ? context.snapshot.ref : null);
+  assert.equal(documents.releaseAgentInputSnapshot(consumer, context).released, true);
+  assert.equal(documents.cloneInputSnapshot(consumer, context).status, 'unavailable');
+  assert.equal(await readFile(join(workspace, 'source.txt'), 'utf8'), 'WRONG_SAVED_SOURCE_BYTES\n');
+  assert(editorResources.every(resource => resource.content === 'LATER_UNSAVED_DRAFT\n' && resource.localEditRevision === 2));
+  surface.close();
   source = { ...prepared.source, tools: ['file_read'] };
   assert(source.mode !== 'live_root');
+  await workingStates.withBranchStore(workspaceId, 'verify-source-draft-root', async store => {
+    await store.collectUnreachableObjects();
+    const entry = await store.readPath(source.branchId!, 'source.txt', { revision: 0 }); assert(entry);
+    assert.deepEqual(await store.readContent(entry), Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('ORIGINAL_SOURCE_BYTES\r\n')]));
+  }, 'shared', { threadId: identity.threadId });
   // Move the actual branch head using its original writer before hiding the live directory.
   await workingStates.withBranchStore(source.workspaceId, 'diverge-source-head', async store => {
     const branch = await store.getBranchRoot(source.branchId!); assert(branch);
@@ -147,6 +204,7 @@ async function initialize(frame: Record<string, unknown>) {
   await writeFile(join(workspace, 'AGENTS.md'), 'WRONG_LIVE_INSTRUCTIONS\n');
   await writeFile(join(workspace, 'source.txt'), 'WRONG_LIVE_BYTES\n');
   await rename(workspace, join(root, 'moved-workspace'));
+  assert.deepEqual(await api.prepareSource(fixedRequest), prepared);
   console.error('Source lifecycle: actual baseline captured, branch head diverged, live root moved', source.mode);
   write({ kind: 'fixture-ready', source, identity });
 }
@@ -181,6 +239,8 @@ async function rejectedSources() {
     const candidate = name === 'registration' ? { ...source, workspaceId: 'missing-registration', executionWorkspaceId: 'missing-registration' }
       : name === 'revision' ? { ...fixedSource, revision: 999_999 } : source;
     trusted = name !== 'trust';
+    if (name === 'trust') await assert.rejects(api.prepareSource(sourceRequest),
+      error => error instanceof ThreadRequestError && error.code === 'source_authority_denied');
     await assert.rejects(api.submit({ ...target, key: name, expectedHead: null, text: 'Must not be admitted', model, source: candidate }),
       error => error instanceof ThreadRequestError && error.code === code, name);
     trusted = true;
@@ -246,7 +306,7 @@ async function handle(frame: Record<string, unknown>) {
   if (frame.kind === 'fixture-first') {
     await rejectedSources(); firstRun = await submit('first-after-move');
     if (source.mode === 'fixed_branch') await researchCleanup();
-    await writeFile(join(root, 'lifecycle.json'), JSON.stringify({ identity, source, firstRun }));
+    await writeFile(join(root, 'lifecycle.json'), JSON.stringify({ identity, source, firstRun, sourceRequest, preparedSource }));
     if (source.mode === 'materialized') {
       const location = await originalMaterializationLocation(storageRoot, source.workspaceId, firstRun);
       await writeFile(join(location.targetPath, 'source.txt'), 'PRESERVED_MANAGED_COPY\n');
@@ -259,7 +319,7 @@ async function handle(frame: Record<string, unknown>) {
     const receipt = await api.submit({ ...identity, key: String(frame.key ?? 'pending-before-reopen'), expectedHead: branch.head,
       text: 'Resume the original accepted source input', model, ...(source.mode === 'fixed_branch' ? { source } : {}) });
     pendingRun = receipt.run_id;
-    await writeFile(join(root, 'lifecycle.json'), JSON.stringify({ identity, source, firstRun, pendingRun }));
+    await writeFile(join(root, 'lifecycle.json'), JSON.stringify({ identity, source, firstRun, pendingRun, sourceRequest, preparedSource }));
     write({ kind: 'fixture-pending-admitted', pendingRun, grants }); return;
   }
   if (frame.kind === 'fixture-second') {

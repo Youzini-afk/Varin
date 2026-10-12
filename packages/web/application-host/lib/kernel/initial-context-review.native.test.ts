@@ -61,7 +61,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const storage = new KernelStorageAdapter({ client: kernel, hostId: 'http-review', storageRoot: root, resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root });
   const workingStates = createKernelWorkspaceWorkingStateAccess(storage);
   const resources = resourceScopeFixture(root, workingStates, documents, undefined, (input, consume) => storage.withResourceRead(input, consume));
-  const prepare = createThreadSourcePreparer({ sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, prepareResources: resources.prepareSourceCapture });
+  const prepare = createThreadSourcePreparer({ inspectInventory: async () => ({ kind: 'directory' }), sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, prepareResources: resources.prepareSourceCapture });
   const personalization = createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'selected-project' }) });
   const prepareContext = createThreadContext({ personalization, resources, projectForWorkspace: async () => 'selected-project' });
   kernel.setMemoryOwner(createMemoryOwner({ personalization, prepareContext }));
@@ -110,7 +110,7 @@ it('initial context preserves pinned AGENTS and request roles while current pers
   await f.personalization.saveNote({ scope: { kind: 'session', id: identity.threadId }, content: 'THIS SESSION NOTE' });
   await f.personalization.saveNote({ scope: { kind: 'project', id: 'unrelated-project' }, content: 'MUST NOT LEAK OTHER PROJECT' });
   await fs.writeFile(path.join(f.workspace, 'AGENTS.md'), 'PINNED WORKSPACE INSTRUCTIONS');
-  const prepared = await f.api.prepareSource({ ...identity, key: 'initial-context-source', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await f.api.prepareSource({ ...identity, key: 'initial-context-source', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   await fs.writeFile(path.join(f.workspace, 'AGENTS.md'), 'LATER DISK INSTRUCTIONS');
   const request = { ...identity, key: 'initial-context-input', expectedHead: null, text: 'USER TEXT MUST STAY USER', model, source: prepared.source };
   await expect(f.api.submit({ ...request, expectedHead: 'wrong-head' })).rejects.toMatchObject({ status: 409 });

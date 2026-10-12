@@ -301,7 +301,7 @@ export function createSourceViewRuntime(options: {
     : documents.commitAgentInputSnapshot(sessionId, context);
   const releaseContext: NonNullable<HarnessServiceHost["releaseAgentInputContext"]> = async (sessionId, context) => sourceViewIdFromContext(context)
     ? { released: Boolean(await viewForSession(sessionId, context)) }
-    : documents.releaseAgentInputSnapshot(sessionId, context);
+    : documents.releaseAgentInputSnapshot({ kind: "pi-session", sessionId }, context);
 
   return {
     contextForSession, readSource, readExploreSource, pathOverlay, writeGuard, surfaceWrite, branchWrite, resolveLanguageTarget,

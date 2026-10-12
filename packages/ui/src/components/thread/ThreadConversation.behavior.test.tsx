@@ -1,3 +1,5 @@
+import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
+import type { DocumentsAPI, RuntimeAPIs } from '@varin/application-client';
 import { attachProcessTerminal } from '@/lib/attachProcessTerminal';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -72,6 +74,8 @@ beforeEach(() => {
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
   endpoint.generation = 1;
   runtimeState.api = undefined; vi.mocked(attachProcessTerminal).mockClear();
+  const documents: Pick<DocumentsAPI, 'resolveWorkspace'> = { resolveWorkspace: async () => ({ workspaceId: 'canonical-source-workspace', hostId: 'fixture-host', epoch: 1 }) };
+  registerRuntimeAPIs({ documents } as RuntimeAPIs);
   const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
   vi.stubGlobal('document', document); vi.stubGlobal('window', window); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('FileReader', class {
@@ -83,7 +87,7 @@ beforeEach(() => {
   vi.stubGlobal('FormData', class { constructor(private form: HTMLFormElement) {} get(name: string) { return this.form.querySelector<HTMLTextAreaElement>(`[name="${name}"]`)?.value ?? null; } });
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+afterEach(() => { act(() => root.unmount()); registerRuntimeAPIs(null); container.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const edit = async (selector: string, value: string, event = 'input') => {
   const element = container.querySelector<HTMLInputElement>(selector)!;
   await act(async () => { Object.defineProperty(element, 'value', { configurable: true, writable: true, value }); element.dispatchEvent(new window.Event(event, { bubbles: true })); });
@@ -751,7 +755,7 @@ it('prepares a real source selection, preserves it and the draft on uncertain se
   await act(async () => { button('Prepare workspace').click(); });
   const calls = vi.mocked(f.api.prepareSource).mock.calls;
   expect(calls[1]![0]).toEqual(calls[0]![0]);
-  expect(calls[0]![0]).toMatchObject({ ...identity, path: '/workspace/project', mode: 'fixed_branch' });
+  expect(calls[0]![0]).toMatchObject({ ...identity, workspaceId: 'canonical-source-workspace', mode: 'fixed_branch' });
   await submitForm(container.querySelector('form')!);
   expect(container.querySelector('[aria-label="Prepared workspace"]')).not.toBeNull();
   expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('preserve this draft');
@@ -882,7 +886,7 @@ it('requires an explicit live workspace choice and discloses direct effects befo
   expect(container.textContent).toContain('not a security sandbox');
   expect(f.submit).not.toHaveBeenCalled();
   await act(async () => { button('Prepare workspace').click(); });
-  expect(f.api.prepareSource).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ ...identity, path: '/workspace/project', mode: 'live_root' }));
+  expect(f.api.prepareSource).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ ...identity, workspaceId: 'canonical-source-workspace', mode: 'live_root' }), expect.any(AbortSignal));
   expect(container.querySelector('[aria-label="Prepared workspace"]')?.textContent).toContain('Live files and commands');
   await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
   await edit('[aria-label="Message thread"]', 'work on these actual files');
@@ -901,11 +905,11 @@ it.each(['fixed_branch', 'materialized'] as const)('reprepares %s and submits th
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} initialWorkspacePath="/workspace/project" />); });
   await edit('[aria-label="Workspace access"]', 'live_root', 'change');
   await act(async () => { button('Prepare workspace').click(); });
-  expect(f.api.prepareSource).toHaveBeenLastCalledWith(expect.objectContaining({ mode: 'live_root' }));
+  expect(f.api.prepareSource).toHaveBeenLastCalledWith(expect.objectContaining({ mode: 'live_root' }), expect.any(AbortSignal));
   expect(container.querySelector('[aria-label="Prepared workspace"]')?.textContent).toContain('Live files and commands');
   await edit('[aria-label="Workspace access"]', mode, 'change');
   await act(async () => { button('Prepare workspace').click(); });
-  expect(f.api.prepareSource).toHaveBeenLastCalledWith(expect.objectContaining({ mode }));
+  expect(f.api.prepareSource).toHaveBeenLastCalledWith(expect.objectContaining({ mode }), expect.any(AbortSignal));
   await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
   await edit('[aria-label="Message thread"]', 'use the newly prepared source');
   await submitForm(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.closest('form')!);
