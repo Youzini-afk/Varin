@@ -24,7 +24,7 @@
 
 ## 实际跨层证据
 
-`retrieval_rerank_review.rs` 和 `retrieval-rerank-host.test-helper.ts` 使用实际 Catalog、
+`retrieval_inference_review.rs` 和 `retrieval-inference-host.test-helper.ts` 使用实际 Catalog、
 RunSupervisor、KernelToolExecutor、原 source grant/Storage/compute、Documents、安装后的
 extension plan、HostCredentialAuthority 与 semantic inference。仅 request/frame delivery
 替为 subprocess stdio；原 KernelClient grant/token 和公开 client/认证 route 均实际执行。
@@ -32,7 +32,7 @@ extension plan、HostCredentialAuthority 与 semantic inference。仅 request/fr
 
 - rank 模式验证原三份授权文件实际进入请求，未授权 private 文件不进入；C/A/B 排名保 A 的零分、
   缺 B 的 partial。原模型回合结果、HTTP child、Goal Missing、GC 和关闭重开一起验证。
-- source 和显式尚不支持的 fast-decision 模式均零 HTTP，保原检索结果与真实可用性。
+- source 和当时显式尚不支持的 fast-decision 模式（当前共享夹具改为仍未接的 llm）均零 HTTP，保原检索结果与真实可用性。
 - 模型等待中修改文件，最终 Rust 不交付旧版本段，也不把新正文贴上旧 revision。
 - Stop 通过 application-client → 认证 route → ControlCommands。HTTP body 尚活动时保 child
   pending 与 Goal pending，真正排空后才结算停止证据；已取消的查询不能复活 source history。
@@ -60,7 +60,7 @@ HTTP child，报 `foreground operation is unsettled`。最小修复在真实 que
 ## 复跑入口与边界
 
 ```bash
-cargo test --manifest-path kernel/Cargo.toml -p varin-kernel --lib retrieval_rerank_review:: -- --ignored --nocapture --test-threads=1
+cargo test --manifest-path kernel/Cargo.toml -p varin-kernel --lib retrieval_inference_review:: -- --ignored --nocapture --test-threads=1
 cargo test --manifest-path kernel/Cargo.toml -p varin-kernel --lib background_decision_review:: -- --ignored --nocapture --test-threads=2
 cargo test --manifest-path kernel/Cargo.toml -p varin-runtime --test decision_inference --test goal_lifecycle --test mcp_sampling_goals
 node --import tsx --test packages/pi-host/test/credential-authority-review.test.ts

@@ -1,3 +1,4 @@
+import type { FastDecisionMaterial } from '@varin/protocol';
 import { contentHashOf } from '../knowledge/semantic/identity.js';
 import type { DocumentAuthority } from '../documents/authority.js';
 import { createExploreQueryRun, DEFAULT_BYTE_BUDGET, DEFAULT_EXCERPT_LIMIT, type ExploreDeps } from '../harness/explore.js';
@@ -189,8 +190,55 @@ export function createRetrievalOwner({ documents, kernel, validateSource, pipeli
       } };
       const run = createExploreQueryRun({ question: query.question, paths: roots.length === 1 && roots[0] === '' ? ['.'] : roots,
         ...(query.limit === undefined ? {} : { limit: query.limit }) }, deps, { signal });
+      // Only this query owner can resolve the loop's material identities back to
+      // admitted views. Re-read current Documents versions at HTTP/delivery fences;
+      // structure views retain their own legitimate omitted-range text.
+      const validateMaterials = async (materials: readonly FastDecisionMaterial[]) => {
+        await validateBinding();
+        await waitWithSignal(validateSource(query, signal), signal);
+        const views = new Map([...run.collect().views, ...run.selectedViews()].map(view => [view.viewId, view]));
+        for (const material of materials) {
+          const view = views.get(material.id);
+          if (!view || material.revision !== view.revision || material.text !== view.text
+            || material.label !== `${view.path}:${view.startLine}-${view.endLine}`) throw new Error('Original retrieval view changed');
+        }
+        // Action questions also disclose names discovered in admitted source, even
+        // when no new material is offered. Their original snapshots remain fenced.
+        const paths = new Map([...views.values()].map(view => [view.path, view.revision]));
+        for (const [path, revision] of paths) {
+          const original = await read(path);
+          if (original.status !== 'ready' || original.revision !== revision) throw new Error('Original retrieval snapshot changed');
+          const lines = original.content.split(/\r\n|\n|\r/);
+          for (const view of views.values()) if (view.path === path
+            && (!Number.isSafeInteger(view.startLine) || !Number.isSafeInteger(view.endLine)
+              || view.startLine < 1 || view.endLine < view.startLine || view.endLine > lines.length)) {
+            throw new Error('Original retrieval view range changed');
+          }
+          const address = { workspaceId: query.workspaceId, rootId: query.liveRoot.rootId, path };
+          const before = await client.fileReadCheck(address, signal);
+          const current = await documents.readSnapshot({ workspaceId: query.workspaceId, resourceId: path }, { signal });
+          const after = await client.fileReadCheck(address, signal);
+          if (before.resourceKey !== after.resourceKey || current.status !== 'ready'
+            || current.revision !== original.revision || current.content !== original.content) {
+            result.omissions.stale++;
+            throw new Error('Retrieval material version changed');
+          }
+        }
+        await waitWithSignal(validateSource(query, signal), signal);
+        await validateBinding();
+      };
       try {
         run.start();
+        if (binding.model?.kind === 'progressive') {
+          try {
+            // The query observer may detach immediately on cancel. This real owner
+            // awaits its session so HTTP bodies and receipts retain their lifetime.
+            const details = await binding.model.select({ run, validateMaterials }, signal);
+            run.applyFastDecision(details);
+            stage('model', details.status === 'failed' || details.status === 'cancelled' ? details.status
+              : details.missing || details.unevaluatedMaterials ? 'partial' : details.status === 'used' ? 'ready' : 'empty');
+          } catch { signal.throwIfAborted(); stage('model', 'failed'); }
+        }
         await waitWithSignal(run.waitForViews(), signal);
         const explored = run.finish();
         let bytes = 0;
@@ -227,7 +275,7 @@ export function createRetrievalOwner({ documents, kernel, validateSource, pipeli
         }
         binding.assertAvailable?.();
         kernel.retrievalGrant(query);
-        if (binding.model && result.snippets.length) {
+        if (binding.model?.kind === 'snippets' && result.snippets.length) {
           // Recheck the exact permit immediately before sending any source to a selected model.
           for (const path of new Set(result.snippets.map(item => item.path))) {
             await client.fileReadCheck({ workspaceId: query.workspaceId, rootId: query.liveRoot.rootId, path }, signal);
@@ -236,7 +284,7 @@ export function createRetrievalOwner({ documents, kernel, validateSource, pipeli
           try {
             // The private query observer may detach, but this owner retains the original
             // model lease through actual body drain and receipt publication.
-            const selected = await binding.model({ question: query.question, snippets: Object.freeze(result.snippets.map(item => Object.freeze({ ...item }))) }, signal);
+            const selected = await binding.model.select({ question: query.question, snippets: Object.freeze(result.snippets.map(item => Object.freeze({ ...item }))) }, signal);
             const selection = selected.indices;
             if (!Array.isArray(selection) || selection.some(index => !Number.isSafeInteger(index) || index < 0 || index >= result.snippets.length) || new Set(selection).size !== selection.length) throw new Error('Invalid retrieval selection');
             result.snippets = selection.map(index => result.snippets[index]!);

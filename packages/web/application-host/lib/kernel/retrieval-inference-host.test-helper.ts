@@ -1,5 +1,5 @@
 /** Original retrieval/configuration/credential owners over test stdio, never product IPC.
- * Storage authorizes actual files/compute; only rerank provider bytes are controlled. */
+ * Storage authorizes actual files/compute; only inference provider bytes are controlled. */
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -34,8 +34,40 @@ function request(method:string,params:unknown,options:{grant?:KernelGrantHandle}
     write({kind:'fixture-request',id,method,params,...(options.grant?{grantId:options.grant.grantId}:{})});
   });
 }
+async function heldResponse(init: RequestInit): Promise<Response> {
+  assert(init.signal);
+  const signal=init.signal;
+  const stream=new ReadableStream<Uint8Array>({start(controller){
+    const cancelled=()=>{
+      write({kind:'fixture-body-cancelled',drained});
+      releaseBody=()=>{drained=true;controller.error(new DOMException('Original inference body stopped','AbortError'));};
+    };
+    signal.addEventListener('abort',cancelled,{once:true});
+    if(signal.aborted) cancelled();
+  }});
+  void withMaterialReviewClient(runtime,{} as ThreadMaterialsAPI,api=>api.cancelRun(runId))
+    .catch(error=>write({kind:'fixture-failed',error:String(error)}));
+  return new Response(stream,{headers:{'content-type':'application/json'}});
+}
 const egress=createEgressRuntime({env:{},resolveAll:async()=>[{address:'93.184.216.34',family:4}],
   systemFetch:async(url,init)=>{
+    if(mode.startsWith('decision-')) {
+      assert.equal(String(url),'https://rerank.invalid/models/systemone');
+      assert.equal(new Headers(init.headers).get('authorization'),'Bearer controlled-rerank-key');
+      const body=JSON.parse(String(init.body)) as {model:string;state:{goal:string;materials:Array<{id:string;text:string;label:string}>};questions:Record<string,unknown>};
+      bodies.push(body);requests++;
+      assert.equal(body.model,'classifier');
+      assert.equal(body.state.goal,'retrievalNeedle');
+      assert(body.state.materials.every(material=>!material.text.includes('FORBIDDEN_SOURCE')));
+      assert.equal('messages' in body,false);
+      if(mode==='decision-stop') return heldResponse(init);
+      const usage=mode==='decision-unknown'?{input_tokens:7}:{input_tokens:requests*7,output_tokens:requests};
+      if(mode==='decision-partial'&&body.state.materials.some(material=>material.text.includes('DISCOVERED_HELPER'))) return Response.json({answers:'invalid original second batch',usage});
+      const answers=Object.fromEntries(Object.keys(body.questions).map(id=>[id,{type:'noul',noul:id.startsWith('m:')||id==='a:symbol:hiddenHelper'||id==='a:read:allowed/helper.ts'?1:0}]));
+      // An unissued identifier is provider data, never source or action authority.
+      answers['a:read:private/secret.ts']={type:'noul',noul:1};
+      return Response.json({answers,usage});
+    }
     assert.equal(String(url),'https://rerank.invalid/models/rerank');
     assert.equal(init.method,'POST');
     assert.equal(new Headers(init.headers).get('authorization'),'Bearer controlled-rerank-key');
@@ -46,21 +78,7 @@ const egress=createEgressRuntime({env:{},resolveAll:async()=>[{address:'93.184.2
     const c=body.documents.findIndex(text=>text.includes('SOURCE_C'));
     const a=body.documents.findIndex(text=>text.includes('SOURCE_A'));
     assert(c>=0&&a>=0,'actual authorized source snippets reached the reranker');
-    if(mode==='stop-body') {
-      assert(init.signal);
-      const signal=init.signal;
-      const stream=new ReadableStream<Uint8Array>({start(controller){
-        const cancelled=()=>{
-          write({kind:'fixture-body-cancelled',drained});
-          releaseBody=()=>{drained=true;controller.error(new DOMException('Original rerank body stopped','AbortError'));};
-        };
-        signal.addEventListener('abort',cancelled,{once:true});
-        if(signal.aborted) cancelled();
-      }});
-      void withMaterialReviewClient(runtime,{} as ThreadMaterialsAPI,api=>api.cancelRun(runId))
-        .catch(error=>write({kind:'fixture-failed',error:String(error)}));
-      return new Response(stream,{headers:{'content-type':'application/json'}});
-    }
+    if(mode==='stop-body') return heldResponse(init);
     if(mode==='empty') return Response.json({results:[],usage:{total_tokens:91}});
     if(mode==='stale') await writeFile(join(root,'workspace','allowed','c.ts'),'export const retrievalNeedle = "CHANGED_SOURCE_C";\n');
     return Response.json({results:[{index:c,relevance_score:0.9},{index:a,relevance_score:0}],
@@ -70,13 +88,19 @@ async function initialize(frame:Record<string,unknown>) {
   root=String(frame.root);mode=String(frame.mode);
   const workspace=join(root,'workspace'), agentDir=join(root,'agent');
   await mkdir(join(workspace,'allowed'),{recursive:true});await mkdir(join(workspace,'private'),{recursive:true});await mkdir(agentDir,{recursive:true});
-  for(const [file,value] of [['a','SOURCE_A'],['b','SOURCE_B'],['c','SOURCE_C']])
-    await writeFile(join(workspace,'allowed',`${file}.ts`),`export const retrievalNeedle = "${value}";\n`);
+  if(mode.startsWith('decision-')) {
+    await writeFile(join(workspace,'allowed','seed.ts'),'export const retrievalNeedle = hiddenHelper();\n');
+    await writeFile(join(workspace,'allowed','helper.ts'),'export function hiddenHelper() { return "DISCOVERED_HELPER"; }\n');
+  } else {
+    for(const [file,value] of [['a','SOURCE_A'],['b','SOURCE_B'],['c','SOURCE_C']])
+      await writeFile(join(workspace,'allowed',`${file}.ts`),`export const retrievalNeedle = "${value}";\n`);
+  }
   await writeFile(join(workspace,'private','secret.ts'),'export const retrievalNeedle = "FORBIDDEN_SOURCE";\n');
   await writeFile(join(agentDir,'models.json'),JSON.stringify({providers:{rank:{apiKey:'controlled-rerank-key',baseUrl:'https://rerank.invalid/models',chat:false,
-    capabilities:{rerank:{protocol:'http-rerank',models:[{id:'ranker'}]}}}}}));
-  await writeFile(join(agentDir,'settings.json'),JSON.stringify({harness:{codeRetrieval:{decision:mode==='source'?'source':mode==='unsupported'?'fast-decision':'rerank'},
-    rerank:{protocol:'http-rerank',providerId:'rank',modelId:'ranker'}}}));
+    capabilities:{rerank:{protocol:'http-rerank',models:[{id:'ranker'}]},decision:{protocol:'pi-classifier',models:[{id:'classifier',api:'typesafe-system-one'}]}}}}}));
+  await writeFile(join(agentDir,'settings.json'),JSON.stringify({harness:{codeRetrieval:{decision:mode.startsWith('decision-')?'fast-decision':mode==='source'?'source':mode==='unsupported'?'llm':'rerank'},
+    rerank:{protocol:'http-rerank',providerId:'rank',modelId:'ranker'},
+    fastDecision:mode.startsWith('decision-')?{default:{protocol:'pi-classifier',providerId:'rank',modelId:'classifier'}}:undefined}}));
   kernel=new KernelClient({hostId:HOST,hostGeneration:GENERATION,storageRoot:String(frame.storageRoot),buildVersion:'0.9.25'});
   // Replace delivery/handshake only. Original grant minting/token checks, bridges and runtime events remain.
   const transport=kernel as unknown as {epoch:string;handshakeResult:KernelHandshakeResult;consumeFrame(value:unknown):void};

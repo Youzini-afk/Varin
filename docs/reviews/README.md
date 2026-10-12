@@ -8,6 +8,7 @@ Last updated: 2026-10-12
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [原渐进检索 fast-decision（2026-10-12）](runtime-progressive-retrieval-2026-10-12.md) | 真实材料/action/followup、多批原推理 owner、原 Goal 用量与取消排空；有限跨层验收 |
 | [原 live-root 检索与 rerank（2026-10-12）](runtime-retrieval-rerank-2026-10-12.md) | 原配置/来源、真实查询委派、逐 HTTP 回执与廉价读取消后独立排空；有限跨层验收 |
 | [llama.cpp decision 的准备与计算（2026-10-12）](runtime-llama-decisions-2026-10-12.md) | 原 SDK/匿名配置、准备与付费请求、部分答案/真实排空及有限跨层验收 |
 | [独立 decision 与原推理回执（2026-10-12）](runtime-background-decisions-2026-10-12.md) | 原专用配置/材料、逐 HTTP 原 Operation/Goal、取消排空/发布失败/恢复及有限跨层验证 |

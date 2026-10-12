@@ -158,6 +158,49 @@ describe("runExploreFastDecisionLoop", () => {
     expect(result.snippets.length).toBeGreaterThan(0);
   });
 
+  it("keeps unknown usage dimensions unknown across progressive batches, including real zero", async () => {
+    const run = newRun();
+    run.start();
+    let batches = 0;
+    const details = await runExploreFastDecisionLoop({
+      run, binding, signal: new AbortController().signal,
+      deadlineAt: Date.now() + 10_000, closing: neverSettle,
+      call: async ({ questions }) => {
+        batches++;
+        return { answers: questions.map(question => ({ id: question.id, kind: "judge" as const,
+          value: question.id === "a:read:c.ts" || question.id.startsWith("m:") ? 1 : 0 })), missing: [],
+          usage: batches === 1 ? { inputTokens: 0 } : { inputTokens: 2, outputTokens: 3 } };
+      },
+    });
+    expect(batches).toBeGreaterThan(1);
+    expect(details.usage).toEqual({ inputTokens: 2 * (batches - 1) });
+    run.cancel();
+  });
+
+  it("records an accounted partial failure without using its judgments or losing earlier selections", async () => {
+    const run = newRun();
+    run.start();
+    let batches = 0;
+    let firstSelected: string[] = [];
+    const details = await runExploreFastDecisionLoop({
+      run, binding, signal: new AbortController().signal,
+      deadlineAt: Date.now() + 10_000, closing: neverSettle,
+      call: async ({ questions }) => {
+        batches++;
+        const answers: FastDecisionAnswer[] = questions.map(question => ({ id: question.id, kind: "judge", value: 1 }));
+        if (batches === 1) return { answers, missing: [], usage: { inputTokens: 0, outputTokens: 5 } };
+        firstSelected = run.selectedViews().map(view => view.viewId);
+        return { answers, missing: [questions[0]!.id], usage: { inputTokens: 3 },
+          failure: { status: "failed", note: "Provider stopped after a partial response" } };
+      },
+    });
+    expect(batches).toBe(2);
+    expect(details).toMatchObject({ status: "failed", batches: 2, missing: 1, usage: { inputTokens: 3 } });
+    expect(firstSelected.length).toBeGreaterThan(0);
+    expect(run.selectedViews().map(view => view.viewId)).toEqual(firstSelected);
+    run.cancel();
+  });
+
   it("cancels with the query instead of reporting a failure", async () => {
     const run = newRun();
     run.start();
