@@ -172,3 +172,13 @@ Each provider owns its section names; identical names in different providers rem
 Instruction/data roles are preserved and the helper accepts no callback, model, network or mutable
 history input. An older undeclared provider can still be selected by the original single-provider
 rule, but joining a collection requires explicit metadata in its own authored manifest.
+
+
+`provideContextBudget(context, { identity, configuration, decide })` registers the metadata-only
+`varin.context.budget@1` Decision. Declare `VARIN_CONTEXT_BUDGET_SERVICE` in the package manifest. Inputs
+and configuration are detached and recursively frozen; cancellation discards unfinished output. Choose
+only a supplied `throughId` and return explicit background/blocking mode, optionally adding summary
+instructions. Core rejects a new background Decision when `settings.backgroundPreparation` is false.
+Do not perform retrieval, model requests or tools inside this callback. The native default
+remains selected until the user explicitly routes this service; summary generation and recovery remain
+owned by the original runtime.

@@ -344,7 +344,7 @@ export class ThreadAdapter {
       instruction_sources: candidate.instructionSources, memory_checkpoint: candidate.memoryCheckpoint } : checkpoint?.proposal);
     const personalization = previous?.request.personalization ?? candidate?.personalization ?? checkpoint?.personalization;
     const model = await this.models.resolveModel(input.model);
-    const job = await this.runtime.createContextJob({ key, branchId: input.branchId, throughId: input.throughId,
+    const job = await this.runtime.createContextJob({ summaryRecipe: previous ? previous.request.summary_recipe : { strategy: { kind: 'builtin', name: 'manual', version: '1' }, mode: 'manual', configurationIdentity: null, additionalInstructions: null }, key, branchId: input.branchId, throughId: input.throughId,
       expectedRevision: input.expectedRevision, effectiveSystemPrompt: recipe?.effective_system_prompt ?? '',
       instructionSources: recipe?.instruction_sources ?? [], memoryCheckpoint: recipe?.memory_checkpoint ?? null,
       ...(personalization ? { personalization } : {}),

@@ -640,7 +640,7 @@ Host/kernel acceptance and its current environment limitations are recorded in t
 
 ## Selected native policy planning models
 
-The installed `varin.agent.policy@3` service declares `modelRoles: ['agentPlanning']` in its
+The installed `varin.agent.policy@4` service declares `modelRoles: ['agentPlanning']` in its
 pinned description. Only that selected policy triggers planning preparation. The Host reads the
 existing authenticated `settings.get` catalog path, validates `harness.models.agentPlanning` using
 `parseHarnessModelSlots`, and resolves it with `resolveHarnessModelSlot(..., null)`. The role has an
@@ -1159,3 +1159,32 @@ publication and checkpoint CAS. Rust ContextRead applies the typed ordered handl
 mutex; immutable model requests, children and recovery keep that checkpoint's exact identities.
 Provider disable blocks new candidates, without deleting already admitted context or claiming to
 retract an in-flight model request. No new configuration, permission, history or Context store exists.
+
+
+## Replaceable context budgets
+
+`ContextService` reads the original user/trusted-project compaction settings at the named
+`before_model_dispatch` boundary. The default adds one short Context-owner rendezvous for current
+settings/selection; Rust keeps estimation, waterlines and ancestor selection local. No candidate IDs,
+full histories, provider credentials or tools cross to an unselected extension. Unknown capacity and
+disabled compaction do not call a budget extension.
+
+`createContextBudget` resolves only an explicit original service-routing/registry selection of
+`varin.context.budget@1`; installing its sole provider does not change the native default. Original
+routing and preparation revisions cache scope/binding facts. Selected immutable declarations are reused
+across unrelated routing changes. Only the separate actual `decide` query carries detached estimates
+and native candidate metadata. Its selected generation is pinned through describe/decide completion;
+ordinary replacement lets it finish, while revocation/cancellation rejects late output. A successful
+Decision is immutable data, not a continuing extension permission or callback state.
+
+Rust checks the chosen boundary against its actual request, then the original ContextJob owner checks
+source ancestry, complete tool pairs, parent/model authority and checkpoint revision. A new external
+background Decision is rejected when the original user settings disable background preparation;
+it cannot silently switch to blocking or admit a paid summary. The required
+`summaryRecipe` follows the original ContentStore admission, tool-free Run, usage and publication path.
+An existing job wins over changed routing, keys or boundaries for the same owner/checkpoint/model and
+credential identity, including failed/unknown jobs. A dedicated admission conflict reconciles racing
+cold preparations to that original receipt; unrelated errors remain failures. Native background work
+may become a current blocking Wait at its waterline. An accepted extension's explicit background mode
+is preserved. Neither case creates another generation. Manual compaction explicitly stores its own
+native/manual recipe and does not select an automatic extension.

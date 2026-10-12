@@ -110,12 +110,15 @@ async function initialize(frame: Record<string, unknown>) {
         error && typeof error === 'object' && 'code' in error ? error.code : 'unclassified');
     },
     createThreadSourcePreparer({ sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, liveSources, prepareResources: resources.prepareSourceCapture }), prepareContext);
-  kernel.setContextOwner(new ContextService(runtime, prepareContext, async (_run, launch) => {
+  kernel.setContextOwner(new ContextService(runtime, prepareContext, async (run, launch, signal) => {
     const selected = launch?.selection.source;
     const registration = selected ? await documents.admitWorkspaceRegistration(selected.workspace_id) : undefined;
-    return readContextPolicy({ agentDir, ...(registration ? { projectRoot: registration.canonicalPath } : {}),
+    const policy=await readContextPolicy({ agentDir, ...(registration ? { projectRoot: registration.canonicalPath } : {}),
       projectTrusted: trusted, modelId: model.modelId, providerId: model.providerId });
-  }, async runId => adapter.continueLaunch(runId)));
+    const admitted=await runtime.contextScope(run.id,signal);
+    return {policy,scope:{sessionId:run.thread_id,...(admitted?.projectId?{projectId:admitted.projectId}:{}),
+      ...(registration?{workspaceId:registration.canonicalPath}:{})}};
+  }, async runId => adapter.continueLaunch(runId), null));
   installHttp();
   if (frame.reopen) {
     const saved = JSON.parse(await readFile(join(root, 'lifecycle.json'), 'utf8')) as { identity: ThreadIdentity; source: ThreadSource; firstRun: string; pendingRun: string };

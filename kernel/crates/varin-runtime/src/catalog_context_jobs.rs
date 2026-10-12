@@ -46,7 +46,7 @@ struct ContextJobRecipe {
     source: SummarySource,
 }
 pub(super) fn initialize_new(db: &Connection) -> Result<()> {
-    db.execute_batch("CREATE TABLE context_jobs(run_id TEXT PRIMARY KEY REFERENCES runs(id),job_key TEXT NOT NULL UNIQUE,branch_id TEXT NOT NULL REFERENCES branches(id),through_id TEXT NOT NULL REFERENCES history(id),expected_revision INTEGER NOT NULL,owner_run_id TEXT REFERENCES runs(id),recipe TEXT NOT NULL,parts INTEGER NOT NULL); CREATE INDEX context_jobs_branch ON context_jobs(branch_id); CREATE TABLE context_job_parts(run_id TEXT NOT NULL REFERENCES runs(id),part_index INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(run_id,part_index));")?;
+    db.execute_batch("CREATE TABLE context_jobs(run_id TEXT PRIMARY KEY REFERENCES runs(id),job_key TEXT NOT NULL UNIQUE,branch_id TEXT NOT NULL REFERENCES branches(id),through_id TEXT NOT NULL REFERENCES history(id),expected_revision INTEGER NOT NULL,owner_run_id TEXT REFERENCES runs(id),recipe TEXT NOT NULL,parts INTEGER NOT NULL); CREATE INDEX context_jobs_branch ON context_jobs(branch_id); CREATE INDEX context_jobs_owner ON context_jobs(owner_run_id,expected_revision); CREATE TABLE context_job_parts(run_id TEXT NOT NULL REFERENCES runs(id),part_index INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(run_id,part_index));")?;
     Ok(())
 }
 pub(super) fn check_format(db: &Connection) -> Result<()> {
@@ -186,6 +186,14 @@ impl Catalog {
             return Err(RuntimeError::Conflict(
                 "active context checkpoint changed".into(),
             ));
+        }
+        if let Some(parent) = &request.owner_run_id {
+            if self
+                .capture_context_job_for_request(parent, request.expected_revision)?
+                .is_some()
+            {
+                return Err(RuntimeError::ContextJobAlreadyAdmitted);
+            }
         }
         // The worker proved immutable ancestry and validated the frozen checkpoint. Branch heads
         // only append; a fork has a distinct branch ID. New tail input does not invalidate A.
@@ -396,6 +404,38 @@ impl Catalog {
         )
         .transpose()
     }
+    /// Reuse any already admitted automatic work for this owner/checkpoint/model, regardless
+    /// of later routing or selected boundaries. Failure/unknown state is not permission to retry.
+    pub fn capture_context_job_for_request(
+        &self,
+        run_id: &str,
+        revision: u64,
+    ) -> Result<Option<ContextJobRead>> {
+        let parent = self.run(run_id)?;
+        let launch = self.launch_metadata(run_id)?;
+        let mut statement = self.db.prepare("SELECT run_id FROM context_jobs WHERE owner_run_id=?1 AND expected_revision=?2 ORDER BY rowid")?;
+        let ids = statement
+            .query_map(params![run_id, sql_number(revision)?], |row| {
+                row.get::<_, String>(0)
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        for id in ids {
+            let job = self.run(&id)?;
+            let selected = self.launch_metadata(&id)?;
+            if job.configuration == parent.configuration
+                && selected
+                    .as_ref()
+                    .and_then(|value| value.selection.credential_scope.as_ref())
+                    == launch
+                        .as_ref()
+                        .and_then(|value| value.selection.credential_scope.as_ref())
+            {
+                return self.capture_context_job(&id).map(Some);
+            }
+        }
+        Ok(None)
+    }
+
     pub fn capture_context_job(&self, run_id: &str) -> Result<ContextJobRead> {
         let metadata = self
             .context_job_metadata(run_id)?
@@ -601,6 +641,10 @@ pub struct PreparedContextJob {
 }
 impl ContextJobPreparation {
     pub fn load(mut self) -> Result<PreparedContextJob> {
+        self.request
+            .summary_recipe
+            .validate(self.request.owner_run_id.is_some())
+            .map_err(RuntimeError::Invalid)?;
         if self.request.key.is_empty() || self.request.through_id.is_empty() {
             return Err(RuntimeError::Invalid(
                 "context job identity and boundary are required".into(),
@@ -718,6 +762,7 @@ impl ContextJobPreparation {
             crate::context_material::partition(
                 &self.request.key,
                 &self.configuration,
+                &self.request.summary_recipe,
                 prior,
                 history,
             )?
@@ -746,7 +791,7 @@ impl ContextJobPreparation {
                 thread_id: format!("context-job-thread:{}", self.request.key),
                 branch_id: format!("context-job-branch:{}", self.request.key),
                 expected_head: None,
-                input: Value::String(crate::context_job::SUMMARY_REQUEST.into()),
+                input: Value::String(self.request.summary_recipe.request_text()),
                 configuration: self.configuration.clone(),
             },
             launch: Some(self.launch.clone()),

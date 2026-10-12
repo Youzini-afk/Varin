@@ -80,8 +80,10 @@ writing Pi session files or the Host harness's existing execution records.
   unresolved. Oversized text is partitioned into immutable, UTF-8 aligned excerpts retaining original
   identities and ranges; media remains typed media. Sequential tool-free ModelSteps carry the previous
   summary and publish only after every part completes. Partition budgets are local estimates, not a
-  guarantee of provider tokenization. Provider capacity-error recovery and replaceable budget strategies
-  remain to be implemented.
+  guarantee of provider tokenization. `varin.context.budget@1` can replace the budget Decision at the
+  named pre-dispatch boundary. The native default keeps its local waterline/boundary algorithm; only
+  an explicitly selected extension receives detached estimates and legal ancestor metadata. Provider
+  capacity-error feedback remains separate work.
 
 Negotiated MCP Tasks share the original Operation/HostJob ledger and original MCP owner. Accepted
 remote identity is separate from local dispatch, immutable caller acceptance, eventual typed output
@@ -1198,23 +1200,33 @@ Both operation cancellation and model-generation interruption address the same r
 `Catalog::create_context_job` admits a summarization Run and its dedicated branch atomically. The
 job fixes an original-history ancestor, checkpoint revision and continuation instruction/memory
 snapshot. Its model launch uses the normal durable request, output, cancellation and recovery paths;
-`context_job::configure_compaction_start` supplies a one-generation policy and a tool-free provider
+`context_job::configure_compaction_start` supplies the fixed source-part policy and a tool-free provider
 binding. Historical source items are quoted with their identities and roles as external data under
 summarizer instructions, rather than replayed as live user instructions or tool calls.
 
 The source branch remains usable while the job runs. `publish_context_job` accepts only that Run's
-single successful, complete textual generation and rechecks the source ancestor and checkpoint
+successful, complete textual generations for every frozen part and rechecks the source ancestor and checkpoint
 revision. Publishing preserves both original history and newly appended tail items. A failed,
 cancelled, incomplete or stale candidate does not replace the active checkpoint. Job branches reject
 additional input; list/inspect APIs retain the original admission and make pending work discoverable
-after restart. This is explicitly requested compaction, not an automatic token-budget trigger or a
-complete migration of the existing Pi memory workflow.
+after restart. Manual jobs explicitly freeze the native/manual recipe. Automatic jobs additionally
+freeze the chosen strategy's immutable artifact/configuration identity, background/blocking mode and
+optional summary guidance in this same ContentStore recipe. The core summarizer system and tool-free
+output rules always apply; additional guidance participates in the original partition estimate.
+
+The original owner/checkpoint/model/credential identity admits one automatic job. Failed or unknown
+work is not silently rekeyed after a routing change. Simultaneously prepared candidates are checked at
+short Catalog admission; the losing Host observer reads the accepted original recipe and receipt.
+Recovery publishes completed original output without calling a current extension or resending a paid
+request. Ordinary provider replacement does not invalidate an accepted candidate; explicit withdrawal
+rejects an unfinished Decision. The continuation's ancestor/tool-pair and memory/checkpoint CAS remain
+unchanged. This is not a complete migration of the existing Pi memory workflow.
 
 ## Remaining integration
 
 The provider adapters and control boundary are foundations for the full cutover, not evidence
 of provider/platform parity. Remaining domain and MCP capabilities,
-provider capacity-error recovery and replaceable context strategies, broader UI/product coverage and
+provider capacity-error recovery, broader UI/product coverage and
 single-writer ownership transfer remain tracked in
 [`docs/plan/agent-runtime-implementation.md`](../../../docs/plan/agent-runtime-implementation.md).
 That matrix owns actual validation and incomplete capabilities. No measured speedup or platform

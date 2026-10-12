@@ -108,3 +108,125 @@ pub fn estimate_item(item: &crate::execution::ConversationItem) -> u64 {
         }
     }
 }
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BudgetCandidate {
+    pub through_id: String,
+    pub prefix_estimated_tokens: u64,
+    pub retained_estimated_tokens: u64,
+    #[serde(skip)]
+    pub end_index: usize,
+}
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum BudgetDecision {
+    Continue,
+    Compact {
+        #[serde(rename = "throughId")]
+        through_id: String,
+        mode: crate::context_job::ContextCompactionMode,
+        #[serde(
+            rename = "summaryInstructions",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        summary_instructions: Option<String>,
+    },
+}
+/// Candidates derive only from this actual request. The original admission subsequently proves
+/// immutable ancestry and validates all source tool pairs again before freezing any excerpts.
+pub fn budget_candidates(view: &RequestView) -> Vec<BudgetCandidate> {
+    let total = view
+        .history
+        .iter()
+        .map(estimate_item)
+        .fold(0u64, u64::saturating_add);
+    let mut prefix = 0u64;
+    let mut pending = std::collections::BTreeSet::new();
+    let mut candidates = Vec::new();
+    for (index, item) in view.history.iter().enumerate() {
+        prefix = prefix.saturating_add(estimate_item(item));
+        match &item.content {
+            crate::execution::Content::ToolCall { call } => {
+                pending.insert(call.call_id.clone());
+            }
+            crate::execution::Content::ToolResult { result } => {
+                pending.remove(&result.call_id);
+            }
+            _ => (),
+        }
+        if !pending.is_empty() {
+            continue;
+        }
+        let through = match &item.provenance {
+            crate::execution::Provenance::UserInstruction { input_id } => {
+                if view.history.get(index + 1).is_some_and(|next| matches!(&next.provenance,
+                    crate::execution::Provenance::UserInstruction { input_id: next } if next == input_id)) { continue; }
+                input_id.clone()
+            }
+            crate::execution::Provenance::Assistant
+            | crate::execution::Provenance::ToolData { .. } => item.id.clone(),
+            _ => continue,
+        };
+        candidates.push(BudgetCandidate {
+            through_id: through,
+            prefix_estimated_tokens: prefix,
+            retained_estimated_tokens: total.saturating_sub(prefix),
+            end_index: index + 1,
+        });
+    }
+    candidates
+}
+pub fn native_mode(
+    policy: &ContextPolicy,
+    capacity: u64,
+    estimate: &InputEstimate,
+) -> Option<crate::context_job::ContextCompactionMode> {
+    use crate::context_job::ContextCompactionMode;
+    let input_budget = capacity.saturating_sub(policy.reserve_tokens);
+    if !policy.enabled || input_budget == 0 {
+        return None;
+    }
+    if estimate.estimated_tokens > input_budget {
+        return Some(ContextCompactionMode::Blocking);
+    }
+    (policy.background_preparation
+        && estimate.estimated_tokens as f64 > input_budget as f64 * policy.preparation_waterline)
+        .then_some(ContextCompactionMode::Background)
+}
+pub fn native_candidate<'a>(
+    view: &RequestView,
+    candidates: &'a [BudgetCandidate],
+    policy: &ContextPolicy,
+    capacity: u64,
+    max_output_tokens: Option<u64>,
+    estimate: &InputEstimate,
+) -> Option<&'a BudgetCandidate> {
+    let history_tokens = view
+        .history
+        .iter()
+        .map(estimate_item)
+        .fold(0u64, u64::saturating_add);
+    let fixed = estimate.estimated_tokens.saturating_sub(history_tokens);
+    let recent = policy.keep_recent_tokens.min(
+        capacity
+            .saturating_sub(policy.reserve_tokens)
+            .saturating_sub(fixed)
+            .saturating_sub(max_output_tokens.unwrap_or(policy.reserve_tokens)),
+    );
+    let mut retained = 0u64;
+    let mut end = view.history.len();
+    while end > 0 && retained < recent {
+        let next = estimate_item(&view.history[end - 1]);
+        if retained > 0 && next > recent.saturating_sub(retained) {
+            break;
+        }
+        end -= 1;
+        retained = retained.saturating_add(next);
+    }
+    candidates
+        .iter()
+        .rev()
+        .find(|candidate| candidate.end_index <= end)
+}

@@ -223,6 +223,7 @@ pub(crate) enum Command {
 }
 pub(crate) fn domain(error: varin_runtime::RuntimeError) -> KernelError {
     match error {
+        varin_runtime::RuntimeError::ContextJobAlreadyAdmitted => KernelError::ContextJobAlreadyAdmitted,
         varin_runtime::RuntimeError::DispatchCancelled => KernelError::Cancelled,
         varin_runtime::RuntimeError::RequestActivationHeld => {
             KernelError::ActivationHeld("original ingress is held by its current owner".into())
@@ -2808,6 +2809,7 @@ fn prepare_context_job(
         source: None,
     };
     let request = varin_runtime::catalog::context_jobs::ContextJobRequest {
+        summary_recipe: p.summary_recipe,
         owner_run_id: p.owner_run_id,
         personalization: p.personalization.map(personalization_basis).transpose()?,
         key: p.key,
@@ -3130,3 +3132,7 @@ mod language_source_review;
 #[cfg(test)]
 #[path = "context_transform_review.rs"]
 mod context_transform_review;
+
+#[cfg(test)]
+#[path = "context_budget_review.rs"]
+mod context_budget_review;

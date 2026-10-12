@@ -152,6 +152,7 @@ fn source_free_handback_prepares_and_admits_a_real_environment_child_run_once() 
     let auxiliary = db
         .create_context_job(
             varin_runtime::context_job::ContextJobRequest {
+            summary_recipe: varin_runtime::context_job::ContextSummaryRecipe::manual(),
                 owner_run_id: None,
                 personalization: checkpoint.personalization,
                 key: "child-handback-auxiliary".into(),

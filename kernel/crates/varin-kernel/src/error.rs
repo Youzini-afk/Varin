@@ -55,6 +55,8 @@ pub(crate) enum KernelError {
     SnapshotChanged(String),
     #[error("activation held: {0}")]
     ActivationHeld(String),
+    #[error("context work already admitted for this owner checkpoint and model")]
+    ContextJobAlreadyAdmitted,
     #[error("operation cancelled")]
     Cancelled,
 }
@@ -77,6 +79,7 @@ impl From<serde_json::Error> for KernelError {
 
 pub(crate) fn error_code(error: &KernelError) -> &'static str {
     match error {
+        KernelError::ContextJobAlreadyAdmitted => "context-job-already-admitted",
         KernelError::Protocol(_) => "protocol-error",
         KernelError::Storage(_) => "storage-error",
         KernelError::Authorization(_) => "unauthorized",

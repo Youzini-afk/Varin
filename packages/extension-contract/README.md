@@ -149,3 +149,12 @@ never shortens a partially available collection. Equally ranked different orders
 Single-service invocation rejects any collection rule, including a one-member list. User single-value
 configuration and external extension assets are not rewritten. The routing document remains the same
 owner/schema with the additive rule shape, and inspection reports collection order separately.
+
+
+`VARIN_CONTEXT_BUDGET_SERVICE` is the shared manifest/registration/method-schema declaration for
+`varin.context.budget@1`. `VARIN_CONTEXT_BUDGET_CONTRACT` describes its `before_model_dispatch` Decision:
+`describe` fixes identity/configuration and `decide` receives estimates, settings and native legal
+ancestor metadata. It returns `continue` or `compact` with a candidate `throughId`, explicit
+background/blocking mode and optional summary guidance. No history bodies, credentials, tools, private
+policy state or model access are supplied. Core validates ancestry and preserves its summary safety
+instructions, real inference usage and atomic checkpoint publication.

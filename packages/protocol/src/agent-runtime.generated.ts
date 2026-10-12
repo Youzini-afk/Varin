@@ -1324,7 +1324,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 19; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 20; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -1728,7 +1728,17 @@ export interface BranchForkResult {
   branchId: string;
 }
 
+export type ContextBudgetStrategy = { kind: 'builtin'; name: string; version: string } | { kind: 'extension'; providerKey: string; extensionId: string; extensionVersion: string; artifactIntegrity: string; serviceVersion: number; configurationIdentity: string; name: string; version: string };
+
+export interface ContextSummaryRecipe {
+  strategy: ContextBudgetStrategy;
+  mode: 'manual' | 'background' | 'blocking';
+  configurationIdentity: string | null;
+  additionalInstructions: string | null;
+}
+
 export interface ContextJobCreateParams {
+  summaryRecipe: ContextSummaryRecipe;
   ownerRunId?: string;
   personalization?: ContextPersonalization;
   key: string;

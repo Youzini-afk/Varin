@@ -23,6 +23,7 @@ import { PlanService } from './lib/kernel/plan-service.js';
 import { createPersonalizationContextResolver } from './lib/memory/personalization-context.js';
 import { createMemoryOwner } from './lib/kernel/memory-owner.js';
 import { ContextService } from './lib/kernel/context-service.js';
+import { createContextBudget } from './lib/kernel/context-budget.js';
 import { readContextPolicy } from './lib/kernel/context-settings.js';
 import { ThreadCollaboration } from './lib/kernel/thread-collaboration.js';
 import { createSemanticInferenceLedger } from './lib/knowledge/semantic/inference-ledger.js';
@@ -3109,13 +3110,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   kernelClient.setResourceOwner(createResourceOwner({ runtime: agentRuntime, resources: threadResources }));
   kernelClient.setPlanOwner(createPlanOwner(getUserKnowledgeStore, agentRuntime));
   kernelClient.setMemoryOwner(createMemoryOwner({ personalization: agentPersonalization, prepareContext: threadContext }));
-  const contextService=new ContextService(agentRuntime,threadContext,async(run,launch)=>{
+  const contextService=new ContextService(agentRuntime,threadContext,async(run,launch,signal)=>{
     const source=launch?.selection.source;
     const root=source ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
+    const admitted=await agentRuntime.contextScope(run.id,signal);
     const model=run.configuration as {providerId?:string;model:string};
-    return readContextPolicy({agentDir:mcpAgentDir,...(root?{projectRoot:root}:{}),projectTrusted:root!==undefined && mcpHostProjectTrusted(mcpAgentDir,root),
+    const policy=await readContextPolicy({agentDir:mcpAgentDir,...(root?{projectRoot:root}:{}),projectTrusted:root!==undefined && mcpHostProjectTrusted(mcpAgentDir,root),
       ...(model.providerId?{providerId:model.providerId}:{}),modelId:model.model});
-  },(runId,signal)=>threads.continueLaunch(runId,{signal}));
+    return {policy,scope:{sessionId:run.thread_id,...(admitted?.projectId?{projectId:admitted.projectId}:{}),...(root?{workspaceId:root}:{})}};
+  },(runId,signal)=>threads.continueLaunch(runId,{signal}),createContextBudget(extensionRuntime));
   kernelClient.setContextOwner(contextService);
   const threads = new ThreadAdapter(agentRuntime,
     modelAuthority, createThreadSourceAdmission({ documents: documentsAuthority, liveSources,

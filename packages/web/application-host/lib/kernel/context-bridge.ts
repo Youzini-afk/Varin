@@ -1,8 +1,13 @@
 import { waitWithSignal } from '../cancellation.js';
 import type { ContextPolicySnapshot } from './context-settings.js';
+import type { ContextSummaryRecipe } from './protocol.generated.js';
+import { parseVarinContextBudgetInput, type VarinContextBudgetInput, type VarinContextBudgetDecision } from '@varin/extension-contract';
 
-export type ContextQuery = {action:'policy';runId:string} | {action:'compact';runId:string;requestId:string;throughId:string;expectedRevision:number;block:boolean};
-export type ContextResult = {status:'ready';policy?:ContextPolicySnapshot;published?:boolean;jobRunId?:string} | {status:'failed';code:string};
+export type ContextQuery = {action:'prepare';runId:string;requestId:string;expectedRevision:number;hasAcceptedJob:boolean}
+  | {action:'decide';runId:string;input:VarinContextBudgetInput}
+  | {action:'compact';runId:string;requestId:string;throughId:string;expectedRevision:number;nativeBlock:boolean;summaryRecipe:ContextSummaryRecipe};
+export interface AcceptedContextJob { throughId:string; summaryRecipe:ContextSummaryRecipe; block:boolean }
+export type ContextResult = {accepted?:AcceptedContextJob;status:'ready';policy?:ContextPolicySnapshot;external?:boolean;decision?:VarinContextBudgetDecision;summaryRecipe?:ContextSummaryRecipe;published?:boolean;jobRunId?:string} | {status:'failed';code:string;accepted?:AcceptedContextJob};
 export interface ContextOwner {
   query(query:ContextQuery,signal:AbortSignal):Promise<ContextResult>;
   close():void;
@@ -10,8 +15,13 @@ export interface ContextOwner {
 export interface PrivateContextResponse {v:1;kind:'context-response';id:string;kernelEpoch:string;result:ContextResult}
 const record = (value:unknown):value is Record<string,unknown> => value !== null && typeof value==='object' && !Array.isArray(value);
 const text = (value:unknown):value is string=>typeof value==='string' && value.length>0;
-const valid = (value:unknown):value is ContextQuery => record(value) && text(value.runId) && (value.action==='policy'
-  || value.action==='compact' && text(value.requestId) && text(value.throughId) && Number.isSafeInteger(value.expectedRevision) && Number(value.expectedRevision)>=0 && typeof value.block==='boolean');
+const valid = (value:unknown):value is ContextQuery => {
+  if (!record(value) || !text(value.runId)) return false;
+  if (value.action === 'decide') { try { parseVarinContextBudgetInput(value.input); return true; } catch { return false; } }
+  return text(value.requestId) && Number.isSafeInteger(value.expectedRevision) && Number(value.expectedRevision)>=0
+    && (value.action==='prepare' && typeof value.hasAcceptedJob==='boolean'
+      || value.action==='compact' && text(value.throughId) && typeof value.nativeBlock==='boolean' && record(value.summaryRecipe));
+};
 /** Independent private owner calls; cancellation ends observation of an already accepted job. */
 export class ContextBridge {
   private owner?: ContextOwner;

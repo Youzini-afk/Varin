@@ -138,11 +138,12 @@ fn excerpts(
 pub(crate) fn partition(
     key: &str,
     configuration: &Value,
+    recipe: &ContextSummaryRecipe,
     prior: Option<ConversationItem>,
     history: Vec<ConversationItem>,
 ) -> Result<Vec<Vec<ConversationItem>>> {
     let capacity: Capacity = serde_json::from_value(configuration.clone())?;
-    let fixed = (SUMMARIZER_SYSTEM.len() as u64 + SUMMARY_REQUEST.len() as u64).div_ceil(4);
+    let fixed = (SUMMARIZER_SYSTEM.len() as u64 + recipe.request_text().len() as u64).div_ceil(4);
     let budget = match (capacity.context_window_tokens, capacity.max_output_tokens) {
         (Some(window), Some(output)) => {
             // Each later request carries the previous summary and reserves the selected output.
@@ -269,6 +270,7 @@ mod tests {
         let parts = partition(
             "job",
             &json!({"contextWindowTokens":600,"maxOutputTokens":64}),
+            &ContextSummaryRecipe::manual(),
             None,
             vec![source.clone(), image.clone()],
         )

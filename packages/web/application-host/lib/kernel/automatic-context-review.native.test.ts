@@ -63,10 +63,10 @@ it.each([
   const prepare=Object.assign(async()=>context,{main:async()=>context}) as ContextPreparer;
   const policies:ContextPolicySnapshot[]=[];
   const installOwner=()=>{
-    const service=new ContextService(runtime,prepare,async()=>{
+    const service=new ContextService(runtime,prepare,async(run)=>{
     const policy=await readContextPolicy({agentDir,projectRoot,projectTrusted:false,modelId:'fixture-model',providerId:'fixture'});
-    policies.push(policy);return policy;
-    },async runId=>{await runtime.startRun(runId);});
+    policies.push(policy);return {policy,scope:{sessionId:run.thread_id}};
+    },async runId=>{await runtime.startRun(runId);},null);
     kernel.setContextOwner(service);return service;
   };
   installOwner();

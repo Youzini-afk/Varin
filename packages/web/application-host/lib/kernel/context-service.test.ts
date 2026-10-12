@@ -25,9 +25,9 @@ it('keeps shared compaction preparation alive for a cancelled query but cancels 
     },
   }) satisfies ContextPreparer;
   const service = new ContextService(runtime as unknown as AgentRuntimeClient, prepare,
-    async () => { throw new Error('Unrequested policy'); }, async () => { throw new Error('Unrequested Run'); });
+    async () => { throw new Error('Unrequested policy'); }, async () => { throw new Error('Unrequested Run'); }, null);
   const query = new AbortController();
-  const pending = service.query({ action: 'compact', requestId: 'request', runId: 'run', expectedRevision: 1, throughId: 'input', block: false }, query.signal);
+  const pending = service.query({ action: 'compact', requestId: 'request', runId: 'run', expectedRevision: 1, throughId: 'input', nativeBlock: false, summaryRecipe: { strategy: { kind: 'builtin', name: 'capacity', version: '1' }, mode: 'background', configurationIdentity: 'fixture', additionalInstructions: null } }, query.signal);
   const rejection = expect(pending).rejects.toThrow();
   try {
     await entered;

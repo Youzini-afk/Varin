@@ -3,12 +3,13 @@ import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import type { Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import express, { type Express, type RequestHandler } from 'express';
 import { test } from 'vitest';
 import { ApplicationExtensionRuntime } from '@varin/extension-host';
-import { parseVarinExtensionServiceProvision, VARIN_CONTEXT_FRAGMENTS_SERVICE as descriptor } from '@varin/extension-contract';
+import { parseVarinExtensionServiceProvision, VARIN_CONTEXT_BUDGET_SERVICE, VARIN_CONTEXT_FRAGMENTS_SERVICE as descriptor } from '@varin/extension-contract';
 import type { RuntimeAPIs } from '@varin/application-client';
 import { registerExtensionRoutes } from '#application-host/lib/extensions/routes.js';
 import { routerTransport } from '#application-host/lib/extensions/direct-router.test-helper.js';
@@ -32,7 +33,7 @@ test('real settings controls persist ordered choices through the original client
   const runtimeOptions = { dataDir, varinVersion: '1.0.0', brokerScript: 'unused-no-activation.cjs',
     transportFactory: () => { brokerStarts += 1; throw new Error('Settings must not execute extensions'); } };
   let runtime = await ApplicationExtensionRuntime.create(runtimeOptions);
-  const serviceId = descriptor.id;
+  let serviceId: string = descriptor.id;
   const scope = { userId: 'default' };
   const providerKey = (id: string) => `${id}:host:${serviceId}@1`;
   const a = providerKey('review.a'), b = providerKey('review.b'), c = providerKey('review.c');
@@ -106,7 +107,7 @@ test('real settings controls persist ordered choices through the original client
     const rule = selectedRule();
     return React.createElement(I18nProvider, null, React.createElement(ServiceRoutingControl, {
       busy: false, composition: serviceRoutingComposition(snapshot, serviceId, 1),
-      extensionNames: new Map([['review.a', 'A'], ['review.b', 'B'], ['review.c', 'C']]),
+      extensionNames: new Map([['review.a', 'A'], ['review.b', 'B'], ['review.c', 'C'], ['example.context-budget', 'Evidence budget']]),
       providers: serviceRoutingOptions(snapshot).get(`${serviceId}@1`) ?? [],
       selection: rule?.providerKeys ?? rule?.providerKey ?? null,
       onSelect: (selection: string | readonly string[] | null) => { pending = store.setVarinExtensionServiceRoute(serviceId, 1, scope, selection); },
@@ -205,6 +206,29 @@ test('real settings controls persist ordered choices through the original client
     assert.deepEqual(persisted.data.rules.find((rule: { scope: { workspaceId?: string } }) => rule.scope.workspaceId === '/selected-project').providerKeys, [b, a]);
     assert.equal(brokerStarts, 0);
     assert.equal(writes.length, 11);
+    // A real installed Decision package uses the same public Settings/client/Router path.
+    // Merely displaying and selecting its metadata must not activate its broker.
+    const installed = await readWhileWatching(() => runtime.installOrStage({
+      expectedRevision: store.getVarinExtensionCatalogState().snapshot!.catalog.revision,
+      source: { kind: 'local', display: 'Actual context budget example',
+        specifier: fileURLToPath(new URL('../../../../examples/extensions/context-budget', import.meta.url)) },
+    }));
+    await readWhileWatching(() => runtime.setEnabled('example.context-budget', true, installed.revision));
+    serviceId = VARIN_CONTEXT_BUDGET_SERVICE.id;
+    await React.act(async () => { await store.refreshVarinExtensionCatalog(); root!.render(React.createElement(SettingsConsumer)); });
+    const budgetKey = 'example.context-budget:host:varin.context.budget@1';
+    const budgetState = store.getVarinExtensionCatalogState().snapshot!;
+    assert.equal(serviceRoutingComposition(budgetState, serviceId, 1), undefined);
+    assert.deepEqual(serviceRoutingOptions(budgetState).get(`${serviceId}@1`)?.map(value => value.providerKey), [budgetKey]);
+    assert.equal(selectionLabel(), 'Automatic');
+    await React.act(async () => store.setVarinExtensionServiceRoute(serviceId, 1, scope, budgetKey));
+    assert.equal(selectionLabel(), 'Single provider: Evidence budget');
+    assert.equal(writes.at(-1)?.body.rule?.providerKey, budgetKey);
+    const budgetDescription = await readWhileWatching(() => api.queryContracts({ action: 'describe', kind: 'service', serviceId, version: 1 }));
+    assert.ok(budgetDescription.action === 'describe' && budgetDescription.kind === 'service');
+    assert.equal(budgetDescription.service?.selection.providerKey, budgetKey);
+    assert.equal(brokerStarts, 0);
+
   } finally {
     if (root) await React.act(async () => root!.unmount());
     store.resetVarinExtensionCatalogForTests();
