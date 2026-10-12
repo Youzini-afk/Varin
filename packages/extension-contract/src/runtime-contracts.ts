@@ -1,7 +1,7 @@
 import {
-  parseVarinPackageSourcePath, parseVarinRuntimeSourceRequest, parseVarinRuntimeSourceResult,
+  parseVarinContractSource, parseVarinRuntimeSourceRequest, parseVarinRuntimeSourceResult,
   parseVarinRuntimeSourceArtifact, VARIN_RUNTIME_SOURCE_REQUEST_SCHEMA,
-  type VarinRuntimeSourceArtifact, type VarinRuntimeSourceRequest, type VarinRuntimeSourceResult,
+  type VarinContractSource, type VarinRuntimeSourceArtifact, type VarinRuntimeSourceRequest, type VarinRuntimeSourceResult,
 } from './runtime-source.js';
 import type {
   JsonObject, JsonValue, VarinExtensionActualStatus, VarinExtensionServiceRequirement,
@@ -12,7 +12,6 @@ import type { VarinWorkbenchResolutionContext } from './workbench.js';
 import { parseVarinToolJson } from './tools.js';
 
 export type VarinContractSchema = JsonObject | boolean;
-export interface VarinContractSource { path: string; line?: number }
 export interface VarinServiceMethodContract {
   inputSchema: VarinContractSchema;
   outputSchema: VarinContractSchema;
@@ -195,14 +194,6 @@ export function parseVarinRuntimeInspectionRequest(value: unknown): VarinRuntime
   throw new Error('Tool inspection action is invalid');
 }
 
-/** Source metadata is a logical package location, never a Host path or source read permission. */
-export function parseVarinContractSource(value: unknown): VarinContractSource {
-  const raw = record(value, 'Contract source');
-  fields(raw, ['path', 'line'], 'Contract source');
-  const path = parseVarinPackageSourcePath(raw.path);
-  if (raw.line !== undefined && (!Number.isSafeInteger(raw.line) || Number(raw.line) < 1)) throw new Error('Contract source line must be positive');
-  return { path, ...(raw.line === undefined ? {} : { line: Number(raw.line) }) };
-}
 function schema(value: unknown): VarinContractSchema {
   const parsed = parseVarinToolJson(value, 'Contract schema');
   if (typeof parsed !== 'boolean' && (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))) throw new Error('Contract schema must be an object or boolean');

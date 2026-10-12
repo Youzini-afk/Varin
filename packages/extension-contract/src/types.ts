@@ -63,7 +63,7 @@ export interface VarinExtensionToolDeclaration {
   lifetime?: "thread" | "environment";
   operation: "read" | "effect";
   examples?: JsonValue[];
-  source?: { path: string; line?: number };
+  source?: import("./runtime-source.js").VarinContractSource;
 }
 
 export interface VarinExtensionServiceProvision {

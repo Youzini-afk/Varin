@@ -39,12 +39,6 @@ interface LastValidCatalog {
   storageState: "missing" | "ready";
 }
 
-interface CatalogMutationRead {
-  document: VarinExtensionCatalogDocument;
-  repaired?: boolean;
-  storageState: "missing" | "ready";
-}
-
 interface ParsedBuiltinDefinition {
   definition: VarinBuiltinExtensionDefinition;
   manifest: VarinExtensionManifest;
@@ -190,94 +184,6 @@ function sameCapabilityGrants(
     .map(({ capability, granted, manifestVersion, realm }) => ({ capability, granted, manifestVersion, realm }))
     .sort((first, second) => capabilityKey(first).localeCompare(capabilityKey(second)));
   return JSON.stringify(project(left)) === JSON.stringify(project(right));
-}
-
-function rawCapabilityGrantsMatch(
-  value: unknown,
-  expected: readonly VarinExtensionCapabilityGrant[],
-): boolean {
-  if (!Array.isArray(value)) return false;
-  const parsed: VarinExtensionCapabilityGrant[] = [];
-  for (const item of value) {
-    if (
-      !isRecord(item)
-      || typeof item.capability !== "string"
-      || typeof item.granted !== "boolean"
-      || typeof item.manifestVersion !== "string"
-      || (item.realm !== "host" && item.realm !== "surface")
-      || typeof item.updatedAt !== "string"
-    ) return false;
-    parsed.push({
-      capability: item.capability,
-      granted: item.granted,
-      manifestVersion: item.manifestVersion,
-      realm: item.realm,
-      updatedAt: item.updatedAt,
-    });
-  }
-  return sameCapabilityGrants(parsed, expected);
-}
-
-function repairKnownBuiltinRecords(
-  value: unknown,
-  manifests: readonly ParsedBuiltinDefinition[],
-  ownedPrefix: string,
-  now: string,
-): { changed: boolean; value: unknown } {
-  if (!isRecord(value) || !isRecord(value.extensions)) return { changed: false, value };
-
-  const extensions = { ...value.extensions };
-  const desiredIds = new Set(manifests.map(({ manifest }) => manifest.id));
-  let changed = false;
-
-  for (const [extensionId, rawRecord] of Object.entries(extensions)) {
-    if (!isRecord(rawRecord) || !isRecord(rawRecord.source)) continue;
-    if (
-      rawRecord.source.kind === "builtin"
-      && typeof rawRecord.source.specifier === "string"
-      && rawRecord.source.specifier.startsWith(ownedPrefix)
-      && !desiredIds.has(extensionId)
-    ) {
-      delete extensions[extensionId];
-      changed = true;
-    }
-  }
-
-  for (const { manifest } of manifests) {
-    const rawRecord = extensions[manifest.id];
-    if (!isRecord(rawRecord) || !isRecord(rawRecord.source)) continue;
-    if (rawRecord.source.kind !== "builtin" || rawRecord.source.specifier !== manifest.id) continue;
-
-    const nextRecord = structuredClone(rawRecord);
-    const manifestChanged = rawRecord.manifest === undefined
-      || canonicalJson(rawRecord.manifest) !== canonicalJson(manifest);
-    const artifactVersionChanged = rawRecord.resolvedVersion !== manifest.version
-      || rawRecord.selectedVersion !== manifest.version;
-    nextRecord.manifest = structuredClone(manifest);
-    nextRecord.resolvedVersion = manifest.version;
-    nextRecord.selectedVersion = manifest.version;
-    nextRecord.source = { display: "Varin", kind: "builtin", specifier: manifest.id };
-    const desiredGrants = builtinCapabilityGrants(
-      manifest,
-      typeof rawRecord.updatedAt === "string" ? rawRecord.updatedAt : now,
-    );
-    if (!rawCapabilityGrantsMatch(rawRecord.capabilityGrants, desiredGrants)) {
-      nextRecord.capabilityGrants = desiredGrants;
-    }
-    delete nextRecord.candidate;
-    if (manifestChanged || artifactVersionChanged) {
-      delete nextRecord.integrity;
-      delete nextRecord.resolvedPath;
-    }
-    if (canonicalJson(rawRecord) === canonicalJson(nextRecord)) continue;
-    nextRecord.updatedAt = now;
-    extensions[manifest.id] = nextRecord;
-    changed = true;
-  }
-
-  return changed
-    ? { changed, value: { ...value, extensions } }
-    : { changed, value };
 }
 
 function capabilitiesReviewed(record: VarinExtensionInstallationRecord): boolean {
@@ -466,7 +372,7 @@ export class ExtensionCatalogStore {
         changed = true;
       }
       return changed;
-    }, (now) => this.#readForBuiltinReconciliation(manifests, ownedPrefix, now));
+    });
   }
 
   selectBuiltinArtifact(candidate: VarinExtensionPreparedArtifact): Promise<CatalogReadState> {
@@ -730,7 +636,6 @@ export class ExtensionCatalogStore {
 
   async #mutateCurrent(
     mutator: (document: VarinExtensionCatalogDocument, now: string) => boolean,
-    reader: (now: string) => Promise<CatalogMutationRead> = () => this.#readStrictForMutation(),
   ): Promise<CatalogReadState> {
     return this.#serialize(async () => {
       await mkdir(this.directory, { mode: 0o700, recursive: true });
@@ -738,10 +643,9 @@ export class ExtensionCatalogStore {
       const release = await acquireLock(this.#lockPath);
       try {
         const now = new Date().toISOString();
-        const strictRead = await reader(now);
+        const strictRead = await this.#readStrictForMutation();
         const document = strictRead.document;
-        const mutated = mutator(document, now);
-        const changed = strictRead.repaired === true || mutated;
+        const changed = mutator(document, now);
         if (changed) {
           document.revision += 1;
           document.updatedAt = now;
@@ -811,31 +715,6 @@ export class ExtensionCatalogStore {
           ? "catalog_invalid"
           : "catalog_read_failed",
         "Cannot mutate an unreadable Varin extension catalog",
-        { cause: error },
-      );
-    }
-  }
-
-  async #readForBuiltinReconciliation(
-    manifests: readonly ParsedBuiltinDefinition[],
-    ownedPrefix: string,
-    now: string,
-  ): Promise<CatalogMutationRead> {
-    try {
-      const raw = JSON.parse(await readFile(this.catalogPath, "utf8")) as unknown;
-      const repaired = repairKnownBuiltinRecords(raw, manifests, ownedPrefix, now);
-      return {
-        document: parseVarinExtensionCatalogDocument(repaired.value),
-        repaired: repaired.changed,
-        storageState: "ready",
-      };
-    } catch (error) {
-      if (errorCode(error) === "ENOENT") return { document: emptyDocument(), storageState: "missing" };
-      throw new ExtensionCatalogStorageError(
-        error instanceof SyntaxError || error instanceof VarinExtensionContractError
-          ? "catalog_invalid"
-          : "catalog_read_failed",
-        "Cannot reconcile built-ins in an unreadable Varin extension catalog",
         { cause: error },
       );
     }

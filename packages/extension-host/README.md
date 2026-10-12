@@ -21,7 +21,9 @@ and persisted multi-scope service routing.
 Distribution-owned Host extensions use the same immutable artifact and broker lifecycle as installed
 extensions. Their requested Host capabilities are granted only while reconciling the distribution
 definition; executable artifacts are materialized lazily when their activation event is first requested,
-so declarative built-ins do not add startup I/O.
+so declarative built-ins do not add startup I/O. Distribution reconciliation reads only the current
+valid catalog format, preserves desired enablement, and updates valid built-in declarations and grants.
+Malformed records are reported without historical raw-record repair or catalog writeback.
 
 Language activation carries the requested language ID. The distribution's provider catalog identifies
 which built-in extension owns it, so opening a TypeScript document does not first prepare the unrelated
@@ -60,9 +62,11 @@ same manifest, routing, registry and workbench owners. Those metadata operations
 `inspect` callback. Read-only workbench snapshots do not migrate profiles or resolve/create workspace
 identities. Revisions and original lifecycle codes distinguish declared/cold, active, draining,
 disabled, failed and unresolved selections. Missing method metadata is `undeclared`, not an empty
-schema. A normal preparation failure is recorded by its original extension owner, without replacing
-an older still-active generation. Unsupported shell contract versions remain unresolved rather than
-being parsed as the current format. Host slot metadata cannot prove a Surface is actually mounted.
+schema. Tool and method source metadata share strict package-relative declaration validation;
+invalid declarations fail at admission rather than losing their source silently. A normal preparation
+failure is recorded by its original extension owner, without replacing an older still-active generation.
+Unsupported shell contract versions remain unresolved rather than being parsed as the current format.
+Host slot metadata cannot prove a Surface is actually mounted.
 
 Optional `ServiceProvision.contract` carries method/event schemas, author examples and package-relative
 source locations through the same manifest and activation descriptor. A declared method must be

@@ -5,6 +5,6 @@ export default defineHostExtension({
     provideContextFragments(context, { sections: [{
       name: 'research-evidence', kind: 'instruction',
       content: 'For this project, distinguish evidence from hypotheses. When reporting experiments, state the measured result and the comparison baseline. Never fabricate measurements.',
-    }] }, { declareContract: true });
+    }] });
   },
 });

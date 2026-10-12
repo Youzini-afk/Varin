@@ -14,6 +14,13 @@
 - 推理用途接入不等于每个用途都有本地推理包。已有提供商 decision/rerank/embedding 的配置、真实消费者与原生执行合同仍需保留/接通；本地包当前只有已有 Bekko。用户本轮明确暂缓 native 图像生成，不计剩余交付范围；旧 Pi 的 `models.generateImages()` 基础不等于 native 已实现。§18.1/§24 的建议/评估限定已有配置的辅助请求，不能扩成默认模型链；没有另设独立“材料 rerank”产品的任务。此前清单混用用途、消费者和本地包，现以这些明确边界纠正，历史台账不充当新需求。
 - 已有本地嵌入是 `bekko-embedding-v1-a8m` 的 `local-semantic` ONNX 组件，安装、校验、worker 与 CPU 调度已实现。当前 native query 入口只接已配置的 OpenAI-compatible HTTP lease（端点可以本机或外部），尚未接通该已有本地执行器。HTTP 模拟响应下的 Catalog/Goal 验证不代表用户配置了此后端，也不代表本地路径已迁移；后续优先补原 Bekko 路径。
 
+## 2026-10-12 增量：声明与 Catalog 的有界历史兼容删除
+
+- `provideContextFragments` 固定注册同源完整 descriptor，发行内置与作者示例同时迁移；删除 `declareContract` opt-in，不影响其他合法未声明 metadata 的异构服务。
+- tool 与 method/event 的 source 使用同一包内相对路径/行号合同，发布 schema 同步引用；无效声明在准入拒绝，metadata 不再捕获错误后假装没有 source。合法元数据仍沿原 slot/integrity 读取不可变包内文件。
+- 删除 builtin Catalog 在严格解析前的 raw-record repair、专用 reader 和 repaired 写回。当前格式的正常发行更新、用户停用状态、外部 candidate/grants、原 CAS/原子写和诊断快照保留，不删除实际用户资产。
+- 原 SDK→实际 broker、source 元数据→原字节、当前 Catalog→正常更新/坏字节拒绝，以及原 native Transform 请求/child/重开组合已复跑；独审接受，[本片证据](../reviews/runtime-current-extension-contracts-2026-10-12.md)记录旧 storage-sync 测试未命中故障的纠正。下一有界片统一数组 routing；registry/Surface 第二选择表的删除必须连同真实 scoped selected 依赖与共享实例生命周期实施，不能只删字段后宣称闭环。这项真实设计实现排在已有 Bekko 接入之后，本片未半迁移。
+
 ## 2026-10-12 增量：可替换 Context Budget Decision
 
 - 设计依据为扩设 §6/§11 的命名压缩 Decision 和总设 §13.2 的固定祖先 `摘要(A)+B+N`。原 settings、service routing、Run、ContextJob 与 ContentStore 继续各司其职；默认原生预算只做短设置查询，不执行未选择扩展。选中普通策略只接收候选边界/估量元数据，核心仍验证祖先、工具配对及用户后台开关。

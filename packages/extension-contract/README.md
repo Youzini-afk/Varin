@@ -101,6 +101,10 @@ subject or prove executor stop. Its service ID/version remain the stable contrac
 validates this metadata; the executing Host compiles schemas before admitting calls. The declaration
 is inspectable metadata and never permission, trusted replay evidence, or a resource/execution receipt.
 
+Tool and method/event source declarations share one package-relative path and positive safe-integer
+line contract. Absolute paths, URLs, traversal, empty segments and unknown source fields fail manifest
+admission. Omitting source remains valid; inspection preserves declared source metadata unchanged.
+
 Runtime discovery separates current-catalog metadata, an accepted Run's frozen tools, and explicit
 immutable package source reads. A `queryContracts` source request uses
 `{ action: 'read', kind: 'source', extensionId, slot, artifactIntegrity, path, offset?, maxBytes? }`.

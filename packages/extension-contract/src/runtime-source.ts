@@ -1,5 +1,7 @@
 import type { JsonObject } from './types.js';
 
+export interface VarinContractSource { path: string; line?: number }
+
 /** An exact current catalog slot, not permission to execute or read arbitrary Host files. */
 export interface VarinRuntimeSourceArtifact {
   extensionId: string;
@@ -45,6 +47,14 @@ export function parseVarinPackageSourcePath(value: unknown): string {
   const path = nonempty(value);
   if (!PACKAGE_SOURCE_PATH.test(path)) throw new Error('Contract source must be a package-relative path');
   return path;
+}
+/** Source metadata is a logical package location, never a Host path or source read permission. */
+export function parseVarinContractSource(value: unknown): VarinContractSource {
+  const raw = record(value);
+  if (Object.keys(raw).some(key => key !== 'path' && key !== 'line')) throw new Error('Contract source contains an unknown field');
+  const path = parseVarinPackageSourcePath(raw.path);
+  if (raw.line !== undefined && (!Number.isSafeInteger(raw.line) || Number(raw.line) < 1)) throw new Error('Contract source line must be positive');
+  return { path, ...(raw.line === undefined ? {} : { line: Number(raw.line) }) };
 }
 function integrity(value: unknown): string {
   const parsed = nonempty(value);

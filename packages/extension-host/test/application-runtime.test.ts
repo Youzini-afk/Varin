@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { ApplicationExtensionRuntime } from "../src/index.js";
+import { build } from "esbuild";
+import { parseVarinContextFragments, parseVarinExtensionServiceProvision,
+  VARIN_CONTEXT_FRAGMENTS_CONTRACT, VARIN_CONTEXT_FRAGMENTS_SERVICE, type VarinExtensionStorageSnapshot } from "@varin/extension-contract";
+import { ApplicationExtensionRuntime, ChildBrokeredHostTransport } from "../src/index.js";
 
 const directories: string[] = [];
 const temporaryDirectory = async (prefix: string): Promise<string> => {
@@ -351,7 +354,7 @@ test("candidate Host generations stage every opened storage document and commit 
   }
 });
 
-test("candidate Host storage rolls back every committed document when storage sync fails", { timeout: 30_000 }, async () => {
+test("candidate Host storage rolls back every committed document when storage sync fails", { timeout: 30_000 }, async (t) => {
   const dataDir = await temporaryDirectory("varin-storage-sync-rollback-runtime-");
   const v1 = await temporaryDirectory("varin-storage-sync-rollback-v1-");
   const v2 = await temporaryDirectory("varin-storage-sync-rollback-v2-");
@@ -390,16 +393,25 @@ test("candidate Host storage rolls back every committed document when storage sy
       extensionId,
     });
     const prepared = await runtime.prepareCandidate(extensionId, integrity);
-    const candidateProvider = prepared.providers[0];
-    assert.ok(candidateProvider);
-    assert.equal(await runtime.invokeService({
-      args: [],
-      method: "crash",
-      providerId: candidateProvider.providerId,
-      serviceId,
-      version: 1,
-    }), "crashing");
-    await delay(200);
+    assert.ok(prepared.providers[0]);
+    const originalRequest = ChildBrokeredHostTransport.prototype.request;
+    let faults = 0;
+    t.mock.method(ChildBrokeredHostTransport.prototype, "request", async function (
+      this: ChildBrokeredHostTransport, method: string, params?: unknown, signal?: AbortSignal,
+    ) {
+      if (method === "storage.sync" && faults === 0) {
+        const snapshots = (params as { storages: VarinExtensionStorageSnapshot[] }).storages;
+        if (snapshots.every(snapshot => snapshot.address.extensionId === extensionId && snapshot.document.schemaVersion === 2)) {
+          assert.equal(snapshots.length, 3);
+          assert.deepEqual(snapshots.map(snapshot => snapshot.address), addresses);
+          assert.deepEqual(snapshots.map(snapshot => snapshot.document.data.value),
+            ["2.0.0-application", "2.0.0-profile", "2.0.0-workspace"]);
+          faults++;
+          throw new Error("injected v2 storage.sync failure");
+        }
+      }
+      return originalRequest.call(this, method, params, signal);
+    });
 
     const beforeFailure = await runtime.state();
     const selectedProvider = beforeFailure.services.providers.find((provider) => provider.extensionId === extensionId);
@@ -408,7 +420,8 @@ test("candidate Host storage rolls back every committed document when storage sy
       candidateIntegrity: integrity,
       expectedRevision: requested.revision,
       extensionId,
-    }), /Brokered Host (?:process (?:exited|is disconnected)|IPC disconnected)/);
+    }), /injected v2 storage\.sync failure/);
+    assert.equal(faults, 1, "the fault must reach the actual candidate storage-sync boundary");
 
     const afterFailure = await runtime.state();
     assert.equal(afterFailure.catalog.revision, requested.revision);
@@ -729,3 +742,42 @@ module.exports = {
     } finally { await runtime.stop(); }
   });
 }
+
+test("packaged and authored ContextFragments use the full SDK descriptor through real broker preparation", { timeout: 30_000 }, async () => {
+  const root = await temporaryDirectory("varin-context-author-");
+  const runtime = await ApplicationExtensionRuntime.create({ dataDir: join(root, "data"), varinVersion,
+    brokerScript: fileURLToPath(new URL("../broker/broker-child.mjs", import.meta.url)) });
+  try {
+    await runtime.start();
+    const example = join(root, "project-context"); await mkdir(example);
+    for (const name of ["package.json", "varin.extension.json"]) {
+      await copyFile(fileURLToPath(new URL(`../../../examples/extensions/project-context/${name}`, import.meta.url)), join(example, name));
+    }
+    await build({ entryPoints: [fileURLToPath(new URL("../../../examples/extensions/project-context/host.ts", import.meta.url))],
+      outfile: join(example, "host.cjs"), bundle: true, platform: "node", format: "cjs",
+      alias: { "@varin/extension-sdk": fileURLToPath(new URL("../../extension-sdk/dist/index.js", import.meta.url)) } });
+    await runtime.installOrStage({ expectedRevision: (await runtime.catalog.snapshot()).revision,
+      source: { kind: "local", display: "Project context", specifier: example } });
+    const providerKeys = ["varin.builtin.context-fragments", "example.project-context"].map(id => `${id}:host:varin.context.fragments@1`);
+    await runtime.upsertServiceRoutingRule({ expectedRevision: (await runtime.routing.read()).document.revision,
+      rule: { allowFallback: false, providerKeys, scope: { projectId: "evidence-project" }, serviceId: "varin.context.fragments", version: 1 } });
+    const prepared = await runtime.prepareServiceCollection({ serviceId: "varin.context.fragments", version: 1,
+      method: "describe", args: [], routing: { projectId: "evidence-project" } });
+    assert.deepEqual(prepared.bindings.map(binding => binding.providerKey), providerKeys);
+    const sections = [];
+    for (const binding of prepared.bindings) {
+      assert.deepEqual(binding.descriptor, parseVarinExtensionServiceProvision(VARIN_CONTEXT_FRAGMENTS_SERVICE));
+      const pin = binding.pin();
+      try {
+        assert.deepEqual(await pin.invoke("inspect", []), VARIN_CONTEXT_FRAGMENTS_CONTRACT);
+        sections.push(...parseVarinContextFragments(await pin.invoke("describe", [])).sections);
+      } finally { pin.release(); }
+    }
+    assert.deepEqual(sections.map(section => section.name), ["execution-reporting", "research-evidence"]);
+    assert.ok(sections.every(section => section.kind === "instruction" && section.content.length > 0));
+    const described = await runtime.queryContracts({ action: "describe", kind: "service", serviceId: "varin.context.fragments", version: 1,
+      extensionId: "example.project-context", member: { kind: "method", name: "describe" } });
+    assert.ok(described.kind === "service" && described.action === "describe");
+    assert.deepEqual(described.member?.contract, VARIN_CONTEXT_FRAGMENTS_SERVICE.contract.methods.describe);
+  } finally { await runtime.stop(); }
+});
