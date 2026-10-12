@@ -13,13 +13,13 @@ use varin_runtime::execution::*;
 use varin_runtime::supervisor::RunStart;
 use varin_runtime::{Effect, Outcome, RunState};
 #[path = "../../varin-runtime/tests/fixtures/child_dispatch.rs"]
-mod child_fixture;
+pub(super) mod child_fixture;
 
 struct Script {
     calls: Vec<(&'static str, Value, Outcome, Effect)>,
     results: Arc<Mutex<BTreeMap<String, Value>>>,
 }
-fn substitute(value: &Value, results: &BTreeMap<String, Value>) -> Value {
+pub(super) fn substitute(value: &Value, results: &BTreeMap<String, Value>) -> Value {
     match value {
         Value::String(text) if text.starts_with('$') => {
             let (call, pointer) = text[1..].split_once(':').unwrap();
@@ -170,7 +170,7 @@ fn fixture(root: &Path, runtime: Arc<RunSupervisor>) -> Fixture {
         outgoing,
     }
 }
-fn accept(f: &mut child_fixture::Fixture, context: &ToolExecutionContext) -> ChildTask {
+pub(super) fn accept(f: &mut child_fixture::Fixture, context: &ToolExecutionContext) -> ChildTask {
     let selected =
         f.db.capture_child_dispatch_invocation(context)
             .unwrap()
@@ -190,7 +190,7 @@ fn accept(f: &mut child_fixture::Fixture, context: &ToolExecutionContext) -> Chi
             .unwrap();
     f.db.accept_child_references(prepared).unwrap()
 }
-fn admit_child(runtime: &Arc<RunSupervisor>, child: &ChildTask) -> String {
+pub(super) fn admit_child(runtime: &Arc<RunSupervisor>, child: &ChildTask) -> String {
     let owner = runtime.catalog();
     let preparation=owner.lock().unwrap().capture_child_preparation(&child.execution_id,None,
         varin_runtime::catalog::context::ContextProposal { key:child.execution_id.clone(),branch_id:child.child_branch_id.clone(),through_id:None,
@@ -204,7 +204,7 @@ fn admit_child(runtime: &Arc<RunSupervisor>, child: &ChildTask) -> String {
         .unwrap();
     admitted.receipt.unwrap().run_id
 }
-fn binding(runtime: &Arc<RunSupervisor>, run: &str) -> RequestBinding {
+pub(super) fn binding(runtime: &Arc<RunSupervisor>, run: &str) -> RequestBinding {
     let owner = runtime.catalog();
     let db = owner.lock().unwrap();
     let launch = db.launch_intent(run).unwrap().unwrap().selection;
@@ -236,17 +236,17 @@ fn binding(runtime: &Arc<RunSupervisor>, run: &str) -> RequestBinding {
         },
     }
 }
-fn next_run(runtime: &Arc<RunSupervisor>, previous: &str, key: &str) -> String {
+pub(super) fn next_run(runtime: &Arc<RunSupervisor>, previous: &str, key: &str) -> String {
     let old = binding(runtime, previous);
-    let extension = runtime
+    let selected = runtime
         .catalog()
         .lock()
         .unwrap()
         .launch_intent(previous)
         .unwrap()
         .unwrap()
-        .selection
-        .extension_bindings;
+        .selection;
+    let extension = selected.extension_bindings;
     let submission = {
         let owner = runtime.catalog();
         let db = owner.lock().unwrap();
@@ -257,7 +257,7 @@ fn next_run(runtime: &Arc<RunSupervisor>, previous: &str, key: &str) -> String {
                 branch_id: "branch:parent".into(),
                 expected_head: db.head("branch:parent").unwrap(),
                 input: json!("Create original material"),
-                configuration: json!({}),
+                configuration: db.run(previous).unwrap().configuration,
             },
             None,
             None,
@@ -279,7 +279,9 @@ fn next_run(runtime: &Arc<RunSupervisor>, previous: &str, key: &str) -> String {
         None,
     );
     launch.tools = extension.iter().map(|value| value.tool.clone()).collect();
+    launch.tools.sort_by(|left, right| left.name.cmp(&right.name));
     launch.extension_bindings = extension;
+    launch.credential_scope = selected.credential_scope;
     runtime
         .catalog()
         .lock()

@@ -318,13 +318,33 @@ failover reports its actual provider and cause; cancellation stops the chain. Se
 discovery material, while the existing `web.fetch` service remains the original-page authority.
 
 `research.search` is the D-315 scholarly adapter. It is a Host-owned, read-only service over
-OpenAlex and Semantic Scholar with `search`, `paper`, and `relations` actions; relation expansion
-(references/citations/related) is server-paginated through provider-minted cursors and keeps the
-relation source identity on every edge. Returned records retain provider identity, DOI/author
+OpenAlex and Semantic Scholar with `search`, `paper`, and `relations` actions. Each call returns one
+page: search/citations use the provider continuation, while OpenAlex references/related use an
+explicit source-and-relation-bound offset into the original work's ID list. Semantic Scholar's
+graph API has no related-works endpoint and reports it unavailable. Relation results keep the
+source identity. Returned records retain provider identity, DOI/author
 metadata, optional abstract and open-access URL, and a `content` state (`metadata-only` or
 `open-location`). The adapter does not claim that metadata is paper content, does not merge works
 on title similarity alone, does not build a global citation graph, and returns provider errors and
 empty results distinctly.
+
+`kernel/research-discovery.ts` connects that same owner through the ordinary installed
+`varin.builtin.research-discovery` / `research_search` tool. Its single declaration supplies the
+manifest, schema and decoder; original extension call authorization and accepted Catalog identity
+remain in force for model, policy and source-less child calls. Only the original global/trusted-project
+`harness.tools.research_search` setting is frozen; unrelated Web/auth configuration is not its authority.
+Pi keeps its existing snake-case tool arguments through its original bridge. Provider limits apply
+to the requested single page; the adapter neither clamps nor automatically fetches extra pages.
+See the current [OpenAlex paging contract](https://help.openalex.org/api/paging/) and
+[Semantic Scholar API](https://api.semanticscholar.org/api-docs/).
+
+Fetch/body completion, including HTTP-error body cancellation, is awaited before the callback reports
+stopped. Abort prevents a dependent relation request; malformed required provider envelopes/identities
+fail instead of becoming an empty success, while absent optional fields remain valid. Metadata and
+open-access locations are ordinary external result data, not instructions or downloaded content.
+Selecting a paper identity into `materials`, or explicitly fetching its URL and reading the resulting
+snapshot, uses the original material/Storage/public-reader owners. Native fast decisions/reranking
+remain a separate inference/Goal integration; this adapter does not open a Pi model session.
 
 `web.fetch` pins fetched bodies as `web.snapshot` kernel records (`web-materials.ts`): content-hash
 deduplicated bodies, explicit `refresh` minting a new snapshot id, snapshot-id rereads re-checking
