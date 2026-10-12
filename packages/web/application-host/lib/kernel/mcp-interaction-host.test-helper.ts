@@ -32,7 +32,7 @@ export async function createInteractionFixture(options: { root: string; mode: 'h
     ...(http ? { createTransport: () => new StreamableHttpTransport({ url: 'https://receiver.invalid/mcp', fetch: http.fetch }) } : {}) });
   const compositions = new McpCompositions(authority, code => options.onError(new Error(code)));
   const recovery = createMcpTaskRecovery({ kernel, authority, agentDir, hostId: 'fixture-host',
-    inspectWorkspace: async () => { throw new Error('Source-less interaction acquired a workspace'); }, projectTrusted: () => false,
+    admitWorkspaceRegistration: async () => { throw new Error('Source-less interaction acquired a workspace'); }, projectTrusted: () => false,
     validateLiveSource: async () => { throw new Error('Source-less interaction acquired a file source'); } });
   const tasks = createMcpTaskRuntime({ kernel, runtime, recover: recovery, onError: options.onError });
   const models = options.sampling ? (await import('./mcp-sampling-model.test-helper.js')).createSamplingModelAuthority() : undefined;

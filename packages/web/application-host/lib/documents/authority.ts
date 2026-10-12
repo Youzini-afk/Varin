@@ -28,6 +28,7 @@ import {
   DocumentPathError,
   DocumentUntrustedError,
   DocumentWorkspaceUnavailableError,
+  DocumentWorkspaceUnregisteredError,
   isDocumentAuthorityError,
 } from './errors.js';
 import { encodeDocumentText, inspectDocumentBytes, revisionFromBytes } from './inspect.js';
@@ -510,13 +511,21 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
   };
 
+  /** Admits the original Host namespace without opening its former filesystem location.
+   * This is registration/trust authority only, never a physical root or file capability. */
+  const admitWorkspaceRegistration = async (workspaceId: string, signal?: AbortSignal) => {
+    signal?.throwIfAborted();
+    const mapping = await waitWithSignal(registry.get(workspaceId), signal);
+    if (!mapping || mapping.hostId !== hostId) throw new DocumentWorkspaceUnregisteredError();
+    if (!await waitWithSignal(isTrusted(mapping.canonicalPath), signal)) throw new DocumentUntrustedError();
+    signal?.throwIfAborted();
+    return mapping;
+  };
+
   const loadWorkspace = async (workspaceId: string): Promise<LoadedWorkspace> => {
     const mapping = await registry.get(workspaceId);
     if (!mapping) {
-      throw new DocumentAuthorityError('Workspace is not registered on this application host', {
-        code: 'failed',
-        statusCode: 404,
-      });
+      throw new DocumentWorkspaceUnregisteredError();
     }
     let root: string;
     try {
@@ -2328,6 +2337,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     getWorkspace: (workspaceId: string, signal?: AbortSignal) => waitWithSignal(loadWorkspace(workspaceId), signal),
     resolveResourceIdentity,
     listWorkspaceRegistrations: () => registry.list(),
+    admitWorkspaceRegistration,
     inspectWorkspace: async (workspaceId: string, options: { signal?: AbortSignal; reportPhase?: (phase: string) => void } = {}) => {
       try {
         options.signal?.throwIfAborted();

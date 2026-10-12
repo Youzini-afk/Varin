@@ -126,7 +126,7 @@ async function fixture(options: { main?: Reply; planner?: Reply; planningAuth?: 
     isAllowedRoot: async () => true, isTrusted: async () => true }) : undefined;
   const storage = documents ? new KernelStorageAdapter({ client: kernel, hostId: 'planning-host-review', storageRoot: root,
     resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root }) : undefined;
-  const resources = documents && storage ? resourceScopeFixture(root, createKernelWorkspaceWorkingStateAccess(storage), documents) : undefined;
+  const resources = documents && storage ? resourceScopeFixture(root, createKernelWorkspaceWorkingStateAccess(storage), documents, undefined, (input, consume) => storage.withResourceRead(input, consume)) : undefined;
   const prepareSource = documents && storage && resources ? createThreadSourcePreparer({ documents, workingStates: createKernelWorkspaceWorkingStateAccess(storage), prepareResources: resources.prepareSourceCapture }) : undefined;
   if (documents && storage) {
     await fs.mkdir(workspace);
@@ -163,8 +163,7 @@ async function fixture(options: { main?: Reply; planner?: Reply; planningAuth?: 
       }, release: () => { if (!released) { released = true; pins--; } pin.release(); } };
     } };
   };
-  const runtime = new AgentRuntimeClient(kernel, undefined,
-    { prepare: ({ threadId, requiredBinding }, signal) => createAgentPolicy(extensions)({ sessionId: threadId, projectId: 'planning-review', ...(requiredBinding ? { requiredBinding } : {}) }, signal), observe: ({threadId}, changed, signal) => createAgentPolicy(extensions).observe({sessionId:threadId,projectId:'planning-review'}, changed, signal) }, prepareModels);
+  const runtime = new AgentRuntimeClient(kernel, undefined, { prepare: ({ threadId, requiredBinding }, signal) => createAgentPolicy(extensions)({ sessionId: threadId, projectId: 'planning-review', ...(requiredBinding ? { requiredBinding } : {}) }, signal), observe: ({threadId}, changed, signal) => createAgentPolicy(extensions).observe({sessionId:threadId,projectId:'planning-review'}, changed, signal) }, prepareModels, undefined, undefined, async (id, signal) => { if (!documents) throw new Error('No fixture source is registered'); return documents.admitWorkspaceRegistration(id, signal); });
   const launchErrors: unknown[] = [];
   const adapter = new ThreadAdapter(runtime, models, async source => {
     if (!documents) throw new Error('No workspace is admitted');

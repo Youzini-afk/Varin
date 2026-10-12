@@ -1,3 +1,4 @@
+import type { SourceFailureCode } from '@varin/protocol';
 import type { DocumentReadRequest, FetchResult } from '@varin/protocol';
 import type { McpInteractionListParams, McpInteractionReadParams, McpInteractionRespondParams, McpInteractionPage, McpInteractionView, McpSamplingRequestReviewParams, McpSamplingOutputReviewParams } from '@varin/protocol';
 import type { MediaReadParams, MediaReadChunk } from '@varin/protocol';
@@ -284,4 +285,16 @@ export interface ThreadsAPI {
   events(cursor: number): Promise<RuntimeEvent[]>;
   /** Reconnect from the last durable cursor; progress is presentation-only. */
   observe(cursor: number, listener: (event: RuntimeEvent | AgentRuntimeStreamEvent) => void, options: { signal: AbortSignal }): Promise<void>;
+}
+
+/** Safe projection of source-owned failures; arbitrary upstream messages are never displayed. */
+export function threadSourceFailureMessage(code: string): string | undefined {
+  const messages: Record<SourceFailureCode, string> = {
+    source_unavailable: 'The selected source revision is unavailable. Select an available source and retry.',
+    source_registration_missing: 'The source is not registered on this Host. Restore its original registration or select a new source.',
+    source_authority_denied: 'Access to the selected source was denied. Restore its authorization before retrying.',
+    source_environment_unavailable: 'The original working copy is unavailable. Restore that copy or explicitly select a new source.',
+    source_changed: 'The source no longer matches its admitted identity. Select the intended source again.',
+  };
+  return Object.hasOwn(messages, code) ? messages[code as SourceFailureCode] : undefined;
 }

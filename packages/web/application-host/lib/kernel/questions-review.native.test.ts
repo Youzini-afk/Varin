@@ -61,7 +61,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const documents = createDocumentAuthority({ hostId: 'http-review', dataDir: path.join(root, 'documents'), isAllowedRoot: async () => true, isTrusted: async () => true });
   const storage = new KernelStorageAdapter({ client: kernel, hostId: 'http-review', storageRoot: root, resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root });
   const workingStates = createKernelWorkspaceWorkingStateAccess(storage);
-  const resources = resourceScopeFixture(root, workingStates, documents);
+  const resources = resourceScopeFixture(root, workingStates, documents, undefined, (input, consume) => storage.withResourceRead(input, consume));
   const prepare = createThreadSourcePreparer({ documents, workingStates, prepareResources: resources.prepareSourceCapture });
   const personalization = createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'selected-project' }) });
   const prepareContext = createThreadContext({ personalization, resources, projectForWorkspace: async () => 'selected-project' });
@@ -70,7 +70,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const close = async () => { if (closed) return; closed = true; await storage.dispose(); await documents.dispose(); await kernel.close(); };
   cleanups.push(close);
 
-  const adapter = new ThreadAdapter(new AgentRuntimeClient(kernel), {
+  const adapter = new ThreadAdapter(new AgentRuntimeClient(kernel, undefined, undefined, undefined, undefined, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal)), {
     resolveModel: async selection => {
       if (selection.providerId !== 'fixture-provider' || selection.modelId !== 'fixture-model') throw new Error('unselected model');
       return { configuration, credentialOwner: owner };

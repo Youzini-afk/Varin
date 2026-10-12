@@ -1,3 +1,5 @@
+import { sourceFailureCode } from './source-admission-error.js';
+import type { SourceFailureCode } from './protocol.generated.js';
 import type { FastDecisionMaterial } from '@varin/protocol';
 import { contentHashOf } from '../knowledge/semantic/identity.js';
 import { createExploreQueryRun, formatExploreOutput, requiredExploreComponents, DEFAULT_BYTE_BUDGET, DEFAULT_EXCERPT_LIMIT, type ExploreDeps } from '../harness/explore.js';
@@ -19,6 +21,7 @@ export interface RetrievalResult {
   omissions: { outOfScope: number; stale: number; unavailable: number };
   stages: Array<{ kind: RetrievalStageKind; status: RetrievalStageStatus }>;
   message?: string;
+  sourceFailure?: SourceFailureCode;
   inferenceReceipts?: readonly SemanticInferenceReceipt[];
 }
 export type RetrievalOwner = (query: RetrievalQuery, signal: AbortSignal) => Promise<RetrievalResult>;
@@ -51,8 +54,9 @@ export function createRetrievalOwner({ sources, kernel, pipelines, preparePipeli
         if (!pipelines) throw new Error('Retrieval selection is unavailable');
         binding = pipelines.capture();
       }
-    } catch {
-      return { status: signal.aborted ? 'cancelled' : 'failed', snippets: [], stages: [],
+    } catch (error) {
+      const failure = signal.aborted ? undefined : sourceFailureCode(error);
+      return { status: signal.aborted ? 'cancelled' : 'failed', ...(failure ? { sourceFailure: failure } : {}), snippets: [], stages: [],
         omissions: { outOfScope: 0, stale: 0, unavailable: 0 }, message: 'Selected retrieval configuration could not be prepared' };
     }
     try {
@@ -324,7 +328,9 @@ export function createRetrievalOwner({ sources, kernel, pipelines, preparePipeli
         result.status = incomplete ? 'partial' : result.snippets.length ? 'ready' : 'empty';
         if (!result.snippets.length && result.stages.find(entry => entry.kind === 'keyword')?.status === 'failed') result.status = 'failed';
         return result;
-      } catch {
+      } catch (error) {
+        const failure = signal.aborted ? undefined : sourceFailureCode(error);
+        if (failure) result.sourceFailure = failure;
         result.status = signal.aborted ? 'cancelled' : 'failed'; result.snippets = [];
         return result;
       } finally {

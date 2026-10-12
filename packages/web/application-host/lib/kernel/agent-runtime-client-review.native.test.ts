@@ -39,7 +39,7 @@ async function fixture() {
   const releaseHeld = () => { holdMethod = undefined; for (const value of held.splice(0)) (host as unknown as {consumeFrame(value: unknown): void}).consumeFrame(value); };
   cleanups.push(async () => { releaseHeld(); await host.close(); await fs.rm(root, { recursive: true, force: true }); });
   await host.start();
-  return { host, runtimeClient: new AgentRuntimeClient(host), root, options, requests, responses, held, hold(method: string) { holdMethod = method; }, release: () => releaseHeld(),
+  return { host, runtimeClient: new AgentRuntimeClient(host, undefined, undefined, undefined, undefined, undefined, async id => { if (id !== 'source-workspace') throw new Error('Unknown controlled fixture registration'); }), root, options, requests, responses, held, hold(method: string) { holdMethod = method; }, release: () => releaseHeld(),
     async crash() { const exited = once(child, 'exit'); child.kill('SIGKILL'); await exited; },
     async raw(value: Record<string, unknown>) { const id = `review-${requests.length}`; await probe.send({ v: KERNEL_PROTOCOL_VERSION, kind: 'request', id, epoch: host.kernelEpoch, ...value }); await expect.poll(() => responses.has(id)).toBe(true); return responses.get(id)!; },
   };
@@ -69,7 +69,7 @@ it('client submits, inspects, cancels, replays events and preserves receipt on r
   await f.host.close();
   const reopened = createKernelClient(f.options);
   try {
-    const runtimeClient = new AgentRuntimeClient(reopened);
+    const runtimeClient = new AgentRuntimeClient(reopened, undefined, undefined, undefined, undefined, undefined, async id => { if (id !== 'source-workspace') throw new Error('Unknown controlled fixture registration'); });
     expect((await runtimeClient.status()).epoch).toBeGreaterThan(before.epoch);
     expect(await runtimeClient.submit(input)).toEqual(receipt);
     expect((await runtimeClient.history('branch')).map(item => item.id)).toEqual([receipt.input_id]);
@@ -663,7 +663,7 @@ it('queued source launch survives kernel loss and rebinds fresh authority to the
   await f.host.close();
   const restarted = createKernelClient(f.options);
   try {
-    const runtimeClient = new AgentRuntimeClient(restarted);
+    const runtimeClient = new AgentRuntimeClient(restarted, undefined, undefined, undefined, undefined, undefined, async id => { if (id !== 'source-workspace') throw new Error('Unknown controlled fixture registration'); });
     const launch = await runtimeClient.launch(next.run_id);
     expect(restarted.kernelEpoch).not.toBe(oldEpoch);
     expect(launch?.requires_rebind).toBe(true);

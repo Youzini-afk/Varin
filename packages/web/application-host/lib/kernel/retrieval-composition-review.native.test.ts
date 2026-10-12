@@ -172,7 +172,7 @@ it('retrieval routing uses the accepted Run project even when the visible projec
   const storage = new KernelStorageAdapter({ client: f.kernel, hostId: 'process-consumer', storageRoot: f.documents.root,
     resolveWorkspaceRoot: async id => (await f.documents.authority.inspectWorkspace(id)).root });
   cleanups.push(() => storage.dispose());
-  const prepareContext = createThreadContext({ personalization, resources: resourceScopeFixture(f.documents.root, createKernelWorkspaceWorkingStateAccess(storage), f.documents.authority, f.liveSources.validate), projectForWorkspace: async () => 'accepted-project' });
+  const prepareContext = createThreadContext({ personalization, resources: resourceScopeFixture(f.documents.root, createKernelWorkspaceWorkingStateAccess(storage), f.documents.authority, f.liveSources.validate, (input, consume) => storage.withResourceRead(input, consume)), projectForWorkspace: async () => 'accepted-project' });
   f.kernel.setMemoryOwner(createMemoryOwner({ personalization, prepareContext }));
   const observedProjects: Array<string | null> = [];
   let visibleProject = 'accepted-project';

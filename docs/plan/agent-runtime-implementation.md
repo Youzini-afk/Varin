@@ -19,6 +19,13 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-12 增量：原来源生命周期与公开诊断
+
+- fixed/materialized 的公开新输入、Context/指令、原 Run 重绑及 child 分支准备沿 Documents 持久注册与当前信任、Storage 精确 revision/pin；不再为元数据准入要求旧 live 目录。首次捕获、live 与真实文件效果仍保物理根检查，配置命名空间不成为执行 cwd。
+- 原 AgentRuntimeClient 在 fresh source grant 前、来源准备后及冷准备完成的实际 start RPC 前调用同一 Documents owner；撤权拒绝新工作并释放已签 grant/凭据。child 原 pin/分支清理按 Catalog 释放事实进行；研究输入 pin 的原 receipt 清理也不被撤权阻断，真实 revision pin producer 已对齐 Rust 合同。资源正文只在真实 Context 消费时读取。
+- materialized 继续使用原 environment Run 派生的实际 managed copy，缺失或换成另一 managed key 的链接均明确失败，不自动重建。来源诊断沿原私有 wire **13**、公开 client/route、持久 launch/child 和 UI；Catalog **58** 无新增记录域。
+- 原公开入口、Context/Memory/RunAssembly、Storage/Catalog 真实重开和受控模型的证据见[本片验收](../reviews/runtime-source-lifecycle-2026-10-12.md)。完整 source semantic/LSP、远端及其余设计能力继续推进；完整产品 IPC/平台与用户最终迁移保持各自边界。
+
 ## 2026-10-12 增量：固定与物化来源的原检索
 
 - 普通 code_retrieval 直接消费原 LaunchSource/ToolBinding/grant；固定 revision 沿原 compute/tree/blob，materialized 读真实 working copy，完整分页与原 Documents 解码保持。私有 wire **12** 替换旧 live-only 查询字段，Catalog **58** 无新记录域。

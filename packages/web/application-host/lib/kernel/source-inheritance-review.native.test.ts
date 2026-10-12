@@ -51,7 +51,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   });
   const configuration = { providerFamily: 'openai-responses', model: 'fixture-model', endpoint, credentialEnvironment: null, allowAnonymous: false, configurationGeneration: 1, maxOutputTokens: 64 };
   const launchErrors: unknown[] = [];
-  const adapter = new ThreadAdapter(new AgentRuntimeClient(kernel), {
+  const adapter = new ThreadAdapter(new AgentRuntimeClient(kernel, undefined, undefined, undefined, undefined, undefined, async id => { if (id !== 'source-workspace') throw new Error('Unknown controlled fixture registration'); }), {
     resolveModel: async selection => {
       if (selection.providerId !== 'fixture-provider' || selection.modelId !== 'fixture-model') throw new Error('unselected model');
       return { configuration, credentialOwner: owner };

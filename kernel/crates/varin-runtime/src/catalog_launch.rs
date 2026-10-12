@@ -7,6 +7,51 @@ use crate::execution::policy_model::{PolicyModelCapability, PolicyModelStatus};
 use crate::execution::{PolicyIdentity, RequestBinding, ToolSchema};
 use serde::Deserialize;
 
+/// Closed source-owner failure vocabulary used by original launch and retrieval projections.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceFailureCode {
+    SourceUnavailable,
+    SourceRegistrationMissing,
+    SourceAuthorityDenied,
+    SourceEnvironmentUnavailable,
+    SourceChanged,
+}
+impl SourceFailureCode {
+    pub fn parse(code: &str) -> Option<Self> {
+        match code {
+            "source_unavailable" => Some(Self::SourceUnavailable),
+            "source_registration_missing" => Some(Self::SourceRegistrationMissing),
+            "source_authority_denied" => Some(Self::SourceAuthorityDenied),
+            "source_environment_unavailable" => Some(Self::SourceEnvironmentUnavailable),
+            "source_changed" => Some(Self::SourceChanged),
+            _ => None,
+        }
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SourceUnavailable => "source_unavailable",
+            Self::SourceRegistrationMissing => "source_registration_missing",
+            Self::SourceAuthorityDenied => "source_authority_denied",
+            Self::SourceEnvironmentUnavailable => "source_environment_unavailable",
+            Self::SourceChanged => "source_changed",
+        }
+    }
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::SourceUnavailable => "The selected source revision is unavailable. Select an available source and retry.",
+            Self::SourceRegistrationMissing => "The source is not registered on this Host. Restore its original registration or select a new source.",
+            Self::SourceAuthorityDenied => "Access to the selected source was denied. Restore its authorization before retrying.",
+            Self::SourceEnvironmentUnavailable => "The original working copy is unavailable. Restore that copy or explicitly select a new source.",
+            Self::SourceChanged => "The source no longer matches its admitted identity. Select the intended source again.",
+        }
+    }
+}
+pub fn valid_preparation_failure(code: &str) -> bool {
+    matches!(code, "preparation_failed" | "credentials_unavailable" | "binding_changed")
+        || SourceFailureCode::parse(code).is_some()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SourceSelection {
@@ -776,13 +821,7 @@ impl Catalog {
         self.launch_read(metadata)?.load()
     }
     pub fn fail_launch_metadata(&mut self, run_id: &str, code: &str) -> Result<LaunchMetadata> {
-        if !matches!(
-            code,
-            "preparation_failed"
-                | "source_unavailable"
-                | "credentials_unavailable"
-                | "binding_changed"
-        ) {
+        if !valid_preparation_failure(code) {
             return Err(RuntimeError::Invalid(
                 "unknown preparation failure code".into(),
             ));

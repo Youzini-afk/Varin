@@ -63,7 +63,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const documents = createDocumentAuthority({ hostId: 'http-review', dataDir: path.join(root, 'documents'), isAllowedRoot: async () => true, isTrusted: async () => true });
   const storage = new KernelStorageAdapter({ client: kernel, hostId: 'http-review', storageRoot: root, resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root });
   const workingStates = createKernelWorkspaceWorkingStateAccess(storage);
-  const resources = resourceScopeFixture(root, workingStates, documents);
+  const resources = resourceScopeFixture(root, workingStates, documents, undefined, (input, consume) => storage.withResourceRead(input, consume));
   const prepare = createThreadSourcePreparer({ documents, workingStates, prepareResources: resources.prepareSourceCapture });
   const personalization = createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'selected-project' }) });
   const prepareContext = createThreadContext({ personalization, resources, projectForWorkspace: async () => 'selected-project' });
@@ -104,7 +104,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
       release() { released = true; },
     };
     return createMcpLease({ lease, kernel, currentPolicy: async () => currentPolicy });
-  });
+  }, undefined, undefined, undefined, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal));
   const adapter = new ThreadAdapter(runtime, {
     resolveModel: async selection => {
       if (selection.providerId !== 'fixture-provider' || selection.modelId !== 'fixture-model') throw new Error('unselected model');

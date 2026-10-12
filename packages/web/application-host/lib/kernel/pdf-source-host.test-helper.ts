@@ -27,6 +27,8 @@ import { createExperimentService } from '../harness/experiments.js';
 import { createResourceService } from '../harness/resources.js';
 import { createMaterialReviewFixture, writeMaterialFixtureFrame as write } from './material-review-fixture.test-helper.js';
 import { makePdf } from '../harness/pdf-test-fixture.js';
+import { createDocumentAuthority, type DocumentAuthority } from '../documents/authority.js';
+let documents: DocumentAuthority;
 const fixture = createMaterialReviewFixture(params => {
   assert.equal(params.sessionId, undefined);
   if (String(params.grantId).startsWith('material:')) {
@@ -39,7 +41,7 @@ const fixture = createMaterialReviewFixture(params => {
     assert.equal(params.operationId, undefined);
     assert.equal(params.runId, selection.sourceRunId);
   }
-});
+}, (id, signal) => documents.admitWorkspaceRegistration(id, signal));
 const { kernel, runtime, bridge } = fixture;
 let extensions: ApplicationExtensionRuntime, selected: ExtensionToolScope | undefined;
 let web: ReturnType<typeof createWebRuntime>, storage: KernelStorageAdapter;
@@ -52,21 +54,25 @@ async function initialize(frame: Record<string, unknown>) {
   const root = String(frame.root), storageRoot = String(frame.storageRoot), mode = String(frame.mode);
   selection = { runtime: 'agent', threadId: String(frame.threadId), branchId: String(frame.branchId), sourceRunId: String(frame.runId) };
   physical = join(root, 'live'); await mkdir(physical, { recursive: true });
-  const live = createLiveSourceOwner({ kernel, documents: { inspectWorkspace: async () => ({ root: physical, hostId: 'web-domain-host' }) } });
+  const registeredRoot = physical;
+  documents = createDocumentAuthority({ hostId: 'web-domain-host', dataDir: join(root, 'documents'),
+    isTrusted: async candidate => candidate === registeredRoot, isAllowedRoot: async candidate => candidate === registeredRoot });
+  const { workspaceId } = await documents.resolveWorkspace({ path: registeredRoot });
+  const live = createLiveSourceOwner({ kernel, documents });
   if (!frame.readerOnly) {
-    const seed = await kernel.issueGrant({ grantId: 'pdf-fixture-seed', threadId: selection.threadId, runId: selection.sourceRunId, owningWorkspace: 'workspace:pdf', executionWorkspace: 'workspace:pdf',
+    const seed = await kernel.issueGrant({ grantId: 'pdf-fixture-seed', threadId: selection.threadId, runId: selection.sourceRunId, owningWorkspace: workspaceId, executionWorkspace: workspaceId,
       capabilities: ['storage.read', 'storage.write'], pathScopes: [''] });
     const actor = kernel.scoped(seed);
     const fixedBytes = pdf('FIXD');
     const blob = await actor.putBlob(fixedBytes, 'fixture-fixed-pdf');
-    await actor.createBranch({ operationId: 'fixture-source', workspaceId: 'workspace:pdf', branchId: 'source:pdf',
+    await actor.createBranch({ operationId: 'fixture-source', workspaceId, branchId: 'source:pdf',
       captureScopes: [], draftBasePaths: [], entries: [{ path: 'paper.pdf', ownerId: blob.ownerId,
         state: { kind: 'regular-file', objectHash: blob.hash, byteLength: fixedBytes.byteLength, mode: 420 } }] });
     await actor.releaseBlob(blob.ownerId);
     source = mode === 'live_root'
-      ? { mode, workspace_id: 'workspace:pdf', execution_workspace_id: 'workspace:pdf', branch_id: null, revision: null,
-        live_root: await live.prepare('workspace:pdf', 'workspace:pdf', selection.threadId) }
-      : { mode: mode as 'materialized' | 'fixed_branch', workspace_id: 'workspace:pdf', execution_workspace_id: 'workspace:pdf',
+      ? { mode, workspace_id: workspaceId, execution_workspace_id: workspaceId, branch_id: null, revision: null,
+        live_root: await live.prepare(workspaceId, workspaceId, selection.threadId) }
+      : { mode: mode as 'materialized' | 'fixed_branch', workspace_id: workspaceId, execution_workspace_id: workspaceId,
         branch_id: 'source:pdf', revision: 0, live_root: null };
     await writeFile(join(physical, 'paper.pdf'), pdf('LIVE'));
     if (mode === 'materialized') {
@@ -166,7 +172,7 @@ async function receive(frame: Record<string, unknown>) {
   if (fixture.receive(frame)) return;
   if (frame.kind === 'fixture-public') return publicRead(frame);
   if (frame.kind === 'fixture-finish') {
-    selected?.close(); await bridge.close(); if (extensions) await extensions.stop(); await experiments.dispose(); await resources.dispose(); await storage.dispose();
+    selected?.close(); await bridge.close(); if (extensions) await extensions.stop(); await experiments.dispose(); await resources.dispose(); await storage.dispose(); await documents.dispose();
     write({ kind: 'fixture-finished' }); return;
   }
   throw new Error(`Unexpected PDF source frame ${JSON.stringify(frame)}`);

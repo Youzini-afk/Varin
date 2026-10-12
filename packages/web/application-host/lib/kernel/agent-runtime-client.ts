@@ -1,3 +1,5 @@
+import { SourceAdmissionError } from './source-admission-error.js';
+import type { SourceFailureCode } from './protocol.generated.js';
 import type { OperationCallCompletion, IncomingMedia, OutputPart } from './protocol.generated.js';
 import type { MediaReadParams, MediaReadChunk } from './protocol.generated.js';
 import type * as CalendarProtocol from './protocol.generated.js';
@@ -128,6 +130,7 @@ export class AgentRuntimeClient {
     private readonly preparePolicyModels?: PolicyModelPreparer,
     private readonly resolveLiveSource?: LiveSourceResolver,
     private readonly prepareExtensionOwner?: ExtensionToolPreparer,
+    private readonly sourceRegistration?: (workspaceId: string, signal?: AbortSignal) => Promise<unknown>,
   ) {
     kernel.subscribeExit(() => {
       for (const runId of this.policyObservations.keys()) this.closePolicyObservation(runId);
@@ -613,7 +616,7 @@ export class AgentRuntimeClient {
     executionId: string,
     code:
       | 'preparation_failed'
-      | 'source_unavailable'
+      | SourceFailureCode
       | 'credentials_unavailable'
       | 'binding_changed',
     signal?: AbortSignal,
@@ -993,7 +996,7 @@ export class AgentRuntimeClient {
     runId: string,
     code:
       | 'preparation_failed'
-      | 'source_unavailable'
+      | SourceFailureCode
       | 'credentials_unavailable'
       | 'binding_changed',
     signal?: AbortSignal,
@@ -1020,6 +1023,15 @@ export class AgentRuntimeClient {
       signal,
     );
   }
+  /** Recheck the original Documents owner; a namespace is never a physical execution root. */
+  async admitSourceRegistration(source: { workspaceId: string; executionWorkspaceId: string }, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
+    if (!this.sourceRegistration) throw new SourceAdmissionError('source_unavailable');
+    await this.sourceRegistration(source.workspaceId, signal);
+    if (source.executionWorkspaceId !== source.workspaceId) await this.sourceRegistration(source.executionWorkspaceId, signal);
+    signal?.throwIfAborted();
+  }
+
   /** Slow connection/schema preparation happens after input admission, before the first model request. */
   async prepareMcp(
     runId: string,
@@ -1583,6 +1595,13 @@ export class AgentRuntimeClient {
     } finally { lease?.release(); preparation.release(); }
   }
 
+  private async admitStartingSource(runId: string, signal: AbortSignal): Promise<void> {
+    const source = (await this.launch(runId, signal))?.selection.source;
+    if (source && source.mode !== 'live_root') await this.admitSourceRegistration({
+      workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id,
+    }, signal);
+  }
+
   async startRun(
     runId: string,
     signal?: AbortSignal,
@@ -1596,6 +1615,7 @@ export class AgentRuntimeClient {
       try {
         await this.reconcileMemory(runId, signal);
         await this.reconcilePlan(runId, signal);
+        await this.admitStartingSource(runId, signal);
         const receipt = await this.kernel.agentRuntimeRequest<
           RunStartReceipt,
           'runtime.run.start'
@@ -1646,6 +1666,7 @@ export class AgentRuntimeClient {
         const extensionBindings = await this.prepareExtensions(runId, signal);
         await this.reconcileMemory(runId, signal);
         await this.reconcilePlan(runId, signal);
+        await this.admitStartingSource(runId, signal);
         const receipt = await this.kernel.agentRuntimeRequest<
           RunStartReceipt,
           'runtime.run.start'

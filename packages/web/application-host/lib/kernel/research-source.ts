@@ -1,5 +1,6 @@
 /** Original Run source authority handed to ExperimentService's accepted worker. */
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { KernelClient } from './kernel-client.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
@@ -49,6 +50,48 @@ export function createResearchSourceAuthority(options: {
       throw new Error('Original research LaunchSource changed');
     return admitRunSourceAuthority(options.kernel, runtime, savedSourceLaunch(caller.owner.runId, caller.owner.source, sourceToolSchemas(launch.selection).map(tool => tool.name) as Parameters<typeof savedSourceLaunch>[2]), { ...(signal ? { signal } : {}), resolveLiveSource: options.resolveLiveSource, retention: 'caller', operationId: caller.owner.operationId });
   };
+  // Release only this original Operation's recorded pin. Cleanup does not reacquire source
+  // reading or physical-root authority after trust has been withdrawn.
+  const releaseFixedPin = async (caller: ExperimentCaller, admitted?: Extract<ExperimentSourceAdmission, { kind: 'fixed' }>): Promise<boolean> => {
+    const owner = caller.owner;
+    if (owner.runtime !== 'agent' || !('operationId' in owner) || owner.source.mode !== 'fixed_branch'
+      || !owner.source.branch_id || owner.source.revision === null
+      || caller.workspaceId !== owner.source.workspace_id || caller.executionWorkspaceId !== owner.source.execution_workspace_id)
+      throw new Error('Original fixed research cleanup owner is required');
+    const pinId = `research-input:${owner.operationId}`;
+    if (admitted && (!isDeepStrictEqual(admitted.selection, owner.source) || admitted.pinId !== pinId
+      || admitted.branchId !== owner.source.branch_id || admitted.revision !== owner.source.revision))
+      throw new Error('Original fixed research admission differs');
+    const runtime = options.runtime();
+    const [run, launch, operation] = await Promise.all([runtime.run(owner.runId), runtime.launch(owner.runId), runtime.operation(owner.operationId)]);
+    if (run.id !== owner.runId || run.thread_id !== owner.threadId || run.branch_id !== owner.branchId
+      || !launch || !isDeepStrictEqual(launch.selection.source, owner.source)
+      || operation.id !== owner.operationId || operation.run_id !== run.id || operation.lifetime !== 'thread'
+      || operation.execution_owner?.kind !== 'external' || !isDeepStrictEqual(operation.execution_owner, owner.executionOwner))
+      throw new Error('Original research cleanup attribution changed');
+    const grant = await options.kernel.issueGrant({ grantId: `research-source-cleanup:${randomUUID()}`,
+      threadId: run.thread_id, runId: run.id, operationId: operation.id,
+      owningWorkspace: owner.source.workspace_id, executionWorkspace: owner.source.execution_workspace_id,
+      capabilities: ['storage.read', 'storage.maintenance'], pathScopes: [''] });
+    const client = options.kernel.scoped(grant);
+    try {
+      const receiptId = `research-input-pin:${owner.operationId}`;
+      const receipt = await client.getOperation(receiptId);
+      if (!receipt) {
+        if (admitted) throw new Error('Original fixed source pin receipt is unavailable');
+        return true;
+      }
+      if (receipt.state !== 'committed') return false;
+      const result = receipt.result as { pinId?: string; branchId?: string; workspaceId?: string; revision?: number; view?: string; root?: string } | undefined;
+      if (receipt.operationId !== receiptId || receipt.kind !== 'branch.pin' || !result || result.pinId !== pinId
+        || result.branchId !== owner.source.branch_id || result.workspaceId !== owner.source.workspace_id
+        || result.view !== 'revision' || result.revision !== owner.source.revision || typeof result.root !== 'string' || !result.root
+        || admitted && result.root !== admitted.root)
+        throw new Error('Original fixed source pin receipt differs');
+      await client.unpinBranch({ operationId: `research-input-unpin:${owner.operationId}`, branchId: owner.source.branch_id, pinId });
+      return true;
+    } finally { await options.kernel.retireGrant(grant.grantId); }
+  };
   return {
     async admit(caller, cwd, signal) {
       const owner = caller.owner;
@@ -63,7 +106,7 @@ export function createResearchSourceAuthority(options: {
           const selectedCwd = relative(cwd ?? "");
           const pinId = `research-input:${owner.operationId}`;
           const pinned = await source.client.pinBranch({ operationId: `research-input-pin:${owner.operationId}`, branchId: owner.source.branch_id,
-            revision: owner.source.revision, pinId, persistent: true });
+            revision: owner.source.revision, pinId });
           if (pinned.root !== branch.root || pinned.pinId !== pinId)
             throw new Error('Research source pin differs from its exact revision');
           return { kind: 'fixed', selection: owner.source, branchId: owner.source.branch_id, revision: owner.source.revision, root: branch.root, pinId, cwd: selectedCwd };
@@ -145,41 +188,15 @@ export function createResearchSourceAuthority(options: {
         await options.kernel.retireOperationGrants(owner.operationId);
         return true;
       }
-      const source = await open(caller);
-      let drained = false;
-      try {
-        const receipt = await source.client.getOperation(`research-input-pin:${owner.operationId}`);
-        if (!receipt) { drained = true; return true; }
-        if (receipt.state !== 'committed')
-          return false;
-        const result = receipt.result as {
-          pinId?: string;
-          branchId?: string;
-          root?: string;
-        } | undefined;
-        const pinId = `research-input:${owner.operationId}`;
-        if (!result || result.pinId !== pinId || result.branchId !== owner.source.branch_id)
-          throw new Error('Original fixed source pin receipt differs');
-        await source.client.unpinBranch({ operationId: `research-input-unpin:${owner.operationId}`, branchId: owner.source.branch_id!, pinId });
-        drained = true;
-        return true;
-      }
-      finally {
-        await source.release();
-        if (drained) await options.kernel.retireOperationGrants(owner.operationId);
-      }
+      const drained = await releaseFixedPin(caller);
+      if (drained) await options.kernel.retireOperationGrants(owner.operationId);
+      return drained;
     },
     async release(caller, admitted) {
       if (admitted.kind !== 'fixed')
         return;
-      const source = await open(caller);
-      try {
-        await source.client.unpinBranch({ operationId: `research-input-unpin:${caller.owner.runtime === 'agent' && 'operationId' in caller.owner ? caller.owner.operationId : ''}`,
-          branchId: admitted.branchId, pinId: admitted.pinId });
-      }
-      finally {
-        await source.release();
-      }
+      if (!await releaseFixedPin(caller, admitted))
+        throw new Error('Original fixed source pin has not drained');
     },
   };
 }

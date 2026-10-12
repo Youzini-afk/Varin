@@ -1,3 +1,4 @@
+import { SourceAdmissionError, sourceReadError } from './source-admission-error.js';
 import { parseSourceResourceCapture, type ResourceSourceReadInput, type ResourceSourceReadView } from "./thread-resource-scope.js";
 import { runKernelCompute } from "./compute-runner.js";
 import type { WorkingStateFileQuery, WorkingStateQueryOptions, WorkingStateQueryResult } from "../harness/working-state/query-contract.js";
@@ -780,7 +781,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
 
   async pinBranch(branchId: string, options?: { revision?: number; signal?: AbortSignal }): Promise<WorkingStatePin> {
     const branch = await this.getBranchRoot(branchId, options?.signal ? { signal: options.signal } : undefined);
-    if (!branch) throw new Error(`Working branch not found: ${branchId}`);
+    if (!branch) throw new SourceAdmissionError("source_unavailable");
     const expected = options?.revision === undefined ? branch : null;
     const operationId = `branch-query-pin:${branchId}:${randomUUID()}`;
     const raw = await this.context.client.pinBranch({
@@ -805,6 +806,10 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       || !Number.isSafeInteger(revision) || revision < 0 || !Number.isSafeInteger(writeRevision)
       || writeRevision < 0 || (view !== "current" && view !== "revision") || !root) {
       throw new Error(`Kernel returned an invalid pin for ${branchId}`);
+    }
+    if (options?.revision !== undefined && (revision !== options.revision || view !== "revision")) {
+      await this.context.client.unpinBranch({ operationId: `branch-query-unpin-mismatch:${branchId}:${pinId}`, branchId, pinId });
+      throw new SourceAdmissionError("source_changed");
     }
     if (expected && (root !== expected.root || writeRevision !== expected.writeRevision || view !== "current")) {
       await this.context.client.unpinBranch({ operationId: `branch-query-unpin-mismatch:${branchId}:${pinId}`, branchId, pinId });
@@ -861,7 +866,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
 
   async pinBranchHandoff(branchId: string, pinId: string, options?: { revision?: number; signal?: AbortSignal }): Promise<WorkingStatePin> {
     const branch = await this.getBranchRoot(branchId, options?.signal ? { signal: options.signal } : undefined);
-    if (!branch) throw new Error(`Working branch not found: ${branchId}`);
+    if (!branch) throw new SourceAdmissionError("source_unavailable");
     const raw = await this.context.client.pinBranch({
       operationId: `branch-handoff-pin:${branchId}:${pinId}`,
       branchId,
@@ -1484,7 +1489,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     const previous = await this.readResultCandidate(branchId, publicationId, signal ? { signal } : undefined);
     if (previous) return previous;
     const branch = await this.getBranchRoot(branchId, signal ? { signal } : undefined);
-    if (!branch) throw new Error(`Working branch not found: ${branchId}`);
+    if (!branch) throw new SourceAdmissionError("source_unavailable");
     if (input.source.kind === "head") {
       return this.resultCandidate(await this.context.client.prepareResultCandidate({ publicationId, branchId,
         expectedWriteRevision: branch.writeRevision, expectedRoot: branch.root, changes: [] }, signal), branchId, publicationId);
@@ -1934,11 +1939,11 @@ export class KernelStorageAdapter {
       const grant = await this.client.issueGrant({ grantId: `resource-read:${randomUUID()}`,
         threadId: input.identity.threadId, ...(input.runId ? { runId: input.runId } : {}),
         owningWorkspace: source.workspaceId, executionWorkspace: source.executionWorkspaceId,
-        capabilities: ["storage.read"], pathScopes: [...paths] });
+        capabilities: ["storage.read"], pathScopes: [...paths] }, signal);
       const lease: Lease = { grant }; leases.push(lease);
       const store = new KernelWorkingStateRootStore(await this.contextFromBranchGrant({ grant,
         owningWorkspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId }));
-      const pin = await store.pinBranch(source.branchId, { revision: source.revision, ...(signal ? { signal } : {}) });
+      const pin = await store.pinBranch(source.branchId, { revision: source.revision, ...(signal ? { signal } : {}) }).catch(error => { throw sourceReadError(error); });
       lease.store = store; lease.pin = pin;
       return { grant, store, pin };
     };
@@ -1955,7 +1960,7 @@ export class KernelStorageAdapter {
     try {
       let current = await open();
       const pin = current.pin;
-      const original = await current.store.readOriginalSource(source.branchId, signal ? { signal } : {});
+      const readOriginalSource = () => current.store.readOriginalSource(source.branchId, signal ? { signal } : {});
       const admitSymlinkTarget = (target: string): Promise<void> => {
         const next = pending.then(async () => {
           // The original resolver supplies only a final context candidate, never its parent directory.
@@ -1980,7 +1985,7 @@ export class KernelStorageAdapter {
         },
       };
       signal?.throwIfAborted();
-      const result = await consume({ pin, original, store, admitSymlinkTarget });
+      const result = await consume({ pin, readOriginalSource, store, admitSymlinkTarget });
       await pending;
       signal?.throwIfAborted();
       return result;

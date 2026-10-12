@@ -75,6 +75,7 @@ async function fixture(files: Record<string, string>) {
     readContent: vi.fn(async (entry: { state: RecoveryState }) => entry.state.kind === 'regular-file' ? objects.get(entry.state.objectHash) ?? null : null),
   } as unknown as WorkingStateRootStore;
   const documents = {
+    admitWorkspaceRegistration: vi.fn(async () => ({ canonicalPath: root, workspaceId: 'workspace', hostId: 'test', kind: 'directory' as const })),
     inspectWorkspace: vi.fn(async () => ({ root, workspaceId: 'workspace' })),
     beginDirtyStateBarrier: vi.fn(async () => ({ settle: async () => undefined, release: async () => undefined })),
     beginCapture: vi.fn(async () => ({ captureId: 'capture', workspaceId: 'workspace' })),
@@ -96,7 +97,7 @@ async function fixture(files: Record<string, string>) {
     withSourceRead: async <T>(input: import('./thread-resource-scope.js').ResourceSourceReadInput, consume: (view: import('./thread-resource-scope.js').ResourceSourceReadView) => Promise<T>) => {
       sourceReads(input);
       const pin = await store.pinBranch(input.source.branchId, { revision: input.source.revision });
-      try { return await consume({ pin, original: await store.readOriginalSource(input.source.branchId), store }); }
+      try { return await consume({ pin, readOriginalSource: () => store.readOriginalSource(input.source.branchId), store }); }
       finally { await pin.release(); }
     } };
   const scope = createThreadResourceScope(options);
@@ -132,8 +133,9 @@ describe('Thread source resource admission', () => {
     const support = await read(f, snapshot, 'review', 'reference.txt');
     expect(support.status === 'ready' && support.kind === 'skill-resource' && support.file.content).toBe('ORIGINAL SUPPORT');
     expect(f.release).toHaveBeenCalledTimes(2);
-    expect(f.sourceReads).toHaveBeenCalledTimes(1);
-    expect(f.sourceReads.mock.calls[0]?.[0]).toMatchObject({ paths: ['.pi/skills/review'], runId: 'run' });
+    expect(f.sourceReads).toHaveBeenCalledTimes(2);
+    expect(f.sourceReads.mock.calls[0]?.[0]).toMatchObject({ paths: [''] });
+    expect(f.sourceReads.mock.calls[1]?.[0]).toMatchObject({ paths: ['.pi/skills/review'], runId: 'run' });
     expect(parseSourceResourceCapture(prepared.provenance.resources)).toEqual(prepared.provenance.resources);
   });
 
@@ -183,6 +185,7 @@ describe('Thread source resource admission', () => {
   it('serves frozen bodies after the original root and branch become unavailable, without obtaining another source grant', async () => {
     const f = await fixture({ 'AGENTS.md': 'ROOT', '.gitignore': '.pi', '.pi/settings.json': '{}', '.pi/skills/review/SKILL.md': skill('review', 'FROZEN') });
     await f.prepare(); const snapshot = await f.candidate();
+    f.sourceReads.mockClear();
     const request = { kind: 'skill' as const, resourceId: snapshot.skills.find(skill => skill.name === 'review')!.id };
     await expect(f.scope.withScope(identity, f.source, admitted, async () => { f.trust.value = false; return 'stale'; }, { snapshot, request }))
       .rejects.toMatchObject({ failure: { status: 'denied' } });

@@ -1,3 +1,5 @@
+import { createThreadSourceAdmission } from './thread-sources.js';
+import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import { describe, expect, it, vi } from 'vitest';
 import type { KernelClient, KernelGrantIssueInput } from './kernel-client.js';
 import { createPinnedResourceReader } from '../agent-resources/source-reader.js';
@@ -29,10 +31,10 @@ function fixture() {
 describe('frozen resource Storage admission', () => {
   it('opens the exact original revision using a current Thread/Run readonly grant, without physical file authority', async () => {
     const f = fixture();
-    const result = await f.adapter.withResourceRead(f.input, async ({ store, pin, original }) => {
+    const result = await f.adapter.withResourceRead(f.input, async ({ store, pin, readOriginalSource }) => {
       expect(Object.keys(store).sort()).toEqual(['listPaths', 'readContent', 'readPath']);
       expect(pin).toMatchObject({ branchId: 'source', revision: 7, root: 'fixed-root' });
-      expect(original).toBeNull();
+      expect(await readOriginalSource()).toBeNull();
       const file = await store.readPath('source', f.file.path, { pin });
       expect(file?.state).toEqual(f.file.state);
       expect(await store.readContent(file!)).toEqual(Buffer.from('BODY'));
@@ -42,13 +44,30 @@ describe('frozen resource Storage admission', () => {
     expect(result).toBe('read');
     expect(f.client.issueGrant).toHaveBeenCalledOnce();
     expect(f.client.issueGrant).toHaveBeenCalledWith({ grantId: expect.stringMatching(/^resource-read:/), threadId: 'fork', runId: 'new-run',
-      owningWorkspace: 'original', executionWorkspace: 'original-execution', capabilities: ['storage.read'], pathScopes: ['.pi/skills/review'] });
+      owningWorkspace: 'original', executionWorkspace: 'original-execution', capabilities: ['storage.read'], pathScopes: ['.pi/skills/review'] }, undefined);
     expect(f.scoped.pinBranch).toHaveBeenCalledWith(expect.objectContaining({ branchId: 'source', revision: 7 }), undefined);
     expect(f.scoped.getBlob).toHaveBeenCalledWith('sha256-body', { pinId: 'resource-pin', path: f.file.path }, expect.anything());
     expect(f.resolveWorkspaceRoot).not.toHaveBeenCalled();
     expect(f.scoped.unpinBranch).toHaveBeenCalledOnce();
     expect(f.client.revokeGrant).toHaveBeenCalledWith(expect.stringMatching(/^resource-read:/));
     expect(f.scoped.unpinBranch.mock.invocationCallOrder[0]).toBeLessThan(f.client.revokeGrant.mock.invocationCallOrder[0]!);
+  });
+
+  it('admits Thread source metadata without reading the resource capsule and rejects a different pinned revision', async () => {
+    const f = fixture();
+    const documents = { admitWorkspaceRegistration: vi.fn(async (workspaceId: string) => ({ workspaceId, hostId: 'host', kind: 'directory' as const, canonicalPath: '/removed/original' })) };
+    const runtime = { childForThread: vi.fn(async () => null) } as unknown as AgentRuntimeClient;
+    const admit = createThreadSourceAdmission({ documents, runtime, withSourceRead: (input, consume) => f.adapter.withResourceRead(input, consume) });
+    await admit(f.input.source, f.input.identity, f.input.runId);
+    expect(f.scoped.getOperation).not.toHaveBeenCalled();
+    expect(f.scoped.getBlob).not.toHaveBeenCalled();
+    expect(f.client.issueGrant).toHaveBeenCalledWith(expect.objectContaining({ capabilities: ['storage.read'], pathScopes: [''], runId: 'new-run' }), undefined);
+    expect(f.scoped.unpinBranch).toHaveBeenCalledOnce();
+    expect(f.resolveWorkspaceRoot).not.toHaveBeenCalled();
+    await expect(admit({ ...f.input.source, revision: 99 }, f.input.identity, f.input.runId)).rejects.toMatchObject({ code: 'source_changed' });
+    expect(f.scoped.getOperation).not.toHaveBeenCalled();
+    expect(f.scoped.getBlob).not.toHaveBeenCalled();
+    expect(f.client.revokeGrant).toHaveBeenCalledTimes(2);
   });
 
   it.each(['failure', 'cancelled'] as const)('releases the original pin and grant on %s without publishing a result', async outcome => {

@@ -85,7 +85,7 @@ export default defineHostExtension({ activate(context) {
   const prepareChild = createChildMcpPreparer({ authority: options.authority, kernel: options.kernel,
     ...(tasks ? { tasks: () => tasks } : {}), ...(resources ? { resources: () => resources } : {}),
     agentDir: options.agentDir, hostId: 'fixture-host',
-    inspectWorkspace: async () => { throw new Error('Source-less child acquired a workspace'); },
+    admitWorkspaceRegistration: async () => { throw new Error('Source-less child acquired a workspace'); },
     projectTrusted: () => false, currentPolicy: async () => ({ mode: 'normal', rules: [] }),
   });
   return {

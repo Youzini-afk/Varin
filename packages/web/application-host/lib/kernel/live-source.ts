@@ -30,24 +30,24 @@ export function createLiveSourceOwner({ documents, kernel }: Owners) {
     }
     signal?.throwIfAborted();
   };
-  const prepare = async (workspaceId: string, executionWorkspaceId: string, threadId: string): Promise<LiveRoot> => {
-    const workspace = await documents.inspectWorkspace(workspaceId);
+  const prepare = async (workspaceId: string, executionWorkspaceId: string, threadId: string, signal?: AbortSignal): Promise<LiveRoot> => {
+    const workspace = await documents.inspectWorkspace(workspaceId, signal ? { signal } : {});
     const source = { workspaceId, executionWorkspaceId,
       liveRoot: { hostId: workspace.hostId, canonicalRoot: workspace.root, rootId: '' } };
-    await validate(source);
+    await validate(source, signal);
     const grant = await kernel.issueGrant({ grantId: `live-admission:${randomUUID()}`,
       owningWorkspace: workspaceId, executionWorkspace: executionWorkspaceId, threadId,
-      capabilities: ['storage.read', 'storage.write'], pathScopes: [''] });
+      capabilities: ['storage.read', 'storage.write'], pathScopes: [''] }, signal);
     try {
-      const registered = await kernel.scoped(grant).fileRootRegister({ workspaceId, executionWorkspaceId, canonicalRoot: workspace.root });
+      const registered = await kernel.scoped(grant).fileRootRegister({ workspaceId, executionWorkspaceId, canonicalRoot: workspace.root }, signal);
       if (typeof registered.rootId !== 'string' || typeof registered.canonicalRoot !== 'string'
         || normalizePathIdentity(registered.canonicalRoot) !== normalizePathIdentity(workspace.root)) throw new Error('Live root admission failed');
       return { ...source.liveRoot, rootId: registered.rootId };
     } finally { await kernel.revokeGrant(grant.grantId); }
   };
-  const admit = async (source: LiveSourceSelection, threadId: string): Promise<void> => {
-    await validate(source);
-    const actual = await prepare(source.workspaceId, source.executionWorkspaceId, threadId);
+  const admit = async (source: LiveSourceSelection, threadId: string, signal?: AbortSignal): Promise<void> => {
+    await validate(source, signal);
+    const actual = await prepare(source.workspaceId, source.executionWorkspaceId, threadId, signal);
     if (actual.rootId !== source.liveRoot.rootId) throw new Error('Live root registration does not match the selected source');
   };
   return { prepare, validate, admit };

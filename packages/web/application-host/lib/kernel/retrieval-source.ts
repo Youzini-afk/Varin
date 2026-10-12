@@ -1,14 +1,15 @@
+import { sourceReadError } from './source-admission-error.js';
 /** Query-local access to the original admitted source. No registrations, grants or corpus live here. */
 import { isDeepStrictEqual } from 'node:util';
 import type { DocumentAuthority } from '../documents/authority.js';
 import { inspectDocumentBytes, revisionFromBytes } from '../documents/inspect.js';
 import type { ExploreFileSnapshot } from '../harness/explore-file-reader.js';
-import { canonicalizePathIdentity, normalizePathIdentity } from '../workspace/path-safety.js';
+import { normalizePathIdentity } from '../workspace/path-safety.js';
 import type { KernelClient } from './kernel-client.js';
 import type { LiveSourceResolver } from './live-source.js';
 import { runKernelCompute, type KernelComputeInput, type KernelComputeOptions, type KernelComputeResult } from './compute-runner.js';
 import type { RetrievalQuery } from './protocol.generated.js';
-import { originalMaterializationLocation } from './source-launch.js';
+import { admitMaterializedRoot, originalMaterializationLocation } from './source-launch.js';
 
 type SourceComputeInput = Omit<KernelComputeInput, 'workspaceId' | 'rootId' | 'branchId' | 'revision' | 'pinId' | 'objects'>;
 export interface RetrievalSourceOwner {
@@ -20,20 +21,22 @@ export interface RetrievalSourceOwner {
 }
 export function createRetrievalSourceOwner(options: {
   kernel: KernelClient;
-  documents: Pick<DocumentAuthority, 'readSnapshot' | 'listWorkspaceRegistrations'>;
+  documents: Pick<DocumentAuthority, 'readSnapshot' | 'admitWorkspaceRegistration'>;
   validateLiveSource: LiveSourceResolver;
 }): RetrievalSourceOwner {
   const { kernel, documents } = options;
   const validate = async (query: RetrievalQuery, signal: AbortSignal): Promise<void> => {
     signal.throwIfAborted();
     const client = kernel.scoped(kernel.retrievalGrant(query));
+    await documents.admitWorkspaceRegistration(query.source.workspace_id, signal);
+    if (query.source.execution_workspace_id !== query.source.workspace_id) await documents.admitWorkspaceRegistration(query.source.execution_workspace_id, signal);
     const source = query.source, root = query.physicalRoot;
     if (source.mode === 'live_root') {
       if (!source.live_root || !isDeepStrictEqual(root, source.live_root)) throw new Error('The original retrieval root changed');
       await options.validateLiveSource({ workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id, liveRoot: root! }, signal);
     } else {
       if (source.live_root || !source.branch_id || !Number.isSafeInteger(source.revision) || source.revision! < 0) throw new Error('The original fixed retrieval source is incomplete');
-      const branch = await client.readBranch({ branchId: source.branch_id, revision: source.revision!, includeEntries: false }, signal);
+      const branch = await client.readBranch({ branchId: source.branch_id, revision: source.revision!, includeEntries: false }, signal).catch(error => { throw sourceReadError(error); });
       if (branch.workspaceId !== source.workspace_id || branch.branchId !== source.branch_id
         || branch.view !== 'revision' || branch.revision !== source.revision) throw new Error('The original retrieval revision changed');
       if (source.mode === 'fixed_branch') {
@@ -42,7 +45,7 @@ export function createRetrievalSourceOwner(options: {
         const handshake = kernel.handshake;
         if (source.mode !== 'materialized' || !root || !handshake || root.hostId !== handshake.hostId) throw new Error('The original materialized retrieval root is unavailable');
         const location = await originalMaterializationLocation(handshake.storageRoot, source.workspace_id, source.environment_run_id ?? query.runId);
-        const canonical = await canonicalizePathIdentity(location.targetPath);
+        const canonical = await admitMaterializedRoot(location.targetPath, signal);
         if (normalizePathIdentity(canonical) !== normalizePathIdentity(root.canonicalRoot)) throw new Error('The original materialized retrieval location changed');
       }
     }
@@ -62,7 +65,7 @@ export function createRetrievalSourceOwner(options: {
       signal.throwIfAborted();
       const client = kernel.scoped(kernel.retrievalGrant(query));
       if (query.source.mode === 'fixed_branch') {
-        await client.readBranch({ branchId: query.source.branch_id!, revision: query.source.revision!, paths: [path], includeEntries: false }, signal);
+        await client.readBranch({ branchId: query.source.branch_id!, revision: query.source.revision!, paths: [path], includeEntries: false }, signal).catch(error => { throw sourceReadError(error); });
       } else {
         await client.fileReadCheck({ workspaceId: query.source.workspace_id, rootId: query.physicalRoot!.rootId, path }, signal);
       }
@@ -72,9 +75,8 @@ export function createRetrievalSourceOwner(options: {
       signal.throwIfAborted();
       kernel.retrievalGrant(query);
       // Configuration identity only. This directory never supplies fixed/materialized source bytes.
-      const workspace = (await documents.listWorkspaceRegistrations()).find(entry => entry.workspaceId === query.source.workspace_id);
+      const workspace = await documents.admitWorkspaceRegistration(query.source.workspace_id, signal);
       signal.throwIfAborted();
-      if (!workspace?.canonicalPath) throw new Error('The original retrieval workspace configuration is unavailable');
       return workspace.canonicalPath;
     },
     async read(query, path, signal) {

@@ -5,7 +5,7 @@ import type { KernelClient } from './kernel-client.js';
 import type { HostJobPending, LaunchSource, McpBinding } from './protocol.generated.js';
 export function createMcpTaskRecovery(options:{
   kernel:KernelClient;authority:McpAuthority;agentDir:string;hostId:string;
-  inspectWorkspace(id:string):Promise<{root:string}>;
+  admitWorkspaceRegistration(id:string,signal?:AbortSignal):Promise<{canonicalPath:string}>;
   projectTrusted(cwd:string):boolean;
   validateLiveSource(source:LaunchSource,signal:AbortSignal):Promise<void>;
 }):(pending:HostJobPending,signal:AbortSignal)=>Promise<McpTaskLease>{

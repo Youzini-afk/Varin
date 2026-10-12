@@ -128,6 +128,30 @@ grant, owner pin and finally release/revoke, with no physical root or file-effec
 execution workspace need not equal the resource's original source. User configuration and installed assets
 are captured through their existing owners; unknown capture-only paths require a new candidate.
 
+Initial fixed-source Context preparation uses that same branch-only reader. Source admission inspects
+only its pin metadata; the view's explicit `readOriginalSource()` loads the resource capsule when the
+Context consumer actually needs it. Documents admits the original registration and current trust without
+requiring the former live directory. Public input, launch retry and recovered launch all retain their
+original source selection, and Run preparation forwards its existing cancellation signal into the reader.
+`AgentRuntimeClient` binds the same Documents registration owner for fresh non-live source grants,
+including independent script/research/document consumers. It rechecks before grant issuance, after
+source preparation and at the final start RPC after credential/policy/extension/Memory/Plan preparation;
+failed preparation revokes its new grant. A missing
+owner is unavailable, never implicit permission. Source-less work needs no artificial workspace.
+Child continuation preparation and cancelled/orphan source cleanup likewise use the original branch
+owner, without obtaining a physical workspace context. Cleanup consumes the original Catalog release
+facts even after access is withdrawn; it does not reopen source content.
+Research input pins use the same rule: a private cleanup path checks the original Run, Operation,
+execution owner and exact `branch.pin` receipt before unpinning with read/maintenance authority.
+It cannot capture or read source content, and does not restore permission for new work. Revision
+pins are already durable; the `persistent` flag belongs only to current working-root pins.
+
+The materialized key remains tied to its original environment Run and exact managed path. Missing
+copies or aliases to another copy reject preparation rather than rematerializing a substitute. Source
+failures carry a closed code through public request, persisted launch/child preparation and retrieval
+projections. The client/UI and Rust tool output supply short controlled explanations, never upstream
+exception bodies.
+
 Explicit user `/skill:name args` runs through `ThreadAdapter` submit/enqueue/edit and the same Host
 resource owner. Private prepared material accompanies unchanged user text/media into the original
 Catalog input transaction. The Host never accepts renderer-provided snapshots or expanded bodies.

@@ -1,3 +1,7 @@
+import { DocumentUntrustedError, DocumentWorkspaceUnregisteredError } from '../documents/errors.js';
+import { createRetrievalOwner } from './retrieval-owner.js';
+import type { KernelClient } from './kernel-client.js';
+import type { RetrievalSourceOwner } from './retrieval-source.js';
 import { expect, it, vi } from 'vitest';
 import type { ApplicationExtensionRuntime } from '@varin/extension-host';
 import type { RetrievalQuery } from './protocol.generated.js';
@@ -56,4 +60,21 @@ it('keeps fixed and materialized syntax separate from live LSP and semantic leas
   expect(fixedAgain.plan.stages.find(stage => stage.kind === 'semantic')?.status).toBe('unsupported');
   expect(prepareSemantic).toHaveBeenCalledOnce();
   fixedAgain.release();
+});
+
+it('preserves only typed source failures before retrieval configuration is prepared', async () => {
+  const sources = {} as RetrievalSourceOwner;
+  const kernel = {} as KernelClient;
+  const query = {} as RetrievalQuery;
+  for (const [error, expected] of [
+    [new DocumentWorkspaceUnregisteredError(), 'source_registration_missing'],
+    [new DocumentUntrustedError(), 'source_authority_denied'],
+    [Object.assign(new Error('untrusted upstream detail'), { code: 'workspace-unregistered' }), undefined],
+  ] as const) {
+    const owner = createRetrievalOwner({ sources, kernel, preparePipeline: async () => { throw error; } });
+    const result = await owner(query, new AbortController().signal);
+    expect(result.status).toBe('failed');
+    expect(result.sourceFailure).toBe(expected);
+    expect(JSON.stringify(result)).not.toContain('untrusted upstream detail');
+  }
 });

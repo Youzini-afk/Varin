@@ -70,6 +70,27 @@ describe('document authority contract', () => {
     await harness?.cleanup();
   });
 
+  it('admits the registered namespace after its directory moves while physical reads stay strict', async () => {
+    const workspaceId = harness.identity.workspaceId;
+    await fs.promises.rename(harness.workspaceRoot, `${harness.workspaceRoot}-moved`);
+    expect(await harness.authority.admitWorkspaceRegistration(workspaceId)).toMatchObject({ workspaceId, canonicalPath: harness.workspaceRoot });
+    await expect(harness.authority.inspectWorkspace(workspaceId)).rejects.toMatchObject({ code: 'workspace-unavailable' });
+    await expect(harness.authority.admitWorkspaceRegistration('unregistered')).rejects.toMatchObject({ code: 'workspace-unregistered' });
+    harness.setTrusted(false);
+    await expect(harness.authority.admitWorkspaceRegistration(workspaceId)).rejects.toBeInstanceOf(DocumentUntrustedError);
+    harness.setTrusted(true);
+    const reopened = createDocumentAuthority({ hostId: harness.authority.hostId, dataDir: harness.dataDir, isTrusted: async () => true });
+    const foreignData = path.join(harness.root, 'foreign-data');
+    await fs.promises.mkdir(path.join(foreignData, 'documents'), { recursive: true });
+    await fs.promises.copyFile(path.join(harness.dataDir, 'documents', 'workspaces.json'), path.join(foreignData, 'documents', 'workspaces.json'));
+    const foreign = createDocumentAuthority({ hostId: 'another-host', dataDir: foreignData, isTrusted: async () => true });
+    try {
+      expect(await reopened.admitWorkspaceRegistration(workspaceId)).toMatchObject({ workspaceId, canonicalPath: harness.workspaceRoot });
+      await expect(reopened.inspectWorkspace(workspaceId)).rejects.toMatchObject({ code: 'workspace-unavailable' });
+      await expect(foreign.admitWorkspaceRegistration(workspaceId)).rejects.toMatchObject({ code: 'workspace-unregistered' });
+    } finally { await reopened.dispose(); await foreign.dispose(); }
+  });
+
   it('distinguishes missing, empty, binary, and read failure', async () => {
     const missing = await harness.authority.read(harness.resource('missing.txt'));
     expect(missing).toEqual({

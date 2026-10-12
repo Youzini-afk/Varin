@@ -102,7 +102,7 @@ records typed dependencies in its manifests. Original publication protection spa
 the short identity/epoch/revision-checked commit. GC follows those dependencies from the existing
 history, input, operation, event, policy and request roots. Catalog retains only original metadata;
 byte reads, hash/base64 work and provider serialization stay outside its control lock. Catalog
-format **58**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **12** reject older internal
+format **58**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **13** reject older internal
 formats directly. These are distinct from policy service **4** and private script worker protocol **2**.
 
 `runtime.output.media.read` uses the original caller Thread/branch plus an actual history, queued

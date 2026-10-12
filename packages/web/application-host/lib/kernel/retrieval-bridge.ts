@@ -1,3 +1,4 @@
+import { sourceFailureCode } from './source-admission-error.js';
 import { waitWithSignal } from '../cancellation.js';
 import type { RetrievalQuery } from './protocol.generated.js';
 import type { RetrievalOwner, RetrievalResult } from './retrieval-owner.js';
@@ -57,9 +58,10 @@ export class RetrievalBridge {
           // can still settle actual dispatch facts without reviving this result delivery.
           ? await waitWithSignal(owner(query, controller.signal), controller.signal)
           : unavailableRetrievalResult(owner ? 'Invalid retrieval query' : 'Retrieval owner is unavailable');
-      } catch {
+      } catch (error) {
+        const failure = sourceFailureCode(error);
         result = controller.signal.aborted ? { ...unavailableRetrievalResult('Retrieval query cancelled'), status: 'cancelled' }
-          : unavailableRetrievalResult('Retrieval query failed');
+          : { ...unavailableRetrievalResult('Retrieval query failed'), ...(failure ? { sourceFailure: failure } : {}) };
       }
       if (this.active.get(id) !== entry) return;
       this.active.delete(id);

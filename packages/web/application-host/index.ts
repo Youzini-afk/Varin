@@ -2983,7 +2983,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const liveSources = createLiveSourceOwner({ documents: documentsAuthority, kernel: kernelClient });
   kernelClient.setLanguageOwner(createLanguageOwner({ documents: documentsAuthority, supervisor: languageSupervisor, validateSource: liveSources.validate }));
   const prepareChildMcp = createChildMcpPreparer({ authority: mcpAuthority, tasks:()=>mcpTaskRuntime, resources:()=>mcpResourceRuntime, kernel: kernelClient, agentDir: mcpAgentDir, hostId,
-    inspectWorkspace: id => documentsAuthority.inspectWorkspace(id),
+    admitWorkspaceRegistration: (id, signal) => documentsAuthority.admitWorkspaceRegistration(id, signal),
     projectTrusted: cwd => mcpHostProjectTrusted(mcpAgentDir, cwd),
     currentPolicy: async (cwd, trusted) => readMcpHostPermissionPolicy(mcpAgentDir, cwd, trusted),
   });
@@ -2992,8 +2992,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // A read-only fixed branch has no executable filesystem view. Global MCP capabilities run
     // in the neutral Host scope; they must not borrow the mutable project directory.
     const workspace = input.source && input.executionCwd
-      ? await documentsAuthority.inspectWorkspace(input.source.workspaceId) : undefined;
-    const configCwd = workspace?.root ?? mcpAgentDir;
+      ? await documentsAuthority.admitWorkspaceRegistration(input.source.workspaceId, signal) : undefined;
+    const configCwd = workspace?.canonicalPath ?? mcpAgentDir;
     const scope = {
       agentDir: mcpAgentDir, configCwd, executionCwd: input.executionCwd ?? mcpAgentDir,
       environmentId: workspace ? `${hostId}:${input.source!.executionWorkspaceId}` : `${hostId}:global`,
@@ -3052,23 +3052,23 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         await scriptRuntimeOwner.current.prepareConfiguration(await computerRuntimeOwner.current.prepareConfiguration(run, required)))));
   },currentPolicy:async runId=>{
     const launch=await kernelClient.agentRuntimeRequest<import('./lib/kernel/protocol.generated.js').LaunchIntent|null,'runtime.launch.inspect'>('runtime.launch.inspect',{runId});
-    const workspace=launch?.selection.source?await documentsAuthority.inspectWorkspace(launch.selection.source.workspace_id):undefined;
-    const cwd=workspace?.root??mcpAgentDir;
+    const workspace=launch?.selection.source?await documentsAuthority.admitWorkspaceRegistration(launch.selection.source.workspace_id):undefined;
+    const cwd=workspace?.canonicalPath??mcpAgentDir;
     return readMcpHostPermissionPolicy(mcpAgentDir,cwd,Boolean(workspace)&&mcpHostProjectTrusted(mcpAgentDir,cwd));
-  }}));
+  }}), documentsAuthority.admitWorkspaceRegistration);
   webRuntimeOwner.current = createWebRuntime({ runtime: agentRuntime, webFetch: webFetchService, documentReader, materials: webMaterials,
     collections: materialCollectionsService,
     documentSources: createDocumentSources({ kernel: kernelClient, runtime: agentRuntime,
       resolveLiveSource: liveSources.validate, experiments: experimentService }),
     fetch: egressRuntime.fetch as typeof globalThis.fetch, readAuth: readPiAuthFile,
     settings: async source => {
-      const root = source ? (await documentsAuthority.inspectWorkspace(source.workspace_id)).root : undefined;
+      const root = source ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
       return readHostSettingsSnapshot(mcpAgentDir, root, root !== undefined && mcpHostProjectTrusted(mcpAgentDir, root));
     },
   });
   researchDiscoveryOwner.current = createResearchDiscoveryRuntime({ service: researchSearchService,
     settings: async source => {
-      const root = source ? (await documentsAuthority.inspectWorkspace(source.workspace_id)).root : undefined;
+      const root = source ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
       return readHostSettingsSnapshot(mcpAgentDir, root, root !== undefined && mcpHostProjectTrusted(mcpAgentDir, root));
     },
   });
@@ -3094,7 +3094,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       resources: threadResources,
       composition: createContextComposition(extensionRuntime),
       projectForWorkspace: async workspaceId => {
-        const { root } = await documentsAuthority.inspectWorkspace(workspaceId);
+        const { canonicalPath: root } = await documentsAuthority.admitWorkspaceRegistration(workspaceId);
         const projects = sanitizeProjects((await readSettingsFromDisk()).projects) ?? [];
         return projects.find(project => projectContainsPath(project, root))?.id;
       },
@@ -3104,7 +3104,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   kernelClient.setMemoryOwner(createMemoryOwner({ personalization: agentPersonalization, prepareContext: threadContext }));
   const contextService=new ContextService(agentRuntime,threadContext,async(run,launch)=>{
     const source=launch?.selection.source;
-    const root=source ? (await documentsAuthority.inspectWorkspace(source.workspace_id)).root : undefined;
+    const root=source ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
     const model=run.configuration as {providerId?:string;model:string};
     return readContextPolicy({agentDir:mcpAgentDir,...(root?{projectRoot:root}:{}),projectTrusted:root!==undefined && mcpHostProjectTrusted(mcpAgentDir,root),
       ...(model.providerId?{providerId:model.providerId}:{}),modelId:model.model});
@@ -3112,7 +3112,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   kernelClient.setContextOwner(contextService);
   const threads = new ThreadAdapter(agentRuntime,
     modelAuthority, createThreadSourceAdmission({ documents: documentsAuthority, liveSources,
-      workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter), runtime: agentRuntime }), (runId, _error) => {
+      withSourceRead: (input, consume) => kernelStorageAdapter.withResourceRead(input, consume), runtime: agentRuntime }), (runId, _error) => {
       // Durable launch remains inspectable/resumable. Never log credentials or provider responses.
       console.error('[Thread] Launch preparation requires attention:', runId);
     }, createThreadSourcePreparer({ documents: documentsAuthority, liveSources, workingStates: threadWorkingStates, prepareResources: threadResources.prepareSourceCapture }),
@@ -3132,7 +3132,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     sourceCaptureOwners: { documents: documentsAuthority, prepareResources: threadResources.prepareSourceCapture, inspectInventory: (directory, signal) => threadWorktreeRuntime.inspectGitBaselineInventory(directory, signal) },
     reconcileDomainReceipts: async signal => { await Promise.all([reconcileIntegrationReceipts(signal), reconcileMaterialReceipts(signal)]); },
     continueRun: (runId, signal) => threads.continueLaunch(runId, { signal }), recoverLaunches: signal => threads.recover(signal),
-    workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter), prepareContext: threadContext,
+    prepareContext: threadContext,
     prepareSkillInput: createThreadSkillInputPreparer(threadResources),
     onError: (operationId, _error) => console.error('[Collaboration] Preparation or delivery requires attention:', operationId ?? 'discovery'),
   });
@@ -3151,15 +3151,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   scriptRuntimeOwner.current = createScriptRuntime({ kernel: kernelClient, runtime: agentRuntime, resolveLiveSource: liveSources.validate, onError: () => console.error('[Script] Original environment requires reconciliation') });
   computerRuntimeOwner.current = createComputerRuntime({ kernel: kernelClient, runtime: agentRuntime, computers: computerService, enabled: async runId => {
     const launch = await kernelClient.agentRuntimeRequest<import('./lib/kernel/protocol.generated.js').LaunchIntent | null, 'runtime.launch.inspect'>('runtime.launch.inspect', { runId });
-    const workspace = launch?.selection.source ? await documentsAuthority.inspectWorkspace(launch.selection.source.workspace_id) : undefined;
-    const cwd = workspace?.root ?? mcpAgentDir;
+    const workspace = launch?.selection.source ? await documentsAuthority.admitWorkspaceRegistration(launch.selection.source.workspace_id) : undefined;
+    const cwd = workspace?.canonicalPath ?? mcpAgentDir;
     return readHostHarnessSettings(mcpAgentDir, cwd, Boolean(workspace) && mcpHostProjectTrusted(mcpAgentDir, cwd)).tools?.computer !== false;
   } });
   const mcpInteractionRuntime = createMcpInteractionRuntime({kernel:kernelClient,runtime:agentRuntime,onError:()=>console.error('[MCP] Original user interaction requires reconciliation')});
   agentRuntime.setMcpInteractionOwner(mcpInteractionRuntime);
   const mcpTaskRuntime = createMcpTaskRuntime({ kernel: kernelClient, runtime: agentRuntime,
     recover:createMcpTaskRecovery({kernel:kernelClient,authority:mcpAuthority,agentDir:mcpAgentDir,hostId,
-      inspectWorkspace:id=>documentsAuthority.inspectWorkspace(id),projectTrusted:cwd=>mcpHostProjectTrusted(mcpAgentDir,cwd),
+      admitWorkspaceRegistration:(id,signal)=>documentsAuthority.admitWorkspaceRegistration(id,signal),projectTrusted:cwd=>mcpHostProjectTrusted(mcpAgentDir,cwd),
       validateLiveSource:async(source,signal)=>{
         if(source.mode!=='live_root'||!source.live_root)throw new Error('MCP Task live source missing');
         await liveSources.validate({workspaceId:source.workspace_id,executionWorkspaceId:source.execution_workspace_id,liveRoot:source.live_root},signal);
@@ -3169,7 +3169,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   const mcpResourceRuntime=createMcpResourceRuntime({kernel:kernelClient,runtime:agentRuntime,
     recover:createMcpResourceRecovery({kernel:kernelClient,authority:mcpAuthority,agentDir:mcpAgentDir,hostId,
-      inspectWorkspace:id=>documentsAuthority.inspectWorkspace(id),projectTrusted:cwd=>mcpHostProjectTrusted(mcpAgentDir,cwd),
+      admitWorkspaceRegistration:(id,signal)=>documentsAuthority.admitWorkspaceRegistration(id,signal),projectTrusted:cwd=>mcpHostProjectTrusted(mcpAgentDir,cwd),
       currentPolicy:async(cwd,trusted)=>readMcpHostPermissionPolicy(mcpAgentDir,cwd,trusted),
       validateLiveSource:async(source,signal)=>{if(source.mode!=='live_root'||!source.live_root)throw new Error('MCP resource original live source missing');
         await liveSources.validate({workspaceId:source.workspace_id,executionWorkspaceId:source.execution_workspace_id,liveRoot:source.live_root},signal);},
@@ -3681,7 +3681,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       onError: () => console.error('[Inference] Original inference receipt requires attention') } });
   researchDecisionOwner.current = createResearchDecisionRuntime({ inference: semanticInference, materials: webRuntimeOwner.current,
     settings: async source => {
-      const root = source ? (await documentsAuthority.inspectWorkspace(source.workspace_id)).root : undefined;
+      const root = source ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
       return readHostSettingsSnapshot(mcpAgentDir, root, root !== undefined && mcpHostProjectTrusted(mcpAgentDir, root));
     },
   });
@@ -4326,7 +4326,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   mcpTaskRuntime.start();
   mcpResourceRuntime.start();
   const unregisterScheduleCapability = extensionRuntime.capabilities.register(SCHEDULE_CAPABILITY,
-    createScheduleToolOwner({ service: scheduledTaskService, workspaceRoot: async workspaceId => (await documentsAuthority.inspectWorkspace(workspaceId)).root }));
+    createScheduleToolOwner({ service: scheduledTaskService, workspaceRoot: async workspaceId => (await documentsAuthority.admitWorkspaceRegistration(workspaceId)).canonicalPath }));
   const unregisterChildIntegrationCapability = extensionRuntime.capabilities.register(CHILD_INTEGRATION_CAPABILITY,
     createIntegrationToolOwner({ runtime: agentRuntime, coordinator: threadIntegrationCoordinator,
       onCleanupError: (_operationId, _error) => console.error('[Integration] Source grant cleanup requires attention'),

@@ -1,4 +1,7 @@
 import { captureStableSourceBaseline, type StableSourcePreparationOwners, type SourceCaptureDocuments } from '../harness/working-state/source-preparation.js';
+import type { DocumentAuthority } from '../documents/authority.js';
+import type { ThreadResourceScopeOwners } from './thread-resource-scope.js';
+import { SourceAdmissionError } from './source-admission-error.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { LiveSourceOwner } from './live-source.js';
 import { createHash } from 'node:crypto';
@@ -53,28 +56,37 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
 }
 
 /** Submission and every continuation re-admit the same Host source authority. */
-export function createThreadSourceAdmission({ documents, workingStates, liveSources, runtime }: SourcePreparationOwners & { runtime: AgentRuntimeClient }) {
-  return async (source: ThreadSource, identity: ThreadIdentity, runId?: string): Promise<void> => {
+export function createThreadSourceAdmission({ documents, withSourceRead, liveSources, runtime }: {
+  documents: Pick<DocumentAuthority, 'admitWorkspaceRegistration'>;
+  withSourceRead: ThreadResourceScopeOwners['withSourceRead'];
+  liveSources?: LiveSourceOwner;
+  runtime: AgentRuntimeClient;
+}) {
+  return async (source: ThreadSource, identity: ThreadIdentity, runId?: string, signal?: AbortSignal): Promise<void> => {
+    signal?.throwIfAborted();
     if (source.mode === 'live_root') {
-      if (!liveSources) throw new Error('Live workspace access is unavailable');
-      await liveSources.admit(source, identity.threadId);
+      if (!liveSources) throw new SourceAdmissionError('source_unavailable');
+      await liveSources.admit(source, identity.threadId, signal);
       return;
     }
-    await documents.inspectWorkspace(source.workspaceId);
-    await documents.inspectWorkspace(source.executionWorkspaceId);
-    const relation = await runtime.childForThread(identity.threadId);
-    if (relation) {
-      if (!runId) throw new Error('Delegated source admission requires its exact Run');
-      const child = await runtime.childExecutionForRun(runId);
-      if (!child || child.child_thread_id !== identity.threadId || child.child_branch_id !== identity.branchId
-        || child.source?.kind !== 'ready' || child.source.selection.branch_id !== source.branchId
-        || child.source.selection.revision !== source.revision || child.source.selection.mode !== source.mode) throw new Error('Child source differs from its admitted private baseline');
-      const admittedPin = child.source.pin;
-      await workingStates.withBranchStore(source.workspaceId, 'child-source-check', async store => {
-        const pin = await store.pinBranch(source.branchId, { revision: source.revision });
-        try { if (pin.root !== admittedPin.root) throw new Error('Child fixed source no longer matches its admitted root'); }
-        finally { await pin.release(); }
-      }, 'shared', { threadId: identity.threadId });
-    }
+    const admitRegistrations = async () => {
+      await documents.admitWorkspaceRegistration(source.workspaceId, signal);
+      if (source.executionWorkspaceId !== source.workspaceId) await documents.admitWorkspaceRegistration(source.executionWorkspaceId, signal);
+    };
+    await admitRegistrations();
+    const relation = await runtime.childForThread(identity.threadId, signal);
+    const child = relation && runId ? await runtime.childExecutionForRun(runId, signal) : null;
+    if (relation && (!runId || !child || child.child_thread_id !== identity.threadId || child.child_branch_id !== identity.branchId
+      || child.source?.kind !== 'ready' || child.source.selection.workspace_id !== source.workspaceId
+      || child.source.selection.execution_workspace_id !== source.executionWorkspaceId
+      || child.source.selection.branch_id !== source.branchId || child.source.selection.revision !== source.revision
+      || child.source.selection.mode !== source.mode)) throw new SourceAdmissionError('source_changed');
+    await withSourceRead({ identity, source, paths: [''], ...(runId ? { runId } : {}), ...(signal ? { signal } : {}) }, async ({ pin }) => {
+      if (pin.workspaceId !== source.workspaceId || pin.branchId !== source.branchId || pin.view !== 'revision'
+        || pin.revision !== source.revision || child?.source?.kind === 'ready' && pin.root !== child.source.pin.root) {
+        throw new SourceAdmissionError('source_changed');
+      }
+      await admitRegistrations();
+    });
   };
 }

@@ -27,7 +27,13 @@ it('real file journal settles a lost receipt after kernel restart without repeat
   let child!: ChildProcess;
   const options = { hostId: 'journal-review', storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false };
   let host = createKernelClient({ ...options, spawnProcess: ((command, args, input) => { child = spawn(command, args ?? [], input ?? {}); return child; }) as typeof spawn });
-  let runtimeClient = new AgentRuntimeClient(host);
+  // This journal fixture seeds one synthetic Storage workspace; Documents registration is
+  // the controlled metadata boundary, while the original materialization and journal are real.
+  const sourceRegistration = async (id: string, signal?: AbortSignal) => {
+    signal?.throwIfAborted();
+    expect(id).toBe('workspace');
+  };
+  let runtimeClient = new AgentRuntimeClient(host, undefined, undefined, undefined, undefined, undefined, sourceRegistration);
   let turn = 0;
   const observed: unknown[] = [];
   const server = createServer((request, response) => {
@@ -72,7 +78,7 @@ it('real file journal settles a lost receipt after kernel restart without repeat
     const before = await fs.stat(materializedFile, { bigint: true });
     const exited = once(child, 'exit'); child.kill('SIGKILL'); await exited; await host.close();
     sql(catalog, 'DROP TRIGGER lose_native_receipt;');
-    host = createKernelClient(options); runtimeClient = new AgentRuntimeClient(host);
+    host = createKernelClient(options); runtimeClient = new AgentRuntimeClient(host, undefined, undefined, undefined, undefined, undefined, sourceRegistration);
     await runtimeClient.rebindLaunch(run.run_id);
     await expect.poll(async () => (await runtimeClient.run(run.run_id)).state, { timeout: 10_000 }).toBe('completed');
     expect(turn).toBe(3);

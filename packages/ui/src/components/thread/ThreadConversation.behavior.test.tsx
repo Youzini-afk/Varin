@@ -522,6 +522,20 @@ function resourceCheckpoint(): ContextCheckpoint {
   };
 }
 
+it('projects a registered source failure without exposing upstream detail or losing the unsent draft', async () => {
+  const f = fixture();
+  const failure = new ThreadRequestError(404, 'source_registration_missing');
+  failure.message = 'Private storage path and upstream body';
+  f.submit.mockRejectedValueOnce(failure);
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
+  await edit('[aria-label="Message thread"]', 'Continue reading the original source');
+  await submitForm(container.querySelector('form')!);
+  expect(container.textContent).toContain('Restore its original registration or select a new source.');
+  expect(container.textContent).not.toContain('Private storage path');
+  expect((container.querySelector('[aria-label="Message thread"]') as HTMLTextAreaElement).value).toBe('Continue reading the original source');
+});
+
 it('adds a hidden skill command and retains the draft and image through a resource conflict and retry', async () => {
   const f = fixture();
   const failure = new ThreadRequestError(409, 'resource-stale');
