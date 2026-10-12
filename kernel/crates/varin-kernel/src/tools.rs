@@ -70,7 +70,7 @@ impl ToolKind {
         let source = match self {
             Self::FileRead | Self::FileList | Self::FileSearch | Self::CodeRetrieval => Source,
             Self::LanguageDefinition | Self::LanguageReferences | Self::LanguageDiagnostics => {
-                Physical
+                Source
             }
             _ => Physical,
         };
@@ -494,10 +494,10 @@ impl ResourceOperation {
                 }
                 ("storage.health", params)
             }
-            Self::LanguageQuery(args) => (
-                "file.read",
-                json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,"path":args.path}),
-            ),
+            Self::LanguageQuery(args) => {
+                if let Some(source)=&binding.file_source { ("branch.read",json!({"branchId":source.branch_id,"revision":source.revision,"paths":[args.path],"includeEntries":false})) }
+                else { ("file.read",json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,"path":args.path})) }
+            },
             Self::FileQuery(args) => ("compute.start", args.params(binding, context)),
             Self::ObserveCompute { .. } => (
                 "compute.read",
@@ -1027,6 +1027,7 @@ impl KernelToolExecutor {
                     | ToolKind::FileList
                     | ToolKind::FileSearch
                     | ToolKind::CodeRetrieval
+                    | ToolKind::LanguageDefinition | ToolKind::LanguageReferences | ToolKind::LanguageDiagnostics
             )
         }) && binding.source_mode == SourceMode::FixedBranch
             && !binding
@@ -1094,21 +1095,6 @@ impl KernelToolExecutor {
             return Err(ExecutionError::new(
                 "invalid_tool_binding",
                 "process spawn requires a registered root",
-            ));
-        }
-        if binding.source_mode == SourceMode::FixedBranch
-            && binding.enabled_tools.iter().any(|kind| {
-                matches!(
-                    kind,
-                    ToolKind::LanguageDefinition
-                        | ToolKind::LanguageReferences
-                        | ToolKind::LanguageDiagnostics
-                )
-            })
-        {
-            return Err(ExecutionError::new(
-                "language_source_unavailable",
-                "Fixed language tools require a complete source-aware dependency adapter; physical sources use live dependencies",
             ));
         }
         let schemas = Self::selected_schemas(&binding.enabled_tools);
@@ -1190,7 +1176,7 @@ impl KernelToolExecutor {
                 | ToolKind::LanguageDiagnostics => crate::run_tools::BuiltinSchema::child(
                     schema,
                     kind.requirements().source.into(),
-                    &[Worker],
+                    &[Worker, Retrieval],
                 ),
             })
             .collect()
@@ -1595,6 +1581,7 @@ impl KernelToolExecutor {
                 ResourceOperation::FileRead(_)
                     | ResourceOperation::FileQuery(_)
                     | ResourceOperation::RetrievalQuery(_)
+                    | ResourceOperation::LanguageQuery(_)
             )
             && contract.read_only
             && contract.completion == CompletionKind::Result
@@ -2077,6 +2064,21 @@ fn serve_resource_immediate(
             &params,
         )?;
         validate_binding(&grant, &request.binding, &request.context)?;
+        // A language backend can read all project dependencies/configuration in its cwd.
+        // The original Run grant must admit that input even when a Host service grant
+        // owns the derived materialization or language process.
+        if matches!(request.operation, ResourceOperation::LanguageQuery(_))
+            && !grant.path_scopes.iter().any(String::is_empty)
+        {
+            let project = if request.binding.source_mode == SourceMode::FixedBranch {
+                "fixed project"
+            } else {
+                "source project"
+            };
+            return Err(KernelError::Authorization(format!(
+                "The selected language backend reads the entire {project}; the current grant only allows selected paths. Use a whole-project read grant or file_read for path-scoped access."
+            )));
+        }
         if matches!(
             request.operation,
             ResourceOperation::CollaborationPin { release: false, .. }
@@ -2181,7 +2183,7 @@ fn serve_resource_immediate(
             request.operation,
             ResourceOperation::RetrievalQuery(_) | ResourceOperation::LanguageQuery(_)
         ) {
-            if matches!(request.operation, ResourceOperation::LanguageQuery(_)) {
+            if matches!(request.operation, ResourceOperation::LanguageQuery(_)) && request.binding.source_mode != SourceMode::FixedBranch {
                 // Keep the original file scope/lease admission without returning its
                 // authorize-only null before the source descriptor is assembled.
                 storage.set_cancellation(request.cancellation.shared_flag());
@@ -2208,6 +2210,15 @@ fn serve_resource_immediate(
                     Some(&request.binding.grant_id),
                     &source_grant,
                 )?;
+            }
+            if let ResourceOperation::LanguageQuery(args)=&request.operation {
+                if let Some(expected)=&args.derived_view {
+                    let view=storage.check_materialized_view(&json!({"workspaceId":source.workspace_id,"viewId":expected["viewId"]}),&grant)?;
+                    let branch=storage.dispatch("branch.read",&json!({"branchId":source.branch_id,"revision":source.revision,"includeEntries":false}),Some(&grant.grant_id),&grant)?;
+                    if source.mode!=SourceMode::FixedBranch || view!=*expected || view["branchId"]!=json!(source.branch_id) || view["revision"]!=json!(source.revision) || view["sourceRoot"]!=branch["root"] {
+                        return Err(KernelError::Authorization("Language derived view differs from its immutable source".into()));
+                    }
+                }
             }
             let physical = storage.source_physical_root(&request.binding, &grant, host_id)?;
             return Ok(json!({"source":source,"physicalRoot":physical}));

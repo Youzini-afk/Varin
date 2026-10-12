@@ -4,16 +4,17 @@ import type { DocumentAuthority } from '../documents/authority.js';
 import { createLanguageViewBinder } from '../lsp/language-view.js';
 import type { createLanguageSupervisor } from '../lsp/supervisor.js';
 import type { SourceQueryOwner } from './source-query.js';
-import type { LanguageQuery, LaunchSource, LiveRoot } from './protocol.generated.js';
+import type { LanguageQuery, LaunchSource, LiveRoot, KernelMaterializedView } from './protocol.generated.js';
 
 
 export interface LanguageResult {
   status: 'ready' | 'partial' | 'pending' | 'unsupported' | 'unavailable' | 'stale' | 'cancelled';
   source?: {
     selection: LaunchSource;
-    physicalRoot: LiveRoot;
+    physicalRoot: LiveRoot | null;
+    derivedView?: KernelMaterializedView;
     resourceId: string; revision: string; view: string; documentVersion: number; generation: number;
-    providerId?: string; dependencies: 'live';
+    providerId?: string; dependencies: { source: 'fixed_branch' | 'live'; external: 'provider_environment' };
   };
   items: Array<Record<string, unknown>>;
   omissions: { outOfScope: number; unmappable: number; stale: number; unavailable: number };
@@ -28,36 +29,39 @@ const failure = (status: LanguageResult['status'], message?: string): LanguageRe
 
 /** Adapter onto the selected language owner, not a server/configuration or source-view owner.
  * Rust admits the input before dispatch and every returned location before committing the receipt.
- * Unopened files, configuration, imports and compiler libraries remain live server dependencies.
+ * Captured project files resolve through the derived tree for fixed sources; provider
+ * libraries and explicit external configuration retain their real environment semantics.
  */
 export function createLanguageOwner({ documents, supervisor, sources }: {
   documents: Pick<DocumentAuthority, 'readSnapshot' | 'readAgentInputSnapshot'>;
   supervisor: ReturnType<typeof createLanguageSupervisor>;
-  sources: Pick<SourceQueryOwner, 'validate' | 'read' | 'processAdmission'>;
+  sources: Pick<SourceQueryOwner, 'validateLanguage' | 'read' | 'processAdmission' | 'prepareLanguageView' | 'dispose'>;
 }): LanguageToolOwner {
   const owner: LanguageToolOwner = async (query, signal) => {
+    try {
     signal.throwIfAborted();
-    await sources.validate(query, signal);
+    await sources.validateLanguage(query, signal);
     const languageId = languageIdForPath(query.path);
     if (!languageId) return failure('unsupported', 'No language is known for this file');
     if (!['definition', 'references', 'diagnostics'].includes(query.method)) return failure('unsupported', 'Unsupported language query');
-    if (query.source.mode === 'fixed_branch' || !query.physicalRoot) return failure('unsupported',
-      'The selected language provider requires a physical working view. Fixed branches need a complete source-aware dependency adapter.');
     const observed = await sources.read(query, query.path, signal);
     if (observed.status !== 'ready') return failure(observed.status === 'stale' ? 'stale' : 'unavailable', observed.message);
     // Same actual environment across Runs shares one service. Provider/configuration generations
     // remain solely in the supervisor; neither Run identity nor grant ID enters this view key.
     const view = `agent:source:${createHash('sha256').update(JSON.stringify([
       query.source.mode, query.source.workspace_id, query.source.execution_workspace_id,
-      query.physicalRoot.hostId, query.physicalRoot.rootId, query.physicalRoot.canonicalRoot,
+      ...(query.source.mode === 'fixed_branch' ? [query.source.branch_id, query.source.revision]
+        : [query.physicalRoot?.hostId, query.physicalRoot?.rootId, query.physicalRoot?.canonicalRoot]),
     ])).digest('hex')}` as const;
-    await supervisor.retainSourceView({ view, workspaceId: query.source.workspace_id, root: query.physicalRoot.canonicalRoot,
-      runId: query.runId, grantId: query.grantId, admitProcess: sources.processAdmission(query),
+    const environment = await supervisor.retainSourceView({ view, workspaceId: query.source.workspace_id, root: query.physicalRoot?.canonicalRoot ?? '',
+      runId: query.runId, grantId: query.grantId, executionWorkspaceId: query.source.execution_workspace_id,
+      prepare: (viewId, active) => sources.prepareLanguageView(query, viewId, active),
+      admitProcess: (active, prepared) => sources.processAdmission(query, prepared)(active),
       read: (resourceId, active) => sources.read(query, resourceId, active) }, signal);
     signal.throwIfAborted();
     const binder = createLanguageViewBinder({ supervisor, documents });
     const bound = await binder.bind({ workspaceId: query.source.workspace_id, resourceId: query.path, languageId, text: 'disk', signal,
-      sourceView: { view, content: observed.content, revision: observed.revision, source: 'disk' } });
+      sourceView: { view, content: observed.content, revision: observed.revision, source: query.source.mode === 'fixed_branch' ? 'working-branch' : 'disk' } });
     if (bound.status !== 'bound') return failure('unavailable', bound.message);
     if (query.method !== 'diagnostics') {
       const row = Number.isSafeInteger(query.line) && query.line! >= 0 ? observed.content.split('\n')[query.line!] : undefined;
@@ -69,7 +73,8 @@ export function createLanguageOwner({ documents, supervisor, sources }: {
     const result: LanguageResult = { ...failure('ready'), source: {
       selection: query.source, physicalRoot: query.physicalRoot, resourceId: bound.resource.resourceId, revision: bound.revision,
       view: bound.view, documentVersion: bound.documentVersion, generation: bound.generation,
-      dependencies: 'live',
+      ...(environment.derivedView ? { derivedView: environment.derivedView } : {}),
+      dependencies: { source: query.source.mode === 'fixed_branch' ? 'fixed_branch' : 'live', external: 'provider_environment' },
     } };
     const request = { view: bound.view, resource: bound.resource, languageId,
       expectedRevision: bound.languageRevision, generation: bound.generation,
@@ -91,7 +96,9 @@ export function createLanguageOwner({ documents, supervisor, sources }: {
       if (response.status === 'ready' && !Array.isArray(response.value)) response = { status: 'pending' };
     } else response = record(await supervisor[query.method === 'definition' ? 'definition' : 'references'](request, options));
     signal.throwIfAborted();
-    await sources.validate(query, signal);
+    await sources.validateLanguage(query, signal);
+    try { await supervisor.checkSourceView(query.source.workspace_id, view, environment, signal); }
+    catch (error) { signal.throwIfAborted(); return { ...result, status: 'stale', message: error instanceof Error ? error.message : 'Source language view changed' }; }
     const current = await sources.read(query, bound.resource.resourceId, signal);
     if (current.status !== 'ready' || current.revision !== bound.revision) {
       return { ...result, status: 'stale', message: 'The queried source changed while the language server was answering' };
@@ -113,7 +120,11 @@ export function createLanguageOwner({ documents, supervisor, sources }: {
     });
     if (!unversioned && (result.omissions.outOfScope || result.omissions.unmappable)) result.status = 'partial';
     return result;
+    } catch (error) { signal.throwIfAborted(); return failure('unavailable', error instanceof Error ? error.message : 'Language source is unavailable'); }
   };
-  owner.releaseSource = match => supervisor.releaseSourceViews(match);
+  owner.releaseSource = async match => {
+    await supervisor.releaseSourceViews(match);
+    if (match.runId === undefined && match.grantId === undefined) await sources.dispose();
+  };
   return owner;
 }

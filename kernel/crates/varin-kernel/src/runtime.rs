@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 enum MaterializationReply {
     Direct(Value),
+    View(Value),
     Reconcile(Value),
     RootRegistration(String),
 }
@@ -69,6 +70,11 @@ enum WorkerRequest {
         grant_id: String,
         control: MaterializationControl,
         reply: mpsc::Sender<Result<MaterializationControlled, KernelError>>,
+    },
+    MaterializedViewCleanupDone {
+        request: Option<Value>,
+        task: crate::storage::materialized_views::CleanupTask,
+        result: Result<(), KernelError>,
     },
     MaterializationDone {
         operation_id: String,
@@ -195,6 +201,8 @@ fn pending_file_worker(method: &str) -> bool {
             | "file.measure"
             | "working.result.publish"
             | "file.materialize"
+            | "file.materializedView.prepare"
+            | "file.materializedView.release"
             | "file.root.register"
             | "file.operation.reconcile"
     )
@@ -402,6 +410,7 @@ impl Kernel {
             self.storage_root = Some(PathBuf::from(&canonical_root));
             self.storage = Some(storage);
             self.handshaken = true;
+            self.collect_obsolete_materialized_views(completions)?;
             return Ok(Some(response_ok(
                 id,
                 json!({"protocolVersion": PROTOCOL_VERSION, "kernelVersion": KERNEL_VERSION, "kernelBuildIdentity": KERNEL_BUILD_IDENTITY, "targetTriple": KERNEL_TARGET, "arch": KERNEL_ARCH, "applicationBuildVersion": build_version, "buildVersion": KERNEL_BUILD_IDENTITY, "kernelEpoch": self.epoch, "requestWindow": KERNEL_REQUEST_WINDOW, "hostId": host_id, "hostGeneration": host_generation, "storageRoot": canonical_root, "capabilities": KERNEL_CAPABILITIES}),
@@ -637,6 +646,22 @@ impl Kernel {
             }
             return Ok(None);
         }
+        if method == "file.materializedView.prepare" {
+            match storage.prepare_materialized_view(&authorized_params,&authorized_grant,cancellation.clone())? {
+                MaterializationAdmission::Complete(result) => return Ok(Some(response_ok(id,storage.finish_materialized_view(&authorized_params,&authorized_grant,result)?))),
+                MaterializationAdmission::Work(task) => {
+                    self.spawn_materialization(task,MaterializationReply::View(request.clone()),authorized_grant.grant_id,cancellation,completions)?;
+                    return Ok(None);
+                }
+            }
+        }
+        if method == "file.materializedView.release" {
+            if let Some(task)=storage.prepare_materialized_view_release(&authorized_params,&authorized_grant)? {
+                self.spawn_materialized_view_cleanup(task,Some(request.clone()),cancellation,completions)?;
+                return Ok(None);
+            }
+            return Ok(Some(response_ok(id,json!({"viewId":authorized_params["viewId"],"released":true}))));
+        }
         if method == "file.materialize" {
             match storage.prepare_materialization(
                 &authorized_params,
@@ -743,7 +768,9 @@ impl Kernel {
         storage.set_cancellation(cancellation);
         let result = storage.dispatch(method, &authorized_params, grant_id, &authorized_grant);
         storage.clear_cancellation();
-        Ok(Some(response_ok(id, result?)))
+        let result = result?;
+        if method == "storage.gc" { self.collect_obsolete_materialized_views(completions)?; }
+        Ok(Some(response_ok(id, result)))
     }
 
     fn complete_file_capture(
@@ -880,6 +907,35 @@ impl Kernel {
             ));
         }
         storage.finish_blob_read(task, result, &grant)
+    }
+
+    fn collect_obsolete_materialized_views(&mut self,completions:&mpsc::Sender<WorkerRequest>)->Result<(),KernelError>{
+        let storage=self.storage.as_mut().ok_or_else(||KernelError::Storage("kernel stopped".into()))?;
+        let obsolete=storage.obsolete_materialized_views(&self.epoch)?;
+        let mut tasks=Vec::new();
+        for (params,grant) in obsolete {
+            // Unknown writers or replaced directories remain owned and visible.
+            match storage.prepare_materialized_view_release(&params,&grant) {
+                Ok(Some(task))=>tasks.push(task), Ok(None)=>{}, Err(error)=>eprintln!("derived view cleanup pending: {error}"),
+            }
+        }
+        for task in tasks { self.spawn_materialized_view_cleanup(task,None,Arc::new(AtomicBool::new(false)),completions)?; }
+        Ok(())
+    }
+    fn spawn_materialized_view_cleanup(&mut self,task:crate::storage::materialized_views::CleanupTask,request:Option<Value>,cancellation:Arc<AtomicBool>,completions:&mpsc::Sender<WorkerRequest>)->Result<(),KernelError>{
+        let completed=completions.clone();
+        let worker_task=task.clone();
+        let worker=thread::Builder::new().name("materialized-view-cleanup".into()).spawn(move||{
+            let result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||worker_task.run())).unwrap_or_else(|_|Err(KernelError::Storage("derived view cleanup worker panicked".into())));
+            let _=completed.send(WorkerRequest::MaterializedViewCleanupDone{request,task:worker_task,result});
+        });
+        match worker {
+            Ok(worker)=>{self.file_workers.push((cancellation,worker));self.active_materializations+=1;Ok(())},
+            Err(error)=>{
+                if let Some(storage)=self.storage.as_mut(){let _=storage.finish_materialized_view_release(&task,Err(KernelError::Storage("Derived view cleanup worker did not start".into())));}
+                Err(error.into())
+            }
+        }
     }
 
     fn spawn_materialization(
@@ -1280,6 +1336,18 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let _ = reply.send(result);
                     continue;
                 }
+                WorkerRequest::MaterializedViewCleanupDone{request,task,result}=>{
+                    let result=kernel.storage.as_mut().ok_or_else(||KernelError::Storage("kernel stopped".into())).and_then(|storage|storage.finish_materialized_view_release(&task,result));
+                    kernel.active_materializations-=1;
+                    if let Some(request)=request {
+                        let id=request["id"].as_str().unwrap_or("");
+                        worker_cancellations.lock().ok().map(|mut active|active.remove(id));
+                        let response=match result {Ok(result)=>response_ok(id,result),Err(error)=>response_error(id,&error)};
+                        if worker_response_tx.send(response).is_err(){break;}
+                    } else if let Err(error)=result {eprintln!("derived view cleanup failed: {error}");}
+                    if stopping && kernel.active_materializations==0 {break;}
+                    continue;
+                }
                 WorkerRequest::MaterializationDone {
                     operation_id,
                     job_id,
@@ -1292,13 +1360,20 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     kernel.active_materializations -= 1;
                     let response = match reply {
                         MaterializationReply::Direct(request)
+                        | MaterializationReply::View(request)
                         | MaterializationReply::Reconcile(request) => {
                             let id = request["id"].as_str().unwrap_or("");
                             worker_cancellations
                                 .lock()
                                 .ok()
                                 .map(|mut active| active.remove(id));
-                            let result = if request["method"] == "file.operation.reconcile" {
+                            let result = if request["method"] == "file.materializedView.prepare" {
+                                result.and_then(|result| {
+                                    let storage=kernel.storage.as_mut().ok_or_else(||KernelError::Storage("kernel stopped".into()))?;
+                                    let (grant,_)=storage.authorize(request["grantId"].as_str(),&kernel.epoch,kernel.host_id.as_deref().unwrap_or(""),kernel.host_generation.as_deref().unwrap_or(""),"file.materializedView.prepare",&request["params"])?;
+                                    storage.finish_materialized_view(&request["params"],&grant,result)
+                                })
+                            } else if request["method"] == "file.operation.reconcile" {
                                 result.map(|result| json!({"status":"reconciled","operationId":operation_id,"kind":"file.materialize","result":result}))
                             } else {
                                 result

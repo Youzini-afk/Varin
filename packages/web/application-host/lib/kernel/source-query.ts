@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { sourceReadError } from './source-admission-error.js';
 /** Query-local access to the original admitted source. No registrations, grants or corpus live here. */
 import { isDeepStrictEqual } from 'node:util';
@@ -8,7 +9,7 @@ import { normalizePathIdentity } from '../workspace/path-safety.js';
 import type { KernelClient } from './kernel-client.js';
 import type { LiveSourceResolver } from './live-source.js';
 import { runKernelCompute, type KernelComputeInput, type KernelComputeOptions, type KernelComputeResult } from './compute-runner.js';
-import type { LaunchSource, LiveRoot } from './protocol.generated.js';
+import type { LaunchSource, LiveRoot, KernelMaterializedView } from './protocol.generated.js';
 import type { NativeProcessIdentity } from './process-service.js';
 import { admitMaterializedRoot, originalMaterializationLocation } from './source-launch.js';
 
@@ -20,14 +21,23 @@ export interface SourceQueryAccess {
   source: LaunchSource;
   physicalRoot: LiveRoot | null;
 }
+export interface PreparedLanguageSource {
+  root: string;
+  derivedView?: KernelMaterializedView;
+  check(signal: AbortSignal): Promise<void>;
+  release(): Promise<void>;
+}
 export interface SourceQueryOwner {
+  prepareLanguageView(query: SourceQueryAccess, viewId: string, signal: AbortSignal): Promise<PreparedLanguageSource>;
+  dispose(): Promise<void>;
   validate(query: SourceQueryAccess, signal: AbortSignal): Promise<void>;
+  validateLanguage(query: SourceQueryAccess, signal: AbortSignal): Promise<void>;
   read(query: SourceQueryAccess, path: string, signal: AbortSignal): Promise<ExploreFileSnapshot>;
   checkPath(query: SourceQueryAccess, path: string, signal: AbortSignal): Promise<void>;
   compute(query: SourceQueryAccess, input: SourceComputeInput, options?: KernelComputeOptions): Promise<KernelComputeResult>;
   routingWorkspace(query: SourceQueryAccess, signal: AbortSignal): Promise<string>;
   /** Trusted Host callback; never a JSON permission or a caller-selected cwd. */
-  processAdmission(query: SourceQueryAccess): (signal: AbortSignal) => Promise<NativeProcessIdentity>;
+  processAdmission(query: SourceQueryAccess, view?: PreparedLanguageSource): (signal: AbortSignal) => Promise<NativeProcessIdentity>;
 }
 export function createSourceQueryOwner(options: {
   kernel: KernelClient;
@@ -35,6 +45,21 @@ export function createSourceQueryOwner(options: {
   validateLiveSource: LiveSourceResolver;
 }): SourceQueryOwner {
   const { kernel, documents } = options;
+  // Credentials for the Host-owned physical resource only. Run admission stays
+  // separate, and these handles are never included in a Run or tool binding.
+  const contexts = new Map<string, Promise<{ client: ReturnType<KernelClient['scoped']>; grantId: string }>>();
+  const context = async (query: SourceQueryAccess) => {
+    const key = JSON.stringify([kernel.kernelEpoch, query.source.workspace_id, query.source.execution_workspace_id]);
+    let pending = contexts.get(key);
+    if (!pending) {
+      pending = kernel.issueGrant({ grantId: `language-view-host:${randomUUID()}`,
+        owningWorkspace: query.source.workspace_id, executionWorkspace: query.source.execution_workspace_id,
+        capabilities: ['storage.read', 'storage.write', 'storage.maintenance'], pathScopes: [''] }).then(grant => ({ client: kernel.scoped(grant), grantId: grant.grantId }));
+      contexts.set(key, pending);
+      void pending.catch(() => { if (contexts.get(key) === pending) contexts.delete(key); });
+    }
+    return pending;
+  };
   const validate = async (query: SourceQueryAccess, signal: AbortSignal): Promise<void> => {
     signal.throwIfAborted();
     const client = kernel.scoped(kernel.sourceGrant(query));
@@ -62,6 +87,15 @@ export function createSourceQueryOwner(options: {
     signal.throwIfAborted();
     kernel.sourceGrant(query);
   };
+  const validateLanguage: SourceQueryOwner['validateLanguage'] = async (query, signal) => {
+    await validate(query, signal);
+    // Language backends may discover imports/configuration anywhere in their cwd.
+    // Inspect the original issued Run handle, never the service materialization grant.
+    if (!kernel.sourceGrant(query).pathScopes.includes('')) {
+      const project = query.source.mode === 'fixed_branch' ? 'fixed project' : 'source project';
+      throw new Error(`The selected language backend reads the entire ${project}; the current grant only allows selected paths. Use a whole-project read grant or file_read for path-scoped access.`);
+    }
+  };
   const compute: SourceQueryOwner['compute'] = async (query, input, options = {}) => {
     const client = kernel.scoped(kernel.sourceGrant(query));
     const source = query.source;
@@ -70,13 +104,47 @@ export function createSourceQueryOwner(options: {
         : { rootId: query.physicalRoot!.rootId }) }, options);
   };
   return {
-    validate, compute,
-    processAdmission(query) {
+    validate, validateLanguage, compute,
+    async prepareLanguageView(query, viewId, signal) {
+      await validateLanguage(query, signal);
+      if (query.source.mode !== 'fixed_branch') {
+        if (!query.physicalRoot) throw new Error('The original source root is unavailable');
+        return { root: query.physicalRoot.canonicalRoot, check: async active => { active.throwIfAborted(); }, release: async () => {} };
+      }
+      const { client } = await context(query);
+      await validateLanguage(query, signal);
+      const address = { workspaceId: query.source.workspace_id, viewId };
+      const release = async () => { await client.materializedViewRelease(address); };
+      try {
+        const derivedView = await client.materializedViewPrepare({ ...address, executionWorkspaceId: query.source.execution_workspace_id,
+          branchId: query.source.branch_id!, revision: query.source.revision! }, signal);
+        if (derivedView.branchId !== query.source.branch_id || derivedView.revision !== query.source.revision
+          || derivedView.viewId !== viewId || derivedView.kernelEpoch !== kernel.kernelEpoch) throw new Error('Derived source view changed during preparation');
+        return { root: derivedView.canonicalRoot, derivedView, release,
+          async check(active) {
+            active.throwIfAborted();
+            const checked = await client.materializedViewCheck(address, active);
+            if (!isDeepStrictEqual(derivedView, checked)) throw new Error('Derived source view identity changed');
+          } };
+      } catch (error) {
+        // Native cancellation settles only after its materialization worker stops.
+        // The independent service context can release after the Run grant retires.
+        await release();
+        throw error;
+      }
+    },
+    async dispose() {
+      const owned = [...contexts.values()];
+      contexts.clear();
+      if (kernel.isReady) await Promise.all(owned.map(async pending => kernel.retireGrant((await pending).grantId)));
+    },
+    processAdmission(query, view) {
       return async signal => {
-        await validate(query, signal);
-        if (!query.physicalRoot || query.source.mode === 'fixed_branch') throw new Error('Language process requires the admitted physical source');
-        return { workspaceId: query.source.workspace_id, executionWorkspaceId: query.source.execution_workspace_id,
-          canonicalRoot: query.physicalRoot.canonicalRoot };
+        await validateLanguage(query, signal);
+        if (view) await view.check(signal);
+        const root = view?.root ?? query.physicalRoot?.canonicalRoot;
+        if (!root || (query.source.mode === 'fixed_branch' && !view?.derivedView)) throw new Error('Language process requires the admitted source view');
+        return { workspaceId: query.source.workspace_id, executionWorkspaceId: query.source.execution_workspace_id, canonicalRoot: root };
       };
     },
     async checkPath(query, path, signal) {

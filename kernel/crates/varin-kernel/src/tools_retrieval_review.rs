@@ -94,3 +94,59 @@ fn fixed_final_observation_reads_past_one_wire_frame_through_original_blob_pages
     assert!(f.executor.observe_source_path(&f.context, "private/secret.ts", &CancellationToken::default()).is_err());
     f.cleanup();
 }
+
+#[test]
+fn narrow_source_grant_reads_fixed_input_but_rejects_language_before_host_preparation() {
+    let text = "export const main = 1;\n";
+    let f = Fixture::new(text.as_bytes());
+    let cancel = CancellationToken::default();
+    // This is the actual immutable FileRead/blob reader under the path-scoped Run grant.
+    let observed = f
+        .executor
+        .observe_source_path(&f.context, "allowed/source.ts", &cancel)
+        .unwrap();
+    assert_eq!(observed.text, text);
+    let args = LanguageQueryArgs::parse(
+        ToolKind::LanguageDefinition,
+        &json!({"path":"allowed/source.ts","line":0,"character":13}),
+    )
+    .unwrap();
+    let failure = f
+        .executor
+        .resources
+        .call(
+            &f.executor.binding,
+            &f.context,
+            ResourceOperation::LanguageQuery(args),
+            true,
+            &cancel,
+        )
+        .unwrap_err();
+    assert!(matches!(failure.error, KernelError::Authorization(_)));
+    assert!(
+        !failure.dispatched,
+        "language input admission must fail before Host service preparation"
+    );
+    assert!(failure
+        .error
+        .to_string()
+        .contains("whole-project read grant"));
+    {
+        let mut storage = f.storage.lock().unwrap();
+        let (grant, params) = storage
+            .authorize(
+                Some("setup"),
+                EPOCH,
+                HOST,
+                GENERATION,
+                "storage.record.list",
+                &json!({"workspaceId":"workspace","recordType":"file.materialized-view"}),
+            )
+            .unwrap();
+        let records = storage
+            .dispatch("storage.record.list", &params, Some("setup"), &grant)
+            .unwrap();
+        assert_eq!(records["records"], json!([]));
+    }
+    f.cleanup();
+}

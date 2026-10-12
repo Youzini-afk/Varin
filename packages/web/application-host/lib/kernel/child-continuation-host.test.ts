@@ -4,7 +4,8 @@ import type { Express, Request, RequestHandler, Response as ExpressResponse } fr
 import { afterEach, expect, it, vi } from 'vitest';
 import { createThreadsHttpAPI, type ThreadIdentity } from '@varin/application-client';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
-import { KernelClientError, type KernelClient } from './kernel-client.js';
+import { KernelClientError, type KernelClient, type KernelGrantIssueInput, type KernelScopedClient } from './kernel-client.js';
+import { KernelStorageAdapter } from './storage-adapter.js';
 import { ThreadAdapter } from './thread-adapter.js';
 import { ThreadCollaboration } from './thread-collaboration.js';
 import { registerThreadRoutes } from './thread-routes.js';
@@ -97,12 +98,40 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
   const checkpoint = { id: 'checkpoint:original', revision: 4, proposal: { through_id: 'compacted-head', summary: 'Original summary' } };
   const context = { effectiveSystemPrompt: 'Original child role', instructionSources: [], memoryCheckpoint: 'old-memory', resources: { snapshot: { id: 'new-fixed-resources' } } };
   const skill = { command: 'fixture-original-command' };
-  const released = vi.fn(async () => {});
-  const store = {
-    pinBranch: vi.fn(async () => ({ workspaceId: 'workspace', branchId: 'old-result', root: 'fixed-result-root', revision: 7, release: released })),
-    createBranchFromPin: vi.fn(async (_workspace: string, _branch: string) => ({ baseRoot: 'fixed-result-root' })),
-    pinBranchHandoff: vi.fn(async () => ({ pinId: 'child-source-pin:execution:new', root: 'fixed-result-root' })),
+  // Keep the real branch adapter/store. Only their native Storage ports are
+  // controlled, with a newer head that must not replace the selected revision.
+  const branches = new Map([['old-result', {
+    branchId: 'old-result', workspaceId: 'workspace', root: 'later-head-root', baseRoot: 'old-base',
+    writeRevision: 8, headRevision: 7, parentRef: 'original-parent',
+    captureScopes: [] as string[], draftBasePaths: [] as string[], createdAt: 1, updatedAt: 2,
+  }]]);
+  const scoped = {
+    readBranch: vi.fn(async (input: Parameters<KernelScopedClient['readBranch']>[0]) => {
+      const branch = branches.get(input.branchId);
+      if (!branch) throw new Error(`Unexpected branch ${input.branchId}`);
+      return { ...branch, view: input.revision === undefined ? 'current' : 'revision', revision: input.revision ?? branch.headRevision,
+        root: input.revision === 0 ? branch.baseRoot : input.revision === 7 ? 'fixed-result-root' : branch.root,
+        entries: [], nextCursor: null };
+    }),
+    pinBranch: vi.fn(async (input: Parameters<KernelScopedClient['pinBranch']>[0]) => {
+      const branch = branches.get(input.branchId);
+      if (!branch) throw new Error(`Unexpected pin branch ${input.branchId}`);
+      return { ...branch, pinId: input.pinId ?? 'predecessor-query-pin', view: 'revision',
+        revision: input.revision, writeRevision: input.revision,
+        root: input.revision === 7 ? 'fixed-result-root' : branch.baseRoot };
+    }),
+    putBlob: vi.fn(async (bytes: Buffer) => ({ hash: 'source-provenance-object', byteLength: bytes.length, ownerId: 'source-provenance-upload' })),
+    createBranch: vi.fn(async (input: Parameters<KernelScopedClient['createBranch']>[0]) => {
+      branches.set(input.branchId, { branchId: input.branchId, workspaceId: input.workspaceId,
+        root: input.baseRef!, baseRoot: input.baseRef!, writeRevision: 0, headRevision: 0,
+        parentRef: input.parentRef!, captureScopes: input.captureScopes!, draftBasePaths: input.draftBasePaths!, createdAt: 3, updatedAt: 3 });
+      return { created: true, branchId: input.branchId, root: input.baseRef, writeRevision: 0, headRevision: 0 };
+    }),
+    unpinBranch: vi.fn(async (_input: Parameters<KernelScopedClient['unpinBranch']>[0]) => ({ released: true })),
+    fileRootRegister: vi.fn(),
   };
+  const documents = { admitWorkspaceRegistration: vi.fn(async (workspaceId: string) => ({ workspaceId,
+    hostId: 'host', kind: 'directory' as const, canonicalPath: '/removed/original' })) };
   const runtime = {
     onEvent: (listener: typeof emit) => { emit = listener; return () => {}; }, onExit: () => () => {}, onReady: () => () => {}, reconcileObservations: async () => [],
     children: async () => [], childExecutions: async () => [structuredClone(child)], unacceptedChildSources: async () => [], status: async () => ({ eventCursor: 7 }), events: async () => [],
@@ -118,26 +147,44 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
       child.state = 'ready'; return structuredClone(child);
     }),
     releaseChildResources: vi.fn(async () => { child.resources_released = true; return structuredClone(child); }),
-    failChild: vi.fn(async () => { throw new Error('A temporary hold must not fail preparation'); }),
+    releaseMcpResourceSource: vi.fn(async () => {}),
+    failChild: vi.fn(async () => structuredClone(child)),
   };
-  const kernel = { reconcileChildToolHandoffs() {}, claimChildSource: vi.fn(), releaseChildToolHandoff: vi.fn() };
+  const kernel = { reconcileChildToolHandoffs() {}, claimChildSource: vi.fn(), releaseChildToolHandoff: vi.fn(),
+    issueGrant: vi.fn(async (input: KernelGrantIssueInput) => ({ ...input, storageIdentity: 'storage' })),
+    revokeGrant: vi.fn(async () => {}), scoped: vi.fn(() => scoped) };
+  const resolveWorkspaceRoot = vi.fn(async () => { throw new Error('Fixed continuation must not reopen the former live directory'); });
+  const storageAdapter = new KernelStorageAdapter({ client: kernel as unknown as KernelClient,
+    hostId: 'host', storageRoot: '/unused', resolveWorkspaceRoot });
   const prepareContext = Object.assign(vi.fn(async () => { throw new Error('Initial context must not replace the old checkpoint'); }), { forSource: vi.fn(async () => context) });
   const prepareSkillInput = vi.fn(async () => ({ status: 'ready', skill }));
   const continueRun = vi.fn(async () => {});
-  const collaboration = new ThreadCollaboration({ kernel: kernel as never, storageAdapter: {} as never, resolveLiveSource: async () => { throw new Error('No live source'); }, sourceCaptureOwners: {} as never,
+  const collaboration = new ThreadCollaboration({ kernel: kernel as never, storageAdapter, resolveLiveSource: async () => { throw new Error('No live source'); }, sourceCaptureOwners: { documents } as never,
     runtime: runtime as unknown as AgentRuntimeClient,
     prepareContext: prepareContext as never, prepareSkillInput: prepareSkillInput as never, continueRun, recoverLaunches: async () => {}, onError: (_id, error) => errors.push(error) });
   try {
     await collaboration.recover();
     if (kind === 'calendar') {
-      await vi.waitFor(() => expect(runtime.prepareChild).toHaveBeenCalledOnce());
+      await vi.waitFor(() => { expect(errors).toEqual([]); expect(runtime.prepareChild).toHaveBeenCalledOnce(); });
       expect(runtime.releaseChildResources).not.toHaveBeenCalled(); expect(runtime.failChild).not.toHaveBeenCalled();
       calendarHeld = false;
       emit({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', kernelEpoch: 'same-epoch', stream: 'durable', cursor: 8 });
     }
-    await vi.waitFor(() => expect(continueRun).toHaveBeenCalledOnce());
-    expect(store.pinBranch).toHaveBeenCalledWith('old-result', { revision: 7, signal: expect.any(AbortSignal) });
-    expect(store.createBranchFromPin.mock.calls[0]![1]).toBe('child-source:execution:new');
+    await vi.waitFor(() => { expect(errors).toEqual([]); expect(continueRun).toHaveBeenCalledOnce(); });
+    expect(scoped.pinBranch).toHaveBeenNthCalledWith(1, expect.objectContaining({ branchId: 'old-result', revision: 7 }), expect.any(AbortSignal));
+    expect(scoped.createBranch).toHaveBeenCalledOnce();
+    expect(scoped.createBranch).toHaveBeenCalledWith({ operationId: 'branch-create:child-source:execution:new',
+      branchId: 'child-source:execution:new', workspaceId: 'workspace', entries: [], baseRef: 'fixed-result-root', parentRef: 'old-result@7',
+      draftBasePaths: [], captureScopes: [], sourceProvenance: { objectHash: 'source-provenance-object', ownerId: 'source-provenance-upload' } });
+    expect(JSON.parse(scoped.putBlob.mock.calls[0]![0].toString('utf8'))).toEqual(child.source_basis!.provenance);
+    expect(scoped.pinBranch).toHaveBeenNthCalledWith(2, expect.objectContaining({ branchId: 'child-source:execution:new',
+      pinId: 'child-source-pin:execution:new', revision: 0 }), expect.any(AbortSignal));
+    expect(scoped.readBranch.mock.calls.every(([input]) => input.includeEntries === false)).toBe(true);
+    expect(runtime.readyChildSource).toHaveBeenCalledOnce();
+    expect(runtime.readyChildSource).toHaveBeenCalledWith({ executionId: child.execution_id,
+      source: { mode: 'materialized', liveRoot: null, workspaceId: 'workspace', executionWorkspaceId: 'workspace', branchId: 'child-source:execution:new', revision: 0 },
+      pin: { pin_id: 'child-source-pin:execution:new', root: 'fixed-result-root', source: { ...source, branch_id: 'child-source:execution:new', revision: 0 } },
+      provenance: child.source_basis!.provenance }, expect.any(AbortSignal));
     expect(runtime.prepareChild).toHaveBeenCalledWith(expect.objectContaining({ executionId: child.execution_id,
       expectedContextCheckpoint: checkpoint.id, context, ...(kind === 'user_continuation' ? { inputPreparation: { expectedContextCheckpoint: null, skill } } : {}) }), expect.any(AbortSignal));
     if (kind !== 'user_continuation') {
@@ -148,7 +195,21 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
     expect(continueRun).toHaveBeenCalledWith('new-run', expect.any(AbortSignal));
     expect(kernel.claimChildSource).not.toHaveBeenCalled(); expect(kernel.releaseChildToolHandoff).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(runtime.releaseChildResources).toHaveBeenCalledOnce());
-    expect(released).toHaveBeenCalledOnce(); expect(errors).toEqual([]);
+    expect(runtime.releaseMcpResourceSource).toHaveBeenCalledWith('new-run');
+    expect(scoped.unpinBranch).toHaveBeenCalledOnce();
+    expect(scoped.unpinBranch).toHaveBeenCalledWith({ operationId: 'branch-query-unpin:old-result:predecessor-query-pin',
+      branchId: 'old-result', pinId: 'predecessor-query-pin' });
+    expect(kernel.issueGrant).toHaveBeenCalledOnce();
+    expect(kernel.issueGrant).toHaveBeenCalledWith({ grantId: expect.stringMatching(/^child-branch:/), threadId: identity.threadId,
+      owningWorkspace: 'workspace', executionWorkspace: 'workspace', capabilities: ['storage.read', 'storage.write', 'storage.maintenance'], pathScopes: [''] }, expect.any(AbortSignal));
+    expect(kernel.revokeGrant).toHaveBeenCalledWith(kernel.issueGrant.mock.calls[0]![0].grantId);
+    expect(scoped.unpinBranch.mock.invocationCallOrder[0]).toBeLessThan(kernel.revokeGrant.mock.invocationCallOrder[0]!);
+    expect(documents.admitWorkspaceRegistration).toHaveBeenCalledTimes(2);
+    expect(documents.admitWorkspaceRegistration).toHaveBeenCalledWith('workspace', expect.any(AbortSignal));
+    expect(documents.admitWorkspaceRegistration.mock.invocationCallOrder[0]).toBeLessThan(kernel.issueGrant.mock.invocationCallOrder[0]!);
+    expect(documents.admitWorkspaceRegistration.mock.invocationCallOrder[1]).toBeLessThan(runtime.readyChildSource.mock.invocationCallOrder[0]!);
+    expect(scoped.fileRootRegister).not.toHaveBeenCalled(); expect(resolveWorkspaceRoot).not.toHaveBeenCalled();
+    expect(runtime.failChild).not.toHaveBeenCalled(); expect(errors).toEqual([]);
   } finally { collaboration.stop(); }
 });
 
@@ -176,8 +237,8 @@ it.each(['dispatch', 'user_continuation', 'message_request', 'followup', 'calend
     releaseChildResources: vi.fn(async () => { child.resources_released = true; return structuredClone(child); }),
     failChild: vi.fn(),
   };
-  const kernel = { reconcileChildToolHandoffs() {}, claimChildSource: vi.fn(), releaseChildToolHandoff: vi.fn() };
-  const withBranchStore = vi.fn(); const continueRun = vi.fn(async () => {});
+  const kernel = { reconcileChildToolHandoffs() {}, claimChildSource: vi.fn(), releaseChildToolHandoff: vi.fn(), issueGrant: vi.fn() };
+  const continueRun = vi.fn(async () => {});
   const collaboration = new ThreadCollaboration({ kernel: kernel as never, runtime: runtime as unknown as AgentRuntimeClient,
      storageAdapter: {} as never, sourceCaptureOwners: {} as never,
     resolveLiveSource: async () => { throw new Error('No file source was selected'); }, prepareContext: prepareContext as never,
@@ -191,7 +252,7 @@ it.each(['dispatch', 'user_continuation', 'message_request', 'followup', 'calend
     if (kind === 'dispatch') expect(prepareContext).toHaveBeenCalledWith(identity, null, expect.objectContaining({ threadRole: 'worker', childProfile: child.selected_profile }));
     else expect(prepareContext.forSource).toHaveBeenCalledWith(checkpoint, null, expect.any(AbortSignal));
     expect(runtime.readyChildSource).not.toHaveBeenCalled(); expect(kernel.claimChildSource).not.toHaveBeenCalled();
-    expect(withBranchStore).not.toHaveBeenCalled(); expect(runtime.failChild).not.toHaveBeenCalled(); expect(errors).toEqual([]);
+    expect(kernel.issueGrant).not.toHaveBeenCalled(); expect(runtime.failChild).not.toHaveBeenCalled(); expect(errors).toEqual([]);
   } finally { collaboration.stop(); }
 });
 

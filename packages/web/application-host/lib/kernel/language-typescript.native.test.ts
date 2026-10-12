@@ -78,7 +78,7 @@ it('executes all three live tools end to end through the bundled TypeScript serv
       source: { revision: sourceSnapshot.revision } });
     const definition = await invoke({ character: sourceSecondLine.indexOf('greet') });
     expect(definition).toMatchObject({ status: 'ready',
-      source: { resourceId: 'main.ts', revision: sourceSnapshot.revision, view: expect.stringMatching(/^agent:source:/), dependencies: 'live',
+      source: { resourceId: 'main.ts', revision: sourceSnapshot.revision, view: expect.stringMatching(/^agent:source:/), dependencies: { source: 'live', external: 'provider_environment' },
         providerId: 'varin.typescript-language' },
       omissions: { outOfScope: 0, unmappable: 0, stale: 0, unavailable: 0 },
       items: [expect.objectContaining({ resource: documents.resource('util.ts'),
@@ -146,7 +146,7 @@ it('executes all three live tools end to end through the bundled TypeScript serv
         const targetSnapshot = await documents.authority.readSnapshot(documents.resource('util.ts'));
         if (targetSnapshot.status !== 'ready') throw new Error('Expected readable target snapshot');
         expect(outputs[0]).toMatchObject({ outcome: 'succeeded', content: { status: 'ready',
-          source: { revision: sourceSnapshot.revision, dependencies: 'live' },
+          source: { revision: sourceSnapshot.revision, dependencies: { source: 'live', external: 'provider_environment' } },
           items: [expect.objectContaining({ resource: documents.resource('util.ts'),
             observedRevision: targetSnapshot.revision, rangeRevision: null,
             targetSelectionRange: testRange(0, targetFirstLine.indexOf('greet'), targetFirstLine.indexOf('greet') + 5) })] } });
@@ -159,7 +159,7 @@ it('executes all three live tools end to end through the bundled TypeScript serv
         expect(outputs[2]).toMatchObject({ outcome: 'succeeded', content: { status: 'pending', diagnosticVerification: 'unversioned',
           items: expect.arrayContaining([expect.objectContaining({ code: 2322, observedRevision: sourceSnapshot.revision,
             rangeRevision: null, range: testRange(1, sourceSecondLine.indexOf('message'), sourceSecondLine.indexOf('message') + 7) })]),
-          source: { revision: sourceSnapshot.revision, dependencies: 'live' } } });
+          source: { revision: sourceSnapshot.revision, dependencies: { source: 'live', external: 'provider_environment' } } } });
         const history = await runtime.history(branchId);
         const historyText = JSON.stringify(history);
         for (const call of calls) expect(historyText).toContain(call.name);

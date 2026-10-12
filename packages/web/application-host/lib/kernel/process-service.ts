@@ -95,6 +95,7 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
   get exitConfirmed(): boolean { return this.finishing && !this.current.writerActive; }
   get killed(): boolean { return this.stopRequested; }
   get snapshot(): KernelProcessSnapshot { return { ...this.current }; }
+  ownedBy(scoped: KernelScopedClient): boolean { return this.scoped === scoped; }
 
   async start(): Promise<void> {
     this.subscriptionStart ??= this.startSubscription();
@@ -313,7 +314,7 @@ export function projectProcessTerminal(child: KernelManagedProcess) {
 export function createKernelProcessService(options: Options) {
   const handles = new Set<KernelManagedProcess>();
   const launches = new Set<Promise<KernelManagedProcess>>();
-  const grants = new Map<string, Promise<{ grant: KernelGrantHandle; client: KernelScopedClient; rootId: string; identity: NativeProcessIdentity }>>();
+  const grants = new Map<string, Promise<{ grant: KernelGrantHandle; client: KernelScopedClient; rootId: string; identity: NativeProcessIdentity; launches: Set<symbol>; retiring: boolean }>>();
   let stopping = false;
   const report = (error: Error): void => { try { options.onError?.(error); } catch { /* diagnostics are not process facts */ } };
   const unsubscribe = options.client.subscribeExit((error) => {
@@ -338,7 +339,7 @@ export function createKernelProcessService(options: Options) {
         const client = options.client.scoped(grant);
         const root = await client.fileRootRegister({ workspaceId: identity.workspaceId, executionWorkspaceId: identity.executionWorkspaceId, canonicalRoot: identity.canonicalRoot });
         if (typeof root.rootId !== "string") throw new Error("Native process root registration returned no identity");
-        return { grant, client, rootId: root.rootId, identity };
+        return { grant, client, rootId: root.rootId, identity, launches: new Set<symbol>(), retiring: false };
       })();
       grants.set(key, existing);
       void existing.catch(() => { grants.delete(key); });
@@ -352,7 +353,10 @@ export function createKernelProcessService(options: Options) {
     if (input.shell || input.detached || input.uid !== undefined || input.gid !== undefined) throw new Error("Native process launch does not accept an alternate shell, detached identity, uid or gid");
     const canonicalCwd = await canonicalizePathIdentity(input.cwd);
     const resolved = await context(input.cwd, admission, input.signal);
-    if (stopping) throw new Error("Native process authority is stopping");
+    if (stopping || resolved.retiring) throw new Error("Native process authority is stopping");
+    const token = Symbol('process launch');
+    resolved.launches.add(token);
+    try {
     const cwd = path.relative(resolved.identity.canonicalRoot, canonicalCwd).replaceAll("\\", "/");
     if (cwd === ".." || cwd.startsWith("../") || path.isAbsolute(cwd)) throw new Error("Native process cwd is outside its admitted root");
     input.signal?.throwIfAborted();
@@ -395,6 +399,7 @@ export function createKernelProcessService(options: Options) {
     void handle.completion.finally(() => input.signal?.removeEventListener("abort", onAbort)).catch(() => undefined);
     if (input.signal?.aborted) onAbort();
     return handle;
+    } finally { resolved.launches.delete(token); }
   };
   const trackedLaunch: typeof launch = (...args) => {
     const pending = launch(...args);
@@ -404,6 +409,30 @@ export function createKernelProcessService(options: Options) {
   };
   return {
     spawn: (command: string, args: readonly string[], input: SpawnOptions) => trackedLaunch(command, args, input, "pipe"),
+    /** Release one drained private source context. It cannot revoke other roots
+     * or a context still owned by an admitted process or in-flight launch. */
+    async releaseContext(identity: NativeProcessIdentity): Promise<void> {
+      const key = JSON.stringify(identity);
+      const pending = grants.get(key);
+      if (!pending) return;
+      const context = await pending;
+      if (context.launches.size) throw new Error('Source process context still has an active launch');
+      const active = [...handles].filter(handle => handle.ownedBy(context.client));
+      if (active.some(handle => !handle.exitConfirmed)) throw new Error('Source process context still has an unconfirmed writer');
+      // The native grant retirement checks every persisted process under this
+      // exact context, including a spawn already committed before handle handoff.
+      context.retiring = true;
+      let cursor = 0;
+      for (;;) {
+        const page = await context.client.processList({ workspaceId: identity.workspaceId, rootId: context.rootId, cursor });
+        if (page.processes.some(process => process.writerActive)) throw new Error('Source process context has an unstopped native writer');
+        if (page.nextCursor === null) break;
+        if (!Number.isSafeInteger(page.nextCursor) || page.nextCursor <= cursor) throw new Error('Invalid native process continuation during context release');
+        cursor = page.nextCursor;
+      }
+      await options.client.retireGrant(context.grant.grantId);
+      if (grants.get(key) === pending) grants.delete(key);
+    },
     /** Host-private source admission. Never exposed in process tool JSON or extension contracts. */
     spawnAdmitted: (admission: ManagedProcessAdmission, command: string, args: readonly string[], input: SpawnOptions) =>
       trackedLaunch(command, args, input, "pipe", 80, 24, admission),

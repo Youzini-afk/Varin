@@ -691,7 +691,7 @@ The initial live AGENTS.md is read through Documents and its actual revision is 
 existing context checkpoint. Later disk changes remain live for file tools but do not retroactively
 rewrite that instruction checkpoint. Ordinary instruction/memory refresh retains its existing owner.
 
-Live and materialized selections also expose `language_definition`, `language_references`, and
+Live, fixed and materialized selections expose `language_definition`, `language_references`, and
 `language_diagnostics`. Native tool contracts, grant admission and history remain in Rust;
 `language-owner.ts` reads the exact original source through the shared `source-query.ts` owner and binds
 its text through the existing LanguageViewBinder and selected
@@ -709,11 +709,26 @@ directory-writer barrier. A notification/withdrawal ACK is not a stopped-process
 
 `runtime.source.tools` projects the original Rust declarations and source requirements. Source
 preparation and saved launch continuation consume that directory instead of maintaining parallel
-Host tool-name lists. Private wire 15 carries the original selection/root/grant, and result provenance
+Host tool-name lists. Private wire 16 carries the original selection/root/grant, and result provenance
 nests source selection separately from the queried document revision. Catalog 58 is unchanged.
 
+Fixed language views use the original Storage `file.materializedView.prepare/check/release` resource
+and materialization worker. The Run remains `fixed_branch` with no physical source root; provider
+cwd/imports/project configuration use its derived tree. Input and returned target content still come
+from the original immutable branch. Supervisor references are the sole logical lifetime owner; Storage
+retains only the physical descriptor, original root, directory identity and journal. Shared preparation
+uses a Host-private service context, never another Run permission. The original Run must admit the whole
+project required by this language backend; a path-limited grant can still use ordinary scoped file reads.
+Last-reference retirement waits for actual process drain, releases only that process context, then runs
+recursive directory cleanup outside the Storage control owner. Unknown writers retain their resources.
+Changed derived trees fail the current query and retire before a later query prepares a new generation.
+No query hashes the whole tree or silently falls back to live files. See the
+[fixed-language review](../../../../../docs/reviews/runtime-fixed-language-2026-10-12.md).
+
 Navigation positions are zero-based UTF-16. The query records its actual bound document revision,
-view, provider and generation, and explicitly reports live dependency semantics. Both Host and Rust
+view, provider and generation. Dependency provenance separates the captured project (`source: fixed_branch`)
+from live/working-copy projects (`source: live`); external libraries/configuration remain explicitly
+`external: provider_environment`. It does not claim an OS sandbox or fully frozen compiler environment. Both Host and Rust
 recheck the input after the query. Rust admits each returned resource under the original Run grant,
 observes that target's own content revision and validates range bounds. `observedRevision` is a
 post-query observation; cross-file `rangeRevision: null` acknowledges that standard LSP locations do

@@ -12,6 +12,8 @@ pub(super) struct LanguageQueryArgs {
     character: Option<u32>,
     #[serde(skip)]
     method: String,
+    #[serde(skip)]
+    pub(super) derived_view: Option<Value>,
 }
 impl LanguageQueryArgs {
     pub fn parse(kind: ToolKind, value: &Value) -> Result<Self, ExecutionError> {
@@ -126,6 +128,9 @@ impl KernelToolExecutor {
             .map_err(|failure| {
                 ExecutionError::new(error_code(&failure.error), failure.error.to_string())
             })?;
+        if self.binding.source_mode == SourceMode::FixedBranch {
+            return Ok(format!("fixed-language:{}:{}",self.binding.file_source.as_ref().expect("fixed source").branch_id,path));
+        }
         value["resourceKey"]
             .as_str()
             .map(str::to_owned)
@@ -297,6 +302,7 @@ impl KernelToolExecutor {
                             "generation",
                             "providerId",
                             "dependencies",
+                            "derivedView",
                         ]
                         .contains(&key.as_str())
                     })
@@ -331,7 +337,7 @@ impl KernelToolExecutor {
             "unmappable":result["omissions"]["unmappable"],"stale":result["omissions"]["stale"],
             "unavailable":result["omissions"]["unavailable"]});
         // Recheck actual source and authority after the service wait. No read lease spans LSP.
-        let source = self.observe_language_path(context, &args.path, cancel)?;
+        let source = self.observe_source_path(context, &args.path, cancel)?;
         if result.get("source").is_some()
             || unversioned
             || matches!(result["status"].as_str(), Some("ready" | "partial"))
@@ -340,7 +346,8 @@ impl KernelToolExecutor {
             if provenance["revision"].as_str().is_none_or(str::is_empty)
                 || provenance["selection"] != admitted["source"]
                 || provenance["physicalRoot"] != admitted["physicalRoot"]
-                || provenance["dependencies"] != "live"
+                || provenance["dependencies"] != json!({"source":if self.binding.source_mode==SourceMode::FixedBranch {"fixed_branch"} else {"live"},"external":"provider_environment"})
+                || (self.binding.source_mode==SourceMode::FixedBranch) != provenance.get("derivedView").is_some()
                 || provenance["resourceId"].as_str() != Some(&args.path)
                 || provenance["view"].as_str().is_none_or(|view| {
                     !view.starts_with("agent:source:") || view.len() == "agent:source:".len()
@@ -357,6 +364,11 @@ impl KernelToolExecutor {
                 ));
             }
         }
+        let mut checked = args.clone();
+        checked.derived_view = result["source"].get("derivedView").cloned();
+        self.resources
+            .call(&self.binding, context, ResourceOperation::LanguageQuery(checked), true, cancel)
+            .map_err(|failure| ExecutionError::new(error_code(&failure.error), failure.error.to_string()))?;
         if let Some(revision) = result["source"]["revision"].as_str() {
             if revision != source.revision {
                 result["status"] = json!("stale");
@@ -405,7 +417,7 @@ impl KernelToolExecutor {
             }
             let observed = match observations.get(&path) {
                 Some(observed) => observed.clone(),
-                None => match self.observe_language_path(context, &path, cancel) {
+                None => match self.observe_source_path(context, &path, cancel) {
                     Ok(observed) => {
                         observations.insert(path.clone(), observed.clone());
                         observed

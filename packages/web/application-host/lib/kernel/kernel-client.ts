@@ -28,6 +28,7 @@ import {
   KERNEL_REQUEST_WINDOW,
   KERNEL_DEFERRED_RESPONSE_METHODS,
   type KernelRequestCreditReleased,
+  type KernelMaterializedView,
   type KernelBranchReadResult,
   type KernelBranchChange,
   type KernelWorkingResultCandidate,
@@ -295,6 +296,16 @@ export class KernelScopedClient {
 
   fileMeasure(params: KernelMethodParams["file.measure"], signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.fileMeasure(params, this.grant, signal);
+  }
+
+  materializedViewPrepare(params: KernelMethodParams["file.materializedView.prepare"], signal?: AbortSignal): Promise<KernelMaterializedView> {
+    return this.owner.materializedViewPrepare(params, this.grant, signal);
+  }
+  materializedViewCheck(params: KernelMethodParams["file.materializedView.check"], signal?: AbortSignal): Promise<KernelMaterializedView> {
+    return this.owner.materializedViewCheck(params, this.grant, signal);
+  }
+  materializedViewRelease(params: KernelMethodParams["file.materializedView.release"], signal?: AbortSignal): Promise<{ released: boolean }> {
+    return this.owner.materializedViewRelease(params, this.grant, signal);
   }
 
   fileMaterialize(params: KernelMethodParams["file.materialize"], signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -1402,6 +1413,16 @@ export class KernelClient {
 
   async processRelease(params: KernelMethodParams["process.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelProcessSnapshot> {
     return this.requestRaw<KernelProcessSnapshot>("process.release", params, { signal, grant });
+  }
+
+  async materializedViewPrepare(params: KernelMethodParams["file.materializedView.prepare"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelMaterializedView> {
+    return this.requestRaw<KernelMaterializedView>("file.materializedView.prepare", params, { signal, grant, settleCancellation: true });
+  }
+  async materializedViewCheck(params: KernelMethodParams["file.materializedView.check"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelMaterializedView> {
+    return this.requestRaw<KernelMaterializedView>("file.materializedView.check", params, { signal, grant });
+  }
+  async materializedViewRelease(params: KernelMethodParams["file.materializedView.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<{ released: boolean }> {
+    return this.requestRaw<{ released: boolean }>("file.materializedView.release", params, { signal, grant, settleCancellation: true });
   }
 
   async fileMaterialize(params: KernelMethodParams["file.materialize"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
