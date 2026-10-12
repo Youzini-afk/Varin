@@ -303,7 +303,7 @@ Global singleton that owns:
 
 The Pi adapter resolves embedding, reranking and fast decisions through its original provider capabilities.
 Native embedding and TypeSafe/Cloudflare/llama.cpp decisions use the existing Host inference/credential owner
-directly; native decision/rerank HTTP/Goal facts belong to Catalog. Native live-root code retrieval
+directly; native decision/rerank HTTP/Goal facts belong to Catalog. Native live, fixed-revision and materialized code retrieval
 uses dedicated rerank, the original progressive fast-decision loop, or the original Explore LLM planner
 and joint selector. Other model-stage purposes still require their own native integration.
 Their connection/credential defaults and model declarations are independent of the native chat API;
@@ -948,7 +948,7 @@ without any model, source retrieval and deterministic packing still run. Explici
 of replacement paid requests. Embedding contributes an independent source. Rerank settings and the
 fast-decision configuration identity stay fixed for this query.
 
-Native `live_root code_retrieval` now runs this same fast-decision loop against its actual query
+Native `code_retrieval` runs this same fast-decision loop against its actual admitted source query
 before finish. It uses one original Host inference session across batches and SDK requests; the existing
 `research_decide` consumer shares that session contract. Source-issued material/action identities and
 original Documents/grant checks remain with the query owner. The loop reports known usage dimensions
@@ -958,6 +958,13 @@ with the original query as its port. In auto it retains LLM selection and classi
 finish explicitly settles the parked action loop. Configuration/credential fences belong to each role,
 while source/grant and actual query-issued identities remain shared. Native generation uses the original
 Rust provider adapter, Catalog and private credential bridge, independently of the main chat request.
+Fixed queries read the retained branch revision; materialized queries read the actual working copy.
+Their shared source adapter uses existing native compute/blob readers and Documents decoding, without
+reading a substituted live directory. Non-live structure uses tree-sitter only; live LSP and published
+semantic readers are not substitutes for a missing source-specific capability. Rust alone reconstructs
+final evidence; Host final checks remain short authorization checks. See the
+[source retrieval review](../../../../../docs/reviews/runtime-source-retrieval-2026-10-12.md) for actual
+source/child/cancel evidence and remaining new-input admission boundaries.
 
 `query.views({seen,inputBytes})` returns ready ranges, current sequence, pending work and actions;
 it does not await all sources or structure. `query.wait({afterSequence})` registers a cancellable,

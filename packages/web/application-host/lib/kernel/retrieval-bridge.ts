@@ -7,8 +7,10 @@ const record = (value: unknown): value is Record<string, unknown> => value !== n
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 export const unavailableRetrievalResult = (message: string): RetrievalResult => ({ status: 'unavailable', snippets: [], omissions: { outOfScope: 0, stale: 0, unavailable: 0 }, stages: [], message });
 const validQuery = (value: unknown): value is RetrievalQuery => {
-  if (!record(value) || !record(value.inferenceOwner) || value.inferenceOwner.kind !== 'external' || !text(value.inferenceOwner.identity) || !text(value.inferenceOwner.epoch) || !['runId','threadId','workspaceId','executionWorkspaceId','grantId','question'].every(key => text(value[key]))
-    || !record(value.liveRoot) || !['hostId','canonicalRoot','rootId'].every(key => text(value.liveRoot && record(value.liveRoot) ? value.liveRoot[key] : undefined))) return false;
+  if (!record(value) || !record(value.inferenceOwner) || value.inferenceOwner.kind !== 'external' || !text(value.inferenceOwner.identity) || !text(value.inferenceOwner.epoch) || !['runId','threadId','grantId','question'].every(key => text(value[key]))
+    || !record(value.source) || !['workspace_id','execution_workspace_id'].every(key => text((value.source as Record<string, unknown>)[key]))
+    || !['live_root','fixed_branch','materialized'].includes(String(value.source.mode))
+    || !(value.physicalRoot === null || record(value.physicalRoot) && ['hostId','canonicalRoot','rootId'].every(key => text((value.physicalRoot as Record<string, unknown>)[key])))) return false;
   const invocation = value.invocation;
   if (!record(invocation) || !text(invocation.toolCallId)
     || !(invocation.kind === 'model_step' ? text(invocation.requestId)

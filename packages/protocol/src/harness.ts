@@ -1326,7 +1326,7 @@ export interface ExploreQueryStartResult {
   parsed: ExploreQueryDetails;
   vocab: ExploreQueryVocab;
   sources: ExploreQuerySourceState[];
-  inputSource: AgentInputContext["source"];
+  inputSource: AgentInputContext["source"] | "fixed_branch" | "materialized";
   /** Frozen user choice for the relevance/plan stage of this query. */
   decisionMode?: import("./harness-settings.js").HarnessExploreDecisionMode;
   /**

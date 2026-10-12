@@ -68,11 +68,10 @@ impl ToolKind {
     pub(crate) fn requirements(self) -> varin_runtime::execution::ToolRequirements {
         use varin_runtime::execution::{ToolRequirements, ToolSourceRequirement::*};
         let source = match self {
-            Self::FileRead | Self::FileList | Self::FileSearch => Source,
+            Self::FileRead | Self::FileList | Self::FileSearch | Self::CodeRetrieval => Source,
             Self::LanguageDefinition
             | Self::LanguageReferences
-            | Self::LanguageDiagnostics
-            | Self::CodeRetrieval => Live,
+            | Self::LanguageDiagnostics => Live,
             _ => Physical,
         };
         ToolRequirements {
@@ -1025,7 +1024,7 @@ impl KernelToolExecutor {
         if binding.enabled_tools.iter().any(|kind| {
             matches!(
                 kind,
-                ToolKind::FileRead | ToolKind::FileList | ToolKind::FileSearch
+                ToolKind::FileRead | ToolKind::FileList | ToolKind::FileSearch | ToolKind::CodeRetrieval
             )
         }) && binding.source_mode == SourceMode::FixedBranch
             && !binding
@@ -1110,14 +1109,6 @@ impl KernelToolExecutor {
                 "Language tools require live_root; fixed dependency closure is not available",
             ));
         }
-        if binding.source_mode != SourceMode::LiveRoot
-            && binding.enabled_tools.contains(&ToolKind::CodeRetrieval)
-        {
-            return Err(ExecutionError::new(
-                "retrieval_source_unavailable",
-                "Code retrieval requires live_root; fixed-source retrieval is not available",
-            ));
-        }
         let schemas = Self::selected_schemas(&binding.enabled_tools);
         Ok(Self {
             binding,
@@ -1173,7 +1164,7 @@ impl KernelToolExecutor {
             .into_iter()
             .zip(enabled)
             .map(|(schema, kind)| match kind {
-                ToolKind::FileRead | ToolKind::FileList | ToolKind::FileSearch => {
+                ToolKind::FileRead | ToolKind::FileList | ToolKind::FileSearch | ToolKind::CodeRetrieval => {
                     crate::run_tools::BuiltinSchema::child(
                         schema,
                         kind.requirements().source.into(),
@@ -1193,8 +1184,7 @@ impl KernelToolExecutor {
                 ),
                 ToolKind::LanguageDefinition
                 | ToolKind::LanguageReferences
-                | ToolKind::LanguageDiagnostics
-                | ToolKind::CodeRetrieval => crate::run_tools::BuiltinSchema::main_only(schema),
+                | ToolKind::LanguageDiagnostics => crate::run_tools::BuiltinSchema::main_only(schema),
             })
             .collect()
     }
@@ -1264,7 +1254,8 @@ impl KernelToolExecutor {
                 key(json!([
                     "retrieval-view",
                     self.binding.execution_workspace_id,
-                    self.binding.root_id
+                    self.binding.root_id,
+                    self.binding.file_source
                 ])),
                 Access::Read,
             ),
@@ -1594,7 +1585,7 @@ impl KernelToolExecutor {
             && source.revision == u64::try_from(bound.revision).ok()
             && matches!(
                 operation,
-                ResourceOperation::FileRead(_) | ResourceOperation::FileQuery(_)
+                ResourceOperation::FileRead(_) | ResourceOperation::FileQuery(_) | ResourceOperation::RetrievalQuery(_)
             )
             && contract.read_only
             && contract.completion == CompletionKind::Result
@@ -1620,7 +1611,7 @@ impl KernelToolExecutor {
                     "retrieval contract changed",
                 ));
             }
-            return self.admit_retrieval(context, args, cancel);
+            return self.admit_retrieval(context, args, cancel).map(|_| ());
         }
         if let ResourceOperation::LanguageQuery(args) = &operation {
             if &self.contract(call, &operation) != contract {
@@ -2216,6 +2207,19 @@ fn serve_resource_immediate(
                 request.authorize_only,
             );
         }
+        if matches!(request.operation, ResourceOperation::RetrievalQuery(_)) {
+            let source = request.binding.source_selection()?;
+            if source.mode == SourceMode::FixedBranch {
+                // Metadata validates the exact original revision, without scanning its tree.
+                let (source_grant, params) = storage.authorize(Some(&request.binding.grant_id), epoch,
+                    host_id, host_generation, "branch.read", &json!({"branchId":source.branch_id,
+                        "revision":source.revision,"includeEntries":false}))?;
+                validate_binding(&source_grant, &request.binding, &request.context)?;
+                storage.dispatch("branch.read", &params, Some(&request.binding.grant_id), &source_grant)?;
+            }
+            let physical = storage.source_physical_root(&request.binding, &grant, host_id)?;
+            return Ok(json!({"source":source,"physicalRoot":physical}));
+        }
         if request.authorize_only {
             return Ok(Value::Null);
         }
@@ -2243,3 +2247,7 @@ fn serve_resource_immediate(
 #[cfg(test)]
 #[path = "collaboration_boundary_review.rs"]
 mod collaboration_boundary_review;
+
+#[cfg(test)]
+#[path = "tools_retrieval_review.rs"]
+mod retrieval_source_adapter_review;

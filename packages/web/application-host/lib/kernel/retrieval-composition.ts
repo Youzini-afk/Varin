@@ -63,6 +63,8 @@ interface ScopeCache {
 export function createRetrievalComposition(runtime: ApplicationExtensionRuntime, options: {
   prepareModel?: (scope: RetrievalCompositionScope, signal?: AbortSignal) => Promise<RetrievalModelLease>;
   structure?: NonNullable<RetrievalPipelineConfiguration['structure']>['implementation'];
+  /** Same native syntax provider, without a live-project LSP fallback. */
+  syntax?: NonNullable<RetrievalPipelineConfiguration['structure']>['implementation'];
   /** Capture only; preparation never embeds the question, reads candidate text or starts indexing. */
   prepareSemantic?: (scope: RetrievalCompositionScope, signal?: AbortSignal) => Promise<RetrievalSemanticLease>;
 }) {
@@ -121,7 +123,7 @@ export function createRetrievalComposition(runtime: ApplicationExtensionRuntime,
           }
         };
         const acquireSemantic = async (declaration: Readonly<VarinRetrievalPlan>): Promise<RetrievalSemanticLease | undefined> => {
-          if (declaration.semantic !== 'builtin' || !options.prepareSemantic) return undefined;
+          if (declaration.semantic !== 'builtin' || !options.prepareSemantic || scope.query && scope.query.source.mode !== 'live_root') return undefined;
           const preparing = options.prepareSemantic(scope, signal);
           let acquired: RetrievalSemanticLease;
           try { acquired = await waitWithSignal(preparing, signal); }
@@ -197,15 +199,23 @@ export function createRetrievalComposition(runtime: ApplicationExtensionRuntime,
         // Query resources never enter the shared publication. Each query captures and owns its
         // real backend/reader lease, including independently acquired refs for identical plans.
         const semanticStage = semantic?.stage;
-        const semanticStages = semanticStage ? Object.freeze(pipeline.plan.stages.map(stage => stage.kind === 'semantic'
+        const sourceLimited = !!scope.query && scope.query.source.mode !== 'live_root';
+        const syntax = sourceLimited && state.current.declaration.structure === 'builtin' ? options.syntax : undefined;
+        const sourceStages = sourceLimited ? Object.freeze(pipeline.plan.stages.map(stage => {
+          if (stage.kind === 'structure' && stage.status !== 'disabled') return Object.freeze({ ...stage,
+            providerId: 'varin.kernel.tree-sitter', status: syntax ? 'ready' as const : 'unavailable' as const });
+          if (stage.kind === 'semantic' && stage.status !== 'disabled') return Object.freeze({ ...stage, status: 'unsupported' as const });
+          return stage;
+        })) : pipeline.plan.stages;
+        const semanticStages = semanticStage ? Object.freeze(sourceStages.map(stage => stage.kind === 'semantic'
           ? Object.freeze({ kind: 'semantic' as const, providerId: semanticStage.providerId,
-            configurationId: semanticStage.configurationId, status: semanticStage.status }) : stage)) : pipeline.plan.stages;
+            configurationId: semanticStage.configurationId, status: semanticStage.status }) : stage)) : sourceStages;
         const modelStage = model?.stage;
         const stages = modelStage ? Object.freeze(semanticStages.map(stage => stage.kind === 'model'
           ? Object.freeze({ kind: 'model' as const, providerId: modelStage.providerId, configurationId: modelStage.configurationId, status: modelStage.status }) : stage)) : semanticStages;
         const metadata = semantic ? Object.freeze({ ...semantic.metadata,
           ...(semantic.metadata.credential ? { credential: Object.freeze({ ...semantic.metadata.credential }) } : {}) }) : undefined;
-        const id = metadata || modelStage ? createHash('sha256').update(JSON.stringify([pipeline.plan.id, stages, metadata])).digest('hex') : pipeline.plan.id;
+        const id = sourceLimited || metadata || modelStage ? createHash('sha256').update(JSON.stringify([pipeline.plan.id, stages, metadata])).digest('hex') : pipeline.plan.id;
         const implementation = semanticStage?.status === 'ready' ? semanticStage.implementation : undefined;
         const lease = semantic;
         const modelLease = model;
@@ -217,7 +227,10 @@ export function createRetrievalComposition(runtime: ApplicationExtensionRuntime,
           lease?.assertAvailable();
           modelLease?.assertAvailable();
         };
-        return Object.freeze({ ...pipeline,
+        const { structure: originalStructure, ...sourcePipeline } = pipeline;
+        const structure = sourceLimited ? syntax : originalStructure;
+        return Object.freeze({ ...sourcePipeline,
+          ...(structure ? { structure } : {}),
           ...(modelStage?.status === 'ready' && modelStage.implementation ? { model: modelStage.implementation } : {}),
           ...(implementation ? { semantic: Object.freeze({ search: implementation.search.bind(implementation) }) } : {}),
           plan: Object.freeze({ ...pipeline.plan, id, stages, selection, ...(metadata ? { semantic: metadata } : {}) }), selection,

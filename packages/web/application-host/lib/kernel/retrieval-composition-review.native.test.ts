@@ -1,3 +1,4 @@
+import { createRetrievalSourceOwner } from './retrieval-source.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
 import { createThreadContext } from './thread-context.js';
@@ -32,7 +33,7 @@ async function fixture(holdStructure = false) {
   const structure = { ...actual, outline: vi.fn(async (...args: Parameters<typeof actual.outline>) => { entered++; if (holdStructure) await gate.promise; return actual.outline(...args); }) };
   const composition = createRetrievalComposition(extensions, { structure });
   const bindings: RetrievalPipelineBinding[] = [];
-  f.kernel.setRetrievalOwner(createRetrievalOwner({ documents: f.documents.authority, kernel: f.kernel, validateSource: f.liveSources.validate,
+  f.kernel.setRetrievalOwner(createRetrievalOwner({ sources: createRetrievalSourceOwner({ documents: f.documents.authority, kernel: f.kernel, validateLiveSource: f.liveSources.validate }), kernel: f.kernel,
     preparePipeline: async (query, signal) => { const binding = await composition.prepare({ threadId: query.threadId, projectId: 'retrieval-project', workspaceId: f.documents.workspaceRoot }, signal); bindings.push(binding); return binding; } }));
   const route = async (providerKey: string, scope: { projectId?: string; sessionId?: string } = { projectId: 'retrieval-project' }) => extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision,
     rule: { allowFallback: false, providerKey, scope, serviceId: 'varin.retrieval.plan', version: 1 } });
@@ -175,9 +176,9 @@ it('retrieval routing uses the accepted Run project even when the visible projec
   f.kernel.setMemoryOwner(createMemoryOwner({ personalization, prepareContext }));
   const observedProjects: Array<string | null> = [];
   let visibleProject = 'accepted-project';
-  f.kernel.setRetrievalOwner(createRetrievalOwner({ documents: f.documents.authority, kernel: f.kernel, validateSource: f.liveSources.validate,
+  f.kernel.setRetrievalOwner(createRetrievalOwner({ sources: createRetrievalSourceOwner({ documents: f.documents.authority, kernel: f.kernel, validateLiveSource: f.liveSources.validate }), kernel: f.kernel,
     preparePipeline: async (query, signal) => { observedProjects.push(query.projectId); return composition.prepare({ threadId: query.threadId,
-      ...(query.projectId ? { projectId: query.projectId } : {}), workspaceId: query.liveRoot.canonicalRoot }, signal); } }));
+      ...(query.projectId ? { projectId: query.projectId } : {}), workspaceId: query.physicalRoot!.canonicalRoot }, signal); } }));
   const initialContext = await prepareContext({ runtime: 'agent', threadId: 'frozen-project-thread', branchId: 'frozen-project-branch' }, null,
     { mode: 'agent', threadRole: 'main', projectId: visibleProject });
   const run = await f.admit('frozen-project', ['code_retrieval'], [''], ['storage.read', 'storage.write'], initialContext);

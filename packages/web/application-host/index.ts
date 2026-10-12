@@ -25,6 +25,7 @@ import { ThreadCollaboration } from './lib/kernel/thread-collaboration.js';
 import { createSemanticInferenceLedger } from './lib/knowledge/semantic/inference-ledger.js';
 import { createSemanticInference } from './lib/knowledge/semantic/runtime-inference.js';
 import { createRetrievalOwner } from './lib/kernel/retrieval-owner.js';
+import { createRetrievalSourceOwner } from './lib/kernel/retrieval-source.js';
 import { createRetrievalComposition } from './lib/kernel/retrieval-composition.js';
 import { createLanguageOwner } from './lib/kernel/language-owner.js';
 import { createLiveSourceOwner } from './lib/kernel/live-source.js';
@@ -3582,13 +3583,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return { status, ...(name ? { name } : {}), ...(message ? { message } : {}) };
     },
   });
-  const structureSource = createStructureSource([
-    createTreeSitterStructureProvider({
+  const syntaxStructure = createTreeSitterStructureProvider({
       compute: kernelCompute,
       onLanguageRequest: (languageId, workspaceId) => languageSupportRuntime.noteRequest(languageId, workspaceId),
       resolveInstalled: (fileName) => grammarStore.pathForGrammarFile(fileName),
       resolveInstalledLanguage: (languageId) => languageSupportRuntime.installedStructureSpec(languageId),
-    }),
+    });
+  const structureSource = createStructureSource([
+    syntaxStructure,
     createLspStructureProvider({
       documents: documentsAuthority,
       supervisor: languageSupervisor,
@@ -3726,14 +3728,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (error) => console.error('[HarnessKnowledge] Semantic runtime failed:', errorMessage(error)),
   });
   semanticRuntimeHolder.current = semanticRuntime;
+  const retrievalSources = createRetrievalSourceOwner({ kernel: kernelClient, documents: documentsAuthority, validateLiveSource: liveSources.validate });
   const retrievalModel = createRetrievalModelStage({ inference: semanticInference, models: modelAuthority,
-    readGlobalSettings: () => hostCredentialAuthority.readGlobalInferenceSettings(), kernel: kernelClient, validateSource: liveSources.validate });
+    readGlobalSettings: () => hostCredentialAuthority.readGlobalInferenceSettings(), kernel: kernelClient, sources: retrievalSources });
   const retrievalComposition = createRetrievalComposition(extensionRuntime, {
     prepareModel: (scope, signal) => {
       if (!scope.query) throw new Error('Native retrieval model requires its original query');
       return retrievalModel.prepare(scope.query, signal ?? new AbortController().signal);
     },
-    structure: structureSource,
+    structure: structureSource, syntax: syntaxStructure,
     prepareSemantic: async (scope, signal) => {
       const query = scope.query;
       if (!query) throw new Error('Native semantic retrieval requires its Run identity');
@@ -3747,7 +3750,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const roots = (query.paths ?? grant.pathScopes).map(relative);
       const authorize = async (requestSignal: AbortSignal): Promise<void> => {
         requestSignal.throwIfAborted();
-        await liveSources.validate(query, requestSignal);
+        await retrievalSources.validate(query, requestSignal);
         const current = kernelClient.retrievalGrant(query);
         const granted = current.pathScopes.map(relative);
         if (!roots.length || roots.some(root => !granted.some(parent => !parent || root === parent || root.startsWith(`${parent}/`)))) {
@@ -3755,15 +3758,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         }
       };
       await authorize(active);
-      return semanticRuntime.acquireQuery({ workspaceId: query.workspaceId, threadId: query.threadId,
+      return semanticRuntime.acquireQuery({ workspaceId: query.source.workspace_id, threadId: query.threadId,
         runId: query.runId, invocation: query.invocation, roots, signal: active, authorize,
         assertAuthorized: () => { kernelClient.retrievalGrant(query); } });
     },
   });
-  kernelClient.setRetrievalOwner(createRetrievalOwner({ documents: documentsAuthority, kernel: kernelClient,
-    validateSource: liveSources.validate,
-    preparePipeline: (query, signal) => retrievalComposition.prepare({ threadId: query.threadId, query,
-      workspaceId: query.liveRoot.canonicalRoot, ...(query.projectId ? { projectId: query.projectId } : {}) }, signal),
+  kernelClient.setRetrievalOwner(createRetrievalOwner({ sources: retrievalSources, kernel: kernelClient,
+    preparePipeline: async (query, signal) => retrievalComposition.prepare({ threadId: query.threadId, query,
+      workspaceId: await retrievalSources.routingWorkspace(query, signal), ...(query.projectId ? { projectId: query.projectId } : {}) }, signal),
   }));
 
   const indexDirectories = createIndexDirectoryManager({

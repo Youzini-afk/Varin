@@ -105,7 +105,8 @@ it('prepares saved disk through real Documents and capture; concurrent and reope
   expect(first).toEqual(concurrent);
   expect(first.source.workspaceId).toBe((await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId);
   expect(first.source.tools).toContain('file_read');
-  expect(first.source.tools.every(tool => ['file_read', 'file_list', 'file_search'].includes(tool))).toBe(true);
+  expect(first.source.tools).toContain('code_retrieval');
+  expect(first.source.tools.every(tool => ['file_read', 'file_list', 'file_search', 'code_retrieval'].includes(tool))).toBe(true);
   expect(first.source.revision).toBe(0);
   await fs.writeFile(path.join(f.workspace, 'source.txt'), 'changed disk after capture');
   expect(await f.api.prepareSource(request)).toEqual(first);

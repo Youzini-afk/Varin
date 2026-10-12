@@ -6,6 +6,19 @@ use crate::tools::ToolBinding;
 use varin_runtime::execution::ToolExecutionContext;
 
 impl Storage {
+    /// Actual registered physical identity, separate from the durable source selection.
+    pub(crate) fn source_physical_root(
+        &self,
+        binding: &ToolBinding,
+        grant: &Grant,
+        host_id: &str,
+    ) -> Result<Option<varin_runtime::catalog::launches::LiveRoot>, KernelError> {
+        if binding.source_mode == varin_runtime::SourceMode::FixedBranch { return Ok(None); }
+        let root = self.registered_file_root(binding.root_id.as_deref().ok_or_else(||
+            KernelError::Authorization("physical source root is missing".into()))?, grant)?;
+        Ok(Some(varin_runtime::catalog::launches::LiveRoot { host_id:host_id.into(),
+            root_id:root.root_id, canonical_root:root.canonical_root.to_string_lossy().into_owned() }))
+    }
     pub(crate) fn child_source_handoff(
         &mut self,
         binding: &ToolBinding,
@@ -26,21 +39,7 @@ impl Storage {
             return Err(KernelError::Authorization("process delegation requires the frozen configured capability or original parent process authority".into()));
         }
         let source = binding.source_selection()?;
-        let physical = if source.mode != varin_runtime::SourceMode::FixedBranch {
-            let root = self.registered_file_root(
-                binding.root_id.as_deref().ok_or_else(|| {
-                    KernelError::Authorization("physical source root is missing".into())
-                })?,
-                grant,
-            )?;
-            Some(varin_runtime::catalog::launches::LiveRoot {
-                host_id: host_id.into(),
-                root_id: root.root_id,
-                canonical_root: root.canonical_root.to_string_lossy().into_owned(),
-            })
-        } else {
-            None
-        };
+        let physical = self.source_physical_root(binding, grant, host_id)?;
         if authorize_only {
             return Ok(Value::Null);
         }

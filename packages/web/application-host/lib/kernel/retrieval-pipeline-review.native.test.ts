@@ -1,3 +1,4 @@
+import { createRetrievalSourceOwner } from './retrieval-source.js';
 import { createHash } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createRetrievalPipelineOwner } from '../harness/retrieval-pipeline.js';
@@ -12,7 +13,7 @@ const fixture = async (reply: Parameters<typeof retrievalFixture>[0]) => { const
 const once = (body: Record<string, unknown>, response: Parameters<typeof responseDone>[0]) => latestOutput(body) ? responseDone(response) : responseTool(response, 'code_retrieval', { question: 'retrievalNeedle' });
 const sourceText = 'export function retrievalNeedle(input: number): number {\n  const adjusted = input + 41;\n  return adjusted;\n}\n';
 function install(f: Awaited<ReturnType<typeof fixture>>, pipelines: ReturnType<typeof createRetrievalPipelineOwner>) {
-  const owner = createRetrievalOwner({ documents: f.documents.authority, kernel: f.kernel, validateSource: f.liveSources.validate, pipelines });
+  const owner = createRetrievalOwner({ sources: createRetrievalSourceOwner({ documents: f.documents.authority, kernel: f.kernel, validateLiveSource: f.liveSources.validate }), kernel: f.kernel, pipelines });
   const results = new Map<string, RetrievalResult>();
   f.kernel.setRetrievalOwner(async (query, signal) => {
     const result = await owner(query, signal); results.set(query.runId, result); return result;
@@ -42,7 +43,7 @@ it('public HTTP runs keyword → actual Rust structure → durable history → f
   expect(f.launchErrors).toEqual([]); expect(f.requests).toHaveLength(3);
   const retrieval = latestOutput(f.requests[1]!)!;
   expect(retrieval).toMatchObject({ outcome: 'succeeded', content: {
-    source: { mode: 'live_root', workspaceId: f.workspaceId, liveRoot },
+    source: { mode: 'live_root', workspace_id: f.workspaceId, live_root: liveRoot },
     snippets: expect.arrayContaining([expect.objectContaining({ path: 'module.ts', startLine: 1, endLine: 4, content: sourceText.trimEnd() })]),
   } });
   expect(results.get(receipt.run_id)?.plan).toMatchObject({ configurationGeneration: 1,

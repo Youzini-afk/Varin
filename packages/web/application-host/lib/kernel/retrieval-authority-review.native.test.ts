@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { afterEach, expect, it } from 'vitest';
-import type { LiveRoot } from './protocol.generated.js';
+import type { RetrievalQuery } from './protocol.generated.js';
 import { retrievalFixture, responseTool, responseDone, latestOutput, deferred } from './retrieval-review.test-helper.js';
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -13,7 +13,7 @@ const askOnce = (body: Record<string, unknown>, response: Parameters<typeof resp
   ? responseDone(response) : responseTool(response, 'code_retrieval', { question: 'retrievalNeedle' });
 const plan = () => ({ id: 'independent-test-plan', configurationGeneration: 7,
   stages: [{ kind: 'keyword' as const, providerId: 'fixture-keyword', configurationId: '7', status: 'ready' as const }, ...(['structure', 'semantic', 'model'] as const).map(kind => ({ kind, providerId: 'none', configurationId: 'disabled', status: 'disabled' as const }))] });
-const source = (query: { workspaceId: string; executionWorkspaceId: string; liveRoot: LiveRoot }) => ({ mode: 'live_root' as const, workspaceId: query.workspaceId, executionWorkspaceId: query.executionWorkspaceId, liveRoot: query.liveRoot });
+const source = (query: RetrievalQuery) => query.source;
 const stages = () => [{ kind: 'keyword' as const, status: 'ready' as const }, ...(['structure', 'semantic', 'model'] as const).map(kind => ({ kind, status: 'disabled' as const }))];
 const omissions = () => ({ outOfScope: 0, stale: 0, unavailable: 0 });
 
@@ -26,24 +26,6 @@ it('a retrieval tool with no Host owner reports unavailable and records a real t
   expect(JSON.stringify(f.requests[0]!.tools)).toContain('code_retrieval');
   expect(JSON.stringify(latestOutput(f.requests[1]!))).toMatch(/unavailable/);
   expect((await f.runtime.history(run.branchId)).some(item => item.source === 'tool')).toBe(true);
-}, 20_000);
-
-it.each(['fixed_branch', 'materialized'] as const)('rejects %s retrieval before model dispatch rather than using the live index', async mode => {
-  const f = await fixture(askOnce);
-  await f.write('source.ts', 'export const retrievalNeedle = 1;\n');
-  const run = await f.admit(`retrieval-${mode}`, ['code_retrieval']);
-  const actor = f.kernel.scoped(run.grant);
-  const bytes = Buffer.from('export const retrievalNeedle = 2;\n');
-  const blob = await actor.putBlob(bytes, 'retrieval-fixed-object');
-  await actor.createBranch({ operationId: 'retrieval-fixed-create', branchId: 'retrieval-fixed', workspaceId: f.workspaceId, draftBasePaths: [], captureScopes: [],
-    entries: [{ path: 'source.ts', state: { kind: 'regular-file', objectHash: blob.hash, byteLength: bytes.length, mode: 0o644 }, ownerId: blob.ownerId }] });
-  const root = await actor.readBranch({ branchId: 'retrieval-fixed' });
-  const published = await actor.publishBranch({ operationId: 'retrieval-fixed-publish', branchId: 'retrieval-fixed', expectedRoot: root.root, expectedWriteRevision: root.writeRevision });
-  const lineage = { branchId: 'retrieval-fixed', revision: Number(published.revision) };
-  await expect(f.runtime.startRun(run.receipt.run_id, undefined, { ...run.binding, sourceMode: mode, liveRoot: undefined,
-    ...(mode === 'fixed_branch' ? { rootId: undefined, fileSource: lineage } : { materializedSource: lineage }) })).rejects.toThrow(/retrieval|live_root|source/i);
-  expect(f.requests).toEqual([]);
-  await f.runtime.cancelRun(run.receipt.run_id);
 }, 20_000);
 
 it('revalidates grant scope, symlink escapes and snippet revisions, rebuilding accepted text from actual source', async () => {
@@ -59,10 +41,10 @@ it('revalidates grant scope, symlink escapes and snippet revisions, rebuilding a
   let ownerCalls = 0;
   f.kernel.setRetrievalOwner(async query => {
     ownerCalls++;
-    expect(query).toMatchObject({ runId: expect.any(String), threadId: 'retrieval-result-authority-thread', grantId: 'retrieval-result-authority-grant', workspaceId: f.workspaceId });
+    expect(query).toMatchObject({ runId: expect.any(String), threadId: 'retrieval-result-authority-thread', grantId: 'retrieval-result-authority-grant', source: { workspace_id: f.workspaceId } });
     expect(query).not.toHaveProperty('sessionId');
     const snippet = (file: string, rev = revision(allowed), startLine = 1, endLine = 3) => ({ path: file, revision: rev, startLine, endLine, content: 'FORGED_INDEX_CONTENT_MUST_NOT_REACH_HISTORY' });
-    return { status: 'ready', plan: plan(), source: source(query), snippets: [
+    return { status: 'ready', plan: plan(), source: source(query), physicalRoot: query.physicalRoot, snippets: [
       snippet('allowed/source.ts'), snippet('private.ts', revision(privateText), 1, 1), snippet('../outside.ts'),
       snippet('allowed/escape.ts'), snippet('allowed/escape-dir/private.ts'), snippet('allowed/missing.ts'),
       snippet('allowed/source.ts', 'd1_old_revision'), snippet('allowed/source.ts', revision(allowed), 1, 900),
@@ -85,7 +67,7 @@ it('revalidates grant scope, symlink escapes and snippet revisions, rebuilding a
 it('rejects a returned foreign source identity rather than attaching it to a local Run', async () => {
   const f = await fixture(askOnce);
   await f.write('source.ts', 'const retrievalNeedle = 1;');
-  f.kernel.setRetrievalOwner(async query => ({ status: 'ready', plan: plan(), source: { ...source(query), workspaceId: 'another-workspace' },
+  f.kernel.setRetrievalOwner(async query => ({ status: 'ready', plan: plan(), source: { ...source(query), workspace_id: 'another-workspace' }, physicalRoot: query.physicalRoot,
     snippets: [{ path: 'source.ts', revision: revision('const retrievalNeedle = 1;'), startLine: 1, endLine: 1, content: 'CROSS_ROOT_FORGED' }], omissions: omissions(), stages: stages() }));
   const run = await f.admit('foreign-retrieval-source', ['code_retrieval']); await run.start();
   await expect.poll(async () => (await f.runtime.run(run.receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
@@ -105,7 +87,7 @@ it('a stalled retrieval leaves control and unrelated reads usable; cancelling dr
   f.kernel.setRetrievalOwner(async (query, signal) => {
     entered = true; signal.addEventListener('abort', () => { aborted = true; }, { once: true });
     await gate.promise;
-    return { status: 'ready', plan: plan(), source: source(query), snippets: [{ path: 'source.ts', revision: revision('const retrievalNeedle = 1;'), startLine: 1, endLine: 1, content: 'LATE_RETRIEVAL_RESULT' }], omissions: omissions(), stages: stages() };
+    return { status: 'ready', plan: plan(), source: source(query), physicalRoot: query.physicalRoot, snippets: [{ path: 'source.ts', revision: revision('const retrievalNeedle = 1;'), startLine: 1, endLine: 1, content: 'LATE_RETRIEVAL_RESULT' }], omissions: omissions(), stages: stages() };
   });
   const slow = await f.admit('slow-retrieval', ['code_retrieval']);
   try {
@@ -126,7 +108,7 @@ it('denies an explicit search path outside the Run grant before invoking the Hos
     : responseTool(response, 'code_retrieval', { question: 'retrievalNeedle', paths: ['private'] }));
   await f.write('allowed/source.ts', 'const retrievalNeedle = 1;'); await f.write('private/secret.ts', 'SECRET_OUTSIDE_SCOPE');
   let invoked = 0;
-  f.kernel.setRetrievalOwner(async query => { invoked++; return { status: 'ready', plan: plan(), source: source(query), snippets: [], omissions: omissions(), stages: [] }; });
+  f.kernel.setRetrievalOwner(async query => { invoked++; return { status: 'ready', plan: plan(), source: source(query), physicalRoot: query.physicalRoot, snippets: [], omissions: omissions(), stages: [] }; });
   const run = await f.admit('denied-retrieval-path', ['code_retrieval'], ['allowed']); await run.start();
   await expect.poll(async () => (await f.runtime.run(run.receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
   expect(invoked).toBe(0);
@@ -136,7 +118,7 @@ it('denies an explicit search path outside the Run grant before invoking the Hos
 it('revoking the Run grant during an outstanding retrieval prevents its otherwise valid snippets from being committed', async () => {
   const f = await fixture(askOnce); const text = 'const retrievalNeedle = "REVOKED_RESULT_MUST_NOT_COMMIT";'; await f.write('source.ts', text);
   const gate = deferred(); let entered = false;
-  f.kernel.setRetrievalOwner(async query => { entered = true; await gate.promise; return { status: 'ready', plan: plan(), source: source(query),
+  f.kernel.setRetrievalOwner(async query => { entered = true; await gate.promise; return { status: 'ready', plan: plan(), source: source(query), physicalRoot: query.physicalRoot,
     snippets: [{ path: 'source.ts', revision: revision(text), startLine: 1, endLine: 1, content: text }], omissions: omissions(), stages: stages() }; });
   const run = await f.admit('revoked-retrieval-grant', ['code_retrieval']);
   try {
