@@ -174,3 +174,43 @@ after the shared preparation has actually ended; it does not revoke shared prepa
 caller's selection. Once the publication transaction starts, its actual result wins over caller
 cancellation. Explicit candidate rejection first commits the original catalog CAS, then reconciles
 and drains the now-invalid preparation. Disable and shutdown retain global lifecycle revocation.
+
+## Explicit Host/Surface update groups
+
+`manifest.updateReadiness.surfaceEntrypoints` opts the candidate's Host and named local Surface
+entrypoints into one update publication dependency. An ordinary Agent apply first persists the
+original `applyRequested` fact. Without a participating prepared Surface it returns
+`application_requested` and records `required_surface_readiness`; a valid selected Host remains
+active. The supervisor never waits for all windows, does not infer membership from packaged UI,
+and never makes selected startup/recovery depend on an open window.
+
+The original prepared Host instance supplies its preparation ID, application Host identity, desired
+revision, and generation. The trusted Surface host submits its matching local preparation members
+through the existing selection route after actual connected-consumer mount preparation. Publication
+checks the exact artifact, review, request intent and revision in the original Catalog lock, then
+runs a synchronous Host-only owner/readiness/request-cancellation check immediately before the
+Catalog write. Preparation, mounts and retirement stay outside that lock. Aborting one HTTP request
+before this boundary prevents its commit; after it, the actual committed selection wins. A lost
+response requires reading the selected artifact, not claiming rollback or inferring a dead window
+from a long-poll timeout. No persistent membership or second selection authority is introduced.
+
+For an explicitly requested group, one Surface's failed mount/cleanup does not revoke the shared
+prepared Host. That unpublished owner belongs to the original pending application request until
+retry or an authoritative candidate replacement, discard, capability/desired change, or shutdown.
+Staging a replacement withdraws only obsolete preparation and does not cold-activate another
+provider. Ordinary replacement preserves frozen exchange/child pins and their original retirement;
+explicit disable/revocation retains its existing stronger cancellation semantics.
+
+Trusted-native Host modules cannot safely prepare beside a loaded predecessor. Such a grouped
+update reports `trusted_native_group_update_requires_restart_handoff`, retains the old selection,
+and does not use the old cold-restart shortcut to bypass Surface readiness. The supported explicit
+path is to disable the extension, apply the reviewed candidate while disabled, restart the
+application Host, then enable it. Disabled selection does not activate or fake a Host preparation.
+A hot grouped native restart handoff is not implemented by this update contract.
+
+An unpublished broker crash invalidates only its own preparation, never a still-valid selected
+predecessor. If the Catalog has already selected the candidate, subsequent stop/crash does not roll
+back its committed storage migration. The original registry closes old new-call admission while
+retained old exchange pins drain; recovery prepares the committed selected artifact. Controlled
+transport tests exercise these interruption windows against the real artifact, Catalog and storage
+owners; they do not claim a whole-process or cross-process atomic transaction.

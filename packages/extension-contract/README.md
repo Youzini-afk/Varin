@@ -123,3 +123,18 @@ Only `stage` requires a SourceView. `VarinExtensionPackageResult` distinguishes 
 installation, staged update, committed application request and selected artifact. Execution/mount
 status remains with the original realm owners. `source_view` is trusted capture provenance in the
 catalog, never an installable discovery source or a client-supplied filesystem resolver.
+
+A manifest may opt one extension into an explicit candidate update group with
+`updateReadiness: { surfaceEntrypoints: ["panel"] }`. The group contains that extension's Host
+and the named Surface entrypoints in one participating compatible realm. Merely shipping a UI
+entrypoint creates no dependency. This is an update publication requirement, not a permanent
+window dependency: initial enabled startup and recovery of an already selected artifact use their
+ordinary Host lifecycle. Other extensions and other windows do not join the group implicitly.
+
+Only `VarinExtensionCandidatePublicationRequest` carries `surfaceReadiness`. Application-request
+and discard requests reject that field. The evidence names the original Host preparation identity
+(including its per-instance ID), realm, Surface kind, and exact prepared local member generations.
+It is a trusted Surface-host transaction report, not a credential, durable window registry, or
+proof that an entire screen is visible. Connected contribution consumers must finish their real
+mount preparation before the report; entrypoint activation without a mounted consumer proves only
+entrypoint readiness. Exact provider handles retain the existing generation handshake.

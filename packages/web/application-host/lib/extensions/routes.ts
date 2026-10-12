@@ -1,5 +1,6 @@
 import {
   ExtensionCatalogRevisionConflictError,
+  ExtensionUpdateReadinessError,
   ExtensionCatalogStorageError,
   ExtensionStorageRevisionConflictError,
   ExtensionStorageError,
@@ -92,6 +93,9 @@ const withRequestSignal = async <Result>(
 };
 
 const sendMutationError = (res: Response, error: unknown) => {
+  if (error instanceof ExtensionUpdateReadinessError) {
+    return res.status(409).json({ error: { code: error.code, message: error.message, retryable: true } });
+  }
   if (error instanceof ExtensionCatalogRevisionConflictError || error instanceof ExtensionStorageRevisionConflictError) {
     return res.status(409).json({
       error: {
@@ -312,7 +316,7 @@ export const registerExtensionRoutes = (app: Express, {
         const extensionId = typeof req.body?.extensionId === 'string' ? req.body.extensionId : '';
         const integrity = typeof req.body?.candidateIntegrity === 'string' ? req.body.candidateIntegrity : '';
         if (!extensionId || !integrity) throw new Error('extensionId and candidateIntegrity are required');
-        return res.json(await extensionRuntime.prepareCandidate(extensionId, integrity));
+        return res.json(await withRequestSignal(req, res, signal => extensionRuntime.prepareCandidate(extensionId, integrity, signal)));
       } catch (error) {
         return sendMutationError(res, error);
       }
@@ -397,9 +401,16 @@ export const registerExtensionRoutes = (app: Express, {
     uiAuthController.requireAuth,
     async (req, res) => {
       try {
-        return res.json({ snapshot: await (extensionRuntime
-          ? extensionRuntime.selectCandidate(req.body)
-          : extensionPackages.selectCandidate(req.body)) });
+        if (!extensionRuntime) {
+          // A catalog-only recovery route cannot attest a prepared Host/Surface group.
+          const snapshot = await extensionCatalog.snapshot();
+          const entry = snapshot.extensions.find(value => value.manifest.id === req.body?.extensionId);
+          if (entry?.desired.enabled && entry.candidate?.manifest.updateReadiness) {
+            throw new ExtensionUpdateReadinessError('required_surface_readiness', 'A running application Host and compatible Surface must prepare this update group');
+          }
+          return res.json({ snapshot: await extensionPackages.selectCandidate(req.body) });
+        }
+        return res.json({ snapshot: await withRequestSignal(req, res, signal => extensionRuntime.selectCandidate(req.body, signal)) });
       } catch (error) {
         return sendMutationError(res, error);
       }

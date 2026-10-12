@@ -8,6 +8,12 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-12 增量：显式 Host/Surface 更新就绪组
+
+- `updateReadiness` 只将明确列出的本包 Surface 成员与 Host 成组更新。普通 apply 保原申请事实，缺就绪时保持旧 selected/active；首装、已提交恢复和未声明组的后台保持原无窗口行为。Catalog **58**、wire **18** 无变化。
+- 原 Host instance、实际 Loader/Surface/Workbench 准备与原 Catalog 短提交校验贯穿真实 client/route 取消；提交后原选择胜过断连，旧 pin 与新合法请求分开。真实坏挂载保旧、好更新及历史/GC/重开已复验；独审闭合准备后 crash、已选 storage 误回滚及无关 slot 更新误取消，[本片证据](../reviews/runtime-readiness-groups-2026-10-12.md)分列实际边界。
+- trusted-native 不能并存实例的热接管仍未实现，保明确 disable/apply/restart/enable 路径；更广 Provider/Transform/共享 key、组合计划及其余两设计能力继续推进。
+
 ## 2026-10-12 增量：Agent 产包与原 Host/Surface 消费
 
 - 普通 `extension_package` 沿原发行目录、调用授权和 Source/Storage 捕获 stage/apply；首次禁用且无 grant，更新保原能力审查与 candidate。原 ArtifactStore/Catalog/supervisor 独占字节、选择和执行事实，无第二安装器或回执权威。Catalog **58**、wire **18** 保持。

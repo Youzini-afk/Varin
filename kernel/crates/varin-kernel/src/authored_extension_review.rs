@@ -23,6 +23,7 @@ const BRANCH: &str = "branch:authored";
 
 #[derive(Default)]
 struct Observed {
+    grouped: bool,
     files: Vec<(String, String)>,
     results: BTreeMap<String, ToolCompletion>,
     requested_enable: bool,
@@ -236,11 +237,32 @@ impl ModelProvider for Model {
                             ));
                             break;
                         }
-                        assert_eq!(data(&state, &apply)["outcome"], "selected");
+                        assert!(matches!(
+                            &state.results[&apply],
+                            ToolCompletion::Result {
+                                outcome: Outcome::Succeeded,
+                                effect: Effect::Confirmed,
+                                ..
+                            }
+                        ));
+                        assert_eq!(
+                            data(&state, &apply)["outcome"],
+                            if state.grouped {
+                                "application_requested"
+                            } else {
+                                "selected"
+                            }
+                        );
                     } else if state.policy_result.is_none() {
                         return Ok(FinishReason::Stop);
                     } else {
-                        assert_eq!(state.policy_result.as_ref().unwrap()["outcome"], "selected");
+                        let outcome = state.policy_result.as_ref().unwrap()["outcome"]
+                            .as_str()
+                            .unwrap();
+                        assert!(
+                            outcome == "selected"
+                                || (state.grouped && outcome == "application_requested")
+                        );
                     }
                     if !state.surface_checks.contains(label) {
                         self.commands.send(json!({"kind":"fixture-check-update","label":label,"integrity":staged["artifactIntegrity"]})).unwrap();
@@ -666,6 +688,16 @@ impl Review {
 #[test]
 #[ignore = "requires built ordinary extension packages; original Storage/Catalog and stdio, no listeners"]
 fn model_authored_files_stage_disabled_then_original_enable_reaches_dynamic_model() {
+    run_authored_extension_chain(false);
+}
+
+#[test]
+#[ignore = "requires built ordinary extension packages; original Storage/Catalog and stdio, no listeners"]
+fn grouped_updates_wait_for_actual_surface_members_then_recover_original_results() {
+    run_authored_extension_chain(true);
+}
+
+fn run_authored_extension_chain(grouped: bool) {
     let root = std::env::temp_dir().join(format!("varin-authored-review-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
     let mut db = Catalog::open(root.join("catalog")).unwrap();
@@ -700,7 +732,10 @@ fn model_authored_files_stage_disabled_then_original_enable_reaches_dynamic_mode
         Default::default(),
     );
     let (command_sender, commands) = mpsc::channel();
-    let observed = Arc::new(Mutex::new(Observed::default()));
+    let observed = Arc::new(Mutex::new(Observed {
+        grouped,
+        ..Default::default()
+    }));
     let mut review = Review {
         f,
         tools: crate::run_tools::RunTools::new(runtime.catalog(), bridge),
@@ -711,7 +746,7 @@ fn model_authored_files_stage_disabled_then_original_enable_reaches_dynamic_mode
         commands,
         report: None,
     };
-    review.f.host.send(json!({"kind":"fixture-initialize","root":root,"storageRoot":storage_root,"epoch":EPOCH,"runId":submitted.run_id,"threadId":THREAD}));
+    review.f.host.send(json!({"kind":"fixture-initialize","grouped":grouped,"root":root,"storageRoot":storage_root,"epoch":EPOCH,"runId":submitted.run_id,"threadId":THREAD}));
     let ready = review.receive("fixture-ready");
     observed.lock().unwrap().files = ready["files"]
         .as_array()

@@ -3,6 +3,7 @@ import {
   parseVarinExtensionActualState,
   parseVarinExtensionCandidateCapabilityReviewRequest,
   parseVarinExtensionCandidateSelectionRequest,
+  parseVarinExtensionCandidatePublicationRequest,
   parseVarinExtensionCapabilityReviewRequest,
   parseVarinExtensionHostStateWaitRequest,
   parseVarinExtensionLocalSourceReloadRequest,
@@ -17,6 +18,7 @@ import {
   type VarinExtensionActualState,
   type VarinExtensionCandidateCapabilityReviewRequest,
   type VarinExtensionCandidateSelectionRequest,
+  type VarinExtensionCandidatePublicationRequest,
   type VarinExtensionCapabilityReviewRequest,
   type VarinExtensionCandidatePreparationResult,
   type VarinExtensionCatalogSnapshot,
@@ -51,7 +53,7 @@ import {
 } from "@varin/extension-builtins";
 import { queryRuntimeContracts, resolveDeclaredServiceRouting } from "./runtime-contracts.js";
 import { ApplicationExtensionCatalog } from "./application-catalog.js";
-import { BrokeredHostSupervisor, type BrokeredHostTransportFactory } from "./broker-supervisor.js";
+import { BrokeredHostSupervisor, ExtensionUpdateReadinessError, type BrokeredHostTransportFactory } from "./broker-supervisor.js";
 import { HostCapabilityRegistry } from "./capability-registry.js";
 import { ExtensionPackageManager } from "./package-manager.js";
 import { HostServiceRegistry, HostServiceBindingError, type HostServiceBinding } from "./service-registry.js";
@@ -251,7 +253,13 @@ export class ApplicationExtensionRuntime {
     signal?: AbortSignal, onMutation?: () => void): Promise<VarinExtensionPackageResult> {
     return this.#mutate(async () => {
       const result = await this.packages.stageCaptured(directory, provenance, expectedRevision, signal, onMutation);
-      // First installation is disabled; staging an update never executes the candidate.
+      // Staging revokes obsolete preparation without cold-activating selected providers.
+      // The package result is already durable; cleanup failure cannot erase that effect.
+      try { await this.supervisor.reconcileCandidatePreparations(); }
+      catch (error) {
+        try { this.#onObserverError(error); }
+        catch { console.error("[VarinExtensions] Candidate cleanup error reporting failed"); }
+      }
       this.#publish();
       return result;
     });
@@ -290,7 +298,13 @@ export class ApplicationExtensionRuntime {
           throw new ExtensionPackageApplicationError(result("application_requested", requested.revision),
             new AggregateError([error, readError], "Candidate preparation failed and its current catalog could not be read"));
         }
-        if (signal?.aborted) return result("application_requested", current.revision);
+        if (current.extensions.some(value => value.manifest.id === request.extensionId && value.integrity === request.candidateIntegrity)) {
+          return result("selected", current.revision);
+        }
+        if (signal?.aborted || error instanceof ExtensionUpdateReadinessError && error.code === "required_surface_readiness") {
+          this.#publish();
+          return result("application_requested", current.revision);
+        }
         throw new ExtensionPackageApplicationError(result("application_requested", current.revision), error);
       }
     });
@@ -366,9 +380,11 @@ export class ApplicationExtensionRuntime {
     });
   }
 
-  prepareCandidate(extensionId: string, integrity: string): Promise<VarinExtensionCandidatePreparationResult> {
+  prepareCandidate(extensionId: string, integrity: string, signal?: AbortSignal): Promise<VarinExtensionCandidatePreparationResult> {
     return this.#mutate(async () => {
+      signal?.throwIfAborted();
       const prepared = await this.supervisor.prepareCandidate(extensionId, integrity);
+      signal?.throwIfAborted();
       this.#publish();
       return prepared;
     });
@@ -434,14 +450,17 @@ export class ApplicationExtensionRuntime {
   }
 
   selectCandidate(
-    requestValue: VarinExtensionCandidateSelectionRequest | unknown,
+    requestValue: VarinExtensionCandidatePublicationRequest | unknown,
+    signal?: AbortSignal,
   ): Promise<VarinExtensionCatalogSnapshot> {
-    const request = parseVarinExtensionCandidateSelectionRequest(requestValue);
+    const request = parseVarinExtensionCandidatePublicationRequest(requestValue);
     return this.#mutateCatalog(async () => {
       const selected = await this.supervisor.selectCandidate(
         request.extensionId,
         request.candidateIntegrity,
         request.expectedRevision,
+        signal,
+        request.surfaceReadiness,
       );
       await this.supervisor.reconcile(selected);
       return this.catalog.snapshot();

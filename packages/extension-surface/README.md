@@ -37,6 +37,12 @@ preparation rolls back those leases; successful publication retires mounts befor
 resources. Window closure during an already successful external commit cleans the staged mount
 without claiming that the Host's selected artifact was rolled back.
 
+Preparation options and connected-consumer leases carry their actual owner signals. The commit
+callback receives their combined signal after validation, so cancellation also reaches a queued
+external publication. The callback's confirmed external result remains the boundary: a signal that
+aborts after that commit cannot turn the selected generation into an uncommitted candidate. Consumer
+signals fence local mounts; they do not create a global window registry or a screen-presentation claim.
+
 
 Owned context writers and read-only candidate projection form one provider capability. Before mount
 preparation, the original context store projects the proposed layer commits/withdrawals without

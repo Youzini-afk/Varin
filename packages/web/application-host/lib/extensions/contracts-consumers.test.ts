@@ -1,9 +1,8 @@
 import { createHash } from 'node:crypto';
-import { EventEmitter } from 'node:events';
 import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import express, { type Express, type Request, type Response as ExpressResponse } from 'express';
+import express, { type Express } from 'express';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApplicationExtensionRuntime } from '@varin/extension-host';
 import { VARIN_BUILTIN_EXTENSION_DEFINITIONS, VARIN_BUILTIN_EXTENSION_PREFIX } from '@varin/extension-builtins';
@@ -21,6 +20,7 @@ import {
 import type { ExtensionsAPI } from '@varin/application-client';
 import { createDocumentAuthority } from '../documents/authority.js';
 import { registerExtensionRoutes } from './routes.js';
+import { routerTransport } from './direct-router.test-helper.js';
 
 const transport = vi.hoisted(() => ({ fetch: vi.fn(), token: vi.fn() }));
 vi.mock('@varin/application-client', async (importOriginal) => ({
@@ -29,55 +29,6 @@ vi.mock('@varin/application-client', async (importOriginal) => ({
   refreshLocalRuntimeUrlAuthToken: transport.token,
 }));
 
-/** Exercise Express's actual route/middleware stack without opening a listener. */
-function routerTransport(router: ReturnType<typeof express.Router>) {
-  const exchanges: Array<{ request: EventEmitter; response: EventEmitter; replied: boolean }> = [];
-  const fetch = (target: URL, init: RequestInit): Promise<Response> => new Promise((resolve, reject) => {
-    if (init.signal?.aborted) { reject(init.signal.reason); return; }
-    const headers = new Headers();
-    const response = Object.assign(new EventEmitter(), {
-      statusCode: 200,
-      writableEnded: false,
-      destroyed: false,
-      setHeader(name: string, value: string) { headers.set(name, value); },
-      status(code: number) { this.statusCode = code; return this; },
-      json(payload: unknown) {
-        exchange.replied = true;
-        this.writableEnded = true;
-        init.signal?.removeEventListener('abort', abort);
-        resolve(Response.json(payload, { status: this.statusCode, headers }));
-        response.emit('finish');
-        return this;
-      },
-    });
-    const request = Object.assign(new EventEmitter(), {
-      method: init.method ?? 'GET',
-      url: target.pathname + target.search,
-      headers: Object.fromEntries(new Headers(init.headers)),
-      body: init.body ? JSON.parse(String(init.body)) : undefined,
-      aborted: false,
-    });
-    const exchange = { request, response, replied: false };
-    exchanges.push(exchange);
-    response.once('close', () => {
-      response.destroyed = true;
-      reject(init.signal?.aborted ? init.signal.reason : new Error('Application host connection closed'));
-    });
-    const abort = () => {
-      request.aborted = true;
-      response.destroyed = true;
-      request.emit('aborted');
-      response.emit('close');
-      reject(init.signal?.reason);
-    };
-    init.signal?.addEventListener('abort', abort, { once: true });
-    router(request as Request, response as unknown as ExpressResponse, (error?: unknown) => {
-      init.signal?.removeEventListener('abort', abort);
-      reject(error ?? new Error('Contract route did not respond'));
-    });
-  });
-  return Object.assign(fetch, { exchanges });
-}
 
 const serviceId = 'dev.contract.discovery';
 const declaredService: VarinExtensionServiceProvision = {

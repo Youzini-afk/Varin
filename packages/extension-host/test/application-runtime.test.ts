@@ -25,6 +25,7 @@ const writeHostExtension = async (
   schemaVersion: number,
   migration: "ok" | "throw",
   mode: "brokered" | "native" = "brokered",
+  grouped = false,
 ): Promise<void> => {
   await mkdir(directory, { recursive: true });
   await writeFile(join(directory, "varin.extension.json"), JSON.stringify({
@@ -33,7 +34,9 @@ const writeHostExtension = async (
     version,
     engines: { varin: "*" },
     storage: { schemaVersion },
-    entrypoints: { host: { activation: ["service-request"], file: "host.cjs", mode } },
+    entrypoints: { host: { activation: ["service-request"], file: "host.cjs", mode },
+      ...(grouped ? { surfaces: [{ id: "panel", mode: "declarative", supports: ["web"] }] } : {}) },
+    ...(grouped ? { updateReadiness: { surfaceEntrypoints: ["panel"] } } : {}),
     provides: { services: [{ id: serviceId, version: 1 }] },
   }), "utf8");
   await writeFile(join(directory, "package.json"), JSON.stringify({ name: extensionId, version }), "utf8");
@@ -526,6 +529,39 @@ test("trusted-native Host updates remain on the prior generation until applicati
   } finally {
     await restarted.stop();
   }
+
+  const groupedData = await temporaryDirectory("varin-native-group-");
+  await writeHostExtension(v1, "1.0.0", 1, "ok", "native", true);
+  await writeHostExtension(v2, "2.0.0", 1, "ok", "native", true);
+  let grouped = await ApplicationExtensionRuntime.create({ brokerScript, dataDir: groupedData, varinVersion });
+  try {
+    const start = await grouped.start();
+    const initial = await grouped.installOrStage({ expectedRevision: start.catalog.revision,
+      source: { display: "Native group v1", kind: "local", specifier: v1 } });
+    assert.equal(await grouped.invokeService({ args: [], method: "generation", serviceId, version: 1 }), "1.0.0");
+    const update = await grouped.installOrStage({ expectedRevision: initial.revision,
+      source: { display: "Native group v2", kind: "local", specifier: v2 } });
+    const candidateIntegrity = update.extensions[0]!.candidate!.integrity;
+    const applied = await grouped.applyPackageCandidate({ extensionId, candidateIntegrity, expectedRevision: update.revision });
+    assert.equal(applied.outcome, "application_requested");
+    assert.ok((await grouped.state()).catalog.extensions[0]!.actual.some(actual => actual.diagnostics.some(diagnostic =>
+      diagnostic.code === "trusted_native_group_update_requires_restart_handoff")));
+    await grouped.stop();
+    grouped = await ApplicationExtensionRuntime.create({ brokerScript, dataDir: groupedData, varinVersion });
+    const recovered = await grouped.start();
+    assert.equal(recovered.catalog.extensions[0]!.selectedVersion, "1.0.0", "cold restart cannot select an unprepared native group");
+    assert.equal(await grouped.invokeService({ args: [], method: "generation", serviceId, version: 1 }), "1.0.0");
+    const disabled = await grouped.setEnabled(extensionId, false, recovered.catalog.revision);
+    const chosen = await grouped.selectCandidate({ extensionId, candidateIntegrity, expectedRevision: disabled.revision });
+    assert.equal(chosen.extensions[0]!.selectedVersion, "2.0.0");
+    assert.equal(chosen.extensions[0]!.desired.enabled, false);
+    assert.equal((await grouped.state()).services.providers.length, 0, "disabled selection cannot prepare or activate a native Host");
+    await grouped.stop();
+    grouped = await ApplicationExtensionRuntime.create({ brokerScript, dataDir: groupedData, varinVersion });
+    const cold = await grouped.start();
+    await grouped.setEnabled(extensionId, true, cold.catalog.revision);
+    assert.equal(await grouped.invokeService({ args: [], method: "generation", serviceId, version: 1 }), "2.0.0");
+  } finally { await grouped.stop(); }
 });
 
 test("persistent routes select different real providers by session and isolate provider withdrawal", { timeout: 30_000 }, async () => {

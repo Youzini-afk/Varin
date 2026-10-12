@@ -12,6 +12,7 @@ import {
   type VarinExtensionAssetPayload,
   type VarinExtensionAssetRequest,
   type VarinExtensionCandidateSelectionRequest,
+  type VarinExtensionCandidatePublicationRequest,
   type VarinExtensionCapabilityGrant,
   type VarinExtensionCandidatePreparationResult,
   type VarinExtensionCatalogAvailability,
@@ -61,12 +62,12 @@ export interface SurfaceExtensionHost {
   discardPreparedCandidate(extensionId: string, candidateIntegrity: string): Promise<void>;
   hostState(): Promise<VarinExtensionHostStateSnapshot>;
   invokeService(request: VarinExtensionServiceInvocationRequest): Promise<JsonValue>;
-  prepareCandidate(extensionId: string, candidateIntegrity: string): Promise<VarinExtensionCandidatePreparationResult>;
+  prepareCandidate(extensionId: string, candidateIntegrity: string, signal?: AbortSignal): Promise<VarinExtensionCandidatePreparationResult>;
   requestCandidateApplication(request: VarinExtensionCandidateSelectionRequest): Promise<VarinExtensionCatalogSnapshot>;
   readAsset(request: VarinExtensionAssetRequest): Promise<VarinExtensionAssetPayload>;
   readManagedEntrypoint(request: VarinExtensionManagedEntrypointRequest): Promise<VarinExtensionManagedEntrypointPayload>;
   reportActualState(extensionId: string, state: VarinExtensionActualState): Promise<void>;
-  selectCandidate(request: VarinExtensionCandidateSelectionRequest): Promise<VarinExtensionCatalogSnapshot>;
+  selectCandidate(request: VarinExtensionCandidatePublicationRequest, signal?: AbortSignal): Promise<VarinExtensionCatalogSnapshot>;
   waitForHostState(request: VarinExtensionHostStateWaitRequest, signal?: AbortSignal): Promise<VarinExtensionHostStateSnapshot>;
 }
 
@@ -75,6 +76,9 @@ export interface ManagedSurfaceModuleEvaluator {
 }
 
 export interface ManagedStyleHandle {
+  /** Recheck the staged local resource before an external publication begins. */
+  validate?(): void;
+  /** Synchronous publication of a validated style; implementations must not throw. */
   commit(): void;
   dispose(): void;
 }
@@ -160,6 +164,14 @@ interface ArtifactSelection {
   manifest: VarinExtensionManifest;
   slot: "candidate" | "selected";
   version: string;
+}
+
+interface PendingPreparation {
+  controller: AbortController;
+  desiredRevision: number;
+  hostId: string;
+  integrity: string;
+  capabilityBindings: string;
 }
 
 type ExecutableSurfaceEntrypoint = VarinExtensionSurfaceEntrypoint & {
@@ -250,6 +262,7 @@ const defaultStyleHost: ManagedStyleHost = {
     element.textContent = cssText;
     document.head.appendChild(element);
     return {
+      validate: () => { if (!element.isConnected) throw new Error("Staged Surface style was detached before publication"); },
       commit: () => { element.media = "all"; },
       dispose: () => element.remove(),
     };
@@ -311,6 +324,11 @@ class ModuleResourceScope {
     for (const style of this.#styles) style.commit();
   }
 
+  validate(): void {
+    if (this.#disposed) throw new Error("Managed Surface resources were disposed before publication");
+    for (const style of this.#styles) style.validate?.();
+  }
+
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
@@ -367,6 +385,16 @@ const explicitCandidateSelection = (
   };
 };
 
+/** Only an explicitly requested group may make the ordinary watcher prepare an unselected artifact. */
+const requestedGroupSelection = (entry: VarinExtensionCatalogEntry, surface: VarinApplicationSurface): ArtifactSelection | null => {
+  const candidate = entry.candidate;
+  const group = candidate?.manifest.updateReadiness;
+  if (!candidate?.applyRequested || !candidate.capabilitiesReviewed || !group) return null;
+  if (!group.surfaceEntrypoints.every((id) => candidate.manifest.entrypoints?.surfaces
+    ?.some((entrypoint) => entrypoint.id === id && entrypoint.supports.includes(surface)))) return null;
+  return explicitCandidateSelection(entry, candidate.integrity);
+};
+
 const selectionCapabilities = (selection: ArtifactSelection): string[] => selection.capabilityGrants
   .filter((grant) => grant.realm === "surface" && grant.granted && grant.manifestVersion === selection.version)
   .map((grant) => grant.capability);
@@ -387,12 +415,13 @@ const compatibleActivationPlans = (
   const compatibleEntrypoints = (manifest.entrypoints?.surfaces ?? [])
     .filter((entrypoint) => entrypoint.supports.includes(surface));
   const compatibleEntrypointIds = new Set(compatibleEntrypoints.map((entrypoint) => entrypoint.id));
+  const groupedIds = new Set(manifest.updateReadiness?.surfaceEntrypoints ?? []);
   const executable = new Map<string, SurfaceActivationPlan>();
   for (const entrypoint of compatibleEntrypoints) {
-    if (entrypoint.mode === "declarative") continue;
+    if (entrypoint.mode === "declarative" && !groupedIds.has(entrypoint.id)) continue;
     executable.set(entrypoint.id, {
       contributions: [],
-      entrypoint: entrypoint as ExecutableSurfaceEntrypoint,
+      ...(entrypoint.mode !== "declarative" ? { entrypoint: entrypoint as ExecutableSurfaceEntrypoint } : {}),
       entrypointId: entrypoint.id,
       mode: entrypoint.mode,
     });
@@ -421,7 +450,8 @@ const compatibleActivationPlans = (
       } else {
         entrypointHasIncompatible.add(contribution.entrypoint);
       }
-      if (compatible) staticContributions.push(contribution);
+      if (compatible && !(groupedIds.has(contribution.entrypoint)
+        && executable.get(contribution.entrypoint)?.mode === "declarative")) staticContributions.push(contribution);
       continue;
     }
     if (compatible) staticContributions.push(contribution);
@@ -435,6 +465,7 @@ const compatibleActivationPlans = (
   // contribute dynamically). Lazy entrypoints are retained (they may
   // contribute when triggered).
   const executablePlans = [...executable.values()].filter((plan) => {
+    if (groupedIds.has(plan.entrypointId)) return true;
     if (plan.contributions.length > 0) return true;
     if (!plan.entrypoint) return true;
     // Has this entrypoint been declared with contributions, all incompatible?
@@ -446,7 +477,7 @@ const compatibleActivationPlans = (
   return {
     executable: executablePlans,
     incompatible,
-    ...(staticContributions.length > 0 || compatibleEntrypoints.some((entrypoint) => entrypoint.mode === "declarative")
+    ...(staticContributions.length > 0 || compatibleEntrypoints.some((entrypoint) => entrypoint.mode === "declarative" && !groupedIds.has(entrypoint.id))
       ? {
           manifest: {
             contributions: staticContributions,
@@ -463,6 +494,18 @@ const entrypointIsEager = (entrypoint: ExecutableSurfaceEntrypoint): boolean => 
   || entrypoint.activation.length === 0
   || entrypoint.activation.includes("application-startup")
   || entrypoint.activation.includes("background")
+);
+
+const planIsRequested = (plan: SurfaceActivationPlan): boolean => (
+  !plan.entrypoint || entrypointIsEager(plan.entrypoint)
+);
+
+const isGroupedCandidate = (selection: ArtifactSelection): boolean => (
+  selection.slot === "candidate" && selection.manifest.updateReadiness !== undefined
+);
+
+const isGroupMember = (plan: SurfaceActivationPlan, selection: ArtifactSelection): boolean => (
+  selection.manifest.updateReadiness?.surfaceEntrypoints.includes(plan.entrypointId) === true
 );
 
 const targetMatchesPlan = (
@@ -519,6 +562,7 @@ export class SurfaceExtensionLoader {
   readonly #enabledExtensions = new Set<string>();
   #hostId: string | null = null;
   readonly #ownerQueues = new Map<string, Promise<void>>();
+  readonly #preparations = new Map<string, PendingPreparation>();
   readonly #reconcileRequests = new Map<string, { snapshot: VarinExtensionCatalogSnapshot; state: VarinExtensionHostStateSnapshot }>();
   readonly #reconciliations = new Map<string, Promise<void>>();
   #lifecycleEpoch = 0;
@@ -589,7 +633,8 @@ export class SurfaceExtensionLoader {
         if (!selection) continue;
         const plans = compatibleActivationPlans(selection.manifest, this.#surface);
         for (const plan of plans.executable) {
-          const entrypoint = plan.entrypoint as ExecutableSurfaceEntrypoint;
+          const entrypoint = plan.entrypoint;
+          if (!entrypoint) continue;
           if (!entrypoint.activation?.includes(event)) continue;
           if (!targetMatchesPlan(selection.manifest, plan, target)) continue;
           const key = keyFor(entry.manifest.id, plan.entrypointId);
@@ -637,8 +682,8 @@ export class SurfaceExtensionLoader {
         : explicitCandidateSelection(entry, candidateIntegrity);
       this.#hostId ??= snapshot.hostId;
       const plans = compatibleActivationPlans(selection.manifest, this.#surface);
-      const executablePlans = plans.executable.filter((plan) => (
-        entrypointIsEager(plan.entrypoint as ExecutableSurfaceEntrypoint)
+      const executablePlans = plans.executable.filter((plan) => isGroupedCandidate(selection) ? isGroupMember(plan, selection) : (
+        planIsRequested(plan)
         || this.#triggered.has(keyFor(extensionId, plan.entrypointId))
         || this.#active.has(keyFor(extensionId, plan.entrypointId))
       ));
@@ -670,11 +715,11 @@ export class SurfaceExtensionLoader {
             ]
           : []);
         for (const [key, active] of [...this.#active]) {
-          if (active.owner.extensionId === extensionId && !retained.has(key)) {
+          if (!isGroupedCandidate(selection) && active.owner.extensionId === extensionId && !retained.has(key)) {
             await this.#deactivate(active, entry.desired.revision);
           }
         }
-        this.#failedCandidates.delete(`${extensionId}\0${candidateIntegrity}`);
+        this.#failedCandidates.delete(`${extensionId}\0${candidateIntegrity}\0${entry.desired.revision}`);
         this.#revision = committed.revision;
         this.#publish();
         return committed;
@@ -731,6 +776,7 @@ export class SurfaceExtensionLoader {
   async stop(): Promise<void> {
     this.#stopped = true;
     this.#lifecycleEpoch += 1;
+    for (const preparation of this.#preparations.values()) preparation.controller.abort(new Error("Surface extension loader stopped"));
     this.#reconcileRequests.clear();
     this.#watchController?.abort("Surface extension loader stopped");
     this.#watchController = null;
@@ -743,6 +789,7 @@ export class SurfaceExtensionLoader {
 
   async deactivateAll(): Promise<void> {
     this.#lifecycleEpoch += 1;
+    for (const preparation of this.#preparations.values()) preparation.controller.abort(new Error("Surface owners were withdrawn"));
     await Promise.all([...this.#active.values()].map((entry) => this.#deactivate(entry, entry.owner.desiredRevision)));
     this.#publish();
   }
@@ -755,9 +802,24 @@ export class SurfaceExtensionLoader {
     const snapshot = parseVarinExtensionCatalogSnapshot(snapshotValue);
     if (!snapshot.authoritative || this.#stopped) return;
     if (snapshot.hostId === this.#hostId && (snapshot.revision < this.#revision || hostState.revision < this.#hostStateRevision)) return;
+    // Watch notifications fence a waiting RPC immediately, rather than sitting behind the same
+    // owner's preparation queue. Promotion of this exact artifact is already a committed fact.
+    for (const [id, preparation] of this.#preparations) {
+      const entry = snapshot.extensions.find((candidate) => candidate.manifest.id === id);
+      const selection = entry && (entry.integrity === preparation.integrity ? publicCandidateSelection(entry)
+        : entry.candidate?.integrity === preparation.integrity && entry.candidate.capabilitiesReviewed
+          ? explicitCandidateSelection(entry, preparation.integrity) : null);
+      const access = this.#accessContext();
+      if (snapshot.hostId !== preparation.hostId || !entry?.desired.enabled
+        || entry.desired.revision !== preparation.desiredRevision || !selection
+        || preparation.capabilityBindings !== this.#capabilityBindingSignature(
+          selectionCapabilities(selection), access,
+        )) preparation.controller.abort(new Error("Surface preparation was superseded by Host, desired state, artifact, or access changes"));
+    }
     if (this.#hostId && this.#hostId !== snapshot.hostId) {
       this.#lifecycleEpoch += 1;
       this.#triggered.clear();
+      this.#failedCandidates.clear();
       this.#enabledExtensions.clear();
     }
     this.#hostId = snapshot.hostId;
@@ -826,7 +888,7 @@ export class SurfaceExtensionLoader {
       for (const plan of plans.executable) {
         const key = keyFor(entry.manifest.id, plan.entrypointId);
         if (
-          entrypointIsEager(plan.entrypoint as ExecutableSurfaceEntrypoint)
+          planIsRequested(plan)
           || this.#triggered.has(key)
           || this.#active.has(key)
         ) desiredKeys.add(key);
@@ -843,24 +905,25 @@ export class SurfaceExtensionLoader {
     for (const entry of entries) {
       if (entry.source.kind === "builtin") continue;
       if (!entry.desired.enabled) continue;
-      const selected = publicCandidateSelection(entry);
+      const selected = requestedGroupSelection(entry, this.#surface) ?? publicCandidateSelection(entry);
       if (!selected) {
         this.#diagnose(entry.manifest.id, "artifact_unavailable", "Surface extension has no content-addressed artifact");
         continue;
       }
       const plans = compatibleActivationPlans(selected.manifest, this.#surface);
       const executablePlans = plans.executable.filter((plan) => {
+        if (isGroupedCandidate(selected)) return isGroupMember(plan, selected);
         const key = keyFor(entry.manifest.id, plan.entrypointId);
-        return entrypointIsEager(plan.entrypoint as ExecutableSurfaceEntrypoint)
+        return planIsRequested(plan)
           || this.#triggered.has(key)
           || this.#active.has(key);
       });
-      const desiredPlans = [...(plans.manifest ? [plans.manifest] : []), ...executablePlans];
+      const desiredPlans = [...(plans.manifest && !isGroupedCandidate(selected) ? [plans.manifest] : []), ...executablePlans];
       if (desiredPlans.length === 0) {
         await this.#ensureInactivePlans(entry, selected, plans.executable, snapshot.hostId);
         continue;
       }
-      const failedKey = `${entry.manifest.id}\0${selected.integrity}`;
+      const failedKey = `${entry.manifest.id}\0${selected.integrity}\0${entry.desired.revision}`;
       if (selected.slot === "candidate" && this.#failedCandidates.has(failedKey)) continue;
       if (executablePlans.some((plan) => plan.mode === "native") && this.#nativeRestartRequired.has(entry.manifest.id)) continue;
       const expectedBindings = selected.slot === "selected"
@@ -928,7 +991,7 @@ export class SurfaceExtensionLoader {
           this.#revision = Math.max(this.#revision, selection.revision);
           const retained = new Set(desiredPlans.map((plan) => keyFor(entry.manifest.id, plan.entrypointId)));
           for (const [key, active] of [...this.#active]) {
-            if (active.owner.extensionId === entry.manifest.id && !retained.has(key)) {
+            if (!isGroupedCandidate(selected) && active.owner.extensionId === entry.manifest.id && !retained.has(key)) {
               await this.#deactivate(active, entry.desired.revision);
             }
           }
@@ -960,9 +1023,20 @@ export class SurfaceExtensionLoader {
     snapshot: VarinExtensionCatalogSnapshot,
   ): Promise<VarinExtensionCatalogSnapshot | null> {
     const lifecycleEpoch = this.#lifecycleEpoch;
+    const groupedCandidate = isGroupedCandidate(selection);
+    const initialAccess = this.#accessContext();
+    const preparation: PendingPreparation = {
+      controller: new AbortController(),
+      desiredRevision: entry.desired.revision,
+      hostId: snapshot.hostId,
+      integrity: selection.integrity,
+      capabilityBindings: this.#capabilityBindingSignature(selectionCapabilities(selection), initialAccess),
+    };
+    this.#preparations.set(entry.manifest.id, preparation);
+    const signal = preparation.controller.signal;
     const executableEntrypointIds = new Set(desiredExecutablePlans.map((plan) => plan.entrypointId));
     const plans = [
-      ...(compatible.manifest
+      ...(compatible.manifest && !groupedCandidate
         ? [{
             ...compatible.manifest,
             contributions: compatible.manifest.contributions.filter((contribution) => (
@@ -981,13 +1055,17 @@ export class SurfaceExtensionLoader {
     try {
       let prepared: VarinExtensionCandidatePreparationResult | null = null;
       if (selection.slot === "candidate") {
+        const missing = selection.manifest.updateReadiness?.surfaceEntrypoints
+          .filter((id) => !plans.some((plan) => plan.entrypointId === id));
+        if (missing?.length) throw new Error(`This Surface cannot prepare every required update member: ${missing.join(", ")}`);
         prepared = parseVarinExtensionCandidatePreparationResult(
-          await this.#host.prepareCandidate(entry.manifest.id, selection.integrity),
+          await this.#host.prepareCandidate(entry.manifest.id, selection.integrity, signal),
         );
       } else if (executablePlansToActivate.length > 0) {
         await this.#host.activateExtension(entry.manifest.id);
       }
       const currentHostState = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
+      signal.throwIfAborted();
       const currentEntry = currentHostState.catalog.extensions.find((candidate) => candidate.manifest.id === entry.manifest.id);
       if (selection.slot === "candidate" && currentEntry?.integrity === selection.integrity) {
         selection = { ...selection, slot: "selected" };
@@ -1007,6 +1085,7 @@ export class SurfaceExtensionLoader {
       ]);
 
       for (const plan of plans) {
+        signal.throwIfAborted();
         const key = keyFor(entry.manifest.id, plan.entrypointId);
         const moduleGeneration = (this.#generations.get(key) ?? 0) + 1;
         this.#generations.set(key, moduleGeneration);
@@ -1175,6 +1254,7 @@ export class SurfaceExtensionLoader {
           options: {
             grantedCapabilities,
             owner,
+            signal,
             ...(externalServices.length > 0 ? { externalServices } : {}),
             ...(selection.manifest.requires?.services
               ? { requirements: selection.manifest.requires.services }
@@ -1192,11 +1272,47 @@ export class SurfaceExtensionLoader {
         });
       }
 
+      // A required lazy member may still have a declarative placeholder in the old manifest
+      // owner. Withdraw only those placeholders; optional owners keep their actual old resources
+      // until the selected-artifact watcher can update them independently.
+      if (groupedCandidate) {
+        const group = new Set(selection.manifest.updateReadiness!.surfaceEntrypoints);
+        const replacedIds = new Set([
+          ...plans.flatMap((plan) => plan.contributions.map((contribution) => contribution.id)),
+          ...(entry.manifest.contributions ?? []).filter((contribution) => contribution.entrypoint && group.has(contribution.entrypoint))
+            .map((contribution) => contribution.id),
+        ]);
+        const manifestOwner = this.#active.get(keyFor(entry.manifest.id, manifestOwnerEntrypointId(entry.manifest)));
+        if (manifestOwner) {
+          const contributions = this.#surfaceRuntime.getSnapshot().contributions.filter((contribution) => (
+            contribution.owner.extensionId === entry.manifest.id
+            && contribution.owner.entrypointId === manifestOwner.owner.entrypointId
+            && contribution.owner.realmId === this.#realmId
+          ));
+          if (contributions.some((contribution) => replacedIds.has(contribution.descriptor.id))) {
+            const key = keyFor(entry.manifest.id, manifestOwner.owner.entrypointId);
+            const generation = (this.#generations.get(key) ?? manifestOwner.moduleGeneration) + 1;
+            this.#generations.set(key, generation);
+            const owner = { ...manifestOwner.owner, generation };
+            requests.push({
+              options: { owner, signal, grantedCapabilities },
+              activation: (context) => {
+                for (const contribution of contributions) {
+                  if (!replacedIds.has(contribution.descriptor.id)) context.contribute(contribution.descriptor, contribution.implementation);
+                }
+              },
+            });
+            activated.push({ ...manifestOwner, owner, moduleGeneration: generation });
+          }
+        }
+      }
+
       // Owners removed by an update are replaced by empty generations in the same batch. This
       // withdraws their old contributions before the candidate is selected, without making missing
       // service requirements or cleanup of an obsolete owner part of the candidate's new contract.
       for (const active of this.#active.values()) {
         if (active.owner.extensionId !== entry.manifest.id) continue;
+        if (groupedCandidate) continue;
         const key = keyFor(entry.manifest.id, active.owner.entrypointId);
         if (plannedKeys.has(key)) continue;
         const moduleGeneration = (this.#generations.get(key) ?? active.moduleGeneration) + 1;
@@ -1208,7 +1324,7 @@ export class SurfaceExtensionLoader {
           generation: moduleGeneration,
           hostId: snapshot.hostId,
         };
-        requests.push({ activation: () => undefined, options: { owner } });
+        requests.push({ activation: () => undefined, options: { owner, signal } });
         activated.push({
           artifactIntegrity: selection.integrity,
           capabilityBindings,
@@ -1220,7 +1336,7 @@ export class SurfaceExtensionLoader {
       }
 
       let committedSnapshot: VarinExtensionCatalogSnapshot | null = null;
-      await this.#surfaceRuntime.activateBatchWithCommit(requests, async () => {
+      await this.#surfaceRuntime.activateBatchWithCommit(requests, async (publicationSignal) => {
         if (this.#stopped || lifecycleEpoch !== this.#lifecycleEpoch || snapshot.hostId !== this.#hostId) {
           throw new Error("Surface activation was superseded by loader close or Host change");
         }
@@ -1244,16 +1360,41 @@ export class SurfaceExtensionLoader {
             || !latestEntry?.desired.enabled || latestEntry.desired.revision !== entry.desired.revision) {
             throw new Error("Surface candidate was superseded by a newer Host or desired generation");
           }
-          committedSnapshot = latestEntry.integrity === selection.integrity ? latest.catalog
-            : parseVarinExtensionCatalogSnapshot(await this.#host.selectCandidate({
-                candidateIntegrity: selection.integrity,
-                expectedRevision: snapshot.revision,
-                extensionId: entry.manifest.id,
-              }));
+          for (const resource of resources) resource.validate();
+          publicationSignal.throwIfAborted();
+          if (latestEntry.integrity === selection.integrity) committedSnapshot = latest.catalog;
+          else {
+            const group = selection.manifest.updateReadiness;
+            if (group && !prepared?.hostPreparation) throw new Error("Required update group has no live Host preparation identity");
+            committedSnapshot = await this.#publishCandidate({
+              candidateIntegrity: selection.integrity,
+              expectedRevision: latest.catalog.revision,
+              extensionId: entry.manifest.id,
+              ...(group ? { surfaceReadiness: {
+                hostPreparation: prepared!.hostPreparation!,
+                realmId: this.#realmId,
+                surface: this.#surface,
+                members: group.surfaceEntrypoints.map((entrypointId) => {
+                  const member = activated.find((active) => active.owner.entrypointId === entrypointId);
+                  if (!member) throw new Error(`Required Surface owner was not prepared: ${entrypointId}`);
+                  return { entrypointId, generation: member.owner.generation };
+                }),
+              } } : {}),
+            }, publicationSignal, snapshot.hostId, entry.desired.revision);
+          }
         } else {
+          publicationSignal.throwIfAborted();
           committedSnapshot = currentHostState.catalog;
         }
-        for (const resource of resources) resource.commit();
+        for (const resource of resources) {
+          try { resource.commit(); }
+          catch (error) {
+            // Resource publication cannot reverse the already confirmed Catalog choice. Keep the
+            // local failure visible; this owner's resources still retire on replacement/disable.
+            this.#diagnose(entry.manifest.id, "resource_publication_failed",
+              error instanceof Error ? error.message : String(error), { integrity: selection.integrity });
+          }
+        }
       });
       for (const active of activated) this.#active.set(keyFor(active.owner.extensionId, active.owner.entrypointId), active);
       await this.#reportActual(entry.manifest.id);
@@ -1273,6 +1414,37 @@ export class SurfaceExtensionLoader {
         );
       }
       await this.#reportActual(entry.manifest.id);
+      throw error;
+    } finally {
+      if (this.#preparations.get(entry.manifest.id) === preparation) this.#preparations.delete(entry.manifest.id);
+    }
+  }
+
+  async #publishCandidate(
+    request: VarinExtensionCandidatePublicationRequest,
+    signal: AbortSignal,
+    hostId: string,
+    desiredRevision: number,
+  ): Promise<VarinExtensionCatalogSnapshot> {
+    try {
+      return parseVarinExtensionCatalogSnapshot(await this.#host.selectCandidate(request, signal));
+    } catch (error) {
+      // A closed fetch may have lost the response after the Host's durable CAS began. Confirm the
+      // current selection through its existing authority; this is not a tool-operation receipt.
+      let observed: VarinExtensionHostStateSnapshot;
+      try { observed = parseVarinExtensionHostStateSnapshot(await this.#host.hostState()); }
+      catch (observationError) {
+        this.#diagnose(request.extensionId, "candidate_selection_unconfirmed",
+          `Candidate publication could not be confirmed: ${observationError instanceof Error ? observationError.message : String(observationError)}`,
+          { integrity: request.candidateIntegrity });
+        throw error;
+      }
+      const entry = observed.catalog.extensions.find((candidate) => candidate.manifest.id === request.extensionId);
+      if (observed.catalog.authoritative && observed.catalog.hostId === hostId
+        && entry?.desired.revision === desiredRevision && entry.integrity === request.candidateIntegrity) return observed.catalog;
+      if (signal.aborted) this.#diagnose(request.extensionId, "candidate_selection_unconfirmed",
+        "The publication request closed before its result was confirmed; the Host watcher will reconcile its actual selection",
+        { integrity: request.candidateIntegrity });
       throw error;
     }
   }
@@ -1527,6 +1699,7 @@ export class SurfaceExtensionLoader {
     for (const key of this.#triggered) {
       if (key.startsWith(prefix)) this.#triggered.delete(key);
     }
+    for (const key of this.#failedCandidates) if (key.startsWith(prefix)) this.#failedCandidates.delete(key);
   }
 
   async #deactivate(active: ActiveEntrypoint, desiredRevision: number): Promise<void> {

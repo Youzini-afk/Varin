@@ -10,6 +10,7 @@ import type {
   VarinExtensionCandidateCapabilityReviewRequest,
   VarinExtensionCapabilityReviewRequest,
   VarinExtensionCandidateSelectionRequest,
+  VarinExtensionCandidatePublicationRequest,
   VarinExtensionCandidatePreparationResult,
   VarinExtensionCatalogAvailability,
   VarinExtensionCatalogSnapshot,
@@ -1533,7 +1534,7 @@ export interface ExtensionsAPI {
   hostState(): Promise<VarinExtensionHostStateSnapshot>;
   install(request: VarinExtensionPackageInstallRequest): Promise<VarinExtensionCatalogSnapshot>;
   invokeService(request: VarinExtensionServiceInvocationRequest): Promise<JsonValue>;
-  prepareCandidate(extensionId: string, candidateIntegrity: string): Promise<VarinExtensionCandidatePreparationResult>;
+  prepareCandidate(extensionId: string, candidateIntegrity: string, signal?: AbortSignal): Promise<VarinExtensionCandidatePreparationResult>;
   requestCandidateApplication(request: VarinExtensionCandidateSelectionRequest): Promise<VarinExtensionCatalogSnapshot>;
   readAsset(request: VarinExtensionAssetRequest): Promise<VarinExtensionAssetPayload>;
   readManagedEntrypoint(request: VarinExtensionManagedEntrypointRequest): Promise<VarinExtensionManagedEntrypointPayload>;
@@ -1541,7 +1542,7 @@ export interface ExtensionsAPI {
   reportActualState(extensionId: string, state: VarinExtensionActualState): Promise<void>;
   reviewCapabilities(request: VarinExtensionCapabilityReviewRequest): Promise<VarinExtensionCatalogSnapshot>;
   reviewCandidateCapabilities(request: VarinExtensionCandidateCapabilityReviewRequest): Promise<VarinExtensionCatalogSnapshot>;
-  selectCandidate(request: VarinExtensionCandidateSelectionRequest): Promise<VarinExtensionCatalogSnapshot>;
+  selectCandidate(request: VarinExtensionCandidatePublicationRequest, signal?: AbortSignal): Promise<VarinExtensionCatalogSnapshot>;
   setEnabled(extensionId: string, enabled: boolean, expectedRevision: number): Promise<VarinExtensionCatalogSnapshot>;
   setServiceSelection(request: VarinExtensionServiceSelectionRequest): Promise<VarinExtensionHostStateSnapshot>;
   upsertServiceRoutingRule(request: VarinExtensionServiceRoutingRuleUpdateRequest): Promise<VarinExtensionServiceRoutingSnapshot>;

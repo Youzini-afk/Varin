@@ -71,6 +71,13 @@ continuous transition without being recreated by a temporary blank outer shell.
 
 ## Module map
 
+`lib/extensions/workbench-composition-host` participates in the existing Surface preparation lease:
+real connected mounts stage hidden DOM and keep the previous owner visible until publication. Binding
+closure/replacement and reported render failures invalidate the lease signal, including while the
+Host selection RPC is waiting to commit. A confirmed Host publication is retained as a fact even if
+the window closes before its response arrives; the closed binding removes its local staged DOM.
+Explicit Host/Surface update groups use this same consumer path, with no additional window registry.
+
 Varin Extensions' service-routing picker includes enabled installed Host service declarations before
 their lazy activation, and merges those stable keys with actual active-generation providers. It labels
 unprepared declarations separately from ready providers. Selection still writes the existing revisioned
