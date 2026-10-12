@@ -14,6 +14,13 @@
 - 推理用途接入不等于每个用途都有本地推理包。已有提供商 decision/rerank/embedding 的配置、真实消费者与原生执行合同仍需保留/接通；本地包当前只有已有 Bekko。用户本轮明确暂缓 native 图像生成，不计剩余交付范围；旧 Pi 的 `models.generateImages()` 基础不等于 native 已实现。§18.1/§24 的建议/评估限定已有配置的辅助请求，不能扩成默认模型链；没有另设独立“材料 rerank”产品的任务。此前清单混用用途、消费者和本地包，现以这些明确边界纠正，历史台账不充当新需求。
 - 已有本地嵌入是 `bekko-embedding-v1-a8m` 的 `local-semantic` ONNX 组件。下述增量已将其原安装/校验/worker 接入 native query 和前台文档向量，HTTP 仍是显式配置的另一执行器。HTTP 或受控本地模型的执行验证不代表用户配置了外部服务，也不代表实际 ONNX 权重、硬件质量/性能已验收；当前组件协议需按原 builder 构建 v3 包后导入。
 
+## 2026-10-12 增量：原 Bot 整理与选段的后台推理
+
+- 已有 organizer 和显式选段 preview 接入独立 MemoryWork Run/decision/generation stages，原 Catalog 与 ContentStore 保存完整固定批次、真实请求和回执；Knowledge 仅保进度/提案，MemoryService 仍唯一写入。原 Bot 身份、配置、Sleep gate 和模型/凭据权威保留，不假借 conversation Tool/Explore/Goal。Catalog **63**、wire **23**。
+- 原成功结果/可选 classifier 原字节恢复不重发；同选区观察复用 requestKey，明确 Retry 在已证本地停止后建立关联新 attempt，原 Unknown 费用不被抹掉。Sleep 用短状态取消并等实际排空，Wake 只恢复已证未派发的原 generation。来源范围、目标 CAS、忘记与已写记忆/coverage 对账继续同 owner。
+- [本片合同及验收记录](../reviews/runtime-bot-memory-inference-2026-10-12.md)分列原领域、UI/direct Router、Rust↔Host 与 Knowledge 子进程的组合证据。整合发现进程期 Knowledge revision 被误持久化，按原短期 fence 与持久目标 CAS 分工收口，不新建持久版本库。
+- 本片仅后台整理与选段。Bot 主入口、native 历史来源/召回/checkpoint 和完整 main/child/Computer Sleep 仍需接入；普通 Agent 不新增自动抽取。随后还须保留原 harness-context §8.4.2 已有的摘要耗时与输入增长自适应准备水位，不能把它扩成 provider 错误学习或自动收费重试。
+
 ## 2026-10-12 增量：原成功 usage 校准请求预算
 
 - 原 harness-context §8.4.2 要求沿上一次有效 usage 与完整新增材料估算；本片接通该已有行为，不新增“provider 容量错误学习”或自动收费重试产品。原 provider adapter 声明真实序列化与输入计数语义，原 Catalog/ContentStore 保存请求和回执，不另存可变校准账。

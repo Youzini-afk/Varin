@@ -19,11 +19,21 @@ writing Pi session files or the Host harness's existing execution records.
   inspection/list serialization runs on workers, and content collection retains every launch reference.
   Policy preparation binds the actual admitted baseline supplied by its assembly owner; the runtime
   does not hard-code a kernel policy wrapper's name.
-- Catalog 62 / wire 22 retain reconstructable Host dependency graphs in the original tool/policy
+- Catalog 63 / wire 23 retain reconstructable Host dependency graphs in the original tool/policy
   binding content. Graph validation, hashing, persistence and hydration run outside Catalog. Short
   policy metadata records exact identity and a ContentStore reference; launch, selection and delegated
   execution roots participate in the same GC publication protocol. Recovery preserves the saved
   choices rather than applying current service routing.
+- Bot memory organization and explicit selection preview have a genuine background `MemoryWork`
+  Run and decision/generation stages, separate from conversation tools, queries and Goals. The private
+  Host registry admits the owner; Catalog retains exact source-range claims and the original inference
+  receipts. The immutable whole-batch recipe lives in ContentStore and participates in publication/GC.
+  Reads hydrate it on workers; cancellation needs no recipe body. A reopened Host explicitly claims
+  stopped work; old executable epochs never become live just because Catalog reopened. Wake can resume
+  an unstarted generation under a new admission while preserving completed decisions and cancellation
+  history. Unknown dispatched requests are observed, not automatically replayed. Knowledge/MemoryService
+  remain the only memory writer; prepared proposals and source coverage are domain progress, not a second
+  inference ledger. The existing Pi Bot entry and source readers have not been migrated by this boundary.
 - `execution` drives a bound model provider and tool executor on a worker. Tool results have stable
   request/call/operation identities, real effect receipts and provider-specific original items.
   The default policy is replaceable; it does not own or mutate the catalog itself.

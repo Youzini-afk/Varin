@@ -428,6 +428,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       return {
         key: p["key"],
         status: status as OrganizerProgressStatus,
+        ...(typeof p["workId"] === "string" ? { workId: p["workId"] } : {}),
         ...(Array.isArray(p["coveredSources"]) ? { coveredSources: parseSourceSpans(p["coveredSources"]) } : {}),
         ...(typeof p["sourceKey"] === "string" && p["sourceKey"] ? { sourceKey: p["sourceKey"] as string } : {}),
         ...(Number.isSafeInteger(p["eventCursor"]) ? { eventCursor: p["eventCursor"] as number } : {}),
@@ -902,6 +903,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
             type: "organizer",
             key: progress.key,
             status: progress.status,
+            ...(progress.workId !== undefined ? { workId: progress.workId } : {}),
             ...(progress.coveredSources ? { coveredSources: progress.coveredSources } : {}),
             ...(progress.sourceKey !== undefined ? { sourceKey: progress.sourceKey } : {}),
             ...(progress.eventCursor !== undefined ? { eventCursor: progress.eventCursor } : {}),
@@ -919,6 +921,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           // Fields this row no longer carries must actually disappear — a
           // stale lastError or cursor would misreport the committed coverage.
           const unset: Record<string, boolean> = {};
+          if (progress.workId === undefined) unset.workId = true;
           if (progress.sourceKey === undefined) unset.sourceKey = true;
           if (progress.coveredSources === undefined) unset.coveredSources = true;
           if (progress.eventCursor === undefined) unset.eventCursor = true;

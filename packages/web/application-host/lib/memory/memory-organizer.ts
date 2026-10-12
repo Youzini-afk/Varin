@@ -15,24 +15,20 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+import { parseSelectionMemories } from "./selection-memory.js";
+import { MemoryInferenceError, memorySourceClaims, type MemoryInference, type MemoryInferenceBinding, type MemoryWork, type MemorySelectionRequest } from "./memory-inference.js";
 import {
   estimateMemoryOrganizerInputTokens,
   mergeHarnessSettings,
   resolveHarnessModelSlot,
   memoryOrganizerOutputReservation,
   resolveFastDecisionPurpose,
-  type FastDecisionMaterial,
-  type FastDecisionQuestion,
   type HarnessFastDecisionPurposeStatus,
-  type HarnessFastDecisionResult,
-  type HarnessInferenceBindingSnapshot,
-  type HarnessMemoryOrganizeParams,
-  type HarnessMemoryOrganizeResult,
   type HarnessSettingsInput,
   type ModelSelection,
   type PiSessionEntry,
   type MemorySourceSpan,
-  type PiSettingsSnapshot,
 } from "@varin/protocol";
 import { botIdFromScopeId, isBotScopeId } from "../harness/owner-scope.js";
 import {
@@ -80,36 +76,9 @@ export interface OrganizerRunSource {
   endedAt: string | null;
 }
 
-/** The Pi-runtime surface the organizer needs. Same structural seam as workspace-inference. */
-export interface MemoryOrganizerBroker {
-  requestForWorkspace(cwd: string, method: "settings.get", params: Record<string, never>): Promise<PiSettingsSnapshot>;
-  requestForWorkspace(cwd: string, method: "model.list", params: Record<string, never>): Promise<import("@varin/protocol").ModelDescriptor[]>;
-  requestForWorkspace(
-    cwd: string,
-    method: "harness.inference.describe",
-    params: Record<string, never>,
-  ): Promise<HarnessInferenceBindingSnapshot>;
-  requestForWorkspace(
-    cwd: string,
-    method: "harness.fastDecision",
-    params: import("@varin/protocol").HarnessFastDecisionParams,
-  ): Promise<HarnessFastDecisionResult>;
-  requestForWorkspace(
-    cwd: string,
-    method: "harness.memoryOrganize",
-    params: HarnessMemoryOrganizeParams,
-  ): Promise<HarnessMemoryOrganizeResult>;
-  requestForWorkspace(
-    cwd: string,
-    method: "harness.inference.cancel",
-    params: { batchId: string },
-  ): Promise<{ cancelled: boolean }>;
-}
-
 export interface MemoryOrganizerDeps {
-  /** Shared worker directory for inference transport (settings/describe/calls). */
-  configCwd: string;
-  getBroker(): MemoryOrganizerBroker | null;
+  /** Trusted original Bot work owner. No Pi workspace-inference worker. */
+  getInference(): MemoryInference;
   storeForScopeId(scopeId: string): Promise<KnowledgeStore | null>;
   /** Whether the scope's store file already exists (cheap — no store open). */
   hasStoreForScope(scopeId: string): boolean | Promise<boolean>;
@@ -282,7 +251,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
   const forced = new Set<string>();
   const running = new Set<string>();
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
-  const activeBatches = new Map<string, string>();
+  const reservedSources = new Map<string, MemorySourceSpan[]>();
   const suspendedScopes = new Set<string>();
   const idleWaiters = new Map<string, Set<() => void>>();
   const pendingTasks = new Set<Promise<unknown>>();
@@ -307,15 +276,14 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
   }
 
   const readHarnessSettings = async (): Promise<ResolvedOrganizerSettings> => {
-    const broker = deps.getBroker();
+    const inference = deps.getInference();
     const empty: ResolvedOrganizerSettings = {
       autoOrganize: { user: false, bot: false },
       model: null,
       fastDecision: null,
     };
-    if (!broker) return empty;
-    const snapshot = await broker.requestForWorkspace(deps.configCwd, "settings.get", {});
-    const globalHarness = record(record(snapshot.global).harness) as HarnessSettingsInput;
+    const document = await inference.settings();
+    const globalHarness = record(record(document).harness) as HarnessSettingsInput;
     // Background inference resolves global configuration only — a project's
     // layer can disable organizing for its scope but never picks the model.
     const settings = mergeHarnessSettings(globalHarness, {});
@@ -323,8 +291,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     let fastDecision: HarnessFastDecisionPurposeStatus | null = null;
     try {
       if (resolveFastDecisionPurpose(settings.fastDecision, "memory-organization").status === "ready") {
-        const described = await broker.requestForWorkspace(deps.configCwd, "harness.inference.describe", {});
-        const status = described.fastDecision?.purposes?.["memory-organization"];
+        const status = await inference.describeDecision();
         if (status?.status === "ready") fastDecision = status;
       }
     } catch { fastDecision = null; }
@@ -341,6 +308,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
   };
 
   interface ProgressPatch {
+    workId?: string;
     coveredSources?: MemorySourceSpan[];
     eventCursor?: number;
     eventPartial?: OrganizerProgress["eventPartial"] | null;
@@ -380,6 +348,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     await store.putOrganizerProgress({
       key,
       status,
+      ...((patch.workId ?? existing?.workId) ? { workId: (patch.workId ?? existing?.workId)! } : {}),
       coveredSources: mergeSourceSpans([...(existing?.coveredSources ?? []), ...(patch.coveredSources ?? []),
         ...((status === "formed" || status === "reviewed-empty") ? existing?.preparedSource?.spans ?? [] : [])]),
       ...(sourceKey !== null ? { sourceKey } : {}),
@@ -410,7 +379,6 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     force: boolean,
     recordEmpty = true,
   ): Promise<OrganizerUnit | null> => {
-    if (progress?.status === "failed" && !retryable(progress, timestamp, force)) return null;
     const key = progressKeyForSession(sessionId);
     const texts: string[] = [];
     const spans: MemorySourceSpan[] = [];
@@ -425,7 +393,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       store.listEvents({ sessionId }), deps.readEntries(sessionId),
       store.listKnowledge({}), deps.memory.list({ scope: "user", ownerId: null }),
     ]);
-    const covered = [...(progress?.coveredSources ?? []), ...[...localMemories, ...userMemories]
+    const covered = [...(progress?.coveredSources ?? []), ...(!frozen ? reservedSources.get(scopeId) ?? [] : []), ...[...localMemories, ...userMemories]
       .flatMap((item) => item.source?.spans ?? [])];
     const materials = [
       ...events.map((event) => ({ span: { kind: "event" as const, id: String(event.id), scopeId, sessionId,
@@ -480,7 +448,8 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       if (progress?.status === "prepared") {
         throw new Error(`Prepared source content is unavailable for session ${sessionId}`);
       }
-      if (recordEmpty && (!progress || progress.status === "failed" || progress.status === "processing")) {
+      if (recordEmpty && !(reservedSources.get(scopeId)?.length) && (!progress || progress.status === "failed" || progress.status === "processing")) {
+        await mutationSettings(scopeId);
         await putProgress(store, key, "reviewed-empty", {
           eventPartial: null,
           entryPartial: null,
@@ -509,9 +478,12 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       ...(entryPartial !== undefined ? { entryPartial } : {}),
       ...(hasMoreSource ? { hasMoreSource } : {}),
     };
+    const sourceKey = unitSourceKey(scopeId, unit);
+    // A failed original range cannot impose its backoff on later source bytes in this session.
+    if (progress?.status === "failed" && progress.sourceKey === sourceKey && !retryable(progress, timestamp, force)) return null;
     return {
       ...unit,
-      sourceKey: unitSourceKey(scopeId, unit),
+      sourceKey,
       rangeKey: unitRangeKey(scopeId, key, spans.map((span) => [span.kind, span.id, span.sessionId, span.scopeId, span.threadId, span.start, span.end]), null),
     };
   };
@@ -572,6 +544,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         runEndOffset: chunk.end,
       };
       const sourceKey = unitSourceKey(scopeId, unit);
+      if ((reservedSources.get(scopeId) ?? []).some(held => unit.source.spans.some(span => memorySourceClaims([span])[0]!.source === memorySourceClaims([held])[0]!.source && span.start < held.end && held.start < span.end))) continue;
       const row = progress.get(key);
       // Terminal coverage only stands while the fingerprint matches — a report
       // rewritten under the same run id reopens the range. Failed rows wait
@@ -626,66 +599,6 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
 
   // ── Judgment + narration ─────────────────────────────────────────
 
-  const filterUnitsByFastDecision = async (
-    scopeId: string,
-    status: HarnessFastDecisionPurposeStatus | null,
-    units: OrganizerUnit[],
-  ): Promise<OrganizerUnit[]> => {
-    const broker = deps.getBroker();
-    if (!broker || status?.status !== "ready") return units;
-    const materials: FastDecisionMaterial[] = units.map((unit, index) => ({
-      id: `u${index}`,
-      label: unit.label,
-      text: unit.texts.join("\n"),
-    }));
-    const questions: FastDecisionQuestion[] = units.map((unit, index) => ({
-      id: `u${index}`,
-      kind: "judge" as const,
-      instructions: `Does material u${index} contain information useful beyond its immediate activity, such as a decision, requirement, preference, judgment, commitment, or notable outcome?`,
-      criteria: {
-        yes: "At least one durable fact survives beyond this task",
-        no: "Only routine tool output or transient status",
-      },
-    }));
-    const batchId = randomUUID();
-    if (suspendedScopes.has(scopeId) || (deps.canExecuteScope && !await deps.canExecuteScope(scopeId))) throw new Error("Bot sleeping");
-    if (suspendedScopes.has(scopeId)) throw new Error("Bot sleeping");
-    activeBatches.set(batchId, scopeId);
-    try {
-      const result = await broker.requestForWorkspace(deps.configCwd, "harness.fastDecision", {
-        configurationId: status.binding.configurationId,
-        providerId: status.binding.providerId,
-        modelId: status.binding.modelId,
-        protocol: "pi-classifier",
-        purpose: "memory-organization",
-        goal: "Decide which durable work fragments carry memory-worthy content",
-        materials,
-        questions,
-        batchId,
-        ...(status.binding.endpoint ? { endpoint: status.binding.endpoint } : {}),
-      });
-      const keep = new Set<string>();
-      const answered = new Set<string>();
-      for (const answer of result.answers) {
-        if (answer.kind !== "judge") continue;
-        answered.add(answer.id);
-        if (answer.value >= 0.5) keep.add(answer.id);
-      }
-      for (const id of result.missing) keep.add(id); // unanswered → keep for the generative pass
-      for (const material of materials) {
-        if (!answered.has(material.id)) keep.add(material.id);
-      }
-      return units.filter((_, index) => keep.has(`u${index}`));
-    } catch (error) {
-      // This is an advisory filter. A failed quick decision must not turn
-      // unjudged source material into completed empty coverage.
-      report(error);
-      return units;
-    } finally {
-      activeBatches.delete(batchId);
-    }
-  };
-
   const buildPrompt = (
     units: readonly OrganizerUnit[],
     existing: readonly Knowledge[],
@@ -711,55 +624,16 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     return sections.join("\n\n");
   };
 
-  const narrateProposals = async (
-    scopeId: string,
-    model: ModelSelection,
-    modelSource: "configured" | "bot",
-    prompt: string,
-    maxOutputTokens: number,
-  ): Promise<OrganizerProposal[]> => {
-    const broker = deps.getBroker();
-    if (!broker) throw new Error("Pi workspace binding is unavailable");
-    const batchId = randomUUID();
-    if (suspendedScopes.has(scopeId) || (deps.canExecuteScope && !await deps.canExecuteScope(scopeId))) throw new Error("Bot sleeping");
-    if (suspendedScopes.has(scopeId)) throw new Error("Bot sleeping");
-    activeBatches.set(batchId, scopeId);
-    try {
-      const result = await broker.requestForWorkspace(deps.configCwd, "harness.memoryOrganize", {
-        batchId,
-        providerId: model.providerId,
-        modelId: model.modelId,
-        ...(modelSource === "bot" ? { modelSource: "bot" as const } : {}),
-        maxOutputTokens,
-        system: MEMORY_ORGANIZER_SYSTEM,
-        prompt,
-      });
-      if (result.batchId !== batchId) {
-        throw new Error("Memory organize response does not match the submitted batch");
-      }
-      const proposals = parseProposals(result.text);
-      if (proposals === null) {
-        throw new Error("Memory organizer output is not a parseable proposals envelope");
-      }
-      return proposals;
-    } finally {
-      activeBatches.delete(batchId);
-    }
-  };
-
   // ── Capacity ────────────────────────────────────────────────────
 
   interface BatchBudget { inputTokens: number; maxOutputTokens: number; unitChars: number }
 
   /** The provider descriptor supplies the hard context/output dimensions. */
   const resolveBudget = async (model: ModelSelection, scope: OrganizerPromptScope): Promise<BatchBudget> => {
-    const broker = deps.getBroker();
-    if (!broker) throw new Error("Pi workspace binding is unavailable");
-    const models = await broker.requestForWorkspace(deps.configCwd, "model.list", {});
-    const descriptor = models.find((m) => m.id === model.modelId && m.provider === model.providerId);
+    const descriptor = await deps.getInference().model(model);
     if (!descriptor) throw new Error(`Memory organizer model capacity is unavailable: ${model.providerId}/${model.modelId}`);
-    const maxOutputTokens = memoryOrganizerOutputReservation(descriptor.contextWindow, descriptor.maxTokens);
-    const inputTokens = descriptor.contextWindow - maxOutputTokens;
+    const maxOutputTokens = memoryOrganizerOutputReservation(descriptor.contextWindow ?? 0, descriptor.maxTokens);
+    const inputTokens = (descriptor.contextWindow ?? 0) - maxOutputTokens;
     const overhead = estimateMemoryOrganizerInputTokens(MEMORY_ORGANIZER_SYSTEM, buildPrompt([], [], scope));
     if (inputTokens <= overhead + MIN_SEGMENT_CHARS) {
       throw new Error(`Memory organizer model context cannot hold the organizer contract: ${model.providerId}/${model.modelId}`);
@@ -888,41 +762,18 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
 
   class SourceChangedError extends Error {}
 
-  const assertSourceCurrent = async (
-    store: KnowledgeStore,
-    scopeId: string,
-    unit: OrganizerUnit,
-    unitChars: number,
-  ): Promise<void> => {
-    let current: OrganizerUnit | undefined | null;
-    if (unit.source.runId) {
-      const run = (await deps.listRunSources(scopeId)).find((row) => row.runId === unit.source.runId);
-      current = run
-        ? (await collectRunUnits(store, scopeId, run, now(),
-          new Map((await store.listOrganizerProgress()).map((row) => [row.key, row])), unitChars, true))
-          .find((row) => row.key === unit.key)
-        : null;
-    } else if (unit.source.sessionId) {
-      current = await collectSessionUnit(store, scopeId, unit.source.sessionId, {
-        key: unit.key,
-        status: "prepared",
-        updatedAt: now(),
-        preparedSource: unit.source,
-        ...(unit.startEventCursor !== undefined ? { eventCursor: unit.startEventCursor } : {}),
-        ...(unit.startEventPartial !== undefined ? { eventPartial: unit.startEventPartial } : {}),
-        ...(unit.startEntryCursor !== undefined ? { entryCursor: unit.startEntryCursor } : {}),
-        ...(unit.startEntryPartial !== undefined ? { entryPartial: unit.startEntryPartial } : {}),
-        preparedRange: {
-          ...(unit.eventCursor !== undefined ? { eventCursor: unit.eventCursor } : {}),
-          ...(unit.eventPartial !== undefined ? { eventPartial: unit.eventPartial } : {}),
-          ...(unit.entryCursor !== undefined ? { entryCursor: unit.entryCursor } : {}),
-          ...(unit.entryPartial !== undefined ? { entryPartial: unit.entryPartial } : {}),
-        },
-      }, now(), unitChars, true, false);
-    }
-    if (!current) throw new Error(`Organizer source is unavailable: ${unit.key}`);
-    if (current.sourceKey !== unit.sourceKey) {
-      throw new SourceChangedError(`Organizer source changed while preparing ${unit.key}`);
+  const assertSourceCurrent = async (store: KnowledgeStore, scopeId: string, unit: OrganizerUnit, _unitChars: number): Promise<void> => {
+    // Re-read only to verify the frozen ranges; never re-collect/re-number today's materials.
+    for (const span of unit.source.spans ?? []) {
+      let text: string | undefined;
+      if (span.kind === "run-report") text = (await deps.listRunSources(scopeId)).find(run => run.runId === span.id)?.reportText;
+      else if (span.kind === "event") text = (await store.listEvents({ sessionId: span.sessionId ?? unit.source.sessionId! })).find(event => String(event.id) === span.id)?.text;
+      else if (span.kind === "pi-entry") {
+        const entry = (await deps.readEntries(span.sessionId ?? unit.source.sessionId!)).find(entry => entry.id === span.id);
+        if (entry) text = entrySourceText(entry);
+      }
+      if (text === undefined) throw new Error(`Original organizer source is unavailable: ${unit.key}`);
+      if (sourceRevision(text) !== span.revision || span.end > text.length) throw new SourceChangedError(`Original organizer source changed: ${unit.key}`);
     }
   };
 
@@ -974,264 +825,313 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
 
   // ── Scope run ────────────────────────────────────────────────────
 
+  interface OrganizerRecipe {
+    binding: MemoryInferenceBinding;
+    units: OrganizerUnit[];
+    presented: Knowledge[];
+    promptScope: OrganizerPromptScope;
+    budget: BatchBudget;
+    decisionStatus: HarnessFastDecisionPurposeStatus | null;
+    system: string;
+  }
+  const mutationSettings = async (scopeId: string) => {
+    const settings = await readHarnessSettings();
+    if (disposed || suspendedScopes.has(scopeId) || settings.disabled || !settings.autoOrganize.bot
+      || deps.canExecuteScope && !await deps.canExecuteScope(scopeId)) {
+      throw new MemoryInferenceError("memory-work-suspended", "Bot memory mutations are currently suspended");
+    }
+    return settings;
+  };
+  const recordWorkError = async (store: KnowledgeStore, units: OrganizerUnit[], error: unknown, workId?: string) => {
+    const lastError = error instanceof Error ? error.message : String(error);
+    for (const unit of units) {
+      const row = await store.getOrganizerProgress(unit.key);
+      if (!row || row.sourceKey !== unit.sourceKey || workId && row.workId !== workId
+        || isCovered(row, unit.sourceKey) || row.lastError === lastError)
+        continue;
+      await putProgress(store, unit.key, row.status === "prepared" ? "prepared" : "failed", { lastError });
+    }
+  };
+  const commitPrepared = async (store: KnowledgeStore, scopeId: string, preparedUnits: Array<{
+    unit: OrganizerUnit;
+    proposals: OrganizerPreparedProposal[];
+  }>, unitChars: number, narratedRevision: string | null = null): Promise<void> => {
+    // The original MemoryService is the only writer. Re-read enable gates before commit.
+    const currentSettings = await readHarnessSettings();
+    if (suspendedScopes.has(scopeId) || (deps.canExecuteScope && !await deps.canExecuteScope(scopeId)))
+      return;
+    if (!currentSettings.autoOrganize.bot)
+      return;
+    if (narratedRevision !== null && narratedRevision !== store.knowledgeRevision()) {
+      throw new KnowledgeMutationError("conflict", "Memory changed while the organizer was narrating proposals");
+    }
+    const owner = ownerFor("bot", scopeId)!;
+    const existing = await deps.memory.list(owner, { activeOnly: true });
+    let revision = store.knowledgeRevision();
+    const userOwner: MemoryOwner = { scope: "user", ownerId: null };
+    let userRevision = currentSettings.autoOrganize.user ? await deps.memory.revision(userOwner) : "";
+    for (const { unit, proposals } of preparedUnits) {
+      await assertSourceCurrent(store, scopeId, unit, unitChars);
+      const produced: number[] = [];
+      for (const proposal of proposals) {
+        const currentSettings = await mutationSettings(scopeId);
+        if (proposal.scope === "user" && !currentSettings.autoOrganize.user)
+          continue;
+        if (revision !== store.knowledgeRevision()) {
+          throw new KnowledgeMutationError("conflict", "Memory changed while the organizer was committing proposals");
+        }
+        const id = await commitProposal(scopeId, proposal, currentSettings, unit.source, existing, proposal.scope === "user" ? userRevision : revision);
+        if (id !== null)
+          produced.push(id);
+        revision = store.knowledgeRevision();
+        if (proposal.scope === "user" && currentSettings.autoOrganize.user) {
+          userRevision = await deps.memory.revision(userOwner);
+        }
+      }
+      await putProgress(store, unit.key, produced.length > 0 ? "formed" : "reviewed-empty", {
+        ...(unit.eventCursor !== undefined ? { eventCursor: unit.eventCursor } : {}),
+        eventPartial: unit.eventPartial ?? null,
+        ...(unit.entryCursor !== undefined ? { entryCursor: unit.entryCursor } : {}),
+        entryPartial: unit.entryPartial ?? null,
+        produced,
+        sourceKey: unit.sourceKey,
+        proposals: null,
+        preparedSource: null,
+        preparedRange: null,
+      });
+    }
+  };
+  const prepareWork = async (store: KnowledgeStore, scopeId: string, original: MemoryWork<OrganizerRecipe>): Promise<void> => {
+    // This writer-incarnation token fences only this preparation attempt.
+    // Across reopen, original source/target snapshots and proposal CAS remain authoritative.
+    const narratedRevision = store.knowledgeRevision();
+    const inference = deps.getInference();
+    let work = original;
+    const recipe = work.recipe;
+    const units = recipe.units;
+    const rows = new Map((await store.listOrganizerProgress()).map(row => [row.key, row]));
+    if (units.every(unit => isCovered(rows.get(unit.key), unit.sourceKey) || rows.get(unit.key)?.status === "prepared" && rows.get(unit.key)?.sourceKey === unit.sourceKey)) {
+      await inference.finish(work);
+      return;
+    }
+    work = await inference.decide(work, {
+      purpose: "memory-organization", goal: "Decide which durable work fragments carry memory-worthy content",
+      materials: units.map((unit, index) => ({ id: `u${index}`, label: unit.label, text: unit.texts.join("\n") })),
+      questions: units.map((_, index) => ({
+        id: `u${index}`, kind: "judge" as const,
+        instructions: `Does material u${index} contain information useful beyond its immediate activity, such as a decision, requirement, preference, judgment, commitment, or notable outcome?`,
+        criteria: { yes: "At least one durable fact survives beyond this task", no: "Only routine tool output or transient status" }
+      })),
+    }, recipe.decisionStatus);
+    const judged = work.decision!.map(index => units[index]!);
+    if (judged.some(unit => !unit))
+      throw new Error("Original memory decision referenced an unknown source");
+    for (const unit of units.filter((_, index) => !work.decision!.includes(index))) {
+      await assertSourceCurrent(store, scopeId, unit, recipe.budget.unitChars);
+      await mutationSettings(scopeId);
+      await putProgress(store, unit.key, "reviewed-empty", {
+        workId: work.workId, sourceKey: unit.sourceKey, coveredSources: unit.source.spans ?? [],
+        ...(unit.eventCursor !== undefined ? { eventCursor: unit.eventCursor } : {}), eventPartial: unit.eventPartial ?? null,
+        ...(unit.entryCursor !== undefined ? { entryCursor: unit.entryCursor } : {}), entryPartial: unit.entryPartial ?? null,
+        proposals: null, preparedSource: null, preparedRange: null
+      });
+    }
+    const preparedUnits: Array<{
+      unit: OrganizerUnit;
+      proposals: OrganizerPreparedProposal[];
+    }> = [];
+    if (judged.length) {
+      const generated = await inference.generate(work, recipe.system, buildPrompt(judged, recipe.presented, recipe.promptScope), undefined, async () => {
+        for (const unit of judged)
+          await assertSourceCurrent(store, scopeId, unit, recipe.budget.unitChars);
+      });
+      work = generated.work;
+      const narrated = parseProposals(generated.text);
+      if (narrated === null)
+        throw new MemoryInferenceError("memory-work-failed", "Memory organizer output is not a parseable proposals envelope");
+      for (const unit of judged)
+        await assertSourceCurrent(store, scopeId, unit, recipe.budget.unitChars);
+      const byUnit = new Map<string, OrganizerPreparedProposal[]>();
+      for (const proposal of narrated) {
+        const unit = judged[Number(proposal.source!.slice(1))];
+        if (!unit)
+          throw new Error("Memory organizer referenced an unknown source");
+        if (!ownerFor(proposal.scope, scopeId))
+          throw new Error("Memory organizer referenced an unrelated owner scope");
+        if (proposal.action !== "new" && (proposal.scope !== "bot"
+          || !recipe.presented.some((item) => item.id === proposal.target))) {
+          throw new Error("Memory organizer referenced a target outside its presented candidates");
+        }
+        const list = byUnit.get(unit.key) ?? [];
+        const target = proposal.target === undefined ? undefined
+          : recipe.presented.find((item) => item.id === proposal.target);
+        const spans = (unit.source.spans ?? []).flatMap((span, index) => {
+          const text = unit.source.runId ? unit.texts.at(-1)! : unit.texts[index]!.replace(/^\[[^\]]*\] /u, "");
+          const offset = text.indexOf(proposal.quote);
+          return offset < 0 ? [] : [{ ...span, start: span.start + offset, end: span.start + offset + proposal.quote.length }];
+        });
+        if (spans.length !== 1)
+          throw new Error("Memory organizer quote must identify one exact source passage");
+        list.push({
+          action: proposal.action,
+          scope: proposal.scope,
+          ...(proposal.nature ? { nature: proposal.nature } : {}),
+          content: proposal.content,
+          spans,
+          ...(proposal.trigger ? { trigger: proposal.trigger } : {}),
+          ...(proposal.target !== undefined ? { target: proposal.target } : {}),
+          ...(target ? {
+            expectedTarget: {
+              content: target.content,
+              trigger: target.trigger,
+              status: target.status,
+              invalidAt: target.invalidAt ?? null,
+            }
+          } : {}),
+        });
+        byUnit.set(unit.key, list);
+      }
+      for (const unit of judged) {
+        const proposals = byUnit.get(unit.key) ?? [];
+        const current = await store.getOrganizerProgress(unit.key);
+        if (current?.status === "prepared" && (current.workId !== work.workId || current.sourceKey !== unit.sourceKey)) {
+          throw new KnowledgeMutationError("conflict", "Another original source range has prepared proposals pending");
+        }
+        await putProgress(store, unit.key, "prepared", {
+          sourceKey: unit.sourceKey,
+          workId: work.workId,
+          proposals,
+          preparedSource: unit.source,
+          ...(unit.key.startsWith("session:") ? {
+            preparedRange: {
+              ...(unit.eventCursor !== undefined ? { eventCursor: unit.eventCursor } : {}),
+              ...(unit.eventPartial !== undefined ? { eventPartial: unit.eventPartial } : {}),
+              ...(unit.entryCursor !== undefined ? { entryCursor: unit.entryCursor } : {}),
+              ...(unit.entryPartial !== undefined ? { entryPartial: unit.entryPartial } : {}),
+            }
+          } : {}),
+        });
+        preparedUnits.push({ unit, proposals });
+      }
+    }
+    // All prepared rows are durably acknowledged before releasing the original source claims.
+    await inference.finish(work);
+    await commitPrepared(store, scopeId, preparedUnits, recipe.budget.unitChars, narratedRevision);
+  };
   const runScope = async (scopeId: string): Promise<void> => {
-    if (disposed || !isBotScopeId(scopeId)) return;
+    if (disposed || !isBotScopeId(scopeId))
+      return;
     running.add(scopeId);
     const force = forced.delete(scopeId);
     try {
-      if (suspendedScopes.has(scopeId) || (deps.canExecuteScope && !await deps.canExecuteScope(scopeId))) return;
-      // Reconcile writes that were already durable before considering current
-      // enable/model settings. Turning organization off cannot strand a
-      // committed cross-store receipt after a crash.
-      const existingStore = await deps.hasStoreForScope(scopeId)
-        ? await deps.storeForScopeId(scopeId) : null;
-      if (existingStore && await settleCommittedPrepared(existingStore, scopeId)) queued.add(scopeId);
+      if (suspendedScopes.has(scopeId) || deps.canExecuteScope && !await deps.canExecuteScope(scopeId))
+        return;
+      const existingStore = await deps.hasStoreForScope(scopeId) ? await deps.storeForScopeId(scopeId) : null;
+      if (existingStore)
+        await settleCommittedPrepared(existingStore, scopeId);
       const settings = await readHarnessSettings();
-      if (!settings.autoOrganize.bot) return;
+      if (!settings.autoOrganize.bot || settings.disabled)
+        return;
+      const inference = deps.getInference();
+      const pending = (await inference.list<OrganizerRecipe>(scopeId)).filter(work => work.mode === "automatic" && !work.consumed);
+      const store = existingStore ?? await deps.storeForScopeId(scopeId);
+      if (!store)
+        return;
+      for (const work of pending) {
+        try {
+          await prepareWork(store, scopeId, work);
+        }
+        catch (error) {
+          await recordWorkError(store, work.recipe.units, error, work.workId);
+          report(error);
+        }
+        if (disposed || suspendedScopes.has(scopeId))
+          return;
+      }
+      // Reservations only affect their exact source revision/range, never another Bot/source.
+      const unresolved = (await inference.list<OrganizerRecipe>(scopeId)).filter(work => work.mode === "automatic" && !work.consumed);
+      reservedSources.set(scopeId, unresolved.flatMap(work => work.recipe.units.flatMap(unit => unit.source.spans ?? [])));
       const binding = await modelForScope(settings, scopeId);
-      if (!binding) return;
-      const model = binding.selection;
-      const store = await deps.storeForScopeId(scopeId);
-      if (!store) return;
-
-      const promptScope: OrganizerPromptScope = {
-        sourceScope: "bot",
-        userMemoryEnabled: settings.autoOrganize.user,
-      };
-      const budget = await resolveBudget(model, promptScope);
-      const planningOwner = ownerFor("bot", scopeId)!;
-      const planningMemories = await deps.memory.list(planningOwner, { activeOnly: true });
+      if (!binding)
+        return;
+      const promptScope: OrganizerPromptScope = { sourceScope: "bot", userMemoryEnabled: settings.autoOrganize.user };
+      const budget = await resolveBudget(binding.selection, promptScope);
+      const planningMemories = await deps.memory.list(ownerFor("bot", scopeId)!, { activeOnly: true });
       let unitChars = budget.unitChars;
       let candidates: OrganizerUnit[] = [];
-      let collected: OrganizerUnit[] = [];
+      let freshUnits: OrganizerUnit[] = [];
+      const preparedUnits: Array<{
+        unit: OrganizerUnit;
+        proposals: OrganizerPreparedProposal[];
+      }> = [];
       while (true) {
         candidates = await collectUnits(store, scopeId, unitChars, force);
-        const progressRows = await store.listOrganizerProgress();
-        const progressByKey = new Map(progressRows.map((row) => [row.key, row]));
-        collected = [];
-        const fresh: OrganizerUnit[] = [];
-        let stalePrepared = false;
+        const rows = new Map((await store.listOrganizerProgress()).map(row => [row.key, row]));
+        freshUnits = [];
+        preparedUnits.length = 0;
         for (const unit of candidates) {
-          const row = progressByKey.get(unit.key);
-          if (row?.status === "prepared" && row.sourceKey !== unit.sourceKey) {
-            await putProgress(store, unit.key, "pending", {
-              sourceKey: null, proposals: null, preparedSource: null, preparedRange: null,
-            });
-            stalePrepared = true;
-            break;
-          }
+          const row = rows.get(unit.key);
+          if (isCovered(row, unit.sourceKey))
+            continue;
+          unit.source.key = unit.rangeKey;
           if (row?.status === "prepared" && row.sourceKey === unit.sourceKey && row.proposals) {
-            collected.push(unit);
+            preparedUnits.push({ unit, proposals: row.proposals });
             continue;
           }
-          if (!selectPrompt([...fresh, unit], planningMemories, budget.inputTokens, promptScope)) break;
-          fresh.push(unit);
-          collected.push(unit);
+          if (!selectPrompt([...freshUnits, unit], planningMemories, budget.inputTokens, promptScope))
+            break;
+          freshUnits.push(unit);
         }
-        if (stalePrepared) continue;
-        if (collected.length > 0 || candidates.length === 0) break;
-        if (unitChars <= MIN_SEGMENT_CHARS) {
-          const tooLarge = candidates[0]!;
-          await putProgress(store, tooLarge.key, "failed", {
-            sourceKey: tooLarge.sourceKey,
-            lastError: `Organizer model context cannot fit this source range, even at ${MIN_SEGMENT_CHARS} characters. Choose a larger-context model.`,
-          });
-          return;
-        }
+        if (freshUnits.length || preparedUnits.length || !candidates.length)
+          break;
+        if (unitChars <= MIN_SEGMENT_CHARS)
+          throw new Error("Memory organizer cannot fit the original source contract in the selected context");
         unitChars = Math.max(MIN_SEGMENT_CHARS, Math.floor(unitChars / 2));
       }
-      // A batch can fill before all pending ranges are selected. Drain the
-      // remainder on the next pass without requiring another user turn.
-      if (collected.length > 0 && (collected.length < candidates.length || candidates.length === MAX_UNITS_PER_RUN
-        || collected.some((unit) => unit.eventPartial || unit.entryPartial || unit.hasMoreSource))) {
-        queued.add(scopeId);
+      if (preparedUnits.length) {
+        try {
+          await commitPrepared(store, scopeId, preparedUnits, unitChars);
+        }
+        catch (error) {
+          await recordWorkError(store, preparedUnits.map(({ unit }) => unit), error);
+          throw error;
+        }
       }
-      if (collected.length === 0) {
-        if (await settleCommittedPrepared(store, scopeId)) queued.add(scopeId);
+      if (!freshUnits.length)
         return;
-      }
-      const rows = await store.listOrganizerProgress();
-      const progress = new Map(rows.map((row) => [row.key, row]));
-
-      // Source revision → coverage: a terminal row only covers a range whose
-      // fingerprint still matches; a `prepared` row replays its stored
-      // proposals so a crash between prepare and commit never re-narrates.
-      const freshUnits: OrganizerUnit[] = [];
-      const preparedUnits: Array<{ unit: OrganizerUnit; proposals: OrganizerPreparedProposal[] }> = [];
-      for (const unit of collected) {
-        const row = progress.get(unit.key);
-        if (isCovered(row, unit.sourceKey)) continue;
-        // Provenance stays bound to the exact range the row covers — commit
-        // receipts and automatic forgetting reference the same fingerprint.
-        unit.source.key = unit.rangeKey;
-        if (row?.status === "prepared" && row.sourceKey === unit.sourceKey && row.proposals !== undefined) {
-          preparedUnits.push({ unit, proposals: row.proposals });
-          continue;
-        }
-        freshUnits.push(unit);
-      }
-      if (freshUnits.length === 0 && preparedUnits.length === 0) return;
-
-      // Units still in flight when a failure lands stay claimable: fresh ones
-      // are marked failed for backoff; prepared ones keep their proposals.
-      const pendingFresh = new Set(freshUnits.map((unit) => unit.key));
-      const pendingPrepared = new Set(preparedUnits.map(({ unit }) => unit.key));
+      const selected = selectPrompt(freshUnits, planningMemories, budget.inputTokens, promptScope)!;
+      const nativeBinding = await inference.bind(binding.selection, budget.maxOutputTokens);
+      const key = randomUUID();
+      const work = await inference.admit({
+        key, scopeId, mode: "automatic", spans: freshUnits.flatMap(unit => unit.source.spans ?? []),
+        recipe: {
+          binding: nativeBinding, units: freshUnits, presented: selected.presented, promptScope,
+          budget: { ...budget, unitChars }, decisionStatus: settings.fastDecision, system: MEMORY_ORGANIZER_SYSTEM
+        } satisfies OrganizerRecipe
+      });
+      for (const unit of freshUnits)
+        await putProgress(store, unit.key, "processing", {
+          sourceKey: unit.sourceKey, workId: work.workId,
+          ...(unit.runEndOffset === undefined ? {} : { runEndOffset: unit.runEndOffset }), proposals: null, preparedSource: null, preparedRange: null
+        });
       try {
-        for (const unit of freshUnits) {
-          await putProgress(store, unit.key, "processing", {
-            sourceKey: unit.sourceKey,
-            ...(unit.runEndOffset !== undefined ? { runEndOffset: unit.runEndOffset } : {}),
-            proposals: null, preparedSource: null, preparedRange: null,
-          });
-        }
-
-        const judged = await filterUnitsByFastDecision(scopeId, settings.fastDecision, freshUnits);
-        if (disposed) return;
-        for (const unit of freshUnits.filter((candidate) => !judged.includes(candidate))) {
-          await putProgress(store, unit.key, "reviewed-empty", {
-            coveredSources: unit.source.spans ?? [],
-            ...(unit.eventCursor !== undefined ? { eventCursor: unit.eventCursor } : {}),
-            eventPartial: unit.eventPartial ?? null,
-            ...(unit.entryCursor !== undefined ? { entryCursor: unit.entryCursor } : {}),
-            entryPartial: unit.entryPartial ?? null,
-            proposals: null,
-            preparedSource: null,
-            preparedRange: null,
-          });
-          pendingFresh.delete(unit.key);
-        }
-
-        // The proposal set is computed against this exact memory state; if the
-        // catalog moves before commit (a human forget, an explicit remember),
-        // the unit stays prepared and the replay drops stale proposals through
-        // dedupe instead of committing against an unseen state.
-        let narratedRevision: string | null = null;
-        if (judged.length > 0) {
-          const owner = ownerFor("bot", scopeId)!;
-          const existing = await deps.memory.list(owner, { activeOnly: true });
-          const selected = selectPrompt(judged, existing, budget.inputTokens, promptScope);
-          if (!selected) throw new Error("Memory organizer prompt exceeded the selected model's context after source selection");
-          narratedRevision = store.knowledgeRevision();
-          const narrated = await narrateProposals(scopeId, model, binding.source, selected.prompt, budget.maxOutputTokens);
-          if (disposed) return;
-          for (const unit of judged) await assertSourceCurrent(store, scopeId, unit, unitChars);
-          // Validate provenance/targets before anything from this response is
-          // durably held. A missing source is not permission to attach one.
-          const byUnit = new Map<string, OrganizerPreparedProposal[]>();
-          for (const proposal of narrated) {
-            const unit = judged[Number(proposal.source!.slice(1))];
-            if (!unit) throw new Error("Memory organizer referenced an unknown source");
-            if (!ownerFor(proposal.scope, scopeId)) throw new Error("Memory organizer referenced an unrelated owner scope");
-            if (proposal.action !== "new" && (proposal.scope !== "bot"
-              || !selected.presented.some((item) => item.id === proposal.target))) {
-              throw new Error("Memory organizer referenced a target outside its presented candidates");
-            }
-            const list = byUnit.get(unit.key) ?? [];
-            const target = proposal.target === undefined ? undefined
-              : selected.presented.find((item) => item.id === proposal.target);
-            const spans = (unit.source.spans ?? []).flatMap((span, index) => {
-              const text = unit.source.runId ? unit.texts.at(-1)! : unit.texts[index]!.replace(/^\[[^\]]*\] /u, "");
-              const offset = text.indexOf(proposal.quote);
-              return offset < 0 ? [] : [{ ...span, start: span.start + offset, end: span.start + offset + proposal.quote.length }];
-            });
-            if (spans.length !== 1) throw new Error("Memory organizer quote must identify one exact source passage");
-            list.push({
-              action: proposal.action,
-              scope: proposal.scope,
-              ...(proposal.nature ? { nature: proposal.nature } : {}),
-              content: proposal.content,
-              spans,
-              ...(proposal.trigger ? { trigger: proposal.trigger } : {}),
-              ...(proposal.target !== undefined ? { target: proposal.target } : {}),
-              ...(target ? { expectedTarget: {
-                content: target.content,
-                trigger: target.trigger,
-                status: target.status,
-                invalidAt: target.invalidAt ?? null,
-              } } : {}),
-            });
-            byUnit.set(unit.key, list);
-          }
-          for (const unit of judged) {
-            const proposals = byUnit.get(unit.key) ?? [];
-            await putProgress(store, unit.key, "prepared", {
-              sourceKey: unit.sourceKey,
-              proposals,
-              preparedSource: unit.source,
-              ...(unit.key.startsWith("session:") ? { preparedRange: {
-                ...(unit.eventCursor !== undefined ? { eventCursor: unit.eventCursor } : {}),
-                ...(unit.eventPartial !== undefined ? { eventPartial: unit.eventPartial } : {}),
-                ...(unit.entryCursor !== undefined ? { entryCursor: unit.entryCursor } : {}),
-                ...(unit.entryPartial !== undefined ? { entryPartial: unit.entryPartial } : {}),
-              } } : {}),
-            });
-            preparedUnits.push({ unit, proposals });
-            pendingFresh.delete(unit.key);
-            pendingPrepared.add(unit.key);
-          }
-        }
-
-        // Commit phase. Settings re-read: a switch flipped mid-run still gates.
-        const currentSettings = await readHarnessSettings();
-        if (suspendedScopes.has(scopeId) || (deps.canExecuteScope && !await deps.canExecuteScope(scopeId))) return;
-        if (!currentSettings.autoOrganize.bot) return;
-        if (narratedRevision !== null && narratedRevision !== store.knowledgeRevision()) {
-          throw new KnowledgeMutationError("conflict", "Memory changed while the organizer was narrating proposals");
-        }
-        const owner = ownerFor("bot", scopeId)!;
-        const existing = await deps.memory.list(owner, { activeOnly: true });
-        let revision = store.knowledgeRevision();
-        const userOwner: MemoryOwner = { scope: "user", ownerId: null };
-        let userRevision = currentSettings.autoOrganize.user ? await deps.memory.revision(userOwner) : "";
-        for (const { unit, proposals } of preparedUnits) {
-          await assertSourceCurrent(store, scopeId, unit, unitChars);
-          const produced: number[] = [];
-          for (const proposal of proposals) {
-            if (proposal.scope === "user" && !currentSettings.autoOrganize.user) continue;
-            if (disposed) return;
-            if (revision !== store.knowledgeRevision()) {
-              throw new KnowledgeMutationError("conflict", "Memory changed while the organizer was committing proposals");
-            }
-            const id = await commitProposal(scopeId, proposal, currentSettings, unit.source, existing,
-              proposal.scope === "user" ? userRevision : revision);
-            if (id !== null) produced.push(id);
-            revision = store.knowledgeRevision();
-            if (proposal.scope === "user" && currentSettings.autoOrganize.user) {
-              userRevision = await deps.memory.revision(userOwner);
-            }
-          }
-          await putProgress(store, unit.key, produced.length > 0 ? "formed" : "reviewed-empty", {
-            ...(unit.eventCursor !== undefined ? { eventCursor: unit.eventCursor } : {}),
-            eventPartial: unit.eventPartial ?? null,
-            ...(unit.entryCursor !== undefined ? { entryCursor: unit.entryCursor } : {}),
-            entryPartial: unit.entryPartial ?? null,
-            produced,
-            sourceKey: unit.sourceKey,
-            proposals: null,
-            preparedSource: null,
-            preparedRange: null,
-          });
-          pendingPrepared.delete(unit.key);
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        const sourceChanged = error instanceof SourceChangedError;
-        for (const unit of freshUnits) {
-          if (!pendingFresh.has(unit.key)) continue;
-          await putProgress(store, unit.key, sourceChanged ? "pending" : "failed", { lastError: message }).catch(report);
-        }
-        for (const { unit } of preparedUnits) {
-          if (!pendingPrepared.has(unit.key)) continue;
-          await putProgress(store, unit.key, sourceChanged ? "pending" : "prepared", { lastError: message }).catch(report);
-        }
-        if (sourceChanged) queued.add(scopeId);
+        await prepareWork(store, scopeId, work);
+      }
+      catch (error) {
+        await recordWorkError(store, freshUnits, error, work.workId);
         throw error;
       }
-    } finally {
+      if (freshUnits.length < candidates.length || candidates.length === MAX_UNITS_PER_RUN || freshUnits.some(unit => unit.hasMoreSource))
+        queued.add(scopeId);
+    }
+    finally {
+      reservedSources.delete(scopeId);
       running.delete(scopeId);
-      for (const resolve of idleWaiters.get(scopeId) ?? []) resolve();
+      for (const resolve of idleWaiters.get(scopeId) ?? [])
+        resolve();
       idleWaiters.delete(scopeId);
-      if (queued.delete(scopeId)) schedule(scopeId);
+      if (queued.delete(scopeId))
+        schedule(scopeId);
     }
   };
 
@@ -1292,17 +1192,14 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       timers.delete(scopeId);
       queued.delete(scopeId);
       forced.delete(scopeId);
-      const broker = deps.getBroker();
-      const cancellations = [...activeBatches.entries()].filter(([, owner]) => owner === scopeId);
-      if (cancellations.length && !broker) throw new Error("Memory organizer worker is unavailable to stop");
-      await Promise.all(cancellations.map(([batchId]) => broker!.requestForWorkspace(deps.configCwd, "harness.inference.cancel", { batchId })));
+      await deps.getInference().suspendScope(scopeId);
       if (running.has(scopeId)) await new Promise<void>((resolve) => {
         const waiters = idleWaiters.get(scopeId) ?? new Set();
         waiters.add(resolve);
         idleWaiters.set(scopeId, waiters);
       });
     },
-    resumeScope(scopeId: string): void { suspendedScopes.delete(scopeId); schedule(scopeId); },
+    resumeScope(scopeId: string): void { deps.getInference().resumeScope(scopeId); suspendedScopes.delete(scopeId); schedule(scopeId); },
     /** First-run reconcile: pick up progress and sources left before shutdown. */
     start(): void {
       if (disposed) return;
@@ -1336,38 +1233,78 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       timers.clear();
       forced.clear();
       if (sweepTimer) { clearTimeout(sweepTimer); sweepTimer = null; }
-      const broker = deps.getBroker();
-      await Promise.allSettled([...activeBatches.keys()].map((batchId) =>
-        broker?.requestForWorkspace(deps.configCwd, "harness.inference.cancel", { batchId })));
-      activeBatches.clear();
+      await deps.getInference().close(await deps.listScopeIds());
       await Promise.allSettled([...pendingTasks]);
     },
     /** Explicit selection preview: no automatic-memory gate, coverage write or commit. */
-    async extractSelection(scopeId: string, system: string, prompt: string, signal: AbortSignal): Promise<string> {
-      if (disposed) throw new Error('Memory organizer is unavailable');
+    async extractSelection(scopeId: string, system: string, prompt: string, signal: AbortSignal, selection: MemorySelectionRequest): Promise<string> {
+      if (disposed)
+        throw new Error('Memory organizer is unavailable');
       signal.throwIfAborted();
-      const broker = deps.getBroker();
-      if (!broker) throw new Error('Memory organizer runtime is unavailable');
-      const binding = await modelForScope(await readHarnessSettings(), scopeId);
-      if (!binding) throw new Error('Configure the memory organizer model to extract memories');
-      if (suspendedScopes.has(scopeId) || (deps.canExecuteScope && !await deps.canExecuteScope(scopeId))) throw new Error('Bot sleeping');
-      signal.throwIfAborted();
-      const batchId = randomUUID();
-      const cancel = () => { void broker.requestForWorkspace(deps.configCwd, 'harness.inference.cancel', { batchId }).catch(report); };
-      activeBatches.set(batchId, scopeId);
-      signal.addEventListener('abort', cancel, { once: true });
-      try {
-        const result = await broker.requestForWorkspace(deps.configCwd, 'harness.memoryOrganize', {
-          batchId, ...binding.selection,
-          ...(binding.source === 'bot' ? { modelSource: 'bot' as const } : {}), system, prompt,
-        });
-        signal.throwIfAborted();
-        if (result.batchId !== batchId) throw new Error('Memory extraction response identity mismatch');
-        return result.text;
-      } finally {
-        signal.removeEventListener('abort', cancel);
-        activeBatches.delete(batchId);
+      const inference = deps.getInference();
+      let work = await inference.find<{
+        binding: MemoryInferenceBinding;
+        system: string;
+        prompt: string;
+        selection: MemorySelectionRequest;
+      }>(selection.requestKey);
+      if (work && (work.scopeId !== scopeId || work.mode !== "selection" || !isDeepStrictEqual(memorySourceClaims(selection.sources), work.claims)))
+        throw new MemoryInferenceError('memory-work-identity-conflict', 'The original selection belongs to different sources.', 'none');
+      if (!work && selection.retryOf) {
+        const prior = await inference.find<{
+          binding: MemoryInferenceBinding;
+          system: string;
+          prompt: string;
+          selection: MemorySelectionRequest;
+        }>(selection.retryOf);
+        if (prior && prior.scopeId === scopeId && isDeepStrictEqual(prior.claims, memorySourceClaims(selection.sources)) && !prior.consumerFailed && prior.inference.some(op => op.outcome === 'succeeded')) {
+          work = prior;
+        }
       }
+      if (!work) {
+        const selected = await modelForScope(await readHarnessSettings(), scopeId);
+        if (!selected)
+          throw new MemoryInferenceError('memory-organizer-unconfigured', 'Configure the memory organizer model to extract memories.', 'none');
+        const descriptor = await inference.model(selected.selection);
+        const output = memoryOrganizerOutputReservation(descriptor.contextWindow ?? 0, descriptor.maxTokens);
+        if (estimateMemoryOrganizerInputTokens(system, prompt) + output > (descriptor.contextWindow ?? 0))
+          throw new MemoryInferenceError('memory-organizer-capacity', 'The selected passages exceed this model’s context capacity.', 'none');
+        work = await inference.admit({
+          key: selection.requestKey, scopeId, mode: 'selection', spans: selection.sources,
+          ...(selection.retryOf ? { retryOf: selection.retryOf } : {}), recipe: { binding: await inference.bind(selected.selection, output), system, prompt, selection }
+        });
+      }
+      const assertSelection = async () => {
+        if (await deps.scopeForSession(selection.sessionId) !== scopeId)
+          throw new MemoryInferenceError('memory-work-owner-changed', 'The selected conversation owner changed.', 'none');
+        const entries = await deps.readEntries(selection.sessionId);
+        for (const span of selection.sources) {
+          const entry = entries.find(entry => entry.id === span.id);
+          if (!entry || sourceRevision(entrySourceText(entry)) !== span.revision)
+            throw new MemoryInferenceError('memory-work-source-changed', 'The selected source changed. Select it again.', 'none');
+        }
+      };
+      const result = await inference.generate(work, work.recipe.system, work.recipe.prompt, signal, assertSelection);
+      signal.throwIfAborted();
+      await assertSelection();
+      try {
+        const input = JSON.parse(result.work.recipe.prompt) as {
+          passages: Array<{
+            role: string;
+            text: string;
+          }>;
+        };
+        parseSelectionMemories(result.text, result.work.recipe.selection.sources.map((span, index) => ({
+          span, role: input.passages[index]!.role,
+          passage: { entryId: span.id, start: span.start, revision: span.revision, text: input.passages[index]!.text }
+        })));
+      }
+      catch (error) {
+        await inference.reject(result.work);
+        throw new MemoryInferenceError('memory-work-invalid-output', error instanceof Error ? error.message : 'The original memory output is invalid.', 'new_attempt');
+      }
+      await inference.finish(result.work);
+      return result.text;
     },
     /** Scope settings and durable progress; read-only, never schedules a run. */
     async describe(scopeId: string): Promise<{

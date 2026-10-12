@@ -8,6 +8,7 @@ Last updated: 2026-10-12
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [原 Bot 记忆整理与选段推理](runtime-bot-memory-inference-2026-10-12.md) | 原 Bot/MemoryService、独立后台推理与固定来源、原回执恢复、Sleep 实际排空和显式选文消费；有限链路证据 |
 | [原成功 usage 与请求预算校准](runtime-context-usage-2026-10-12.md) | 原请求/回执、adapter 计数语义、锁外完整前缀、真实 main/Goal 预算消费及取消恢复边界 |
 | [Scoped 服务依赖与组合寿命](runtime-scoped-composition-2026-10-12.md) | 唯一选择、冻结图/共享实例、原授权及排空、Surface 响应 lease 与实际跨层消费者；整合证据与边界 |
 | [已有 Bekko 本地原生推理](runtime-bekko-inference-2026-10-12.md) | 原组件安装/选择、主与 child Source、共享 worker、Catalog/Goal、取消排空和恢复；受控模型与真实 ONNX 验收边界 |

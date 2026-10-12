@@ -1,65 +1,102 @@
 import type { Express, RequestHandler } from 'express';
 import type { ChatMemoryOwner } from '@varin/application-client';
-import { agentScopeKey, type AgentMemoryScope, type PiSessionEntry } from '@varin/protocol';
+import { agentScopeKey, type AgentMemoryScope, type MemorySourceSpan, type PiSessionEntry } from '@varin/protocol';
 import { KnowledgeMutationError, MEMORY_NATURES } from '../knowledge/store.js';
 import { memoryOwnerScopeId, type MemoryService } from './memory-service.js';
 import { parseSelectionMemories, SELECTION_MEMORY_SYSTEM, validateMemoryPassages } from './selection-memory.js';
 import { AgentPersonalizationError, type AgentPersonalization } from './agent-personalization.js';
 
+export interface SelectionMemoryRequest {
+  requestKey: string;
+  retryOf?: string;
+  sessionId: string;
+  sources: MemorySourceSpan[];
+}
+type RetryDisposition = 'observe' | 'new_attempt' | 'none';
+
 export function registerSelectionMemoryRoutes(app: Express, deps: {
   memory: MemoryService;
   agentPersonalization?: AgentPersonalization;
   entries(sessionId: string): Promise<PiSessionEntry[]>;
-  narrate(scopeId: string, system: string, prompt: string, signal: AbortSignal): Promise<string>;
+  narrate(scopeId: string, system: string, prompt: string, signal: AbortSignal, selection: SelectionMemoryRequest): Promise<string>;
   requireAuth: RequestHandler;
 }) {
   const base = '/api/harness/sessions/:sessionId/knowledge/extracted';
-  const ownerForSession = async (sessionId: string): Promise<ChatMemoryOwner> => {
+  const resolveSessionOwner = async (sessionId: string): Promise<{ owner: ChatMemoryOwner; agent: boolean }> => {
     const context = await deps.agentPersonalization?.context(sessionId);
-    return context?.mode === 'agent' ? context.projectId ? { scope: 'workspace', ownerId: context.projectId }
-      : { scope: 'session', ownerId: sessionId } : deps.memory.ownerForSession(sessionId);
+    const agent = context?.mode === 'agent';
+    const owner: ChatMemoryOwner = agent ? context.projectId ? { scope: 'workspace', ownerId: context.projectId }
+      : { scope: 'session', ownerId: sessionId } : await deps.memory.ownerForSession(sessionId);
+    return { owner, agent };
   };
   const ownerMatches = (expected: unknown, actual: ChatMemoryOwner): boolean => {
     const value = expected as Partial<ChatMemoryOwner> | null;
     return !!value && value.scope === actual.scope && value.ownerId === actual.ownerId;
   };
   const targetOwner = async (sessionId: string, target: unknown, expectedOwner: unknown) => {
-    const owner = await ownerForSession(sessionId);
+    const { owner } = await resolveSessionOwner(sessionId);
     if (!ownerMatches(expectedOwner, owner)) throw new KnowledgeMutationError('conflict', 'The conversation memory owner has changed');
     if (target === 'user') return { scope: 'user', ownerId: null } as const;
     if (target !== 'owner') throw new KnowledgeMutationError('invalid', 'Choose a memory destination');
     return owner;
   };
-  const handleError = (res: import('express').Response, error: unknown) => {
+  const handleError = (res: import('express').Response, error: unknown, preview?: { requestKey: string | null; retryDisposition: RetryDisposition }) => {
     if (res.destroyed || res.writableEnded) return;
     const status = error instanceof AgentPersonalizationError ? error.status : error instanceof KnowledgeMutationError
       ? error.code === 'conflict' ? 409 : error.code === 'not-found' ? 404 : 400 : 500;
-    res.status(status).json({ error: error instanceof Error ? error.message : 'Memory operation failed' });
+    const failure = error as { code?: unknown; retryDisposition?: unknown } | null;
+    // The inference owner classifies whether a new attempt is safe. Do not infer
+    // external-send state from an HTTP status or maintain a second error-code list.
+    const retryDisposition = failure?.retryDisposition;
+    res.status(status).json({ error: error instanceof Error ? error.message : 'Memory operation failed',
+      ...(preview ? { requestKey: preview.requestKey,
+        ...(typeof failure?.code === 'string' ? { code: failure.code } : {}),
+        retryDisposition: retryDisposition === 'observe' || retryDisposition === 'new_attempt' || retryDisposition === 'none'
+          ? retryDisposition : preview.retryDisposition } : {}),
+    });
   };
   const agentScope = (owner: ChatMemoryOwner, sessionId: string): AgentMemoryScope => owner.scope === 'user'
     ? { kind: 'global' } : owner.scope === 'workspace' ? { kind: 'project', id: owner.ownerId! } : { kind: 'session', id: sessionId };
 
   app.post(`${base}/preview`, deps.requireAuth, async (req, res) => {
     const sessionId = String(req.params.sessionId);
+    const requestKey = typeof req.body?.requestKey === 'string' ? req.body.requestKey : null;
+    let admitted = false;
     const controller = new AbortController();
     const disconnect = () => { if (!res.writableEnded) controller.abort(); };
     res.on('close', disconnect);
     try {
-      const owner = await ownerForSession(sessionId);
+      if (!requestKey?.trim() || (req.body?.retryOf !== undefined
+        && (typeof req.body.retryOf !== 'string' || !req.body.retryOf.trim() || req.body.retryOf === requestKey))) {
+        throw new KnowledgeMutationError('invalid', 'A valid memory preview request identity is required');
+      }
+      const { owner, agent } = await resolveSessionOwner(sessionId);
+      const scopeId = memoryOwnerScopeId(owner);
+      if (!['workspace', 'bot', 'session', 'user'].includes(owner.scope)
+        || (owner.scope === 'user' ? owner.ownerId !== null : typeof owner.ownerId !== 'string' || !owner.ownerId.trim() || !scopeId)) {
+        throw new KnowledgeMutationError('invalid', 'The conversation memory owner is invalid');
+      }
       const passages = validateMemoryPassages(req.body?.sources, await deps.entries(sessionId));
       controller.signal.throwIfAborted();
-      if (deps.agentPersonalization && (await deps.agentPersonalization.context(sessionId)).mode === 'agent') {
-        res.json({ owner, drafts: passages.map(source => ({ content: source.passage.text, trigger: '',
+      if (agent) {
+        res.json({ owner, requestKey, drafts: passages.map(source => ({ content: source.passage.text, trigger: '',
           nature: source.role === 'user' ? 'instruction' : 'experience', sources: [source.passage] })) });
         return;
       }
       const prompt = JSON.stringify({ passages: passages.map((source, index) => ({
         id: `s${index}`, role: source.role, text: source.passage.text,
       })) });
-      const text = await deps.narrate(memoryOwnerScopeId(owner) ?? 'user', SELECTION_MEMORY_SYSTEM, prompt, controller.signal);
+      admitted = true;
+      const text = await deps.narrate(scopeId ?? 'user', SELECTION_MEMORY_SYSTEM, prompt, controller.signal, {
+        requestKey, ...(req.body.retryOf === undefined ? {} : { retryOf: req.body.retryOf }), sessionId,
+        sources: passages.map(({ span }) => ({ ...span, sessionId })),
+      });
       controller.signal.throwIfAborted();
-      res.json({ owner, drafts: parseSelectionMemories(text, passages) });
-    } catch (error) { handleError(res, error); }
+      res.json({ owner, requestKey, drafts: parseSelectionMemories(text, passages) });
+    } catch (error) { handleError(res, error, { requestKey,
+      retryDisposition: !admitted && (error instanceof KnowledgeMutationError || error instanceof AgentPersonalizationError)
+        ? 'none' : 'observe',
+    }); }
     finally { res.off('close', disconnect); }
   });
 

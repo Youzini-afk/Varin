@@ -150,6 +150,7 @@ pub struct InferenceSettleParams {
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum InferenceCaller {
     Operation,
+    MemoryWork,
     Query {
         context: crate::execution::ToolExecutionContext,
     },
@@ -196,7 +197,7 @@ pub struct InferencePreparation {
     _publication: crate::content::ContentPublication,
 }
 pub struct InferenceBody {
-    reference: Value,
+    pub(super) reference: Value,
     _preparation: InferencePreparation,
 }
 impl InferencePreparation {
@@ -244,6 +245,11 @@ fn parent_live(db: &Connection, op: &Operation, i: &Intent, epoch: u64) -> Resul
         return Err(RuntimeError::DispatchCancelled);
     }
     let context = match &i.caller {
+        InferenceCaller::MemoryWork => {
+            let parent: Operation = record(db, "operations", &i.parent_operation_id)?;
+            if parent.run_id != op.run_id || i.goal.is_some() { return Err(conflict()); }
+            return memory_work::stage_live(db, &parent, &i.caller_owner, epoch);
+        }
         InferenceCaller::Operation => {
             let parent: Operation = record(db, "operations", &i.parent_operation_id)?;
             if parent.run_id != op.run_id
@@ -324,7 +330,9 @@ impl Catalog {
                     && matches!(p.execution_owner, ExecutorOwner::External { .. })
             })
         {
-            self.admit_inference_for(p, body, InferenceCaller::Operation, false)
+            { let parent=self.operation(&p.parent_operation_id)?;
+              let caller=if memory_work::is_stage(&parent) { InferenceCaller::MemoryWork } else { InferenceCaller::Operation };
+              self.admit_inference_for(p, body, caller, false) }
         } else {
             scopes.with_inference_context(&p.parent_operation_id, &p.execution_owner, |context| {
                 self.admit_inference_for(
@@ -362,21 +370,26 @@ impl Catalog {
             }
             return self.inference_status_unfenced(&id, &p.execution_owner);
         }
-        let (run_id, origin) = match &caller {
+        let (run_id, goal) = match &caller {
+            InferenceCaller::MemoryWork => {
+                let parent=self.operation(&p.parent_operation_id)?;
+                memory_work::stage_live(&self.db,&parent,&p.execution_owner,self.epoch)?;
+                memory_work::validate_inference(&self.db,&parent,&p.binding,native)?;
+                (parent.run_id,None)
+            }
             InferenceCaller::Operation => {
                 let parent = self.operation(&p.parent_operation_id)?;
                 owned(&parent, &p.execution_owner)?;
                 let tool = tool_content::ToolIntent::from_operation(&parent)?;
-                (parent.run_id, tool.origin().clone())
+                (parent.run_id, goals::origin_goal(&self.db, tool.origin())?)
             }
             InferenceCaller::Query { context } => {
                 if context.operation_id != p.parent_operation_id {
                     return Err(conflict());
                 }
-                (context.run_id.clone(), context.origin.clone())
+                (context.run_id.clone(), goals::origin_goal(&self.db, &context.origin)?)
             }
         };
-        let goal = goals::origin_goal(&self.db, &origin)?;
         let i = Intent {
             caller_owner: p.execution_owner.clone(),
             caller,
@@ -444,6 +457,9 @@ impl Catalog {
         tx.commit()?;
         self.inference_status_unfenced(&id, &p.execution_owner)
     }
+    pub(super) fn inference_observation(&self, operation: &Operation) -> Result<InferenceStatus> {
+        self.inference_status(&operation.id, &intent(operation)?.caller_owner)
+    }
     pub fn inference_status(&self, id: &str, owner: &ExecutorOwner) -> Result<InferenceStatus> {
         let mut status = self.inference_status_unfenced(id, owner)?;
         let op = self.operation(id)?;
@@ -493,7 +509,7 @@ impl Catalog {
         let caller = intent(&self.operation(&p.operation_id)?)?.caller;
         let scopes = self.nested_tools.clone();
         match caller {
-            InferenceCaller::Operation => self.dispatch_inference_held(p),
+            InferenceCaller::Operation | InferenceCaller::MemoryWork => self.dispatch_inference_held(p),
             InferenceCaller::Query { context } => {
                 scopes.with_inference_context(&context.operation_id, &p.execution_owner, |_| {
                     self.dispatch_inference_held(p)

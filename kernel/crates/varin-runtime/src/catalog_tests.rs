@@ -3664,6 +3664,7 @@ fn native_inference_checkpoint_reopens_original_usage_and_opaque_without_replay(
         pricing_version: Some("original-price".into()),
     };
     let output = GenerationOutput {
+        finish_reason: None,
         events: vec![
             ProviderEvent::ItemCompleted { item: item.clone() },
             ProviderEvent::Usage {

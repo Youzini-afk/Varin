@@ -1,3 +1,4 @@
+import { createMemoryInference } from './lib/memory/memory-inference.js';
 import { createExtensionPackageOwner, VARIN_EXTENSION_PACKAGES_CAPABILITY } from "./lib/kernel/extension-package-owner.js";
 import { createRetrievalModelStage } from './lib/kernel/retrieval-model.js';
 import { mergeHarnessWebDomainPolicy } from '@varin/protocol';
@@ -2092,12 +2093,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   // Bot background memory organizer reads durable session/run sources.
   // filters them with the memory-organization fast decision when bound, and
-  // narrates proposals through the models.memoryOrganizer slot on the shared
-  // workspace worker. All commits go through memoryService, so inferred output
+  // narrates proposals through the models.memoryOrganizer slot on the original
+  // native inference owner. All commits go through memoryService, so inferred output
   // keeps suggested/accepted semantics, dedupe, and correction CAS.
   const memoryOrganizer = createMemoryOrganizer({
-    configCwd: VARIN_DATA_DIR,
-    getBroker: getReadyPiRuntimeBroker,
+    getInference: () => memoryInference,
     storeForScopeId: getKnowledgeStoreForScope,
     hasStoreForScope: async (scopeId) => {
       const storePath = path.join(VARIN_DATA_DIR, 'knowledge', hostId, `${knowledgeStoreKeyForScope(scopeId)}.tdb`);
@@ -3275,7 +3275,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     agentPersonalization,
     memory: memoryService,
     entries: async (sessionId) => (await piRuntimeBroker.previewSessionEntries(sessionId, undefined, 'branch')).entries,
-    narrate: (scopeId, system, prompt, signal) => memoryOrganizer.extractSelection(scopeId, system, prompt, signal),
+    narrate: (scopeId, system, prompt, signal, selection) => memoryOrganizer.extractSelection(scopeId, system, prompt, signal, selection),
     requireAuth: uiAuthController?.requireAuth ?? ((_request, _response, next) => next()),
   });
   registerWebSearchCredentialRoutes(app, {
@@ -3689,6 +3689,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   }, { ledger: createSemanticInferenceLedger({ dataDir: VARIN_DATA_DIR, hostId }),
     requests: { kernel: kernelClient, runtime: agentRuntime, egress: egressRuntime,
       onError: () => console.error('[Inference] Original inference receipt requires attention') } });
+  const memoryInference = createMemoryInference({ kernel: kernelClient, runtime: agentRuntime, models: modelAuthority,
+    authority: hostCredentialAuthority, decision: semanticInference, canExecuteScope: canExecuteBotScope,
+    validateScope: async scopeId => {
+      if (!isBotScopeId(scopeId)) throw new Error('Only a registered Bot owns memory inference');
+      const bot = await botService.get(botIdFromScopeId(scopeId));
+      if (!bot || bot.archived) throw new Error('The original Bot memory owner is unavailable');
+    },
+  });
   researchDecisionOwner.current = createResearchDecisionRuntime({ inference: semanticInference, materials: webRuntimeOwner.current,
     settings: async source => {
       const root = source ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
@@ -4922,11 +4930,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await indexDirectories.dispose();
       observeKnowledgeDocumentMutation = () => undefined;
       await semanticRuntime.dispose();
-      await semanticInference.close();
+      // The organizer is a semantic-inference consumer; fence it before closing that owner.
+      const inferenceShutdownErrors: unknown[] = [];
+      await memoryOrganizer.dispose().catch((error: unknown) => { inferenceShutdownErrors.push(error); });
+      await semanticInference.close().catch((error: unknown) => { inferenceShutdownErrors.push(error); });
       await symbolGraphRuntime.dispose();
       // Stop producers and drain their receipts while process grants are valid.
       // One refused exit must not prevent the other domains from shutting down.
-      await memoryOrganizer.dispose();
       const processShutdown = await Promise.allSettled([
         threadWaitRuntime?.dispose(), agentRootRuntime.dispose(), researchRootRuntime.dispose(), botRootRuntime.dispose(), threadRuntime.dispose(), terminalRuntime?.shutdown(), languageSupervisor.dispose(), managedLanguageServers.dispose(), runRuntime.dispose(),
         // Release every supervised native driver so no synthesized input is
@@ -4934,7 +4944,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         computerService.dispose(),
         connections.shutdownAll(),
       ]);
-      const processShutdownErrors = processShutdown.flatMap((result) => result.status === 'rejected' ? [result.reason] : []);
+      const processShutdownErrors = [...inferenceShutdownErrors, ...processShutdown.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])];
       await languageToolProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
       await documentProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
       await kernelProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });

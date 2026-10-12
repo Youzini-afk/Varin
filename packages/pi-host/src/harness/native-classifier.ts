@@ -1,7 +1,7 @@
 /** Varin question/result semantics over Pi native classifiers. Pi owns transport and retries. */
 import { classify as classifyCloudflare } from "@earendil-works/pi-ai/api/cloudflare-workers-ai-system-one";
 import { classify as classifySystemOne } from "@earendil-works/pi-ai/api/typesafe-system-one";
-import { classify as classifyLlama, llamaServerRoot } from "@earendil-works/pi-ai/api/llama-cpp-classify";
+import { classify as classifyLlama, llamaServerRoot, renderQuestion, labelProbabilities, answerFromProbabilities } from "@earendil-works/pi-ai/api/llama-cpp-classify";
 import type { ClassifierContext, ClassifierFunction, ClassifierModel, ClassifierApi } from "@earendil-works/pi-ai";
 import { toJsonValue } from "../json.js";
 import type {
@@ -235,6 +235,66 @@ export function classifierWireResponseValid(api: string, modelId: string, questi
   if (!isRecord(body) || !Array.isArray(body.completion_probabilities)) return false;
   const first: unknown = body.completion_probabilities[0];
   return isRecord(first) && Array.isArray(first.top_logprobs);
+}
+
+/** Pure recovery from the original transport transcript. Never opens a connection or reruns a request. */
+export function restoreClassifierResult(input: {
+  api: string; modelId: string; state: unknown; questions: readonly FastDecisionQuestion[];
+  requests: readonly { endpoint: string; wire: unknown; response: unknown; succeeded: boolean }[];
+}): ClassifierResponse {
+  if (input.api !== "llama-cpp-classify") {
+    const last = input.requests.findLast(request => request.succeeded);
+    if (!last) throw new ClassifierResponseError("Original classifier has no successful response");
+    return classifierWireResult(input.api, input.modelId, input.questions, last.response);
+  }
+  const questions = Object.fromEntries(input.questions.map(question => [question.id, classifierQuestion(question)]));
+  const context: ClassifierContext = { state: isRecord(input.state) ? toJsonValue(input.state) as ClassifierContext["state"] : { input: toJsonValue(input.state) }, questions };
+  const observed = (path: string, match: (wire: Record<string, unknown>) => boolean): unknown => {
+    const result = input.requests.findLast(request => request.succeeded && new URL(request.endpoint).pathname.endsWith(path)
+      && isRecord(request.wire) && match(request.wire));
+    if (!result) throw new ClassifierResponseError("Original classifier transcript is incomplete");
+    return result.response;
+  };
+  const tokens = (content: string): number[] => {
+    const body = observed("/tokenize", wire => wire.content === content && wire.model === input.modelId);
+    if (!isRecord(body) || !Array.isArray(body.tokens)) throw new ClassifierResponseError("Original tokenization is invalid");
+    return body.tokens.map(value => {
+      const id: unknown = isRecord(value) ? value.id : value;
+      if (typeof id !== "number") throw new ClassifierResponseError("Original tokenization is invalid");
+      return id;
+    });
+  };
+  const answers: FastDecisionAnswer[] = [];
+  for (const question of input.questions) {
+    const rendered = renderQuestion(context, question.id);
+    const ids = rendered.labels.map(label => {
+      const newline = tokens("\n"); const next = tokens(`\n${label}`);
+      if (next.length === newline.length + 1 && newline.every((id, index) => next[index] === id)) return next[newline.length]!;
+      const alone = tokens(label);
+      if (alone.length !== 1) throw new ClassifierResponseError("Original label was not a single token");
+      return alone[0]!;
+    });
+    if (new Set(ids).size !== ids.length) throw new ClassifierResponseError("Original labels share a token");
+    const template = observed("/apply-template", wire => wire.model === input.modelId && Array.isArray(wire.messages)
+      && isRecord(wire.messages[1]) && wire.messages[1].content === rendered.content);
+    if (!isRecord(template) || typeof template.prompt !== "string") throw new ClassifierResponseError("Original template is invalid");
+    const prompt = template.prompt.endsWith("<think>") ? `${template.prompt}</think>` : template.prompt;
+    const completion = observed("/completion", wire => wire.model === input.modelId && wire.prompt === prompt);
+    const first: unknown = isRecord(completion) && Array.isArray(completion.completion_probabilities) ? completion.completion_probabilities[0] : undefined;
+    if (!isRecord(first) || !Array.isArray(first.top_logprobs)) throw new ClassifierResponseError("Original probability readout is invalid");
+    const topLogprobs: unknown[] = first.top_logprobs;
+    const values = ids.map(id => {
+      const entry = topLogprobs.find((value: unknown) => isRecord(value) && value.id === id);
+      if (!isRecord(entry) || typeof entry.logprob !== "number") throw new ClassifierResponseError("Original label probability is missing");
+      return entry.logprob;
+    });
+    if (values.every(value => value <= -1e30)) throw new ClassifierResponseError("Original labels have no probability");
+    const native = answerFromProbabilities(questions[question.id]!, rendered.keys, labelProbabilities(values, 1));
+    const answer = readAnswer(question, native.type === "bool" ? { type: "noul", noul: native.probability } : native);
+    if (!answer) throw new ClassifierResponseError("Original classifier answer is invalid");
+    answers.push(answer);
+  }
+  return { answers, missing: [] };
 }
 
 export async function requestClassifier(request: ClassifierRequest): Promise<ClassifierResponse> {

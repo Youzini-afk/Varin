@@ -27,6 +27,8 @@ use varin_runtime::{model_session, supervisor::RunSupervisor, Catalog, SubmitInp
 mod computer_commands;
 #[path = "agent_host_jobs.rs"]
 mod host_job_commands;
+#[path = "agent_memory_work.rs"]
+mod memory_work_commands;
 #[path = "agent_inference.rs"]
 mod inference_commands;
 #[path = "agent_inference_generation.rs"]
@@ -923,7 +925,7 @@ pub(crate) fn spawn(
                             deferred = true;
                             return Ok(Value::Null);
                         }
-                        if method.starts_with("runtime.inference.")
+                        if method.starts_with("runtime.memory_work.") || method.starts_with("runtime.inference.")
                             || method.starts_with("runtime.mcp.resource.")
                             || method.starts_with("runtime.mcp.interaction.")
                             || method.starts_with("runtime.mcp.sampling.")
@@ -939,7 +941,9 @@ pub(crate) fn spawn(
                             let done = finished.clone();
                             let cancelled = cancellation.clone();
                             thread::spawn(move || {
-                                let result = if method == "runtime.inference.generate" {
+                                let result = if method.starts_with("runtime.memory_work.") {
+                                    memory_work_commands::execute(runtime, &method, params, &cancelled)
+                                } else if method == "runtime.inference.generate" {
                                     inference_generation_commands::generate(
                                         runtime,
                                         credentials,

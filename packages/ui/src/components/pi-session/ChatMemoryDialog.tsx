@@ -5,13 +5,33 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 
-export const ChatMemoryDialog: React.FC<{
+interface ChatMemoryDialogProps {
   sessionId: string;
   sources: ChatMemoryPassage[];
   onClose(): void;
-}> = ({ sessionId, sources, onClose }) => {
+}
+type RetryDisposition = 'observe' | 'new_attempt' | 'none';
+interface PreviewRequest { requestKey: string; retryOf?: string }
+
+export const ChatMemoryDialog: React.FC<ChatMemoryDialogProps> = (props) => {
+  // A new array or a language change is not a new selection. A genuinely different
+  // selection remounts the editor, cancelling its observer and discarding old receipts.
+  const selection = JSON.stringify([props.sessionId, props.sources.map(source =>
+    [source.entryId, source.start, source.text, source.revision ?? null])]);
+  return <SelectionMemoryDialog key={selection} {...props} />;
+};
+
+const SelectionMemoryDialog: React.FC<ChatMemoryDialogProps> = ({ sessionId, sources: selectedSources, onClose }) => {
   const { t } = useI18n();
   const [runtimeKey] = React.useState(getRuntimeKey);
+  const [sources] = React.useState(() => selectedSources.map(source => ({ ...source })));
+  const [request, setRequest] = React.useState<PreviewRequest>(() => ({ requestKey: crypto.randomUUID() }));
+  const requestRef = React.useRef(request);
+  const [retryDisposition, setRetryDisposition] = React.useState<RetryDisposition | null>(null);
+  const previewController = React.useRef<AbortController | null>(null);
+  const retrying = React.useRef(false);
+  const callbacks = React.useRef({ onClose, failed: t('chat.context.failed') });
+  callbacks.current = { onClose, failed: t('chat.context.failed') };
   const [result, setResult] = React.useState<ChatMemoryExtraction | null>(null);
   const [error, setError] = React.useState('');
   const [target, setTarget] = React.useState<'owner' | 'user'>('owner');
@@ -21,37 +41,70 @@ export const ChatMemoryDialog: React.FC<{
   const mounted = React.useRef(true);
   const current = () => mounted.current && runtimeKey === getRuntimeKey();
   const base = `/api/harness/sessions/${encodeURIComponent(sessionId)}/knowledge/extracted`;
+  const close = React.useCallback(() => {
+    mounted.current = false;
+    // Stop waiting locally. This does not claim a dispatched provider request stopped.
+    previewController.current?.abort();
+    callbacks.current.onClose();
+  }, []);
   React.useEffect(() => {
     mounted.current = true;
-    const unsubscribe = subscribeRuntimeEndpointChanged(onClose);
+    const unsubscribe = subscribeRuntimeEndpointChanged(close);
     return () => { mounted.current = false; unsubscribe(); };
-  }, [onClose]);
+  }, [close]);
   React.useEffect(() => {
     const controller = new AbortController();
+    previewController.current = controller;
+    const isCurrent = () => mounted.current && !controller.signal.aborted && runtimeKey === getRuntimeKey()
+      && requestRef.current.requestKey === request.requestKey;
     setError('');
     setResult(null);
+    setRetryDisposition(null);
+    retrying.current = true;
     void (async () => {
+      let disposition: RetryDisposition = 'observe';
       try {
         const response = await runtimeFetch(`${base}/preview`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sources }), signal: controller.signal,
+          body: JSON.stringify({ sources, ...request }), signal: controller.signal,
         });
         const body = await response.json();
-        if (!response.ok) throw new Error(body.error || t('chat.context.failed'));
+        if (!isCurrent()) return;
+        if (!body || body.requestKey !== request.requestKey) throw new Error(callbacks.current.failed);
+        if (!response.ok) {
+          if (body.retryDisposition === 'observe' || body.retryDisposition === 'new_attempt' || body.retryDisposition === 'none') {
+            disposition = body.retryDisposition;
+          }
+          throw new Error(typeof body.error === 'string' && body.error ? body.error : callbacks.current.failed);
+        }
         if (!body.owner || !['workspace', 'bot', 'session', 'user'].includes(body.owner.scope)
           || (body.owner.ownerId !== null && typeof body.owner.ownerId !== 'string') || !Array.isArray(body.drafts)
           || !body.drafts.every((draft: ChatMemoryDraft) => typeof draft.content === 'string'
             && typeof draft.trigger === 'string' && ['experience', 'decision', 'preference', 'judgment', 'instruction'].includes(draft.nature)
             && Array.isArray(draft.sources) && draft.sources.length > 0
             && draft.sources.every((source) => typeof source.entryId === 'string' && typeof source.text === 'string'
-              && Number.isSafeInteger(source.start) && typeof source.revision === 'string'))) throw new Error(t('chat.context.failed'));
-        if (!controller.signal.aborted && runtimeKey === getRuntimeKey()) setResult(body);
+              && Number.isSafeInteger(source.start) && typeof source.revision === 'string'))) throw new Error(callbacks.current.failed);
+        if (isCurrent()) setResult(body);
       } catch (cause) {
-        if (!controller.signal.aborted && runtimeKey === getRuntimeKey()) setError(cause instanceof Error ? cause.message : String(cause));
-      }
+        if (isCurrent()) {
+          setError(cause instanceof Error ? cause.message : String(cause));
+          // A lost response is an observation failure, never proof of no external send.
+          setRetryDisposition(disposition);
+        }
+      } finally { if (isCurrent()) retrying.current = false; }
     })();
     return () => controller.abort();
-  }, [attempt, base, runtimeKey, sources, t]);
+  }, [attempt, base, request, runtimeKey, sources]);
+
+  const retry = () => {
+    if (!current() || retrying.current || !error || !retryDisposition || retryDisposition === 'none') return;
+    retrying.current = true;
+    if (retryDisposition === 'new_attempt') {
+      const next = { requestKey: crypto.randomUUID(), retryOf: requestRef.current.requestKey };
+      requestRef.current = next;
+      setRequest(next);
+    } else setAttempt(value => value + 1);
+  };
 
   const save = async () => {
     if (!result || saving || !current()) return;
@@ -93,12 +146,12 @@ export const ChatMemoryDialog: React.FC<{
     finally { if (current()) setSaving(false); }
   };
   const allSaved = !!result?.drafts.length && result.drafts.every((draft, index) => receipts[index] || !draft.content.trim());
-  return <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+  return <Dialog open onOpenChange={(open) => { if (!open) close(); }}>
     <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-xl">
       <DialogHeader><DialogTitle>{t('chat.context.extract')}</DialogTitle></DialogHeader>
       {error ? <div role="alert" className="typography-meta text-[var(--status-error)]">{error}</div> : null}
       {!result && !error ? <p role="status" className="typography-meta text-muted-foreground">{t('chat.context.extracting')}</p> : null}
-      {!result && error ? <Button variant="outline" onClick={() => setAttempt((value) => value + 1)}>{t('chat.context.retry')}</Button> : null}
+      {!result && error && retryDisposition && retryDisposition !== 'none' ? <Button variant="outline" onClick={retry}>{t('chat.context.retry')}</Button> : null}
       {result?.drafts.length === 0 ? <p className="typography-meta text-muted-foreground">{t('chat.context.empty')}</p> : null}
       {result && result.drafts.length > 0 ? <>
         <label className="grid gap-1.5 typography-meta">

@@ -138,7 +138,7 @@ not a new database owner. Automatic memory enabled by the user commits effective
 `accepted` rows; claim nature and source still distinguish inference from explicit
 user requirements. Acceptance is not a persistence receipt or an authority level.
 
-The organizer discovers source events only in workspace and Bot stores. `user.tdb`
+The organizer enumerates registered Bots and discovers their existing source events. `user.tdb`
 is the shared memory destination and is opened exclusively through the Host's user
 store owner; directory discovery must not reopen it as a workspace event store.
 Narration receives the actual source scope and available destination scopes; the user
@@ -162,6 +162,15 @@ native Pi branches. List cursors are presentation only; changed source revisions
 reopen their ranges. Prepared proposals and their source ranges survive restart;
 committed provenance reconciles a crash between memory and coverage writes. This
 is recoverable progress, not a cross-store rollback transaction.
+
+The original narrator and optional decision now execute as Catalog `MemoryWork` stages. Their whole
+fixed recipe, output, transport/finish evidence and usage live in the existing ContentStore/inference
+owner; `OrganizerProgress.workId` is only a reference. An unknown old source range cannot refresh the
+failure backoff for every newer entry in the same session, and an old work cannot overwrite another
+work's prepared row. Recovery uses original prepared proposals and committed provenance; it never
+turns the KnowledgeStore into a second inference scheduler or creates an incidental paid request.
+See [Bot background inference](../memory/DOCUMENTATION.md#bot-background-inference) for admission,
+Sleep, explicit Retry and the remaining native Bot entry boundary.
 
 Explicit chat selection extraction uses `memory/selection-memory-routes.ts`. Preview validates native
 branch text and exact offsets, calls the existing organizer narrator without automatic coverage/commit,

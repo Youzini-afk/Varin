@@ -21,6 +21,8 @@ pub struct GenerationOutput {
     pub events: Vec<ProviderEvent>,
     pub items: Vec<ProviderItem>,
     pub usage: UsageReceipt,
+    #[serde(rename = "finishReason")]
+    pub finish_reason: Option<crate::execution::FinishReason>,
 }
 impl From<&UsageReceipt> for InferenceUsage {
     fn from(value: &UsageReceipt) -> Self {
@@ -65,7 +67,7 @@ impl Catalog {
         p: &InferenceGenerateParams,
         body: InferenceBody,
     ) -> Result<InferenceStatus> {
-        if p.purpose != "explore" || p.system_prompt.trim().is_empty() || p.user.trim().is_empty() {
+        if !matches!(p.purpose.as_str(), "explore" | "memory-organizer") || p.system_prompt.trim().is_empty() || p.user.trim().is_empty() {
             return Err(RuntimeError::Invalid(
                 "invalid tool-free inference request".into(),
             ));
@@ -92,6 +94,10 @@ impl Catalog {
             },
             request: Value::Null,
         };
+        if p.purpose == "memory-organizer" {
+            memory_work::generation_parent(&self.db, &p.parent_operation_id, &p.caller_owner, self.epoch)?.ok_or_else(conflict)?;
+            return self.admit_inference_for(&params,body,InferenceCaller::MemoryWork,true);
+        }
         let scopes = self.nested_tools.clone();
         scopes.with_inference_context(&p.parent_operation_id, &p.caller_owner, |context| {
             self.admit_inference_for(
@@ -140,6 +146,9 @@ impl Catalog {
         let op = self.operation(id)?;
         kernel_owned(&op, self.epoch)?;
         let i = intent(&op)?;
+        if matches!(i.caller, InferenceCaller::MemoryWork) {
+            return self.dispatch_inference_executor(&InferenceOwnerParams {operation_id:id.into(),execution_owner:i.caller_owner},true);
+        }
         let InferenceCaller::Query { context } = i.caller else {
             return Err(conflict());
         };

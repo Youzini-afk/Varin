@@ -562,12 +562,12 @@ pub(super) fn hydrate_source(
 /// Internal summary branches accept only their original admitted input.
 pub(super) fn require_regular_branch(db: &Connection, branch_id: &str) -> Result<()> {
     let internal: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM context_jobs j JOIN runs r ON r.id=j.run_id WHERE r.branch_id=?1)",
+        "SELECT EXISTS(SELECT 1 FROM context_jobs j JOIN runs r ON r.id=j.run_id WHERE r.branch_id=?1) OR EXISTS(SELECT 1 FROM operations o JOIN runs r ON r.id=o.run_id WHERE r.branch_id=?1 AND json_extract(o.body,'$.intent.kind')='memory_work_v1')",
         [branch_id], |r| r.get(0),
     )?;
     if internal {
         return Err(RuntimeError::Conflict(
-            "context job branches do not accept additional input".into(),
+            "background work branches do not accept conversation input".into(),
         ));
     }
     Ok(())

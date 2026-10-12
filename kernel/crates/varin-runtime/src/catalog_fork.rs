@@ -49,6 +49,7 @@ impl Catalog {
         head: Option<&str>,
         plan_capture: Option<plan::PlanForkCapture>,
     ) -> Result<BranchForkPreparation> {
+        context_jobs::require_regular_branch(&self.db, source)?;
         let source_view = self.plan_view(source, head)?;
         let mut identity = json!({"source":source,"head":head});
         if let Some(capture) = plan_capture {
