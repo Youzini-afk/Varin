@@ -436,12 +436,18 @@ export class AgentRuntimeClient {
     const signal = callerSignal
       ? AbortSignal.any([callerSignal, registration.signal])
       : registration.signal;
+    let pending: Promise<T>;
     try {
       signal.throwIfAborted();
-      return await waitWithSignal(work(signal), signal);
-    } finally {
+      pending = work(signal);
+    } catch (error) {
       registration.release();
+      throw error;
     }
+    // Caller cancellation stays prompt, but the original preparation registration
+    // remains drainable until its actual source/resource work has settled.
+    void pending.then(() => registration.release(), () => registration.release());
+    return waitWithSignal(pending, signal);
   }
 
   onExit(listener: (error: Error) => void): () => void {

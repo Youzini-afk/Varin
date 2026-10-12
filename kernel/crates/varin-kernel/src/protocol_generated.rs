@@ -9,6 +9,11 @@ pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 23;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
+    "runtime.bot.gate.publish",
+    "runtime.bot.thread.create",
+    "runtime.bot.scope.suspend",
+    "runtime.bot.scope.status",
+    "runtime.bot.scope.resume",
     "runtime.inference.session",
     "runtime.inference.receipt_pending",
     "runtime.inference.dispatch",
@@ -66,6 +71,11 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.calendar.calculation.retry",
 ];
 pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
+    "runtime.bot.gate.publish",
+    "runtime.bot.thread.create",
+    "runtime.bot.scope.suspend",
+    "runtime.bot.scope.status",
+    "runtime.bot.scope.resume",
     "runtime.inference.session",
     "runtime.inference.generate",
     "runtime.inference.receipt_pending",
@@ -153,6 +163,31 @@ pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
 #[derive(Clone, Debug, Deserialize)]
 #[serde(transparent)]
 pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct BotExecutionGate {
+    pub(crate) bot_id: String,
+    pub(crate) profile_revision: i64,
+    pub(crate) activity_operation_id: RequiredNullable<String>,
+    pub(crate) permitted: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct BotThreadCreateParams {
+    pub(crate) bot_id: String,
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct BotScopeSuspension {
+    pub(crate) bot_id: String,
+    pub(crate) profile_revision: i64,
+    pub(crate) activity_operation_id: String,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -2972,6 +3007,23 @@ pub(crate) struct ContextFragment {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "runtime.bot.gate.publish" => serde_json::from_value::<BotExecutionGate>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.bot.thread.create" => {
+            serde_json::from_value::<BotThreadCreateParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.bot.scope.suspend" => serde_json::from_value::<BotScopeSuspension>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.bot.scope.status" => serde_json::from_value::<BotScopeSuspension>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.bot.scope.resume" => serde_json::from_value::<BotScopeSuspension>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.memory_work.admit" => serde_json::from_value::<MemoryWorkAdmit>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

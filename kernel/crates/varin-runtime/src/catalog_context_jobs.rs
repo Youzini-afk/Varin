@@ -8,7 +8,7 @@ use crate::execution::{Content, ConversationItem, Provenance};
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ContextJobAdmission {
     key: String,
-    branch_id: String,
+    pub(super) branch_id: String,
     through_id: String,
     expected_revision: u64,
     owner_run_id: Option<String>,

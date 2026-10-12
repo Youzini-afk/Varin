@@ -460,6 +460,7 @@ impl Catalog {
         if dispatched {
             goals::measured(&tx, goal.as_ref(), &receipt.usage)?;
         }
+        if receipt.local_executor_stopped { super::execution_persistence::record_kernel_executor_stopped(&tx, &op, self.epoch)?; }
         publish_operation(&tx, &mut op, s, "mcp.sampling.settled")?;
         publish(&tx, &mut m, "mcp.sampling.generated")?;
         tx.commit()?;

@@ -712,6 +712,7 @@ pub(super) fn check_dispatch(
     run: &str,
     selected: Option<&FrozenGoal>,
 ) -> Result<Option<FrozenGoal>> {
+    if !super::bot::run_permitted(db, &record(db, "runs", run)?)? { return Err(RuntimeError::BotSuspended); }
     let d = for_run(db, run)?;
     if d.as_ref().map(Definition::binding).as_ref() != selected {
         return Err(RuntimeError::GoalChanged);
@@ -1032,6 +1033,7 @@ pub(super) fn tool_allowed(
     db: &Connection,
     c: &crate::execution::ToolExecutionContext,
 ) -> Result<bool> {
+    if !super::bot::run_permitted(db, &record(db, "runs", &c.run_id)?)? { return Ok(false); }
     let selected = origin_goal(db, &c.origin)?;
     let current = for_run(db, &c.run_id)?;
     Ok(current.as_ref().map(Definition::binding) == selected

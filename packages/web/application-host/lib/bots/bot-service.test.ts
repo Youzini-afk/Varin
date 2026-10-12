@@ -45,7 +45,7 @@ const setup = async () => {
     prepareWake: vi.fn(async () => {}),
   };
   const options: BotServiceOptions = {
-    client: { issueGrant: async () => ({}), scoped: () => catalog } as unknown as BotServiceOptions["client"],
+    client: { subscribeExit: () => () => {}, issueGrant: async () => ({}), scoped: () => catalog } as unknown as BotServiceOptions["client"],
     dataDir, hostId: "test", registry: {
       listWorkspaceThreadSnapshots: async () => [], listRuns: async () => [], listWorkspaceRunSessionIds: async () => [],
     }, createSession, openSession, applyModel, applyInstructions, removeData, onDeleted, lifecycle: () => lifecycle,
@@ -302,7 +302,7 @@ it("reports the latest run session as a work item's navigation target", async ()
   const workThread = { id: "thread-1", purpose: "task", brief: "child work", parent: { kind: "thread", id: "root" } };
   const rootThread = { id: "root", purpose: "bot-root", brief: "root", hidden: true };
   const service = createBotService({
-    client: { issueGrant: async () => ({}), scoped: () => catalog } as unknown as BotServiceOptions["client"],
+    client: { subscribeExit: () => () => {}, issueGrant: async () => ({}), scoped: () => catalog } as unknown as BotServiceOptions["client"],
     dataDir, hostId: "test",
     registry: {
       listWorkspaceThreadSnapshots: async () => [

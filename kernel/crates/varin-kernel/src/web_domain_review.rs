@@ -75,7 +75,7 @@ pub(super) struct Fixture {
     pub(super) outgoing: mpsc::Receiver<Value>,
 }
 impl Fixture {
-    fn rpc(&self, frame: &Value) -> Result<Value, KernelError> {
+    fn rpc(&self, frame: &Value, epoch: &str) -> Result<Value, KernelError> {
         let method = frame["method"].as_str().unwrap();
         let params = frame["params"].clone();
         validate_method_params(method, &params)?;
@@ -103,7 +103,8 @@ impl Fixture {
                 if let Some(value)=controls.admit_control(method,&params)? { return Ok(value); }
                 controls.execute(method,params,&AtomicBool::new(false))
             }
-            "runtime.thread.list"
+            "runtime.bot.gate.publish"
+            | "runtime.thread.list"
             | "runtime.thread.inspect"
             | "runtime.run.inspect"
             | "runtime.run.scope" => dispatch(&mut owner.lock().unwrap(), method, params),
@@ -138,7 +139,7 @@ impl Fixture {
                 HOST,
                 GENERATION,
                 &self.storage_root.to_string_lossy(),
-                EPOCH,
+                epoch,
             ),
             "authority.grant.revoke" => self.storage.lock().unwrap().revoke_grant(&params, HOST),
             "authority.grant.retire" => self.storage.lock().unwrap().retire_grants(&params, HOST),
@@ -146,7 +147,7 @@ impl Fixture {
                 let grant_id = frame["grantId"].as_str();
                 let mut storage = self.storage.lock().unwrap();
                 let (grant, params) =
-                    storage.authorize(grant_id, EPOCH, HOST, GENERATION, method, &params)?;
+                    storage.authorize(grant_id, epoch, HOST, GENERATION, method, &params)?;
                 if method == "file.materialize" || method == "file.materializedView.prepare" {
                     use crate::storage::materialization::Admission;
                     let admission = if method == "file.materializedView.prepare" {
@@ -200,7 +201,7 @@ impl Fixture {
                     let mut storage = self.storage.lock().unwrap();
                     let result = (|| {
                         let (grant, _) = storage
-                            .authorize(grant_id, EPOCH, HOST, GENERATION, method, &params)?;
+                            .authorize(grant_id, epoch, HOST, GENERATION, method, &params)?;
                         storage.publish_capture(&task, body?, &grant)
                     })();
                     storage.finish_retained_file_lease(task.lease_id());
@@ -245,6 +246,15 @@ impl Fixture {
     /// An additional original production handler, without replacing Storage or Catalog routes.
     pub(super) fn pump_dispatch(
         &mut self,
+        dispatch: impl FnMut(&Value) -> Option<Result<Value, KernelError>>,
+        deliver: impl FnMut(&Value, &Result<Value, KernelError>) -> bool,
+    ) -> Option<Value> { self.pump_dispatch_epoch(EPOCH, dispatch, deliver) }
+    pub(super) fn pump_epoch(&mut self, epoch: &str) -> Option<Value> {
+        self.pump_dispatch_epoch(epoch, |_|None, |_,_|true)
+    }
+    fn pump_dispatch_epoch(
+        &mut self,
+        epoch: &str,
         mut dispatch: impl FnMut(&Value) -> Option<Result<Value, KernelError>>,
         mut deliver: impl FnMut(&Value, &Result<Value, KernelError>) -> bool,
     ) -> Option<Value> {
@@ -259,10 +269,10 @@ impl Fixture {
         match frame["kind"].as_str().unwrap() {
             "fixture-request" => {
                 let before = self.runtime.catalog().lock().unwrap().event_cursor().unwrap();
-                let result = match dispatch(&frame) { Some(result)=>result,None=>self.rpc(&frame) };
+                let result = match dispatch(&frame) { Some(result)=>result,None=>self.rpc(&frame, epoch) };
                 let cursor = self.runtime.catalog().lock().unwrap().event_cursor().unwrap();
                 if cursor != before {
-                    self.host.send(json!({"v":crate::protocol::PROTOCOL_VERSION,"kind":"runtime-event","kernelEpoch":EPOCH,"stream":"durable","cursor":cursor}));
+                    self.host.send(json!({"v":crate::protocol::PROTOCOL_VERSION,"kind":"runtime-event","kernelEpoch":epoch,"stream":"durable","cursor":cursor}));
                 }
                 if !deliver(&frame, &result) {
                     return Some(frame);
@@ -282,7 +292,7 @@ impl Fixture {
                     .unwrap()
                     .apply(&self.runtime.catalog())
                     .is_ok();
-                self.host.send(json!({"v":1,"kind":"host-tool-receipt-ack","kernelEpoch":EPOCH,"id":frame["id"],"accepted":accepted}));
+                self.host.send(json!({"v":1,"kind":"host-tool-receipt-ack","kernelEpoch":epoch,"id":frame["id"],"accepted":accepted}));
                 None
             }
             "fixture-failed" => panic!("original Web owner failed: {frame}"),

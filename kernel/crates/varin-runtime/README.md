@@ -19,7 +19,7 @@ writing Pi session files or the Host harness's existing execution records.
   inspection/list serialization runs on workers, and content collection retains every launch reference.
   Policy preparation binds the actual admitted baseline supplied by its assembly owner; the runtime
   does not hard-code a kernel policy wrapper's name.
-- Catalog 63 / wire 23 retain reconstructable Host dependency graphs in the original tool/policy
+- Catalog 64 / wire 23 retain reconstructable Host dependency graphs in the original tool/policy
   binding content. Graph validation, hashing, persistence and hydration run outside Catalog. Short
   policy metadata records exact identity and a ContentStore reference; launch, selection and delegated
   execution roots participate in the same GC publication protocol. Recovery preserves the saved
@@ -34,6 +34,14 @@ writing Pi session files or the Host harness's existing execution records.
   history. Unknown dispatched requests are observed, not automatically replayed. Knowledge/MemoryService
   remain the only memory writer; prepared proposals and source coverage are domain progress, not a second
   inference ledger. The existing Pi Bot entry and source readers have not been migrated by this boundary.
+- Private Bot Thread bindings derive children, context jobs and MemoryWork through their original
+  relationships. BotService publishes its exact profile revision/activity gate; a new Catalog epoch
+  remains closed until that source is revalidated. Scope suspension holds the original Runs without
+  changing user cancellation, Wait definitions, policy proposals or completed receipts. Workers drain
+  off the control actor; local stop evidence, unknown effects and unresolved model requests remain
+  distinct. Wake releases eligible holds for the existing continuation owner. Prepared requests use
+  the single existing recovery path, while uncertain dispatch is never automatically replayed.
+  This is a private foundation, not a complete native Bot entry, recall or Computer lifecycle.
 - `execution` drives a bound model provider and tool executor on a worker. Tool results have stable
   request/call/operation identities, real effect receipts and provider-specific original items.
   The default policy is replaceable; it does not own or mutate the catalog itself.
@@ -126,7 +134,7 @@ records typed dependencies in its manifests. Original publication protection spa
 the short identity/epoch/revision-checked commit. GC follows those dependencies from the existing
 history, input, operation, event, policy and request roots. Catalog retains only original metadata;
 byte reads, hash/base64 work and provider serialization stay outside its control lock. Catalog
-format **59**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **19** reject older internal
+format **64**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **23** reject older internal
 formats directly. These are distinct from policy service **4** and private script worker protocol **2**.
 
 `runtime.output.media.read` uses the original caller Thread/branch plus an actual history, queued

@@ -27,9 +27,11 @@ impl Drop for Fixture {
         let _ = std::fs::remove_dir_all(&self.path);
     }
 }
-fn input(db: &Arc<Mutex<Catalog>>) -> ExecutionInput {
+fn input(db: &Arc<Mutex<Catalog>>) -> ExecutionInput { input_with_bot(db, None) }
+fn input_with_bot(db: &Arc<Mutex<Catalog>>, bot: Option<&str>) -> ExecutionInput {
     let mut db = db.lock().unwrap();
-    db.create_thread("thread", "main").unwrap();
+    if let Some(bot) = bot { db.create_bot_thread("thread", "main", bot).unwrap(); }
+    else { db.create_thread("thread", "main").unwrap(); }
     let receipt = db
         .submit(&SubmitInput {
             key: "input".into(),
@@ -1583,3 +1585,6 @@ fn active_context_compiles_summary_and_tail_without_destroying_original_history(
         tail.opaque
     );
 }
+
+#[path = "bot_suspension_execution_tests.rs"]
+mod bot_suspension;

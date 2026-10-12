@@ -622,7 +622,7 @@ export class KernelClient {
   private readonly retrievalBridge: RetrievalBridge;
   private readonly issuedGrants = new Map<string, KernelGrantHandle>();
   private readonly policyBridge: AgentPolicyBridge;
-  private readonly runPreparations = new Map<string, Set<AbortController>>();
+  private readonly runPreparations = new Map<string, Set<{ controller: AbortController; settled: Promise<void> }>>();
   private window = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
   private controlWindow = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
   private closePromise: Promise<void> | undefined;
@@ -746,19 +746,30 @@ export class KernelClient {
   /** Ephemeral launch waits share the existing Run cancellation and kernel lifetime. */
   beginRunPreparation(runId: string): { signal: AbortSignal; release(): void } {
     const controller = new AbortController();
-    const registrations = this.runPreparations.get(runId) ?? new Set<AbortController>();
-    registrations.add(controller);
+    const registrations = this.runPreparations.get(runId) ?? new Set<{ controller: AbortController; settled: Promise<void> }>();
+    let settle!: () => void;
+    const registration = { controller, settled: new Promise<void>(resolve => { settle = resolve; }) };
+    registrations.add(registration);
     this.runPreparations.set(runId, registrations);
     return { signal: controller.signal, release: () => {
-      registrations.delete(controller);
+      registrations.delete(registration);
+      settle();
       if (this.runPreparations.get(runId) === registrations && registrations.size === 0) this.runPreparations.delete(runId);
     } };
   }
   cancelRunPreparation(runId: string): void {
     const registrations = this.runPreparations.get(runId);
     if (!registrations) return;
-    this.runPreparations.delete(runId);
-    for (const controller of registrations) controller.abort(new DOMException('Run preparation cancelled', 'AbortError'));
+    for (const { controller } of registrations) controller.abort(new DOMException('Run preparation cancelled', 'AbortError'));
+  }
+  /** The existing preparation owner settles only when its underlying work exits. */
+  async drainRunPreparations(runId: string): Promise<void> {
+    for (;;) {
+      const registrations = this.runPreparations.get(runId);
+      if (!registrations?.size) return;
+      this.cancelRunPreparation(runId);
+      await Promise.all([...registrations].map(registration => registration.settled));
+    }
   }
   async registerPolicyOwner(runId: string, generation: number, lease: AgentPolicyLease): Promise<AgentPolicyBinding> {
     if (!this.handshakeResult) await this.start();

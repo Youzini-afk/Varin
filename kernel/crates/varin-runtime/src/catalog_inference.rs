@@ -241,7 +241,7 @@ fn caller_owned(op: &Operation, owner: &ExecutorOwner) -> Result<()> {
 }
 fn parent_live(db: &Connection, op: &Operation, i: &Intent, epoch: u64) -> Result<()> {
     let run: Run = record(db, "runs", &op.run_id)?;
-    if op.epoch != epoch || run.cancel_requested || run.state.terminal() || op.cancel_requested {
+    if op.epoch != epoch || run.cancel_requested || run.state.terminal() || op.cancel_requested || !super::bot::run_permitted(db, &run)? {
         return Err(RuntimeError::DispatchCancelled);
     }
     let context = match &i.caller {

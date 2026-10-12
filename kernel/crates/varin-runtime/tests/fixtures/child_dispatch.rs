@@ -272,6 +272,7 @@ impl Fixture {
             parent_extension,
             customize,
             None,
+            None,
         )
     }
     pub(crate) fn new_in_project() -> Self {
@@ -292,7 +293,11 @@ impl Fixture {
             false,
             |_, _| {},
             Some("project-A"),
+            None,
         )
+    }
+    pub(crate) fn new_in_bot(bot: &str) -> Self {
+        Self::new_parent_scoped(7, read_schema(), ToolSchema { requirements:None, description:String::new(), output_schema:None, metadata:None, name:DISPATCH_TOOL.into(), version:"1".into(), schema:json!({"type":"object"}) }, false, false, false, |_,_|{}, None, Some(bot))
     }
     fn new_parent_scoped(
         revision: i64,
@@ -303,13 +308,17 @@ impl Fixture {
         parent_extension: bool,
         customize: impl FnOnce(&mut DispatchInput, &mut LaunchSelection),
         project: Option<&str>,
+        bot: Option<&str>,
     ) -> Self {
         let root = std::env::temp_dir().join(format!(
             "varin-child-catalog-review-{}",
             uuid::Uuid::new_v4()
         ));
         let mut db = Catalog::open(&root).unwrap();
-        db.create_thread("thread:parent", "branch:parent").unwrap();
+        if let Some(bot) = bot {
+            db.publish_bot_gate(varin_runtime::catalog::bot::BotGate { bot_id:bot.into(), profile_revision:1, activity_operation_id:Some("sleep".into()), permitted:true }).unwrap();
+            db.create_bot_thread("thread:parent", "branch:parent", bot).unwrap();
+        } else { db.create_thread("thread:parent", "branch:parent").unwrap(); }
         let mut input = DispatchInput {
             task: "Read the fixed file and report".into(),
             preset: None,

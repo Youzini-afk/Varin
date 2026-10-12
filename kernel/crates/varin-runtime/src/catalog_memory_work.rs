@@ -321,6 +321,7 @@ impl Catalog {
             }
             return Ok(id);
         }
+        if !super::bot::permitted(&self.db, &p.scope_id[4..], self.epoch)? { return Err(RuntimeError::BotSuspended); }
         if let Some(previous) = &p.retry_of {
             let old = self.operation(previous)?;
             let old_intent = intent(&old)?;
@@ -535,6 +536,9 @@ impl Catalog {
                 || work.epoch != self.epoch)
         {
             return Err(invalid());
+        }
+        if matches!(p.action, MemoryWorkAction::Claim | MemoryWorkAction::Resume) && !super::bot::thread_permitted(&self.db, &self.run(&work.run_id)?.thread_id, self.epoch)? {
+            return Err(RuntimeError::BotSuspended);
         }
         let tx = self.db.transaction()?;
         let event_kind = match &p.action {

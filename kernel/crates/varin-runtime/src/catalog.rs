@@ -12,6 +12,8 @@ use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
+    #[error("Bot execution gate is closed")]
+    BotSuspended,
     #[error("new user input is waiting at this execution boundary")]
     InputPending,
     #[error("tool dispatch cancelled before executor entry")]
@@ -40,7 +42,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 63;
+pub(crate) const FORMAT: i64 = 64;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -127,6 +129,7 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
         calendar::check_format(db)?;
         goals::check_format(db)?;
         mcp_interactions::check_format(db)?;
+        bot::check_format(db)?;
         db.prepare("SELECT run_id,identity,kind,state_ref,pending_state_ref,action_ref,continuation_ref,activation_cursor,pending,wait_id FROM policy_checkpoints")?;
         db.prepare("SELECT action_id,node_id,call_id,position,call,receipt,outcome FROM policy_graph_nodes")?;
         db.prepare("SELECT action_id,node_id,dependency_id FROM policy_graph_dependencies")?;
@@ -179,6 +182,7 @@ fn initialize_metadata(
         calendar::initialize_new(&tx)?;
         goals::initialize_new(&tx)?;
         mcp_interactions::initialize_new(&tx)?;
+        bot::initialize_new(&tx)?;
     }
     let epoch = tx.query_row(
         "UPDATE runtime_meta SET epoch=epoch+1 WHERE id=1 RETURNING epoch",
@@ -285,9 +289,14 @@ impl Catalog {
         self.nested_tools.clone()
     }
     pub fn create_thread(&mut self, thread_id: &str, branch_id: &str) -> Result<()> {
+        self.create_thread_with_bot(thread_id, branch_id, None)
+    }
+    fn create_thread_with_bot(&mut self, thread_id: &str, branch_id: &str, bot_id: Option<&str>) -> Result<()> {
         let tx = self.db.transaction()?;
         let initial:Option<String>=tx.query_row("SELECT json_extract(data,'$.branch_id') FROM events WHERE subject=?1 AND kind='thread.created' ORDER BY cursor LIMIT 1",[thread_id],|r|r.get(0)).optional()?;
         if let Some(initial) = initial {
+            let bound: Option<String> = tx.query_row("SELECT bot_id FROM bot_thread_bindings WHERE thread_id=?1", [thread_id], |r| r.get(0)).optional()?;
+            if bound.as_deref() != bot_id { return Err(RuntimeError::Conflict("Thread Bot binding changed".into())); }
             if initial == branch_id {
                 return Ok(());
             }
@@ -297,6 +306,10 @@ impl Catalog {
         }
 
         tx.execute("INSERT INTO threads(id) VALUES(?1)", [thread_id])?;
+        if let Some(bot_id) = bot_id {
+            if !bot::permitted(&tx, bot_id, self.epoch)? { return Err(RuntimeError::RequestActivationHeld); }
+            tx.execute("INSERT INTO bot_thread_bindings(thread_id,bot_id) VALUES(?1,?2)", params![thread_id, bot_id])?;
+        }
         tx.execute(
             "INSERT INTO branches(id,thread_id,head) VALUES(?1,?2,NULL)",
             params![branch_id, thread_id],
@@ -375,6 +388,14 @@ impl Catalog {
                 ));
             }
             return Ok(serde_json::from_str(&receipt)?);
+        }
+        let source_thread = if let Some((job, _)) = context_job {
+            Some(tx.query_row("SELECT thread_id FROM branches WHERE id=?1", [&job.branch_id], |r| r.get::<_, String>(0))?)
+        } else if let submissions::SubmissionOrigin::Child { parent_thread_id, .. } = origin {
+            Some(parent_thread_id.clone())
+        } else { None };
+        if !bot::thread_permitted(tx, source_thread.as_deref().unwrap_or(&command.thread_id), catalog_epoch)? {
+            return Err(RuntimeError::BotSuspended);
         }
         if let submissions::SubmissionOrigin::Ingress { input, .. } = origin {
             let current: inputs::QueuedInputMetadata = record(tx, "input_queue", &input.id)?;
@@ -851,6 +872,7 @@ impl Catalog {
         if !op.handed_off {
             fence(&run, epoch)?;
         }
+        if !bot::run_permitted(&tx, &run)? { return Err(RuntimeError::BotSuspended); }
         if op.epoch != epoch
             || op.cancel_requested
             || (!op.handed_off && run.cancel_requested)
@@ -1706,6 +1728,9 @@ pub mod forks;
 
 #[path = "catalog_memory_work.rs"]
 pub mod memory_work;
+
+#[path = "catalog_bot.rs"]
+pub mod bot;
 
 #[path = "catalog_context_jobs.rs"]
 pub mod context_jobs;

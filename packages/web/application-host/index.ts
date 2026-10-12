@@ -1859,6 +1859,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     hostId,
     dataDir: VARIN_DATA_DIR,
     registry: threadRegistry,
+    publishExecutionGate: (gate) => kernelClient.agentRuntimeRequest<void, 'runtime.bot.gate.publish'>('runtime.bot.gate.publish', gate),
     lifecycle: () => {
       if (!botLifecycleRuntime) throw new Error('Bot lifecycle is not ready');
       return botLifecycleRuntime;
@@ -1912,6 +1913,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       console.error('[VarinBots]', errorMessage(error));
     },
   });
+  kernelClient.subscribeReady(() => {
+    botAdmissionReady = false;
+    void botService.publishExecutionGates().then(() => { botAdmissionReady = true; }, error => {
+      console.error('[VarinBots] Execution gates could not be republished', errorMessage(error));
+    });
+  });
+  await botService.publishExecutionGates();
   botAdmissionReady = true;
   assertBotSessionExecution = async (sessionId) => {
     const entry = await botService.botForSession(sessionId);
