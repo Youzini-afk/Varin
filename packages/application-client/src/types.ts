@@ -1,4 +1,4 @@
-import type { AgentInputContext, PiRuntimeSnapshot, WorkFocusId } from '@varin/protocol';
+import type { AgentInputContext, AgentInputSnapshotConsumer, PiRuntimeSnapshot, WorkFocusId } from '@varin/protocol';
 import type { WorktreeMetadata, DraftStarterRef, FileEditorSettingsPatch } from './ui-dto.js';
 import type {
   VarinApplicationSurface,
@@ -1588,6 +1588,12 @@ export interface VarinResourceReference {
   resourceId: string;
 }
 
+export interface VarinResourceIdentity {
+  coordinationId: string;
+  /** Registered references to this same target, including the requested reference. */
+  aliases: VarinResourceReference[];
+}
+
 export interface WorkspaceMutationOwner {
   kind: string;
   id: string;
@@ -1790,7 +1796,7 @@ export interface VarinAgentInputSnapshotCaptureRequest {
   generation: number;
   ownerId: string;
   resources: VarinAgentInputSnapshotResource[];
-  sessionId: string;
+  consumer: AgentInputSnapshotConsumer;
 }
 
 export interface VarinDirtyBufferPublication {
@@ -1843,7 +1849,7 @@ export interface DocumentsAPI {
     workspaceId: string;
   }): Promise<{ cleared: boolean }>;
   captureAgentInputSnapshot?(request: VarinAgentInputSnapshotCaptureRequest): Promise<AgentInputContext>;
-  releaseAgentInputSnapshot?(request: { context: AgentInputContext; sessionId: string }): Promise<{ released: boolean }>;
+  releaseAgentInputSnapshot?(request: { context: AgentInputContext; consumer: AgentInputSnapshotConsumer }): Promise<{ released: boolean }>;
   readSurfaceOperation?(request: {
     generation: number;
     ownerId: string;
@@ -1853,11 +1859,9 @@ export interface DocumentsAPI {
   completeSurfaceOperation?(request: VarinDocumentSurfaceOperationCompletion): Promise<{ accepted: boolean }>;
   resolveWorkspace(input: { path?: string; workspaceId?: string }): Promise<VarinWorkspaceIdentity>;
   /** Opaque Host and canonical-target identity for coordinating aliases of one file. Never use it as an open path. */
-  resolveResourceIdentity(resource: VarinResourceReference): Promise<{
-    coordinationId: string;
-    /** Registered references to this same target, including the requested reference. */
-    aliases: VarinResourceReference[];
-  }>;
+  resolveResourceIdentity(resource: VarinResourceReference): Promise<VarinResourceIdentity>;
+  /** Null proves the registered roots cannot intersect; candidate admission failures still reject. */
+  resolveResourceIdentity(resource: VarinResourceReference, options: { withinWorkspaceId: string }): Promise<VarinResourceIdentity | null>;
   read(resource: VarinResourceReference): Promise<VarinDocumentReadResult>;
   write(request: VarinDocumentWriteRequest): Promise<VarinDocumentWriteResult>;
   move(request: VarinDocumentMoveRequest): Promise<VarinDocumentMoveResult>;

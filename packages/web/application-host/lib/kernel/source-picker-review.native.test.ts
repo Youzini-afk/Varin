@@ -57,7 +57,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const documents = createDocumentAuthority({ hostId: 'http-review', dataDir: path.join(root, 'documents'), isAllowedRoot: async () => true, isTrusted: async () => true });
   const storage = new KernelStorageAdapter({ client: kernel, hostId: 'http-review', storageRoot: root, resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root });
   const workingStates = createKernelWorkspaceWorkingStateAccess(storage);
-  const prepare = createThreadSourcePreparer({ sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates });
+  const prepare = createThreadSourcePreparer({ inspectInventory: async () => ({ kind: 'directory' }), sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates });
   let closed = false;
   const close = async () => { if (closed) return; closed = true; await storage.dispose(); await documents.dispose(); await kernel.close(); };
   cleanups.push(close);
@@ -100,7 +100,8 @@ it('prepares saved disk through real Documents and capture; concurrent and reope
   const f = await fixture(reply);
   await fs.writeFile(path.join(f.workspace, 'source.txt'), 'saved baseline');
   const identity = await f.api.create('prepared-source');
-  const request = { ...identity, key: 'same-capture', path: f.workspace, mode: 'fixed_branch' as const };
+  const request = { ...identity, key: 'same-capture', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId,
+    content: { mode: 'saved-files' as const }, captureScopes: [], mode: 'fixed_branch' as const };
   const [first, concurrent] = await Promise.all([f.api.prepareSource(request), f.api.prepareSource(request)]);
   expect(first).toEqual(concurrent);
   expect(first.source.workspaceId).toBe((await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId);
@@ -112,7 +113,7 @@ it('prepares saved disk through real Documents and capture; concurrent and reope
   expect(await f.api.prepareSource(request)).toEqual(first);
   const other = await f.api.create('other-prepared-thread');
   await expect(f.api.prepareSource({ ...request, threadId: other.threadId })).rejects.toMatchObject({ status: 400 });
-  await expect(f.api.prepareSource({ ...request, key: 'missing-folder', path: path.join(f.root, 'absent') })).rejects.toMatchObject({ status: 400 });
+  await expect(f.documents.resolveWorkspace({ path: path.join(f.root, 'absent') })).rejects.toMatchObject({ statusCode: 404 });
   await f.close();
   const reopened = await fixture(reply, f.root);
   expect(await reopened.api.prepareSource(request)).toEqual(first);
@@ -138,7 +139,7 @@ it('prepared editable copy runs a real process without modifying the source fold
   });
   await fs.writeFile(path.join(f.workspace, 'source.txt'), 'unmodified source folder');
   const identity = await f.api.create('editable-prepared-source');
-  const prepared = await f.api.prepareSource({ ...identity, key: 'editable-capture', path: f.workspace, mode: 'materialized' });
+  const prepared = await f.api.prepareSource({ ...identity, key: 'editable-capture', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'materialized' });
   const input = { ...identity, key: 'execute-isolated-copy', expectedHead: null, text: 'edit only isolated working copy', model, source: prepared.source };
   await expect(f.api.submit({ ...input, source: { ...prepared.source, workspaceId: 'invented-workspace' } })).rejects.toMatchObject({ status: 400 });
   expect((await f.api.snapshot(identity)).history).toEqual([]);
@@ -165,7 +166,7 @@ it('list and search discover the prepared fixed snapshot rather than later disk 
   await fs.mkdir(path.join(f.workspace, 'src'));
   await fs.writeFile(path.join(f.workspace, 'src', 'original.ts'), 'needle snapshot content');
   const identity = await f.api.create('fixed-discovery-thread');
-  const prepared = await f.api.prepareSource({ ...identity, key: 'fixed-discovery-source', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await f.api.prepareSource({ ...identity, key: 'fixed-discovery-source', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   await fs.writeFile(path.join(f.workspace, 'src', 'original.ts'), 'needle changed live content');
   await fs.writeFile(path.join(f.workspace, 'src', 'live-only.ts'), 'needle not in snapshot');
   const receipt = await f.api.submit({ ...identity, key: 'fixed-discovery-input', expectedHead: null, text: 'list and search the saved workspace', model, source: prepared.source });

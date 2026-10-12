@@ -82,7 +82,7 @@ async function fixture(
         generation: 1,
         ownerId: "surface",
         resources: [{ baseRevision, content, localEditRevision, resource }],
-        sessionId,
+        consumer: { kind: 'pi-session', sessionId: sessionId },
       });
     },
   };

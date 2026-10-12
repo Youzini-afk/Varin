@@ -200,7 +200,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
     }, rebindModel: async () => credentialOwner };
     const settings = new GlobalSettingsAuthority(agentDir);
     const profiles = createAgentProfilesAPI({ settings, capabilities: signal => runtime.childCapabilities(signal) });
-    const adapter = new ThreadAdapter(runtime, models, createThreadSourceAdmission({ documents, withSourceRead: (input, consume) => storage.withResourceRead(input, consume), runtime }), (_runId, error) => { errors.push(error); }, createThreadSourcePreparer({ sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, prepareResources: resources.prepareSourceCapture }), prepareContext, plans, undefined, undefined,
+    const adapter = new ThreadAdapter(runtime, models, createThreadSourceAdmission({ documents, withSourceRead: (input, consume) => storage.withResourceRead(input, consume), runtime }), (_runId, error) => { errors.push(error); }, createThreadSourcePreparer({ inspectInventory: async () => ({ kind: 'directory' }), sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, prepareResources: resources.prepareSourceCapture }), prepareContext, plans, undefined, undefined,
       createChildProfilePreparer({ settings: async () => (await settings.read()).document, capabilities: signal => runtime.childCapabilities(signal), models }));
     const collaboration = options.collaboration === false ? undefined : new ThreadCollaboration({ kernel, storageAdapter: storage, resolveLiveSource: async () => { throw new Error("Fixed source fixture"); }, sourceCaptureOwners: { documents, prepareResources: resources.prepareSourceCapture, inspectInventory: async () => { throw new Error("Fixed source fixture"); } }, runtime,  prepareContext, continueRun: (runId, signal) => adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => adapter.recover(signal), onError: (_operation, error) => { errors.push(error); } });
     const app = express();
@@ -279,7 +279,7 @@ it('family tools and public views read original and fork-inherited conversations
   });
   const h = await f.openHost();
   const identity = await h.api.create('family-conversations');
-  const prepared = await h.api.prepareSource({ ...identity, key: 'family-source', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await h.api.prepareSource({ ...identity, key: 'family-source', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   prepared.source.tools = ['file_read'];
   const receipt = await h.api.submit({ ...identity, key: 'family-input', expectedHead: null, text: 'FAMILY_PARENT_SEMANTIC: discover and read this original task', model, source: prepared.source });
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
@@ -345,7 +345,7 @@ it('two real send observations retain their original requests across Host restar
   const h = await f.openHost({ context: original => blockChild(original, entered, release) });
   try {
     const identity = await h.api.create('two-correlated-replies');
-    const prepared = await h.api.prepareSource({ ...identity, key: 'reply-source', path: f.workspace, mode: 'fixed_branch' });
+    const prepared = await h.api.prepareSource({ ...identity, key: 'reply-source', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
     const initial = await h.api.submit({ ...identity, key: 'reply-input', expectedHead: null, text: 'Dispatch a child and finish; the user will reply to its two messages', model, source: prepared.source });
     await entered.promise;
     await expect.poll(async () => (await h.runtime.run(initial.run_id)).state).toBe('completed');
@@ -403,7 +403,7 @@ it('passive family messages keep Agent and User identities, do not reopen finish
   const h = await f.openHost({ context: original => blockChild(original, entered, release) });
   try {
     const identity = await h.api.create('passive-family-messages');
-    const prepared = await h.api.prepareSource({ ...identity, key: 'message-source', path: f.workspace, mode: 'fixed_branch' });
+    const prepared = await h.api.prepareSource({ ...identity, key: 'message-source', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
     const original = await h.api.submit({ ...identity, key: 'message-input', expectedHead: null, text: 'Dispatch and finish; ordinary notifications need no response', model, source: prepared.source });
     await entered.promise; await expect.poll(async () => (await h.runtime.run(original.run_id)).state).toBe('completed');
     release.release();
@@ -464,7 +464,7 @@ it('selected read-only child owns its ordinary notes and plan through real Host 
   const identity = await h.api.create('child-notes-plan');
   await h.personalization.saveNote({ scope: { kind: 'session', id: identity.threadId }, content: 'PARENT_PRIVATE_NOTE' });
   await h.personalization.saveNote({ scope: { kind: 'project', id: 'child-review-project' }, content: 'SHARED_CHILD_PROJECT' });
-  const prepared = await h.api.prepareSource({ ...identity, key: 'notes-plan-source', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await h.api.prepareSource({ ...identity, key: 'notes-plan-source', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   prepared.source.tools = ['file_read'];
   const run = await h.api.submit({ ...identity, key: 'notes-plan-input', expectedHead: null, text: 'Delegate notes and plan', model, source: prepared.source });
   try {
@@ -528,7 +528,7 @@ it('the configured retrieval preset returns before preparation and delivers one 
   await h.personalization.saveNote({ scope: { kind: 'session', id: identity.threadId }, content: 'PARENT_SESSION_SECRET' });
   await h.personalization.saveNote({ scope: { kind: 'project', id: 'child-review-project' }, content: 'SHARED_ADMITTED_PROJECT_NOTE' });
   await h.personalization.saveNote({ scope: { kind: 'project', id: 'other-project' }, content: 'UNRELATED_CHANGED_PROJECT_NOTE' });
-  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   prepared.source.tools = ['file_read'];
   const receipt = await h.api.submit({ ...identity, key: 'parent-input', expectedHead: null, text: 'PARENT_TASK: delegate then read and wait', model, source: prepared.source });
   await entered.promise;
@@ -611,7 +611,7 @@ it('the shipped worker preset writes a private child from a fixed read-only pare
   expect(worker.tools.names).toEqual(expect.arrayContaining(['file_read', 'file_write', 'file_edit']));
   expect(worker.tools.names).not.toContain('read');
   const identity = await h.api.create('isolated-write-review');
-  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   prepared.source.tools = ['file_read'];
   const parent = await h.api.submit({ ...identity, key: 'parent-input', expectedHead: null, text: 'Delegate isolated edits and wait', model, source: prepared.source });
   await expect.poll(async () => (await h.runtime.run(parent.run_id)).state, { timeout: 15_000 }).toBe('completed');
@@ -649,7 +649,7 @@ it('parent final survives independently; cancelling preparing child fences late 
   });
   const h = await f.openHost({ context: original => blockChild(original, entered, release) });
   const identity = await h.api.create('child-review-cancel');
-  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   const receipt = await h.api.submit({ ...identity, key: 'parent-input', expectedHead: null, text: 'dispatch and finish', model, source: prepared.source });
   await entered.promise;
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state).toBe('completed');
@@ -698,7 +698,7 @@ it('a saved runtime-specific preset stays frozen across a later edit and Host/ke
   expect((await h.profiles.read({ runtime: 'agent' })).profiles.find(profile => profile.id === saved.profileId)?.tools)
     .toEqual({ source: 'explicit', names: ['file_read'] });
   const identity = await h.api.create('child-review-reopen-prepare');
-  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   const receipt = await h.api.submit({ ...identity, key: 'parent-input', expectedHead: null, text: 'dispatch and finish', model, source: prepared.source });
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state).toBe('completed');
   const child = await h.runtime.child(operationId);
@@ -742,7 +742,7 @@ it('a later Run of the same parent Thread can observe and wait for an independen
   });
   const h = await f.openHost({ context: original => blockChild(original, entered, release) });
   const identity = await h.api.create('child-review-parent-continuation');
-  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   const first = await h.api.submit({ ...identity, key: 'first-input', expectedHead: null, text: 'dispatch and finish', model, source: prepared.source });
   await entered.promise;
   await expect.poll(async () => (await h.runtime.run(first.run_id)).state).toBe('completed');
@@ -779,7 +779,7 @@ it('a dispatched child model request is not replayed after Host/kernel loss', as
   });
   const h = await f.openHost();
   const identity = await h.api.create('child-review-no-paid-replay');
-  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   const receipt = await h.api.submit({ ...identity, key: 'parent-input', expectedHead: null, text: 'dispatch and finish', model, source: prepared.source });
   await childRequested.promise;
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state).toBe('completed');
@@ -809,7 +809,7 @@ it('committed child output survives a lost report delivery and resumes the origi
   });
   const h = await f.openHost();
   const identity = await h.api.create('child-review-report-recovery');
-  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   const receipt = await h.api.submit({ ...identity, key: 'parent-input', expectedHead: null, text: 'dispatch then wait', model, source: prepared.source });
   await childRequested.promise;
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state).toBe('waiting');
@@ -850,7 +850,7 @@ it('model-supplied parent, source, project and grant fields cannot manufacture c
     }
   });
   const h = await f.openHost(); const identity = await h.api.create('child-review-model-forgery');
-  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   const receipt = await h.api.submit({ ...identity, key: 'parent-input', expectedHead: null, text: 'exercise rejected model parameters', model, source: prepared.source });
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state).toBe('completed');
   expect(await h.runtime.children()).toEqual([]); expect(steps).toBe(2);
@@ -878,7 +878,7 @@ it('another Thread cannot read or wait on a child merely by knowing its operatio
   });
   const h = await f.openHost({ context: original => blockChild(original, entered, release) });
   const owner = await h.api.create('child-review-private-owner');
-  const prepared = await h.api.prepareSource({ ...owner, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await h.api.prepareSource({ ...owner, key: 'fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   const first = await h.api.submit({ ...owner, key: 'owner-input', expectedHead: null, text: 'dispatch then finish', model, source: prepared.source });
   await entered.promise;
   await expect.poll(async () => (await h.runtime.run(first.run_id)).state).toBe('completed');
@@ -906,7 +906,7 @@ it('revoking only the old parent grant after durable handoff does not cancel the
   });
   const h = await f.openHost({ context: original => blockChild(original, entered, release) });
   const identity = await h.api.create('child-review-retired-parent-grant');
-  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   const receipt = await h.api.submit({ ...identity, key: 'parent-input', expectedHead: null, text: 'dispatch then finish', model, source: prepared.source });
   await entered.promise;
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state).toBe('completed');
@@ -934,7 +934,7 @@ it('a parent grant revoked before dispatch cannot create a child or retain a han
     }
   });
   const h = await f.openHost(); const identity = await h.api.create('child-review-pre-handoff-revoke');
-  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   const receipt = await h.api.submit({ ...identity, key: 'parent-input', expectedHead: null, text: 'dispatch only with current grant', model, source: prepared.source });
   await parentRequested.promise;
   const grant = h.grants.find(entry => entry.runId === receipt.run_id)!;
@@ -956,7 +956,7 @@ it('a narrow parent read scope cannot turn a whole fixed root into wider child a
   });
   const scopeOptions: { sourceGrantScopes?: string[] } = {};
   const h = await f.openHost(scopeOptions); const identity = await h.api.create('child-review-narrow-scope');
-  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   scopeOptions.sourceGrantScopes = ['source.txt'];
   prepared.source.tools = ['file_read'];
   const receipt = await h.api.submit({ ...identity, key: 'parent-input', expectedHead: null, text: 'dispatch must honor narrow read scopes', model, source: prepared.source });
@@ -981,7 +981,7 @@ it('a revoked child grant blocks its own reads even though the parent handoff wa
     }
   });
   const h = await f.openHost(); const identity = await h.api.create('child-review-child-grant-revoke');
-  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   const receipt = await h.api.submit({ ...identity, key: 'parent-input', expectedHead: null, text: 'dispatch then finish', model, source: prepared.source });
   await childRequested.promise;
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state).toBe('completed');
@@ -1007,7 +1007,7 @@ it('credential-owner failure holds the admitted child for explicit retry without
   });
   const h = await f.openHost({ context: original => blockChild(original, entered, release) });
   const identity = await h.api.create('child-review-rebind-failure');
-  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   const receipt = await h.api.submit({ ...identity, key: 'parent-input', expectedHead: null, text: 'dispatch then finish', model, source: prepared.source });
   await entered.promise;
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state).toBe('completed');
@@ -1046,7 +1046,7 @@ it('failure between the durable source pin and child Catalog admission compensat
     try { database.exec(query); } finally { database.close(); }
   };
   sql("CREATE TRIGGER review_reject_child_admission BEFORE INSERT ON child_tasks BEGIN SELECT RAISE(ABORT,'review failed child admission after source receipt'); END;");
-  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   const receipt = await h.api.submit({ ...identity, key: 'parent-input', expectedHead: null, text: 'dispatch with an injected local admission failure', model, source: prepared.source });
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state).toBe('completed');
   expect(await h.runtime.children()).toEqual([]);
@@ -1077,7 +1077,7 @@ it('keeps large UTF-8 reports as references with bounded Wait preview and exact 
   });
   const h = await f.openHost();
   const identity = await h.api.create('child-review-report-pages');
-  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   const receipt = await h.api.submit({ ...identity, key: 'parent-input', expectedHead: null, text: 'Dispatch then wait', model, source: prepared.source });
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
   const child = await h.runtime.child(operationId);
@@ -1118,7 +1118,7 @@ it('revoking actual Documents workspace trust after child handoff prevents child
   });
   const h = await f.openHost({ context: original => blockChild(original, entered, release) });
   const identity = await h.api.create('child-review-workspace-revoked');
-  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   const receipt = await h.api.submit({ ...identity, key: 'parent-input', expectedHead: null, text: 'Dispatch and finish', model, source: prepared.source });
   await entered.promise;
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state).toBe('completed');
@@ -1218,7 +1218,7 @@ for (const family of ['openai-responses', 'anthropic-messages'] as const) {
     const identity = await h.api.create(`combined-${family}`);
     await h.personalization.saveNote({ scope: { kind: 'session', id: identity.threadId }, content: 'COMBINED_PARENT_PRIVATE' });
     await h.personalization.saveNote({ scope: { kind: 'project', id: 'child-review-project' }, content: 'COMBINED_ADMITTED_PROJECT' });
-    const prepared = await h.api.prepareSource({ ...identity, key: 'combined-fixed', path: f.workspace, mode: 'fixed_branch' });
+    const prepared = await h.api.prepareSource({ ...identity, key: 'combined-fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
     prepared.source.tools = ['file_read'];
     const run = await h.api.submit({ ...identity, key: 'combined-input', expectedHead: null, text: 'Delegate a read-only child, then continue.', model, source: prepared.source });
     await entered.promise; await frozenReady.promise;
@@ -1287,7 +1287,7 @@ it('combined recovery reconciles a lost memory receipt while resuming an accepte
   const h = await f.openHost({ collaboration: false });
   h.memoryControl.dropMutationReply = true;
   const identity = await h.api.create('combined-recovery');
-  const prepared = await h.api.prepareSource({ ...identity, key: 'recovery-fixed', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await h.api.prepareSource({ ...identity, key: 'recovery-fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   prepared.source.tools = ['file_read'];
   const run = await h.api.submit({ ...identity, key: 'recovery-input', expectedHead: null, text: 'Dispatch then save a note', model, source: prepared.source });
   await expect.poll(async () => ['completed', 'failed'].includes((await h.runtime.run(run.run_id)).state)).toBe(true);
@@ -1338,7 +1338,7 @@ it('combined controls cancel blocked child preparation and parent generation wit
   });
   const h = await f.openHost({ context: original => blockChild(original, entered, release) });
   const identity = await h.api.create('combined-control');
-  const prepared = await h.api.prepareSource({ ...identity, key: 'control-fixed', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await h.api.prepareSource({ ...identity, key: 'control-fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   const run = await h.api.submit({ ...identity, key: 'control-input', expectedHead: null, text: 'Save then dispatch', model, source: prepared.source });
   await entered.promise; await parentHeld.promise;
   expect((await h.personalization.catalog()).revision).toBe(1);
@@ -1402,7 +1402,7 @@ for (const [defect, mutation] of Object.entries(combinedFormatDefects)) {
     const h = await f.openHost();
     const identity = await h.api.create('combined-format');
     await h.personalization.saveNote({ scope: { kind: 'session', id: identity.threadId }, content: 'FORMAT_MEMORY_SENTINEL' });
-    const prepared = await h.api.prepareSource({ ...identity, key: 'format-fixed', path: f.workspace, mode: 'fixed_branch' });
+    const prepared = await h.api.prepareSource({ ...identity, key: 'format-fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
     prepared.source.tools = ['file_read'];
     const run = await h.api.submit({ ...identity, key: 'format-input', expectedHead: null, text: 'Format fixture: dispatch and wait', model, source: prepared.source });
     await combinedFixtureTerminal(h.runtime, run.run_id);
@@ -1468,7 +1468,7 @@ it('installed collaboration policy accepts a child and reads before any parent M
   try {
     const identity = await h.api.create('policy-child-fixed');
     await h.selectParentPolicy(identity.threadId);
-    const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+    const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
     prepared.source.tools = ['file_read'];
     const receipt = await h.api.submit({ ...identity, key: 'input', expectedHead: null, text: 'Delegate, independently inspect, then answer from the report', model, source: prepared.source });
     await entered.promise;
@@ -1522,7 +1522,7 @@ it('installed collaboration policy reopens its pending Wait without duplicating 
   const h = await f.openHost({ policyExample: true, collaboration: false });
   const identity = await h.api.create('policy-child-reopen');
   await h.selectParentPolicy(identity.threadId);
-  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   prepared.source.tools = ['file_read'];
   const receipt = await h.api.submit({ ...identity, key: 'input', expectedHead: null, text: 'Await the delegated report', model, source: prepared.source });
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).waiting_on, { timeout: 10_000 }).toMatch(/^child-wait:/);
@@ -1576,7 +1576,7 @@ it('cancelling a policy child observation resumes from the real cancellation fac
   try {
     const identity = await h.api.create('policy-child-cancel-observation');
     await h.selectParentPolicy(identity.threadId);
-    const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+    const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
     prepared.source.tools = ['file_read'];
     const receipt = await h.api.submit({ ...identity, key: 'input', expectedHead: null, text: 'Delegate and observe', model, source: prepared.source });
     await entered.promise;
@@ -1623,7 +1623,7 @@ it.each(['user_continuation', 'message_request'] as const)('%s continues a compl
   });
   const h = await f.openHost();
   const parentIdentity = await h.api.create('continued-writable-child');
-  const prepared = await h.api.prepareSource({ ...parentIdentity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+  const prepared = await h.api.prepareSource({ ...parentIdentity, key: 'fixed', workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   prepared.source.tools = ['file_read'];
   const parent = await h.api.submit({ ...parentIdentity, key: 'parent', expectedHead: null, text: 'Delegate isolated work and observe its result', model, source: prepared.source });
   await expect.poll(async () => (await h.runtime.run(parent.run_id)).state, { timeout: 15_000 }).toBe('completed');

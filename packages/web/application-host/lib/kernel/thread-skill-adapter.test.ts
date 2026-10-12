@@ -180,7 +180,7 @@ it('cold calendar admission preserves explicit skill input and transfers a succe
   const occurrence = { id: 'calendar:occurrence', revision: 3, thread_id: identity.threadId, branch_id: identity.branchId };
   const work = { occurrence, definition: { target: { kind: 'new_work', model, sourceMode: 'fixed_branch', goal: null } }, instruction: rawText, owner_epoch: 2 } as import('./protocol.generated.js').CalendarPreparation;
   const preparation = new AbortController();
-  await f.adapter.prepareCalendarWork(work, f.root, preparation.signal);
+  await f.adapter.prepareCalendarWork(work, 'calendar-project', preparation.signal);
   preparation.abort(); // The occurrence leaves the pending preparation scan after admission.
   expect(f.runtime.admitCalendar.mock.calls[0]?.[0]).toMatchObject({ occurrenceId: occurrence.id, expectedRevision: 3, ownerEpoch: 2,
     initialContext: f.initial(f.a), inputPreparation: { expectedContextCheckpoint: null, skill: { snapshotId: f.a.snapshot.id, body: 'ORIGINAL A', arguments: 'first\n second' } } });

@@ -705,11 +705,11 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       collect(["ls-files", "-z"]),
       collect(["ls-files", "-d", "-z"]),
       collect(["ls-files", "--others", "--exclude-standard", "-z"]),
-      collect(["diff", "--name-only", "-z"]),
-      collect(["diff", "--cached", "--name-only", "-z"]),
+      collect(["diff", "--relative", "--name-only", "-z", "--", "."]),
+      collect(["diff", "--relative", "--cached", "--name-only", "-z", "--", "."]),
       collect(["ls-files", "-s", "-z"]),
     ]);
-    const versusHead = unborn ? [] : parseGitNullList(await collect(["diff", "--name-only", "-z", "HEAD"]));
+    const versusHead = unborn ? [] : parseGitNullList(await collect(["diff", "--relative", "--name-only", "-z", "HEAD", "--", "."]));
     const gitlinks = [...new Set(
       parseGitStageList(stagedMeta)
         .filter((entry) => entry.mode === "160000")
@@ -740,7 +740,9 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     // C-quoted UTF-8 input handles spaces, quotes and control characters without a shell.
     const quoted = (file: string) => '"' + [...Buffer.from(file)].map(byte => byte >= 32 && byte < 127 && byte !== 34 && byte !== 92
       ? String.fromCharCode(byte) : `\\${byte.toString(8).padStart(3, "0")}`).join("") + '"';
-    const rawHashes = rawPaths.length ? (await runGit(directory, ["hash-object", "--no-filters", "--stdin-paths"], rawPaths.map(quoted).join("\n") + "\n", signal)).stdout.trim().split(/\r?\n/u) : [];
+    // Git resolves --stdin-paths from its repository root, whereas ls-files and our
+    // inventory are relative to the selected directory, which may be a subtree.
+    const rawHashes = rawPaths.length ? (await runGit(directory, ["hash-object", "--no-filters", "--stdin-paths"], rawPaths.map(file => quoted(pathModule.resolve(directory, file))).join("\n") + "\n", signal)).stdout.trim().split(/\r?\n/u) : [];
     if (rawHashes.length !== rawPaths.length || rawHashes.some(hash => !/^[0-9a-f]+$/u.test(hash))) throw new Error("Git returned an incomplete raw baseline identity");
     const rawFileHashes = Object.fromEntries(rawPaths.map((file, index) => [file, rawHashes[index]!]));
     return {
@@ -756,6 +758,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         ...versusHead,
       ])].sort(),
       gitlinks,
+      indexFingerprint: createHash("sha256").update(stagedMeta).digest("hex"),
       indexModes,
       contentIdentities,
       rawFileHashes,

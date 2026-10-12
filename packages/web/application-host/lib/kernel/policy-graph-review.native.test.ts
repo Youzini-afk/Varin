@@ -79,7 +79,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const storage = new KernelStorageAdapter({ client: kernel, hostId: 'http-review', storageRoot: root, resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root });
   const workingStates = createKernelWorkspaceWorkingStateAccess(storage);
   const resources = resourceScopeFixture(root, workingStates, documents, undefined, (input, consume) => storage.withResourceRead(input, consume));
-  const prepare = createThreadSourcePreparer({ sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, prepareResources: resources.prepareSourceCapture });
+  const prepare = createThreadSourcePreparer({ inspectInventory: async () => ({ kind: 'directory' }), sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, prepareResources: resources.prepareSourceCapture });
   let refresh = () => Promise.resolve();
   const refreshTasks: Promise<void>[] = [];
   const personalization = createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'selected-project' }), onChanged: () => { const task = refresh(); void task.catch(() => undefined); refreshTasks.push(task); } });
@@ -180,7 +180,7 @@ const graphReceipts = (f: Awaited<ReturnType<typeof fixture>>): VarinAgentPolicy
 async function submitSource(f: Awaited<ReturnType<typeof fixture>>, name: string, mode: 'fixed_branch' | 'materialized' = 'fixed_branch') {
   const identity = await f.api.create(name);
   await fs.writeFile(path.join(f.workspace, 'evidence.txt'), 'IMMUTABLE_REVIEW_EVIDENCE');
-  const source = await f.api.prepareSource({ ...identity, key: 'source', path: f.workspace, mode });
+  const source = await f.api.prepareSource({ ...identity, key: 'source', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode });
   const run = await f.api.submit({ ...identity, key: `run-${name}`, expectedHead: null, text: 'Review evidence', model, source: source.source });
   return { identity, run };
 }
@@ -198,7 +198,7 @@ it('installed evidence policy reads content-dependent immutable graphs before th
   await fs.writeFile(path.join(f.workspace, 'evidence-index.json'), JSON.stringify({ nextFile: followOn }));
   await fs.writeFile(path.join(f.workspace, followOn), 'SNAPSHOT_SELECTED_EVIDENCE');
   await fs.writeFile(path.join(f.workspace, 'unselected.txt'), 'UNSELECTED_DECOY_EVIDENCE');
-  const source = await f.api.prepareSource({ ...identity, key: 'source', path: f.workspace, mode: 'fixed_branch' });
+  const source = await f.api.prepareSource({ ...identity, key: 'source', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   // The selected file changes after capture. Both graph reads must use the pinned source.
   await fs.writeFile(path.join(f.workspace, followOn), 'MUTATED_LIVE_EVIDENCE');
   const run = await f.api.submit({ ...identity, key: 'run', expectedHead: null, text: 'Read selected evidence', model, source: source.source });

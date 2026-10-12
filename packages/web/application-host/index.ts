@@ -1219,7 +1219,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     storageRoot: path.join(VARIN_DATA_DIR, 'kernel', extensionRuntime.services.hostId),
     resolveWorkspaceRoot: async (workspaceId) => workspaceId === SOURCE_VIEW_STORAGE_SCOPE
       ? sourceViewStorageRoot
-      : scopeDirectory(workspaceId),
+      : isSessionScopeId(workspaceId) || isBotScopeId(workspaceId) ? scopeDirectory(workspaceId)
+        : (await documentsAuthority.admitWorkspaceRegistration(workspaceId)).canonicalPath,
     resolveActor: async (workspaceId, purpose, hint) => {
       const maintenance = hint?.capabilities?.some((capability) => (
         capability === 'recovery.maintenance' || capability === 'storage.maintenance'
@@ -3232,7 +3233,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       withSourceRead: (input, consume) => kernelStorageAdapter.withResourceRead(input, consume), runtime: agentRuntime }), (runId, _error) => {
       // Durable launch remains inspectable/resumable. Never log credentials or provider responses.
       console.error('[Thread] Launch preparation requires attention:', runId);
-    }, createThreadSourcePreparer({ sourceTools: mode => agentRuntime.sourceTools(mode),  documents: documentsAuthority, liveSources, workingStates: threadWorkingStates, prepareResources: threadResources.prepareSourceCapture }),
+    }, createThreadSourcePreparer({ inspectInventory: (directory, signal) => threadWorktreeRuntime.inspectGitBaselineInventory(directory, signal), sourceTools: mode => agentRuntime.sourceTools(mode),  documents: documentsAuthority, liveSources, workingStates: threadWorkingStates, prepareResources: threadResources.prepareSourceCapture }),
     threadContext, new PlanService(agentRuntime, getUserKnowledgeStore), createThreadSkillInputPreparer(threadResources), createThreadProcesses({ runtime: agentRuntime, kernel: kernelClient,
       terminal: () => terminalRuntime, resolveLiveSource: liveSources.validate,
       onError: () => console.error('[Thread] Original process terminal requires attention'),
@@ -3264,7 +3265,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const calendarOwner = new CalendarOwner({ runtime: agentRuntime,
     projects: () => readScheduledProjects(readSettingsFromDisk, sanitizeProjects),
     hasPiWork: scheduledTasksRuntime.hasPiWork,
-    prepare: (work, projectPath, signal) => threads.prepareCalendarWork(work, projectPath, signal),
+    prepare: async (work, projectPath, signal) => threads.prepareCalendarWork(work, (await documentsAuthority.resolveWorkspace({ path: projectPath })).workspaceId, signal),
     onChanged: () => { for (const client of uiVarinEventClients) { try { writeSseEvent(client, { type: 'varin:scheduled-task-changed', properties: {} }); } catch { uiVarinEventClients.delete(client); } } },
     onError: () => console.warn('[Calendar] preparation or asset synchronization requires attention'),
   });

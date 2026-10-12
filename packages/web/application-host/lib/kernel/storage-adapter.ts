@@ -1,3 +1,4 @@
+import { parseSourceDraftProvenance } from '../harness/working-state/source-drafts.js';
 import { SourceAdmissionError, sourceReadError } from './source-admission-error.js';
 import { parseSourceResourceCapture, type ResourceSourceReadInput, type ResourceSourceReadView } from "./thread-resource-scope.js";
 import { runKernelCompute } from "./compute-runner.js";
@@ -149,6 +150,8 @@ const normalize = (value: string): string => {
   return parts.join("/");
 };
 
+const normalizeCaptureScope = (value: string): string => value === "." ? "." : normalize(value);
+
 const normalizeViewPath = (value: string): string => {
   const raw = value.replace(/\\/g, "/").replace(/^\.\//, "");
   if (!raw || raw === ".") return "";
@@ -178,6 +181,11 @@ const asRecord = (value: unknown): Record<string, unknown> => (
 const parseSourceProvenance = (value: unknown): ChildSourceProvenance => {
   const source = asRecord(value);
   const resources = source.resources === undefined ? undefined : parseSourceResourceCapture(source.resources);
+  if (source.captureIdentity !== undefined && (typeof source.captureIdentity !== "string" || !/^[0-9a-f]{64}$/.test(source.captureIdentity))) {
+    throw new Error("Working source capture identity is malformed");
+  }
+  const drafts = source.drafts === undefined ? undefined : parseSourceDraftProvenance(source.drafts);
+  if (drafts && source.contentMode !== "fixed-draft-baseline") throw new Error("Working source draft mode is inconsistent");
   if (source.consistency === "fixed-root" && typeof source.root === "string" && source.root) {
     return { consistency: source.consistency, root: source.root, ...(resources ? { resources } : {}) };
   }
@@ -186,7 +194,9 @@ const parseSourceProvenance = (value: unknown): ChildSourceProvenance => {
     && Array.isArray(source.captureScopes) && source.captureScopes.every((item): item is string => typeof item === "string")
     && Array.isArray(source.omittedDraftPaths) && source.omittedDraftPaths.every((item): item is string => typeof item === "string")) {
     return { consistency: source.consistency, contentMode: source.contentMode,
-      captureScopes: [...source.captureScopes], omittedDraftPaths: [...source.omittedDraftPaths], ...(resources ? { resources } : {}) };
+      captureScopes: [...source.captureScopes], omittedDraftPaths: [...source.omittedDraftPaths],
+      ...(source.captureIdentity === undefined ? {} : { captureIdentity: source.captureIdentity as string }),
+      ...(drafts ? { drafts } : {}), ...(resources ? { resources } : {}) };
   }
   throw new Error("Working source provenance body is malformed");
 };
@@ -415,7 +425,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       ? current.draftBasePaths.map(normalize).sort()
       : null;
     const captureScopes = Array.isArray(current.captureScopes) && current.captureScopes.every((item) => typeof item === "string")
-      ? current.captureScopes.map(normalize).sort()
+      ? current.captureScopes.map(normalizeCaptureScope).sort()
       : null;
     const createdAt = Number(current.createdAt);
     const updatedAt = Number(current.updatedAt);
@@ -905,7 +915,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     });
   }
 
-  async putObject(bytes: Buffer): Promise<{ hash: string; byteLength: number }> {
+  async putObject(bytes: Buffer): Promise<{ hash: string; byteLength: number; release?: () => Promise<void> }> {
     const value = await this.context.client.putBlob(bytes, `blob:${randomUUID()}`);
     const existingOwner = this.ownerByHash.get(value.hash);
     if (existingOwner) {
@@ -913,7 +923,12 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       return { hash: value.hash, byteLength: value.byteLength };
     }
     this.ownerByHash.set(value.hash, value.ownerId);
-    return { hash: value.hash, byteLength: value.byteLength };
+    return { hash: value.hash, byteLength: value.byteLength, release: async () => {
+      // Only this upload's untransferred lease is ours; committed roots own their own references.
+      if (this.ownerByHash.get(value.hash) !== value.ownerId) return;
+      await this.context.client.releaseBlob(value.ownerId);
+      if (this.ownerByHash.get(value.hash) === value.ownerId) this.ownerByHash.delete(value.hash);
+    } };
   }
 
   private kernelEntry(file: string, state: RecoveryState): { path: string; state: KernelBranchState; ownerId?: string; sourcePath?: string; sourceRecordId?: string; sourceSlot?: string } {
@@ -991,7 +1006,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     if (workspaceId !== this.context.identity.workspaceId) throw new Error("Working-state workspace mismatch");
     const kernelBaseRef = baseRef && (/^sha256-[a-f0-9]+$/i.test(baseRef) || baseRef.startsWith("pin:") || /^.+@\d+$/.test(baseRef)) ? baseRef : undefined;
     const normalizedDraftPaths = [...new Set(draftBasePaths.map(normalize))].sort();
-    const normalizedCaptureScopes = [...new Set(captureScopes.map(normalize))].sort();
+    const normalizedCaptureScopes = [...new Set(captureScopes.map(normalizeCaptureScope))].sort();
     const entries = Object.entries(baseState).map(([file, state]) => this.kernelEntry(file, state));
     const pendingOwners = new Map(Object.values(baseState).flatMap((state) => {
       if (state.kind !== "regular-file") return [];
@@ -1070,7 +1085,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     }
     for (const entry of parentEntries?.entries ?? []) if (directDraftPaths.some((file) => entry.path.startsWith(`${file}/`))) draftClosure.add(entry.path);
     const normalizedDraftPaths = [...draftClosure].sort();
-    const normalizedCaptureScopes = [...new Set(captureScopes.map(normalize))].sort();
+    const normalizedCaptureScopes = [...new Set(captureScopes.map(normalizeCaptureScope))].sort();
     const provenanceUpload = options?.sourceProvenance
       ? await this.context.client.putBlob(Buffer.from(JSON.stringify(parseSourceProvenance(options.sourceProvenance)), "utf8"), `source-provenance:${branchId}:${randomUUID()}`)
       : undefined;

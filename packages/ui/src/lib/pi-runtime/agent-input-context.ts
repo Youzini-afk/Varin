@@ -1,11 +1,11 @@
-import type { AgentInputContext } from '@varin/protocol';
+import type { AgentInputContext, AgentInputSnapshotConsumer } from '@varin/protocol';
 import { getDocumentRegistry } from '@/lib/documents/session';
 
 export const captureSurfaceAgentInputContext = async (
-  sessionId: string,
+  consumer: AgentInputSnapshotConsumer,
 ): Promise<AgentInputContext> => {
   try {
-    return await getDocumentRegistry().captureAgentInputContext(sessionId);
+    return await getDocumentRegistry().captureAgentInputContext(consumer);
   } catch {
     return {
       source: 'surface',
@@ -16,12 +16,12 @@ export const captureSurfaceAgentInputContext = async (
 };
 
 export const releaseSurfaceAgentInputContext = async (
-  sessionId: string,
+  consumer: AgentInputSnapshotConsumer,
   context: AgentInputContext,
 ): Promise<void> => {
   if (context.source !== 'surface' || context.snapshot.status !== 'ready') return;
   try {
-    await getDocumentRegistry().releaseAgentInputContext(sessionId, context);
+    await getDocumentRegistry().releaseAgentInputContext(consumer, context);
   } catch {
     // SessionHost may already have committed or released the pending snapshot.
   }

@@ -250,7 +250,7 @@ const sendPiMessage = async (
   const promptText = modelContext?.agent
     ? renderPiAgentInvocation(modelContext.agent, task)
     : task;
-  const inputContext = await captureSurfaceAgentInputContext(sessionId);
+  const inputContext = await captureSurfaceAgentInputContext({ kind: 'pi-session', sessionId });
   let result;
   try {
     result = await client.request('agent.prompt', {
@@ -260,10 +260,10 @@ const sendPiMessage = async (
       text: promptText,
     });
   } catch (error) {
-    await releaseSurfaceAgentInputContext(sessionId, inputContext);
+    await releaseSurfaceAgentInputContext({ kind: 'pi-session', sessionId }, inputContext);
     throw error;
   }
-  if (!result.accepted) await releaseSurfaceAgentInputContext(sessionId, inputContext);
+  if (!result.accepted) await releaseSurfaceAgentInputContext({ kind: 'pi-session', sessionId }, inputContext);
   if (!result.accepted) throw new Error('The Pi runtime did not accept the review prompt');
   requestChatForceScrollBottom(sessionId);
   return waitForSentUserEntry(sessionId, previousEntryIds, startedAt);

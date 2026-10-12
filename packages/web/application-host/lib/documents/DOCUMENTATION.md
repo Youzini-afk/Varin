@@ -12,7 +12,7 @@ Text editors and workspace text helpers consume DocumentsAPI. `FilesAPI` remains
 - `surface-mutation.ts` — classifies snapshot-owned vs disk paths, matches every edit against the original content and rejects overlapping matches before writing, writes editor-canonical text through `requestSurfaceOperation`, and compensates a mixed batch with one undo that reuses the apply `operationId`. UI `bufferHash` is compared only to the normalized editor identity, never to serialized snapshot bytes.
 - `line-ending.ts` — detect / normalize / serialize editor line endings so Registry buffers stay LF while snapshots keep the file's original endings.
 - `agent-mutation-operation.ts` — durable `agent-mutation` kind on the Rust typed recovery store. It records intent before the first write, per-path before/target identity, external dispatch/compensation/observation phases, and monotonic needs-attention. Disk capture/apply/compensation uses the Rust file-resource backend; Registry receipts remain Host-coordinated. The durable store is the sole operation authority; there is no bounded in-memory mirror. This is not an Integration operation.
-- `surface-snapshot-store.ts` — content-hash-deduplicated in-memory copies of one input surface's dirty buffers, including encoding/BOM metadata, editor `bufferHash`, `lineEnding`, and content serialized with its original line endings so consumers can reproduce save bytes. Pending snapshots become active only after Pi accepts the input; replacement, rollback, session drop, and Host disposal release content references. The internal clone operation lets Thread dispatch copy a validated snapshot into persistent WorkingState; it is not a renderer route.
+- `surface-snapshot-store.ts` — content-hash-deduplicated in-memory copies of one input surface's dirty buffers, including encoding/BOM metadata, editor `bufferHash`, `lineEnding`, and content serialized with its original line endings so consumers can reproduce save bytes. Each snapshot belongs to an explicit `pi-session` or `thread` consumer. Pi acceptance activates its pending snapshot; replacement, rollback, consumer drop, and Host disposal release content references. Thread snapshots remain immutable until release. The internal clone operation lets Thread preparation copy a validated snapshot into persistent WorkingState; it is not a renderer route.
 - `routes.ts`: `registerDocumentRoutes(app, { documents, uiAuthController })` — authenticated `/api/documents/*` routes.
 - `capability.ts`: `createDocumentsCapabilityHandler(authority)` — resource-scoped `workspace.documents` Host capability.
 - `contract-fixtures.ts`: shared Web contract fixtures.
@@ -32,7 +32,20 @@ Text editors and workspace text helpers consume DocumentsAPI. `FilesAPI` remains
 
 Watch events carry resource metadata only. Agent-input capture bodies use the authenticated Documents POST channel. Runtime worker requests receive only an opaque snapshot reference or unavailable dirty paths; file bodies are not written to logs, event payloads, or URLs.
 
-Thread Integration uses Host-directed surface capture/apply/undo requests. The dirty-owner connection carries the request ID; the authenticated surface-operation routes carry bodies and receipts. Authority checks owner registration, generation, workspace and document identity. Integration persists its intent before dispatch and only completes after a valid receipt; caller-provided paths cannot acknowledge a write. Confirmed own writes update matching active agent-input sources. An uncertain dispatched write invalidates those paths, so reads cannot silently return either the old draft or old disk. Ordinary later user edits still do not mutate an already captured input.
+Thread Integration uses Host-directed surface capture/apply/undo requests. The dirty-owner connection carries the request ID; the authenticated surface-operation routes carry bodies and receipts. Authority checks owner registration, generation, workspace and document identity. Integration persists its intent before dispatch and only completes after a valid receipt; caller-provided paths cannot acknowledge a write. Confirmed own writes update matching active Pi agent-input sources. An uncertain dispatched write invalidates those Pi paths, so reads cannot silently return either the old draft or old disk. Thread source snapshots and ordinary later user edits do not participate in that Pi own-write replacement rule.
+
+Thread source selection resolves the chosen directory through Documents once, then freezes its
+`workspaceId`, preparation key, explicit saved-files or surface-drafts choice, and capture scopes.
+The Registry includes dirty buffers only from that selected physical root, including verified aliases;
+another registered workspace cannot contribute bodies. Preparation reads its original durable branch
+receipt before requiring a still-live snapshot or directory. A completed request can therefore be
+retried after snapshot release or a directory move, while current registration and trust admission
+remain mandatory. This does not authorize a live file operation through registration metadata alone.
+
+The original resource-identity query accepts `withinWorkspaceId` for this selection. Only disjoint
+registered canonical roots return `null`, without opening an unrelated offline root. Overlapping
+parent/nested/file registrations still resolve actual physical identity and aliases; their admission
+failures remain errors. The Registry does not infer paths from opaque coordination IDs.
 
 Root-session mixed surface/disk mutations preflight every disk member under the same Rust file-resource lease before sending any surface request. Explicit failure is recorded as not applied; a missing authenticated Registry receipt remains uncertain. Conditional compensation continues across paths and never overwrites a later user edit. Rust file operations persist intent before the side effect and reconcile started operations after kernel restart; an observed mismatch remains conflict/needs-attention rather than being guessed complete. Recovery status and the Recovery panel expose durable `agent-mutation` needs-attention rows.
 

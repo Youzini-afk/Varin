@@ -8,6 +8,7 @@ Last updated: 2026-10-12
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [Documents 草稿与原生固定来源](runtime-document-source-2026-10-12.md) | 显式内容选择、同源资源闭包、Git 选根、原固定 receipt、取消与重开；各层证据与组合恢复边界 |
 | [Bot 产品入口、原记忆与摘要准备（2026-10-12）](runtime-bot-product-context-2026-10-12.md) | 实际 Bot 身份/来源/召回、产品配置、Sleep/Wake、原 Plan 与摘要基线；真实消费者与有限验证边界 |
 | [私有 Bot 身份与可恢复暂停基础（2026-10-12）](runtime-bot-suspension-foundation-2026-10-12.md) | 原来源 gate、实际 worker 排空、保留等待与单一路径恢复；完整 Bot 产品链仍待接入 |
 | [原 Bot 记忆整理与选段推理](runtime-bot-memory-inference-2026-10-12.md) | 原 Bot/MemoryService、独立后台推理与固定来源、原回执恢复、Sleep 实际排空和显式选文消费；有限链路证据 |

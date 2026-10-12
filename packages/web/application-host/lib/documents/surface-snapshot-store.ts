@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { AgentInputContext } from '@varin/protocol';
+import type { AgentInputContext, AgentInputSnapshotConsumer } from '@varin/protocol';
 
 export interface SurfaceSnapshotResource {
   baseRevision: string | null;
@@ -7,6 +7,7 @@ export interface SurfaceSnapshotResource {
   bom: boolean;
   content: string;
   localEditRevision: number;
+  documentInstanceId?: string;
   resource: { workspaceId: string; resourceId: string };
   /** Host-resolved identity and registered aliases for the same physical target. */
   coordinationId?: string;
@@ -32,7 +33,8 @@ interface StoredSnapshot {
   ownerGeneration: number;
   ref: string;
   resources: Map<string, StoredResource>;
-  sessionId: string;
+  consumer: AgentInputSnapshotConsumer;
+  consumerKey: string;
   state: 'active' | 'pending';
   /**
    * Paths whose captured draft has been replaced by an observed write. The
@@ -80,6 +82,7 @@ export type SurfaceSnapshotCloneResult =
   | { status: 'disk' }
   | {
       status: 'ready';
+      owner?: { ownerId: string; generation: number };
       resources: Array<SurfaceSnapshotResource & { revision: string }>;
       /** Dirty paths a write already superseded; disk is their newer baseline. */
       supersededResources: Array<{ workspaceId: string; resourceId: string }>;
@@ -116,15 +119,17 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
   };
   const contents = new Map<string, StoredContent>();
   const snapshots = new Map<string, StoredSnapshot>();
-  const pendingBySession = new Map<string, Set<string>>();
-  const activeBySession = new Map<string, string>();
+  const consumerKey = (consumer: AgentInputSnapshotConsumer): string => consumer.kind === 'pi-session'
+    ? JSON.stringify(['pi-session', consumer.sessionId]) : JSON.stringify(['thread', consumer.threadId, consumer.branchId]);
+  const pendingByConsumer = new Map<string, Set<string>>();
+  const activeByConsumer = new Map<string, string>();
 
   const releaseStored = (snapshot: StoredSnapshot): void => {
     if (snapshots.get(snapshot.ref) !== snapshot) return;
     snapshots.delete(snapshot.ref);
-    pendingBySession.get(snapshot.sessionId)?.delete(snapshot.ref);
-    if (pendingBySession.get(snapshot.sessionId)?.size === 0) pendingBySession.delete(snapshot.sessionId);
-    if (activeBySession.get(snapshot.sessionId) === snapshot.ref) activeBySession.delete(snapshot.sessionId);
+    pendingByConsumer.get(snapshot.consumerKey)?.delete(snapshot.ref);
+    if (pendingByConsumer.get(snapshot.consumerKey)?.size === 0) pendingByConsumer.delete(snapshot.consumerKey);
+    if (activeByConsumer.get(snapshot.consumerKey) === snapshot.ref) activeByConsumer.delete(snapshot.consumerKey);
     for (const resource of snapshot.resources.values()) {
       const stored = contents.get(resource.contentHash);
       if (!stored) continue;
@@ -137,8 +142,10 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     ownerId: string;
     ownerGeneration?: number;
     resources: readonly SurfaceSnapshotResource[];
-    sessionId: string;
+    consumer: AgentInputSnapshotConsumer;
   }): AgentInputContext => {
+    const keys = input.resources.map(resource => resourceKey(resource.resource.workspaceId, resource.resource.resourceId));
+    if (new Set(keys).size !== keys.length) throw new Error('Snapshot resources contain duplicate document identities');
     const ref = randomUUID();
     const resources = new Map<string, StoredResource>();
     const aliases = new Map<string, string>();
@@ -154,6 +161,7 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
         bom: resource.bom,
         contentHash: hash,
         localEditRevision: resource.localEditRevision,
+        ...(resource.documentInstanceId === undefined ? {} : { documentInstanceId: resource.documentInstanceId }),
         resource: Object.freeze({ ...resource.resource }),
         ...(resource.coordinationId === undefined ? {} : { coordinationId: resource.coordinationId }),
         ...(resource.aliases === undefined ? {} : { aliases: Object.freeze(resource.aliases.map((alias) => Object.freeze({ ...alias }))) }),
@@ -180,15 +188,16 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
       ownerGeneration: input.ownerGeneration ?? 0,
       ref,
       resources,
-      sessionId: input.sessionId,
+      consumer: Object.freeze({ ...input.consumer }),
+      consumerKey: consumerKey(input.consumer),
       state: 'pending',
       superseded: new Set<string>(),
       invalidated: new Set<string>(),
     });
     snapshots.set(ref, snapshot);
-    const pending = pendingBySession.get(input.sessionId) ?? new Set<string>();
+    const pending = pendingByConsumer.get(consumerKey(input.consumer)) ?? new Set<string>();
     pending.add(ref);
-    pendingBySession.set(input.sessionId, pending);
+    pendingByConsumer.set(consumerKey(input.consumer), pending);
     return {
       source: 'surface',
       roots: roots.map((root) => ({ workspaceId: root.workspaceId, dirtyPaths: [...root.dirtyPaths] })),
@@ -211,6 +220,8 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     const written = resourceKey(workspaceId, normalizeResourceId(resourceId));
     if (!written) return;
     for (const snapshot of snapshots.values()) {
+      // Thread preparation consumes the exact immutable capture; Pi turns retain their observed-write view.
+      if (snapshot.consumer.kind === 'thread') continue;
       const coordinationId = snapshot.aliases.get(written);
       for (const [key, resource] of snapshot.resources) {
         if (snapshot.superseded.has(key)) continue;
@@ -238,6 +249,8 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     const key = resourceKey(input.workspaceId, input.resourceId);
     const hash = contentHash(input.content);
     for (const snapshot of snapshots.values()) {
+      // Thread preparation consumes the exact immutable capture; Pi turns retain their observed-write view.
+      if (snapshot.consumer.kind === 'thread') continue;
       if (snapshot.ownerId !== input.ownerId || snapshot.ownerGeneration !== input.ownerGeneration) continue;
       const coordinationId = snapshot.aliases.get(key);
       for (const [targetKey, resource] of snapshot.resources) {
@@ -278,6 +291,8 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
   }): void => {
     const keys = new Set(input.resourceIds.map((resourceId) => resourceKey(input.workspaceId, resourceId)));
     for (const snapshot of snapshots.values()) {
+      // Thread preparation consumes the exact immutable capture; Pi turns retain their observed-write view.
+      if (snapshot.consumer.kind === 'thread') continue;
       if (snapshot.ownerId !== input.ownerId || snapshot.ownerGeneration !== input.ownerGeneration) continue;
       const coordinationIds = new Set([...keys].map((key) => snapshot.aliases.get(key)).filter((id): id is string => Boolean(id)));
       for (const [key, resource] of snapshot.resources) {
@@ -287,42 +302,42 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     }
   };
 
-  const resolveReady = (sessionId: string, context: AgentInputContext): StoredSnapshot | null => {
+  const resolveReady = (consumer: AgentInputSnapshotConsumer, context: AgentInputContext): StoredSnapshot | null => {
     if (context.source !== 'surface' || context.snapshot.status !== 'ready') return null;
     const snapshot = snapshots.get(context.snapshot.ref);
-    if (!snapshot || snapshot.sessionId !== sessionId) return null;
+    if (!snapshot || snapshot.consumerKey !== consumerKey(consumer)) return null;
     return sameRoots(snapshot.roots, context.roots) ? snapshot : null;
   };
 
-  const commit = (sessionId: string, context: AgentInputContext): { committed: boolean } => {
-    const previousRef = activeBySession.get(sessionId);
+  const commit = (consumer: AgentInputSnapshotConsumer, context: AgentInputContext): { committed: boolean } => {
+    const previousRef = activeByConsumer.get(consumerKey(consumer));
     let nextRef: string | undefined;
     if (context.source === 'surface' && context.snapshot.status === 'ready') {
-      const snapshot = resolveReady(sessionId, context);
+      const snapshot = resolveReady(consumer, context);
       if (!snapshot) return { committed: false };
       const active: StoredSnapshot = Object.freeze({ ...snapshot, state: 'active' });
       snapshots.set(snapshot.ref, active);
-      pendingBySession.get(sessionId)?.delete(snapshot.ref);
-      if (pendingBySession.get(sessionId)?.size === 0) pendingBySession.delete(sessionId);
-      activeBySession.set(sessionId, snapshot.ref);
+      pendingByConsumer.get(consumerKey(consumer))?.delete(snapshot.ref);
+      if (pendingByConsumer.get(consumerKey(consumer))?.size === 0) pendingByConsumer.delete(consumerKey(consumer));
+      activeByConsumer.set(consumerKey(consumer), snapshot.ref);
       nextRef = snapshot.ref;
     }
     if (previousRef && previousRef !== nextRef) {
       const previous = snapshots.get(previousRef);
       if (previous) releaseStored(previous);
     }
-    if (nextRef === undefined) activeBySession.delete(sessionId);
+    if (nextRef === undefined) activeByConsumer.delete(consumerKey(consumer));
     return { committed: true };
   };
 
-  const release = (sessionId: string, context: AgentInputContext): { released: boolean } => {
-    const snapshot = resolveReady(sessionId, context);
+  const release = (consumer: AgentInputSnapshotConsumer, context: AgentInputContext): { released: boolean } => {
+    const snapshot = resolveReady(consumer, context);
     if (!snapshot || snapshot.state !== 'pending') return { released: false };
     releaseStored(snapshot);
     return { released: true };
   };
 
-  const read = (sessionId: string, context: AgentInputContext, resourceId: string, workspaceId: string): SurfaceSnapshotReadResult => {
+  const read = (consumer: AgentInputSnapshotConsumer, context: AgentInputContext, resourceId: string, workspaceId: string): SurfaceSnapshotReadResult => {
     if (context.source === 'disk') return { status: 'disk' };
     const root = context.roots.find((entry) => entry.workspaceId === workspaceId);
     const dirty = context.roots.length === 0 || Boolean(root?.dirtyPaths.some((path) => pathKey(path) === pathKey(resourceId)));
@@ -331,7 +346,7 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
         ? { status: 'unavailable', message: 'The editor source snapshot is unavailable for this dirty document.' }
         : { status: 'disk' };
     }
-    const snapshot = resolveReady(sessionId, context);
+    const snapshot = resolveReady(consumer, context);
     if (!snapshot) {
       return dirty
         ? { status: 'unavailable', message: 'The editor source snapshot expired on the application host.' }
@@ -359,14 +374,14 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
   };
 
   const inspect = (
-    sessionId: string,
+    consumer: AgentInputSnapshotConsumer,
     context: AgentInputContext,
     resourceId: string,
     workspaceId: string,
   ): SurfaceSnapshotInspectResult => {
-    const draft = read(sessionId, context, resourceId, workspaceId);
+    const draft = read(consumer, context, resourceId, workspaceId);
     if (draft.status !== 'ready') return draft;
-    const snapshot = resolveReady(sessionId, context);
+    const snapshot = resolveReady(consumer, context);
     const resource = snapshot?.resources.get(resourceKey(workspaceId, resourceId));
     if (!snapshot || !resource) {
       return { status: 'unavailable', message: 'The editor source snapshot expired on the application host.' };
@@ -386,12 +401,12 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     };
   };
 
-  const clone = (sessionId: string, context: AgentInputContext): SurfaceSnapshotCloneResult => {
+  const clone = (consumer: AgentInputSnapshotConsumer, context: AgentInputContext): SurfaceSnapshotCloneResult => {
     if (context.source === 'disk') return { status: 'disk' };
     if (context.snapshot.status === 'unavailable') {
       return { status: 'unavailable', message: 'The editor source snapshot is unavailable.' };
     }
-    const snapshot = resolveReady(sessionId, context);
+    const snapshot = resolveReady(consumer, context);
     if (!snapshot) return { status: 'unavailable', message: 'The editor source snapshot expired on the application host.' };
     const resources: Array<SurfaceSnapshotResource & { revision: string }> = [];
     const supersededResources: Array<{ workspaceId: string; resourceId: string }> = [];
@@ -417,6 +432,7 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
         bom: resource.bom,
         content,
         localEditRevision: resource.localEditRevision,
+        ...(resource.documentInstanceId === undefined ? {} : { documentInstanceId: resource.documentInstanceId }),
         resource: { ...resource.resource },
         revision: `surface-draft:${snapshot.ref}:${resource.localEditRevision}`,
         ...(resource.coordinationId === undefined ? {} : { coordinationId: resource.coordinationId }),
@@ -425,7 +441,7 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
         ...(resource.lineEnding === undefined ? {} : { lineEnding: resource.lineEnding }),
       });
     }
-    return { status: 'ready', resources, supersededResources };
+    return { status: 'ready', owner: { ownerId: snapshot.ownerId, generation: snapshot.ownerGeneration }, resources, supersededResources };
   };
 
   /**
@@ -434,17 +450,17 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
    * search and enumerate it on disk like any other file, while an expired
    * capture keeps every dirty path here and never becomes a silent disk read.
    */
-  const draftPaths = (sessionId: string, context: AgentInputContext, workspaceId: string): string[] => {
+  const draftPaths = (consumer: AgentInputSnapshotConsumer, context: AgentInputContext, workspaceId: string): string[] => {
     if (context.source === 'disk') return [];
     const dirtyPaths = context.roots.find((root) => root.workspaceId === workspaceId)?.dirtyPaths ?? [];
     if (context.snapshot.status === 'unavailable') return [...dirtyPaths];
-    const snapshot = resolveReady(sessionId, context);
+    const snapshot = resolveReady(consumer, context);
     if (!snapshot) return [...dirtyPaths];
     return dirtyPaths.filter((resourceId) => !snapshot.superseded.has(resourceKey(workspaceId, resourceId)));
   };
 
-  const owner = (sessionId: string, context: AgentInputContext, workspaceId: string): { ownerId: string; generation: number; workspaceId: string } | null => {
-    const snapshot = resolveReady(sessionId, context);
+  const owner = (consumer: AgentInputSnapshotConsumer, context: AgentInputContext, workspaceId: string): { ownerId: string; generation: number; workspaceId: string } | null => {
+    const snapshot = resolveReady(consumer, context);
     return snapshot?.roots.some((root) => root.workspaceId === workspaceId)
       ? { ownerId: snapshot.ownerId, generation: snapshot.ownerGeneration, workspaceId }
       : null;
@@ -456,7 +472,7 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
    * never falls back to disk when its immutable snapshot is unavailable.
    */
   const overlay = (
-    sessionId: string,
+    consumer: AgentInputSnapshotConsumer,
     context: AgentInputContext,
     root: string,
     workspaceId: string,
@@ -470,7 +486,7 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
         ? { status: 'unavailable', message: 'The editor source snapshot is unavailable.' }
         : { status: 'disk' };
     }
-    const snapshot = resolveReady(sessionId, context);
+    const snapshot = resolveReady(consumer, context);
     if (!snapshot) {
       return contextHasRelatedDirtyPath
         ? { status: 'unavailable', message: 'The editor source snapshot expired on the application host.' }
@@ -525,16 +541,16 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     };
   };
 
-  const dropSession = (sessionId: string): void => {
-    const refs = new Set<string>(pendingBySession.get(sessionId) ?? []);
-    const active = activeBySession.get(sessionId);
+  const dropConsumer = (consumer: AgentInputSnapshotConsumer): void => {
+    const refs = new Set<string>(pendingByConsumer.get(consumerKey(consumer)) ?? []);
+    const active = activeByConsumer.get(consumerKey(consumer));
     if (active) refs.add(active);
     for (const ref of refs) {
       const snapshot = snapshots.get(ref);
       if (snapshot) releaseStored(snapshot);
     }
-    pendingBySession.delete(sessionId);
-    activeBySession.delete(sessionId);
+    pendingByConsumer.delete(consumerKey(consumer));
+    activeByConsumer.delete(consumerKey(consumer));
   };
 
   const dropPendingOwner = (ownerId: string, workspaceId: string): void => {
@@ -549,8 +565,8 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
   const dispose = (): void => {
     snapshots.clear();
     contents.clear();
-    pendingBySession.clear();
-    activeBySession.clear();
+    pendingByConsumer.clear();
+    activeByConsumer.clear();
   };
 
   return {
@@ -561,7 +577,7 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     dispose,
     draftPaths,
     dropPendingOwner,
-    dropSession,
+    dropConsumer,
     inspect,
     invalidateOwnerEdit,
     observeWrite,

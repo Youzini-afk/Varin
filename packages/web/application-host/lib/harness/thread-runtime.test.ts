@@ -606,7 +606,7 @@ describe("thread runtime", () => {
     await documents.publishDirtyBuffers(publication);
     const context = await documents.captureAgentInputSnapshot({
       ...publication,
-      sessionId: "parent-1",
+      consumer: { kind: 'pi-session', sessionId: "parent-1" },
       resources: [
         { ...publication.resources[0]!, content: "fixed parent draft\r\n", encoding: "utf-8", bom: true },
         { ...publication.resources[1]!, content: "new fixed draft\n" },

@@ -882,7 +882,7 @@ export const createPiSessionStore = (
     );
 
     const captureInputContext = async (sessionId: string): Promise<AgentInputContext> => {
-      return captureSurfaceAgentInputContext(sessionId);
+      return captureSurfaceAgentInputContext({ kind: 'pi-session', sessionId });
     };
 
     const commitError = (runtimeKey: string, error: unknown): void => {
@@ -1578,7 +1578,7 @@ export const createPiSessionStore = (
           sessionId,
           text,
         }, runtimeKey, false, submissionTimeoutMs);
-        if (!result.accepted && isCurrent()) await releaseSurfaceAgentInputContext(sessionId, inputContext);
+        if (!result.accepted && isCurrent()) await releaseSurfaceAgentInputContext({ kind: 'pi-session', sessionId }, inputContext);
         return result.accepted;
       } catch (error) {
         if (isPiRequestOutcomeUnknown(error)) {
@@ -1586,7 +1586,7 @@ export const createPiSessionStore = (
           // acknowledgement is not permission to release it or resend input.
           if (isCurrent()) void syncSessionRecord(sessionId);
         } else if (isCurrent()) {
-          await releaseSurfaceAgentInputContext(sessionId, inputContext);
+          await releaseSurfaceAgentInputContext({ kind: 'pi-session', sessionId }, inputContext);
           commitError(runtimeKey, error);
         }
         throw error;

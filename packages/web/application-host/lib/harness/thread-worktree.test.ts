@@ -62,6 +62,25 @@ describe("thread worktree runtime", () => {
       if (first.kind !== "git" || second.kind !== "git") throw new Error("Expected a Git baseline");
       expect(first.rawFileHashes?.["中文 file.txt"]).toBeTruthy();
       expect(first.rawFileHashes?.["tracked.txt"]).not.toBe(second.rawFileHashes?.["tracked.txt"]);
+
+      // A user-selected subdirectory keeps its own relative paths and never
+      // inherits dirty siblings merely because they share one Git repository.
+      const selected = join(fixture.repo, "nested");
+      mkdirSync(selected);
+      writeFileSync(join(selected, "中文 file.txt"), "staged one\n");
+      git(fixture.repo, ["add", "nested"]);
+      writeFileSync(join(selected, "中文 file.txt"), "working text\n");
+      const beforeIndexChange = await runtime.inspectGitBaselineInventory(selected);
+      writeFileSync(join(selected, "中文 file.txt"), "staged two\n");
+      git(fixture.repo, ["add", "nested"]);
+      writeFileSync(join(selected, "中文 file.txt"), "working text\n");
+      const afterIndexChange = await runtime.inspectGitBaselineInventory(selected);
+      if (beforeIndexChange.kind !== "git" || afterIndexChange.kind !== "git") throw new Error("Expected a Git subtree baseline");
+      expect(beforeIndexChange.paths).toEqual(["中文 file.txt"]);
+      expect(afterIndexChange.paths).toEqual(beforeIndexChange.paths);
+      expect(Object.keys(beforeIndexChange.contentIdentities ?? {})).toEqual(["中文 file.txt"]);
+      expect(afterIndexChange.rawFileHashes).toEqual(beforeIndexChange.rawFileHashes);
+      expect(afterIndexChange.indexFingerprint).not.toBe(beforeIndexChange.indexFingerprint);
     } finally { rmSync(fixture.root, { recursive: true, force: true }); }
   });
   it("prepares a virtual isolated scratch without copying parent bytes", async () => {

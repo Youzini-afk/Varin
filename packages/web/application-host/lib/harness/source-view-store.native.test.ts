@@ -287,7 +287,7 @@ it.skipIf(!hasKernel)("applies a child edit to B's live editor, advances the fix
     live.set("draft.ts", { ...binding, content: "draft B\n" });
     await harness.authority.publishDirtyBuffers({ generation: 1, ownerId: "editor-B", resources: [binding], workspaceId: harness.identity.workspaceId });
     const parentContext = await harness.authority.captureAgentInputSnapshot({
-      generation: 1, ownerId: "editor-B", sessionId: "parent-session", resources: [{ ...binding, content: "draft B\n" }],
+      generation: 1, ownerId: "editor-B", consumer: { kind: 'pi-session', sessionId: "parent-session" }, resources: [{ ...binding, content: "draft B\n" }],
     });
     const cloned = harness.authority.cloneAgentInputSnapshot("parent-session", parentContext);
     if (cloned.status !== "ready") throw new Error("Expected captured editor input");

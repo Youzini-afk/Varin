@@ -2537,7 +2537,7 @@ describe('Pi session store', () => {
   test('automatically captures the current dirty surface without putting document text in runtime params', async () => {
     const workspaceId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     const captures: VarinAgentInputSnapshotCaptureRequest[] = [];
-    const releases: Array<{ sessionId: string; context: unknown }> = [];
+    const releases: Array<Parameters<NonNullable<DocumentsAPI['releaseAgentInputSnapshot']>>[0]> = [];
     const documents = {
       resolveResourceIdentity: async (resource: { workspaceId: string; resourceId: string }) => ({ coordinationId: `host-1\0${resource.workspaceId}\0${resource.resourceId}`, aliases: [resource] }),
       captureAgentInputSnapshot: async (request: VarinAgentInputSnapshotCaptureRequest) => {
@@ -2570,7 +2570,7 @@ describe('Pi session store', () => {
         byteLength: 9,
       }),
       readRecoveryJournal: async (journalId: string) => ({ status: 'missing' as const, journalId }),
-      releaseAgentInputSnapshot: async (request: { sessionId: string; context: unknown }) => {
+      releaseAgentInputSnapshot: async (request: Parameters<NonNullable<DocumentsAPI['releaseAgentInputSnapshot']>>[0]) => {
         releases.push(request);
         return { released: true };
       },
@@ -2632,7 +2632,7 @@ describe('Pi session store', () => {
     expect(failed).toBe(true);
     expect(releases).toHaveLength(1);
     expect(releases[0]).toEqual({
-      sessionId: 'session-a',
+      consumer: { kind: 'pi-session', sessionId: 'session-a' },
       context: {
         source: 'surface',
         roots: [{ workspaceId, dirtyPaths: ['draft.ts'] }],

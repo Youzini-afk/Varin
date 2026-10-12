@@ -1,3 +1,7 @@
+import { parseAgentInputContext } from '@varin/protocol';
+import { waitWithSignal } from '../cancellation.js';
+import { normalizeWorkspaceRelativePath } from '../workspace/path-safety.js';
+import { readSourceDrafts } from '../harness/working-state/source-drafts.js';
 import { captureStableSourceBaseline, type StableSourcePreparationOwners, type SourceCaptureDocuments } from '../harness/working-state/source-preparation.js';
 import type { DocumentAuthority } from '../documents/authority.js';
 import type { ThreadResourceScopeOwners } from './thread-resource-scope.js';
@@ -9,51 +13,132 @@ import type { ThreadIdentity, ThreadSource, ThreadPrepareSource, ThreadPreparedS
 import type { WorkspaceWorkingStateRootAccess } from '../harness/working-state/types.js';
 
 interface SourcePreparationOwners {
-  documents: SourceCaptureDocuments;
+  documents: SourceCaptureDocuments & Pick<DocumentAuthority, 'admitWorkspaceRegistration' | 'cloneInputSnapshot'>;
   prepareResources?: StableSourcePreparationOwners['prepareResources'];
+  inspectInventory: StableSourcePreparationOwners['inspectInventory'];
   workingStates: WorkspaceWorkingStateRootAccess;
   liveSources?: LiveSourceOwner;
   sourceTools(mode: ThreadSource['mode']): Promise<string[]>;
 }
 
-/** Preparation uses the existing Documents admission and immutable WorkingState owner.
- * The map only joins concurrent requests; the branch's fixed base is the durable receipt.
- */
-export function createThreadSourcePreparer({ documents, workingStates, liveSources, prepareResources, sourceTools }: SourcePreparationOwners) {
-  const preparing = new Map<string, Promise<ThreadPreparedSource>>();
-  return async (input: ThreadPrepareSource): Promise<ThreadPreparedSource> => {
-    const workspace = await documents.resolveWorkspace({ path: input.path });
-    const { root } = await documents.inspectWorkspace(workspace.workspaceId);
+interface SourcePreparationFlight {
+  identity: string;
+  controller: AbortController;
+  work: Promise<ThreadPreparedSource>;
+  observers: number;
+}
+
+/** A cancelled last observer drains the actual capture before its call settles.
+ * Other observers keep shared work alive; no new attempt can overtake that cleanup. */
+function observePreparation(flight: SourcePreparationFlight, signal?: AbortSignal): Promise<ThreadPreparedSource> {
+  flight.observers += 1;
+  return new Promise((resolve, reject) => {
+    let observing = true;
+    const leave = () => { if (!observing) return false; observing = false; flight.observers -= 1; signal?.removeEventListener('abort', abort); return true; };
+    const abort = () => {
+      if (!leave()) return;
+      const reason = signal?.reason ?? new DOMException('Source preparation cancelled', 'AbortError');
+      if (flight.observers) { reject(reason); return; }
+      flight.controller.abort(reason);
+      void flight.work.then(() => reject(reason), () => reject(reason));
+    };
+    void flight.work.then(value => { if (leave()) resolve(value); }, error => { if (leave()) reject(error); });
+    if (signal?.aborted) abort(); else signal?.addEventListener('abort', abort, { once: true });
+  });
+}
+
+/** Request identity and content are frozen before crossing any asynchronous owner. */
+export function normalizeThreadSourcePreparation(input: ThreadPrepareSource): ThreadPrepareSource {
+  if (!input || input.runtime !== 'agent' || !input.threadId || !input.branchId || !input.key
+    || typeof input.workspaceId !== 'string' || !input.workspaceId || !Array.isArray(input.captureScopes)
+    || input.captureScopes.some(scope => typeof scope !== 'string')
+    || !['fixed_branch', 'materialized', 'live_root'].includes(input.mode)) throw new Error('Source preparation request is malformed');
+  const captureScopes = [...new Set(input.captureScopes.map(scope => normalizeWorkspaceRelativePath(scope) || '.'))].sort();
+  let content: ThreadPrepareSource['content'];
+  if (input.content?.mode === 'saved-files') content = { mode: 'saved-files' };
+  else if (input.content?.mode === 'surface-drafts') {
+    const context = parseAgentInputContext(input.content.context);
+    if (!context) throw new Error('Source editor context is malformed');
+    if (context.source === 'surface') {
+      context.roots.sort((left, right) => left.workspaceId.localeCompare(right.workspaceId));
+      for (const root of context.roots) root.dirtyPaths.sort();
+    }
+    content = { mode: 'surface-drafts', context };
+  } else throw new Error('An explicit source content selection is required');
+  if (input.mode === 'live_root' && (content.mode !== 'saved-files' || captureScopes.length)) {
+    throw new Error('Live workspace access uses saved files and does not capture editor drafts or copy scopes');
+  }
+  return { runtime: 'agent', threadId: input.threadId, branchId: input.branchId, key: input.key,
+    workspaceId: input.workspaceId, mode: input.mode, content, captureScopes };
+}
+
+/** Documents supplies original drafts; WorkingState's branch-create receipt owns the fixed source. */
+export function createThreadSourcePreparer({ documents, workingStates, liveSources, prepareResources, inspectInventory, sourceTools }: SourcePreparationOwners) {
+  const preparing = new Map<string, SourcePreparationFlight>();
+  const prepare = async (input: ThreadPrepareSource, key: string, captureIdentity: string, signal: AbortSignal): Promise<ThreadPreparedSource> => {
+    signal.throwIfAborted();
+    // A saved registration is a namespace, not authority to read a physical directory.
+    // Look up the durable receipt before reopening a now-moved directory or expired draft.
+    const workspaceId = input.workspaceId;
+    const registration = await documents.admitWorkspaceRegistration(workspaceId, signal);
     const tools = await sourceTools(input.mode);
+    signal.throwIfAborted();
     if (input.mode === 'live_root') {
       if (!liveSources) throw new Error('Live workspace access is unavailable');
-      const liveRoot = await liveSources.prepare(workspace.workspaceId, workspace.workspaceId, input.threadId);
-      return { path: root, source: { workspaceId: workspace.workspaceId, executionWorkspaceId: workspace.workspaceId,
-        mode: 'live_root', liveRoot, tools } };
+      const liveRoot = await liveSources.prepare(workspaceId, workspaceId, input.threadId, signal);
+      return { path: registration.canonicalPath, source: { workspaceId, executionWorkspaceId: workspaceId, mode: 'live_root', liveRoot, tools } };
     }
-    const mode = input.mode;
-    const key = createHash('sha256').update(JSON.stringify([input.threadId, input.branchId, workspace.workspaceId, input.key, input.mode])).digest('hex');
-    const current = preparing.get(key);
-    if (current) return current;
-    const preparation = workingStates.withBranchStore(workspace.workspaceId, 'source-prepare', async store => {
+    return workingStates.withBranchStore(workspaceId, 'source-prepare', async store => {
       const branchId = `source:${key}`;
-      let branch = await store.getBranchRoot(branchId);
-      if (!branch) {
-        const captured = await captureStableSourceBaseline({ store, directory: root, workspaceId: workspace.workspaceId,
-          captureWorkspaceId: workspace.workspaceId, branchId, captureScopes: [], content: { mode: 'saved-files' } },
-        { documents, inspectInventory: async () => ({ kind: 'directory' }), ...(prepareResources ? { prepareResources } : {}) });
-        branch = captured.branch;
+      const restored = await store.readOriginalSource(branchId, { signal });
+      if (restored) {
+        if (restored.provenance.consistency === 'fixed-root' || restored.provenance.captureIdentity !== captureIdentity) {
+          throw new Error('This source preparation key already has a different selection');
+        }
+        const pin = await store.pinBranch(branchId, { revision: 0, signal });
+        try {
+          if (pin.workspaceId !== workspaceId || pin.branchId !== branchId || pin.revision !== 0 || pin.root !== restored.root) {
+            throw new SourceAdmissionError('source_changed');
+          }
+        } finally { await pin.release(); }
+        return { path: registration.canonicalPath, source: { workspaceId, executionWorkspaceId: workspaceId,
+          branchId, revision: 0, mode: input.mode, tools }, provenance: restored.provenance } as ThreadPreparedSource;
       }
-      // Branch creation durably publishes its immutable baseline at revision zero. Later retries
-      // do not recapture a changed directory or substitute the branch's mutable write root.
-      return { path: root, source: { workspaceId: workspace.workspaceId, executionWorkspaceId: workspace.workspaceId,
-        branchId: branch.branchId, revision: 0, mode,
-        tools,
-      } } satisfies ThreadPreparedSource;
+      if (await store.getBranchRoot(branchId, { signal })) throw new Error('Source preparation has no original receipt');
+      const { root } = await documents.inspectWorkspace(workspaceId, { signal });
+      const capturedDraft = input.content.mode === 'surface-drafts'
+        ? readSourceDrafts({ documents, consumer: { kind: 'thread', threadId: input.threadId, branchId: input.branchId },
+          context: input.content.context, workspaceId, signal }) : { editorDrafts: [] };
+        const captured = await captureStableSourceBaseline({ store, directory: root, workspaceId, captureWorkspaceId: workspaceId,
+          branchId, captureScopes: input.captureScopes, captureIdentity, ...(capturedDraft.drafts ? { drafts: capturedDraft.drafts } : {}),
+          editorDrafts: capturedDraft.editorDrafts, signal,
+          content: input.content.mode === 'saved-files' ? { mode: 'saved-files' } : { mode: 'fixed-draft-baseline' } },
+        { documents, inspectInventory, ...(prepareResources ? { prepareResources } : {}) });
+        return { path: root, source: { workspaceId, executionWorkspaceId: workspaceId,
+          branchId: captured.branch.branchId, revision: 0, mode: input.mode, tools }, provenance: captured.provenance } as ThreadPreparedSource;
     }, 'shared', { threadId: input.threadId });
-    preparing.set(key, preparation);
-    try { return await preparation; }
-    finally { if (preparing.get(key) === preparation) preparing.delete(key); }
+  };
+  return async (value: ThreadPrepareSource, signal?: AbortSignal): Promise<ThreadPreparedSource> => {
+    signal?.throwIfAborted();
+    const input = normalizeThreadSourcePreparation(value);
+    const key = createHash('sha256').update(JSON.stringify([input.threadId, input.branchId, input.key])).digest('hex');
+    const identity = createHash('sha256').update(JSON.stringify(input)).digest('hex');
+    let flight = preparing.get(key);
+    if (flight && flight.identity !== identity) throw new Error('This source preparation key already has a different selection');
+    if (flight?.controller.signal.aborted) {
+      await waitWithSignal(flight.work.then(() => undefined, () => undefined), signal);
+      signal?.throwIfAborted();
+      flight = preparing.get(key);
+    }
+    if (!flight) {
+      const controller = new AbortController();
+      const next: SourcePreparationFlight = { identity, controller, observers: 0,
+        work: Promise.resolve().then(() => prepare(input, key, identity, controller.signal))
+          .finally(() => { if (preparing.get(key) === next) preparing.delete(key); }) };
+      preparing.set(key, next);
+      flight = next;
+    }
+    return observePreparation(flight, signal);
   };
 }
 

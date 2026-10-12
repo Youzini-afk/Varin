@@ -126,7 +126,7 @@ describe("cold workspace catalog scan", () => {
         localEditRevision: 1,
         resource: documents.resource("cold.ts"),
       }],
-      sessionId: "catalog-session",
+      consumer: { kind: 'pi-session', sessionId: "catalog-session" },
     });
 
     const readDiskBody = vi.spyOn(documents.authority, "read");

@@ -150,6 +150,26 @@ export type AgentInputContext =
         | { status: "unavailable"; reason: "surface-unavailable" };
     };
 
+/** Documents snapshots are scoped to their real consumer, independently of editor ownership. */
+export type AgentInputSnapshotConsumer =
+  | { kind: "pi-session"; sessionId: string }
+  | { kind: "thread"; threadId: string; branchId: string };
+
+export function parseAgentInputSnapshotConsumer(value: unknown): AgentInputSnapshotConsumer | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  if (input.kind === "pi-session" && typeof input.sessionId === "string" && input.sessionId
+    && Object.keys(input).every(key => key === "kind" || key === "sessionId")) {
+    return { kind: "pi-session", sessionId: input.sessionId };
+  }
+  if (input.kind === "thread" && typeof input.threadId === "string" && input.threadId
+    && typeof input.branchId === "string" && input.branchId
+    && Object.keys(input).every(key => key === "kind" || key === "threadId" || key === "branchId")) {
+    return { kind: "thread", threadId: input.threadId, branchId: input.branchId };
+  }
+  return null;
+}
+
 /** Parse untrusted wire input into a content-free AgentInputContext clone. */
 export function parseAgentInputContext(value: unknown): AgentInputContext | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;

@@ -127,7 +127,7 @@ async function fixture(options: { main?: Reply; planner?: Reply; planningAuth?: 
   const storage = documents ? new KernelStorageAdapter({ client: kernel, hostId: 'planning-host-review', storageRoot: root,
     resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root }) : undefined;
   const resources = documents && storage ? resourceScopeFixture(root, createKernelWorkspaceWorkingStateAccess(storage), documents, undefined, (input, consume) => storage.withResourceRead(input, consume)) : undefined;
-  const prepareSource = documents && storage && resources ? createThreadSourcePreparer({ sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates: createKernelWorkspaceWorkingStateAccess(storage), prepareResources: resources.prepareSourceCapture }) : undefined;
+  const prepareSource = documents && storage && resources ? createThreadSourcePreparer({ inspectInventory: async () => ({ kind: 'directory' }), sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates: createKernelWorkspaceWorkingStateAccess(storage), prepareResources: resources.prepareSourceCapture }) : undefined;
   if (documents && storage) {
     await fs.mkdir(workspace);
     cleanups.push(async () => { if (!closed) { await storage.dispose(); await documents.dispose(); } });
@@ -187,7 +187,7 @@ async function fixture(options: { main?: Reply; planner?: Reply; planningAuth?: 
     }
   });
   const closeKernel = async () => { if (closed) return; await storage?.dispose(); await documents?.dispose(); await kernel.close(); closed = true; };
-  return { closeKernel, memoryControl, personalization, prepareContext, root, workspace, main, planner, models, prepareModels, mutable, scope, mainScope, fakeSecrets, authReads, catalogReads,
+  return { closeKernel, memoryControl, personalization, prepareContext, root, workspace, documents, main, planner, models, prepareModels, mutable, scope, mainScope, fakeSecrets, authReads, catalogReads,
     kernel, extensions, runtime, adapter, decisions, pins: () => pins, launchErrors, api: createThreadsHttpAPI() };
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>;
@@ -221,11 +221,12 @@ async function installBundledExample(f: Fixture) {
       scope: { projectId: 'planning-review' }, allowFallback: false } });
 }
 async function submitBundledExample(f: Fixture, key: string) {
+  if (!f.documents) throw new Error('Source fixture requires the Documents owner');
   const identity = await f.api.create(key);
   await fs.writeFile(path.join(f.workspace, 'planning-context.md'), 'Candidate evidence: first.txt and second.txt. Only read the file selected by the plan.');
   await fs.writeFile(path.join(f.workspace, 'first.txt'), 'IMMUTABLE_FIRST_FINDING');
   await fs.writeFile(path.join(f.workspace, 'second.txt'), 'IMMUTABLE_SECOND_FINDING');
-  const source = await f.api.prepareSource({ ...identity, key: 'source', path: f.workspace, mode: 'fixed_branch' });
+  const source = await f.api.prepareSource({ ...identity, key: 'source', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   await fs.writeFile(path.join(f.workspace, 'first.txt'), 'MUTATED_LIVE_FIRST');
   await fs.writeFile(path.join(f.workspace, 'second.txt'), 'MUTATED_LIVE_SECOND');
   const run = await f.api.submit({ ...identity, key: `input-${key}`, expectedHead: null, text: 'Find the selected evidence', model: mainSelection, source: source.source });
