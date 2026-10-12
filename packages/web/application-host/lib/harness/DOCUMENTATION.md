@@ -302,7 +302,7 @@ Global singleton that owns:
 ### HarnessRouter (`router.ts`)
 
 The Pi adapter resolves embedding, reranking and fast decisions through its original provider capabilities.
-Native embedding and TypeSafe/Cloudflare decisions use the existing Host inference/credential owner
+Native embedding and TypeSafe/Cloudflare/llama.cpp decisions use the existing Host inference/credential owner
 directly; native decision HTTP/Goal facts belong to Catalog. Rerank and other classifier APIs still
 require their own native integration.
 Their connection/credential defaults and model declarations are independent of the native chat API;
@@ -409,7 +409,7 @@ unavailable under that original research source contract. No public local-path s
 Full and ranged material body/source reads page the same immutable record proof through Rust getBlob;
 the wire-frame maximum is not a PDF size limit. Metadata-only reader checks request zero body bytes but
 still validate the record and object. Cancellation awaits each started read/iterator and material
-commit before reporting drain. Scholarly discovery and TypeSafe/Cloudflare decision now have ordinary
+commit before reporting drain. Scholarly discovery and TypeSafe/Cloudflare/llama.cpp decision now have ordinary
 native tools; extra reader-model prompts and other inference purposes remain separate integration work.
 
 `materials` uses the same explicit collection domain as the thin Pi adapter. It resolves its Thread,
@@ -526,7 +526,9 @@ The service resolves the `web`/`scholarly` purpose binding through `fastDecision
 `configurationId` for the call, validates snapshot candidates by actually reading them under the
 caller's authority, and maps answers to ranked results. Disabled, unconfigured, unavailable,
 failed, and cancelled states return honestly with the caller's order preserved (`fallback:"order"`);
-missing answers are reported, never zero.
+missing answers are reported, never zero. Ordinary partial failure preserves confirmed scores and
+choices, including a real zero, while cancellation or revoked authority suppresses answers. Each
+score instruction explicitly identifies the candidate, because SDK question keys are not prompt text.
 
 `executeResearchDecide` is the shared domain; the Pi service is a thin authority adapter. The ordinary
 native builtin enters through `kernel/research-decision.ts`, original invocation and material owners.
@@ -535,7 +537,9 @@ ranges and all-unreadable candidates do not dispatch, and Storage errors are not
 The trusted native inference adapter preserves original usage on malformed answers and cancellation;
 the old Pi broker's failure/cancellation projection is not replaced by this phase. Each native HTTP
 request, including an authorized SDK retry, is a separate original Catalog Operation with immutable
-input/configuration and exactly-once Goal accounting. No second inference ledger or main-chat fallback
+input/configuration. llama.cpp preparation and model computation share controls, but only actual
+computation has exactly-once Goal accounting. Early SDK failure still waits for all real fetch/body
+work to drain. No second inference ledger or main-chat fallback
 is introduced. See the [inference owner](../knowledge/semantic/DOCUMENTATION.md).
 
 Consumes `harness.request` events from the broker stream and dispatches

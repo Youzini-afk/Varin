@@ -51,6 +51,15 @@ and ship with that package. Bun applies them to bundled dependencies; the select
 applies the same hunks in memory, accepts an already adapted source and rejects a changed required seam.
 Never patch a user's external installation or copy its native configuration into another authority.
 
+The October 12 llama.cpp adaptation keeps pending label promises inside one classification request
+and retains already completed answers on later-question failure. Both the bundled install and the
+external in-memory loader consume that same `pi-ai` patch; no second classifier implementation is
+introduced. Cold installation also exposed four incorrect new-line hunk offsets in the existing
+`pi-mcp` patch. Correcting only those offsets prevents Bun from leaving a duplicate method signature;
+the MCP behavior is unchanged. The published 1.0.4 tarball integrity, actual patched import and
+existing MCP consumers were verified. The production lock was regenerated/verified with the normal
+builder and is semantically unchanged; a formatting-only rewrite is not a dependency update.
+
 The October 6 dependency integration rebases the three Pi patches against the published 1.0.4
 files, preserving Varin's execution scheduling, tool exclusions, Responses parsing, system sections
 and native MCP ownership. Upstream tool-pattern and hidden-tool behavior remains intact. Project

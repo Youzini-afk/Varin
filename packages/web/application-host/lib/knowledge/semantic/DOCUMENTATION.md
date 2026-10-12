@@ -9,7 +9,7 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this local-m
 `runtime-inference.ts` owns both retained embedding leases and native decision transport lifetimes.
 `decision-inference.ts` uses the original `HostCredentialAuthority`, global purpose settings, egress
 owner and pure classifier adapter; it does not start a Pi AgentSession/workspace worker. Its actual
-TypeSafe/Cloudflare HTTP attempts are linked to the original tool by stable ordinal. Catalog, not the
+TypeSafe/Cloudflare/llama.cpp HTTP attempts are linked to the original tool by stable ordinal. Catalog, not the
 semantic index ledger or a second batch table, owns decision admission, dispatch, original receipt,
 Goal usage and recovery. Request/response/raw-usage bodies live in ContentStore. Private retained
 credentials/headers never enter those records.
@@ -26,8 +26,16 @@ normalized zero defaults are not accounting evidence. Legitimate SDK retries eac
 Goal/config/permission admission as another HTTP Operation; recovery never restarts the paid batch.
 Original owner evidence can refine a recovered unknown receipt once without charging twice.
 `research_decide` is the first native consumer; it uses the original Thread material reader, including
-PDF extraction, and rechecks retained material authority before each dispatch. Native llama.cpp,
-rerank and other auxiliary consumers remain separate work. The older Pi workspace broker retains
+PDF extraction, and rechecks retained material authority before each dispatch. llama.cpp uses the
+original SDK server-root semantics and three exact frozen routes. Tokenization and template HTTPs
+are controlled `preparation`; only `/completion` is `model_compute` charged to Goal. Raw
+`tokens_evaluated`/`tokens_predicted` supply usage, with native timing/cache evidence retained;
+`n_predict` and timing estimates never fill missing dimensions. Retry and probability-depth expansion
+are distinct actual computations. The adapter drains every fetch/body even if the SDK fails early
+while a sibling preparation is active. Label promises are request-local, so one caller cancellation
+cannot poison another. Ordinary partial failures retain completed scores/choices and original order;
+explicit cancellation/revocation still suppresses answers. Rerank and other auxiliary consumers remain
+separate work. The older Pi workspace broker retains
 its existing failure/cancellation projection; this native lifecycle is not a claim that those older
 observer semantics were replaced.
 

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { requestClassifier, ClassifierResponseError } from "@varin/pi-host/classifier";
 import type {
   FetchResult,
   HarnessFastDecisionResult,
@@ -443,4 +444,43 @@ describe("shared research decision domain", () => {
     expect(result).toMatchObject({ status: "failed", fallback: "order", missing: ["c1", "c2"], usage: known.usage,
       ranked: [{ id: "c1" }, { id: "c2" }] });
   });
+});
+
+
+it("keeps a real llama earlier score zero after the next candidate fails, with distinct target prompts", async () => {
+  const prompts: string[] = [];
+  const model = { type: "classifier" as const, api: "llama-cpp-classify" as const, provider: "local", id: "domain-partial",
+    name: "fixture", baseUrl: "https://llama.invalid/v1", input: ["text" as const], contextWindow: 1000,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+  const result = await executeResearchDecide(params(), directContext({ fastDecision: async input => {
+    try {
+      const response = await requestClassifier({ nativeModel: model, baseUrl: model.baseUrl, model: model.id,
+        state: { goal: input.goal, materials: input.materials }, questions: input.questions, signal: input.signal,
+        fetchImpl: async (url, init) => {
+          const wire = JSON.parse(String(init?.body));
+          if (String(url).endsWith("/tokenize")) return Response.json({ tokens: wire.content === "\n" ? [1] : [1, 10 + Number(wire.content.trim())] });
+          if (String(url).endsWith("/apply-template")) {
+            const prompt = wire.messages[1].content as string;
+            prompts.push(prompt);
+            return Response.json({ prompt });
+          }
+          const target = /Evaluate only the material with candidate ID ("[^"\n]+")./gu;
+          const candidate = [...String(wire.prompt).matchAll(target)].at(-1)?.[1];
+          expect([JSON.stringify("c1"), JSON.stringify("c2")]).toContain(candidate);
+          return Response.json({ tokens_evaluated: 17, tokens_predicted: 1,
+            ...(candidate === JSON.stringify("c1") ? { completion_probabilities: [{ top_logprobs: [
+              { id: 10, logprob: 0 }, { id: 11, logprob: -1e31 }, { id: 12, logprob: -1e31 }, { id: 13, logprob: -1e31 },
+            ] }] } : {}) });
+        } });
+      return { batchId: "real-llama", providerId: model.provider, modelId: model.id, ...response };
+    } catch (error) {
+      expect(error).toBeInstanceOf(ClassifierResponseError);
+      const partial = (error as ClassifierResponseError).result!;
+      throw new ResearchDecisionFailure("later classifier response invalid", { batchId: "real-llama", providerId: model.provider, modelId: model.id, ...partial });
+    }
+  } }));
+  expect(prompts).toHaveLength(2);
+  expect(prompts[0]).not.toBe(prompts[1]);
+  expect(result).toMatchObject({ status: "failed", fallback: "order", ranked: [{ id: "c1", score: 0 }, { id: "c2" }],
+    missing: ["c2"], usage: { inputTokens: 34, outputTokens: 2 } });
 });

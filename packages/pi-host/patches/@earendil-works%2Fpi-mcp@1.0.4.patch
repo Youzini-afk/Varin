@@ -133,7 +133,7 @@ diff --git a/dist/client.js b/dist/client.js
                  timeoutMs: options.timeoutMs ?? this.options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
                  timer: undefined,
                  signal: options.signal,
-@@ -274,7 +283,10 @@
+@@ -274,7 +284,10 @@
                  this.progressRequests.set(progressToken, id);
              options.signal?.addEventListener("abort", entry.onAbort, { once: true });
              this.armTimeout(id, entry);
@@ -145,7 +145,7 @@ diff --git a/dist/client.js b/dist/client.js
          });
      }
      async notifyInternal(method, params, allowConnecting) {
-@@ -290,13 +302,13 @@
+@@ -290,13 +303,13 @@
          }
          throw new McpConnectionClosedError(`MCP client is ${this.state}`);
      }
@@ -162,7 +162,7 @@ diff --git a/dist/client.js b/dist/client.js
              return;
          }
          if (isJsonRpcNotification(message)) {
-@@ -305,49 +317,72 @@
+@@ -305,49 +318,72 @@
          }
          this.emitError(new McpError(JSON_RPC_ERROR_CODES.invalidRequest, "Received invalid JSON-RPC message"));
      }
@@ -261,7 +261,7 @@ diff --git a/dist/client.js b/dist/client.js
          }
      }
      handleNotification(method, params) {
-@@ -408,8 +438,9 @@
+@@ -408,8 +444,9 @@
                  .catch((sendError) => this.emitError(sendError));
          }
      }

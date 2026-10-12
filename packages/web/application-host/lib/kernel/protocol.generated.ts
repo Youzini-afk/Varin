@@ -315,7 +315,10 @@ export interface InferenceReceiptPendingParams {
   requestStarted: boolean;
 }
 
+export type InferenceRequestKind = 'preparation' | 'model_compute';
+
 export interface InferenceBinding {
+  requestKind: InferenceRequestKind;
   purpose: string;
   providerId: string;
   modelId: string;
@@ -361,6 +364,7 @@ export interface InferenceSettleParams {
 }
 
 export interface InferenceStatus {
+  requestKind: InferenceRequestKind;
   operationId: string;
   phase: OperationPhase;
   outcome: Outcome | null;

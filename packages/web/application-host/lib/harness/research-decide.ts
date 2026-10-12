@@ -84,6 +84,21 @@ const KIND_INSTRUCTIONS: Record<Exclude<ResearchDecideKind, "next">, string> = {
 
 const SCORE_LEVELS = ["none", "low", "moderate", "high"] as const;
 
+/** One answer-to-candidate projection; ordering and failure status belong to the caller. */
+const projectCandidates = (params: Pick<ResearchDecideParams, "kind" | "candidates">, result?: HarnessFastDecisionResult): ResearchDecideRankedCandidate[] => {
+  if (params.kind === "next") {
+    const answer = result?.answers.find(item => item.id === "next" && item.kind === "choose");
+    const choice = answer?.kind === "choose" ? answer.choice : null;
+    return params.candidates.map(candidate => ({ id: candidate.id, ...(candidate.id === choice ? { selected: true } : {}) }));
+  }
+  const answers = new Map(result?.answers.filter(item => item.kind === "score").map(item => [item.id, item] as const));
+  return params.candidates.map(candidate => {
+    const answer = answers.get(candidate.id);
+    return answer?.kind === "score" ? { id: candidate.id, score: answer.score,
+      ...(answer.probabilities === undefined ? {} : { probabilities: answer.probabilities }) } : { id: candidate.id };
+  });
+};
+
 const fallbackResult = (
   params: ResearchDecideParams,
   purpose: "web" | "scholarly",
@@ -95,9 +110,8 @@ const fallbackResult = (
   status,
   purpose,
   kind: params.kind,
-  ranked: params.candidates
-    .filter((candidate) => !rejected.some((item) => item.id === candidate.id))
-    .map((candidate) => ({ id: candidate.id })),
+  ranked: projectCandidates({ ...params, candidates: params.candidates
+    .filter((candidate) => !rejected.some((item) => item.id === candidate.id)) }, status === "failed" ? known?.result : undefined),
   rejected,
   missing: known?.result.missing ?? [],
   ...(known ? decisionProvenance(known.result, known.configurationId) : {}),
@@ -279,7 +293,7 @@ export async function executeResearchDecide(
         return {
           id: candidate.id,
           kind: "score" as const,
-          instructions: `${KIND_INSTRUCTIONS[kind]}\nGoal: ${goal}`,
+          instructions: `${KIND_INSTRUCTIONS[kind]}\nEvaluate only the material with candidate ID ${JSON.stringify(candidate.id)}.\nGoal: ${goal}`,
           levels: SCORE_LEVELS,
         };
       });
@@ -318,30 +332,8 @@ export async function executeResearchDecide(
   }
 
   const missing = new Set(result.missing);
-  let ranked: ResearchDecideRankedCandidate[];
-  if (params.kind === "next") {
-    const answer = result.answers.find((item) => item.id === "next" && item.kind === "choose");
-    const choice = answer && answer.kind === "choose" ? answer.choice : null;
-    ranked = candidates.map((candidate) => ({
-      id: candidate.id,
-      ...(candidate.id === choice ? { selected: true } : {}),
-    }));
-  } else {
-    const answers = new Map(
-      result.answers
-        .filter((item) => item.kind === "score")
-        .map((item) => [item.id, item] as const),
-    );
-    ranked = candidates.map((candidate) => {
-      const answer = answers.get(candidate.id);
-      return answer && answer.kind === "score"
-        ? {
-            id: candidate.id,
-            score: answer.score,
-            ...(answer.probabilities !== undefined ? { probabilities: answer.probabilities } : {}),
-          }
-        : { id: candidate.id };
-    });
+  let ranked = projectCandidates({ ...params, candidates }, result);
+  if (params.kind !== "next") {
     // Higher scores lead the ordering; missing/unscored candidates keep
     // their relative order at the end rather than being read as zero.
     const order = new Map(candidates.map((candidate, index) => [candidate.id, index]));

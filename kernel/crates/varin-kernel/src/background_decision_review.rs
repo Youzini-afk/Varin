@@ -564,3 +564,192 @@ fn failed_receipt_publication_blocks_following_paid_work_then_refines_original_u
     drop(f);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+fn llama_candidates() -> Value {
+    json!({"goal":"Judge each original candidate separately", "kind":"relevance", "candidates":[
+        {"id":"candidate-a","kind":"query","detail":"First actual material"},
+        {"id":"candidate-b","kind":"query","detail":"Different second material"}
+    ]})
+}
+#[test]
+#[ignore = "requires installed patched classifier; original SDK and controlled egress over stdio"]
+fn llama_original_preparation_compute_partial_and_unknown_usage_survive_reopen() {
+    for mode in ["llama-depth", "llama-partial", "llama-missing"] {
+        let (root, mut f, run, bindings) = fixture(mode);
+        let result = execute(
+            &mut f,
+            &run,
+            &bindings,
+            vec![("llama", "research_decide", llama_candidates())],
+        );
+        f.host.send(json!({"kind":"fixture-finish"}));
+        let counts = f.receive("fixture-finished");
+        let owner = f.runtime.catalog();
+        let db = owner.lock().unwrap();
+        let usage = db
+            .capture_goal("decision-goal")
+            .unwrap()
+            .load()
+            .unwrap()
+            .usage;
+        assert_eq!(usage.pending_inferences, 0);
+        assert_eq!(
+            usage.missing_inferences, 0,
+            "preparation HTTP is not unknown model billing"
+        );
+        let admissions = db
+            .events_after(0, 10000)
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == "inference.admitted")
+            .collect::<Vec<_>>();
+        let operations = admissions
+            .iter()
+            .map(|event| {
+                db.capture_operation_read(db.operation(&event.subject).unwrap())
+                    .load()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let computations = operations
+            .iter()
+            .filter(|op| op.intent["binding"]["requestKind"] == "model_compute")
+            .collect::<Vec<_>>();
+        assert!(
+            operations
+                .iter()
+                .any(|op| op.intent["binding"]["requestKind"] == "preparation")
+        );
+        match mode {
+            "llama-depth" => {
+                assert_eq!(
+                    counts["preparations"], 10,
+                    "batch-local label reuse must retain original per-question template work"
+                );
+                assert_eq!(counts["completions"], 4);
+                assert_eq!(counts["depths"], json!([256, 256, 4096, 256]));
+                assert_eq!(
+                    counts["targets"],
+                    json!(["candidate-a", "candidate-a", "candidate-a", "candidate-b"])
+                );
+                assert_eq!(computations.len(), 4);
+                assert_eq!(result["llama"]["status"], "ok");
+                assert_eq!(result["llama"]["ranked"][0]["id"], "candidate-b");
+                assert_eq!(result["llama"]["ranked"][1]["score"], 0);
+                assert_eq!(usage.actual.input_tokens.known, 36);
+                assert_eq!(usage.actual.output_tokens.known, 4);
+                assert_eq!(
+                    result["llama"]["usage"],
+                    json!({"inputTokens":36,"outputTokens":4})
+                );
+            }
+            "llama-partial" => {
+                assert_eq!(counts["completions"], 2);
+                assert_eq!(computations.len(), 2);
+                assert_eq!(result["llama"]["status"], "failed");
+                assert_eq!(result["llama"]["fallback"], "order");
+                assert_eq!(result["llama"]["ranked"][0]["id"], "candidate-a");
+                assert_eq!(result["llama"]["ranked"][0]["score"], 0);
+                assert!(result["llama"]["ranked"][1].get("score").is_none());
+                assert_eq!(result["llama"]["missing"], json!(["candidate-b"]));
+                assert_eq!(usage.actual.input_tokens.known, 24);
+                assert_eq!(usage.actual.output_tokens.known, 2);
+                assert_eq!(
+                    result["llama"]["usage"],
+                    json!({"inputTokens":24,"outputTokens":2})
+                );
+            }
+            _ => {
+                assert_eq!(counts["completions"], 1);
+                assert_eq!(computations.len(), 1);
+                assert_eq!(
+                    counts["preparations"], 9,
+                    "the next template must not be sent through the unknown-usage Goal boundary"
+                );
+                assert_eq!(result["llama"]["status"], "failed");
+                assert_eq!(result["llama"]["ranked"][0]["score"], 0);
+                assert_eq!(result["llama"]["missing"], json!(["candidate-b"]));
+                assert_eq!(usage.actual.input_tokens.known, 17);
+                assert_eq!(usage.actual.output_tokens.unknown_receipts, 1);
+                assert_eq!(result["llama"]["usage"], json!({"inputTokens":17}));
+            }
+        }
+        let history = db.execution_history("branch:parent").unwrap();
+        drop(db);
+        let collection = owner
+            .lock()
+            .unwrap()
+            .prepare_content_collection(Default::default());
+        assert_eq!(
+            collection.run().status,
+            varin_runtime::ContentCollectionStatus::Completed
+        );
+        drop(owner);
+        drop(f);
+        let db = Catalog::open(root.join("catalog")).unwrap();
+        assert_eq!(db.execution_history("branch:parent").unwrap(), history);
+        for original in operations {
+            assert_eq!(
+                db.capture_operation_read(db.operation(&original.id).unwrap())
+                    .load()
+                    .unwrap(),
+                original
+            );
+        }
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+#[ignore = "requires patched classifier; exact public Stop and real held preparation body over stdio"]
+fn llama_stop_or_failed_tokenizer_drains_parallel_preparation_without_model_charge() {
+    for mode in ["llama-stop-prep", "llama-fail-prep"] {
+        let (root, mut f, run, bindings) = fixture(mode);
+        let result = execute(
+            &mut f,
+            &run,
+            &bindings,
+            vec![("llama", "research_decide", llama_candidates())],
+        );
+        assert_eq!(
+            result["llama"]["status"],
+            if mode == "llama-stop-prep" {
+                "cancelled"
+            } else {
+                "failed"
+            }
+        );
+        f.host.send(json!({"kind":"fixture-finish"}));
+        let counts = f.receive("fixture-finished");
+        assert_eq!(counts["completions"], 0);
+        assert_eq!(counts["bodyDrained"], true);
+        let owner = f.runtime.catalog();
+        let db = owner.lock().unwrap();
+        assert!(!db.run(&run).unwrap().cancel_requested);
+        let usage = db
+            .capture_goal("decision-goal")
+            .unwrap()
+            .load()
+            .unwrap()
+            .usage;
+        assert_eq!(usage.pending_inferences, 0);
+        assert_eq!(usage.missing_inferences, 0);
+        assert_eq!(usage.actual.input_tokens.known, 0);
+        assert_eq!(usage.actual.output_tokens.known, 0);
+        assert_eq!(usage.actual.output_tokens.unknown_receipts, 0);
+        for event in db
+            .events_after(0, 10000)
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == "inference.admitted")
+        {
+            let op = db.operation(&event.subject).unwrap();
+            assert_eq!(op.intent["binding"]["requestKind"], "preparation");
+        }
+        drop(db);
+        drop(owner);
+        drop(f);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}

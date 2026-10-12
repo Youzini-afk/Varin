@@ -16,6 +16,7 @@ import type { AuthOperationOptions, AuthResult, Credential, CredentialInfo, Cred
 
 import { ProviderConfigurationManager } from './provider-configuration.js';
 import { embeddingConfigurationId, embeddingRequestUrl } from '@varin/protocol/node/embeddings';
+import { classifierRequestRoutes, isSupportedClassifierApi, type ClassifierRequestRoute } from './harness/native-classifier.js';
 
 export interface HostEmbeddingProviderBinding {
   providerId: string;
@@ -32,6 +33,7 @@ export interface HostEmbeddingProviderBinding {
 }
 export interface HostDecisionProviderBinding extends HostEmbeddingProviderBinding {
   api: string;
+  routes: readonly ClassifierRequestRoute[];
   /** Private resolved model, never serialized into Catalog or public metadata. */
   nativeModel?: import("@earendil-works/pi-ai").ClassifierModel<import("@earendil-works/pi-ai").ClassifierApi>;
 }
@@ -440,7 +442,7 @@ export class HostCredentialAuthority implements CredentialStore {
     return (await this.globalSettingsAuthority.read()).document;
   }
 
-  async #inferenceCredentialState(credentialRef: string, accepted?: InferenceCredentialConfiguration): Promise<{ scope: HostCredentialScope; auth: AuthResult; configuration: InferenceCredentialConfiguration }> {
+  async #inferenceCredentialState(credentialRef: string, accepted?: InferenceCredentialConfiguration, allowAnonymous = false): Promise<{ scope: HostCredentialScope; auth: AuthResult; configuration: InferenceCredentialConfiguration }> {
     const providers = this.#inferenceOwner();
     const cwd = this.#modelsPath ? dirname(this.#modelsPath) : getAgentDir();
     let configuration: InferenceCredentialConfiguration;
@@ -458,6 +460,11 @@ export class HostCredentialAuthority implements CredentialStore {
     const configured = sources.sources as Array<{ apiKey?: unknown; headers?: unknown; authHeader?: unknown }>;
     const configuredKey = [...configured].reverse().find(entry => entry.apiKey !== undefined)?.apiKey;
     const expression = before?.type === 'api_key' ? before.key : !before ? configuredKey : undefined;
+    const generatedAuthorization = [...configured].reverse().find(entry => typeof entry.authHeader === 'boolean')?.authHeader === true;
+    // llama-server may be intentionally unauthenticated. A failed explicit credential
+    // is never an anonymous connection, and the same owner still freezes its scope.
+    const anonymousAllowed = allowAnonymous && (sources.configured || !!runtime.getProvider(credentialRef))
+      && !before && expression === undefined && !generatedAuthorization;
     let key: string | undefined;
     if (expression !== undefined) {
       if (typeof expression !== 'string') throw publicFailure('credential-source-invalid');
@@ -469,9 +476,7 @@ export class HostCredentialAuthority implements CredentialStore {
     if (!auth) {
       // A configured-header connection is a real credential owner even without an SDK key.
       const headers: Record<string, string> = Object.create(null);
-      let generatedAuthorization = false;
       for (const entry of configured) {
-        if (typeof entry.authHeader === 'boolean') generatedAuthorization = entry.authHeader;
         if (entry.headers && typeof entry.headers === 'object' && !Array.isArray(entry.headers)) {
           for (const [name, expression] of Object.entries(entry.headers)) {
             if (typeof expression !== 'string') throw publicFailure('configured-header-invalid');
@@ -481,15 +486,15 @@ export class HostCredentialAuthority implements CredentialStore {
           }
         }
       }
-      if (!Object.keys(headers).length || generatedAuthorization) throw publicFailure('credential-missing');
-      auth = { auth: { headers }, source: 'configured headers' };
+      if ((!Object.keys(headers).length && !anonymousAllowed) || generatedAuthorization) throw publicFailure('credential-missing');
+      auth = { auth: { headers }, source: Object.keys(headers).length ? 'configured headers' : 'anonymous classifier' };
     }
     const after = await this.#record(credentialRef);
     if (JSON.stringify(metadata(after)) !== JSON.stringify(binding)) throw publicFailure('credential-scope-changed');
     const headers = new Headers();
     for (const [name, value] of Object.entries(auth.auth.headers ?? {})) if (value !== null) headers.set(name, value);
     const authenticated = Boolean(auth.auth.apiKey) || [...headers.values()].some(Boolean);
-    if (!authenticated) throw publicFailure('credential-missing');
+    if (!authenticated && !anonymousAllowed) throw publicFailure('credential-missing');
     const identityHeaders = new Headers(headers);
     if (before?.type === 'oauth') {
       // A same-account token refresh preserves the owner's account generation.
@@ -554,27 +559,31 @@ export class HostCredentialAuthority implements CredentialStore {
       if (!baseUrl) throw publicFailure(`${kind}-endpoint-unavailable`);
       const endpoint = endpointOverride ?? capability?.endpoint;
       const api = kind === 'decision' ? capabilityModel?.api ?? model?.api ?? 'typesafe-system-one' : 'openai-compatible';
-      if (kind === 'decision' && !['typesafe-system-one', 'cloudflare-workers-ai-system-one'].includes(api)) {
+      if (kind === 'decision' && !isSupportedClassifierApi(api)) {
         throw publicFailure('decision-api-unavailable');
       }
-      let url: URL;
-      try { url = new URL(kind === 'embedding' ? embeddingRequestUrl(baseUrl, endpoint)
-        : `${baseUrl.replace(/\/+$/u, '')}${endpoint ?? (api === 'typesafe-system-one' ? '/systemone' : '/run')}`); } catch { throw publicFailure(`${kind}-endpoint-invalid`); }
-      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash) throw publicFailure(`${kind}-endpoint-invalid`);
-      for (const name of url.searchParams.keys()) {
-        if (/^(key|api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|password|secret|signature|sig)$/i.test(name)) throw publicFailure(`${kind}-endpoint-invalid`);
+      let routes: readonly ClassifierRequestRoute[];
+      try { routes = kind === 'embedding' ? [{ requestUrl: new URL(embeddingRequestUrl(baseUrl, endpoint)).toString(), requestKind: 'model_compute' }]
+        : classifierRequestRoutes(api, baseUrl, endpoint); } catch { throw publicFailure(`${kind}-endpoint-invalid`); }
+      for (const route of routes) {
+        const url = new URL(route.requestUrl);
+        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash) throw publicFailure(`${kind}-endpoint-invalid`);
+        for (const name of url.searchParams.keys()) {
+          if (/^(key|api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|password|secret|signature|sig)$/i.test(name)) throw publicFailure(`${kind}-endpoint-invalid`);
+        }
       }
       const headerSources = kind === 'decision' ? await providers.inferenceCredentialSources(cwd, providerId, modelId) : undefined;
       const modelHeaders = headerSources?.sources.flatMap(entry => (entry as { modelHeaders?: unknown[] }).modelHeaders ?? []).filter(value => value !== undefined) ?? [];
       const modelHeaderRevision = modelHeaders.length ? headerSources?.revision : undefined;
-      return { api, baseUrl, ...(endpoint ? { endpoint } : {}), requestUrl: url.toString(),
+      return { api, baseUrl, ...(endpoint ? { endpoint } : {}), routes: Object.freeze(routes.map(route => Object.freeze({ ...route }))), requestUrl: routes.at(-1)!.requestUrl,
         modelHeaders, ...(modelHeaderRevision === undefined ? {} : { modelHeaderRevision }),
         ...(kind === 'decision' && model?.type === 'classifier' ? { nativeModel: model } : {}),
         credentialRef: capability?.credentialRef ?? providerId, configured: Boolean(editable) };
     };
     const selected = await resolveProvider();
     const revocationGeneration = this.#inferenceRevocations.get(`${kind}:${providerId}`) ?? 0;
-    const initial = await this.#inferenceCredentialState(selected.credentialRef);
+    const allowAnonymous = kind === 'decision' && selected.api === 'llama-cpp-classify';
+    const initial = await this.#inferenceCredentialState(selected.credentialRef, undefined, allowAnonymous);
     // Capture a coherent route/credential candidate. A concurrent settings replacement must
     // not pair the old endpoint with credentials first observed under a different connection.
     const verified = await resolveProvider();
@@ -639,16 +648,16 @@ export class HostCredentialAuthority implements CredentialStore {
       if (!isDeepStrictEqual(await resolveModelHeaders(), modelHeaders)
         || modelOwnerKey && !isDeepStrictEqual(this.#inferenceCredentialBindings.get(modelOwnerKey)?.scope, scope)) revoked = 'credential-scope-changed';
       if (revoked) throw publicFailure(revoked);
-      if (JSON.stringify((await this.#inferenceCredentialState(selected.credentialRef, initial.configuration)).scope) !== expected) {
+      if (JSON.stringify((await this.#inferenceCredentialState(selected.credentialRef, initial.configuration, allowAnonymous)).scope) !== expected) {
         revoked = 'credential-scope-changed'; throw publicFailure(revoked);
       }
     };
-    return { providerId, modelId, api: selected.api, ...(selected.nativeModel ? { nativeModel: selected.nativeModel } : {}), baseUrl: selected.baseUrl, ...(selected.endpoint ? { endpoint: selected.endpoint } : {}),
+    return { providerId, modelId, api: selected.api, routes: selected.routes, ...(selected.nativeModel ? { nativeModel: selected.nativeModel } : {}), baseUrl: selected.baseUrl, ...(selected.endpoint ? { endpoint: selected.endpoint } : {}),
       requestUrl: selected.requestUrl, configurationId: kind === 'embedding' ? embeddingConfigurationId(providerId, modelId, selected.baseUrl, selected.endpoint)
         : createHash('sha256').update(JSON.stringify({ providerId, modelId, api: selected.api, endpoint: selected.requestUrl, credentialRef: selected.credentialRef, credentialScope: scope, modelHeaderRevision: selected.modelHeaderRevision, schema: 'decision.v1' })).digest('hex'),
       credentialRef: selected.credentialRef, credentialScope: Object.freeze({ ...scope }), assertAvailable,
       currentScope: async () => { await assertAvailable(); return { ...scope }; },
-      getAuth: async () => { await assertAvailable(); const current = await this.#inferenceCredentialState(selected.credentialRef, initial.configuration);
+      getAuth: async () => { await assertAvailable(); const current = await this.#inferenceCredentialState(selected.credentialRef, initial.configuration, allowAnonymous);
         if (JSON.stringify(current.scope) !== expected) throw publicFailure('credential-scope-changed');
         return { ...current.auth, auth: { ...current.auth.auth, headers: { ...modelHeaders, ...current.auth.auth.headers } } }; },
     };
