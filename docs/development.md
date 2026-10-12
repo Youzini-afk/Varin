@@ -90,6 +90,12 @@ first; do not silently test an earlier build. Electron type checking uses genera
 and need not overwrite a running `server/` generation. A source-development Host may use the permitted
 Cargo runner; packaged layouts need the manifest-verified staged Rust executable.
 
+Web's aggregate `type-check` checks and emits the Application Host's declarations before checking
+browser and CLI consumers. Cross-layer tests use the existing `#application-host` boundary: TypeScript
+reads those fresh declarations, while the native Vitest configuration resolves the same imports to
+real Host source. Host implementations remain checked in their Node project; browser code keeps its
+own DOM/lib settings. A successful type check is not execution of a listener-bearing native test.
+
 **Test ownership.** UI and Web use Vitest. Native Web tests follow the `*.native.test.ts` convention and
 run through the dedicated kernel entry rather than the portable Web suite. Electron separates runtime,
 updater, Linux desktop and packaging-helper coverage. Python driver tests use

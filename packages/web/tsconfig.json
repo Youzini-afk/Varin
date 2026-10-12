@@ -22,6 +22,9 @@
       "@types/dom-speech-recognition"
     ],
     "paths": {
+      "#application-host/*": [
+        "./.application-host-types/*"
+      ],
       "@/*": [
         "../ui/src/*",
         "./src/*"
