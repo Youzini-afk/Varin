@@ -149,7 +149,7 @@ impl ModelProvider for PiMessagesProvider {
             );
         }
         let session_id = match &view.origin {
-            RequestOrigin::McpSampling { operation_id, .. } => operation_id,
+            RequestOrigin::McpSampling { operation_id, .. } | RequestOrigin::AuxiliaryInference { operation_id, .. } => operation_id,
             _ => &view.binding.history_range.branch_id,
         };
         let mut options = json!({"sessionId":session_id});

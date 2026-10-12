@@ -283,6 +283,10 @@ struct Snippet {
     revision: String,
     start_line: u64,
     end_line: u64,
+    #[serde(default)]
+    required: bool,
+    #[serde(default)]
+    required_groups: Vec<String>,
     #[serde(rename = "content")]
     _untrusted_content: String,
 }
@@ -296,6 +300,36 @@ struct Reply {
     stages: Vec<Stage>,
     #[serde(rename = "inferenceReceipts", default)]
     inference_receipts: Vec<InferenceReceipt>,
+}
+fn required_components(items: &[Snippet]) -> Vec<Vec<usize>> {
+    let mut pending: std::collections::BTreeSet<_> = (0..items.len()).collect();
+    let mut result = Vec::new();
+    while let Some(first) = pending.pop_first() {
+        let mut group = vec![first];
+        let mut ids: std::collections::BTreeSet<_> = items[first].required_groups.iter().collect();
+        loop {
+            let joined: Vec<_> = pending
+                .iter()
+                .copied()
+                .filter(|index| {
+                    items[*index]
+                        .required_groups
+                        .iter()
+                        .any(|id| ids.contains(id))
+                })
+                .collect();
+            if joined.is_empty() {
+                break;
+            }
+            for index in joined {
+                pending.remove(&index);
+                ids.extend(items[index].required_groups.iter());
+                group.push(index);
+            }
+        }
+        result.push(group);
+    }
+    result
 }
 fn exact_stages<'a>(kinds: impl Iterator<Item = &'a str>) -> bool {
     let kinds: Vec<_> = kinds.collect();
@@ -531,78 +565,106 @@ impl KernelToolExecutor {
         if matches!(reply.status.as_str(), "ready" | "partial") {
             // Cache only the current file: many tiny spans must not retain every full body.
             let mut observation: Option<(String, language::Observation)> = None;
-            for item in reply.snippets {
+            for component in required_components(&reply.snippets) {
+                let required = component.iter().any(|i| {
+                    reply.snippets[*i].required || !reply.snippets[*i].required_groups.is_empty()
+                });
+                let original_len = snippets.len();
+                let original_budget = output_budget;
+                let mut rejected = false;
+                for index in component {
+                    let item = &reply.snippets[index];
+                    if item.required_groups.iter().any(|id| id.trim().is_empty()) {
+                        return Err(invalid());
+                    }
+                    if cancel.is_cancelled() {
+                        reply.status = "cancelled".into();
+                        snippets.clear();
+                        break;
+                    }
+                    if !valid_path(&item.path) || !args.contains(&item.path) {
+                        counter(&mut reply.omissions.out_of_scope);
+                        rejected = true;
+                        continue;
+                    }
+                    if args
+                        .limit
+                        .is_some_and(|limit| snippets.len() as u64 >= limit)
+                    {
+                        rejected = true;
+                        continue;
+                    }
+                    if observation
+                        .as_ref()
+                        .is_none_or(|(path, _)| path != &item.path)
+                    {
+                        match self.observe_language_path(context, &item.path, cancel) {
+                            Ok(observed) => {
+                                observation = Some((item.path.clone(), observed));
+                            }
+                            Err(error) => {
+                                if cancel.is_cancelled() {
+                                    reply.status = "cancelled".into();
+                                    snippets.clear();
+                                    break;
+                                }
+                                if error.code == "unauthorized" {
+                                    counter(&mut reply.omissions.out_of_scope);
+                                } else {
+                                    counter(&mut reply.omissions.unavailable);
+                                }
+                                rejected = true;
+                                continue;
+                            }
+                        }
+                    }
+                    let observed = &observation.as_ref().expect("observed current path").1;
+                    if item.revision != observed.revision {
+                        counter(&mut reply.omissions.stale);
+                        rejected = true;
+                        continue;
+                    }
+                    let content = match span(
+                        &observed.text,
+                        item.start_line,
+                        item.end_line,
+                        output_budget,
+                    ) {
+                        Span::Content(content) => content,
+                        Span::Invalid => {
+                            counter(&mut reply.omissions.stale);
+                            rejected = true;
+                            continue;
+                        }
+                        Span::OverBudget => {
+                            counter(&mut reply.omissions.unavailable);
+                            rejected = true;
+                            continue;
+                        }
+                    };
+                    let snippet = json!({"path":item.path,"revision":observed.revision,
+                    "startLine":item.start_line,"endLine":item.end_line,"content":content});
+                    let encoded_length = serde_json::to_vec(&snippet)
+                        .map_err(|_| invalid())?
+                        .len()
+                        .saturating_add(1);
+                    if encoded_length > output_budget {
+                        counter(&mut reply.omissions.unavailable);
+                        rejected = true;
+                        continue;
+                    }
+                    output_budget -= encoded_length;
+                    snippets.push(snippet);
+                }
+                if required && rejected {
+                    snippets.truncate(original_len);
+                    output_budget = original_budget;
+                    counter(&mut reply.omissions.unavailable);
+                }
                 if cancel.is_cancelled() {
-                    reply.status = "cancelled".into();
                     snippets.clear();
                     break;
                 }
-                if !valid_path(&item.path) || !args.contains(&item.path) {
-                    counter(&mut reply.omissions.out_of_scope);
-                    continue;
-                }
-                if args
-                    .limit
-                    .is_some_and(|limit| snippets.len() as u64 >= limit)
-                {
-                    continue;
-                }
-                if observation
-                    .as_ref()
-                    .is_none_or(|(path, _)| path != &item.path)
-                {
-                    match self.observe_language_path(context, &item.path, cancel) {
-                        Ok(observed) => {
-                            observation = Some((item.path.clone(), observed));
-                        }
-                        Err(error) => {
-                            if cancel.is_cancelled() {
-                                reply.status = "cancelled".into();
-                                snippets.clear();
-                                break;
-                            }
-                            if error.code == "unauthorized" {
-                                counter(&mut reply.omissions.out_of_scope);
-                            } else {
-                                counter(&mut reply.omissions.unavailable);
-                            }
-                            continue;
-                        }
-                    }
-                }
-                let observed = &observation.as_ref().expect("observed current path").1;
-                if item.revision != observed.revision {
-                    counter(&mut reply.omissions.stale);
-                    continue;
-                }
-                let content = match span(
-                    &observed.text,
-                    item.start_line,
-                    item.end_line,
-                    output_budget,
-                ) {
-                    Span::Content(content) => content,
-                    Span::Invalid => {
-                        counter(&mut reply.omissions.stale);
-                        continue;
-                    }
-                    Span::OverBudget => {
-                        counter(&mut reply.omissions.unavailable);
-                        continue;
-                    }
-                };
-                let snippet = json!({"path":item.path,"revision":observed.revision,
-                    "startLine":item.start_line,"endLine":item.end_line,"content":content});
-                let encoded_length = serde_json::to_vec(&snippet)
-                    .map_err(|_| invalid())?
-                    .len()
-                    .saturating_add(1);
-                if encoded_length > output_budget {
-                    counter(&mut reply.omissions.unavailable);
-                    continue;
-                }
-                output_budget -= encoded_length;
-                snippets.push(snippet);
             }
         }
         // A failed selected stage cannot masquerade as clean zero hits, even if its owner

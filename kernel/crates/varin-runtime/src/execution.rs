@@ -368,6 +368,7 @@ pub struct RequestView<M = ResolvedMedia> {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RequestOrigin {
+    AuxiliaryInference { operation_id: String, parent_operation_id: String, purpose: String },
     McpSampling { interaction_id: String, operation_id: String, parent_operation_id: String },
     Conversation {
         step: u64,

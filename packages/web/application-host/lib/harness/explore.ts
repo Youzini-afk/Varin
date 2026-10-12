@@ -3402,6 +3402,29 @@ function relationLines(relations: NonNullable<WireResult["details"]["relations"]
   return lines;
 }
 
+/** Required groups sharing a range are one atomic delivery component. */
+export function requiredExploreComponents<T extends { requiredGroups?: readonly string[] }>(snippets: readonly T[]): T[][] {
+  const pending = new Set(snippets);
+  const components: T[][] = [];
+  for (const snippet of snippets) {
+    if (!pending.has(snippet)) continue;
+    const group = [snippet];
+    const ids = new Set(snippet.requiredGroups);
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const candidate of pending) {
+        if (group.includes(candidate) || !candidate.requiredGroups?.some(id => ids.has(id))) continue;
+        group.push(candidate);
+        for (const id of candidate.requiredGroups) ids.add(id);
+        changed = true;
+      }
+    }
+    for (const item of group) pending.delete(item);
+    components.push(group);
+  }
+  return components;
+}
+
 /** A delivery plan owns both selected ranges and their exact rendering. */
 function planExploreDelivery(
   result: ExploreFormatInput,
@@ -3489,22 +3512,8 @@ function planExploreDelivery(
       reason: `already shown in ${covering.path}:${covering.startLine}-${covering.endLine}` });
   };
 
-  const pendingDelivery = new Set(result.snippets);
-  for (const snippet of result.snippets) {
-    if (!pendingDelivery.has(snippet)) continue;
-    const group = [snippet];
-    const requiredGroups = new Set(snippet.requiredGroups);
-    // Overlapping required groups form one atomic delivery component.
-    for (let changed = true; changed;) {
-      changed = false;
-      for (const candidate of pendingDelivery) {
-        if (group.includes(candidate) || !candidate.requiredGroups?.some(id => requiredGroups.has(id))) continue;
-        group.push(candidate);
-        for (const id of candidate.requiredGroups) requiredGroups.add(id);
-        changed = true;
-      }
-    }
-    for (const member of group) pendingDelivery.delete(member);
+  for (const group of requiredExploreComponents(result.snippets)) {
+    const requiredGroups = new Set(group.flatMap(member => member.requiredGroups ?? []));
     const block = group.map(member => snippetBlocks[result.snippets.indexOf(member)]!).join('\n');
     if (!pushIfFits(block)) {
       for (const member of group) {

@@ -18,7 +18,7 @@ import type {
   HarnessServiceMap,
   HarnessExploreDecisionMode,
 } from "@varin/protocol";
-import { resolveHarnessCodeRetrievalSettings } from "@varin/protocol";
+import { resolveHarnessCodeRetrievalSettings, resolveExploreDuties } from "@varin/protocol";
 import {
   documentsFromViews,
   rerankFailureDetails,
@@ -622,10 +622,7 @@ export function createExploreQueryStartService(
         stored.rerankInvalid = rerankInvalid;
         const llm = Boolean(params.reserveForJudge) && (decisionMode === 'auto' || decisionMode === 'llm');
         const decision = fastDecision?.status === 'ready';
-        stored.duties = {
-          actions: decision ? 'fast-decision' : llm ? 'llm' : 'source',
-          selection: llm ? 'llm' : decision ? 'fast-decision' : rerankConfigured ? 'rerank' : 'source',
-        };
+        stored.duties = resolveExploreDuties({ mode: decisionMode, llm, fastDecision: decision, rerank: rerankConfigured });
         queryCoverage.set(stored, { graphMissing: graphSources.missing > 0, resourceUnits });
         if (fastDecision) {
           stored.fastDecision = fastDecision;

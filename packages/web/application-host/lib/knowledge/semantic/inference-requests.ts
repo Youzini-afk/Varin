@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { EgressRuntime } from '../../harness/egress.js';
 import type { AgentRuntimeClient } from '../../kernel/agent-runtime-client.js';
 import type { KernelClient } from '../../kernel/kernel-client.js';
-import type { ExecutorOwner, InferenceBinding, InferenceReceipt, InferenceSettleParams, InferenceStatus, Operation } from '../../kernel/protocol.generated.js';
+import type { ExecutorOwner, InferenceBinding, InferenceReceipt, InferenceSettleParams, InferenceStatus, Operation, InferenceGenerateParams, InferenceSessionStatus } from '../../kernel/protocol.generated.js';
 export interface InferenceInvocationAuthority { operationId: string; executorOwner: ExecutorOwner }
 export interface InferenceRequestsOptions {
   kernel: Pick<KernelClient, 'agentRuntimeRequest'>;
@@ -18,21 +18,37 @@ interface InferenceRequest {
   init: RequestInit;
   connection: Awaited<ReturnType<EgressRuntime['prepare']>>;
   check(signal: AbortSignal): Promise<void>;
+  onReceipt?(receipt: InferenceReceipt): void;
   observe(raw: unknown): { usage?: InferenceReceipt['usage']; rawUsage: unknown; valid: boolean };
 }
 export interface InferenceCall {
   readonly signal: AbortSignal;
   readonly cancelled: boolean;
-  readonly receipts: readonly InferenceReceipt[];
   assertFresh(): Promise<void>;
   request(input: InferenceRequest): Promise<Response>;
+  generate(input: {
+    request: Omit<InferenceGenerateParams, 'parentOperationId' | 'callerOwner' | 'ordinal'>;
+    signal?: AbortSignal;
+    check(signal: AbortSignal): Promise<void>;
+    register(operationId: string, signal: AbortSignal): Promise<void>;
+    release(operationId: string): void;
+  }): Promise<string>;
 }
 const cancelled = () => new DOMException('Inference request cancelled', 'AbortError');
 const emptyUsage = (): InferenceReceipt['usage'] => ({ measurement: 'missing', inputTokens: null, outputTokens: null });
 export function createInferenceRequests(options: InferenceRequestsOptions) {
   let closed = false;
   const controllers = new Set<AbortController>();
+  let change = 0;
+  let lostEpoch = 0;
+  const waiters = new Set<() => void>();
+  const notify = () => { change++; for (const wake of [...waiters]) wake(); };
+  const waitForChange = (after: number): Promise<void> => change !== after ? Promise.resolve() : new Promise(resolve => {
+    const wake = () => { waiters.delete(wake); resolve(); }; waiters.add(wake);
+    if (change !== after) wake();
+  });
   const calls = new Set<Promise<unknown>>();
+  const sessions = new Map<string, object>();
   const active = new Map<string, { owner: ExecutorOwner; abort: AbortController; cancel(): void }>();
   const pending = new Map<string, InferenceSettleParams>();
   const report = () => options.onError?.();
@@ -101,26 +117,90 @@ export function createInferenceRequests(options: InferenceRequestsOptions) {
     })().finally(() => { reconciling = undefined; });
     return reconciling;
   };
-  const removers = [options.runtime.onEvent(() => { void reconcile(); }), options.runtime.onReady(() => { void reconcile(); }),
-    options.runtime.onExit(() => { for (const controller of controllers) controller.abort(cancelled()); })];
+  const removers = [options.runtime.onEvent(() => { notify(); void reconcile(); }), options.runtime.onReady(() => { notify(); void reconcile(); }),
+    options.runtime.onExit(() => { lostEpoch++; for (const controller of controllers) controller.abort(cancelled()); notify(); })];
   const run = <T>(invocation: InferenceInvocationAuthority, signal: AbortSignal, execute: (call: InferenceCall) => Promise<T>): Promise<T> => {
     const work = (async () => {
       if (closed) throw new Error('Inference requests are closed');
+      if (sessions.has(invocation.operationId)) throw new Error('Original inference session is already active');
+      const session = {};
+      sessions.set(invocation.operationId, session);
       const controller = new AbortController();
       let ownerCancelled = false;
       controllers.add(controller);
       const combined = AbortSignal.any([signal, controller.signal]);
-      const receipts: InferenceReceipt[] = [];
       let ordinal = 0;
       const call: InferenceCall = {
-        signal: combined, receipts,
+        signal: combined,
         get cancelled() { return signal.aborted || ownerCancelled; },
         async assertFresh() {
           combined.throwIfAborted();
-          const previous = await options.kernel.agentRuntimeRequest<Operation | null, 'runtime.operation.inspect'>('runtime.operation.inspect', {
-            operationId: `inference:${invocation.operationId}:1`, allowMissing: true,
+          const previous = await options.kernel.agentRuntimeRequest<InferenceSessionStatus, 'runtime.inference.session'>('runtime.inference.session', {
+            parentOperationId: invocation.operationId, executionOwner: invocation.executorOwner,
           });
-          if (previous) throw new Error('Original inference exists; recovery never restarts its paid request');
+          if (previous.hasRequests) throw new Error('Original inference exists; recovery never restarts its paid request');
+        },
+        async generate(input) {
+          const generationSignal = input.signal ? AbortSignal.any([combined, input.signal]) : combined;
+          generationSignal.throwIfAborted();
+          await input.check(generationSignal);
+          const ownEpoch = lostEpoch;
+          const next = ++ordinal;
+          const id = `inference:${invocation.operationId}:${next}`;
+          let admitted = false;
+          let cancelSent = false;
+          const cancel = () => {
+            notify();
+            if (admitted && !cancelSent) {
+              cancelSent = true;
+              void options.kernel.agentRuntimeRequest('runtime.operation.cancel', { operationId: id }).catch(report);
+            }
+          };
+          generationSignal.addEventListener('abort', cancel);
+          try {
+            await input.register(id, generationSignal);
+            await input.check(generationSignal);
+            generationSignal.throwIfAborted();
+            let status: InferenceStatus;
+            try {
+              status = await options.kernel.agentRuntimeRequest<InferenceStatus, 'runtime.inference.generate'>('runtime.inference.generate', {
+                ...input.request, parentOperationId: invocation.operationId, callerOwner: invocation.executorOwner, ordinal: next,
+              });
+              admitted = true;
+            } catch (error) {
+              // Lost admission ACK is resolved by the exact original identity, never another generation.
+              const original = await options.kernel.agentRuntimeRequest<Operation | null, 'runtime.operation.inspect'>('runtime.operation.inspect', { operationId: id, allowMissing: true });
+              if (!original || original.execution_owner?.kind !== 'kernel') throw error;
+              status = await options.kernel.agentRuntimeRequest<InferenceStatus, 'runtime.inference.status'>('runtime.inference.status', { operationId: id, executionOwner: invocation.executorOwner });
+              admitted = true;
+            }
+            const entry = { owner: invocation.executorOwner, abort: controller, cancel: () => { ownerCancelled = true; controller.abort(cancelled()); } };
+            active.set(id, entry);
+            if (generationSignal.aborted) cancel();
+            while (true) {
+              if (lostEpoch !== ownEpoch) throw new Error('Original generation owner was lost; it is not replayed');
+              if (status.phase === 'terminal') {
+                // Terminal recovery is not body-drain proof. The old worker cannot publish into this epoch.
+                if (status.recovered || !status.receipt?.localExecutorStopped) throw new Error('Original generation is indeterminate');
+                const original = await options.kernel.agentRuntimeRequest<Operation, 'runtime.operation.inspect'>('runtime.operation.inspect', { operationId: id });
+                generationSignal.throwIfAborted();
+                await input.check(generationSignal);
+                const value = original.result?.kind === 'control' ? original.result.value : undefined;
+                const response = value && typeof value === 'object' && 'response' in value ? value.response : undefined;
+                const text = response && typeof response === 'object' && 'text' in response ? response.text : undefined;
+                if (status.outcome !== 'succeeded' || typeof text !== 'string') throw new Error('Auxiliary generation failed; its original evidence was retained');
+                return text;
+              }
+              const observed = change;
+              status = await options.kernel.agentRuntimeRequest<InferenceStatus, 'runtime.inference.status'>('runtime.inference.status', { operationId: id, executionOwner: invocation.executorOwner });
+              observeStatus(status);
+              if (status.phase !== 'terminal') await waitForChange(observed);
+            }
+          } finally {
+            generationSignal.removeEventListener('abort', cancel);
+            active.delete(id);
+            input.release(id);
+          }
         },
         async request(input) {
           const requestSignal = input.init.signal ? AbortSignal.any([combined, input.init.signal]) : combined;
@@ -166,7 +246,7 @@ export function createInferenceRequests(options: InferenceRequestsOptions) {
             if (observed.usage) usage = observed.usage;
             const receipt: InferenceReceipt = { requestStarted: true, providerCompleted: true, localExecutorStopped: true,
               usage, httpStatus, problem: !response.ok ? 'http_rejected' : raw === null || !observed.valid ? 'invalid_response' : null };
-            if (selectedBinding.requestKind === 'model_compute') receipts.push(receipt);
+            if (selectedBinding.requestKind === 'model_compute') input.onReceipt?.(receipt);
             try { await publish({ operationId: id, executionOwner, receipt, response: { bodyBase64: responseBody, rawUsage: observed.rawUsage } }); }
             catch (error) { controller.abort(cancelled()); throw error; }
             // The SDK receives exactly these already drained bytes. Cancellation cannot erase their usage.
@@ -182,7 +262,7 @@ export function createInferenceRequests(options: InferenceRequestsOptions) {
             if (admitted && !completed) {
               const receipt: InferenceReceipt = { requestStarted: started, providerCompleted: false, localExecutorStopped: true,
                 usage, httpStatus, problem: requestSignal.aborted ? 'cancelled' : started ? 'transport_failed' : 'not_dispatched' };
-              if (selectedBinding.requestKind === 'model_compute' && started) receipts.push(receipt);
+              if (selectedBinding.requestKind === 'model_compute' && started) input.onReceipt?.(receipt);
               try { await publish({ operationId: id, executionOwner, receipt, response: { bodyBase64: responseBody, rawUsage: selectedBinding.requestKind === 'model_compute' ? input.observe(raw).rawUsage : null } }); }
               catch { report(); }
             }
@@ -192,7 +272,7 @@ export function createInferenceRequests(options: InferenceRequestsOptions) {
         },
       };
       try { return await execute(call); }
-      finally { controllers.delete(controller); }
+      finally { controllers.delete(controller); if (sessions.get(invocation.operationId) === session) sessions.delete(invocation.operationId); }
     })();
     calls.add(work);
     void work.finally(() => calls.delete(work)).catch(() => {});

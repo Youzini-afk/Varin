@@ -304,8 +304,8 @@ Global singleton that owns:
 The Pi adapter resolves embedding, reranking and fast decisions through its original provider capabilities.
 Native embedding and TypeSafe/Cloudflare/llama.cpp decisions use the existing Host inference/credential owner
 directly; native decision/rerank HTTP/Goal facts belong to Catalog. Native live-root code retrieval
-uses dedicated rerank or the original progressive fast-decision loop. Explore LLM and other model-stage
-purposes still require their own native integration.
+uses dedicated rerank, the original progressive fast-decision loop, or the original Explore LLM planner
+and joint selector. Other model-stage purposes still require their own native integration.
 Their connection/credential defaults and model declarations are independent of the native chat API;
 the Host receives only frozen, credential-free bindings. User/operator metadata can override the
 operation's address, path and credential owner; project configuration cannot redirect background
@@ -953,8 +953,11 @@ before finish. It uses one original Host inference session across batches and SD
 `research_decide` consumer shares that session contract. Source-issued material/action identities and
 original Documents/grant checks remain with the query owner. The loop reports known usage dimensions
 only, and an accounted failed batch stops before selection/followup while retaining earlier successful
-selection. Native Explore LLM is still explicitly unsupported, including an enabled Explore slot in auto;
-the Pi LLM planner/selection behavior above is not yet a native implementation claim.
+selection. Native Explore LLM uses the same pure `@varin/protocol` planner/selection loop as Pi,
+with the original query as its port. In auto it retains LLM selection and classifier actions concurrently;
+finish explicitly settles the parked action loop. Configuration/credential fences belong to each role,
+while source/grant and actual query-issued identities remain shared. Native generation uses the original
+Rust provider adapter, Catalog and private credential bridge, independently of the main chat request.
 
 `query.views({seen,inputBytes})` returns ready ranges, current sequence, pending work and actions;
 it does not await all sources or structure. `query.wait({afterSequence})` registers a cancellable,

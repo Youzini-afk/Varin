@@ -23,6 +23,8 @@ mod computer_commands;
 mod host_job_commands;
 #[path = "agent_inference.rs"]
 mod inference_commands;
+#[path = "agent_inference_generation.rs"]
+mod inference_generation_commands;
 #[path = "agent_managed_process.rs"]
 mod managed_process_commands;
 #[path = "agent_mcp_interactions.rs"]
@@ -930,7 +932,9 @@ pub(crate) fn spawn(
                             let done = finished.clone();
                             let cancelled = cancellation.clone();
                             thread::spawn(move || {
-                                let result = if method.starts_with("runtime.inference.") {
+                                let result = if method == "runtime.inference.generate" {
+                                    inference_generation_commands::generate(runtime, credentials, params, &cancelled)
+                                } else if method.starts_with("runtime.inference.") {
                                     inference_commands::execute(
                                         runtime, &method, params, &cancelled,
                                     )

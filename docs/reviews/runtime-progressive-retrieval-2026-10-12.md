@@ -4,6 +4,9 @@
 与已签发后续动作接入 Native live_root code_retrieval。没有另写最终片段打分器冒充渐进检索。
 Catalog **57**、wire **10** 保持；原 query delegation、HTTP child、Goal 和 ContentStore 权威不变。
 
+以下是该基线当时的结果；后续 Explore LLM 与共享 session/逐请求回执合同见
+[Explore LLM 增量](runtime-explore-llm-2026-10-12.md)，不把后续实现倒记为本片证据。
+
 ## 共同合同
 
 - 原 codeRetrieval selector 与 fastDecision explore/default/Off 决定是否参与。source/rerank

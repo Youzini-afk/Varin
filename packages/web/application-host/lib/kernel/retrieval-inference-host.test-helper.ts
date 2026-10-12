@@ -14,6 +14,7 @@ import { KernelClient, type KernelGrantHandle } from './kernel-client.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { createLiveSourceOwner } from './live-source.js';
 import { createRetrievalComposition } from './retrieval-composition.js';
+import { createModelAuthority } from './model-authority.js';
 import { createRetrievalModelStage } from './retrieval-model.js';
 import { createRetrievalOwner } from './retrieval-owner.js';
 import { withMaterialReviewClient, writeMaterialFixtureFrame as write } from './material-review-fixture.test-helper.js';
@@ -51,15 +52,16 @@ async function heldResponse(init: RequestInit): Promise<Response> {
 }
 const egress=createEgressRuntime({env:{},resolveAll:async()=>[{address:'93.184.216.34',family:4}],
   systemFetch:async(url,init)=>{
-    if(mode.startsWith('decision-')) {
+    if(mode.startsWith('decision-')||mode==='llm-auto') {
       assert.equal(String(url),'https://rerank.invalid/models/systemone');
       assert.equal(new Headers(init.headers).get('authorization'),'Bearer controlled-rerank-key');
       const body=JSON.parse(String(init.body)) as {model:string;state:{goal:string;materials:Array<{id:string;text:string;label:string}>};questions:Record<string,unknown>};
       bodies.push(body);requests++;
       assert.equal(body.model,'classifier');
-      assert.equal(body.state.goal,'retrievalNeedle');
+      assert.equal(body.state.goal,mode.startsWith('llm-')?'How does retrievalNeedle resolve its dependency?':'retrievalNeedle');
       assert(body.state.materials.every(material=>!material.text.includes('FORBIDDEN_SOURCE')));
       assert.equal('messages' in body,false);
+      if(mode==='llm-auto') assert(Object.keys(body.questions).every(id=>id.startsWith('a:')),'classifier keeps only its original action duty');
       if(mode==='decision-stop') return heldResponse(init);
       const usage=mode==='decision-unknown'?{input_tokens:7}:{input_tokens:requests*7,output_tokens:requests};
       if(mode==='decision-partial'&&body.state.materials.some(material=>material.text.includes('DISCOVERED_HELPER'))) return Response.json({answers:'invalid original second batch',usage});
@@ -88,7 +90,7 @@ async function initialize(frame:Record<string,unknown>) {
   root=String(frame.root);mode=String(frame.mode);
   const workspace=join(root,'workspace'), agentDir=join(root,'agent');
   await mkdir(join(workspace,'allowed'),{recursive:true});await mkdir(join(workspace,'private'),{recursive:true});await mkdir(agentDir,{recursive:true});
-  if(mode.startsWith('decision-')) {
+  if(mode.startsWith('decision-')||mode.startsWith('llm-')) {
     await writeFile(join(workspace,'allowed','seed.ts'),'export const retrievalNeedle = hiddenHelper();\n');
     await writeFile(join(workspace,'allowed','helper.ts'),'export function hiddenHelper() { return "DISCOVERED_HELPER"; }\n');
   } else {
@@ -97,10 +99,12 @@ async function initialize(frame:Record<string,unknown>) {
   }
   await writeFile(join(workspace,'private','secret.ts'),'export const retrievalNeedle = "FORBIDDEN_SOURCE";\n');
   await writeFile(join(agentDir,'models.json'),JSON.stringify({providers:{rank:{apiKey:'controlled-rerank-key',baseUrl:'https://rerank.invalid/models',chat:false,
-    capabilities:{rerank:{protocol:'http-rerank',models:[{id:'ranker'}]},decision:{protocol:'pi-classifier',models:[{id:'classifier',api:'typesafe-system-one'}]}}}}}));
-  await writeFile(join(agentDir,'settings.json'),JSON.stringify({harness:{codeRetrieval:{decision:mode.startsWith('decision-')?'fast-decision':mode==='source'?'source':mode==='unsupported'?'llm':'rerank'},
+    capabilities:{rerank:{protocol:'http-rerank',models:[{id:'ranker'}]},decision:{protocol:'pi-classifier',models:[{id:'classifier',api:'typesafe-system-one'}]}}},
+    explore:{baseUrl:'https://explore.invalid/v1',apiKey:'controlled-explore-key',api:'openai-responses',models:[{id:'explore-model',name:'Original configured Explore',contextWindow:32768,maxTokens:2000,input:['text']}]}}}));
+  await writeFile(join(agentDir,'settings.json'),JSON.stringify({harness:{codeRetrieval:{decision:mode==='llm-auto'?'auto':mode.startsWith('llm-')||mode==='unconfigured-model'?'llm':mode.startsWith('decision-')?'fast-decision':mode==='source'?'source':'rerank'},
     rerank:{protocol:'http-rerank',providerId:'rank',modelId:'ranker'},
-    fastDecision:mode.startsWith('decision-')?{default:{protocol:'pi-classifier',providerId:'rank',modelId:'classifier'}}:undefined}}));
+    models:mode.startsWith('llm-')?{explore:{providerId:'explore',modelId:'explore-model'}}:undefined,
+    fastDecision:mode.startsWith('decision-')||mode==='llm-auto'?{default:{protocol:'pi-classifier',providerId:'rank',modelId:'classifier'}}:undefined}}));
   kernel=new KernelClient({hostId:HOST,hostGeneration:GENERATION,storageRoot:String(frame.storageRoot),buildVersion:'0.9.25'});
   // Replace delivery/handshake only. Original grant minting/token checks, bridges and runtime events remain.
   const transport=kernel as unknown as {epoch:string;handshakeResult:KernelHandshakeResult;consumeFrame(value:unknown):void};
@@ -116,7 +120,7 @@ async function initialize(frame:Record<string,unknown>) {
   const source={workspaceId:identity.workspaceId,executionWorkspaceId:identity.workspaceId,liveRoot:await live.prepare(identity.workspaceId,identity.workspaceId,'thread:parent')};
   const credentials=HostCredentialAuthority.open(agentDir);
   inference=createSemanticInference(credentials,undefined,{requests:{kernel,runtime,egress}});
-  const model=createRetrievalModelStage({inference,readGlobalSettings:()=>credentials.readGlobalInferenceSettings(),kernel,validateSource:live.validate});
+  const model=createRetrievalModelStage({models:createModelAuthority(credentials),inference,readGlobalSettings:()=>credentials.readGlobalInferenceSettings(),kernel,validateSource:live.validate});
   extensions=await ApplicationExtensionRuntime.create({dataDir:join(root,'extensions'),varinVersion:'0.9.25',
     brokerScript:resolve('packages/extension-host/broker/broker-child.mjs')});
   await extensions.start();
@@ -140,7 +144,11 @@ async function handle(frame:Record<string,unknown>) {
       owningWorkspace:source.workspaceId,executionWorkspace:source.executionWorkspaceId,capabilities:['storage.read'],pathScopes:['allowed']});
     write({kind:'fixture-prepared',grantId:grant.grantId});return;
   }
-  if(frame.kind==='fixture-release-body') {releaseBody();return;}
+  if(frame.kind==='fixture-native-request') {
+    await withMaterialReviewClient(runtime,{} as ThreadMaterialsAPI,api=>api.cancelRun(runId));return;
+  }
+  if(frame.kind==='fixture-native-body-cancelled') {write({kind:'fixture-body-cancelled',drained:false});return;}
+  if(frame.kind==='fixture-release-body') {if(mode==='llm-stop'){drained=true;write({kind:'fixture-native-release'});}else releaseBody();return;}
   if(frame.kind==='fixture-finish') {
     // Publishing may outlive the detached caller. Wait for that existing owner's completion before exit.
     await inference.close();await extensions.stop();await documents.dispose();

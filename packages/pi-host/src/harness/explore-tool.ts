@@ -1,19 +1,9 @@
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { AgentInputContext, ExploreModelParticipation, ExploreModelStageStatus } from "@varin/protocol";
-import { HARNESS_MAX_REQUEST_TIMEOUT_MS } from "@varin/protocol";
+import type { AgentInputContext, ExploreModelComplete, ExploreModelParticipation } from "@varin/protocol";
+import { ExploreBudgetExhausted, HARNESS_MAX_REQUEST_TIMEOUT_MS, runExploreModelLoop } from "@varin/protocol";
 import { createExploreProgress } from "./explore-progress.js";
 import { HarnessRequestError, type HostServicesBridge } from "./host-services-bridge.js";
-import {
-  EXPLORE_PLAN_SYSTEM,
-  EXPLORE_SELECT_SYSTEM,
-  exploreShouldPlanWithModel,
-  exploreShouldSelectWithModel,
-  parseExplorePlan,
-  parseExploreSelection,
-  renderExplorePlanPrompt,
-  renderExploreSelectPrompt,
-} from "./explore-model.js";
 
 const ExploreParams = Type.Object({
   question: Type.String({ description: "What you want to find or understand in the codebase" }),
@@ -27,30 +17,6 @@ const ExploreParams = Type.Object({
 
 /** Public remaining wait shared across stages. Not a calibrated SLO. */
 export const EXPLORE_PUBLIC_BUDGET_MS = 120_000;
-
-class ExploreBudgetExhausted extends Error {
-  constructor() {
-    super("Explore search budget exhausted");
-  }
-}
-
-function boundByDeadline(signal: AbortSignal | undefined, deadlineAt: number): AbortSignal {
-  const remaining = deadlineAt - Date.now();
-  if (remaining <= 0) throw new ExploreBudgetExhausted();
-  const timeout = AbortSignal.timeout(remaining);
-  return signal ? AbortSignal.any([signal, timeout]) : timeout;
-}
-
-export type ExploreModelComplete = ((input: {
-  systemPrompt: string;
-  user: string;
-  signal?: AbortSignal;
-}) => Promise<string>) & { inputBytes?: number };
-
-function stageFromError(error: unknown, signal?: AbortSignal): ExploreModelStageStatus {
-  if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) return "cancelled";
-  return "failed";
-}
 
 export function createExploreTool(
   bridge: HostServicesBridge,
@@ -71,7 +37,7 @@ export function createExploreTool(
       const budgetMs = params.budgetMs ?? EXPLORE_PUBLIC_BUDGET_MS;
       let deadlineAt = Date.now() + budgetMs;
       const remaining = (): number => Math.max(0, deadlineAt - Date.now());
-      const participation: ExploreModelParticipation = {
+      let participation: ExploreModelParticipation = {
         plan: options?.complete ? "skipped" : "unconfigured",
         select: options?.complete ? "skipped" : "unconfigured",
         followup: options?.complete ? "skipped" : "unconfigured",
@@ -140,118 +106,20 @@ export function createExploreTool(
         queryId = started.queryId;
         progress.observe(started);
         deadlineAt = Math.min(deadlineAt, started.deadlineAt);
-        const modelSignal = () => boundByDeadline(signal, deadlineAt);
-        const decisionMode = started.decisionMode ?? "auto";
-        const useExploreModel = decisionMode === "auto" || decisionMode === "llm";
-        if (!useExploreModel) {
-          participation.plan = "disabled";
-          participation.select = "disabled";
-          participation.followup = "disabled";
-        }
-
-        const duties = started.duties;
-        if (started.fastDecision && started.fastDecision.status !== "ready") {
-          participation.fastDecision = started.fastDecision.status === "invalid" || started.fastDecision.status === "unavailable" ? "failed" : started.fastDecision.status;
-        }
-        if (!complete && decisionMode === "llm") participation.note = "The selected Explore LLM is unavailable; source ranking was kept.";
-
-        const shouldPlan = useExploreModel && Boolean(complete) && exploreShouldPlanWithModel(params.question, started.parsed.objects);
-        if (complete && shouldPlan) {
-          progress.phase("planning");
-          try {
-            const planText = await complete({
-              systemPrompt: EXPLORE_PLAN_SYSTEM,
-              user: renderExplorePlanPrompt(started),
-              signal: modelSignal(),
-            });
-            const plan = parseExplorePlan(planText);
-            if (plan) {
-              const submitted = await request("explore.query.plan", { queryId, plan });
-              progress.observe(submitted);
-              participation.plan = submitted.launched.length > 0 ? "used" : "skipped";
-            } else {
-              participation.plan = "failed";
-              participation.note = "Explore model plan was unused; excerpts are from algorithm and vector sources.";
-            }
-          } catch (error) {
-            participation.plan = stageFromError(error, signal);
-            if (participation.plan === "failed") {
-              participation.note = "Explore model plan failed; excerpts are from algorithm and vector sources.";
-            }
-          }
-        }
-
-        const seen = new Set<string>();
-        const offeredActions = new Map<string, string>();
-        const selectedViews = new Map<string, import("@varin/protocol").ExploreQueryView>();
-        const useSelection = complete && useExploreModel && duties?.selection !== "fast-decision"
-          && duties?.selection !== "rerank" && duties?.selection !== "source"
-          && exploreShouldSelectWithModel(params.question, started.parsed.objects, participation.plan === 'used');
-        let modelFailed = false;
-        while (remaining() > 0) {
-          signal?.throwIfAborted();
-          progress.phase("collecting");
-          const retained = [...selectedViews.values()];
-          const actionContext = retained.map(view => view.viewId).sort().join('|');
-          const capacity = complete?.inputBytes;
-          const retainedBytes = new TextEncoder().encode(JSON.stringify(retained) + EXPLORE_SELECT_SYSTEM + params.question).length;
-          const views = await request("explore.query.views", { queryId, seen: [...seen],
-            ...(capacity ? { inputBytes: Math.max(1, capacity - retainedBytes) } : {}) });
-          progress.observe(views);
-          const freshActions = views.actions.filter(action => offeredActions.get(action.actionId) !== actionContext);
-          if (useSelection && !modelFailed && (views.views.length > 0 || freshActions.length > 0)) {
-            progress.phase("selecting");
-            try {
-              const selected = parseExploreSelection(await complete!({
-                systemPrompt: EXPLORE_SELECT_SYSTEM,
-                user: renderExploreSelectPrompt(params.question, { ...views, actions: freshActions }, "incremental", {
-                  selectedViews: retained, newViews: views.views, excerptLimit: params.limit ?? 20,
-                }), signal: modelSignal(),
-              }));
-              for (const view of views.views) seen.add(view.viewId);
-              for (const action of freshActions) offeredActions.set(action.actionId, actionContext);
-              if (!selected) throw new Error("Explore model returned no valid selection or follow-up.");
-              // Each batch compares its new evidence with the retained group.
-              // Replacement is explicit, rather than accumulating every yes.
-              const applied = await request("explore.query.select", { queryId, groups: selected.groups });
-              selectedViews.clear();
-              for (const view of applied.selectedViews) selectedViews.set(view.viewId, view);
-              participation.select = applied.accepted.length || !selected.groups.length || selectedViews.size ? "used" : "skipped";
-              if (!applied.accepted.length && applied.rejected.length) {
-                participation.note = `Explore model selection was rejected: ${[...new Set(applied.rejected.map(entry => entry.reason))].join('; ')}. Source ranking was kept.`;
-              }
-              const actions = views.actions.filter(action => selected.actionIds.includes(action.actionId));
-              let launched = false;
-              if (selected.followup || actions.length) {
-                progress.phase("following-up");
-                const result = await request("explore.query.followup", { queryId, ...selected.followup, actions });
-                progress.observe(result);
-                launched = result.launched.length > 0;
-                participation.followup = launched ? "used" : "skipped";
-              }
-              if (selected.done && !launched) break;
-            } catch (error) {
-              if (participation.select === 'used') {
-                participation.followup = stageFromError(error, signal);
-                participation.note = 'Explore follow-up failed; the earlier accepted material was kept.';
-              } else {
-                participation.select = stageFromError(error, signal);
-                participation.note = "Explore model selection failed; acquired source material was kept.";
-              }
-              modelFailed = true;
-            }
-          } else {
-            for (const view of views.views) seen.add(view.viewId);
-          }
-          if (views.unevaluated > 0) continue;
-          // Re-collect after inference/submission: a producer may have progressed
-          // during that await. The sequence makes check-and-wait race-free.
-          const next = await request("explore.query.views", { queryId, seen: [...seen] });
-          progress.observe(next);
-          if (next.views.some(view => !seen.has(view.viewId)) || next.sequence !== views.sequence) continue;
-          if (!next.pending) break;
-          await request("explore.query.wait", { queryId, afterSequence: next.sequence });
-        }
+        participation = await runExploreModelLoop({
+          started: { ...started, deadlineAt },
+          ...(complete ? { complete } : {}),
+          ...(signal ? { signal } : {}),
+          ...(params.limit !== undefined ? { limit: params.limit } : {}),
+          progress,
+          port: {
+            plan: plan => request("explore.query.plan", { queryId, plan }),
+            views: options => request("explore.query.views", { queryId, ...options }),
+            wait: afterSequence => request("explore.query.wait", { queryId, afterSequence }),
+            select: groups => request("explore.query.select", { queryId, groups }),
+            followup: options => request("explore.query.followup", { queryId, ...options }),
+          },
+        });
 
         return await finish();
       } catch (caught) {

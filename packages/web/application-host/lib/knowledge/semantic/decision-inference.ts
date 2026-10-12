@@ -6,9 +6,9 @@ import { parseHarnessFastDecisionSettings, resolveFastDecisionPurpose,
   type HarnessFastDecisionParams, type HarnessResolvedFastDecisionBinding } from '@varin/protocol';
 import { requestClassifier, classifierWireUsage, classifierRawUsage, classifierWireResponseValid, ClassifierResponseError } from '@varin/pi-host/classifier';
 import type { HostInferenceProviderBinding } from '@varin/pi-host/credentials';
-import type { InferenceInvocationAuthority, InferenceRequests, InferenceRequestsOptions } from './inference-requests.js';
+import type { InferenceCall, InferenceInvocationAuthority, InferenceRequests, InferenceRequestsOptions } from './inference-requests.js';
 import { ResearchDecisionFailure } from '../../harness/research-decide.js';
-import type { InferenceBinding } from '../../kernel/protocol.generated.js';
+import type { InferenceBinding, InferenceReceipt } from '../../kernel/protocol.generated.js';
 
 export interface DecisionInferenceAuthority {
   resolveDecisionBinding(providerId: string, modelId: string, endpoint?: string): Promise<HostInferenceProviderBinding>;
@@ -20,6 +20,7 @@ export interface DecisionInferenceLease {
   binding: HarnessResolvedFastDecisionBinding;
   assertAvailable(signal: AbortSignal): Promise<void>;
   run<T>(authority: InferenceInvocationAuthority, signal: AbortSignal, consume: (session: DecisionInferenceSession) => Promise<T>): Promise<T>;
+  consume<T>(call: InferenceCall, consume: (session: DecisionInferenceSession) => Promise<T>): Promise<T>;
   release(): void;
 }
 export type DecisionInferenceCapture = { status: 'ready'; lease: DecisionInferenceLease }
@@ -72,19 +73,14 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
       await provider.assertAvailable();
       signal.throwIfAborted();
     };
-    const run: DecisionInferenceLease['run'] = (invocation, signal, consume) => {
-      return requests.run(invocation, signal, async call => {
+    const consumeCall: DecisionInferenceLease['consume'] = async (call, consume) => {
         const combined = call.signal;
-        await assertAvailable(combined);
-        // One original query/tool session owns every batch and actual HTTP ordinal.
-        // Recovered work never restarts even the first paid request.
-        await call.assertFresh();
         return consume({ decide: async (input, guard) => {
-          const receiptStart = call.receipts.length;
+          const batchReceipts: InferenceReceipt[] = [];
           const batchId = randomUUID();
           const base: HarnessFastDecisionResult = { batchId, providerId: binding.providerId, modelId: binding.modelId,
             answers: [], missing: input.questions.map(question => question.id) };
-          const receipts = () => call.receipts.slice(receiptStart);
+          const receipts = () => batchReceipts;
           const observed = (): HarnessFastDecisionResult => {
             const usage: NonNullable<HarnessFastDecisionResult['usage']> = {};
             const batchReceipts = receipts();
@@ -114,7 +110,7 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
               if (!route || init?.method !== 'POST' || typeof init.body !== 'string') throw new Error('decision-request-binding-changed');
               const selectedBinding: InferenceBinding = { purpose, providerId: binding.providerId, modelId: binding.modelId,
                 api: provider.api, endpoint: destination, requestKind: route.requestKind, configurationId: binding.configurationId, credentialScope: provider.credentialScope };
-              return call.request({ binding: selectedBinding, request: { input, wire: JSON.parse(init.body) }, destination, init, connection,
+              return call.request({ onReceipt: receipt => batchReceipts.push(receipt), binding: selectedBinding, request: { input, wire: JSON.parse(init.body) }, destination, init, connection,
                 check: async requestSignal => { await assertAvailable(requestSignal); await guard?.(); requestSignal.throwIfAborted(); },
                 observe: raw => {
                   const actual = route.requestKind === 'model_compute' ? classifierWireUsage(provider.api, raw) : undefined;
@@ -150,9 +146,12 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
               : 'Decision failed; inspect its original inference receipt and provider configuration.', result, wasCancelled);
           }
         } });
-      });
     };
-    return { status: 'ready', lease: { binding, assertAvailable, run, release: () => { released = true; } } };
+    const run: DecisionInferenceLease['run'] = (invocation, signal, consume) => requests.run(invocation, signal, async call => {
+      await call.assertFresh();
+      return consumeCall(call, consume);
+    });
+    return { status: 'ready', lease: { binding, assertAvailable, run, consume: consumeCall, release: () => { released = true; } } };
   };
   return { capture, close() { closed = true; } };
 }

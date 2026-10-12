@@ -5,10 +5,11 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 10;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 11;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
+    "runtime.inference.session",
     "runtime.inference.receipt_pending",
     "runtime.inference.dispatch",
     "runtime.inference.status",
@@ -64,6 +65,8 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.calendar.calculation.retry",
 ];
 pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
+    "runtime.inference.session",
+    "runtime.inference.generate",
     "runtime.inference.receipt_pending",
     "runtime.inference.admit",
     "runtime.inference.dispatch",
@@ -124,6 +127,7 @@ pub(crate) const KERNEL_INPUT_ORDER_PARAMS: &[(&str, &str)] = &[
     ("runtime.input.edit", "inputId"),
 ];
 pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
+    "runtime.inference.generate",
     "runtime.inference.admit",
     "runtime.inference.settle",
     "runtime.mcp.sampling.review_output",
@@ -159,6 +163,26 @@ pub(crate) struct InferenceAdmitParams {
     pub(crate) ordinal: i64,
     pub(crate) binding: varin_runtime::catalog::inference::InferenceBinding,
     pub(crate) request: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct InferenceGenerateParams {
+    pub(crate) parent_operation_id: String,
+    pub(crate) caller_owner: varin_runtime::ExecutorOwner,
+    pub(crate) ordinal: i64,
+    pub(crate) configuration: ModelSessionConfiguration,
+    pub(crate) credential_scope: CredentialScope,
+    pub(crate) purpose: String,
+    pub(crate) system_prompt: String,
+    pub(crate) user: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct InferenceSessionParams {
+    pub(crate) parent_operation_id: String,
+    pub(crate) execution_owner: varin_runtime::ExecutorOwner,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2877,6 +2901,16 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.inference.admit" => serde_json::from_value::<InferenceAdmitParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.inference.generate" => {
+            serde_json::from_value::<InferenceGenerateParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.inference.session" => {
+            serde_json::from_value::<InferenceSessionParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.inference.dispatch" => {
             serde_json::from_value::<InferenceOwnerParams>(params.clone())
                 .map(|_| ())

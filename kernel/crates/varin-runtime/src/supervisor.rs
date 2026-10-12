@@ -1001,7 +1001,7 @@ impl RunSupervisor {
         let owner = self.clone();
         let id = operation_id.to_owned();
         let join = thread::Builder::new()
-            .name("mcp-sampling".into())
+            .name("model-operation".into())
             .spawn(move || {
                 let result = execute(&token_worker);
                 if let Err(failure) = result {
@@ -1033,7 +1033,11 @@ impl RunSupervisor {
             .iter().map(|(id, worker)| (id.clone(), worker.cancel.clone())).collect();
         let catalog = self.catalog.lock().map_err(error)?;
         for (id, token) in entries {
-            if !catalog.sampling_generation_live(&id).unwrap_or(false) {
+            let live = catalog.operation(&id).ok().is_some_and(|op| {
+                if op.executor.as_deref() == Some("inference.model.v1") { catalog.inference_generation_live(&id).unwrap_or(false) }
+                else { catalog.sampling_generation_live(&id).unwrap_or(false) }
+            });
+            if !live {
                 token.cancel();
             }
         }

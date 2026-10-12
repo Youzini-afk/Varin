@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { ExploreFastDecisionDetails, FastDecisionMaterial } from '@varin/protocol';
+import type { ExploreFastDecisionDetails, ExploreModelParticipation, FastDecisionMaterial } from '@varin/protocol';
 import type { ExploreDeps, ExploreQueryRun } from './explore.js';
 import type { SemanticInferenceReceipt } from '../knowledge/semantic/runtime-inference.js';
 
@@ -32,7 +32,7 @@ export interface PipelinePlan {
   readonly semantic?: Readonly<RetrievalSemanticMetadata>;
   readonly selection?: Readonly<{ providerId: string; providerKey: string; artifactId: string; configurationId: string; selectionRevision: number }>;
 }
-export interface RetrievalSnippet { path: string; revision: string; startLine: number; endLine: number; content: string }
+export interface RetrievalSnippet { path: string; revision: string; startLine: number; endLine: number; content: string; required?: boolean; requiredGroups?: readonly string[] }
 export interface RetrievalStageBinding<T> {
   providerId: string;
   configurationId: string;
@@ -46,7 +46,7 @@ export type RetrievalModel = {
   select(input: { question: string; snippets: readonly RetrievalSnippet[] }, signal: AbortSignal): Promise<{ indices: readonly number[]; status: 'ready' | 'partial' | 'empty' }>;
 } | {
   kind: 'progressive';
-  select(input: { run: ExploreQueryRun; validateMaterials(materials: readonly FastDecisionMaterial[]): Promise<void> }, signal: AbortSignal): Promise<ExploreFastDecisionDetails>;
+  select(input: { run: ExploreQueryRun; validateMaterials(materials: readonly FastDecisionMaterial[]): Promise<void> }, signal: AbortSignal): Promise<{ fastDecision?: ExploreFastDecisionDetails; model?: ExploreModelParticipation }>;
 };
 export interface RetrievalPipelineConfiguration {
   configurationId: string;

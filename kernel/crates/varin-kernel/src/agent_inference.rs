@@ -2,7 +2,7 @@
 use super::*;
 use varin_runtime::catalog::inference::{
     InferenceAdmitParams, InferenceOwnerParams, InferenceReceiptPendingParams,
-    InferenceSettleParams,
+    InferenceSessionParams, InferenceSettleParams,
 };
 pub(super) fn execute(
     runtime: Arc<RunSupervisor>,
@@ -17,6 +17,12 @@ pub(super) fn execute(
             .map_err(|_| KernelError::Storage("Catalog owner failed".into()))
     };
     match method {
+        "runtime.inference.session" => {
+            let p: InferenceSessionParams = serde_json::from_value(params)?;
+            Ok(serde_json::to_value(
+                lock()?.inference_session(&p).map_err(domain)?,
+            )?)
+        }
         "runtime.inference.admit" => {
             let p: InferenceAdmitParams = serde_json::from_value(params)?;
             let prep = lock()?.prepare_inference_content();

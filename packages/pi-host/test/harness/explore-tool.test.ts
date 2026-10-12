@@ -242,7 +242,7 @@ describe("Host-backed explore tool", () => {
       request: async (method: string, params: Record<string, unknown>, options: { timeoutMs?: number }) => {
         calls.push({ method, timeoutMs: options.timeoutMs });
         if (method === "explore.query.start") return {
-          queryId: "eq_budget", deadlineAt: now + 500,
+          queryId: "eq_budget", question: params.question, deadlineAt: now + 500,
           parsed: { objects: [] }, vocab: {}, sources: [],
         };
         if (method === "explore.query.finish") return {
@@ -472,4 +472,70 @@ describe("Host-backed explore tool", () => {
       note: "Explore follow-up failed; the earlier accepted material was kept.",
     });
   });
+});
+
+describe("shared selection replacement through the Pi tool", () => {
+  for (const explicitEmpty of [false, true]) {
+    it(explicitEmpty ? "applies an explicit empty replacement after a valid selection" : "retains a valid selection after a malformed nonempty replacement", async () => {
+      const view = (viewId: string): ExploreQueryView => ({
+        viewId, path: `${viewId}.ts`, startLine: 1, endLine: 2, text: viewId, revision: "r1", source: "disk",
+        ranges: [{ rangeId: `${viewId}:full`, startLine: 1, endLine: 2 }], arrivals: [],
+        assessment: "object-present", purpose: "candidate", why: "matched",
+      });
+      let wave = 1;
+      let selected: ExploreQueryView[] = [];
+      let selections = 0;
+      let submittedModel: { select?: string; followup?: string } | undefined;
+      const bridge = {
+        inputContext: () => ({ source: "disk" }), cancel: () => undefined,
+        request: async (method: string, params: Record<string, unknown>) => {
+          if (method === "explore.query.start") return {
+            queryId: "replacement", question: params.question, deadlineAt: Date.now() + 30_000,
+            parsed: { objects: [], relation: "unknown", domain: "implementation" },
+            vocab: { objects: [], anchors: [] }, sources: [], inputSource: "disk",
+          };
+          if (method === "explore.query.plan") return { queryId: "replacement", launched: ["plan"], reused: [], sources: [] };
+          if (method === "explore.query.views") return {
+            queryId: "replacement", views: (params.seen as string[]).includes(`v${wave}`) ? [] : [view(`v${wave}`)],
+            sources: [], actions: [], sequence: wave, pending: false, unevaluated: 0, outputByteBudget: 24_576,
+          };
+          if (method === "explore.query.select") {
+            selections++;
+            const groups = params.groups as Array<{ id: string; views: Array<{ viewId: string }> }>;
+            selected = groups.flatMap(group => group.views.map(item => view(item.viewId)));
+            return { queryId: "replacement", accepted: groups.map(group => ({ groupId: group.id, viewIds: group.views.map(item => item.viewId) })),
+              rejected: [], gaps: [], selectedViews: selected };
+          }
+          if (method === "explore.query.followup") {
+            wave++;
+            return { queryId: "replacement", launched: ["more"], reused: [], actionsAccepted: [], sources: [] };
+          }
+          if (method === "explore.query.finish") {
+            submittedModel = params.model as typeof submittedModel;
+            return { ...finishResult, snippets: selected };
+          }
+          if (method === "explore.query.release") return { released: true };
+          throw Error(method);
+        },
+      } as unknown as HostServicesBridge;
+      let completions = 0;
+      const tool = createExploreTool(bridge, "session", { complete: async ({ user }) => {
+        completions++;
+        if (completions === 1) return JSON.stringify({ groups: [{ expressions: ["reclaimLease"] }] });
+        if (completions === 2) return JSON.stringify({
+          groups: [{ id: "accepted", views: [{ viewId: "v1", required: true }] }],
+          followup: { searches: [{ expression: "next" }] },
+        });
+        assert.match(user, /Already selected source:\nview v1/);
+        return JSON.stringify({ groups: explicitEmpty ? [] : [{ views: [{ viewId: 17 }] }], done: true });
+      } });
+      const result = await tool.execute("tool", { question: "how does reclaim work" }, undefined, undefined, undefined as never);
+      assert.equal((result as { isError?: boolean }).isError, undefined);
+      assert.equal(completions, 3);
+      assert.equal(selections, explicitEmpty ? 2 : 1);
+      assert.deepEqual((result.details as { snippets: ExploreQueryView[] }).snippets.map(item => item.viewId), explicitEmpty ? [] : ["v1"]);
+      assert.equal(submittedModel?.select, "used");
+      assert.equal(submittedModel?.followup, explicitEmpty ? "used" : "failed");
+    });
+  }
 });

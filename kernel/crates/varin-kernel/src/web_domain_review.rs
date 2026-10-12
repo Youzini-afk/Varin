@@ -224,6 +224,14 @@ impl Fixture {
     pub(super) fn pump_request(
         &mut self,
         mut reject: impl FnMut(&Value) -> Option<KernelError>,
+        deliver: impl FnMut(&Value, &Result<Value, KernelError>) -> bool,
+    ) -> Option<Value> {
+        self.pump_dispatch(|frame| reject(frame).map(Err), deliver)
+    }
+    /// An additional original production handler, without replacing Storage or Catalog routes.
+    pub(super) fn pump_dispatch(
+        &mut self,
+        mut dispatch: impl FnMut(&Value) -> Option<Result<Value, KernelError>>,
         mut deliver: impl FnMut(&Value, &Result<Value, KernelError>) -> bool,
     ) -> Option<Value> {
         while let Ok(frame) = self.outgoing.try_recv() {
@@ -237,7 +245,7 @@ impl Fixture {
         match frame["kind"].as_str().unwrap() {
             "fixture-request" => {
                 let before = self.runtime.catalog().lock().unwrap().event_cursor().unwrap();
-                let result = match reject(&frame) { Some(error)=>Err(error),None=>self.rpc(&frame) };
+                let result = match dispatch(&frame) { Some(result)=>result,None=>self.rpc(&frame) };
                 let cursor = self.runtime.catalog().lock().unwrap().event_cursor().unwrap();
                 if cursor != before {
                     self.host.send(json!({"v":crate::protocol::PROTOCOL_VERSION,"kind":"runtime-event","kernelEpoch":EPOCH,"stream":"durable","cursor":cursor}));

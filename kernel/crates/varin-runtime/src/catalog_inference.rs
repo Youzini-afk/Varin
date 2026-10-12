@@ -4,6 +4,8 @@ use super::*;
 use crate::execution::{UsageMeasurement, UsageReceipt};
 use crate::providers::auth::CredentialScope;
 use serde::Deserialize;
+#[path = "catalog_inference_generation.rs"]
+pub mod generation;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -32,6 +34,17 @@ pub struct InferenceAdmitParams {
     pub binding: InferenceBinding,
     pub request: Value,
 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct InferenceSessionParams {
+    pub parent_operation_id: String,
+    pub execution_owner: ExecutorOwner,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct InferenceSessionStatus {
+    pub has_requests: bool,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InferenceOwnerParams {
@@ -44,6 +57,10 @@ pub struct InferenceUsage {
     pub measurement: UsageMeasurement,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
+    pub cached_input_tokens: Option<u64>,
+    pub cache_write_tokens: Option<u64>,
+    pub reasoning_tokens: Option<u64>,
+    pub pricing_version: Option<String>,
 }
 impl InferenceUsage {
     fn receipt(&self) -> UsageReceipt {
@@ -51,7 +68,11 @@ impl InferenceUsage {
             measurement: self.measurement,
             input_tokens: self.input_tokens,
             output_tokens: self.output_tokens,
-            ..UsageReceipt::default()
+            cached_input_tokens: self.cached_input_tokens,
+            cache_write_tokens: self.cache_write_tokens,
+            reasoning_tokens: self.reasoning_tokens,
+            pricing_version: self.pricing_version.clone(),
+            raw: None,
         }
     }
     fn refines(&self, previous: &Self) -> bool {
@@ -63,6 +84,19 @@ impl InferenceUsage {
             && previous
                 .output_tokens
                 .is_none_or(|n| self.output_tokens == Some(n))
+            && previous
+                .cached_input_tokens
+                .is_none_or(|n| self.cached_input_tokens == Some(n))
+            && previous
+                .cache_write_tokens
+                .is_none_or(|n| self.cache_write_tokens == Some(n))
+            && previous
+                .reasoning_tokens
+                .is_none_or(|n| self.reasoning_tokens == Some(n))
+            && previous
+                .pricing_version
+                .as_ref()
+                .is_none_or(|v| self.pricing_version.as_ref() == Some(v))
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -114,6 +148,7 @@ enum InferenceCaller {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Intent {
+    caller_owner: ExecutorOwner,
     caller: InferenceCaller,
     kind: String,
     parent_operation_id: String,
@@ -131,6 +166,7 @@ struct State {
     receipt_pending: bool,
     receipt: Option<InferenceReceipt>,
     response_ref: Option<Value>,
+    checkpoint_usage: InferenceUsage,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -187,6 +223,12 @@ fn owned(op: &Operation, owner: &ExecutorOwner) -> Result<()> {
     }
     Ok(())
 }
+fn caller_owned(op: &Operation, owner: &ExecutorOwner) -> Result<()> {
+    if &intent(op)?.caller_owner != owner || !matches!(owner, ExecutorOwner::External { .. }) {
+        return Err(conflict());
+    }
+    Ok(())
+}
 fn parent_live(db: &Connection, op: &Operation, i: &Intent, epoch: u64) -> Result<()> {
     let run: Run = record(db, "runs", &op.run_id)?;
     if op.epoch != epoch || run.cancel_requested || run.state.terminal() || op.cancel_requested {
@@ -196,7 +238,7 @@ fn parent_live(db: &Connection, op: &Operation, i: &Intent, epoch: u64) -> Resul
         InferenceCaller::Operation => {
             let parent: Operation = record(db, "operations", &i.parent_operation_id)?;
             if parent.run_id != op.run_id
-                || parent.execution_owner != op.execution_owner
+                || parent.execution_owner.as_ref() != Some(&i.caller_owner)
                 || parent.phase != OperationPhase::Running
                 || parent.cancel_requested
             {
@@ -230,11 +272,31 @@ fn publish(tx: &Transaction<'_>, op: &mut Operation, s: &State, event_kind: &str
         &op.id,
         op.revision,
         event_kind,
-        json!({"runId":op.run_id,"responseRef":s.response_ref}),
+        json!({"runId":op.run_id,"responseRef":if event_kind == "inference.settled" { s.response_ref.as_ref() } else { None }}),
     )?;
     Ok(())
 }
 impl Catalog {
+    pub fn inference_session(&self, p: &InferenceSessionParams) -> Result<InferenceSessionStatus> {
+        let read = |run_id: &str| -> Result<InferenceSessionStatus> {
+            let has_requests = self.db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind')='inference_request_v1' AND json_extract(body,'$.intent.parentOperationId')=?2)",
+                params![run_id, p.parent_operation_id], |row| row.get(0))?;
+            Ok(InferenceSessionStatus { has_requests })
+        };
+        if let Some(op) =
+            optional_record::<Operation>(&self.db, "operations", &p.parent_operation_id)?
+        {
+            if owned(&op, &p.execution_owner).is_ok() {
+                return read(&op.run_id);
+            }
+        }
+        self.nested_tools.with_inference_context(
+            &p.parent_operation_id,
+            &p.execution_owner,
+            |context| read(&context.run_id),
+        )
+    }
     pub fn prepare_inference_content(&self) -> InferencePreparation {
         InferencePreparation {
             content: self.content.clone(),
@@ -253,7 +315,7 @@ impl Catalog {
                     && matches!(p.execution_owner, ExecutorOwner::External { .. })
             })
         {
-            self.admit_inference_for(p, body, InferenceCaller::Operation)
+            self.admit_inference_for(p, body, InferenceCaller::Operation, false)
         } else {
             scopes.with_inference_context(&p.parent_operation_id, &p.execution_owner, |context| {
                 self.admit_inference_for(
@@ -262,6 +324,7 @@ impl Catalog {
                     InferenceCaller::Query {
                         context: context.clone(),
                     },
+                    false,
                 )
             })
         }
@@ -271,13 +334,19 @@ impl Catalog {
         p: &InferenceAdmitParams,
         body: InferenceBody,
         caller: InferenceCaller,
+        native: bool,
     ) -> Result<InferenceStatus> {
         if p.ordinal == 0 || p.binding.purpose.is_empty() || p.binding.configuration_id.is_empty() {
             return Err(conflict());
         }
         let id = format!("inference:{}:{}", p.parent_operation_id, p.ordinal);
         if let Some(op) = optional_record::<Operation>(&self.db, "operations", &id)? {
-            owned(&op, &p.execution_owner)?;
+            if native {
+                generation::kernel_owned(&op, self.epoch)?;
+                caller_owned(&op, &p.execution_owner)?;
+            } else {
+                owned(&op, &p.execution_owner)?;
+            }
             let i = intent(&op)?;
             if i.binding != p.binding || i.request_ref != body.reference {
                 return Err(conflict());
@@ -300,6 +369,7 @@ impl Catalog {
         };
         let goal = goals::origin_goal(&self.db, &origin)?;
         let i = Intent {
+            caller_owner: p.execution_owner.clone(),
             caller,
             kind: "inference_request_v1".into(),
             parent_operation_id: p.parent_operation_id.clone(),
@@ -323,8 +393,19 @@ impl Catalog {
             // transfers foreground responsibility, never the Run cancellation scope or
             // permission to dispatch after the query closes.
             handed_off: matches!(i.caller, InferenceCaller::Query { .. }),
-            executor: Some("inference.http.v1".into()),
-            execution_owner: Some(p.execution_owner.clone()),
+            executor: Some(
+                if native {
+                    "inference.model.v1"
+                } else {
+                    "inference.http.v1"
+                }
+                .into(),
+            ),
+            execution_owner: Some(if native {
+                ExecutorOwner::Kernel
+            } else {
+                p.execution_owner.clone()
+            }),
             waiting_on: None,
             intent: serde_json::to_value(&i)?,
             result: Some(OperationResultMetadata::Control {
@@ -372,7 +453,7 @@ impl Catalog {
         owner: &ExecutorOwner,
     ) -> Result<InferenceStatus> {
         let op = self.operation(id)?;
-        owned(&op, owner)?;
+        caller_owned(&op, owner)?;
         let i = intent(&op)?;
         let s = state(&op)?;
         let live = if op.phase == OperationPhase::Terminal {
@@ -410,8 +491,20 @@ impl Catalog {
         }
     }
     fn dispatch_inference_held(&mut self, p: &InferenceOwnerParams) -> Result<InferenceStatus> {
+        self.dispatch_inference_executor(p, false)
+    }
+    fn dispatch_inference_executor(
+        &mut self,
+        p: &InferenceOwnerParams,
+        native: bool,
+    ) -> Result<InferenceStatus> {
         let mut op = self.operation(&p.operation_id)?;
-        owned(&op, &p.execution_owner)?;
+        if native {
+            generation::kernel_owned(&op, self.epoch)?;
+            caller_owned(&op, &p.execution_owner)?;
+        } else {
+            owned(&op, &p.execution_owner)?;
+        }
         let i = intent(&op)?;
         let mut s = state(&op)?;
         if s.dispatched || s.recovered || op.phase == OperationPhase::Terminal {
@@ -508,8 +601,21 @@ impl Catalog {
         p: &InferenceSettleParams,
         body: InferenceBody,
     ) -> Result<InferenceStatus> {
+        self.settle_inference_executor(p, body, false)
+    }
+    fn settle_inference_executor(
+        &mut self,
+        p: &InferenceSettleParams,
+        body: InferenceBody,
+        native: bool,
+    ) -> Result<InferenceStatus> {
         let mut op = self.operation(&p.operation_id)?;
-        owned(&op, &p.execution_owner)?;
+        if native {
+            generation::kernel_owned(&op, self.epoch)?;
+            caller_owned(&op, &p.execution_owner)?;
+        } else {
+            owned(&op, &p.execution_owner)?;
+        }
         let i = intent(&op)?;
         let mut s = state(&op)?;
         if s.response_ref.as_ref() == Some(&body.reference)
@@ -518,7 +624,7 @@ impl Catalog {
             return self.inference_status(&p.operation_id, &p.execution_owner);
         }
         if !p.receipt.local_executor_stopped
-            || p.receipt.request_started.is_none()
+            || (!native && p.receipt.request_started.is_none())
             || (p.receipt.provider_completed && p.receipt.request_started != Some(true))
             || (p.receipt.request_started == Some(false)
                 && p.receipt.usage != InferenceUsage::default())
@@ -608,7 +714,7 @@ pub(crate) fn recover(tx: &Transaction<'_>, op: &mut Operation) -> Result<bool> 
         request_started: None,
         provider_completed: false,
         local_executor_stopped: false,
-        usage: InferenceUsage::default(),
+        usage: s.checkpoint_usage.clone(),
         http_status: None,
         problem: Some(InferenceProblem::OwnerInterrupted),
     });

@@ -83,7 +83,7 @@ impl ModelProvider for CodexProvider {
         body["tool_choice"] = json!("auto");
         body["parallel_tool_calls"] = json!(true);
         // A branch is the stable cache/session boundary. The run ID handles branchless callers.
-        let session = if let crate::execution::RequestOrigin::McpSampling{operation_id,..} = &view.origin {
+        let session = if let crate::execution::RequestOrigin::McpSampling{operation_id,..} | crate::execution::RequestOrigin::AuxiliaryInference{operation_id,..} = &view.origin {
             operation_id
         } else if let crate::execution::RequestOrigin::PolicyModelJob{action_id,..} = &view.origin {
             action_id
