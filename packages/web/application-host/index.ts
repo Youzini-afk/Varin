@@ -1,3 +1,4 @@
+import { createResearchDiscoveryRuntime, RESEARCH_DISCOVERY_CAPABILITY } from './lib/kernel/research-discovery.js';
 import { readHostSettingsSnapshot } from '@varin/pi-host/settings-authority';
 import { createWebRuntime, WEB_CAPABILITY } from './lib/kernel/web-runtime.js';
 import { createMaterialReceiptReconciler } from './lib/kernel/material-receipts.js';
@@ -1931,6 +1932,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const desktopControlHolder = `desktop:${hostId}`;
   const scriptRuntimeOwner: { current?: ReturnType<typeof createScriptRuntime> } = {};
   const computerRuntimeOwner: { current?: ReturnType<typeof createComputerRuntime> } = {};
+  const researchDiscoveryOwner: { current?: ReturnType<typeof createResearchDiscoveryRuntime> } = {};
   const webRuntimeOwner: { current?: ReturnType<typeof createWebRuntime> } = {};
   const resolveComputerWork = async (work: import('@varin/protocol').ComputerWorkRef) => {
     if (work.runtime === 'pi') return resolvePiComputerWork(threadRegistry, work.sessionId);
@@ -3028,8 +3030,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     if (!scriptRuntimeOwner.current) throw new Error('Script tool preparation is unavailable');
     if (!computerRuntimeOwner.current) throw new ComputerError('computer-owner-unavailable', 'Computer tool preparation is unavailable');
     if (!webRuntimeOwner.current) throw new Error('Web tool preparation is unavailable');
-    return webRuntimeOwner.current.prepareConfiguration(run, required,
-      await scriptRuntimeOwner.current.prepareConfiguration(await computerRuntimeOwner.current.prepareConfiguration(run, required)));
+    if (!researchDiscoveryOwner.current) throw new Error('Scholarly search tool preparation is unavailable');
+    return researchDiscoveryOwner.current.prepareConfiguration(run, required,
+      await webRuntimeOwner.current.prepareConfiguration(run, required,
+        await scriptRuntimeOwner.current.prepareConfiguration(await computerRuntimeOwner.current.prepareConfiguration(run, required))));
   },currentPolicy:async runId=>{
     const launch=await kernelClient.agentRuntimeRequest<import('./lib/kernel/protocol.generated.js').LaunchIntent|null,'runtime.launch.inspect'>('runtime.launch.inspect',{runId});
     const workspace=launch?.selection.source?await documentsAuthority.inspectWorkspace(launch.selection.source.workspace_id):undefined;
@@ -3041,6 +3045,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     documentSources: createDocumentSources({ kernel: kernelClient, runtime: agentRuntime,
       resolveLiveSource: liveSources.validate, experiments: experimentService }),
     fetch: egressRuntime.fetch as typeof globalThis.fetch, readAuth: readPiAuthFile,
+    settings: async source => {
+      const root = source ? (await documentsAuthority.inspectWorkspace(source.workspace_id)).root : undefined;
+      return readHostSettingsSnapshot(mcpAgentDir, root, root !== undefined && mcpHostProjectTrusted(mcpAgentDir, root));
+    },
+  });
+  researchDiscoveryOwner.current = createResearchDiscoveryRuntime({ service: researchSearchService,
     settings: async source => {
       const root = source ? (await documentsAuthority.inspectWorkspace(source.workspace_id)).root : undefined;
       return readHostSettingsSnapshot(mcpAgentDir, root, root !== undefined && mcpHostProjectTrusted(mcpAgentDir, root));
@@ -4273,6 +4283,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
   const unregisterMaterialToolCapability = extensionRuntime.capabilities.register(MATERIAL_SNAPSHOT_CAPABILITY, webRuntimeOwner.current.snapshotCapability);
+  const unregisterResearchDiscoveryCapability = extensionRuntime.capabilities.register(RESEARCH_DISCOVERY_CAPABILITY, researchDiscoveryOwner.current.capability);
   const unregisterWebCapability = extensionRuntime.capabilities.register(WEB_CAPABILITY, webRuntimeOwner.current.capability);
   const unregisterNestedToolCapability = extensionRuntime.capabilities.register(VARIN_RUNTIME_TOOLS_CAPABILITY, createNestedToolOwner(kernelClient));
   const unregisterScriptCapability = extensionRuntime.capabilities.register(SCRIPT_CAPABILITY, scriptRuntimeOwner.current.capability);
@@ -4833,6 +4844,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       unregisterPiRuntimeCapability();
       unregisterMaterialToolCapability();
       unregisterWebCapability();
+      unregisterResearchDiscoveryCapability();
       unregisterChildIntegrationCapability();
       unregisterScheduleCapability();
       unregisterDocumentsCapability();

@@ -3033,3 +3033,7 @@ mod pdf_source_review;
 #[cfg(test)]
 #[path = "material_collection_review.rs"]
 mod material_collection_review;
+
+#[cfg(test)]
+#[path = "scholarly_discovery_review.rs"]
+mod scholarly_discovery_review;

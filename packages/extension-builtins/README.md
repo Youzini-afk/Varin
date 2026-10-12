@@ -9,8 +9,15 @@ their original Host/Storage owners. Source-less execution uses real Thread ident
 distribution does not bypass original call permission, accepted Web settings or material authorization.
 The adapter supports URL/fixed-snapshot reads, scoped local/Experiment PDF sources and the original
 material collection/share actions. Collection mutations retain their original Storage receipts; family
-membership alone does not grant private material access. Scholarly services and reader-model prompts
-remain separate integration work. See the [Web/material owner](../web/application-host/lib/harness/DOCUMENTATION.md).
+membership alone does not grant private material access. Reader-model prompts remain separate
+integration work. See the [Web/material owner](../web/application-host/lib/harness/DOCUMENTATION.md).
+
+`varin.builtin.research-discovery` distributes the ordinary `research_search` metadata tool through
+`RESEARCH_DISCOVERY_TOOL_DECLARATIONS` and the `research.discovery` capability. Search, paper lookup
+and relation pages use the original OpenAlex/Semantic Scholar owner; they do not download paper
+content or acquire a file source. The accepted enabled setting and original per-call authorization
+apply independently of Web settings. The artifact uses the same immutable package-root/fingerprint
+pipeline. Fast decisions/reranking and reader-model prompts are not supplied by this metadata tool.
 
 `varin.builtin.computer` provides the ordinary native single-call Computer tools. Its shared
 `COMPUTER_TOOL_DECLARATIONS` supplies the product manifest, tool directory and Host argument decoder;
@@ -20,7 +27,8 @@ distribution does not bypass capability review, selected tool configuration or a
 The saved execution binding fixes its default desktop and is restored unchanged after reconnect.
 The same declaration exposes request/access/grant/deny and durable request Wait for existing
 child tasks with or without a file source. Resource assignment does not expand their frozen callable
-tools. Trusted handback continuation and persistent Computer scripts remain pending. See the [Computer owner](../web/application-host/lib/computer/DOCUMENTATION.md).
+tools. Trusted handback continuation and persistent Computer scripts retain their original lifecycle
+owners; actual desktop/platform acceptance remains separate. See the [Computer owner](../web/application-host/lib/computer/DOCUMENTATION.md).
 
 The lazy brokered `varin.builtin.retrieval-structured`, `varin.builtin.retrieval-keyword`, and
 `varin.builtin.retrieval-semantic` packages

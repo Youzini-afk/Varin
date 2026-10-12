@@ -19,6 +19,13 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-12 增量：原学术 metadata 与普通工具
+
+- 独立普通 builtin 的单声明接原 OpenAlex/Semantic Scholar `research.search` owner，保 search/paper/relations、provider identity、单页 cursor 与内容可用性。metadata 不冒充纸本正文；明确选入材料或获取 URL 才走原材料/PDF owner。
+- 原 extension policy/调用/Run/Operation/config 仍唯一准入；只冻结原 scholarly enabled 设置，不依赖无关 Web/auth 配置或 Pi session。模型、Policy 与 source-less child 复用同一执行合同，普通结果/历史/GC 仍唯一 ContentStore。
+- 独审五条原失败链已复验修复：OA 首 cursor、S2 坏 offset、畸形响应假空、取消后追加请求和 HTTP 错误正文未排空；合法缺省字段保留。实际安装入口、明确材料/PDF公共读取与重开的有限证据见[本片验收](../reviews/runtime-scholarly-discovery-2026-10-12.md)。
+- 继续原 fast-decision/rerank 的独立推理用途、Goal/计量与真实材料权限，而非套主聊天模型；环境/Bot、来源/检索/上下文/provider 等余能力仍未完。最终产品/平台验收与用户全面迁移分别保留。
+
 ## 2026-10-12 增量：原材料集合与明确分享
 
 - 普通 `materials` 单声明接同一原 collection domain，Pi 仅适配原 session；实际 Catalog Thread/family 生成 scope。私有材料 service grant 只在可信 owner 内部使用，原材料 ACL 唯一，maintenance 不含写能力。持久集合只读共享、写入仍限原 owner；同家系不自动读私有材料。
@@ -697,7 +704,7 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 | Computer Use、人工接管 | Host `computer`、`packages/computer-driver` | 实际桌面控制epoch；观察/动作/效果分开；紧急停止独立；释放按键与资源有证据 | 原 Computer 工具、精确停止、source-less child 请求/Wait/handback 与持久脚本已接；真实桌面平台/远端及完整产品验收仍待 |
 | MCP、脚本、用户扩展 | Pi MCP/codemode adapters；`extension-contract`/`extension-host`/`extension-sdk` | 原生MCP；单registry；脚本嵌套调用同权限/回执；完整async单元格；不另造插件管理器 | 原 MCP tools/content/Tasks/resource observers/有限 interaction/sampling、普通扩展 tools/SDK、child/nested、持久 async 脚本与 typed media 已接；更广协议/provider/平台组合与完整产品验收仍待 |
 | 深层策略、发现与工作台 | 既有扩展service registry、Host/Surface和UI shells | CompositionPlan；Provider/Transform/Decision/Observer；AgentPolicy；按需合同查询；无UI后端 | 一般 ToolGraph、直接 child、Deliver/Pause、策略换绑、context/Decision/Observer、真实扩展/SDK 发现已有闭环；完整领域 Provider/Transform 覆盖与工作台仍待 |
-| Web/材料/科研/Bot领域工具 | 现有Host领域服务与harness工具 | 通过相同Operations接入；保留材料来源、产物及用户配置行为 | 原 Web/固定材料/PDF 原来源与材料集合/明确分享已接同一 owner，原科研作业/产物/观察已接；学术/decision、Bot 等其余领域继续 |
+| Web/材料/科研/Bot领域工具 | 现有Host领域服务与harness工具 | 通过相同Operations接入；保留材料来源、产物及用户配置行为 | 原 Web/固定材料/PDF 原来源、材料集合/明确分享、学术 metadata 已接同一 owner，原科研作业/产物/观察已接；decision、Bot 等其余领域继续 |
 | Web/Electron/Mobile、远端、发行 | `application-client`/`protocol`、各surface、Host环境服务、kernel packaging | 同一后端生命周期；snapshot/cursor投影；环境绑定/fencing；平台驱动与安装升级实际验证 | 未完成 |
 | 用户资产与Pi退出 | Pi JSONL/配置/凭据引用/用户扩展源文件 | 一次性导入保留entry ID、分支、工具配对、压缩、opaque及未知项；原文件保留；切换结算在途工作 | 交付迁移前验收入口与清单；用户验收后负责默认切换、Pi 删除及资产全面迁移，当前未执行 |
 
