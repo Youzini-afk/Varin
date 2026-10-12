@@ -24,7 +24,7 @@ import { createMaterialReviewFixture, writeMaterialFixtureFrame as write } from 
 import { makePdf } from '../harness/pdf-test-fixture.js';
 
 const fixture = createMaterialReviewFixture(params => {
-  assert.deepEqual(params.capabilities, params.capabilities && (params.capabilities as string[]).filter(value => value === 'storage.read' || value === 'storage.write'));
+  assert.deepEqual(params.capabilities, params.capabilities && (params.capabilities as string[]).filter(value => value === 'storage.read' || value === 'storage.write' || value === 'storage.maintenance'));
   assert.equal(params.sessionId, undefined); assert.equal(params.runId, undefined);
 });
 const { kernel, runtime, bridge } = fixture;
@@ -79,8 +79,8 @@ async function initialize(frame: Record<string, unknown>) {
   const prepare = createExtensionTools({ runtime: extensions, kernel, currentPolicy: async () => ({ mode: 'normal', rules: [] }),
     prepareConfiguration: (run, required) => web.prepareConfiguration(run, required) });
   selected = await prepare({ threadId, runId, source: null }, [], new AbortController().signal);
-  assert.equal(selected.initial.length, 3);
-  const bindings = selected.initial.map(retained => {
+  assert(selected.initial.some(entry => entry.binding.tool.name === 'materials'));
+  const bindings = selected.initial.filter(entry => entry.binding.tool.name !== 'materials').map(retained => {
     const registered = bridge.register(runId, retained.lease);
     return { ownerId: registered.ownerId, generation: retained.generation, binding: retained.binding };
   });
@@ -122,7 +122,7 @@ async function publicRead(frame: Record<string, unknown>) {
     const original = await materials.read(scope, String(frame.original), { kind: 'thread', owningWorkspaceId: scope, threadId: identity.threadId });
     assert(original?.body.toString('utf8').includes('OriginalWebText'));
     // Guessing the same physical namespace never broadens Rust Thread visibility.
-    await assert.rejects(materials.read(scope, String(frame.original), { kind: 'thread', owningWorkspaceId: scope, threadId: 'thread:foreign' }), /record belongs to another actor/);
+    assert.equal(await materials.read(scope, String(frame.original), { kind: 'thread', owningWorkspaceId: scope, threadId: 'thread:foreign' }), null);
     const pdf = await api.materials.read(identity, { snapshotId: String(frame.pdf), view: 'page-image', page: 1 });
     assert.equal(pdf.status, 'ok');
     if (pdf.status !== 'ok') throw new Error('Original PDF was not readable');

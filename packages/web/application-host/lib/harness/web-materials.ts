@@ -260,7 +260,10 @@ export const createWebMaterialStore = (
                   collectionIds?: unknown;
                 };
                 if (grant.toThreadId !== authority.threadId) continue;
-                if (record.threadId !== undefined && grant.fromThreadId !== record.threadId) continue;
+                // The trusted collection owner already checked the sender's read
+                // authority when issuing this explicit grant. It may be a reshare;
+                // the sender must match this grant's envelope, not the first fetcher.
+                if (grant.fromThreadId !== candidate.threadId || typeof grant.fromThreadId !== "string") continue;
                 if (Array.isArray(grant.snapshotIds) && grant.snapshotIds.includes(snapshotId)) return true;
                 if (!Array.isArray(grant.collectionIds)) continue;
                 for (const collectionId of grant.collectionIds) {
@@ -268,7 +271,7 @@ export const createWebMaterialStore = (
                   const collectionRecord = await context.records.get(`material.collection:${collectionId}`);
                   if (!collectionRecord || collectionRecord.state === "released"
                     || (collectionRecord.workspaceId !== undefined && collectionRecord.workspaceId !== workspaceId)) continue;
-                  if (collectionRecord.threadId !== undefined && collectionRecord.threadId !== grant.fromThreadId) continue;
+                  if (collectionRecord.recordType !== MATERIAL_COLLECTION_RECORD_TYPE) continue;
                   try {
                     const collection = JSON.parse(collectionRecord.payloadJson) as {
                       members?: Array<{ snapshotId?: unknown }>;
@@ -300,6 +303,9 @@ export const createWebMaterialStore = (
         }
         const reference = record.references.find((item) => item.slot === "body" && item.objectHash === ref.contentHash);
         if (!reference) throw new WebSnapshotReadError("corrupt", `Web snapshot body reference is missing: ${snapshotId}`);
+        if (ref.document?.source && !record.references.some(item => item.slot === "source" && item.objectHash === ref.document?.source?.contentHash)) {
+          throw new WebSnapshotReadError("corrupt", `Web snapshot source reference is missing: ${snapshotId}`);
+        }
         const readBlob = async (hash: string, slot: "body" | "source", byteLength: number,
           offset = 0, length = byteLength): Promise<Buffer> => {
           if (!Number.isSafeInteger(byteLength) || byteLength < 0) {

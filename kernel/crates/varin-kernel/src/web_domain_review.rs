@@ -85,9 +85,10 @@ impl Fixture {
             return command.load(&|| false);
         }
         match method {
-            "runtime.thread.inspect" | "runtime.run.inspect" | "runtime.run.scope" => {
-                dispatch(&mut owner.lock().unwrap(), method, params)
-            }
+            "runtime.thread.list"
+            | "runtime.thread.inspect"
+            | "runtime.run.inspect"
+            | "runtime.run.scope" => dispatch(&mut owner.lock().unwrap(), method, params),
             "runtime.launch.inspect" => {
                 let read = owner
                     .lock()
@@ -105,6 +106,7 @@ impl Fixture {
                 &AtomicBool::new(false),
             ),
             "runtime.operation.inspect"
+            | "runtime.thread.operations.active"
             | "runtime.permission.open"
             | "runtime.permission.consume"
             | "runtime.permission.decide" => operation_commands::execute(
@@ -191,6 +193,13 @@ impl Fixture {
         }
     }
     pub(super) fn pump(&mut self) -> Option<Value> {
+        self.pump_reply(|_, _| true)
+    }
+    /// Drop a selected delivery only after the original authority returned its result.
+    pub(super) fn pump_reply(
+        &mut self,
+        mut deliver: impl FnMut(&Value, &Result<Value, KernelError>) -> bool,
+    ) -> Option<Value> {
         while let Ok(frame) = self.outgoing.try_recv() {
             self.host.send(frame);
         }
@@ -202,6 +211,9 @@ impl Fixture {
         match frame["kind"].as_str().unwrap() {
             "fixture-request" => {
                 let result = self.rpc(&frame);
+                if !deliver(&frame, &result) {
+                    return Some(frame);
+                }
                 self.host.send(match result {
                     Ok(value) => json!({"kind":"fixture-response","id":frame["id"],"ok":true,"result":value}),
                     Err(error) => json!({"kind":"fixture-response","id":frame["id"],"ok":false,"error":error.to_string()}),

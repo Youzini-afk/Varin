@@ -3029,3 +3029,7 @@ mod web_domain_review;
 #[cfg(test)]
 #[path = "pdf_source_review.rs"]
 mod pdf_source_review;
+
+#[cfg(test)]
+#[path = "material_collection_review.rs"]
+mod material_collection_review;

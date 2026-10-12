@@ -27,3 +27,31 @@ it('freezes Web configuration failures at its own declarations and preserves the
   expect(() => broken(WEB_TOOL_DECLARATIONS[1])).toThrow(failure);
   expect(broken(WEB_TOOL_DECLARATIONS[1], original)).toBe(original);
 });
+
+it('keeps an unconfirmed Storage mutation unknown and unstopped rather than converting a rejected Host promise to no effect', async () => {
+  const { MaterialCollectionMutationError, createMaterialCollections } = await import('../harness/material-collections.js');
+  const { withToolInvocation } = await import('./tool-invocation.js');
+  const opened = createMaterialStoreFixture();
+  const unused = async (): Promise<never> => { throw new Error('This mutation never reads a document or network'); };
+  const collections = createMaterialCollections(opened.workingStates, { materials: opened.materials });
+  collections.execute = async () => { throw new MaterialCollectionMutationError('Original Storage response was lost', 'unknown'); };
+  const web = createWebRuntime({
+    runtime: { run: async () => ({ thread_id: 'thread', branch_id: 'branch' }),
+      familyList: async () => ({ rootThreadId: 'thread', members: [{ threadId: 'thread', branches: [{ branchId: 'branch' }] }] }), launch: unused } as unknown as WebRuntimeOptions['runtime'],
+    materials: opened.materials, collections, documentReader: createDocumentReader({ materials: opened.materials }),
+    webFetch: createWebFetch({ ssrf: { check: unused, isSameHost: () => false }, materials: opened.materials }),
+    fetch: unused, readAuth: unused,
+    settings: async () => ({ global: {}, project: {}, globalRevision: 'global', projectRevision: 'project', projectTrusted: false }),
+  });
+  const declaration = WEB_TOOL_DECLARATIONS.find(value => value.tool!.name === 'materials')!;
+  const prepare = await web.prepareConfiguration({ runId: 'run', threadId: 'thread', source: null }, []);
+  const args = { action: 'create' }, owner = { extensionId: 'varin.builtin.web', extensionVersion: '0.1.0', entrypointId: 'host', generation: 1 };
+  const signal = new AbortController().signal;
+  let receipt: import('./tool-bridge.js').ToolExecutionReceipt | undefined;
+  await withToolInvocation({ owner, signal, onEffectReceipt: value => { receipt = value; }, authority: {
+    invocationId: 'invocation', runId: 'run', threadId: 'thread', operationId: 'request:tool:call', callId: 'call',
+    origin: { kind: 'model_step', request_id: 'request' }, executorOwner: { kind: 'external', identity: 'provider', epoch: 'owner' },
+    source: null, operation: 'effect', completion: 'result', toolName: 'materials', configurationIdentity: prepare(declaration), arguments: args,
+  } }, async invocation => { await web.capability('collections', args, { owner, signal, invocation }); });
+  expect(receipt).toMatchObject({ executor_stopped: false, completion: { outcome: 'indeterminate', effect: 'unknown' } });
+});
