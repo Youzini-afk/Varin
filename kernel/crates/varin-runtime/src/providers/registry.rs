@@ -184,6 +184,10 @@ struct PinnedProvider {
     inner: Arc<dyn ModelProvider>,
 }
 impl ModelProvider for PinnedProvider {
+    fn request_budget_protocol(&self) -> Option<crate::context_capacity::RequestBudgetProtocol> {
+        self.inner.request_budget_protocol()
+    }
+
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         self.lease.validate().map_err(composition_error)?;
         self.inner.serialize(view)

@@ -1,6 +1,6 @@
 //! Actual budget extension, ContextService and RunAssembly via the existing stdio fixture.
 //! Only model generation is controlled; serialization, summary ownership and publication are real.
-use super::web_domain_review::{EPOCH, Fixture, HOST, Host};
+use super::web_domain_review::{Fixture, Host, EPOCH, HOST};
 use super::*;
 use crate::run_assembly::{PreparedLaunch, RunAssembly, RunPreparation};
 use crate::storage::Storage;
@@ -16,9 +16,15 @@ struct Generation {
 }
 struct ControlledModel {
     serializer: Arc<dyn ModelProvider>,
+    actual_input_tokens: Option<u64>,
     sends: mpsc::Sender<Generation>,
 }
 impl ModelProvider for ControlledModel {
+    fn request_budget_protocol(
+        &self,
+    ) -> Option<varin_runtime::context_capacity::RequestBudgetProtocol> {
+        self.serializer.request_budget_protocol()
+    }
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         self.serializer.serialize(view)
     }
@@ -62,7 +68,13 @@ impl ModelProvider for ControlledModel {
         emit(ProviderEvent::Usage {
             receipt: UsageReceipt {
                 measurement: UsageMeasurement::Actual,
-                input_tokens: Some(10),
+                input_tokens: Some(self.actual_input_tokens.unwrap_or_else(|| {
+                    varin_runtime::context_capacity::estimate_request(
+                        &request.view,
+                        &request.serialized,
+                    )
+                    .estimated_tokens
+                })),
                 output_tokens: Some(3),
                 raw: Some(json!({"controlled":true})),
                 ..Default::default()
@@ -77,8 +89,10 @@ struct Review {
     assembly: RunAssembly,
     sends: mpsc::Sender<Generation>,
     generations: mpsc::Receiver<Generation>,
+    actual_input_tokens: Option<u64>,
     notified_cursor: u64,
     connected: bool,
+    with_goal: bool,
 }
 impl Review {
     fn open(root: &Path) -> Self {
@@ -137,8 +151,10 @@ impl Review {
             assembly,
             sends,
             generations,
+            actual_input_tokens: None,
             notified_cursor: 0,
             connected: false,
+            with_goal: false,
         }
     }
     fn initialize(&mut self, root: &Path, reopen: bool) {
@@ -152,7 +168,7 @@ impl Review {
                 .unwrap();
         }
         self.fixture.host.send(json!({"kind":"fixture-initialize","root":root,"threadId":"thread:budget","branchId":"branch:budget",
-            "epoch":EPOCH,"storageRoot":self.fixture.storage_root,"reopen":reopen,
+            "epoch":EPOCH,"storageRoot":self.fixture.storage_root,"reopen":reopen,"withGoal":self.with_goal,
             "configuration":{"providerFamily":"openai-responses","model":"budget-controlled","endpoint":"https://controlled.invalid/responses",
                 "allowAnonymous":true,"credentialEnvironment":null,"configurationGeneration":1,"maxOutputTokens":64,"contextWindowTokens":16384}}));
     }
@@ -160,6 +176,7 @@ impl Review {
         self.fixture.runtime.reap().unwrap();
         let assembly = self.assembly.clone();
         let sends = self.sends.clone();
+        let actual_input_tokens = self.actual_input_tokens;
         let mut failure = None;
         let mut connected = false;
         let frame=self.fixture.pump_dispatch(|frame| {
@@ -175,6 +192,9 @@ impl Review {
                 }
                 if method.starts_with("runtime.child.") {
                     return child_commands::execute(runtime,assembly.resources.clone(),method,params,&AtomicBool::new(false));
+                }
+                if method == "runtime.goal.start" {
+                    return crate::agent_goals::execute_rpc(owner, method, params, Arc::new(AtomicBool::new(false)));
                 }
                 match method {
                     "runtime.context.inspect" => {
@@ -227,7 +247,7 @@ impl Review {
                         let p:RunStartParams=serde_json::from_value(params)?; let run=owner.lock().unwrap().run(&p.run_id).map_err(domain)?;
                         let prepared=RunPreparation::new(p,&run)?;
                         let PreparedLaunch::Start(mut start)=assembly.prepare(prepared,None,||false)? else { panic!("Run expected") };
-                        start.provider=Arc::new(ControlledModel { serializer:start.provider.clone(), sends:sends.clone() });
+                        start.provider=Arc::new(ControlledModel { serializer:start.provider.clone(), actual_input_tokens, sends:sends.clone() });
                         if let Some(parts)=owner.lock().unwrap().context_job_parts(&run.id).map_err(domain)? {
                             start=varin_runtime::context_job::configure_compaction_start(start,parts);
                         }
@@ -342,12 +362,11 @@ fn selected_budget_freezes_summary_and_recovers_original_publication_without_pai
     let initial_run = initial["receipt"]["run_id"].as_str().unwrap();
     let main = first.generation();
     assert_eq!(main.request.view.run_id, initial_run);
-    assert!(
-        main.request
-            .serialized
-            .to_string()
-            .contains("ORIGINAL BUDGET USER PROFILE")
-    );
+    assert!(main
+        .request
+        .serialized
+        .to_string()
+        .contains("ORIGINAL BUDGET USER PROFILE"));
     main.finish
         .send("FIRST ANSWER retained evidence".into())
         .unwrap();
@@ -408,6 +427,11 @@ fn selected_budget_freezes_summary_and_recovers_original_publication_without_pai
     let summary = first.generation();
     let summary_id = summary.request.view.run_id.clone();
     let summary_request_id = summary.request.view.request_id.clone();
+    let summary_input_tokens = varin_runtime::context_capacity::estimate_request(
+        &summary.request.view,
+        &summary.request.serialized,
+    )
+    .estimated_tokens;
     assert_ne!(summary_id, parent);
     let wire = summary.request.serialized.to_string();
     assert!(
@@ -482,7 +506,10 @@ fn selected_budget_freezes_summary_and_recovers_original_publication_without_pai
         summary_step.usage.as_ref().unwrap()["measurement"],
         "actual"
     );
-    assert_eq!(summary_step.usage.as_ref().unwrap()["input_tokens"], 10);
+    assert_eq!(
+        summary_step.usage.as_ref().unwrap()["input_tokens"],
+        summary_input_tokens
+    );
     assert_eq!(
         summary_step.usage.as_ref().unwrap()["raw"],
         json!({"controlled":true})
@@ -555,6 +582,111 @@ fn real_child_admission_selects_its_own_budget_scope_without_promoting_parent_se
     let checked = review.receive("fixture-child-verified");
     assert_eq!(checked["selected"]["external"], true);
     assert_eq!(checked["parent"]["external"], false);
+    assert!(review.generations.try_recv().is_err());
+    drop(review);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+#[ignore = "requires built original Host packages; stdio and Node broker IPC only"]
+fn original_usage_reaches_selected_budget_without_unrequested_summary() {
+    for with_goal in [false, true] {
+        calibrated_scenario(with_goal);
+    }
+}
+fn calibrated_scenario(with_goal: bool) {
+    use varin_runtime::context_capacity::estimate_request;
+    let root =
+        std::env::temp_dir().join(format!("varin-calibrated-budget-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let mut review = Review::open(&root);
+    review.actual_input_tokens = Some(10);
+    review.with_goal = with_goal;
+    review.initialize(&root, false);
+    let first = review.receive("fixture-submitted");
+    let initial = review.generation();
+    // The actual assembled request must also satisfy GenerateContent's system-prefix contract.
+    // Only serialize: the lazy transport and credential resolver are never dispatched.
+    let google = varin_runtime::providers::google::GoogleProvider::new(
+        varin_runtime::providers::Connection::new(
+            "https://controlled.invalid/models/model:streamGenerateContent",
+            Arc::new(varin_runtime::providers::EnvironmentCredentialResolver::default()),
+            varin_runtime::providers::shared_transport(),
+        ),
+    )
+    .unwrap();
+    let mut google_view = initial.request.view.clone();
+    google_view.binding.provider_family = varin_runtime::providers::google::FAMILY.into();
+    let google_request = google.serialize(&google_view).unwrap();
+    assert!(
+        google_request["systemInstruction"]["parts"]
+            .as_array()
+            .unwrap()
+            .len()
+            >= 2
+    );
+    if with_goal {
+        assert_eq!(google_request["contents"][0]["role"], "user");
+        let goal = initial
+            .request
+            .view
+            .history
+            .iter()
+            .position(|item| matches!(item.provenance, Provenance::GoalInstruction { .. }))
+            .unwrap();
+        let user = initial
+            .request
+            .view
+            .history
+            .iter()
+            .position(|item| matches!(item.provenance, Provenance::UserInstruction { .. }))
+            .unwrap();
+        assert!(goal < user);
+        assert!(!initial.request.view.history[goal].provenance.is_system());
+        assert_eq!(initial.request.serialized["input"][goal]["role"], "user");
+    }
+    let old_estimate =
+        estimate_request(&initial.request.view, &initial.request.serialized).estimated_tokens;
+    assert!(
+        old_estimate > 4384,
+        "Local bytes alone would require a summary at the next budget"
+    );
+    initial
+        .finish
+        .send("ACTUAL SUCCESS retained output".into())
+        .unwrap();
+    review.completed(first["receipt"]["run_id"].as_str().unwrap());
+    review
+        .fixture
+        .host
+        .send(json!({"kind":"fixture-calibrated"}));
+    let admitted = review.receive("fixture-calibrated-submitted");
+    let next = review.generation();
+    assert_eq!(next.request.view.run_id, admitted["receipt"]["run_id"].as_str().unwrap(),
+        "The selected Decision must consume the calibrated input instead of starting an extra summary");
+    assert!(next
+        .request
+        .view
+        .history
+        .starts_with(&initial.request.view.history));
+    let expected = 10
+        + estimate_request(&next.request.view, &next.request.serialized).estimated_tokens
+        - old_estimate;
+    next.finish.send("NEXT SUCCESS".into()).unwrap();
+    review.completed(admitted["receipt"]["run_id"].as_str().unwrap());
+    review.fixture.host.send(json!({"kind":"fixture-finish"}));
+    let finished = review.receive("fixture-finished");
+    assert_eq!(finished["jobs"], json!([]));
+    let observations = finished["observations"].as_array().unwrap();
+    assert_eq!(observations.len(), 1);
+    assert_eq!(
+        observations[0]["input"]["estimate"]["estimatedTokens"],
+        expected
+    );
+    assert!(observations[0]["input"]["estimate"]["method"]
+        .as_str()
+        .unwrap()
+        .starts_with("actual-input-calibrated"));
     assert!(review.generations.try_recv().is_err());
     drop(review);
     std::fs::remove_dir_all(root).unwrap();

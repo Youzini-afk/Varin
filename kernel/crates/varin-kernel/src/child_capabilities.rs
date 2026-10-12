@@ -109,6 +109,7 @@ impl varin_runtime::execution::ContextPreparation for BindingPreparation {
         Vec<varin_runtime::execution::ConversationItem>,
         varin_runtime::execution::ExecutionError,
     > {
+        use sha2::{Digest, Sha256};
         use varin_runtime::execution::*;
         let error = |e: String| ExecutionError::new("child_delegation", e);
         let mut context = self.inner.prepare_binding(run_id, epoch, binding, cancel)?;
@@ -161,7 +162,7 @@ impl varin_runtime::execution::ContextPreparation for BindingPreparation {
             .bind_child_dispatch(run_id, prepared)
             .map_err(|e| error(e.to_string()))?;
         if binding.tools.iter().any(|tool| tool.name == "dispatch") {
-            if let Some(reference) = binding
+            let text = if let Some(reference) = binding
                 .child_dispatch
                 .as_ref()
                 .filter(|_| has_child_catalog)
@@ -172,22 +173,28 @@ impl varin_runtime::execution::ContextPreparation for BindingPreparation {
                     .map_err(|e| error(e.to_string()))?
                     .capture_child_dispatch(reference);
                 let selected = read.load().map_err(|e| error(e.to_string()))?;
-                context.push(ConversationItem {
-                    id: format!("child-dispatch:{run_id}"),
-                    resource_activation: None,
-                    provenance: Provenance::SystemInstruction {
-                        source: "child_dispatch_configuration".into(),
-                    },
-                    content: Content::Text {
-                        text: discovery(&selected).to_string(),
-                    },
-                    opaque: None,
-                });
+                discovery(&selected).to_string()
             } else {
-                context.push(ConversationItem { id: format!("child-dispatch:{run_id}"), resource_activation: None,
-                    provenance: Provenance::SystemInstruction { source: "child_dispatch_configuration".into() },
-                    content: Content::Text { text: "Child dispatch unavailable: no configuration snapshot was selected for this Run.".into() }, opaque: None });
-            }
+                "Child dispatch unavailable: no configuration snapshot was selected for this Run."
+                    .into()
+            };
+            // This is fixed request context, not a per-Run history event. Its original frozen
+            // authority and complete content determine identity; equal bindings keep the prefix.
+            let identity = hex::encode(Sha256::digest(
+                serde_json::to_vec(&serde_json::json!({
+                    "child_dispatch": binding.child_dispatch, "text": text,
+                }))
+                .map_err(|e| error(e.to_string()))?,
+            ));
+            context.push(ConversationItem {
+                id: format!("child-dispatch:sha256-{identity}"),
+                resource_activation: None,
+                provenance: Provenance::SystemInstruction {
+                    source: "child_dispatch_configuration".into(),
+                },
+                content: Content::Text { text },
+                opaque: None,
+            });
         }
         Ok(context)
     }
@@ -204,12 +211,14 @@ impl varin_runtime::execution::ContextPreparation for BindingPreparation {
         epoch: u64,
         view: &varin_runtime::execution::RequestView,
         serialized: &serde_json::Value,
+        budget_protocol: Option<varin_runtime::context_capacity::RequestBudgetProtocol>,
         cancel: &varin_runtime::execution::CancellationToken,
     ) -> Result<
         varin_runtime::execution::ContextRequestPreparation,
         varin_runtime::execution::ExecutionError,
     > {
-        self.inner.prepare_request(epoch, view, serialized, cancel)
+        self.inner
+            .prepare_request(epoch, view, serialized, budget_protocol, cancel)
     }
 }
 

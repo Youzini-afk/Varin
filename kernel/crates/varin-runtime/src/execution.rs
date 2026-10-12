@@ -543,6 +543,10 @@ pub trait ModelProvider: Send + Sync {
 
     /// Serialize and validate the semantic view. Reject unsupported attachment kinds explicitly.
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError>;
+    /// Optional pure serializer/usage contract. Unknown adapters retain the explicit local estimate.
+    fn request_budget_protocol(&self) -> Option<crate::context_capacity::RequestBudgetProtocol> {
+        None
+    }
     /// Implementations must cooperate with cancellation, including while awaiting the network.
     /// Deltas are presentation candidates. Only ItemCompleted can register a complete tool call.
     fn generate(
@@ -1625,6 +1629,7 @@ pub trait ContextPreparation: Send + Sync {
         _owner_generation: u64,
         _view: &RequestView,
         _serialized: &Value,
+        _budget_protocol: Option<crate::context_capacity::RequestBudgetProtocol>,
         _cancel: &CancellationToken,
     ) -> Result<ContextRequestPreparation, ExecutionError> {
         Ok(ContextRequestPreparation::Ready)
@@ -2271,16 +2276,24 @@ impl<
                         request_history.retain(|previous| !matches!(&previous.provenance,Provenance::EnvironmentFact{event_id} if item.memory_facts.contains(event_id)));
                         request_history.push(item.item);
                     }
-                    binding.resource_activations =
-                        crate::catalog::resources::retained_activations(&request_history);
                     let goal = self
                         .persistence
                         .goal_context(&input.run_id, input.owner_generation)?;
                     binding.goal = goal.as_ref().map(|g| g.binding.clone());
-                    if let Some(item) = goal.and_then(|g| g.item) {
-                        request_history.push(item);
-                    }
-                    request_history.extend(binding_context);
+                    // Current binding instructions belong to the fixed request context, after
+                    // the existing system prefix and before growing history. Keep Goal's original
+                    // provenance (and provider user role); neither these items nor their placement
+                    // rewrite conversation history or an already prepared request.
+                    let prefix = request_history
+                        .iter()
+                        .take_while(|item| item.provenance.is_system())
+                        .count();
+                    request_history.splice(
+                        prefix..prefix,
+                        binding_context.into_iter().chain(goal.and_then(|g| g.item)),
+                    );
+                    binding.resource_activations =
+                        crate::catalog::resources::retained_activations(&request_history);
                     let view = RequestView {
                         request_id: format!(
                             "{}:{}:{}",
@@ -2307,6 +2320,10 @@ impl<
                         input.owner_generation,
                         &view,
                         &serialized,
+                        selected_model.as_ref().map_or_else(
+                            || self.provider.request_budget_protocol(),
+                            |selected| selected.provider.request_budget_protocol(),
+                        ),
                         &cancel,
                     ) {
                         Ok(ContextRequestPreparation::Recompile) => {

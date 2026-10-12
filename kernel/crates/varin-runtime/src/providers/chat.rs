@@ -54,6 +54,14 @@ fn chat_parts(parts: Vec<crate::output::OutputPart>) -> Result<Vec<Value>, Execu
     Ok(blocks)
 }
 impl ModelProvider for ChatProvider {
+    fn request_budget_protocol(&self) -> Option<crate::context_capacity::RequestBudgetProtocol> {
+        Some(crate::context_capacity::RequestBudgetProtocol {
+            transcript: &["messages"],
+            coalesced_content: None,
+            complete_input_tokens: inclusive_input_tokens,
+        })
+    }
+
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         validate_view(view, self.family)?;
         validate_images(view, &self.connection)?;

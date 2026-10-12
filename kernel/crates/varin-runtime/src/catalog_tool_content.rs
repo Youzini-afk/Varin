@@ -130,6 +130,90 @@ pub struct ModelStepRead {
     content: crate::content::ContentStore,
     _publication: crate::content::ContentPublication,
 }
+/// One derived budget read. Capture only ownership and a content publication lease; SQL selection,
+/// snapshot hydration and exact prefix comparison all run outside the Catalog/control mutex.
+pub struct RequestBudgetRead {
+    run_id: String,
+    branch_id: String,
+    epoch: u64,
+    database: std::path::PathBuf,
+    content: crate::content::ContentStore,
+    _publication: crate::content::ContentPublication,
+}
+impl RequestBudgetRead {
+    pub fn estimate(
+        self,
+        view: &crate::execution::RequestView,
+        serialized: &Value,
+        protocol: crate::context_capacity::RequestBudgetProtocol,
+        cancel: &crate::execution::CancellationToken,
+    ) -> Result<crate::context_capacity::InputEstimate> {
+        use crate::{context_capacity::*, execution::*};
+        if cancel.is_cancelled() {
+            return Err(RuntimeError::DispatchCancelled);
+        }
+        if view.run_id != self.run_id || view.binding.history_range.branch_id != self.branch_id {
+            return Err(RuntimeError::Conflict(
+                "request budget owner changed".into(),
+            ));
+        }
+        let local = || estimate_request(view, serialized);
+        if !matches!(view.origin, RequestOrigin::Conversation { .. }) {
+            return Ok(local());
+        }
+        let db = Connection::open_with_flags(
+            &self.database,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        let token = cancel.clone();
+        db.progress_handler(1000, Some(move || token.is_cancelled()))?;
+        let epoch = db.query_row("SELECT epoch FROM runtime_meta WHERE id=1", [], |row| {
+            read_number(row, 0)
+        })?;
+        if epoch != self.epoch {
+            return Err(RuntimeError::Conflict(
+                "request budget belongs to a previous owner epoch".into(),
+            ));
+        }
+        // Failed/interrupted/late output and unknown/estimated input never replace a successful
+        // actual observation. Select exactly one latest candidate, including across Runs of this
+        // branch; a different configuration or prefix does not revive an older observation.
+        let previous: Option<(String, String, String, String)> = db.query_row(
+            "SELECT m.id,m.run_id,json_extract(m.body,'$.request'),json_extract(m.body,'$.usage')
+             FROM model_steps m JOIN runs r ON r.id=m.run_id
+             WHERE r.branch_id=?1 AND m.state='completed'
+               AND json_extract(m.body,'$.usage.measurement')='actual'
+               AND json_type(m.body,'$.usage.input_tokens')='integer'
+             ORDER BY m.rowid DESC LIMIT 1", [&self.branch_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))).optional()?;
+        drop(db);
+        if cancel.is_cancelled() {
+            return Err(RuntimeError::DispatchCancelled);
+        }
+        let Some((id, run, reference, usage)) = previous else {
+            return Ok(local());
+        };
+        let previous = self
+            .content
+            .load_snapshot_cancellable(&serde_json::from_str(&reference)?, &|| {
+                cancel.is_cancelled()
+            })?;
+        if previous.view.request_id != id
+            || previous.view.run_id != run
+            || previous.view.binding.history_range.branch_id != self.branch_id
+        {
+            return Err(RuntimeError::Invalid(
+                "request budget snapshot differs from its owner".into(),
+            ));
+        }
+        let usage: UsageReceipt = serde_json::from_str(&usage)?;
+        let estimate = calibrated_estimate(view, serialized, &previous, &usage, protocol);
+        if cancel.is_cancelled() {
+            return Err(RuntimeError::DispatchCancelled);
+        }
+        Ok(estimate)
+    }
+}
 impl ModelStepRead {
     pub fn load_request(self) -> Result<Value> {
         self.content.load(&self.metadata.request)
@@ -284,6 +368,27 @@ pub(super) fn hydrate_operation(
     })
 }
 impl Catalog {
+    pub fn capture_request_budget(&self, run_id: &str, epoch: u64) -> Result<RequestBudgetRead> {
+        let run = self.run(run_id)?;
+        if run.epoch != epoch || epoch != self.epoch || run.cancel_requested || run.state.terminal()
+        {
+            return Err(RuntimeError::Conflict(
+                "request budget owner changed".into(),
+            ));
+        }
+        Ok(RequestBudgetRead {
+            run_id: run.id,
+            branch_id: run.branch_id,
+            epoch,
+            database: self
+                .db
+                .path()
+                .ok_or_else(|| RuntimeError::Invalid("Catalog has no database".into()))?
+                .into(),
+            content: self.content.clone(),
+            _publication: self.content.begin_publication(),
+        })
+    }
     pub fn model_step_metadata(&self, id: &str) -> Result<ModelStep> {
         record(&self.db, "model_steps", id)
     }

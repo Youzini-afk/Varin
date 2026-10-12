@@ -28,9 +28,9 @@ pub(super) fn validate_thinking_capacity(
     if view.binding.tools.is_empty()
         && thinking.is_some_and(|thinking| {
             thinking["type"] == "enabled"
-                && thinking["budget_tokens"].as_u64().is_some_and(|budget| {
-                    max_tokens.is_some_and(|max| budget >= max)
-                })
+                && thinking["budget_tokens"]
+                    .as_u64()
+                    .is_some_and(|budget| max_tokens.is_some_and(|max| budget >= max))
         })
     {
         return Err(ExecutionError::new(
@@ -126,6 +126,14 @@ fn anthropic_parts(parts: Vec<crate::output::OutputPart>) -> Result<Vec<Value>, 
     Ok(blocks)
 }
 impl ModelProvider for AnthropicProvider {
+    fn request_budget_protocol(&self) -> Option<crate::context_capacity::RequestBudgetProtocol> {
+        Some(crate::context_capacity::RequestBudgetProtocol {
+            transcript: &["messages"],
+            coalesced_content: Some("content"),
+            complete_input_tokens: separate_cache_input_tokens,
+        })
+    }
+
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         validate_view(view, FAMILY)?;
         validate_images(view, &self.connection)?;

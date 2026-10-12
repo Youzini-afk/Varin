@@ -1,15 +1,15 @@
 //! Context policy and compaction wait on the requesting Run worker, outside shared owners.
 use crate::host_query::OwnerChannel;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use varin_runtime::{
-    Catalog, ModelSessionConfiguration,
     context_capacity::{
-        BudgetDecision, ContextPolicy, budget_candidates, estimate_request, native_candidate,
-        native_mode,
+        budget_candidates, estimate_request, native_candidate, native_mode, BudgetDecision,
+        ContextPolicy,
     },
     context_job::{ContextBudgetStrategy, ContextCompactionMode, ContextSummaryRecipe},
     execution::*,
+    Catalog, ModelSessionConfiguration,
 };
 
 pub(crate) struct CapacityPreparation {
@@ -75,16 +75,17 @@ impl ContextPreparation for CapacityPreparation {
         epoch: u64,
         view: &RequestView,
         serialized: &Value,
+        budget_protocol: Option<varin_runtime::context_capacity::RequestBudgetProtocol>,
         cancel: &CancellationToken,
     ) -> Result<ContextRequestPreparation, ExecutionError> {
         match self
             .inner
-            .prepare_request(epoch, view, serialized, cancel)?
+            .prepare_request(epoch, view, serialized, budget_protocol, cancel)?
         {
             ContextRequestPreparation::Ready => (),
             other => return Ok(other),
         }
-        let (configuration, revision, existing) = {
+        let (configuration, revision, existing, budget) = {
             let catalog = self.catalog.lock().map_err(failed)?;
             let run = catalog.run(&view.run_id).map_err(failed)?;
             if run.epoch != epoch || run.cancel_requested || run.state.terminal() {
@@ -103,7 +104,15 @@ impl ContextPreparation for CapacityPreparation {
             } else {
                 None
             };
-            (configuration, revision, existing)
+            let budget = budget_protocol
+                .map(|protocol| {
+                    catalog
+                        .capture_request_budget(&view.run_id, epoch)
+                        .map(|read| (read, protocol))
+                })
+                .transpose()
+                .map_err(failed)?;
+            (configuration, revision, existing, budget)
         };
         let Some(capacity) = configuration.context_window_tokens else {
             return Ok(ContextRequestPreparation::Ready);
@@ -119,7 +128,12 @@ impl ContextPreparation for CapacityPreparation {
         if !settings.enabled {
             return Ok(ContextRequestPreparation::Ready);
         }
-        let estimate = estimate_request(view, serialized);
+        let estimate = match budget {
+            Some((read, protocol)) => read
+                .estimate(view, serialized, protocol, cancel)
+                .map_err(failed)?,
+            None => estimate_request(view, serialized),
+        };
         let existing = existing.map(|job| job.load().map_err(failed)).transpose()?;
         let mut candidates = None;
         let (through, recipe, mut block) = if let Some(job) = existing {
@@ -312,7 +326,7 @@ impl ContextPreparation for CapacityPreparation {
 mod tests {
     use super::*;
     use std::{sync::mpsc, time::Duration};
-    use varin_runtime::{SubmitInput, catalog::context::ContextProposal};
+    use varin_runtime::{catalog::context::ContextProposal, SubmitInput};
 
     #[test]
     fn external_background_decision_cannot_override_disabled_user_preparation() {
@@ -394,6 +408,7 @@ mod tests {
                 epoch,
                 &view,
                 &json!({"input":"Original source"}),
+                None,
                 &CancellationToken::default(),
             );
             output.send(json!({"kind":"preparation-finished"})).unwrap();

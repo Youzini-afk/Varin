@@ -188,6 +188,10 @@ pub fn configure_compaction_start(mut start: RunStart, parts: u64) -> RunStart {
 }
 struct SummaryProvider(Arc<dyn ModelProvider>);
 impl ModelProvider for SummaryProvider {
+    fn request_budget_protocol(&self) -> Option<crate::context_capacity::RequestBudgetProtocol> {
+        self.0.request_budget_protocol()
+    }
+
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         if !view.binding.tools.is_empty() {
             return Err(ExecutionError::new(

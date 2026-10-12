@@ -57,6 +57,10 @@ impl AzureResponsesProvider {
     }
 }
 impl ModelProvider for AzureResponsesProvider {
+    fn request_budget_protocol(&self) -> Option<crate::context_capacity::RequestBudgetProtocol> {
+        self.inner.request_budget_protocol()
+    }
+
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         let mut value = self.inner.serialize(view)?;
         value["model"] = Value::String(self.deployment.clone());

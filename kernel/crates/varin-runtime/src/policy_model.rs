@@ -61,6 +61,10 @@ impl ModelProvider for WithPolicyModels {
         self.primary
             .select_for_request(run_id, owner_generation, cancel)
     }
+    fn request_budget_protocol(&self) -> Option<crate::context_capacity::RequestBudgetProtocol> {
+        self.primary.request_budget_protocol()
+    }
+
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         self.primary.serialize(view)
     }

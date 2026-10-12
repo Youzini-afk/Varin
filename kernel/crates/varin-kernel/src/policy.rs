@@ -694,6 +694,12 @@ impl ModelProvider for SelectedPolicyModels {
     ) -> Result<Option<SelectedModel>, ExecutionError> {
         self.primary.select_for_request(run, epoch, cancel)
     }
+    fn request_budget_protocol(
+        &self,
+    ) -> Option<varin_runtime::context_capacity::RequestBudgetProtocol> {
+        self.primary.request_budget_protocol()
+    }
+
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         self.primary.serialize(view)
     }

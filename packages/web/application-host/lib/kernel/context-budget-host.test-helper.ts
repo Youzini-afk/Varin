@@ -122,6 +122,8 @@ async function initialize(frame: Record<string, unknown>) {
   const receipt = await runtime.submit({ key: 'budget-first', threadId, branchId, expectedHead: null,
     input: { text: `ORIGINAL_EVIDENCE ${'recorded source fact. '.repeat(1000)}` }, configuration,
     launch: { source: null, enabledTools: [], inheritSource: false }, initialContext: initial });
+  if (frame.withGoal) await runtime.startGoal({ key: 'calibrated-objective', runId: receipt.run_id,
+    threadId, branchId, objective: 'Keep the original continuing objective and its user-level authority', budget: null });
   await runtime.startRun(receipt.run_id);
   send({ kind: 'fixture-submitted', receipt });
 }
@@ -174,6 +176,19 @@ async function handle(frame: Record<string, unknown>) {
     await writeFile(join(root, 'budget-run.json'), JSON.stringify({ runId }));
     await runtime.startRun(runId);
     send({ kind: 'fixture-second-submitted', receipt }); return;
+  }
+  if (frame.kind === 'fixture-calibrated') {
+    assert.equal(observations.length, 0);
+    await settings(12000);
+    await extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision,
+      rule: { serviceId: 'varin.context.budget', version: 1,
+        providerKeys: ['example.context-budget:host:varin.context.budget@1'], scope: { userId: 'default' }, allowFallback: false } });
+    const branch = (await runtime.thread(threadId)).branches.find(value => value.branch_id === branchId); assert(branch);
+    const receipt = await runtime.submit({ key: 'budget-calibrated', threadId, branchId, expectedHead: branch.head,
+      input: { text: 'NEW USER INPUT after actual successful generation' }, configuration,
+      launch: { source: null, enabledTools: [], inheritSource: false } });
+    await runtime.startRun(receipt.run_id);
+    send({ kind: 'fixture-calibrated-submitted', receipt }); return;
   }
   if (frame.kind === 'fixture-tail') {
     // The accepted old recipe survives both a route change and a relaxed new-request budget.
