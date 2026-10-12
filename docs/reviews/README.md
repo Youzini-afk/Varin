@@ -8,6 +8,7 @@ Last updated: 2026-10-12
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [原查询 embedding 与统一推理会话（2026-10-12）](runtime-query-embedding-2026-10-12.md) | 原 Catalog/Goal、semantic/decision/rerank/Explore 同查询 ordinal、实际 HTTP/body/receipt 与后台 index 区分；有限验收 |
 | [原来源生命周期与公开诊断（2026-10-12）](runtime-source-lifecycle-2026-10-12.md) | 原注册/信任、固定字节与 Context、真实 Storage/Run 恢复、物化身份和公开失败消费；有限跨层验收 |
 | [固定与物化来源的原检索链（2026-10-12）](runtime-source-retrieval-2026-10-12.md) | 原 Source/Storage、真实 working copy、同源模型与语法、child 冻结/派发及取消；有限跨层验收 |
 | [原 Explore LLM 规划与联合选材（2026-10-12）](runtime-explore-llm-2026-10-12.md) | 原模型/凭据、共享 Pi/Native 循环、query 推理账、required group 与实际取消排空；有限跨层验收 |

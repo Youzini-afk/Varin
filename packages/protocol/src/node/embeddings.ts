@@ -149,8 +149,15 @@ export async function requestOpenAICompatibleEmbeddings(
     );
   }
   const payload = await response.json() as unknown;
-  const usage = readEmbeddingUsage(payload);
+  const usage = embeddingWireUsage(payload);
   if (usage) request.onUsage?.(usage);
+  return parseOpenAICompatibleEmbeddings(payload, request);
+}
+
+/** Parse actual provider bytes independently of transport and receipt publication. */
+export function parseOpenAICompatibleEmbeddings(payload: unknown,
+  request: Pick<OpenAICompatibleEmbeddingsRequest, 'input' | 'model' | 'dimensions'>): OpenAICompatibleEmbeddingsResponse {
+  const usage = embeddingWireUsage(payload);
   if (!isRecord(payload) || !Array.isArray(payload.data)) {
     throw new EmbeddingResponseError("Embedding response is missing data");
   }
@@ -196,7 +203,7 @@ export async function requestOpenAICompatibleEmbeddings(
   };
 }
 
-function readEmbeddingUsage(payload: unknown): EmbeddingUsage | undefined {
+export function embeddingWireUsage(payload: unknown): EmbeddingUsage | undefined {
   if (!isRecord(payload) || !isRecord(payload.usage)) return undefined;
   const input = payload.usage.prompt_tokens;
   const total = payload.usage.total_tokens;

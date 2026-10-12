@@ -19,6 +19,12 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-12 增量：原查询 embedding 与统一推理会话
+
+- native query embedding 接原 Catalog/Goal，与同查询的 decision/rerank/Explore 共用一次真实调用准入和连续 ordinal。原配置、凭据、egress 与 wire parser 保持，后台 index ledger 只管 index-build，移除 retrieval response 重复 receipt；Catalog **58** 保持、私有 wire **14**直接拒旧。
+- 原 usage 先于向量有效性结算，total-only 不改成 input、缺 output 不补零；原 Goal 预算未知门与 not-dispatched 事实保留。带当前来源/账号授权的 warm cache 不产生假 HTTP/收费；恢复不重发原付费请求。query observer 可结束，原 session 保实际 HTTP/body/receipt 寿命并拒晚到 scheduler 新工作。
+- 原真实 scan/publication、semantic+rerank 与 semantic+FD+Explore 组合、取消、Catalog 重开、背景索引恢复及共享 SDK/receipt 故障证据见[本片记录](../reviews/runtime-query-embedding-2026-10-12.md)。这是 non-live semantic 的必要前置片，固定/物化 semantic、完整 LSP/远端来源仍未完成，未提前移除 unsupported 声明。
+
 ## 2026-10-12 增量：原来源生命周期与公开诊断
 
 - fixed/materialized 的公开新输入、Context/指令、原 Run 重绑及 child 分支准备沿 Documents 持久注册与当前信任、Storage 精确 revision/pin；不再为元数据准入要求旧 live 目录。首次捕获、live 与真实文件效果仍保物理根检查，配置命名空间不成为执行 cwd。

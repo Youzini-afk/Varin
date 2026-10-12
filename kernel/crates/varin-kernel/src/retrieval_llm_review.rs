@@ -36,12 +36,10 @@ impl HttpTransport for Stream {
         assert_eq!(request.body["model"], "explore-model");
         assert!(!request.body.to_string().contains("FORBIDDEN_SOURCE"));
         assert!(!request.body.to_string().contains("private/secret.ts"));
-        assert!(
-            request
-                .body
-                .get("tools")
-                .is_none_or(|v| v.as_array().is_some_and(Vec::is_empty))
-        );
+        assert!(request
+            .body
+            .get("tools")
+            .is_none_or(|v| v.as_array().is_some_and(Vec::is_empty)));
         let ordinal = {
             let mut requests = self.requests.lock().unwrap();
             requests.push(request.body.clone());
@@ -222,11 +220,9 @@ fn configured_explore_llm_plans_selects_and_accounts_under_the_original_query() 
         } else {
             assert!(count >= 2);
         }
-        assert!(
-            requests[0]
-                .to_string()
-                .contains("Plan grouped search expressions")
-        );
+        assert!(requests[0]
+            .to_string()
+            .contains("Plan grouped search expressions"));
         if mode == "llm-auto" {
             assert!(
                 counts["requests"].as_u64().unwrap() > 0,
@@ -315,11 +311,9 @@ fn configured_explore_llm_plans_selects_and_accounts_under_the_original_query() 
                         state["response"]["snapshot"]["view"]["origin"]["kind"],
                         "auxiliary_inference"
                     );
-                    assert!(
-                        state["response"]["providerOutput"]["items"]
-                            .as_array()
-                            .is_some_and(|a| !a.is_empty())
-                    );
+                    assert!(state["response"]["providerOutput"]["items"]
+                        .as_array()
+                        .is_some_and(|a| !a.is_empty()));
                 }
             }
         }
@@ -413,5 +407,71 @@ fn public_query_stop_keeps_native_generation_pending_until_actual_transport_drai
     let root = review.root.clone();
     drop(review);
     drop(guard);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+#[ignore = "requires original semantic/decision/Explore consumers over stdio"]
+fn semantic_decision_and_explore_use_one_query_session_with_contiguous_ordinals() {
+    let mut review = Review::new("semantic-auto");
+    let (send, events) = mpsc::sync_channel(16);
+    let (stream, guard) = install("llm-auto", send);
+    let counts = review.execute(false);
+    assert!(events.try_recv().is_err());
+    assert_eq!(counts["embeddingRequests"], 1);
+    assert!(
+        counts["requests"].as_u64().unwrap() > 0,
+        "classifier action duty executed"
+    );
+    assert!(
+        stream.requests.lock().unwrap().len() >= 2,
+        "original Explore planner and selector executed"
+    );
+    let owner = review.f.runtime.catalog();
+    let db = owner.lock().unwrap();
+    let mut operations = db
+        .events_after(0, 10000)
+        .unwrap()
+        .into_iter()
+        .filter(|event| event.kind == "inference.admitted")
+        .map(|event| {
+            db.capture_operation_read(db.operation(&event.subject).unwrap())
+                .load()
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    operations.sort_by_key(|operation| operation.intent["ordinal"].as_u64().unwrap());
+    assert!(operations.iter().any(
+        |operation| operation.intent["binding"]["purpose"] == "code-retrieval-query-embedding"
+    ));
+    assert!(operations
+        .iter()
+        .any(|operation| operation.intent["binding"]["api"] == "typesafe-system-one"));
+    assert!(operations
+        .iter()
+        .any(|operation| operation.intent["binding"]["api"] == "openai-responses"));
+    for (index, operation) in operations.iter().enumerate() {
+        assert_eq!(operation.intent["ordinal"], (index + 1) as u64);
+        assert_eq!(
+            operation.intent["parentOperationId"],
+            operations[0].intent["parentOperationId"]
+        );
+        assert_eq!(operation.phase, OperationPhase::Terminal);
+    }
+    assert_eq!(
+        db.capture_goal("rerank-goal")
+            .unwrap()
+            .load()
+            .unwrap()
+            .usage
+            .pending_inferences,
+        0
+    );
+    drop(db);
+    drop(owner);
+    drop(guard);
+    drop(stream);
+    let root = review.root.clone();
+    drop(review);
     std::fs::remove_dir_all(root).unwrap();
 }

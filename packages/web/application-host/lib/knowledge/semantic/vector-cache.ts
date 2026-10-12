@@ -12,10 +12,12 @@ export type VectorCacheKey = {
   spaceId: string;
   purpose: SemanticEmbedPurpose;
   embedText: string;
+  /** Query credential provenance; background/index reuse keeps its original key. */
+  authority?: string;
 };
 
 const keyOf = (input: VectorCacheKey): string => (
-  `${input.spaceId}\0${input.purpose}\0${embedTextKey(input.embedText)}`
+  `${input.spaceId}\0${input.purpose}\0${embedTextKey(input.embedText)}\0${input.authority ?? ""}`
 );
 
 const vectorBytes = (vector: readonly number[]): number => vector.length * 8 + 64;

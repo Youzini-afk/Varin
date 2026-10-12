@@ -6,19 +6,22 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this local-m
 
 ## Purpose-specific Host inference
 
-`runtime-inference.ts` owns both retained embedding leases and native decision transport lifetimes.
-`decision-inference.ts` uses the original `HostCredentialAuthority`, global purpose settings, egress
-owner and pure classifier adapter; it does not start a Pi AgentSession/workspace worker. Its actual
-TypeSafe/Cloudflare/llama.cpp HTTP attempts are linked to the original tool by stable ordinal. Catalog, not the
-semantic index ledger or a second batch table, owns decision admission, dispatch, original receipt,
-Goal usage and recovery. Request/response/raw-usage bodies live in ContentStore. Private retained
+`runtime-inference.ts` owns retained embedding leases and assembles purpose-specific Host inference.
+Native retrieval's query embedding, decision, rerank and Explore generation consume one original
+query session in `inference-requests.ts`, with one ordinal allocator for actual requests. The
+`HostCredentialAuthority`, global purpose settings, egress and original protocol adapters remain
+their owners; no Pi AgentSession/workspace worker is started. Catalog owns native request admission,
+dispatch, original receipt, Goal usage and recovery. Background document indexing retains its
+separate existing index owner below. Request/response/raw-usage bodies live in ContentStore. Private retained
 credentials/headers never enter those records.
 
 Ordinary configuration edits do not redirect an accepted request. Explicit disable/revocation and
 original Goal/parent control fence dispatch. Runtime events reconcile the exact active Operation;
 kernel exit aborts local transports immediately. Stop acknowledgement does not prove remote work
 stopped: the Host waits for its actual fetch/body reader and records known/unknown effects separately.
-An unpublished observed receipt remains with that owner for same-identity publication, and prevents
+The session closes new scheduler admission when its query callback finishes, retaining already-owned
+HTTP/body work until its receipt or existing unknown-usage barrier is acknowledged. Kernel generation
+keeps its original execution owner. An unpublished observed receipt remains with its owner for same-identity publication, and prevents
 the SDK from interpreting the persistence failure as permission to send another paid request.
 
 Raw provider usage, including missing dimensions, is recorded before answer validation. The SDK's
@@ -34,8 +37,14 @@ are controlled `preparation`; only `/completion` is `model_compute` charged to G
 are distinct actual computations. The adapter drains every fetch/body even if the SDK fails early
 while a sibling preparation is active. Label promises are request-local, so one caller cancellation
 cannot poison another. Ordinary partial failures retain completed scores/choices and original order;
-explicit cancellation/revocation still suppresses answers. Rerank and other auxiliary consumers remain
-separate work. The older Pi workspace broker retains
+explicit cancellation/revocation still suppresses answers.
+
+Native embedding uses the shared OpenAI-compatible wire with zero automatic retries. Raw
+`prompt_tokens` supplies input usage; `total_tokens` alone is not relabeled as input, and an absent
+output dimension remains missing. An output-budgeted Goal therefore retains its existing unknown-use
+barrier when this provider supplies no output dimension. Query vector cache hits require the current
+source, binding and captured credential-scope fingerprint; they create no HTTP Operation or usage.
+The older Pi workspace broker retains
 its existing failure/cancellation projection; this native lifecycle is not a claim that those older
 observer semantics were replaced.
 
@@ -118,7 +127,7 @@ observer semantics were replaced.
   invalidates all tokens, and startup under the exclusive writer lock removes abandoned copies.
   Same-space embedder replacement affects future document admissions while an admitted batch keeps
   its original binding through preparation and embedding.
-- Inference execution facts: `inference-ledger.ts` uses the same private semantic storage process.
+- Background index inference facts: `inference-ledger.ts` uses the same private semantic storage process.
   Its sole durable ledger is `VARIN_DATA_DIR/knowledge/<hostId>/semantic-inference/ledger.tdb`, alongside
   the derived `semantic/` subtree rather than inside it. Storage relocation and index-cache purge
   cannot erase admitted external work. This dimension-independent, one-dimensional Trivium store
@@ -127,10 +136,9 @@ observer semantics were replaced.
   hashes, attempt/usage receipts and validated completed vectors; it never stores input text,
   credentials, authentication headers or endpoint URLs. There is no second configuration authority
   or writable mirror of native Run state.
-  A retrieval-query key is its real persisted invocation plus the fixed inference stage. Input hashes
-  and vector binding are immutable intent under that key, so changed input/settings cannot bypass
-  an unknown outcome; a changed intent fails explicitly. Index-build keys additionally include
-  workspace/recipe, input hashes and vector binding so a new model can build a distinct index.
+  Index-build keys include workspace/recipe, input hashes and vector binding so a new model can build
+  a distinct index. Native query requests use the original Catalog and never also write this ledger.
+  Obsolete internal query records are rejected, not imported, silently erased or used as a fallback.
   An indexed unresolved-state scan also fences overlapping index inputs under the same workspace,
   recipe and vector binding, independent of batch grouping/order after restart. Settlement removes
   terminal operations from that scan; no second claim authority or background cleanup is introduced.
@@ -144,9 +152,9 @@ observer semantics were replaced.
   proof that its transport can never dispatch may be admitted again. That full-sync transaction
   archives the old no-send fact as `semantic-inference-attempt` and creates a new admission number
   and token under the same operation key. History lists both admissions. A pending pre-dispatch
-  chain remains unknown until finalized; retrieval-query invocations and any started/unknown request
-  never acquire this retry path. Facts are retained across restarts without automatic
-  pruning; future deletion/retention must preserve unresolved-outcome fences. Read-only Run/scope
+  chain remains unknown until finalized; any started/unknown request never acquires this retry path.
+  Facts are retained across restarts without automatic
+  pruning; future deletion/retention must preserve unresolved-outcome fences. Read-only workspace-scope
   history projections omit vector payloads and dispatch tokens.
 - Runtime: `runtime.ts` — native directory inventory first returns path and stat metadata without
   reading every file body. New, changed, invalidated and failed paths then enter Documents reads,

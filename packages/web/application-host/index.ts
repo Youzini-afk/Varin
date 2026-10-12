@@ -3734,12 +3734,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const retrievalComposition = createRetrievalComposition(extensionRuntime, {
     prepareModel: (scope, signal) => {
       if (!scope.query) throw new Error('Native retrieval model requires its original query');
-      return retrievalModel.prepare(scope.query, signal ?? new AbortController().signal);
+      return retrievalModel.prepare(scope.query, signal ?? new AbortController().signal, scope.inference);
     },
     structure: structureSource, syntax: syntaxStructure,
     prepareSemantic: async (scope, signal) => {
       const query = scope.query;
-      if (!query) throw new Error('Native semantic retrieval requires its Run identity');
+      if (!query || !scope.inference) throw new Error('Native semantic retrieval requires its Run identity and inference session');
       const active = signal ?? new AbortController().signal;
       const relative = (value: string): string => {
         if (value.includes('\\') || value.startsWith('/') || value.includes(':') || value.includes('\0')
@@ -3758,13 +3758,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         }
       };
       await authorize(active);
-      return semanticRuntime.acquireQuery({ workspaceId: query.source.workspace_id, threadId: query.threadId,
-        runId: query.runId, invocation: query.invocation, roots, signal: active, authorize,
+      return semanticRuntime.acquireQuery({ workspaceId: query.source.workspace_id, inference: scope.inference, roots, signal: active, authorize,
         assertAuthorized: () => { kernelClient.retrievalGrant(query); } });
     },
   });
-  kernelClient.setRetrievalOwner(createRetrievalOwner({ sources: retrievalSources, kernel: kernelClient,
-    preparePipeline: async (query, signal) => retrievalComposition.prepare({ threadId: query.threadId, query,
+  kernelClient.setRetrievalOwner(createRetrievalOwner({ sources: retrievalSources, kernel: kernelClient, inferenceRequests: semanticInference.requests!,
+    preparePipeline: async (query, signal, inference) => retrievalComposition.prepare({ threadId: query.threadId, query, inference,
       workspaceId: await retrievalSources.routingWorkspace(query, signal), ...(query.projectId ? { projectId: query.projectId } : {}) }, signal),
   }));
 

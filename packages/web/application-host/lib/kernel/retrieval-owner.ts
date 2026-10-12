@@ -9,8 +9,8 @@ import { waitWithSignal } from '../cancellation.js';
 import { decodeSearchHit, CONTENT_SEARCH_EXCLUDED_DIRS } from '../search/content.js';
 import type { KernelClient } from './kernel-client.js';
 import type { RetrievalSourceOwner } from './retrieval-source.js';
-import type { LiveRoot, LaunchSource, RetrievalQuery } from './protocol.generated.js';
-import type { SemanticInferenceReceipt } from '../knowledge/semantic/runtime-inference.js';
+import { toolOperationId, type LiveRoot, type LaunchSource, type RetrievalQuery } from './protocol.generated.js';
+import type { InferenceCall, InferenceRequests } from '../knowledge/semantic/inference-requests.js';
 
 export interface RetrievalResult {
   status: Exclude<RetrievalStageStatus, 'disabled'>;
@@ -22,7 +22,6 @@ export interface RetrievalResult {
   stages: Array<{ kind: RetrievalStageKind; status: RetrievalStageStatus }>;
   message?: string;
   sourceFailure?: SourceFailureCode;
-  inferenceReceipts?: readonly SemanticInferenceReceipt[];
 }
 export type RetrievalOwner = (query: RetrievalQuery, signal: AbortSignal) => Promise<RetrievalResult>;
 const relative = (path: string): string => {
@@ -36,18 +35,19 @@ const rank: Record<RetrievalStageStatus, number> = { disabled: 0, empty: 1, read
  * Search/read admission uses the original Run grant and source; Documents owns text decoding.
  * Providers only receive text after admission. Rust independently verifies all returned snippets.
  */
-export function createRetrievalOwner({ sources, kernel, pipelines, preparePipeline }: {
+export function createRetrievalOwner({ sources, kernel, pipelines, preparePipeline, inferenceRequests }: {
   sources: RetrievalSourceOwner;
   kernel: KernelClient;
   pipelines?: Pick<RetrievalPipelineOwner, 'capture'>;
-  preparePipeline?: (query: RetrievalQuery, signal: AbortSignal) => Promise<BoundRetrievalPipeline>;
+  inferenceRequests?: Pick<InferenceRequests, 'run'>;
+  preparePipeline?: (query: RetrievalQuery, signal: AbortSignal, inference?: InferenceCall) => Promise<BoundRetrievalPipeline>;
 }): RetrievalOwner {
-  return async (query, signal) => {
+  const execute = async (query: RetrievalQuery, signal: AbortSignal, inference?: InferenceCall): Promise<RetrievalResult> => {
     // Bind before source I/O. A later settings publication cannot replace this query's selected stages.
     let binding: BoundRetrievalPipeline;
     try {
       if (preparePipeline) {
-        const preparing = preparePipeline(query, signal);
+        const preparing = preparePipeline(query, signal, inference);
         try { binding = await waitWithSignal(preparing, signal); }
         catch (error) { void preparing.then(late => late.release?.(), () => {}); throw error; }
       } else {
@@ -335,8 +335,19 @@ export function createRetrievalOwner({ sources, kernel, pipelines, preparePipeli
         return result;
       } finally {
         if (run.terminal() === 'active') run.cancel();
-        if (binding.inferenceReceipts) result.inferenceReceipts = binding.inferenceReceipts();
       }
     } finally { binding.release?.(); }
+  };
+  return (query, signal) => {
+    if (!inferenceRequests) return execute(query, signal);
+    const invocation = query.invocation;
+    const origin = invocation.kind === 'model_step' ? { kind: 'model_step' as const, request_id: invocation.requestId }
+      : invocation.kind === 'policy_action' ? { kind: 'policy_action' as const, action_id: invocation.actionId, node_id: invocation.nodeId }
+        : { kind: 'nested_call' as const, parent_operation_id: invocation.parentOperationId };
+    return inferenceRequests.run({ operationId: toolOperationId(origin, invocation.toolCallId), executorOwner: query.inferenceOwner }, signal,
+      async call => {
+        await call.assertFresh();
+        return execute(query, call.signal, call);
+      });
   };
 }

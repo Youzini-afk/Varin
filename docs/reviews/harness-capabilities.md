@@ -60,6 +60,7 @@ Last updated: 2026-10-06
 | HTTP reranker（3.16E） | 独立配置，在相应检索路径消费；不把聊天或 embedding 接口当 rerank | 真实 provider 质量、费用与延迟未验证 |
 | explore、grep、read（3.15、3.2） | 冷目录文本检索、渐进 Explore、固定查询来源、详情句柄与原文续读；模型消费者按配置启用 | faux 与算法测试证明局部行为；120s/8s 等历史预算不是已测 SLO |
 | Native SourceView 检索 | 原固定 revision/实际 working copy、关键词与 source-local tree-sitter、原 rerank/FD/Explore LLM、真实 child 源与结果重建，见[检索证据](runtime-source-retrieval-2026-10-12.md)；新 input/原 Run 重绑沿注册身份并经实际 Storage 重开，见[生命周期证据](runtime-source-lifecycle-2026-10-12.md) | 非 live semantic publication、完整 LSP 依赖闭包和远端来源仍待实现；stdio 不替代产品 IPC，受控模型不证明质量/性能 |
+| Native query embedding | 原 Catalog/Goal 和同查询 decision/rerank/Explore 共用实际请求序列，原 publication/cache、取消排空与恢复，见[推理归属证据](runtime-query-embedding-2026-10-12.md) | 后台 index 保独立原 owner；缺 output 不伪造预算用量，非 live 向量覆盖与真实 provider 质量仍待完成 |
 | 符号图、related 与 LSP（3.1、3.3、3.8） | 结构采集、定义/引用/调用关系、查询范围及来源语言视图沿现有模块 | 实际语言和 provider 能力分别判断；跨文件版本不能伪称已固定；PageRank/通用多跳及完整桌面冷建不因已有图查询而完成 |
 
 本地默认的直接依据是 [identity.ts](../../packages/web/application-host/lib/knowledge/semantic/identity.ts)

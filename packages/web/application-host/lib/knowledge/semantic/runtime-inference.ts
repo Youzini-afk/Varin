@@ -1,4 +1,4 @@
-import { createInferenceRequests, type InferenceRequestsOptions } from './inference-requests.js';
+import { createInferenceRequests, type InferenceCall, type InferenceRequestsOptions } from './inference-requests.js';
 import { createRerankInference, type RerankInferenceAuthority, type RerankInferenceCapture } from './rerank-inference.js';
 /** Application Host inference leases. No Pi worker, project configuration or secret DTOs. */
 import { createDecisionInference, type DecisionInferenceAuthority, type DecisionInferenceCapture } from './decision-inference.js';
@@ -9,7 +9,7 @@ import {
   type HarnessEmbeddingSettings, type HarnessResolvedEmbeddingBinding,
   type HarnessEmbedParams, type HarnessEmbedResult,
 } from '@varin/protocol';
-import { EmbeddingResponseError, requestOpenAICompatibleEmbeddings, type EmbeddingUsage } from '@varin/protocol/node/embeddings';
+import { EmbeddingResponseError, requestOpenAICompatibleEmbeddings, parseOpenAICompatibleEmbeddings, embeddingWireUsage, type EmbeddingUsage } from '@varin/protocol/node/embeddings';
 import { waitWithSignal } from '../../cancellation.js';
 import { semanticInferenceOperationKey, type SemanticInferenceLedger, type SemanticInferenceLedgerIdentity, type SemanticInferenceOperation, type SemanticInferenceFactFilter } from './inference-ledger-contract.js';
 import { ExistingHostCredentialOwner, type CredentialScope, type ExistingModelAuthRuntime } from '../../kernel/credential-owner.js';
@@ -45,7 +45,7 @@ export interface SemanticInferenceReceipt {
   providerId: string;
   modelId: string;
   configurationId: string;
-  purpose: 'index-document-embedding' | 'query-embedding';
+  purpose: 'index-document-embedding';
   inputItems: number;
   inputBytes: number;
   attempts: number;
@@ -58,12 +58,16 @@ export interface SemanticInferenceReceipt {
 }
 export interface SemanticInferenceRequest extends HarnessEmbedParams {
   operationIdentity: SemanticInferenceOperation;
-  /** Candidate from the existing vector cache; admission still precedes reuse. */
-  cachedResult?: HarnessEmbedResult;
   signal?: AbortSignal;
   /** The Run's grant owner, checked at dispatch and after the response. */
   guard?(): Promise<void>;
   onReceipt?(receipt: SemanticInferenceReceipt): void;
+}
+export interface SemanticQueryEmbeddingRequest extends HarnessEmbedParams {
+  /** Candidate from the credential-scoped query cache; original source fences still apply. */
+  cachedResult?: HarnessEmbedResult;
+  signal?: AbortSignal;
+  guard(): Promise<void>;
 }
 export interface SemanticInferenceLease {
   readonly binding: HarnessResolvedEmbeddingBinding;
@@ -72,6 +76,8 @@ export interface SemanticInferenceLease {
   retain(): SemanticInferenceLease;
   release(): void;
   embed(params: SemanticInferenceRequest): Promise<HarnessEmbedResult & { receipt: SemanticInferenceReceipt }>;
+  /** Native retrieval consumes its original Catalog request session, never the index ledger. */
+  consume(call: InferenceCall, params: SemanticQueryEmbeddingRequest): Promise<HarnessEmbedResult>;
 }
 export type SemanticInferenceStatus = 'unconfigured' | 'disabled' | 'invalid' | 'unavailable';
 export type SemanticInferenceDescription = { status: 'ready'; binding: HarnessResolvedEmbeddingBinding }
@@ -139,7 +145,6 @@ export function createSemanticInference(
       const settings = settingsFrom(await readGlobalSettings());
       const capturedRevocation = revocationGeneration;
       const ledger = options.ledger;
-      if (!ledger) return fail('unavailable', 'embedding-ledger-unavailable');
       const provider = await authority.resolveEmbeddingBinding(settings.providerId, settings.modelId);
       if (JSON.stringify(settingsFrom(await readGlobalSettings())) !== JSON.stringify(settings) || capturedRevocation !== revocationGeneration) return fail('unavailable', 'embedding-selection-changed');
       const binding: HarnessResolvedEmbeddingBinding = Object.freeze({ ...settings,
@@ -182,13 +187,81 @@ export function createSemanticInference(
           binding, identity, assertAvailable,
           retain: () => { if (closed || released) return fail('unavailable', 'embedding-lease-released'); return retain(); },
           release: () => { if (released) return; released = true; references--; controller.abort(); controllers.delete(controller); },
+          consume: async (call, params) => {
+            if (!options.requests) return fail('unavailable', 'embedding-request-owner-unavailable');
+            const signal = AbortSignal.any([call.signal, controller.signal, ...(params.signal ? [params.signal] : [])]);
+            const validate = async () => { await assertAvailable(signal); await params.guard?.(); signal.throwIfAborted(); };
+            if (params.purpose !== 'query' || typeof params.guard !== 'function') return fail('invalid', 'embedding-run-authorization-required');
+            if (params.providerId !== binding.providerId || params.modelId !== binding.modelId || params.protocol !== binding.protocol
+              || params.configurationId !== binding.configurationId || params.dimensions !== binding.dimensions
+              || params.maxTokens !== binding.maxTokens) return fail('invalid', 'embedding-binding-mismatch');
+            if (!Array.isArray(params.items) || !params.items.length || params.items.some(item => !item || typeof item.id !== 'string' || !item.id || typeof item.text !== 'string')
+              || new Set(params.items.map(item => item.id)).size !== params.items.length) return fail('invalid', 'embedding-input-invalid');
+            await validate();
+            if (params.cachedResult) {
+              const cached = params.cachedResult;
+              const expectedSpace = digest(JSON.stringify(remoteEmbeddingSpaceParts({ protocol: binding.protocol,
+                providerId: binding.providerId, modelId: binding.modelId, configurationId: binding.configurationId,
+                maxTokens: binding.maxTokens!, dimensions: cached.space.dim }))).slice(0, 16);
+              if (cached.space.spaceId !== expectedSpace || cached.space.providerId !== binding.providerId || cached.space.modelId !== binding.modelId
+                || cached.space.protocol !== binding.protocol || cached.space.configurationId !== binding.configurationId
+                || cached.space.maxTokens !== binding.maxTokens || !Number.isSafeInteger(cached.space.dim) || cached.space.dim <= 0
+                || (binding.dimensions !== undefined && cached.space.dim !== binding.dimensions)
+                || cached.items.length !== params.items.length || cached.items.some((item, index) => item.index !== index
+                  || item.id !== params.items[index]!.id || item.vector.length !== cached.space.dim || item.vector.some(value => !Number.isFinite(value)))) {
+                return fail('invalid', 'embedding-cache-binding-mismatch');
+              }
+              await validate();
+              return { ...cached, batchId: params.batchId };
+            }
+            const connection = await options.requests.egress.prepare(provider.requestUrl);
+            const result = await requestOpenAICompatibleEmbeddings({ baseUrl: provider.baseUrl,
+              ...(provider.endpoint ? { endpoint: provider.endpoint } : {}), model: binding.modelId,
+              input: params.items.map(item => item.text), ...(binding.dimensions === undefined ? {} : { dimensions: binding.dimensions }),
+              signal, maxRetries: 0, redirect: 'manual',
+              beforeDispatch: async request => {
+                await validate();
+                const auth = await credentials.resolve(identity.credentialScope, signal, { method: 'POST', endpoint: request.url,
+                  payloadSha256: digest(request.body) });
+                await validate();
+                return auth.headers;
+              },
+              fetchImpl: async (url, init) => {
+                const destination = new URL(String(url)).toString();
+                if (destination !== provider.requestUrl || init?.method !== 'POST' || typeof init.body !== 'string') return fail('invalid', 'embedding-request-binding-mismatch');
+                return call.request({ binding: { requestKind: 'model_compute', purpose: 'code-retrieval-query-embedding',
+                  providerId: binding.providerId, modelId: binding.modelId, api: binding.protocol, endpoint: destination,
+                  configurationId: binding.configurationId, credentialScope: identity.credentialScope },
+                  request: { purpose: params.purpose, wire: JSON.parse(init.body) }, destination, init, connection,
+                  check: validate,
+                  observe: raw => {
+                    const usage = embeddingWireUsage(raw);
+                    let valid = false;
+                    try { parseOpenAICompatibleEmbeddings(raw, { input: params.items.map(item => item.text), model: binding.modelId,
+                      ...(binding.dimensions === undefined ? {} : { dimensions: binding.dimensions }) }); valid = true; } catch { /* Original usage precedes vector validation. */ }
+                    return { valid, rawUsage: record(raw) ? raw.usage ?? null : null,
+                      ...(usage ? { usage: { measurement: 'actual' as const, inputTokens: usage.inputTokens ?? null, outputTokens: null } } : {}) };
+                  },
+                });
+              },
+            });
+            await validate();
+            return { batchId: params.batchId,
+              space: { providerId: binding.providerId, modelId: binding.modelId, protocol: binding.protocol,
+                configurationId: binding.configurationId, maxTokens: binding.maxTokens!, dim: result.dim,
+                spaceId: digest(JSON.stringify(remoteEmbeddingSpaceParts({ protocol: binding.protocol,
+                  providerId: binding.providerId, modelId: binding.modelId, configurationId: binding.configurationId,
+                  maxTokens: binding.maxTokens!, dimensions: result.dim }))).slice(0, 16) },
+              items: result.vectors.map((vector, index) => ({ id: params.items[index]!.id, index, vector })) };
+          },
           embed: async (params) => {
+            if (!ledger) return fail('unavailable', 'embedding-ledger-unavailable');
             let finish!: () => void;
             const completion = new Promise<void>(resolve => { finish = resolve; });
             pending.add(completion);
             let receipt: SemanticInferenceReceipt = { batchId: params.batchId, providerId: binding.providerId,
               modelId: binding.modelId, configurationId: binding.configurationId,
-              purpose: params.purpose === 'query' ? 'query-embedding' : 'index-document-embedding',
+              purpose: 'index-document-embedding',
               inputItems: Array.isArray(params.items) ? params.items.length : 0,
               inputBytes: Array.isArray(params.items) ? params.items.reduce((total, item) => total + (typeof item?.text === 'string' ? Buffer.byteLength(item.text, 'utf8') : 0), 0) : 0,
               attempts: 0, attemptsKnown: true, state: 'not-started', usage: { status: 'unknown' } };
@@ -222,12 +295,8 @@ export function createSemanticInference(
                 || params.maxTokens !== binding.maxTokens) return fail('invalid', 'embedding-binding-mismatch');
               if (!Array.isArray(params.items) || !params.items.length || params.items.some(item => !item || typeof item.id !== 'string' || !item.id || typeof item.text !== 'string')
                 || new Set(params.items.map(item => item.id)).size !== params.items.length) return fail('invalid', 'embedding-input-invalid');
-              if (!params.operationIdentity || (params.purpose === 'query'
-                ? params.operationIdentity.kind !== 'retrieval-query' || params.operationIdentity.stage !== 'code-retrieval.semantic.query-embedding'
-                : params.operationIdentity.kind !== 'index-build' || params.operationIdentity.stage !== 'document-embedding')) {
-                return fail('invalid', 'embedding-operation-identity-invalid');
-              }
-              if (params.purpose === 'query' && typeof params.guard !== 'function') return fail('invalid', 'embedding-run-authorization-required');
+              if (params.purpose !== 'document' || !params.operationIdentity || params.operationIdentity.kind !== 'index-build'
+                || params.operationIdentity.stage !== 'document-embedding') return fail('invalid', 'embedding-operation-identity-invalid');
               await validateDelivery();
               const operation: SemanticInferenceLedgerIdentity = {
                 providerId: binding.providerId, modelId: binding.modelId, protocol: binding.protocol,
@@ -254,32 +323,6 @@ export function createSemanticInference(
                   items: admission.result.items.map((item, index) => ({ ...item, id: params.items[index]!.id })), receipt: frozenReceipt(receipt) };
               }
               token = admission.token;
-              if (params.cachedResult) {
-                const cached = params.cachedResult;
-                const space = cached.space;
-                const expectedSpace = digest(JSON.stringify(remoteEmbeddingSpaceParts({ protocol: binding.protocol,
-                  providerId: binding.providerId, modelId: binding.modelId, configurationId: binding.configurationId,
-                  maxTokens: binding.maxTokens!, dimensions: space.dim }))).slice(0, 16);
-                if (space.protocol !== binding.protocol || space.providerId !== binding.providerId || space.modelId !== binding.modelId
-                  || space.configurationId !== binding.configurationId || space.maxTokens !== binding.maxTokens
-                  || space.spaceId !== expectedSpace || !Number.isSafeInteger(space.dim) || space.dim <= 0
-                  || (binding.dimensions !== undefined && binding.dimensions !== space.dim)
-                  || cached.items.length !== params.items.length || cached.items.some((item, index) => item.index !== index
-                    || item.id !== params.items[index]!.id || item.vector.length !== space.dim || item.vector.some(value => !Number.isFinite(value)))) {
-                  return fail('invalid', 'embedding-cache-binding-mismatch');
-                }
-                await validateDelivery();
-                const response = { ...cached, batchId: params.batchId };
-                receipt = { ...receipt, state: 'succeeded' };
-                pendingSettlements++;
-                try { await ledger.settle(token, { receipt: frozenReceipt(receipt), result: response }); }
-                finally { pendingSettlements--; }
-                terminalStored = true;
-                deliveryCheck = true;
-                await validateDelivery();
-                receipt = { ...receipt, reused: true };
-                return { ...response, receipt: publish() };
-              }
               transportConstructed = true;
               const request = requestOpenAICompatibleEmbeddings({ baseUrl: provider.baseUrl,
                 ...(provider.endpoint ? { endpoint: provider.endpoint } : {}), model: binding.modelId,

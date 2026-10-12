@@ -1,3 +1,4 @@
+import { createEgressRuntime } from '../harness/egress.js';
 import { createRetrievalSourceOwner } from './retrieval-source.js';
 import { createServer, type ServerResponse } from 'node:http';
 import { once } from 'node:events';
@@ -57,7 +58,8 @@ async function fixture(hooks: { concurrency?: number; conversation?: (body: Reco
   await writeModels(); await writeSettings();
   const ledger = createSemanticInferenceLedger({ dataDir: f.documents.dataDir, hostId: 'process-consumer' });
   const receipts: Array<import('../knowledge/semantic/runtime-inference.js').SemanticInferenceReceipt> = [];
-  const inference = createSemanticInference(authority, undefined, { ledger, onReceipt: receipt => receipts.push(receipt) });
+  const egress = createEgressRuntime({ env: {}, allowLocalTargets: true }); cleanups.push(() => egress.close());
+  const inference = createSemanticInference(authority, undefined, { ledger, requests: { kernel: f.kernel, runtime: f.runtime, egress }, onReceipt: receipt => receipts.push(receipt) });
   cleanups.push(() => inference.close());
   const scope = createProjectIndexScope([f.documents.workspaceRoot]); cleanups.push(async () => scope.dispose());
   const structure = createStructureSource([createTreeSitterStructureProvider({ compute: f.compute, parseBudgetMs: 30_000 })]);
@@ -77,15 +79,15 @@ async function fixture(hooks: { concurrency?: number; conversation?: (body: Reco
     rule: { allowFallback: false, providerKey: semanticKey, scope: { projectId: 'semantic-review-project' }, serviceId: 'varin.retrieval.plan', version: 1 } });
   const authorize = async (query: RetrievalQuery, signal: AbortSignal) => { signal.throwIfAborted(); await f.liveSources.validate({ workspaceId: query.source.workspace_id, executionWorkspaceId: query.source.execution_workspace_id, liveRoot: query.source.live_root! }, signal); f.kernel.retrievalGrant(query); };
   const composition = createRetrievalComposition(extensions, { structure, prepareSemantic: async (selection, signal) => {
-    const query = selection.query; if (!query) throw new Error('Query identity required');
+    const query = selection.query; if (!query || !selection.inference) throw new Error('Query identity and session required');
     await authorize(query, signal ?? new AbortController().signal);
     const grant = f.kernel.retrievalGrant(query);
-    return workspace.acquireQuery({ workspaceId: query.source.workspace_id, threadId: query.threadId, runId: query.runId, invocation: query.invocation, roots: query.paths ?? grant.pathScopes, ...(signal ? { signal } : {}), authorize: active => authorize(query, active), assertAuthorized: () => { f.kernel.retrievalGrant(query); } });
+    return workspace.acquireQuery({ workspaceId: query.source.workspace_id, inference: selection.inference, roots: query.paths ?? grant.pathScopes, ...(signal ? { signal } : {}), authorize: active => authorize(query, active), assertAuthorized: () => { f.kernel.retrievalGrant(query); } });
   } });
   const queries: RetrievalQuery[] = [];
   const selections: Array<Awaited<ReturnType<typeof composition.prepare>>> = [];
-  f.kernel.setRetrievalOwner(createRetrievalOwner({ sources: createRetrievalSourceOwner({ documents: f.documents.authority, kernel: f.kernel, validateLiveSource: f.liveSources.validate }), kernel: f.kernel,
-    preparePipeline: async (query, signal) => { queries.push(query); const selected = await composition.prepare({ threadId: query.threadId, projectId: 'semantic-review-project', workspaceId: query.physicalRoot!.canonicalRoot, query }, signal); selections.push(selected); return selected; } }));
+  f.kernel.setRetrievalOwner(createRetrievalOwner({ sources: createRetrievalSourceOwner({ documents: f.documents.authority, kernel: f.kernel, validateLiveSource: f.liveSources.validate }), kernel: f.kernel, inferenceRequests: inference.requests!,
+    preparePipeline: async (query, signal, call) => { queries.push(query); const selected = await composition.prepare({ threadId: query.threadId, projectId: 'semantic-review-project', workspaceId: query.physicalRoot!.canonicalRoot, query, inference: call }, signal); selections.push(selected); return selected; } }));
   const scan = async () => { await workspace.scanWorkspace(f.workspaceId); await workspace.drain(); };
   if (!hooks.cold) await scan();
   const run = async (id: string, roots = ['']) => { const admitted = await f.admit(id, ['code_retrieval'], roots); await admitted.start(); return admitted; };
@@ -111,13 +113,15 @@ it('real configured inference, registered indexing and installed semantic select
   expect(f.selections[0]?.plan.stages.find(stage => stage.kind === 'model')?.status).toBe('disabled');
   expect(f.wires.some(wire => wire.input.includes(question))).toBe(true);
   expect(f.receipts.some(receipt => receipt.purpose === 'index-document-embedding' && receipt.state === 'succeeded')).toBe(true);
-  expect(f.receipts.some(receipt => receipt.purpose === 'query-embedding' && receipt.state === 'succeeded' && receipt.usage.status === 'unknown')).toBe(true);
-  expect((await f.ledger.list({ runId: run.receipt.run_id })).some(fact => fact.hasResult && fact.identity.operation.kind === 'retrieval-query')).toBe(true);
+  const queryOperations = (await f.runtime.events(0, 10000)).filter(event => event.kind === 'inference.admitted');
+  expect(queryOperations).toHaveLength(1);
+  const queryOperation = await f.runtime.operation(queryOperations[0]!.subject);
+  expect(queryOperation.intent).toMatchObject({ binding: { purpose: 'code-retrieval-query-embedding' } });
   expect(f.forbiddenPi).not.toHaveBeenCalled(); expect(f.localCalls).not.toHaveBeenCalled();
   const sent = f.wires.length; f.scope.update([], [f.documents.workspaceRoot]); await f.workspace.refreshIndexScope();
   const pausedHistory = JSON.stringify(await f.completed(await f.run('semantic-paused-published')));
   expect(pausedHistory).toContain('ALPHA_SEMANTIC_EVIDENCE'); expect(pausedHistory).not.toContain('"reused":true'); expect(f.wires).toHaveLength(sent);
-  expect(f.receipts.some(receipt => receipt.purpose === 'query-embedding' && receipt.state === 'succeeded' && receipt.attempts === 0 && receipt.attemptsKnown && receipt.reused)).toBe(true);
+  expect((await f.runtime.events(0, 10000)).filter(event => event.kind === 'inference.admitted')).toHaveLength(1);
   await f.workspace.drain(); expect(await f.workspace.queryStats()).toMatchObject({ activeQueries: 0, activeReaders: 0 });
   await f.workspace.dispose(); expect(await f.workspace.queryStats()).toMatchObject({ activeQueries: 0, activeReaders: 0, retainedPublications: 0 });
   await f.inference.close(); expect(f.inference.stats()).toEqual({ activeLeases: 0, activeRequests: 0, activeCalls: 0, pendingSettlements: 0 });
@@ -240,7 +244,9 @@ it('cancelling one blocked query leaves another query and the shared indexed own
   await expect.poll(async () => (await f.workspace.queryStats()).activeReaders, { timeout: 10_000 }).toBe(0);
   expect((await f.workspace.queryStats()).activeQueries).toBe(0);
   expect(JSON.stringify(await f.runtime.history(blocked.branchId))).not.toContain('ALPHA_SEMANTIC_EVIDENCE');
-  const facts = await f.ledger.list({ runId: blocked.receipt.run_id }); expect(facts.some(fact => fact.state === 'unknown')).toBe(true);
+  const events = (await f.runtime.events(0, 10000)).filter(event => event.kind === 'inference.admitted');
+  const operations = await Promise.all(events.map(event => f.runtime.operation(event.subject)));
+  expect(operations.some(operation => operation.run_id === blocked.receipt.run_id && operation.outcome === 'indeterminate')).toBe(true);
   expect(f.workspace.indexStatuses()[0]?.status.publishedDocuments).toBe(2);
 }, 55_000);
 

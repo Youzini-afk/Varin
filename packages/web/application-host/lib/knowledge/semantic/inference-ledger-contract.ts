@@ -1,16 +1,9 @@
 /** Durable execution facts for paid semantic inference, separate from index data. */
 import { createHash } from "node:crypto";
-import type { HarnessEmbedResult, RetrievalInvocation } from "@varin/protocol";
+import type { HarnessEmbedResult } from "@varin/protocol";
 import type { SemanticInferenceReceipt } from "./runtime-inference.js";
 
 export type SemanticInferenceOperation = {
-  kind: "retrieval-query";
-  hostId: string;
-  threadId: string;
-  runId: string;
-  invocation: RetrievalInvocation;
-  stage: "code-retrieval.semantic.query-embedding";
-} | {
   kind: "index-build";
   hostId: string;
   workspaceId: string;
@@ -58,7 +51,7 @@ export type SemanticInferenceFact = {
   createdAt: string;
   updatedAt: string;
 };
-export type SemanticInferenceFactFilter = { runId?: string; scopeId?: string; state?: "unknown" | "terminal" };
+export type SemanticInferenceFactFilter = { scopeId?: string; state?: "unknown" | "terminal" };
 export interface SemanticInferenceLedger {
   admit(input: SemanticInferenceAdmission): Promise<SemanticInferenceAdmissionResult>;
   settle(token: string, settlement: SemanticInferenceSettlement): Promise<void>;
@@ -72,17 +65,8 @@ export type SemanticInferenceLedgerOpenOptions = { dataDir: string; hostId: stri
 export function semanticInferenceOperationKey(identity: SemanticInferenceLedgerIdentity,
   purpose: SemanticInferenceReceipt["purpose"]): string {
   const operation = identity.operation;
-  const owner = operation.kind === "retrieval-query"
-    ? [operation.kind, operation.hostId, operation.threadId, operation.runId,
-      operation.invocation.kind === "model_step"
-        ? [operation.invocation.kind, operation.invocation.requestId, operation.invocation.toolCallId]
-        : operation.invocation.kind === "policy_action"
-          ? [operation.invocation.kind, operation.invocation.actionId, operation.invocation.nodeId, operation.invocation.toolCallId]
-          : [operation.invocation.kind, operation.invocation.parentOperationId, operation.invocation.toolCallId],
-      operation.stage]
-    : [operation.kind, operation.hostId, operation.workspaceId, operation.recipeId, operation.stage];
-  const binding = operation.kind === "retrieval-query" ? [] : [identity.providerId, identity.modelId,
-    identity.protocol, identity.configurationId, identity.endpointHash, identity.dimensions ?? null, identity.maxTokens];
-  return createHash("sha256").update(JSON.stringify(operation.kind === "retrieval-query"
-    ? [purpose, owner] : [purpose, owner, binding, identity.inputHashes])).digest("hex");
+  const owner = [operation.kind, operation.hostId, operation.workspaceId, operation.recipeId, operation.stage];
+  const binding = [identity.providerId, identity.modelId, identity.protocol, identity.configurationId,
+    identity.endpointHash, identity.dimensions ?? null, identity.maxTokens];
+  return createHash("sha256").update(JSON.stringify([purpose, owner, binding, identity.inputHashes])).digest("hex");
 }
