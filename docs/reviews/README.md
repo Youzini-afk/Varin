@@ -8,6 +8,7 @@ Last updated: 2026-10-12
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [原材料集合与明确分享（2026-10-12）](runtime-material-collections-2026-10-12.md) | 原材料 ACL/Storage mutation、family 分享/保活、取消/丢回应对账及实际公开 reader；有限验收 |
 | [PDF 原来源（2026-10-12）](runtime-pdf-sources-2026-10-12.md) | 原 Run source/Experiment 字节到 native reader、13MiB 分页与草稿消费者；真实组合与取消证据边界 |
 | [原 Web 工具与固定 PDF 材料（2026-10-12）](runtime-web-materials-2026-10-12.md) | 原搜索/材料/Thread grant、实际 PDF/typed 输出与公开 reader；共享取消、固定快照/重开及三条反例修复 |
 | [原 MCP sampling 双重审查（2026-10-11）](runtime-mcp-sampling-2026-10-11.md) | 原模型/凭据/Goal 计量、独立生成 Operation、两次公开 review、实际 HTTP/Task 及取消恢复；六处接缝修复 |

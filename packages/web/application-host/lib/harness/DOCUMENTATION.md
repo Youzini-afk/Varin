@@ -346,9 +346,12 @@ propagate as failures, including through both web and PDF readers.
 `materials.snapshot/read` capability. For native calls, the shared invocation resolves the actual
 Catalog Thread/family and the logical `thread-materials:<rootThreadId>` scope; extension parameters
 cannot supply either identity. The scope is independent of a file source or Pi session. Its narrow
-Storage grants bind the actual Thread, with no synthetic Run lifetime or maintenance access. A shared
-family scope alone never authorizes another Thread's snapshots. Existing material grants and persisted
-collections remain the sharing owner; native collection/share commands are a subsequent slice. Reads return an
+Host-private Storage service grants bind the actual Thread and exact logical namespace, with no
+synthetic Run lifetime, path/process authority or raw client exposed to tools. Read access includes
+`storage.read`/`storage.maintenance` so the original material owner can interpret persisted collections
+and explicit grants; mutation entrances additionally receive `storage.write`. Maintenance itself does
+not authorize writes. A shared family scope alone never authorizes another Thread's snapshots.
+Existing material grants and persisted collections remain the sole material sharing owner. Reads return an
 immutable snapshot/hash revision and UTF-8 byte page with an exact next cursor; invalid boundaries or
 budgets smaller than the next codepoint fail explicitly. Empty bodies, unavailable snapshots, conflicts
 and corrupt data stay distinct. Storage/transport failures reject, and cancelled or retired invocations
@@ -356,7 +359,7 @@ cannot publish late content. The production blob owner reads the requested range
 object hash verification is not bounded by the response byte budget. This capability performs no fetch,
 document parsing or OCR.
 
-The ordinary `varin.builtin.web` extension exposes `websearch`, `webfetch` and `document_read` through
+The ordinary `varin.builtin.web` extension exposes `websearch`, `webfetch`, `document_read` and `materials` through
 one declaration and the original ToolBridge. `kernel/web-runtime.ts` adapts their admitted calls into
 these owners, retaining the accepted Web/domain/render/OCR settings in the original tool binding;
 search credentials still resolve from their current owner at dispatch. A source-less Run reads user
@@ -382,8 +385,37 @@ unavailable under that original research source contract. No public local-path s
 Full and ranged material body/source reads page the same immutable record proof through Rust getBlob;
 the wire-frame maximum is not a PDF size limit. Metadata-only reader checks request zero body bytes but
 still validate the record and object. Cancellation awaits each started read/iterator and material
-commit before reporting drain. Collections/sharing, scholarly/decision services and extra reader-model
-prompts still need native integration.
+commit before reporting drain. Scholarly/decision services and extra reader-model prompts still need
+native integration.
+
+`materials` uses the same explicit collection domain as the thin Pi adapter. It resolves its Thread,
+family and namespace from the original invocation, and checks sharing recipients in that family.
+Persisted collections are readable in their namespace but remain owner-only writable. Every attached
+snapshot, including a paper member's optional snapshot, must first be readable under the sender's
+original authority. Re-sharing is an explicit new grant from a readable sender; it does not require
+an invented recursive grant chain. Original collection/grant references retain body and PDF source.
+Thread removal releases that sender's grants; another live explicit grant can retain the original
+collection and snapshots until original workspace reconciliation. Run/Goal completion is not Thread
+deletion, and no new public native Thread-delete API is introduced.
+
+URL fetching and body/search reads do not hold the workspace mutation serializer. Final publication
+uses original record revision and Storage operation identity. Its atomic `record.put` receipt is the
+only mutation authority; short `lastMutation` metadata identifies the invocation/result projection,
+not a second journal. Cancellation before publication has no effect; admitted writes await their real
+result. An unresolved Storage result remains Unknown, not a claim that its writer stopped. Grant-cleanup
+failure is diagnosed without erasing a known committed result.
+
+`kernel/material-receipts.ts` reads original failed/committed Storage operations under the accepted
+builtin invocation, and sends the existing private ToolBridge LateReceipt. Reopening does not refetch
+URLs, repeat writes, require a current enabled extension, or register an old broker lease. Live callbacks
+must drain before reconciliation. Catalog validates the original fingerprint, execution owner and epoch;
+already-delivered Unknown history is retained even when the Operation's actual outcome becomes known.
+The existing collaboration reconciliation loop owns scheduling, not another polling service.
+
+Collection results expose their original snapshot selectors to existing public material reading.
+There is no new native collection browser, direct member button or public mutation API in this slice;
+`document_read` still produces the actual PDF projection consumed by the existing Thread PDF button.
+See the [finite collection/share acceptance](../../../../../docs/reviews/runtime-material-collections-2026-10-12.md).
 
 Harness deadline/cancellation diagnostics record the request method, admission/service/response
 phase, elapsed time, service completion and pending storage method counts. They contain no tool

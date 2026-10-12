@@ -1,6 +1,11 @@
 /** Actual KernelClient operations and ToolBridge with only request delivery replaced by stdio.
  * Shared by the finite material integration fixtures; never included in the product Host. */
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import { createThreadsHttpAPI, type ThreadMaterialsAPI } from '@varin/application-client';
+import type { Express, Request, RequestHandler, Response as ExpressResponse } from 'express';
+import { ThreadAdapter } from './thread-adapter.js';
+import { registerThreadRoutes } from './thread-routes.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { KernelClient, KernelScopedClient, type KernelGrantHandle } from './kernel-client.js';
 import { permissionService } from './permission-service.js';
@@ -31,6 +36,8 @@ export function createMaterialReviewFixture(verifyGrant: (params: Record<string,
     get handshake() { return { storageRoot, hostId: 'web-domain-host' }; },
     subscribeReady() { return () => {}; }, subscribeExit() { return () => {}; },
     onAgentRuntimeEvent() { return () => {}; }, onToolReleased() { return () => {}; },
+    toolCallbackEnded: (...args: Parameters<ToolBridge['callbackEnded']>) => bridge.callbackEnded(...args),
+    publishRecoveredToolReceipt: (...args: Parameters<ToolBridge['publishRecoveredReceipt']>) => bridge.publishRecoveredReceipt(...args),
     cancelRunPreparation() {}, unregisterCredentialOwner() {}, releaseRunPolicyOwners() {},
     unregisterToolOwners(runId: string) { bridge.unregister(runId); },
     agentRuntimeRequest: (method: string, params: unknown) => request(method, params),
@@ -57,7 +64,7 @@ export function createMaterialReviewFixture(verifyGrant: (params: Record<string,
   };
   const kernel = transport as unknown as KernelClient;
   // Reuse original chunking and record/source methods, replacing only delivery.
-  for (const name of ['putBlob', 'getBlob', 'getOperation', 'releaseBlob', 'getRecord', 'listRecords', 'putRecord', 'releaseRecord',
+  for (const name of ['gc', 'putBlob', 'getBlob', 'getOperation', 'releaseBlob', 'getRecord', 'listRecords', 'putRecord', 'releaseRecord',
     'readBranch', 'createBranch', 'deleteBranch', 'pinBranch', 'unpinBranch', 'fileRootRegister', 'fileReadCheck',
     'fileCapture', 'fileMaterialize', 'fileLeaseAcquire', 'fileLeaseRelease', 'experimentArtifacts'] as const) {
     const method = KernelClient.prototype[name];
@@ -76,4 +83,34 @@ export function createMaterialReviewFixture(verifyGrant: (params: Record<string,
       return bridge.consume(frame);
     },
   };
+}
+
+/** Actual public client/authentication/route chain, with in-memory delivery only. */
+export async function withMaterialReviewClient<T>(runtime: AgentRuntimeClient, materials: ThreadMaterialsAPI,
+  consume: (api: ReturnType<typeof createThreadsHttpAPI>) => Promise<T>): Promise<T> {
+  const unexpected = async (): Promise<never> => { throw new Error('Material reading attempted model or file-source work'); };
+  const adapter = new ThreadAdapter(runtime, { resolveModel: unexpected, rebindModel: unexpected }, unexpected, unexpected);
+  const routes = new Map<string, RequestHandler[]>();
+  const app = { post(path: string, ...handlers: RequestHandler[]) { routes.set(path, handlers); }, get() {} } as unknown as Express;
+  registerThreadRoutes(app, adapter, (request, response, next) => {
+    if (request.headers.authorization !== 'fixture-material-user') { response.status(401).end(); return; } next();
+  }, undefined, undefined, materials);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | globalThis.Request, init?: RequestInit): Promise<Response> => {
+    const handlers = routes.get(new URL(String(input), 'https://application.invalid').pathname); assert(handlers);
+    let status = 200, output: unknown;
+    const response = Object.assign(new EventEmitter(), { writableEnded: false,
+      status(value: number) { status = value; return this; }, json(value: unknown) { output = value; this.writableEnded = true; return this; },
+      end() { this.writableEnded = true; return this; }, setHeader() { return this; } });
+    const request = Object.assign(new EventEmitter(), { body: JSON.parse(String(init?.body)), headers: { authorization: 'fixture-material-user' } });
+    await new Promise<void>((resolve, reject) => {
+      let index = 0; const next = (error?: unknown) => {
+        if (error) { reject(error); return; } const handler = handlers[index++]; if (!handler) { resolve(); return; }
+        Promise.resolve(handler(request as Request, response as unknown as ExpressResponse, next)).then(() => { if (response.writableEnded) resolve(); }, reject);
+      }; next();
+    });
+    return Response.json(output ?? {}, { status });
+  }) as typeof globalThis.fetch;
+  try { return await consume(createThreadsHttpAPI()); }
+  finally { globalThis.fetch = originalFetch; }
 }

@@ -258,6 +258,13 @@ pub(super) fn idempotent(
             let _ = storage.conn.execute_batch("ROLLBACK");
             storage.conn.execute_batch("BEGIN IMMEDIATE")?;
             storage.operation_begin(operation_id, kind, &params_hash)?;
+            // The failed transaction is still an original workspace-owned fact.
+            // Rollback removed its first owner row; retain the same admitted
+            // scope so a read can distinguish rejection from an unknown effect.
+            storage.record_operation_workspace(
+                operation_id,
+                params_value.get("workspaceId").and_then(Value::as_str),
+            )?;
             storage.operation_failed(operation_id, &error)?;
             storage.conn.execute_batch("COMMIT")?;
             Err(error)

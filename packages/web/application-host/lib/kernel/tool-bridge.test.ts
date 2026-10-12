@@ -414,3 +414,38 @@ it('reports only branded local admission markers and keeps unknown or forged rem
     f.bridge.unregister('run');
   }
 });
+
+it('delivers a recovered domain receipt without a broker lease and repeats only unacknowledged original frames after epoch replacement', async () => {
+  let epoch = 'first'; const frames: PrivateToolFrame[] = [];
+  const bridge = new ToolBridge(() => epoch, async frame => { frames.push(frame); }, () => { throw new Error('unexpected transport failure'); });
+  const original = { call, executionOwner: { kind: 'external' as const, identity: 'original-provider', epoch: 'original-owner' },
+    receipt: { executor_stopped: true, completion: { kind: 'result' as const, outcome: 'succeeded' as const, effect: 'confirmed' as const,
+      content: { data: { collectionId: 'original-collection' }, parts: [] } } } };
+  await bridge.publishRecoveredReceipt(original);
+  expect(frames[0]).toMatchObject({ kind: 'host-tool-receipt', call, executionOwner: original.executionOwner, receipt: original.receipt, kernelEpoch: 'first' });
+  await expect(bridge.publishRecoveredReceipt({ ...original, receipt: { ...original.receipt,
+    completion: { ...original.receipt.completion, content: { data: { collectionId: 'changed' }, parts: [] } } } })).rejects.toThrow('changed');
+  const sent = frames[0]; if (sent?.kind !== 'host-tool-receipt') throw new Error('Expected original receipt frame');
+  const id = sent.id;
+  epoch = 'replacement'; bridge.reset(); bridge.reconnect(); await tick();
+  expect(frames.at(-1)).toMatchObject({ id, kernelEpoch: 'replacement', call, executionOwner: original.executionOwner });
+  bridge.consume({ v: 1, kind: 'host-tool-receipt-ack', kernelEpoch: 'first', id, accepted: true });
+  const before = frames.length; bridge.reconnect(); await tick(); expect(frames.length).toBe(before + 1);
+  bridge.consume({ v: 1, kind: 'host-tool-receipt-ack', kernelEpoch: 'replacement', id, accepted: true });
+  const confirmed = frames.length; bridge.reconnect(); await tick(); expect(frames).toHaveLength(confirmed);
+  expect(bridge.callbackEnded(call.runId, original.executionOwner, call.operationId)).toBeUndefined();
+});
+
+it('does not retransmit a definitively rejected recovered receipt on another wake or reconnect', async () => {
+  const frames: PrivateToolFrame[] = [];
+  const bridge = new ToolBridge(() => 'epoch', async frame => { frames.push(frame); }, () => {});
+  const input = { call, executionOwner: { kind: 'external' as const, identity: 'provider', epoch: 'original' },
+    receipt: { executor_stopped: true, completion: { kind: 'result' as const, outcome: 'failed' as const, effect: 'none' as const,
+      content: { data: { error: 'Original failed transaction' }, parts: [] } } } };
+  await bridge.publishRecoveredReceipt(input);
+  const frame = frames[0]; if (frame?.kind !== 'host-tool-receipt') throw new Error('Expected receipt');
+  bridge.consume({ v: 1, kind: 'host-tool-receipt-ack', kernelEpoch: 'epoch', id: frame.id, accepted: false });
+  bridge.reconnect(); await tick();
+  await expect(bridge.publishRecoveredReceipt(input)).rejects.toThrow('rejected');
+  expect(frames).toHaveLength(1);
+});

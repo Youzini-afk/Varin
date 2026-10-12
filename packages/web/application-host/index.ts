@@ -1,5 +1,6 @@
 import { readHostSettingsSnapshot } from '@varin/pi-host/settings-authority';
 import { createWebRuntime, WEB_CAPABILITY } from './lib/kernel/web-runtime.js';
+import { createMaterialReceiptReconciler } from './lib/kernel/material-receipts.js';
 import { createDocumentSources } from './lib/kernel/document-sources.js';
 import { createMaterialStorageAccess } from './lib/kernel/material-storage.js';
 import { createScriptRuntime, SCRIPT_CAPABILITY } from './lib/kernel/script-runtime.js';
@@ -2246,12 +2247,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // Source views own private kernel records, not user workspace recovery or disk mutations.
   const sourceViews = createSourceViewStore(createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter));
   const retrievalArtifacts = createRetrievalArtifactAccess(harnessWorkingStates);
-  const webMaterials = createWebMaterialStore(createMaterialStorageAccess({ kernel: kernelClient, storage: kernelStorageAdapter, legacy: harnessWorkingStates }));
+  const materialStorage = createMaterialStorageAccess({ kernel: kernelClient, storage: kernelStorageAdapter, legacy: harnessWorkingStates });
+  const webMaterials = createWebMaterialStore(materialStorage);
   webMaterialAccess.put = webMaterials.put;
   webMaterialAccess.read = webMaterials.read;
   webMaterialAccess.findAnalysis = webMaterials.findAnalysis;
   webMaterialAccess.findAnalysisConfig = webMaterials.findAnalysisConfig;
-  const materialCollectionsService = createMaterialCollectionsService(harnessWorkingStates, {
+  const materialCollectionsService = createMaterialCollectionsService(materialStorage, {
     materials: webMaterials,
     // URL members go through the full web.fetch path: session binding,
     // domain policy, renderer entitlement, and receipt authority.
@@ -3035,6 +3037,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return readMcpHostPermissionPolicy(mcpAgentDir,cwd,Boolean(workspace)&&mcpHostProjectTrusted(mcpAgentDir,cwd));
   }}));
   webRuntimeOwner.current = createWebRuntime({ runtime: agentRuntime, webFetch: webFetchService, documentReader, materials: webMaterials,
+    collections: materialCollectionsService,
     documentSources: createDocumentSources({ kernel: kernelClient, runtime: agentRuntime,
       resolveLiveSource: liveSources.validate, experiments: experimentService }),
     fetch: egressRuntime.fetch as typeof globalThis.fetch, readAuth: readPiAuthFile,
@@ -3094,11 +3097,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       settings: () => hostCredentialAuthority.readGlobalInferenceSettings(),
       capabilities: signal => agentRuntime.childCapabilities(signal),
     }));
+  const reconcileIntegrationReceipts = createIntegrationReceiptReconciler({ runtime: agentRuntime,
+    onError: (_operationId, _error) => console.error('[Integration] Original effect receipt requires attention') });
+  const reconcileMaterialReceipts = createMaterialReceiptReconciler({ runtime: agentRuntime, kernel: kernelClient, collections: materialCollectionsService,
+    onError: (_operationId, _error) => console.error('[Materials] Original mutation receipt requires attention') });
   const collaboration = new ThreadCollaboration({ runtime: agentRuntime,
     kernel: kernelClient, storageAdapter: kernelStorageAdapter, resolveLiveSource: liveSources.validate,
     sourceCaptureOwners: { documents: documentsAuthority, prepareResources: threadResources.prepareSourceCapture, inspectInventory: (directory, signal) => threadWorktreeRuntime.inspectGitBaselineInventory(directory, signal) },
-    reconcileDomainReceipts: createIntegrationReceiptReconciler({ runtime: agentRuntime,
-      onError: (_operationId, _error) => console.error('[Integration] Original effect receipt requires attention') }),
+    reconcileDomainReceipts: async signal => { await Promise.all([reconcileIntegrationReceipts(signal), reconcileMaterialReceipts(signal)]); },
     continueRun: (runId, signal) => threads.continueLaunch(runId, { signal }), recoverLaunches: signal => threads.recover(signal),
     workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter), prepareContext: threadContext,
     prepareSkillInput: createThreadSkillInputPreparer(threadResources),

@@ -30,7 +30,7 @@ import { makePdf } from '../harness/pdf-test-fixture.js';
 const fixture = createMaterialReviewFixture(params => {
   assert.equal(params.sessionId, undefined);
   if (String(params.grantId).startsWith('material:')) {
-    assert.deepEqual(params.capabilities, (params.capabilities as string[]).filter(value => value === 'storage.read' || value === 'storage.write'));
+    assert.deepEqual(params.capabilities, (params.capabilities as string[]).filter(value => value === 'storage.read' || value === 'storage.write' || value === 'storage.maintenance'));
     assert.equal(params.runId, undefined);
     assert.deepEqual(params.pathScopes, []);
   }

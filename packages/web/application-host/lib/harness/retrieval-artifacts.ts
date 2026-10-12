@@ -87,6 +87,7 @@ type RecordPutInput = {
 };
 
 type KernelBlobClient = {
+  getOperation?(operationId: string): Promise<Record<string, unknown> | null>;
   getBlob(
     hash: string,
     source: { recordId: string; slot: string },
@@ -286,6 +287,25 @@ const persistedCollection = (record: RecordLike): boolean => {
   } catch {
     return false;
   }
+};
+
+/** Explicit live shares retain the addressed collection itself. This is a
+ * direct record edge, not a continuing check of the sender's ancestor grants. */
+const sharedCollectionIds = (records: readonly RecordLike[], grantSurvives: (record: RecordLike) => boolean): Set<string> => {
+  const ids = new Set<string>();
+  for (const record of records) {
+    if (record.recordType !== "material.grant" || record.state === "released" || !grantSurvives(record)) continue;
+    try {
+      const value = JSON.parse(record.payloadJson) as { fromThreadId?: unknown; toThreadId?: unknown; collectionIds?: unknown };
+      if (typeof value.fromThreadId !== "string" || value.fromThreadId !== record.threadId || typeof value.toThreadId !== "string" || !Array.isArray(value.collectionIds)) continue;
+      for (const id of value.collectionIds) if (typeof id === "string") ids.add(id);
+    } catch { /* Malformed grants retain nothing. */ }
+  }
+  return ids;
+};
+const collectionIdOf = (record: RecordLike): string | undefined => {
+  try { const value = JSON.parse(record.payloadJson) as { collectionId?: unknown }; return typeof value.collectionId === "string" ? value.collectionId : undefined; }
+  catch { return undefined; }
 };
 
 const temporaryArtifactsFor = async (
@@ -680,7 +700,9 @@ export const createRetrievalArtifactAccess = (
     async (_store, context) => {
       const snapshots: RecordLike[] = [];
       const plain: RecordLike[] = [];
-      for (const record of await context.records.list({})) {
+      const records = await context.records.list({});
+      const sharedCollections = sharedCollectionIds(records, record => record.threadId !== threadId);
+      for (const record of records) {
         const isSnapshot = record.recordType === WEB_SNAPSHOT_RECORD_TYPE;
         const isCollection = record.recordType === MATERIAL_COLLECTION_RECORD_TYPE;
         const isGrant = record.recordType === "material.grant";
@@ -692,7 +714,7 @@ export const createRetrievalArtifactAccess = (
           || record.recordType === "retrieval.artifact"
           || record.recordType === "retrieval.receipt"
         )) continue;
-        if (isCollection && persistedCollection(record)) continue;
+        if (isCollection && (persistedCollection(record) || sharedCollections.has(collectionIdOf(record) ?? ""))) continue;
         if (record.threadId === threadId) {
           (isSnapshot ? snapshots : plain).push(record);
           continue;
@@ -724,11 +746,14 @@ export const createRetrievalArtifactAccess = (
     async (_store, context) => {
       const receipts: RecordLike[] = [];
       const collections: RecordLike[] = [];
-      for (const record of await context.records.list({})) {
+      const records = await context.records.list({});
+      const sharedCollections = sharedCollectionIds(records, () => true);
+      for (const record of records) {
         if (record.recordType === "retrieval.receipt" && fieldsMatch(record, authority)) {
           receipts.push(record);
         } else if (record.recordType === MATERIAL_COLLECTION_RECORD_TYPE
           && !persistedCollection(record)
+          && !sharedCollections.has(collectionIdOf(record) ?? "")
           && fieldsMatch(record, authority)) {
           collections.push(record);
         }
@@ -764,6 +789,7 @@ export const createRetrievalArtifactAccess = (
     async (_store, context) => {
       const knownThreads = new Map(threads.map((thread) => [thread.id, thread]));
       const records = await context.records.list({});
+      const sharedCollections = sharedCollectionIds(records, record => Boolean(record.threadId && knownThreads.has(record.threadId)));
       const plainOrphans: RecordLike[] = [];
       const snapshotOrphans: RecordLike[] = [];
       for (const record of records) {
@@ -779,7 +805,7 @@ export const createRetrievalArtifactAccess = (
           // Persisted collections are saved workspace assets. Temporary ones
           // bound to a dead thread are orphans; session-scoped ones (no
           // threadId) are left for session-drop release.
-          if (!persistedCollection(record) && record.threadId && !knownThreads.has(record.threadId)) {
+          if (!persistedCollection(record) && !sharedCollections.has(collectionIdOf(record) ?? "") && record.threadId && !knownThreads.has(record.threadId)) {
             plainOrphans.push(record);
           }
           continue;
@@ -791,6 +817,12 @@ export const createRetrievalArtifactAccess = (
           continue;
         }
         if (record.recordType !== "retrieval.artifact" && record.recordType !== "retrieval.receipt" && !isSnapshot) continue;
+        // Material snapshots belong to a real Thread across Runs; native ones
+        // deliberately have no synthetic session/Run identity.
+        if (isSnapshot && record.threadId) {
+          if (!knownThreads.has(record.threadId)) snapshotOrphans.push(record);
+          continue;
+        }
         if (!record.threadId || !record.runId) {
           // Session-scoped records release on session drop; only a mixed
           // owner shape (one of thread/run set) is an orphan.

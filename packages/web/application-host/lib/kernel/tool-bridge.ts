@@ -31,6 +31,13 @@ export interface ToolExecutionReceipt {
   completion: HostToolCompletion;
   executor_stopped: boolean;
 }
+/** Trusted domain recovery supplies a receipt from its original durable owner.
+ * Catalog still validates the complete original invocation and executor identity. */
+export interface RecoveredToolReceipt {
+  call: HostToolCall;
+  executionOwner: ExecutorOwner;
+  receipt: ToolExecutionReceipt;
+}
 export interface HostToolLease {
   readonly binding: HostToolBinding;
   readonly implementationIdentity: string;
@@ -180,6 +187,9 @@ function waitForOwner<T>(
 export class ToolBridge {
   readonly #owners = new Map<string, Map<string, OwnerEntry>>();
   readonly #selected = new Map<string, Map<string, string>>();
+  // Pending delivery only: effect facts live in the domain's durable operation,
+  // and no broker callback, lease or new execution is manufactured here.
+  readonly #recovered = new Map<string, RecoveredToolReceipt & { id: string; rejected?: boolean }>();
   constructor(
     private readonly currentEpoch: () => string | null,
     private readonly send: (response: PrivateToolFrame) => Promise<void>,
@@ -304,6 +314,30 @@ export class ToolBridge {
     const call = entry.calls.get(operationId);
     return call?.started ? !call.actualPending : undefined;
   }
+  async publishRecoveredReceipt(input: RecoveredToolReceipt): Promise<void> {
+    if (!callValid(input.call) || input.executionOwner.kind !== 'external'
+      || !input.receipt.executor_stopped || input.receipt.completion.kind !== 'result'
+      || input.receipt.completion.effect === 'unknown') throw new Error('host_tool_recovery_receipt_invalid');
+    if (this.callbackEnded(input.call.runId, input.executionOwner, input.call.operationId) === false) {
+      throw new Error('host_tool_original_callback_pending');
+    }
+    const previous = this.#recovered.get(input.call.operationId);
+    if (previous && !isDeepStrictEqual({ call: previous.call, executionOwner: previous.executionOwner, receipt: previous.receipt }, input)) {
+      throw new Error('host_tool_recovery_receipt_changed');
+    }
+    if (previous?.rejected) throw new Error('host_tool_recovery_receipt_rejected');
+    const pending = previous ?? { ...structuredClone(input), id: randomUUID() };
+    this.#recovered.set(input.call.operationId, pending);
+    await this.#publishRecovered(pending);
+  }
+  async #publishRecovered(pending: RecoveredToolReceipt & { id: string; rejected?: boolean }): Promise<void> {
+    const epoch = this.currentEpoch();
+    if (!epoch || pending.rejected) return;
+    try {
+      await this.send({ v: 1, kind: 'host-tool-receipt', id: pending.id, kernelEpoch: epoch,
+        executionOwner: pending.executionOwner, call: pending.call, receipt: pending.receipt });
+    } catch { if (epoch === this.currentEpoch()) this.transportFailed(); }
+  }
   availability(
     runId: string,
     name: string,
@@ -352,6 +386,7 @@ export class ToolBridge {
     this.reset();
   }
   reconnect(): void {
+    for (const pending of this.#recovered.values()) void this.#publishRecovered(pending);
     for (const [run, entries] of this.#owners)
       for (const [key, owner] of entries)
         for (const call of owner.calls.values())
@@ -512,6 +547,13 @@ export class ToolBridge {
         typeof v.accepted !== 'boolean'
       )
         return true;
+      for (const [operationId, pending] of this.#recovered) {
+        if (pending.id === v.id) {
+          if (v.accepted) this.#recovered.delete(operationId);
+          else pending.rejected = true;
+          return true;
+        }
+      }
       for (const [run, entries] of this.#owners)
         for (const [key, owner] of entries)
           for (const call of owner.calls.values())

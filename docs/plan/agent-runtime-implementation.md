@@ -19,6 +19,14 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-12 增量：原材料集合与明确分享
+
+- 普通 `materials` 单声明接同一原 collection domain，Pi 仅适配原 session；实际 Catalog Thread/family 生成 scope。私有材料 service grant 只在可信 owner 内部使用，原材料 ACL 唯一，maintenance 不含写能力。持久集合只读共享、写入仍限原 owner；同家系不自动读私有材料。
+- 原 Storage `record.put`/operation receipt 是唯一 mutation 事实。调用持短身份投影，URL/正文/搜索不持 mutation serializer；取消、未知与真实写者停止分开。原 private LateReceipt 对账旧原调用，无重新 fetch/put 或伪旧 lease，原 Unknown 历史不覆写。
+- 原 PDF body/source 引用与显式再次转授、sender 清理/后续 orphan reconciliation 一起闭合。独审原四反例、paper 附猜测 snapshot 提权、重定向来源丢失，以及实核 failed-CAS 回执归属丢失均最小修复并复验。
+- 实际普通模型/Policy、source-less child、原 Storage、client/认证 route/PDF reader、GC/完整重开与丢提交回应对账的范围见[本片验收](../reviews/runtime-material-collections-2026-10-12.md)。本片没有新增 collection browser/member 按钮/公开 mutation API；实际材料结果的 snapshot 可由既有 reader 使用，document_read 的真实 PDF 投影仍接原按钮。
+- 接续学术/decision、其余环境/Bot、来源/检索/上下文/provider 能力；两设计整体未完，完整产品/平台证据与用户负责最终迁移仍分别保留。
+
 ## 2026-10-12 增量：本地与实验 PDF 原来源
 
 - 普通 `document_read` 直接复用原 Run source grant/Storage：fixed 精确分支版本、live 原 Documents 注册、materialized 当前工作副本；不要求另选 file/experiment 工具，不伪造来源。原临时 capture owner、分页读取与授权释放按实际排空。
@@ -686,10 +694,10 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 | 计划、普通记忆、Bot知识 | Host `memory`/`knowledge`；普通Agent notes为Rust typed record | 保留各领域owner、权限和revision；不把所有知识塞入泛化状态库 | 普通 notes、真实自身计划、root/child 两调用来源、CAS 和原回执恢复已接；Bot 知识与完整自动记忆流程仍待 |
 | Goal、自动接续、辅助模型 | Host `bots`/`pi-session-automation`/`run` | 显式Goal授权、暂停/预算/用量；等待不覆盖手动暂停；辅助请求独立身份 | 显式 Goal、原用量/预算、暂停、依赖、root/child 自动接续及独立规划模型已接；其他辅助用途与完整产品验收仍待 |
 | 问题、follow-up、日历 | Pi extension UI bridge；Host `harness/followups.ts`/`scheduled-tasks` | 问答持久记录；到期非批准；发生项幂等；登记后重查防丢唤醒；时区/遗漏策略 | 问题/回答、一次 At/ProcessStopped、Any/All 与带时区日历发生项已接；原来源文件 exists/changed/ready 已接，其他领域来源继续 |
-| Computer Use、人工接管 | Host `computer`、`packages/computer-driver` | 实际桌面控制epoch；观察/动作/效果分开；紧急停止独立；释放按键与资源有证据 | 未完成；平台既有缺口不因原生化自动消失 |
-| MCP、脚本、用户扩展 | Pi MCP/codemode adapters；`extension-contract`/`extension-host`/`extension-sdk` | 原生MCP；单registry；脚本嵌套调用同权限/回执；完整async单元格；不另造插件管理器 | 原生 MCP、普通扩展 tools/SDK、精确服务世代与 child 委派已接；MCP Tasks、持久 async 脚本、长输出与多模态映射仍待 |
+| Computer Use、人工接管 | Host `computer`、`packages/computer-driver` | 实际桌面控制epoch；观察/动作/效果分开；紧急停止独立；释放按键与资源有证据 | 原 Computer 工具、精确停止、source-less child 请求/Wait/handback 与持久脚本已接；真实桌面平台/远端及完整产品验收仍待 |
+| MCP、脚本、用户扩展 | Pi MCP/codemode adapters；`extension-contract`/`extension-host`/`extension-sdk` | 原生MCP；单registry；脚本嵌套调用同权限/回执；完整async单元格；不另造插件管理器 | 原 MCP tools/content/Tasks/resource observers/有限 interaction/sampling、普通扩展 tools/SDK、child/nested、持久 async 脚本与 typed media 已接；更广协议/provider/平台组合与完整产品验收仍待 |
 | 深层策略、发现与工作台 | 既有扩展service registry、Host/Surface和UI shells | CompositionPlan；Provider/Transform/Decision/Observer；AgentPolicy；按需合同查询；无UI后端 | 一般 ToolGraph、直接 child、Deliver/Pause、策略换绑、context/Decision/Observer、真实扩展/SDK 发现已有闭环；完整领域 Provider/Transform 覆盖与工作台仍待 |
-| Web/材料/科研/Bot领域工具 | 现有Host领域服务与harness工具 | 通过相同Operations接入；保留材料来源、产物及用户配置行为 | 普通材料入口已接原领域 owner；Web/科研/Bot 其余 native 身份与完整能力继续 |
+| Web/材料/科研/Bot领域工具 | 现有Host领域服务与harness工具 | 通过相同Operations接入；保留材料来源、产物及用户配置行为 | 原 Web/固定材料/PDF 原来源与材料集合/明确分享已接同一 owner，原科研作业/产物/观察已接；学术/decision、Bot 等其余领域继续 |
 | Web/Electron/Mobile、远端、发行 | `application-client`/`protocol`、各surface、Host环境服务、kernel packaging | 同一后端生命周期；snapshot/cursor投影；环境绑定/fencing；平台驱动与安装升级实际验证 | 未完成 |
 | 用户资产与Pi退出 | Pi JSONL/配置/凭据引用/用户扩展源文件 | 一次性导入保留entry ID、分支、工具配对、压缩、opaque及未知项；原文件保留；切换结算在途工作 | 交付迁移前验收入口与清单；用户验收后负责默认切换、Pi 删除及资产全面迁移，当前未执行 |
 

@@ -720,6 +720,10 @@ export class KernelClient {
   toolCallbackEnded(runId: string, owner: import('./protocol.generated.js').ExecutorOwner, operationId: string): boolean | undefined {
     return this.toolBridge.callbackEnded(runId, owner, operationId);
   }
+  /** Host-only recovery delivery; never exposed as an extension capability. */
+  publishRecoveredToolReceipt(input: import('./tool-bridge.js').RecoveredToolReceipt): Promise<void> {
+    return this.toolBridge.publishRecoveredReceipt(input);
+  }
   toolAvailability(runId:string,name:string,version:string):boolean|undefined{return this.toolBridge.availability(runId,name,version);}
   mcpBinding(runId: string): McpBinding | undefined { return this.toolBridge.binding(runId) as McpBinding | undefined; }
   mcpLiveBinding(runId:string):LiveMcpBinding|undefined {return this.toolBridge.liveBinding(runId) as LiveMcpBinding | undefined;}

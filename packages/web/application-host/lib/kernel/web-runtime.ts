@@ -9,6 +9,7 @@ import {
   resolveHarnessDocumentReadingSettings,
   type DocumentReadRequest, type FetchResult, type HarnessDocumentReadingSettings, type HarnessWebDomainPolicy,
   type PiSettingsSnapshot, type WebFetchRequest, type WebSearchRequest, type WebSearchResult,
+  type MaterialsCollectionParams,
 } from '@varin/protocol';
 import type { DocumentReader, DocumentReaderContext } from '../harness/document-reading.js';
 import { readDocumentMaterial } from '../harness/material-read-service.js';
@@ -25,6 +26,7 @@ import type { ExtensionToolBinding, LaunchSource, OutputBody, IncomingMedia, Out
 import { runToolDomainCall, type ToolInvocationAuthority } from './tool-invocation.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
 import type { DocumentSources } from './document-sources.js';
+import { MaterialCollectionMutationError, type createMaterialCollections } from '../harness/material-collections.js';
 
 export { WEB_CAPABILITY };
 const declarations = new Map(WEB_TOOL_DECLARATIONS.map(declaration => [declaration.id.slice('varin.web.'.length),
@@ -112,6 +114,7 @@ export interface WebRuntimeOptions {
   documentReader: DocumentReader;
   documentSources?: DocumentSources;
   materials: WebMaterialStore;
+  collections?: ReturnType<typeof createMaterialCollections>;
   fetch: typeof globalThis.fetch;
   readAuth(): unknown | Promise<unknown>;
   /** Read current user/trusted-project assets, without opening a Pi AgentSession. */
@@ -178,11 +181,31 @@ export function createWebRuntime(options: WebRuntimeOptions) {
   const capability: HostCapabilityHandler = async (method, value, call) => {
     const { selected, input } = decode(method, value);
     return runToolDomainCall(call, { domain: WEB_CAPABILITY, toolName: selected.declaration.tool!.name,
-      operation: 'read', arguments: input }, async invocation => {
+      operation: selected.declaration.tool!.operation, arguments: input }, async invocation => {
       try {
         const config = configuration(invocation.configurationIdentity);
         if (config.disabledTools.includes(invocation.toolName)) throw new HarnessServiceError('forbidden', 'This Web tool is disabled in the accepted settings');
         const owner = await invocationScope(invocation, call.signal);
+        if (method === 'collections') {
+          if (!options.collections) throw new HarnessServiceError('unavailable', 'Material collections are unavailable');
+          const original = await options.collections.execute(input as unknown as MaterialsCollectionParams, {
+            authority: owner.authority, signal: call.signal, origin: invocation.operationId,
+            fetchUrl: async request => {
+              const fetched = await fetchPage(request, owner, config, call.signal);
+              return fetched.status === 'ok' ? { status: fetched.status, ...(fetched.snapshot ? { snapshot: fetched.snapshot } : {}), finalUrl: fetched.finalUrl,
+                ...(fetched.title ? { title: fetched.title } : {}) }
+                : { status: fetched.status };
+            },
+            threadsRelated: async (from, to, workspace) => {
+              if (from !== invocation.threadId || workspace !== owner.workspaceId) return false;
+              const family = await options.runtime.familyList({ callerThreadId: from, includeSelf: true }, call.signal);
+              return threadMaterialScope(family.rootThreadId) === workspace && family.members.some(member => member.threadId === to);
+            },
+          });
+          return { executor_stopped: true, completion: { kind: 'result',
+            outcome: original.result.status === 'ok' ? 'succeeded' : 'failed', effect: original.effect,
+            content: { data: parseVarinToolJson(original.result), parts: [] } } };
+        }
         const result = method === 'search' ? await search.handle(input as WebSearchRequest, { owner, config, signal: call.signal })
           : method === 'fetch' ? await fetchPage(input as WebFetchRequest, owner, config, call.signal)
             : await readDocumentMaterial(options.documentReader, input as unknown as DocumentReadRequest,
@@ -190,6 +213,9 @@ export function createWebRuntime(options: WebRuntimeOptions) {
         if (call.signal.aborted) return { executor_stopped: true, completion: { kind: 'result', outcome: 'cancelled', effect: 'none', content: webOutput(result) } };
         return receipt(result);
       } catch (error) {
+        if (error instanceof MaterialCollectionMutationError) return { executor_stopped: error.effect !== 'unknown',
+          completion: { kind: 'result', outcome: error.effect === 'unknown' ? 'indeterminate' : 'failed', effect: error.effect,
+            content: { data: { status: 'failed', error: error.message }, parts: [] } } };
         // Owners await their own material commits and the last shared producer.
         // This callback's settlement is actual drain, not an observer abort race.
         return { executor_stopped: true, completion: { kind: 'result', outcome: call.signal.aborted ? 'cancelled' : 'failed', effect: 'none',
