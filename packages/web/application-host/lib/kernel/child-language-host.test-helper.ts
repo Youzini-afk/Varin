@@ -26,8 +26,14 @@ startLanguageFixture(async frame => {
     queries.push(query);
   }
   if (frame.kind === 'fixture-child-audit') {
-    assert.equal(queries.length, 5);
+    assert.equal(queries.length, 10);
     assert.equal(new Set(queries.map(query => query.runId)).size, 1);
+    assert.deepEqual(queries.slice(5).map(query => query.method), [
+      'hover', 'workspace_symbols', 'document_symbols', 'call_hierarchy', 'call_hierarchy',
+    ]);
+    assert.equal(queries[6]!.query, 'greet');
+    assert.equal(queries[8]!.direction, 'incoming');
+    assert.equal(queries[9]!.direction, 'outgoing');
     process.stdout.write(`${JSON.stringify({ kind: 'fixture-child-audited', queries })}\n`);
     return;
   }

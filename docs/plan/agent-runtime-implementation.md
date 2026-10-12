@@ -8,6 +8,12 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-12 增量：原来源的更多只读语言查询
+
+- 原 Rust 工具声明新增 hover、工程/文档 symbols 与单查询双向 call hierarchy；既有三语言工具与显式用户数组保留，默认目录按原声明发现。Catalog **58**、私有 wire **17**。
+- 原 source/binder/supervisor/executor 接三种本地来源；树形节点与 call 的 from/to/sites 分别保原资源授权和实际字节。Opaque item 仅本次查询私有，后续 RPC 仍检查当前 Run 权限/取消，不复用 editor token 或伪造 range revision。
+- 真实 TypeScript 的 live/fixed/materialized、默认 child 和 Policy graph 消费及 GC 重开五条链已复验，结果与有限边界见[本片记录](../reviews/runtime-language-queries-2026-10-12.md)。其他语言/编辑器/草稿/远端、完整 nested rich-result 组合及外层验收不由本片自动成立。
+
 ## 2026-10-12 增量：固定工程语言视图与真实 child 消费
 
 - fixed_branch 沿原 Storage 物化器准备完整的已捕获工程，Run 仍保原 source/revision；supervisor 独占引用/共享准备，派生目录与原 Run 权限分开。Catalog **58**、私有 wire **16**。
@@ -688,8 +694,8 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 | 3 | 一个完整执行纵切 | 默认 AgentPolicy →冻结 RequestSnapshot→真实协议适配→工具合法配对→历史提交/停止/恢复；模型请求不能成为资源权威 | 局部通过：真实SQLite执行loop、多家族provider协议fixture与本地真实HTTP流/错误/取消；输入队列与序列化窗口中断通过。完整认证迁移、全部provider与产品路径未完成 |
 | 4 | 资源执行与 IPC 去公共长等待 | 独立准备/捕获作业；保留文件 CAS/恢复；进程推送流；控制与数据分离；每个取消有实际执行端确认 | 未完成 |
 | 5 | 组合计划与既有扩展接线 | 在启用/配置变化时解析依赖与绑定；复用现有 Host/Surface、候选更新；在途绑定保留；观察者不阻塞提交 | 局部通过：原生绑定/pins/撤权、root-reachable依赖解析、候选scope检查及现有调用取消；真实 context/Decision/Observer 与 live-root retrieval 已接线；全域异步owner装配与生产迁移未完成 |
-| 6 | 领域与产品消费者迁移 | 完成下表全部能力；UI snapshot/cursor；远端身份一致；用户资产一次性导入；逐域单写者切换 | 未完成 |
-| 7 | 完整底层的产品交付与实证 | 两份设计的结构不变量和全部领域路径共同成立；默认完整产品与局部替换均可用；冷/热/并发/更新成本有证据；真实平台/发行验证；由此完成单写者切换并删除 Pi 与重复中转 | 未完成 |
+| 6 | 领域与产品消费者能力 | 完成下表全部能力；UI snapshot/cursor；远端身份一致；为用户验收和资产迁移提供明确入口与支持边界 | 未完成 |
+| 7 | 完整能力交付与用户验收 | 两份设计的结构不变量和全部领域路径共同成立；完整产品与局部替换能力可用；冷/热/并发/更新成本及真实平台/发行证据；交付验收与迁移前清单。默认切换、Pi 删除和全面资产迁移由用户执行 | 未完成 |
 
 步骤可在互不冲突的模块并行，但所有权切换必须依赖前置合同。先后顺序不缩减最终交付范围，也不要求把每个领域都重写为 Rust。
 
@@ -701,7 +707,7 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 
 | 设计要求 / 剩余类别 | 已有实际能力，不再作为从零缺口 | 仍需实现或闭合的实际路径 | 验收重点 |
 | --- | --- | --- | --- |
-| 总设 §15–17：来源、语言与检索 | 固定/物化/live_root 来源、隔离可写 child 与逐项结果集成；三类来源的定义/引用/诊断、关键词/结构/显式语义、dedicated rerank、渐进 fast-decision 与 Explore LLM；原 immutable reader、撤权和推理账本；固定工程派生视图及实际 child 消费 | 其余 LSP 查询与跨文件计算版本证据；远端文件/语言/检索同源映射；材料 rerank 组合消费者、本地 native embedding；更多 provider/工程规模下的来源合同验证 | 固定捕获树不能悄悄读 live 配置，目录外 provider environment 明确标识；同名远端路径不串源；旧 reader/配置切代与取消恢复；正常可选缺失不吞选定实现失败 |
+| 总设 §15–17：来源、语言与检索 | 固定/物化/live_root 来源、隔离可写 child 与逐项结果集成；三类来源的定义/引用/诊断/hover/symbols/call hierarchy、关键词/结构/显式语义、dedicated rerank、渐进 fast-decision 与 Explore LLM；原 immutable reader、撤权和推理账本；固定工程派生视图及实际 child 消费 | 其余编辑器语言/编辑候选与跨文件计算版本证据；远端文件/语言/检索同源映射；材料 rerank 组合消费者、本地 native embedding；更多 provider/工程规模下的来源合同验证 | 固定捕获树不能悄悄读 live 配置，目录外 provider environment 明确标识；同名远端路径不串源；旧 reader/配置切代与取消恢复；正常可选缺失不吞选定实现失败 |
 | 总设 §12–13、§18、§24：推理用途、记忆与 Bot | 多 API 家族原生适配及原 credential owner；规划模型、embedding、TypeSafe/Cloudflare/llama.cpp decision 与真实 research_decide；自动容量水位、分段摘要、普通 notes/计划和稳定 memory checkpoint；Goal/预算/暂停/各种持久触发 | 其他检索/材料 rerank 消费者、协议特定已知计量；其余建议/评估消费者与独立 image 用途；实际模型配置覆盖和服务器工作续接；可替换上下文预算策略、provider 容量反馈；完整自动记忆与 Bot 独立知识/身份/睡眠恢复/长期任务 | 每次实际外发按用途、原凭据、来源和 Goal 受理；未知 usage 不变成零；不重放潜在收费请求；原记忆 revision 和祖先压缩边界保持 |
 | 扩设 §4–9：完整能力组合与作者接口 | Provider/Transform/Decision/Observer 已有真实切片；ToolGraph、直接 child、Deliver/Pause、运行中策略换绑；SDK tools.list/describe/invoke、普通工具/嵌套调用、候选更新与 owner 独立准备；已有 typed workbench slot 声明 | 同一合同的完整 service/method/event/UI slot/props/来源/就绪状态精确查询；Agent 产包→既有授权候选→工作台挂载/释放整链；更广领域 Provider/Transform、父子作用域共享键与局部复用、多变换顺序/冲突、独占资源交接 | 不另养能力名单或第二安装器；失败候选保留旧实例；旧调用保留真实绑定；关闭 UI 不取消后台业务；仅依赖自己的工作等待准备 |
 | 总设 §14–16、§21、§24：文件与产品工作流 | 原文件工具/CAS/捕获、child 报告与 WorkingResult、family 消息/读取/Wait、历史引用与分支、Storage 与 Catalog GC 锁外准备 | 未保存编辑器草稿、Documents/Git/overview 与工作源的关联；历史/磁盘组合恢复；完整 IDE/Research/Bot 模式、通知等产品消费者接同一身份/revision/cursor | 草稿不是聊天回滚副作用；重开保留真实副本与效果；报告和代码集成各有事实；各视图不能有第二份状态权威 |
@@ -715,10 +721,10 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 - 既有平台组件不等于真实平台已验；反过来，缺真实机证据也不等于该平台完全没有实现。完整产品验证可能发现接线问题，不能提前把全部余项称为“只剩测试”。
 - 完整能力交付后提供用户验收方法、明确支持边界及迁移前清单；不擅自切默认 runtime、删除 Pi 或做全面资产迁移。
 
-### 当前领域纵切：三类本地来源的语言与检索已接通，继续补查询与环境范围
+### 当前领域纵切：三类本地来源的语言与检索已接通，继续补编辑器与环境范围
 
 - `SourceMode` 现有 `FixedBranch`、`Materialized`、`LiveRoot`；显式 live_root 不捕获目录，受理、续接和恢复保持同一已验证 host/workspace/root。固定来源仍固定，物化环境仍保留实际副本，不随当前 UI/cwd 改绑。
-- live_root、fixed_branch 与 materialized 已通过原生注册表执行 `language_definition`、`language_references`、`language_diagnostics`。Rust 拥有工具准入与结果提交，Host 直接使用现有 LanguageViewBinder/LanguageSupervisor 和选定 provider；没有第二个语言进程/config owner、Pi 身份冒充或 decide 内隐藏 I/O。
+- live_root、fixed_branch 与 materialized 已通过原生注册表执行 `language_definition`、`language_references`、`language_diagnostics`、hover、工程/文档 symbols 和单查询 call hierarchy。Rust 拥有工具准入与结果提交，Host 直接使用现有 LanguageViewBinder/LanguageSupervisor 和选定 provider；没有第二个语言进程/config owner、Pi 身份冒充或 decide 内隐藏 I/O。
 - 当前 live 路径核对同一 Host 和实际 Documents 环境；同 workspace/provider/view 的准备复用，实际 query 绑定 generation/documentVersion。输入前后 revision 核对，返回目标逐项授权；目标的 observedRevision 不证明语言服务器计算跨文件 range 时使用了该版本。
 - fixed_branch 的捕获树、相对 imports/配置与路径映射由原 Storage 准备派生工程；materialized 使用原真实 working copy。返回正文始终取原来源；目录外 SDK、显式外部配置与 symlink 属于明确标识的 provider environment，不称为完整 OS 快照。真实固定与物化 child 已执行语言工具、原报告/历史、停止与 GC 重开；Worker 代码发布保持单独验收。
 - 三类来源已接实际检索 PipelinePlan 与显式语义 owner；继续补其余查询、草稿、远端同名路径和跨层产品范围。无版本诊断可保留真实非空观测，但仍是 pending，不能称为 current/clean。

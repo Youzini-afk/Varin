@@ -4,12 +4,21 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum CallDirection {
+    Incoming,
+    Outgoing,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct LanguageQueryArgs {
     pub path: String,
     line: Option<u32>,
     character: Option<u32>,
+    query: Option<String>,
+    direction: Option<CallDirection>,
     #[serde(skip)]
     method: String,
     #[serde(skip)]
@@ -23,31 +32,59 @@ impl LanguageQueryArgs {
         args.method = match kind {
             ToolKind::LanguageDefinition => "definition",
             ToolKind::LanguageReferences => "references",
-            _ => "diagnostics",
+            ToolKind::LanguageDiagnostics => "diagnostics",
+            ToolKind::LanguageHover => "hover",
+            ToolKind::LanguageSymbols => "workspace_symbols",
+            ToolKind::LanguageDocumentSymbols => "document_symbols",
+            ToolKind::LanguageCallHierarchy => "call_hierarchy",
+            _ => unreachable!("language tool decoder"),
         }
         .into();
-        if (args.method == "diagnostics" && (args.line.is_some() || args.character.is_some()))
-            || (args.method != "diagnostics" && (args.line.is_none() || args.character.is_none()))
+        let position = matches!(
+            kind,
+            ToolKind::LanguageDefinition
+                | ToolKind::LanguageReferences
+                | ToolKind::LanguageHover
+                | ToolKind::LanguageCallHierarchy
+        );
+        if (position && (args.line.is_none() || args.character.is_none()))
+            || (!position && (args.line.is_some() || args.character.is_some()))
+            || (kind == ToolKind::LanguageSymbols) != args.query.is_some()
+            || (kind == ToolKind::LanguageCallHierarchy) != args.direction.is_some()
         {
-            return Err(ExecutionError::new(
-                "invalid_tool_arguments",
-                "Navigation requires zero-based UTF-16 line and character; diagnostics accepts only path",
-            ));
+            return Err(ExecutionError::new("invalid_tool_arguments",
+                "Use the selected language tool schema: navigation requires zero-based UTF-16 line/character, symbols requires query, and call hierarchy requires direction"));
         }
         Ok(args)
     }
 }
 pub(super) fn schema(kind: ToolKind) -> Value {
-    let navigation = kind != ToolKind::LanguageDiagnostics;
-    let mut properties = json!({"path":{"type":"string","description":"Normalized path relative to the selected source workspace."}});
+    let navigation = matches!(
+        kind,
+        ToolKind::LanguageDefinition
+            | ToolKind::LanguageReferences
+            | ToolKind::LanguageHover
+            | ToolKind::LanguageCallHierarchy
+    );
+    let mut properties = json!({"path":{"type":"string","description":"Normalized path relative to the selected source workspace. Select an existing representative source file for workspace symbols."}});
+    let mut required = vec!["path"];
     if navigation {
         for key in ["line", "character"] {
             properties[key] = json!({"type":"integer","minimum":0,"maximum":4294967295u64,"description":"Zero-based UTF-16 position."});
+            required.push(key);
         }
     }
-    json!({"type":"object","additionalProperties":false,"properties":properties,
-        "required":if navigation { vec!["path","line","character"] } else { vec!["path"] }})
+    if kind == ToolKind::LanguageSymbols {
+        properties["query"] = json!({"type":"string","description":"Symbol name or name fragment in this language's workspace."});
+        required.push("query");
+    }
+    if kind == ToolKind::LanguageCallHierarchy {
+        properties["direction"] = json!({"type":"string","enum":["incoming","outgoing"]});
+        required.push("direction");
+    }
+    json!({"type":"object","additionalProperties":false,"properties":properties,"required":required})
 }
+
 #[derive(Clone)]
 pub(super) struct Observation {
     pub(super) revision: String,
@@ -94,17 +131,30 @@ fn position(value: &Value, text: &str) -> Option<(u64, u64)> {
     let character = value["character"].as_u64()?;
     let row = text.split('\n').nth(usize::try_from(line).ok()?)?;
     let row = row.strip_suffix('\r').unwrap_or(row);
-    (character <= row.encode_utf16().count() as u64).then_some((line, character))
+    // LSP Position normalizes an output column beyond EOL to that line's end.
+    // Model-supplied query positions retain their separate strict input validation.
+    Some((line, character.min(row.encode_utf16().count() as u64)))
 }
-fn valid_range(value: &Value, text: &str) -> bool {
-    match (
-        position(&value["start"], text),
-        position(&value["end"], text),
-    ) {
-        (Some(a), Some(b)) => a <= b,
-        _ => false,
+fn normalized_range(value: &Value, text: &str) -> Option<Value> {
+    let original_start = (
+        value["start"]["line"].as_u64()?,
+        value["start"]["character"].as_u64()?,
+    );
+    let original_end = (
+        value["end"]["line"].as_u64()?,
+        value["end"]["character"].as_u64()?,
+    );
+    if original_start > original_end {
+        return None;
     }
+    let start = position(&value["start"], text)?;
+    let end = position(&value["end"], text)?;
+    (start <= end).then(|| {
+        json!({"start":{"line":start.0,"character":start.1},
+        "end":{"line":end.0,"character":end.1}})
+    })
 }
+
 fn bump(result: &mut Value, key: &str) {
     let count = result["omissions"][key].as_u64().unwrap_or(0);
     result["omissions"][key] = json!(count + 1);
@@ -129,7 +179,15 @@ impl KernelToolExecutor {
                 ExecutionError::new(error_code(&failure.error), failure.error.to_string())
             })?;
         if self.binding.source_mode == SourceMode::FixedBranch {
-            return Ok(format!("fixed-language:{}:{}",self.binding.file_source.as_ref().expect("fixed source").branch_id,path));
+            return Ok(format!(
+                "fixed-language:{}:{}",
+                self.binding
+                    .file_source
+                    .as_ref()
+                    .expect("fixed source")
+                    .branch_id,
+                path
+            ));
         }
         value["resourceKey"]
             .as_str()
@@ -275,6 +333,12 @@ impl KernelToolExecutor {
         if let Some(character) = args.character {
             query["character"] = json!(character);
         }
+        if let Some(text) = &args.query {
+            query["query"] = json!(text);
+        }
+        if let Some(direction) = args.direction {
+            query["direction"] = json!(direction);
+        }
         let raw = bridge.query(query, cancel)?;
         let mut result =
             json!({"status":raw["status"],"items":raw["items"],"omissions":raw["omissions"]});
@@ -346,8 +410,10 @@ impl KernelToolExecutor {
             if provenance["revision"].as_str().is_none_or(str::is_empty)
                 || provenance["selection"] != admitted["source"]
                 || provenance["physicalRoot"] != admitted["physicalRoot"]
-                || provenance["dependencies"] != json!({"source":if self.binding.source_mode==SourceMode::FixedBranch {"fixed_branch"} else {"live"},"external":"provider_environment"})
-                || (self.binding.source_mode==SourceMode::FixedBranch) != provenance.get("derivedView").is_some()
+                || provenance["dependencies"]
+                    != json!({"source":if self.binding.source_mode==SourceMode::FixedBranch {"fixed_branch"} else {"live"},"external":"provider_environment"})
+                || (self.binding.source_mode == SourceMode::FixedBranch)
+                    != provenance.get("derivedView").is_some()
                 || provenance["resourceId"].as_str() != Some(&args.path)
                 || provenance["view"].as_str().is_none_or(|view| {
                     !view.starts_with("agent:source:") || view.len() == "agent:source:".len()
@@ -367,8 +433,16 @@ impl KernelToolExecutor {
         let mut checked = args.clone();
         checked.derived_view = result["source"].get("derivedView").cloned();
         self.resources
-            .call(&self.binding, context, ResourceOperation::LanguageQuery(checked), true, cancel)
-            .map_err(|failure| ExecutionError::new(error_code(&failure.error), failure.error.to_string()))?;
+            .call(
+                &self.binding,
+                context,
+                ResourceOperation::LanguageQuery(checked),
+                true,
+                cancel,
+            )
+            .map_err(|failure| {
+                ExecutionError::new(error_code(&failure.error), failure.error.to_string())
+            })?;
         if let Some(revision) = result["source"]["revision"].as_str() {
             if revision != source.revision {
                 result["status"] = json!("stale");
@@ -392,68 +466,153 @@ impl KernelToolExecutor {
                     "Language result omitted its items",
                 )
             })?;
-        let mut observations = BTreeMap::from([(args.path.clone(), source.clone())]);
+        let mut projection = LanguageProjection {
+            executor: self,
+            context,
+            cancel,
+            input_path: &args.path,
+            source: &source,
+            unversioned,
+            observations: BTreeMap::from([(args.path.clone(), source.clone())]),
+            result: &mut result,
+        };
         let mut admitted = Vec::new();
-        for mut item in items {
-            if !item.is_object() {
-                bump(&mut result, "unmappable");
-                continue;
-            }
-            if cancel.is_cancelled() {
-                return Err(ExecutionError::new(
-                    "language_cancelled",
-                    "Language query cancelled",
-                ));
-            }
-            let Some(path) = item["resource"]["resourceId"].as_str().map(str::to_owned) else {
-                bump(&mut result, "unmappable");
-                continue;
+        if args.method == "hover" && items.len() > 1 {
+            return Err(ExecutionError::new(
+                "language_result_invalid",
+                "Hover returned multiple results",
+            ));
+        }
+        for item in items {
+            let projected = match args.method.as_str() {
+                "hover" => projection.hover(item)?,
+                "document_symbols" | "workspace_symbols" => projection.symbol(item)?,
+                "call_hierarchy" => projection.edge(item)?,
+                _ => projection.navigation(item)?,
             };
-            if item["resource"]["workspaceId"].as_str() != Some(&self.binding.workspace_id)
-                || normalized_path(&path, false).is_err()
-            {
-                bump(&mut result, "outOfScope");
-                continue;
+            if let Some(item) = projected {
+                admitted.push(item);
             }
-            let observed = match observations.get(&path) {
-                Some(observed) => observed.clone(),
-                None => match self.observe_source_path(context, &path, cancel) {
-                    Ok(observed) => {
-                        observations.insert(path.clone(), observed.clone());
-                        observed
+        }
+        result["items"] = json!(admitted);
+        if !unversioned
+            && result["omissions"]
+                .as_object()
+                .is_some_and(|counts| counts.values().any(|count| count.as_u64().unwrap_or(0) > 0))
+        {
+            result["status"] = json!("partial");
+        }
+        Ok(result)
+    }
+}
+
+/// Method-specific projections share only source admission/observation, never an
+/// arbitrary JSON walk. Opaque language-server items do not cross this boundary.
+struct LanguageProjection<'a> {
+    executor: &'a KernelToolExecutor,
+    context: &'a ToolExecutionContext,
+    cancel: &'a CancellationToken,
+    input_path: &'a str,
+    source: &'a Observation,
+    unversioned: bool,
+    observations: BTreeMap<String, Observation>,
+    result: &'a mut Value,
+}
+fn retain_fields(item: &mut Value, fields: &[&str]) {
+    if let Some(object) = item.as_object_mut() {
+        object.retain(|key, _| fields.contains(&key.as_str()));
+    }
+}
+impl LanguageProjection<'_> {
+    fn omit(&mut self, reason: &str) -> Option<Value> {
+        bump(self.result, reason);
+        None
+    }
+    fn location(
+        &mut self,
+        item: &mut Value,
+        ranges: &[&str],
+        require_range: bool,
+    ) -> Result<Option<Observation>, ExecutionError> {
+        if self.cancel.is_cancelled() {
+            return Err(ExecutionError::new(
+                "language_cancelled",
+                "Language query cancelled",
+            ));
+        }
+        if !item.is_object() {
+            self.omit("unmappable");
+            return Ok(None);
+        }
+        let Some(path) = item["resource"]["resourceId"].as_str().map(str::to_owned) else {
+            self.omit("unmappable");
+            return Ok(None);
+        };
+        if item["resource"]["workspaceId"].as_str() != Some(&self.executor.binding.workspace_id)
+            || normalized_path(&path, false).is_err()
+        {
+            self.omit("outOfScope");
+            return Ok(None);
+        }
+        let observed = match self.observations.get(&path) {
+            Some(observed) => observed.clone(),
+            None => match self
+                .executor
+                .observe_source_path(self.context, &path, self.cancel)
+            {
+                Ok(observed) => {
+                    self.observations.insert(path.clone(), observed.clone());
+                    observed
+                }
+                Err(error) => {
+                    if self.cancel.is_cancelled() {
+                        return Err(error);
                     }
-                    Err(error) => {
-                        if cancel.is_cancelled() {
-                            return Err(error);
-                        }
-                        bump(
-                            &mut result,
-                            if error.code == "unauthorized" {
-                                "outOfScope"
-                            } else {
-                                "unavailable"
-                            },
-                        );
-                        continue;
-                    }
-                },
+                    self.omit(if error.code == "unauthorized" {
+                        "outOfScope"
+                    } else {
+                        "unavailable"
+                    });
+                    return Ok(None);
+                }
+            },
+        };
+        let mut present = 0;
+        for key in ranges {
+            if let Some(range) = item.get_mut(*key) {
+                present += 1;
+                let Some(normalized) = normalized_range(range, &observed.text) else {
+                    self.omit("stale");
+                    return Ok(None);
+                };
+                *range = normalized;
+            }
+        }
+        if require_range && present == 0 {
+            self.omit("stale");
+            return Ok(None);
+        }
+        if let Some(origin) = item.get_mut("originSelectionRange") {
+            let Some(normalized) = normalized_range(origin, &self.source.text) else {
+                self.omit("stale");
+                return Ok(None);
             };
-            let ranges: Vec<_> = ["range", "targetRange", "targetSelectionRange"]
-                .into_iter()
-                .filter_map(|key| item.get(key))
-                .collect();
-            if ranges.is_empty()
-                || ranges
-                    .iter()
-                    .any(|range| !valid_range(range, &observed.text))
-                || item
-                    .get("originSelectionRange")
-                    .is_some_and(|range| !valid_range(range, &source.text))
-            {
-                bump(&mut result, "stale");
-                continue;
-            }
-            let allowed = [
+            *origin = normalized;
+        }
+        item["resource"] =
+            json!({"workspaceId":self.executor.binding.workspace_id,"resourceId":path});
+        item["observedRevision"] = json!(observed.revision);
+        item["rangeRevision"] = if path == self.input_path && !self.unversioned {
+            json!(self.source.revision)
+        } else {
+            Value::Null
+        };
+        Ok(Some(observed))
+    }
+    fn navigation(&mut self, mut item: Value) -> Result<Option<Value>, ExecutionError> {
+        retain_fields(
+            &mut item,
+            &[
                 "resource",
                 "range",
                 "targetRange",
@@ -467,29 +626,165 @@ impl KernelToolExecutor {
                 "providerId",
                 "generation",
                 "documentVersion",
-            ];
-            item.as_object_mut()
-                .expect("checked item object")
-                .retain(|key, _| allowed.contains(&key.as_str()));
-            item["resource"] = json!({"workspaceId":self.binding.workspace_id,"resourceId":path});
-            item["observedRevision"] = json!(observed.revision);
-            // An LSP cross-file Location carries no target document version. An observation
-            // made after its response is not proof of which bytes produced its range.
-            item["rangeRevision"] = if path == args.path && !unversioned {
-                json!(source.revision)
-            } else {
-                Value::Null
-            };
-            admitted.push(item);
-        }
-        result["items"] = json!(admitted);
-        if !unversioned
-            && result["omissions"]
-                .as_object()
-                .is_some_and(|counts| counts.values().any(|count| count.as_u64().unwrap_or(0) > 0))
+            ],
+        );
+        if self
+            .location(
+                &mut item,
+                &["range", "targetRange", "targetSelectionRange"],
+                true,
+            )?
+            .is_none()
         {
-            result["status"] = json!("partial");
+            return Ok(None);
         }
-        Ok(result)
+        Ok(Some(item))
+    }
+    fn hover(&mut self, mut item: Value) -> Result<Option<Value>, ExecutionError> {
+        if !item["contents"].as_array().is_some_and(|contents| {
+            !contents.is_empty()
+                && contents.iter().all(|part| {
+                    matches!(part["kind"].as_str(), Some("markdown" | "plaintext"))
+                        && part["value"].is_string()
+                })
+        }) {
+            return Ok(self.omit("unmappable"));
+        }
+        // Hover is text about the bound input, never an authority for links embedded in it.
+        if item["resource"]["resourceId"].as_str() != Some(self.input_path) {
+            return Ok(self.omit("outOfScope"));
+        }
+        retain_fields(&mut item, &["resource", "range", "contents"]);
+        for part in item["contents"].as_array_mut().expect("validated markup") {
+            retain_fields(part, &["kind", "value"]);
+        }
+        if self.location(&mut item, &["range"], false)?.is_none() {
+            return Ok(None);
+        }
+        Ok(Some(item))
+    }
+    fn symbol(&mut self, mut item: Value) -> Result<Option<Value>, ExecutionError> {
+        if !item["name"].is_string()
+            || item["kind"].as_u64().is_none()
+            || item.get("range").is_none()
+            || item
+                .get("children")
+                .is_some_and(|children| !children.is_array())
+        {
+            return Ok(self.omit("unmappable"));
+        }
+        let children = item
+            .as_object_mut()
+            .and_then(|object| object.remove("children"));
+        retain_fields(
+            &mut item,
+            &[
+                "resource",
+                "name",
+                "kind",
+                "range",
+                "selectionRange",
+                "detail",
+                "containerName",
+                "tags",
+            ],
+        );
+        if self
+            .location(&mut item, &["range", "selectionRange"], true)?
+            .is_none()
+        {
+            return Ok(None);
+        }
+        if let Some(Value::Array(children)) = children {
+            let mut admitted = Vec::new();
+            for child in children {
+                if let Some(child) = self.symbol(child)? {
+                    admitted.push(child);
+                }
+            }
+            item["children"] = json!(admitted);
+        }
+        Ok(Some(item))
+    }
+    fn call_item(
+        &mut self,
+        mut item: Value,
+    ) -> Result<Option<(Value, Observation)>, ExecutionError> {
+        if !item["name"].is_string()
+            || item["kind"].as_u64().is_none()
+            || item.get("range").is_none()
+            || item.get("selectionRange").is_none()
+        {
+            self.omit("unmappable");
+            return Ok(None);
+        }
+        retain_fields(
+            &mut item,
+            &[
+                "resource",
+                "name",
+                "kind",
+                "range",
+                "selectionRange",
+                "detail",
+                "tags",
+            ],
+        );
+        Ok(self
+            .location(&mut item, &["range", "selectionRange"], true)?
+            .map(|observed| (item, observed)))
+    }
+    fn edge(&mut self, item: Value) -> Result<Option<Value>, ExecutionError> {
+        let Some(ranges) = item["fromRanges"].as_array() else {
+            return Ok(self.omit("unmappable"));
+        };
+        let Some((from, observed)) = self.call_item(item["from"].clone())? else {
+            return Ok(None);
+        };
+        let Some((to, _)) = self.call_item(item["to"].clone())? else {
+            return Ok(None);
+        };
+        let mut admitted = Vec::new();
+        for range in ranges {
+            if let Some(normalized) = normalized_range(range, &observed.text) {
+                admitted.push(normalized);
+            } else {
+                self.omit("stale");
+            }
+        }
+        // No surviving call-site evidence is not a relation with zero calls.
+        if !ranges.is_empty() && admitted.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(json!({"from":from,"to":to,"fromRanges":admitted})))
+    }
+}
+
+#[cfg(test)]
+mod output_range_tests {
+    use super::*;
+
+    #[test]
+    fn normalizes_lsp_output_columns_on_their_own_utf16_lines_without_accepting_invalid_ranges() {
+        let text = "function caller() {\r\n  return '😀';\r\n}\r\n";
+        let range = json!({"start":{"line":0,"character":0},"end":{"line":2,"character":2}});
+        // The bundled TypeScript server emits this synthetic module EOL column.
+        assert_eq!(
+            normalized_range(&range, text).unwrap()["end"],
+            json!({"line":2,"character":1})
+        );
+        let utf16 = json!({"start":{"line":1,"character":0},"end":{"line":1,"character":100}});
+        assert_eq!(
+            normalized_range(&utf16, text).unwrap()["end"]["character"],
+            "  return '😀';".encode_utf16().count()
+        );
+        for invalid in [
+            json!({"start":{"line":0,"character":0},"end":{"line":99,"character":0}}),
+            json!({"start":{"line":2,"character":2},"end":{"line":2,"character":1}}),
+            json!({"start":{"line":0,"character":-1},"end":{"line":0,"character":1}}),
+            json!({"start":{"line":0,"character":0.5},"end":{"line":0,"character":1}}),
+        ] {
+            assert!(normalized_range(&invalid, text).is_none(), "{invalid}");
+        }
     }
 }

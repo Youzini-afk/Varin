@@ -17,14 +17,14 @@ const zeroOmissions = { outOfScope: 0, unmappable: 0, stale: 0, unavailable: 0 }
 async function fixture(options: { capabilities?: Record<string, unknown>; prepare?: Prepare; provider?: boolean; afterRead?: () => Promise<void> } = {}) {
   const documents = await createDocumentAuthorityHarness();
   const peer = createControlledLanguagePeer(options.capabilities);
-  const spawn = vi.fn(() => peer.child);
-  const supervisor = createLanguageSupervisor({ documents: documents.authority, spawn, spawnAdmitted: async (admit, _command, _args, options) => { await admit(options.signal ?? new AbortController().signal); return spawn(); },
+  const spawn = vi.fn((_command?: string) => peer.child);
+  const supervisor = createLanguageSupervisor({ documents: documents.authority, spawn, spawnAdmitted: async (admit, command, _args, options) => { await admit(options.signal ?? new AbortController().signal); return spawn(command); },
     ...(options.prepare ? { prepareProvider: options.prepare } : {}) });
   cleanups.push(async () => { await supervisor.dispose(); await documents.cleanup(); });
   if (options.provider !== false) supervisor.registerProvider({ providerId: 'test-language',
     command: 'controlled-test-peer', languageIds: ['typescript'], source: 'builtin' });
   await fs.writeFile(path.join(documents.workspaceRoot, 'main.ts'), 'const value = 1;\n');
-  const validateSource = vi.fn(async () => {});
+  const validateSource = vi.fn(async (_query?: Pick<Query, 'grantId'>) => {});
   const owner = createLanguageOwner({ documents: documents.authority, supervisor, sources: {
     validateLanguage: validateSource,
     prepareLanguageView: async query => ({ root: query.physicalRoot!.canonicalRoot, check: async () => {}, release: async () => {} }),
@@ -41,7 +41,8 @@ async function fixture(options: { capabilities?: Record<string, unknown>; prepar
   const liveRoot = { hostId: '11111111-1111-4111-8111-111111111111', canonicalRoot: documents.workspaceRoot, rootId: 'live-test-root' };
   const query = (overrides: Partial<Query> = {}): Query => ({ runId: 'run-a', threadId: 'thread-a',
     grantId: 'grant-a', source: { mode: 'live_root', workspace_id: documents.identity.workspaceId, execution_workspace_id: documents.identity.workspaceId, branch_id: null, revision: null, live_root: liveRoot }, physicalRoot: liveRoot,
-    method: 'definition', path: 'main.ts', line: 0, character: 6, ...overrides });
+    method: 'definition', path: 'main.ts',
+    ...(!overrides.method || ['definition', 'references', 'hover', 'call_hierarchy'].includes(overrides.method) ? { line: 0, character: 6 } : {}), ...overrides });
   const invoke = (overrides: Partial<Query> = {}, signal = new AbortController().signal) => owner(query(overrides), signal);
   const uri = (file: string) => pathToFileURL(path.join(documents.workspaceRoot, file)).href;
   return { documents, peer, spawn, supervisor, owner, validateSource, query, invoke, uri };
@@ -379,13 +380,22 @@ it('rebuilds the same source watcher after failed startup and invalidates change
     await fs.rename(moved, root);
     const main = await f.invoke();
     expect(main.status).toBe('ready');
-    expect(await f.invoke({ path: 'dep.ts' })).toMatchObject({ status: 'ready' });
+    const dependency = await f.invoke({ path: 'dep.ts' });
+    expect(dependency).toMatchObject({ status: 'ready' });
     f.peer.notify('textDocument/publishDiagnostics', { uri: f.uri('main.ts'), version: main.source!.documentVersion,
       diagnostics: [{ range: testRange(0, 6, 11), message: 'old dependency diagnostic' }] });
     expect(await f.invoke({ method: 'diagnostics' })).toMatchObject({ status: 'ready' });
     await fs.writeFile(path.join(root, 'dep.ts'), 'export const value = "changed";\n');
     await vi.waitFor(() => expect(f.peer.notifications('textDocument/didClose'))
       .toEqual(expect.arrayContaining([expect.objectContaining({ params: { textDocument: { uri: f.uri('dep.ts') } } })])));
+    expect(f.peer.notifications('textDocument/didChange')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ params: {
+        textDocument: { uri: f.uri('dep.ts'), version: dependency.source!.documentVersion + 1 },
+        contentChanges: [{ text: 'export const value = "changed";\n' }],
+      } }),
+    ]));
+    expect(f.peer.frames.filter(frame => (frame.params?.textDocument as { uri?: string } | undefined)?.uri === f.uri('dep.ts'))
+      .map(frame => frame.method).slice(-2)).toEqual(['textDocument/didChange', 'textDocument/didClose']);
     expect(await f.invoke({ method: 'diagnostics' })).toMatchObject({ status: 'pending', items: [] });
     expect(f.spawn).toHaveBeenCalledTimes(1);
   } finally { if (await fs.stat(moved).then(() => true, () => false)) await fs.rename(moved, root); }
@@ -561,4 +571,131 @@ it('retires a changed fixed dependency tree and creates a fresh generation only 
   const second = await supervisor.retainSourceView(binding, new AbortController().signal);
   expect(second.derivedView!.viewId).not.toBe(first.derivedView!.viewId); expect(preparations).toBe(2);
   expect(await fs.readFile(path.join(second.root, 'dep.ts'), 'utf8')).toBe('export const x = 1;');
+});
+
+
+describe('source-bound language navigation', () => {
+  it('preserves hover markup and a genuinely absent range; null is empty and malformed is unavailable', async () => {
+    const f = await fixture({ capabilities: { hoverProvider: true } });
+    const contents = { kind: 'markdown', value: '```ts\nconst value: number\n```\n[documentation](file:///provider/environment.ts)' };
+    f.peer.handlers.set('textDocument/hover', () => ({ contents }));
+    expect(await f.invoke({ method: 'hover' })).toMatchObject({ status: 'ready', items: [{ contents: [contents], resource: f.documents.resource('main.ts') }] });
+    expect((await f.invoke({ method: 'hover' })).items[0]).not.toHaveProperty('range');
+    f.peer.handlers.set('textDocument/hover', () => null);
+    expect(await f.invoke({ method: 'hover' })).toMatchObject({ status: 'ready', items: [] });
+    f.peer.handlers.set('textDocument/hover', () => ({ contents: { value: 42 } }));
+    expect(await f.invoke({ method: 'hover' })).toMatchObject({ status: 'unavailable', items: [] });
+  });
+
+  it('keeps document symbol children and never relabels an unmapped workspace URI as the input', async () => {
+    const f = await fixture({ capabilities: { documentSymbolProvider: true, workspaceSymbolProvider: true } });
+    await fs.writeFile(path.join(f.documents.workspaceRoot, '..inside.ts'), 'export const needle = 123;\n');
+    const range = testRange(0, 6, 11);
+    f.peer.handlers.set('textDocument/documentSymbol', () => [{ name: 'outer', kind: 12, range, selectionRange: range,
+      children: [{ name: 'inner', kind: 13, range, selectionRange: range }] }]);
+    const symbols = await f.invoke({ method: 'document_symbols' });
+    expect(symbols).toMatchObject({ status: 'ready', items: [{ name: 'outer', resource: f.documents.resource('main.ts'),
+      children: [{ name: 'inner', resource: f.documents.resource('main.ts') }] }] });
+    f.peer.handlers.set('workspace/symbol', frame => {
+      expect(frame.params).toEqual({ query: 'value' });
+      return [{ name: 'value', kind: 13, location: { uri: f.uri('main.ts'), range } },
+        { name: 'needle', kind: 13, location: { uri: f.uri('..inside.ts'), range } },
+        { name: 'private', kind: 13, location: { uri: 'file:///not-this-source/secret.ts', range } },
+        { name: 'missing', kind: 13, range }];
+    });
+    expect(await f.invoke({ method: 'workspace_symbols', query: 'value' })).toMatchObject({
+      status: 'partial', items: [{ name: 'value', resource: f.documents.resource('main.ts') },
+        { name: 'needle', resource: f.documents.resource('..inside.ts') }], omissions: { outOfScope: 1, unmappable: 1 },
+    });
+    expect(await f.invoke({ method: 'document_symbols', path: '..inside.ts' })).toMatchObject({ status: 'ready',
+      items: [{ resource: f.documents.resource('..inside.ts'), children: [{ resource: f.documents.resource('..inside.ts') }] }] });
+    f.peer.handlers.set('workspace/symbol', () => ({}));
+    expect(await f.invoke({ method: 'workspace_symbols', query: '' })).toMatchObject({ status: 'unavailable', items: [] });
+  });
+
+  it('isolates concurrent call queries, preserves every opaque candidate and keeps the original token consumer alive', async () => {
+    const f = await fixture({ capabilities: { callHierarchyProvider: true } });
+    const range = testRange(0, 6, 11);
+    const raw = (name: string) => ({ name, kind: 12, uri: f.uri(name === 'cross' ? 'other.ts' : 'main.ts'), range,
+      selectionRange: range, data: { privateProviderItem: name, nested: ['opaque'] } });
+    f.peer.handlers.set('textDocument/prepareCallHierarchy', () => [raw('value'), raw('cross')]);
+    const gate = deferred<void>(); let started = 0;
+    f.peer.handlers.set('callHierarchy/outgoingCalls', async frame => {
+      const item = frame.params?.item as ReturnType<typeof raw>;
+      expect(item).toEqual(raw(item.name));
+      if (++started <= 2) await gate.promise;
+      return [{ to: raw('target'), fromRanges: [range] }];
+    });
+    const first = f.invoke({ method: 'call_hierarchy', direction: 'outgoing' });
+    await vi.waitFor(() => expect(started).toBe(1));
+    const second = f.invoke({ method: 'call_hierarchy', direction: 'outgoing', runId: 'run-b', grantId: 'grant-b' });
+    await vi.waitFor(() => expect(started).toBe(2));
+    gate.resolve();
+    for (const result of await Promise.all([first, second])) {
+      expect(result).toMatchObject({ status: 'ready', items: [
+        { from: { name: 'value', resource: f.documents.resource('main.ts') }, to: { name: 'target' }, fromRanges: [range] },
+        { from: { name: 'cross', resource: f.documents.resource('other.ts') }, to: { name: 'target' }, fromRanges: [range] },
+      ] });
+      expect(JSON.stringify(result)).not.toContain('privateProviderItem');
+    }
+    expect(f.spawn).toHaveBeenCalledTimes(1);
+    expect(f.peer.requests('callHierarchy/outgoingCalls')).toHaveLength(4);
+    const source = (await f.invoke()).source!;
+    const request = { resource: f.documents.resource('main.ts'), languageId: 'typescript', view: source.view as `agent:${string}`,
+      generation: source.generation, documentVersion: source.documentVersion, position: { line: 0, character: 6 } };
+    const prepared = await f.supervisor.prepareCallHierarchy(request);
+    const token = (prepared as { value: Array<{ itemToken: string }> }).value[0]!.itemToken;
+    await f.invoke({ method: 'call_hierarchy', direction: 'outgoing' });
+    expect(await f.supervisor.callHierarchyOutgoing({ ...request, itemToken: token })).toMatchObject({ status: 'ready' });
+  });
+
+  it('never sends a prepared opaque item to another provider with matching local generation numbers', async () => {
+    const f = await fixture({ capabilities: { hoverProvider: true, callHierarchyProvider: true } });
+    f.peer.handlers.set('textDocument/hover', () => ({ contents: 'original provider' }));
+    const original = await f.invoke({ method: 'hover', runId: 'run-b', grantId: 'grant-b' });
+    expect(original.status).toBe('ready');
+    const candidate = createControlledLanguagePeer({ callHierarchyProvider: true });
+    f.spawn.mockImplementation(command => command === 'candidate' ? candidate.child : f.peer.child);
+    f.supervisor.registerProvider({ providerId: 'candidate-provider', command: 'candidate', languageIds: ['typescript'], source: 'extension' });
+    candidate.heldMethods.add('textDocument/prepareCallHierarchy');
+    const pending = f.invoke({ method: 'call_hierarchy', direction: 'outgoing' });
+    await vi.waitFor(() => expect(candidate.requests('textDocument/prepareCallHierarchy')).toHaveLength(1));
+    const range = testRange(0, 6, 11);
+    candidate.reply(candidate.requests('textDocument/prepareCallHierarchy')[0]!, [
+      { name: 'value', kind: 12, uri: f.uri('main.ts'), range, selectionRange: range, data: { belongsTo: 'candidate-provider' } },
+    ]);
+    let retired: Promise<unknown> | undefined;
+    queueMicrotask(() => { retired = f.supervisor.unregisterProvider('candidate-provider'); });
+    const result = await pending;
+    await retired;
+    expect(result.status).toBe('stale');
+    expect(result.items).toEqual([]);
+    expect(f.peer.requests('callHierarchy/outgoingCalls')).toHaveLength(0);
+    expect(candidate.requests('callHierarchy/outgoingCalls')).toHaveLength(0);
+  });
+
+  it('rechecks the querying Run before follow-through even while another Run retains the shared view, and cancels only its RPC', async () => {
+    const f = await fixture({ capabilities: { callHierarchyProvider: true } });
+    const range = testRange(0, 6, 11);
+    const item = { name: 'value', kind: 12, uri: f.uri('main.ts'), range, selectionRange: range, data: 'private' };
+    let revoked = false;
+    f.validateSource.mockImplementation(async query => { if (query?.grantId === 'grant-a' && revoked) throw new Error('Original Run grant withdrawn'); });
+    expect(await f.invoke({ runId: 'run-b', grantId: 'grant-b' })).toMatchObject({ status: 'ready' });
+    f.peer.handlers.set('textDocument/prepareCallHierarchy', () => { revoked = true; return [item]; });
+    expect(await f.invoke({ method: 'call_hierarchy', direction: 'incoming' })).toMatchObject({ status: 'unavailable', items: [], message: 'Original Run grant withdrawn' });
+    expect(f.peer.requests('callHierarchy/incomingCalls')).toHaveLength(0);
+    expect(f.supervisor.inspectViews()).toEqual([expect.objectContaining({ status: 'ready' })]);
+    f.peer.handlers.set('textDocument/prepareCallHierarchy', () => [item]);
+    f.peer.heldMethods.add('callHierarchy/incomingCalls');
+    const controller = new AbortController();
+    const pending = f.invoke({ method: 'call_hierarchy', direction: 'incoming', runId: 'run-b', grantId: 'grant-b' }, controller.signal);
+    await vi.waitFor(() => expect(f.peer.requests('callHierarchy/incomingCalls')).toHaveLength(1));
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(f.peer.notifications('$/cancelRequest')).toHaveLength(1);
+    expect(f.peer.child.killed).toBe(false);
+    f.peer.heldMethods.delete('callHierarchy/incomingCalls');
+    f.peer.handlers.set('callHierarchy/incomingCalls', () => null);
+    expect(await f.invoke({ method: 'call_hierarchy', direction: 'incoming', runId: 'run-b', grantId: 'grant-b' })).toMatchObject({ status: 'ready', items: [] });
+  });
 });

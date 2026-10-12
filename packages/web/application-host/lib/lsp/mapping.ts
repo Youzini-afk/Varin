@@ -94,7 +94,7 @@ export const resourceFromUri = (
     return null;
   }
   const relative = pathModule.relative(root, absolutePath);
-  if (!relative || relative.startsWith('..') || pathModule.isAbsolute(relative)) return null;
+  if (!relative || (relative === '..' || relative.startsWith(`..${pathModule.sep}`)) || pathModule.isAbsolute(relative)) return null;
   return { workspaceId, resourceId: relative.split(pathModule.sep).join('/') };
 };
 
@@ -226,7 +226,15 @@ export const mapCompletionItem = (item: unknown, resolveToken?: string | undefin
   };
 };
 
-export const mapHover = (raw: unknown) => {
+export const mapHover = (raw: unknown, strict = false) => {
+  if (strict && raw !== null) {
+    const values = isRecord(raw) && (Array.isArray(raw.contents) ? raw.contents : [raw.contents]);
+    if (!values || !values.every(value => typeof value === 'string' || isRecord(value)
+      && typeof value.value === 'string' && (value.kind === 'markdown' || value.kind === 'plaintext' || typeof value.language === 'string'))
+      || isRecord(raw) && raw.range !== undefined && !validLanguageRange(raw.range)) {
+      throw new LanguageMappingError('Language provider returned malformed hover information');
+    }
+  }
   if (!isRecord(raw)) return null;
   const contents = mapMarkupArray(raw.contents);
   if (contents.length === 0) return null;
@@ -271,15 +279,30 @@ export const mapSignatureHelp = (raw: unknown) => {
   };
 };
 
-const mapSymbol = (value: unknown, context: MappingContext): JsonRecord | null => {
-  if (!isRecord(value) || typeof value.name !== 'string' || !finiteInteger(value.kind)) return null;
+interface SymbolMappingOptions {
+  kind: 'document' | 'workspace';
+  resource: LanguageResource;
+  onRejectedLocation(reason: 'outOfScope' | 'unmappable'): void;
+}
+const mapSymbol = (value: unknown, context: MappingContext, options?: SymbolMappingOptions): JsonRecord | null => {
+  const reject = (reason: 'outOfScope' | 'unmappable' = 'unmappable') => { options?.onRejectedLocation(reason); return null; };
+  if (!isRecord(value) || typeof value.name !== 'string' || !finiteInteger(value.kind)) return reject();
+  if (options && (value.location !== undefined || options.kind === 'workspace')) {
+    const rejection = strictLocationRejection(value.location, context.root, context.pathModule);
+    if (rejection) return reject(rejection);
+  }
   const location = value.location ? mapLocation(value.location, context.workspaceId, context.root, context.pathModule) : null;
+  // An explicit target never becomes an implicit document-local symbol on mapping failure.
+  if (value.location !== undefined && !location) return reject(rejectedLocationReason(value.location, context.root, context.pathModule));
   const locationRecord = isRecord(value.location) ? value.location : null;
   const range = mapRange(value.range ?? locationRecord?.range) ?? location?.range;
-  if (!range) return null;
+  if (!range || options && (!validLanguageRange(range)
+    || value.selectionRange !== undefined && !validLanguageRange(value.selectionRange)
+    || value.children !== undefined && !Array.isArray(value.children))) return reject();
   const selectionRange = mapRange(value.selectionRange);
+  const resource = location?.resource ?? (options?.kind === 'document' && value.location === undefined ? options.resource : undefined);
   const children = Array.isArray(value.children)
-    ? value.children.map((child: unknown) => mapSymbol(child, context)).filter((child): child is JsonRecord => Boolean(child))
+    ? value.children.map((child: unknown) => mapSymbol(child, context, options && { ...options, resource: resource! })).filter((child): child is JsonRecord => Boolean(child))
     : undefined;
   return {
     name: value.name,
@@ -289,14 +312,15 @@ const mapSymbol = (value: unknown, context: MappingContext): JsonRecord | null =
     ...(typeof value.detail === 'string' ? { detail: value.detail } : {}),
     ...(typeof value.containerName === 'string' ? { containerName: value.containerName } : {}),
     ...(Array.isArray(value.tags) ? { tags: value.tags.filter(finiteInteger) } : {}),
-    ...(location ? { resource: location.resource } : {}),
+    ...(resource ? { resource } : {}),
     ...(children?.length ? { children } : {}),
   };
 };
 
-export const mapSymbols = (raw: unknown, context: MappingContext) => (
-  (Array.isArray(raw) ? raw : []).map((value: unknown) => mapSymbol(value, context)).filter(Boolean)
-);
+export const mapSymbols = (raw: unknown, context: MappingContext, options?: SymbolMappingOptions) => {
+  if (options && raw !== null && !Array.isArray(raw)) throw new LanguageMappingError('Language provider returned malformed symbols');
+  return (Array.isArray(raw) ? raw : []).map((value: unknown) => mapSymbol(value, context, options)).filter(Boolean);
+};
 
 const mapChangeAnnotations = (value: unknown): Record<string, JsonRecord> | undefined => {
   if (!isRecord(value)) return undefined;

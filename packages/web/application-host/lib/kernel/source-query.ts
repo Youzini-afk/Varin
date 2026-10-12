@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { sourceReadError } from './source-admission-error.js';
-/** Query-local access to the original admitted source. No registrations, grants or corpus live here. */
+/** Query access retains the original admitted source authority. Private derived-language
+ * service contexts prepare and release Storage-owned views; they never replace a Run grant. */
 import { isDeepStrictEqual } from 'node:util';
 import type { DocumentAuthority } from '../documents/authority.js';
 import { inspectDocumentBytes, revisionFromBytes } from '../documents/inspect.js';
