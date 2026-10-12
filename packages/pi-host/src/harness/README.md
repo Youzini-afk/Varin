@@ -35,6 +35,12 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `research_source` | Register or inspect provenance and retained source objects | `source.register/list` |
 | `computer` | Observe/control a bound desktop application through structured calls or the persistent REPL | `computer.*` |
 
+The Explore model planner and complete progressive selection/followup loop live in the pure
+`@varin/protocol` Explore modules and are shared with native live-root retrieval. This Pi tool still
+owns its public start/finish/release/cancel and bridge deadlines. A nonempty wholly malformed selection
+is an invalid response, not an explicit empty selection; earlier accepted material remains. Normal
+retrieval errors are never relabeled as budget expiry merely because they arrive after the deadline.
+
 `grep` exposes `hidden` and `noIgnore`. Broad searches skip dot paths and ignored/generated files;
 explicit dot paths enable hidden traversal unless `hidden:false`; ignore rules still apply. Disk and fixed-view searches retain the same
 hidden-file choice. An interrupted search reports incomplete coverage rather than a clean zero.

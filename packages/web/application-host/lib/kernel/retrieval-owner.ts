@@ -1,7 +1,7 @@
 import type { FastDecisionMaterial } from '@varin/protocol';
 import { contentHashOf } from '../knowledge/semantic/identity.js';
 import type { DocumentAuthority } from '../documents/authority.js';
-import { createExploreQueryRun, DEFAULT_BYTE_BUDGET, DEFAULT_EXCERPT_LIMIT, type ExploreDeps } from '../harness/explore.js';
+import { createExploreQueryRun, formatExploreOutput, requiredExploreComponents, DEFAULT_BYTE_BUDGET, DEFAULT_EXCERPT_LIMIT, type ExploreDeps } from '../harness/explore.js';
 import type { ExploreFileSnapshot } from '../harness/explore-file-reader.js';
 import type { BoundRetrievalPipeline, PipelinePlan, RetrievalPipelineOwner, RetrievalSnippet, RetrievalStageKind, RetrievalStageStatus } from '../harness/retrieval-pipeline.js';
 import { waitWithSignal } from '../cancellation.js';
@@ -227,6 +227,7 @@ export function createRetrievalOwner({ documents, kernel, validateSource, pipeli
         await waitWithSignal(validateSource(query, signal), signal);
         await validateBinding();
       };
+      let modelParticipation: import('@varin/protocol').ExploreModelParticipation | undefined;
       try {
         run.start();
         if (binding.model?.kind === 'progressive') {
@@ -234,43 +235,75 @@ export function createRetrievalOwner({ documents, kernel, validateSource, pipeli
             // The query observer may detach immediately on cancel. This real owner
             // awaits its session so HTTP bodies and receipts retain their lifetime.
             const details = await binding.model.select({ run, validateMaterials }, signal);
-            run.applyFastDecision(details);
-            stage('model', details.status === 'failed' || details.status === 'cancelled' ? details.status
-              : details.missing || details.unevaluatedMaterials ? 'partial' : details.status === 'used' ? 'ready' : 'empty');
+            modelParticipation = details.model;
+            if (details.fastDecision) {
+              const decision = details.fastDecision;
+              run.applyFastDecision(decision);
+              stage('model', decision.status === 'failed' || decision.status === 'cancelled' ? decision.status
+                : decision.missing || decision.unevaluatedMaterials ? 'partial' : decision.status === 'used' ? 'ready' : 'empty');
+            }
+            if (details.model) {
+              const phases = [details.model.plan, details.model.select, details.model.followup, details.model.fastDecision];
+              stage('model', phases.includes('failed') ? 'failed' : phases.includes('cancelled') ? 'cancelled'
+                : phases.includes('used') ? 'ready' : 'empty');
+            }
           } catch { signal.throwIfAborted(); stage('model', 'failed'); }
         }
         await waitWithSignal(run.waitForViews(), signal);
-        const explored = run.finish();
+        const explored = run.finish(modelParticipation);
+        const packed = modelParticipation?.select === 'used' ? formatExploreOutput(explored)
+          : { snippets: explored.snippets, omitted: explored.omitted };
+        if (packed.omitted.length > explored.omitted.length) stage('model', 'partial');
         let bytes = 0;
-        for (const snippet of explored.snippets) {
-          const snapshot = await read(snippet.path);
-          if (snapshot.status !== 'ready' || snapshot.revision !== snippet.revision) continue;
-          const lines = snapshot.content.split('\n');
-          // A structure window may contain signature + focus blocks, not one contiguous range.
-          // Preserve the slicer's omitted spans; never refill its omitted body and truncate away the hit.
-          const ranges: Array<{ startLine: number; endLine: number }> = [];
-          let cursor = snippet.startLine;
-          for (const omitted of [...(snippet.unit?.omitted ?? [])].sort((a, b) => a.startLine - b.startLine)) {
-            if (omitted.endLine < cursor || omitted.startLine > snippet.endLine) continue;
-            if (omitted.startLine > cursor) ranges.push({ startLine: cursor, endLine: Math.min(snippet.endLine, omitted.startLine - 1) });
-            cursor = Math.max(cursor, omitted.endLine + 1);
-          }
-          if (cursor <= snippet.endLine) ranges.push({ startLine: cursor, endLine: snippet.endLine });
-          const isFocus = (range: { startLine: number; endLine: number }): boolean => [...(focuses.get(snippet.path) ?? [])].some(line => line >= range.startLine && line <= range.endLine);
-          ranges.sort((a, b) => Number(isFocus(b)) - Number(isFocus(a)) || a.startLine - b.startLine);
-          for (const range of ranges) {
-            if (result.snippets.length >= (query.limit ?? DEFAULT_EXCERPT_LIMIT)) { stage('keyword', 'partial'); break; }
-            let end = range.startLine - 1;
-            let content = '';
-            for (let index = range.startLine - 1; index < Math.min(range.endLine, lines.length); index++) {
-              const next = `${content}${end >= range.startLine ? '\n' : ''}${lines[index]!}`;
-              if (bytes + Buffer.byteLength(next, 'utf8') > DEFAULT_BYTE_BUDGET) break;
-              content = next; end = index + 1;
+        for (const component of requiredExploreComponents(packed.snippets)) {
+          const required = component.some(snippet => snippet.required || snippet.requiredGroups?.length);
+          const candidates: RetrievalSnippet[] = [];
+          let invalid = false;
+          for (const snippet of component) {
+            const snapshot = await read(snippet.path);
+            if (snapshot.status !== 'ready' || snapshot.revision !== snippet.revision) { invalid = true; continue; }
+            const lines = snapshot.content.split('\n');
+            const ranges: Array<{ startLine: number; endLine: number }> = [];
+            let cursor = snippet.startLine;
+            for (const omitted of [...(snippet.unit?.omitted ?? [])].sort((a, b) => a.startLine - b.startLine)) {
+              if (omitted.endLine < cursor || omitted.startLine > snippet.endLine) continue;
+              if (omitted.startLine > cursor) ranges.push({ startLine: cursor, endLine: Math.min(snippet.endLine, omitted.startLine - 1) });
+              cursor = Math.max(cursor, omitted.endLine + 1);
             }
-            if (end < range.endLine) stage('keyword', 'partial');
-            if (end < range.startLine) continue;
-            bytes += Buffer.byteLength(content, 'utf8');
-            result.snippets.push({ path: snippet.path, revision: snippet.revision, startLine: range.startLine, endLine: end, content });
+            if (cursor <= snippet.endLine) ranges.push({ startLine: cursor, endLine: snippet.endLine });
+            const isFocus = (range: { startLine: number; endLine: number }): boolean => [...(focuses.get(snippet.path) ?? [])].some(line => line >= range.startLine && line <= range.endLine);
+            ranges.sort((a, b) => Number(isFocus(b)) - Number(isFocus(a)) || a.startLine - b.startLine);
+            for (const range of ranges) {
+              if (range.startLine < 1 || range.endLine > lines.length) { invalid = true; continue; }
+              candidates.push({ path: snippet.path, revision: snippet.revision, ...range,
+                content: lines.slice(range.startLine - 1, range.endLine).join('\n'),
+                ...(snippet.required ? { required: true } : {}), ...(snippet.requiredGroups?.length ? { requiredGroups: snippet.requiredGroups } : {}) });
+            }
+          }
+          const remaining = (query.limit ?? DEFAULT_EXCERPT_LIMIT) - result.snippets.length;
+          const componentBytes = candidates.reduce((total, snippet) => total + Buffer.byteLength(snippet.content, 'utf8'), 0);
+          if (required && (invalid || candidates.length > remaining || bytes + componentBytes > DEFAULT_BYTE_BUDGET)) {
+            result.omissions.unavailable++; stage('model', 'partial'); continue;
+          }
+          for (const candidate of candidates) {
+            if (result.snippets.length >= (query.limit ?? DEFAULT_EXCERPT_LIMIT)) { stage('keyword', 'partial'); continue; }
+            let snippet = candidate;
+            if (bytes + Buffer.byteLength(snippet.content, 'utf8') > DEFAULT_BYTE_BUDGET) {
+              // Optional source ranges retain the original line-bound byte-budget behavior.
+              // Required components were checked in full above and are never truncated.
+              stage('keyword', 'partial');
+              let content = '';
+              let endLine = snippet.startLine - 1;
+              for (const line of snippet.content.split('\n')) {
+                const next = `${content}${endLine >= snippet.startLine ? '\n' : ''}${line}`;
+                if (bytes + Buffer.byteLength(next, 'utf8') > DEFAULT_BYTE_BUDGET) break;
+                content = next; endLine++;
+              }
+              if (endLine < snippet.startLine) continue;
+              snippet = { ...snippet, content, endLine };
+            }
+            bytes += Buffer.byteLength(snippet.content, 'utf8');
+            result.snippets.push(snippet);
           }
         }
         binding.assertAvailable?.();

@@ -3440,3 +3440,299 @@ fn queued_typed_media_text_edit_preserves_exact_owner_bytes_and_ref_ingress_is_r
         .is_err()
     );
 }
+
+fn admitted_native_query(
+    db: &mut Catalog,
+) -> (
+    crate::nested_tools::NestedScopeGuard,
+    crate::nested_tools::InferenceScopeGuard,
+    inference::generation::InferenceGenerateParams,
+    String,
+) {
+    use crate::execution::*;
+    use std::sync::Arc;
+    let r = submit(db);
+    let epoch = db.epoch();
+    db.transition_run(&r.run_id, epoch, 1, RunState::Runnable)
+        .unwrap();
+    let goal = db
+        .prepare_goal_start(
+            "native-inference-goal",
+            &r.run_id,
+            goals::GoalScope {
+                thread_id: r.thread_id.clone(),
+                branch_id: r.branch_id.clone(),
+            },
+            "Keep original inference facts".into(),
+            Some(goals::GoalBudget {
+                max_output_tokens: 1000,
+            }),
+        )
+        .unwrap()
+        .load()
+        .unwrap();
+    db.admit_goal_mutation(goal).unwrap();
+    let mut snapshot = request_snapshot(&r);
+    snapshot.view.binding.goal = db.goal_binding(&r.run_id).unwrap();
+    let schema = ToolSchema {
+        name: "code_retrieval".into(),
+        version: "1".into(),
+        description: String::new(),
+        schema: json!({"type":"object"}),
+        requirements: None,
+        output_schema: None,
+        metadata: None,
+    };
+    snapshot.view.binding.tools.push(schema.clone());
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::RequestPrepared { snapshot },
+    )
+    .unwrap();
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::ModelDispatched {
+            request_id: "model-1".into(),
+        },
+    )
+    .unwrap();
+    let call = ToolCall {
+        call_id: "retrieve".into(),
+        name: "code_retrieval".into(),
+        schema_version: "1".into(),
+        arguments: json!({"question":"query"}),
+    };
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::ModelFinished {
+            request_id: "model-1".into(),
+            outcome: ModelOutcome::Completed,
+            finish_reason: Some(FinishReason::ToolCalls),
+            items: vec![ProviderItem {
+                id: "retrieve-call".into(),
+                content: Content::ToolCall { call },
+                opaque: None,
+            }],
+            interrupted_deltas: vec![],
+            failure: None,
+            usage: UsageReceipt {
+                measurement: UsageMeasurement::Actual,
+                input_tokens: Some(0),
+                output_tokens: Some(0),
+                cached_input_tokens: Some(0),
+                cache_write_tokens: Some(0),
+                reasoning_tokens: Some(0),
+                ..Default::default()
+            },
+        },
+    )
+    .unwrap();
+    let context = ToolExecutionContext {
+        run_id: r.run_id.clone(),
+        operation_id: "model-1:tool:retrieve".into(),
+        origin: ToolOrigin::ModelStep {
+            request_id: "model-1".into(),
+        },
+    };
+    let registry = db.nested_tools();
+    let scope = registry
+        .register(
+            context.clone(),
+            ExecutorOwner::Kernel,
+            Arc::new(FrozenToolContext {
+                run_id: r.run_id,
+                origin: context.origin.clone(),
+                child_dispatch: None,
+                resource_activations: vec![],
+                resource_checkpoint_id: None,
+                tool_schema_generation: 1,
+                tools: Arc::new(vec![schema]),
+                source: None,
+            }),
+            CancellationToken::default(),
+            Arc::new(|_, _| unreachable!("this query makes no nested tool call")),
+        )
+        .unwrap();
+    let delegation = registry.delegate_inference(&context).unwrap();
+    let params: inference::generation::InferenceGenerateParams = serde_json::from_value(json!({
+        "parentOperationId": context.operation_id, "callerOwner": delegation.owner(), "ordinal": 1,
+        "configuration": { "providerId":"fixture", "providerFamily":"openai-responses", "model":"fixture", "endpoint":"https://fixture.invalid/responses", "allowAnonymous":false, "configurationGeneration":1, "maxOutputTokens":100 },
+        "credentialScope": { "reference":"fixture", "authority":"fixture", "account":"fixture", "generation":1 },
+        "purpose":"explore", "systemPrompt":"Select original views", "user":"Original material",
+    })).unwrap();
+    let body = db
+        .prepare_inference_content()
+        .write(&serde_json::to_value(&params).unwrap())
+        .unwrap();
+    let id = db
+        .admit_inference_generation(&params, body)
+        .unwrap()
+        .operation_id;
+    assert!(
+        db.operation(&context.operation_id).is_err(),
+        "the cheap query has no synthetic parent Operation"
+    );
+    (scope, delegation, params, id)
+}
+
+#[test]
+fn native_inference_rejects_external_and_forged_kernel_dispatch_and_receipts() {
+    use inference::*;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let (_scope, _delegation, params, id) = admitted_native_query(&mut db);
+    assert_eq!(
+        db.operation(&id).unwrap().execution_owner,
+        Some(ExecutorOwner::Kernel)
+    );
+    let before = db.operation(&id).unwrap();
+    for execution_owner in [params.caller_owner.clone(), ExecutorOwner::Kernel] {
+        let p = InferenceOwnerParams {
+            operation_id: id.clone(),
+            execution_owner: execution_owner.clone(),
+        };
+        assert!(db.dispatch_inference(&p).is_err());
+        assert!(
+            db.inference_receipt_pending(&InferenceReceiptPendingParams {
+                operation_id: id.clone(),
+                execution_owner: execution_owner.clone(),
+                request_started: false
+            })
+            .is_err()
+        );
+        let p = InferenceSettleParams {
+            operation_id: id.clone(),
+            execution_owner,
+            receipt: InferenceReceipt {
+                request_started: Some(false),
+                provider_completed: false,
+                local_executor_stopped: true,
+                usage: InferenceUsage::default(),
+                http_status: None,
+                problem: Some(InferenceProblem::NotDispatched),
+            },
+            response: json!({"forged":true}),
+        };
+        let body = db.prepare_inference_content().write(&p.response).unwrap();
+        assert!(db.settle_inference(&p, body).is_err());
+    }
+    assert_eq!(db.operation(&id).unwrap(), before);
+    let dispatched = db.dispatch_inference_generation(&id).unwrap();
+    assert!(dispatched.dispatched);
+    assert_eq!(
+        db.capture_goal("native-inference-goal")
+            .unwrap()
+            .load()
+            .unwrap()
+            .usage
+            .pending_inferences,
+        1
+    );
+}
+
+#[test]
+fn native_inference_checkpoint_reopens_original_usage_and_opaque_without_replay() {
+    use crate::execution::*;
+    use inference::generation::*;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let (scope, delegation, params, id) = admitted_native_query(&mut db);
+    db.dispatch_inference_generation(&id).unwrap();
+    let item = ProviderItem {
+        id: "provider-item".into(),
+        content: Content::Text {
+            text: "partial original".into(),
+        },
+        opaque: Some(OpaqueProviderItem {
+            connection_identity: "fixture".into(),
+            family: "openai-responses".into(),
+            adapter_version: "1".into(),
+            value: json!({"signature":["original",null,42]}),
+        }),
+    };
+    let usage = UsageReceipt {
+        measurement: UsageMeasurement::Actual,
+        input_tokens: Some(19),
+        output_tokens: None,
+        cached_input_tokens: Some(4),
+        cache_write_tokens: Some(0),
+        reasoning_tokens: None,
+        raw: Some(json!({"provider_original":"retained"})),
+        pricing_version: Some("original-price".into()),
+    };
+    let output = GenerationOutput {
+        events: vec![
+            ProviderEvent::ItemCompleted { item: item.clone() },
+            ProviderEvent::Usage {
+                receipt: usage.clone(),
+            },
+        ],
+        items: vec![item],
+        usage,
+    };
+    let original = generation_body(None, &output, None, None, None);
+    let body = db.prepare_inference_content().write(&original).unwrap();
+    db.checkpoint_inference_generation(&id, body, &output)
+        .unwrap();
+    drop(delegation);
+    drop(scope);
+    drop(db);
+    let mut db = f.open();
+    let status = db.inference_status(&id, &params.caller_owner).unwrap();
+    assert!(status.recovered);
+    assert_eq!(status.outcome, Some(Outcome::Indeterminate));
+    let receipt = status.receipt.unwrap();
+    assert!(!receipt.local_executor_stopped);
+    assert_eq!(receipt.request_started, None);
+    assert_eq!(receipt.usage.input_tokens, Some(19));
+    assert_eq!(receipt.usage.output_tokens, None);
+    assert_eq!(receipt.usage.cached_input_tokens, Some(4));
+    assert_eq!(receipt.usage.cache_write_tokens, Some(0));
+    assert_eq!(receipt.usage.reasoning_tokens, None);
+    let usage = db
+        .capture_goal("native-inference-goal")
+        .unwrap()
+        .load()
+        .unwrap()
+        .usage;
+    assert_eq!(usage.pending_inferences, 0);
+    assert_eq!(usage.actual.input_tokens.known, 19);
+    assert_eq!(usage.actual.output_tokens.unknown_receipts, 1);
+    assert_eq!(usage.actual.cached_input_tokens.known, 4);
+    assert!(db.dispatch_inference_generation(&id).is_err());
+    let body = db
+        .prepare_inference_content()
+        .write(&serde_json::to_value(&params).unwrap())
+        .unwrap();
+    assert!(db.admit_inference_generation(&params, body).is_err());
+    let body = db.prepare_inference_content().write(&original).unwrap();
+    assert!(
+        db.checkpoint_inference_generation(&id, body, &output)
+            .is_err()
+    );
+    assert_eq!(
+        db.prepare_content_collection(Default::default())
+            .run()
+            .status,
+        ContentCollectionStatus::Completed
+    );
+    let loaded = db
+        .capture_operation_read(db.operation(&id).unwrap())
+        .load()
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(loaded.result).unwrap()["value"]["response"],
+        original
+    );
+    assert_eq!(
+        db.capture_goal("native-inference-goal")
+            .unwrap()
+            .load()
+            .unwrap()
+            .usage,
+        usage
+    );
+}

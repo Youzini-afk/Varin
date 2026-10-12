@@ -2,7 +2,11 @@
 import { isDeepStrictEqual } from 'node:util';
 import { createHash } from 'node:crypto';
 import { parseHarnessModelSlots, resolveHarnessModelSlot, parseHarnessRerankSettings, resolveHarnessCodeRetrievalSettings,
-  type HarnessExploreDecisionMode } from '@varin/protocol';
+  runExploreModelLoop, resolveExploreDuties,
+  type ExploreModelComplete, type ExploreQueryStartResult, type HarnessExploreDecisionMode } from '@varin/protocol';
+import type { ThreadModelAuthority } from './thread-adapter.js';
+import { DEFAULT_BYTE_BUDGET } from '../harness/explore.js';
+import type { DecisionInferenceCapture } from '../knowledge/semantic/decision-inference.js';
 import { runExploreFastDecisionLoop } from '../harness/explore-fast-decision.js';
 import { ResearchDecisionFailure } from '../harness/research-decide.js';
 import type { SemanticInference } from '../knowledge/semantic/runtime-inference.js';
@@ -19,9 +23,10 @@ function origin(query: RetrievalQuery): ToolOrigin {
       : { kind: 'nested_call', parent_operation_id: value.parentOperationId };
 }
 export function createRetrievalModelStage(options: {
-  inference: Pick<SemanticInference, 'captureRerank' | 'captureDecision'>;
+  inference: Pick<SemanticInference, 'captureRerank' | 'captureDecision' | 'requests'>;
+  models?: ThreadModelAuthority;
   readGlobalSettings(): Promise<unknown>;
-  kernel: Pick<KernelClient, 'retrievalGrant' | 'scoped'>;
+  kernel: Pick<KernelClient, 'retrievalGrant' | 'scoped' | 'registerCredentialOwner' | 'unregisterCredentialOwner' | 'kernelEpoch'>;
   validateSource: LiveSourceResolver;
 }) {
   return { async prepare(query: RetrievalQuery, signal: AbortSignal): Promise<RetrievalModelLease> {
@@ -43,15 +48,15 @@ export function createRetrievalModelStage(options: {
       mode = resolveHarnessCodeRetrievalSettings(harness.codeRetrieval).decision;
     } catch { return unavailable('settings', 'unavailable', ['invalid']); }
     if (mode === 'source') return unavailable('none', 'disabled', [mode]);
-    if (mode === 'llm') return unavailable(mode, 'unsupported', [mode]);
-    if (mode === 'auto') {
-      // The original Explore slot has precedence over classifier and rerank. Resolve only
-      // this role so unrelated malformed model candidates cannot select or block this duty.
+    let exploreSelection: ReturnType<typeof resolveHarnessModelSlot> = null;
+    let exploreDisabled = false;
+    if (mode === 'auto' || mode === 'llm') {
       try {
         if (harness.models !== undefined && !object(harness.models)) throw new Error('Invalid Explore model settings');
         const raw = object(harness.models) ? harness.models.explore : undefined;
-        const explore = resolveHarnessModelSlot('explore', parseHarnessModelSlots(raw === undefined ? undefined : { explore: raw }), null);
-        if (explore) return unavailable(explore.providerId, 'unsupported', [mode, 'explore', explore]);
+        const slots = parseHarnessModelSlots(raw === undefined ? undefined : { explore: raw });
+        exploreDisabled = slots.explore?.enabled === false;
+        exploreSelection = resolveHarnessModelSlot('explore', slots, null);
       } catch { return unavailable('llm', 'unavailable', [mode, 'invalid-explore-slot']); }
     }
     const invocation = { operationId: toolOperationId(origin(query), query.invocation.toolCallId), executorOwner: query.inferenceOwner };
@@ -60,28 +65,68 @@ export function createRetrievalModelStage(options: {
       const verified = await options.readGlobalSettings();
       const current = object(verified) && object(verified.harness) ? verified.harness : {};
       if (!isDeepStrictEqual(current.codeRetrieval, harness.codeRetrieval)
-        || mode === 'auto' && (!isDeepStrictEqual(current.fastDecision, harness.fastDecision)
-          || !isDeepStrictEqual(object(current.models) ? current.models.explore : current.models,
-            object(harness.models) ? harness.models.explore : harness.models))) {
+        || mode === 'auto' && !isDeepStrictEqual(current.fastDecision, harness.fastDecision)
+        || (mode === 'auto' || mode === 'llm') && !isDeepStrictEqual(object(current.models) ? current.models.explore : current.models,
+          object(harness.models) ? harness.models.explore : harness.models)) {
         throw new Error('Retrieval model selection changed during preparation');
       }
       if (invocation.executorOwner.kind !== 'external') throw new Error('Original inference delegation is unavailable');
     };
-    if (mode === 'auto' || mode === 'fast-decision') {
-      const decision = await options.inference.captureDecision('explore');
-      if (decision.status === 'ready') {
-        const lease = decision.lease;
-        try {
-          await verifySelection();
-          const validate = async (active: AbortSignal = signal) => { await validateAvailable(active); await lease.assertAvailable(active); };
-          await validate(signal);
-          return {
-            stage: { providerId: lease.binding.providerId, configurationId: identity([mode, lease.binding]), status: 'ready',
-              implementation: { kind: 'progressive', select: async ({ run, validateMaterials }, active) => {
-                await validate(active);
-                return lease.run(invocation, active, session => runExploreFastDecisionLoop({
-                  run, binding: lease.binding, signal: active, deadlineAt: run.deadlineAt,
-                  closing: { promise: new Promise<void>(() => {}), requested: () => false },
+    // Explore is an independent, tool-free model role. Never inherit the main model.
+    let explore: Awaited<ReturnType<ThreadModelAuthority['resolveModel']>> | undefined;
+    let exploreScope: Awaited<ReturnType<NonNullable<typeof explore>['credentialOwner']['scope']>> | undefined;
+    if (exploreSelection) {
+      try {
+        if (!options.models || !options.inference.requests) throw new Error('Explore model owner unavailable');
+        explore = await options.models.resolveModel(exploreSelection);
+        exploreScope = await explore.credentialOwner.scope();
+      } catch { explore = undefined; exploreScope = undefined; }
+    } else if (mode === 'llm') return unavailable('llm', exploreDisabled ? 'disabled' : 'unavailable', [mode, exploreDisabled ? 'disabled' : 'unconfigured']);
+    let decision: DecisionInferenceCapture = { status: 'unconfigured' };
+    if (mode === 'auto' || mode === 'fast-decision') decision = await options.inference.captureDecision('explore');
+    if (exploreSelection && !explore && decision.status !== 'ready') return unavailable(exploreSelection.providerId, 'unavailable', [mode, exploreSelection]);
+    if (explore || decision.status === 'ready') {
+      const lease = decision.status === 'ready' ? decision.lease : undefined;
+      const llm = explore;
+      const scope = exploreScope;
+      const requests = options.inference.requests;
+      let revoked = false;
+      try {
+        await verifySelection();
+        const validate = validateAvailable;
+        const validateLLM = async (active: AbortSignal = signal) => {
+          await validateAvailable(active);
+          if (llm) {
+            let current: unknown;
+            try { current = await options.readGlobalSettings(); } catch { /* Invalid candidates do not replace this binding. */ }
+            if (object(current) && (current.harness === undefined || object(current.harness))) {
+              const currentHarness = object(current.harness) ? current.harness : {};
+              const models = currentHarness.models;
+              if (models === undefined || object(models) && (models.explore === undefined || object(models.explore) && models.explore.enabled === false)) revoked = true;
+              if (object(currentHarness.codeRetrieval) && currentHarness.codeRetrieval.decision === 'source') revoked = true;
+            }
+            if (revoked || !isDeepStrictEqual(await llm.credentialOwner.scope(), scope)) throw new Error('Original Explore model authority was revoked');
+          }
+          active.throwIfAborted();
+        };
+        await validate(signal);
+        return {
+          stage: { providerId: exploreSelection?.providerId ?? lease!.binding.providerId,
+            configurationId: identity([mode, exploreSelection, llm?.configuration, scope, lease?.binding]), status: 'ready',
+            implementation: { kind: 'progressive', select: async ({ run, validateMaterials }, active) => {
+              await validate(active);
+              const execute = async (call: import('../knowledge/semantic/inference-requests.js').InferenceCall) => {
+                await call.assertFresh();
+                const duties = resolveExploreDuties({ mode, llm: !!exploreSelection, fastDecision: !!lease, rerank: false });
+                let closing = false;
+                let settle!: () => void;
+                const settled = new Promise<void>(resolve => { settle = resolve; });
+                const loopAbort = new AbortController();
+                const loopSignal = AbortSignal.any([active, call.signal, loopAbort.signal]);
+                const fd = lease?.consume(call, session => runExploreFastDecisionLoop({
+                  run, binding: lease.binding, signal: loopSignal, deadlineAt: run.deadlineAt,
+                  judgeMaterials: duties.selection === 'fast-decision', waitForLaterProgress: !!exploreSelection,
+                  closing: { promise: settled, requested: () => closing },
                   call: async batch => {
                     try {
                       return await session.decide({ purpose: 'explore', goal: batch.goal,
@@ -91,22 +136,67 @@ export function createRetrievalModelStage(options: {
                       });
                     } catch (error) {
                       if (!(error instanceof ResearchDecisionFailure) || !error.result) throw error;
-                      // Preserve accounted partial facts, but a failed batch never selects
-                      // material or launches actions. Earlier successful rounds stay intact.
                       return { ...error.result, failure: { status: error.cancelled ? 'cancelled' : 'failed', note: error.message } };
                     }
                   },
                 }));
-              } },
-            },
-            assertAvailable, validateAvailable: validate,
-            release() { if (released) return; released = true; lease.release(); },
-          };
-        } catch (error) { lease.release(); throw error; }
-      }
-      if (mode === 'fast-decision' || !['disabled', 'unconfigured'].includes(decision.status)) {
-        return unavailable('fast-decision', decision.status === 'disabled' ? 'disabled' : 'unavailable', [mode, decision.status]);
-      }
+                void fd?.catch(() => {});
+                let model: import('@varin/protocol').ExploreModelParticipation | undefined;
+                let fastDecision: Awaited<NonNullable<typeof fd>> | undefined;
+                try {
+                  if (exploreSelection) {
+                    await run.refreshVocab();
+                    const complete: ExploreModelComplete | undefined = llm && scope ? Object.assign(async (input: Parameters<ExploreModelComplete>[0]) => {
+                      const generatedSignal = input.signal ? AbortSignal.any([active, input.signal]) : active;
+                      const epoch = options.kernel.kernelEpoch;
+                      return call.generate({ signal: generatedSignal,
+                        request: { configuration: llm.configuration, credentialScope: scope, purpose: 'explore', systemPrompt: input.systemPrompt, user: input.user },
+                        check: async () => { generatedSignal.throwIfAborted(); await validateLLM(generatedSignal); await validateMaterials([]); generatedSignal.throwIfAborted(); },
+                        register: async (id, originalSignal) => {
+                          await options.kernel.registerCredentialOwner(query.runId, llm.credentialOwner, originalSignal, id,
+                            { kind: 'operation', operationId: id, assertLive: async () => { await validateLLM(generatedSignal); await validateMaterials([]); } });
+                        },
+                        release: id => { if (options.kernel.kernelEpoch === epoch) options.kernel.unregisterCredentialOwner(query.runId, id); },
+                      });
+                    }, llm.configuration.contextWindowTokens ? { inputBytes: llm.configuration.contextWindowTokens } : {}) : undefined;
+                    const queryId = invocation.operationId;
+                    const started: ExploreQueryStartResult = { queryId, question: run.question, deadlineAt: run.deadlineAt,
+                      parsed: { objects: run.parsed.objects, relation: run.parsed.relation, domain: run.parsed.domain },
+                      vocab: run.vocab(), sources: run.sourceStates(), inputSource: 'disk', decisionMode: mode, duties,
+                      fastDecision: { status: decision.status } };
+                    const guard = async () => { await validate(active); await validateMaterials([]); };
+                    model = await runExploreModelLoop({ started, ...(complete ? { complete } : {}), signal: active, ...(query.limit === undefined ? {} : { limit: query.limit }), port: {
+                      plan: async plan => { await validateLLM(active); await guard(); return { queryId, ...await run.submitPlan(plan), sources: run.sourceStates() }; },
+                      views: async input => {
+                        await guard();
+                        const actions = duties.actions === 'llm' && !run.signal.aborted ? await run.actionCandidates() : [];
+                        const views = run.collect(input);
+                        return { queryId, question: run.question, ...views, sources: run.sourceStates(), deadlineAt: run.deadlineAt, actions, outputByteBudget: DEFAULT_BYTE_BUDGET };
+                      },
+                      wait: after => run.waitForProgress(after, active),
+                      select: async groups => { await validateLLM(active); await guard(); return { ...run.applySelection(groups), queryId }; },
+                      followup: async request => { await validateLLM(active); await guard(); return { queryId, ...await run.followup(request), sources: run.sourceStates() }; },
+                    } });
+                    if (!llm) { model.plan = 'failed'; model.select = 'failed'; model.note = 'The selected Explore model is unavailable; source material was kept.'; }
+                  }
+                } finally {
+                  if (exploreSelection) { closing = true; settle(); }
+                  try { fastDecision = await fd; }
+                  finally { loopAbort.abort(); }
+                }
+                return { ...(model ? { model } : {}), ...(fastDecision ? { fastDecision } : {}) };
+              };
+              if (!requests) throw new Error('Original inference session is unavailable');
+              return requests.run(invocation, active, execute);
+            } },
+          },
+          assertAvailable, validateAvailable: validate,
+          release() { if (released) return; released = true; lease?.release(); },
+        };
+      } catch (error) { lease?.release(); throw error; }
+    }
+    if (mode === 'fast-decision' || !['disabled', 'unconfigured'].includes(decision.status)) {
+      return unavailable('fast-decision', decision.status === 'disabled' ? 'disabled' : 'unavailable', [mode, decision.status]);
     }
     let configured;
     try { configured = parseHarnessRerankSettings(harness.rerank); }

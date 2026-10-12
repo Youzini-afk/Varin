@@ -23,6 +23,10 @@ export interface InferenceUsage {
   measurement: "missing" | "estimated" | "actual";
   inputTokens: number | null;
   outputTokens: number | null;
+  cachedInputTokens?: number | null;
+  cacheWriteTokens?: number | null;
+  reasoningTokens?: number | null;
+  pricingVersion?: string | null;
 }
 
 export interface InferenceReceipt {
@@ -32,6 +36,26 @@ export interface InferenceReceipt {
   usage: InferenceUsage;
   httpStatus: number | null;
   problem: InferenceProblem | null;
+}
+
+export interface InferenceSessionParams {
+  parentOperationId: string;
+  executionOwner: ExecutorOwner;
+}
+
+export interface InferenceSessionStatus {
+  hasRequests: boolean;
+}
+
+export interface InferenceGenerateParams {
+  parentOperationId: string;
+  callerOwner: ExecutorOwner;
+  ordinal: number;
+  configuration: ModelSessionConfiguration;
+  credentialScope: CredentialScope;
+  purpose: string;
+  systemPrompt: string;
+  user: string;
 }
 
 export interface InferenceAdmitParams {
@@ -1297,7 +1321,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 10; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 11; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 

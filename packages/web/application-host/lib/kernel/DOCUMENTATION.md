@@ -793,8 +793,9 @@ references, not a frozen wrapper around whichever backend/index happens to be cu
 `harness.rerank` connection. The extension plan still selects structural/semantic composition; it
 is not a second model selector. `source` dispatches nothing, an explicit unavailable reranker stays
 unavailable, and `auto` respects an explicitly enabled Explore model slot before fast-decision rather than silently
-choosing a different paid model. Native Explore LLM remains explicitly unsupported; an absent or disabled Explore slot continues
-through the original fast-decision binding and then the existing rerank choice. Slot parsing/resolution comes from the shared configuration contract, not another model list.
+choosing a different paid model. A ready Explore LLM plans and jointly selects source; in auto a ready
+fast-decision role independently handles actions. An absent/disabled Explore slot continues through the
+original classifier and rerank choices, while an explicitly selected unavailable model stays visible. Slot parsing/resolution comes from the shared configuration contract, not another model list.
 A query pins its actual credential/configuration binding through the original Host credential owner.
 Deleting the original rerank selection is explicit Off and retires retained leases; normal/invalid
 replacement candidates leave accepted bindings intact. A nonempty request with no scored documents
@@ -813,7 +814,7 @@ stably ahead of unscored or over-budget candidates, whose original order remains
 status. This generic protocol does not define input/output token dimensions: raw usage/meta are
 retained, but total tokens are not relabeled as input and output is not invented as zero. Actual
 requests therefore retain missing usage under the original Goal barrier. Protocol-specific known
-metering and material/Explore LLM consumers remain follow-on work.
+metering and material-purpose consumers remain follow-on work.
 
 `fast-decision` uses the original `ExploreQueryRun` and `runExploreFastDecisionLoop` before
 query finish. It judges source-issued views and action candidates, applies successful selections and
@@ -828,6 +829,23 @@ request, so ordinals do not restart and earlier usage is not counted again. `res
 same session interface. Loop summaries omit an unknown token dimension instead of filling it with zero;
 Catalog still owns each actual HTTP charge and its unknown-usage barrier. Purpose Off and credential
 revocation suppress new work/delivery while preserving the original receipt and actual body-drain facts.
+
+The shared `protocol/explore-model-loop` is also the actual Pi consumer: prompts, planning, retained
+joint replacement, explicit empty selection, required groups and race-free source waits have one
+implementation. Native adapts the original query directly. The FD loop settles explicitly after the
+LLM consumer finishes, so an idle action loop does not deadlock collection. Each role checks its own
+configuration/credential revocation; disabling one does not silently assign its paid duty to the other.
+Required selection components survive both Host packing and final Rust version/encoded-budget checks;
+a stale required member drops its component rather than publishing a partial group as intact.
+
+`runtime.inference.generate` admits native tool-free generation into the same inference ledger.
+The original query delegation proves the caller, but the Operation executor is Kernel. Its supervised
+worker uses `model_session` adapters and the exact operation-lifetime private credential binding;
+Host HTTP settlement endpoints cannot write native receipts. Request snapshots, original provider
+items/events/opaque output and full usage stay in ContentStore. Recovery keeps durable checkpoint usage
+and never replays generation. Query cancellation may detach before this worker actually drains.
+One Host query session allocates every classifier/native ordinal, and per-request receipt callbacks
+keep concurrent native charges out of the classifier's batch summary.
 
 ### Model item identity and committed-history recovery
 

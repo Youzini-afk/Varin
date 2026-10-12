@@ -102,7 +102,7 @@ records typed dependencies in its manifests. Original publication protection spa
 the short identity/epoch/revision-checked commit. GC follows those dependencies from the existing
 history, input, operation, event, policy and request roots. Catalog retains only original metadata;
 byte reads, hash/base64 work and provider serialization stay outside its control lock. Catalog
-format **54**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **9** reject older internal
+format **58**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **11** reject older internal
 formats directly. These are distinct from policy service **4** and private script worker protocol **2**.
 
 `runtime.output.media.read` uses the original caller Thread/branch plus an actual history, queued
@@ -421,7 +421,7 @@ passive fact interrupts an unrelated observation Wait. Physical release remains 
 Computer owner's evidence, independent of input acceptance and body failure.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version **57**, input domain 6 and collaboration domain 8 store input intents/queue bodies and context-job ownership,
+The current Catalog, input and collaboration domains store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format **4** retains typed request origins and typed output bodies. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
@@ -433,7 +433,8 @@ permission audit events and original invocation completions. Original decision/r
 references and their historical settlement event roots are also retained. It verifies each distinct live object
 before sweeping and preserves unknown files; it never deletes history or invokes system-kernel GC.
 
-`catalog_inference.rs` owns purpose-specific decision/rerank HTTP work under an already admitted tool.
+`catalog_inference.rs` owns purpose-specific decision/rerank HTTP and native auxiliary generation under
+an already admitted tool/query.
 One parent/ordinal identifies one actual request, with the original external executor, frozen binding
 and Goal. Progressive retrieval retains that same query session across classifier batches and SDK
 requests; ordinals do not reset and each HTTP contribution is counted once. Required `requestKind` distinguishes `preparation` from `model_compute`; both retain the
@@ -446,7 +447,7 @@ provider completion. Parent/Run/Goal controls fence the corresponding child requ
 rejects new dispatch without retroactively cancelling otherwise valid already-dispatched work.
 Recovery retains the external owner, marks unresolved dispatch as unknown and never resends it.
 The exact original owner may refine that recovery receipt, replacing its original Goal contribution
-in the same transaction. Repeated delivery leaves revision, events and usage unchanged. Catalog 57
+in the same transaction. Repeated delivery leaves revision, events and usage unchanged. Catalog 58
 prevents an older reader from applying generic external-operation recovery to these inference facts.
 If a drained transport's full receipt cannot be published, `receipt_pending` records that exact
 owner's short unknown-usage fact before its parent callback may finish. Known no-send evidence
@@ -454,18 +455,27 @@ removes only the original dispatch placeholder. Later full publication refines t
 a late short barrier cannot overwrite a complete receipt. If neither write succeeds, the Host keeps
 the original callback/bytes until an event or ready notification permits publication, without a timer
 retry loop or another provider request. This does not serialize unrelated valid in-flight requests.
-The Host supplies actual transport cancellation/body drain, credentials and protocol interpretation;
+Native text generation shares these records through `catalog_inference_generation.rs`, with Kernel
+execution ownership and a separately retained original query caller proof. Only internal native methods
+prepare/checkpoint/settle those operations; public Host receipt writes still require the actual External
+HTTP executor. The supervised worker uses the original model adapter and operation-bound private
+credential owner, with a tool-free auxiliary request origin. Immutable snapshot and full provider output
+remain referenced body data; durable known usage survives interruption, and unknown dimensions stay
+unknown. An already recorded occurrence is never automatically regenerated after reopen. The session
+read checks any exact original parent occurrence, including a gap before its first admitted ordinal.
+
+For classifier/rerank HTTP, the Host supplies actual transport cancellation/body drain, credentials and protocol interpretation;
 this module does not implement a second provider/configuration owner or an inference batch ledger.
 
 Cheap Kernel retrieval has no durable parent Operation. Its existing InvocationRunner/NestedTools
 scope delegates a fresh external inference identity at the real retrieval entry; no Host API creates
 that delegation. Admission/dispatch hold the same short scope fence while Catalog commits the actual
-HTTP Operation, original ToolOrigin and frozen Goal. Tagged callers distinguish a durable external
+inference Operation, original ToolOrigin and frozen Goal. Tagged callers distinguish a durable external
 tool from that real query context. Scope exit/cancellation forbids new requests but does not erase an
 already-dispatched child or its exact-owner receipt. Recovery cannot recreate the vanished scope.
 A cheap query may detach promptly while the child transport remains active; only the child's original
-receipt establishes local drain and updates its pending/unknown Goal usage. Catalog 57 and wire 10
-replace the former decision-only names directly, without an alias or older-format reader.
+receipt establishes local drain and updates its pending/unknown Goal usage. Catalog 58 and wire 11
+retain explicit caller proof and native-generation facts, without an alias or older-format reader.
 
 Child task records retain ownership/state and references to task text, configuration and launch
 descriptions. Admission prepares those bodies and verifies the original dispatch arguments on a worker;
@@ -692,7 +702,7 @@ output does not suppress their next legal request delivery or replay the write a
 
 The private protocol releases only completed-body transfer credit after a nested call belongs to its
 live worker, preserving the pending cancellation/final response. This permits further original
-permission/domain requests at the existing window size. Catalog **50** rejects older internal formats
+permission/domain requests at the existing window size. The current Catalog rejects older internal formats
 directly. Persistent script environments use the contract below; typed media follows the shared
 output contract above. Arbitrary extension Node I/O is not sandboxed or intercepted.
 

@@ -393,7 +393,7 @@ pub(super) fn schema_version(view: &RequestView, name: &str) -> Result<String, M
     // its provider original even though no schema was offered. The empty version explicitly
     // means unadmitted; the policy-model owner rejects every call before result publication.
     // Ordinary conversation requests still require an exact offered schema below.
-    if matches!(view.origin, RequestOrigin::PolicyModelJob { .. } | RequestOrigin::McpSampling { .. }) {
+    if matches!(view.origin, RequestOrigin::PolicyModelJob { .. } | RequestOrigin::McpSampling { .. } | RequestOrigin::AuxiliaryInference { .. }) {
         return Ok(String::new());
     }
     view.binding

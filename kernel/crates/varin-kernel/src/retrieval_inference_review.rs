@@ -17,7 +17,9 @@ use varin_runtime::{OperationPhase, RunState};
 #[path = "../../varin-runtime/tests/fixtures/input_admission.rs"]
 mod admission;
 use admission::InputAdmission;
-struct Model;
+struct Model {
+    question: String,
+}
 impl ModelProvider for Model {
     fn serialize(&self, _: &RequestView) -> Result<Value, ExecutionError> {
         Ok(json!({}))
@@ -45,8 +47,21 @@ impl ModelProvider for Model {
             .iter()
             .find(|tool| tool.name == "code_retrieval")
             .unwrap();
-        emit(ProviderEvent::ItemCompleted{item:ProviderItem{id:"retrieval-call".into(),opaque:None,content:Content::ToolCall{call:ToolCall{
-            call_id:"retrieve".into(),name:schema.name.clone(),schema_version:schema.version.clone(),arguments:json!({"question":"retrievalNeedle","paths":["allowed"],"limit":3})}}}}).unwrap();
+        emit(ProviderEvent::ItemCompleted {
+            item: ProviderItem {
+                id: "retrieval-call".into(),
+                opaque: None,
+                content: Content::ToolCall {
+                    call: ToolCall {
+                        call_id: "retrieve".into(),
+                        name: schema.name.clone(),
+                        schema_version: schema.version.clone(),
+                        arguments: json!({"question":self.question,"paths":["allowed"],"limit":3}),
+                    },
+                },
+            },
+        })
+        .unwrap();
         Ok(FinishReason::ToolCalls)
     }
 }
@@ -58,6 +73,10 @@ struct Review {
     retrieval: crate::retrieval::RetrievalBridge,
     resources: mpsc::Receiver<ResourceCall>,
     executor: Arc<KernelToolExecutor>,
+    credentials: crate::credential_bridge::CredentialBridge,
+    cursor: u64,
+    native_release: Option<Arc<dyn Fn() + Send + Sync>>,
+    native_events: Option<mpsc::Receiver<Value>>,
 }
 impl Review {
     fn new(mode: &str) -> Self {
@@ -70,6 +89,8 @@ impl Review {
         let (output, outgoing) = mpsc::sync_channel(64);
         let bridge = ToolBridge::new(output.clone().into());
         bridge.initialize(EPOCH);
+        let credentials = crate::credential_bridge::CredentialBridge::new(output.clone());
+        credentials.initialize(EPOCH).unwrap();
         let retrieval = crate::retrieval::RetrievalBridge::new(output);
         retrieval.initialize(EPOCH);
         let storage_root = root.join("storage");
@@ -169,9 +190,31 @@ impl Review {
             retrieval,
             resources,
             executor,
+            credentials,
+            cursor: 0,
+            native_release: None,
+            native_events: None,
         }
     }
     fn pump(&mut self) -> Option<Value> {
+        if let Some(events) = &self.native_events {
+            while let Ok(frame) = events.try_recv() {
+                self.f.host.send(frame);
+            }
+        }
+        self.f.runtime.reap().unwrap();
+        let cursor = self
+            .f
+            .runtime
+            .catalog()
+            .lock()
+            .unwrap()
+            .event_cursor()
+            .unwrap();
+        if cursor != self.cursor {
+            self.cursor = cursor;
+            self.f.host.send(json!({"v":crate::protocol::PROTOCOL_VERSION,"kind":"runtime-event","kernelEpoch":EPOCH,"stream":"durable","cursor":cursor}));
+        }
         while let Ok(call) = self.resources.try_recv() {
             let result = serve_resource(
                 &mut self.f.storage.lock().unwrap(),
@@ -182,8 +225,43 @@ impl Review {
             );
             call.reply.send(result).unwrap();
         }
-        let value = self.f.pump()?;
+        let runtime = self.f.runtime.clone();
+        let credentials = self.credentials.clone();
+        let value = self.f.pump_dispatch(
+            |frame| {
+                if frame["method"] == "runtime.inference.generate" {
+                    let params = frame["params"].clone();
+                    validate_method_params("runtime.inference.generate", &params).unwrap();
+                    Some(inference_generation_commands::generate(
+                        runtime.clone(),
+                        credentials.clone(),
+                        params,
+                        &AtomicBool::new(false),
+                    ))
+                } else {
+                    None
+                }
+            },
+            |_, _| true,
+        )?;
+        if value["kind"] == "fixture-native-release" {
+            self.native_release
+                .as_ref()
+                .expect("native transport release owner")();
+            return None;
+        }
+        if value["kind"] == "credential-response" {
+            self.credentials.receive(value);
+            return None;
+        }
         if value["kind"] == "retrieval-response" {
+            if self.mode == "llm-stale" {
+                std::fs::write(
+                    self.root.join("workspace/allowed/helper.ts"),
+                    "export function hiddenHelper() { return \"CHANGED_HELPER\"; }\n",
+                )
+                .unwrap();
+            }
             if self.mode == "empty" {
                 assert!(
                     value["result"]["stages"]
@@ -208,7 +286,13 @@ impl Review {
                 RunStart {
                     binding: binding(&self.f.runtime, &self.run),
                     policy_state: Value::Null,
-                    provider: Arc::new(Model),
+                    provider: Arc::new(Model {
+                        question: if self.mode.starts_with("llm-") {
+                            "How does retrievalNeedle resolve its dependency?".into()
+                        } else {
+                            "retrievalNeedle".into()
+                        },
+                    }),
                     tools: self.executor.clone(),
                     policy: Arc::new(DefaultAgentPolicy),
                     context_preparation: Arc::new(NoopContextPreparation),
@@ -299,12 +383,12 @@ impl Review {
 #[test]
 #[ignore = "requires built Host/extension packages; actual source owners and controlled rerank over stdio"]
 fn original_rerank_source_selection_partial_scores_and_receipts_survive_reopen() {
-    for mode in ["rank", "source", "unsupported", "stale", "empty"] {
+    for mode in ["rank", "source", "unconfigured-model", "stale", "empty"] {
         let mut review = Review::new(mode);
         let counts = review.execute(false);
         assert_eq!(
             counts["requests"],
-            if matches!(mode, "source" | "unsupported") {
+            if matches!(mode, "source" | "unconfigured-model") {
                 0
             } else {
                 1
@@ -343,7 +427,7 @@ fn original_rerank_source_selection_partial_scores_and_receipts_survive_reopen()
         if mode == "source" {
             assert_eq!(paths.len(), 3);
         }
-        if mode == "unsupported" || mode == "empty" {
+        if mode == "unconfigured-model" || mode == "empty" {
             assert_eq!(result["status"], "partial");
             assert_eq!(paths.len(), 3);
         }
@@ -607,3 +691,6 @@ fn progressive_decision_keeps_one_query_owner_across_real_actions_and_paid_batch
         std::fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[path = "retrieval_llm_review.rs"]
+mod llm;

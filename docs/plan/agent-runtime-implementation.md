@@ -19,6 +19,13 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-12 增量：原 Explore LLM 规划与联合选材
+
+- Native live_root code_retrieval 接原 Explore slot/模型配置/凭据与原生 adapter。Pi 与 Native 共用原完整渐进规划、联合选择、replacement/retained/显式空选和 followup；auto 的 LLM 选材与 fast-decision actions 各守自身 Off/凭据边界，不互相接管付费职责。
+- 原 inference ledger 统一 query session 与全部真实请求 ordinal；调用委派和 Kernel 实际执行 owner 分开。Catalog **58**、wire **11**直接拒旧，原 ContentStore 保 request/snapshot/provider items/opaque/raw usage，原 Goal 保真实用量与未知屏障，没有第二推理任务或计量库。
+- required group 沿 Host 原 pack 与 Rust 真实字节重建，版本/范围/预算不截成残组。普通 source 排序保原语义；原取消可先释放 query，生成实际排空才有停止事实，恢复不重放任何已记录的收费发生项。
+- 有限跨层验收与复跑入口见[本片记录](../reviews/runtime-explore-llm-2026-10-12.md)。真实组合、两条独审反例修复和同源打包分别留证。固定/物化/远端来源、其他用途及完整平台/产品验收仍分别推进；用户负责最终默认切换与全面迁移。
+
 ## 2026-10-12 增量：原渐进检索 fast-decision
 
 - Native live_root code_retrieval 复用原 ExploreQueryRun/fast-decision loop，在 finish 前判断实际材料和原 action、执行 followup 并接后续批次。原 selector、purpose/default/Off、Documents/grant 与 source owner 保持，未造第二 planner 或权限目录。
@@ -713,12 +720,12 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 | 能力 | 当前入口/权威 | 目标交付 | 原生实现状态 |
 | --- | --- | --- | --- |
 | 会话、分支、运行中输入 | `packages/pi-host/src/session-host.ts`、`packages/runtime-broker` | ConversationStore + RunCoordinator；队列编辑、steering、停止、重连、历史回读 | 局部实现：持久队列、编辑/取消、边界输入/中断/nextRun；显式原生界面、固定 head 分页与对话分支已接入；默认路由迁移与完整恢复未完成 |
-| 模型、认证、推理用途 | Pi SDK、Host `connections`/`pi-config`/`small-model` | 各实际配置 transport、OAuth/云身份、模型覆盖、reasoning/opaque、多模态、usage；chat与embedding/rerank等各自合同 | 局部实现：native query/index embedding 与 TypeSafe/Cloudflare/llama.cpp decision 复用真实配置/凭据 owner、原transport和持久dispatch/usage事实，dedicated rerank 与原渐进 fast-decision 已接 live_root 检索；其他用途/已知 rerank 计量及完整认证/模型覆盖未完成 |
+| 模型、认证、推理用途 | Pi SDK、Host `connections`/`pi-config`/`small-model` | 各实际配置 transport、OAuth/云身份、模型覆盖、reasoning/opaque、多模态、usage；chat与embedding/rerank等各自合同 | 局部实现：native query/index embedding 与 TypeSafe/Cloudflare/llama.cpp decision 复用真实配置/凭据 owner、原transport和持久dispatch/usage事实，dedicated rerank、原渐进 fast-decision 与 Explore LLM 规划/联合选材已接 live_root 检索；其他用途/已知 rerank 计量及完整认证/模型覆盖未完成 |
 | 上下文、记忆checkpoint、压缩 | Pi harness/session history、Host `memory` | 原文保留；来源角色；冻结快照；祖先范围压缩；交付去重；即时记忆写入与稳定system快照 | 原生 checkpoint、自动容量水位与分段摘要 Run 已实现；可替换预算策略、provider 容量反馈与完整自动记忆产品流程仍待 |
 | 文件、草稿、恢复 | Rust `storage`；Host `documents`/`recovery`；UI Document Registry | 复用内容对象/条件写入/恢复；明确草稿owner；分支与磁盘效果区分；组合恢复可核对 | 原生文件工具、固定/可写来源、结果保留与逐项集成已有闭环；完整草稿与历史/磁盘组合恢复的产品接线仍需完成 |
 | 工作分支、基线与dispatch | Host `harness/thread-services.ts`、`thread-runtime.ts`、`kernel/storage-adapter.ts` | 持久受理立即回执；准备独立作业；批量capture；真实一致性标记；无变更报告与代码集成分开 | 固定与可写 child 持久受理、原来源准备、递归取消、报告/WorkingResult 与逐项集成已接；更广捕获与恢复产品组合仍待 |
 | Shell、PTY、输出、进程树 | Rust `process` guardian；Host `kernel/process-service.ts`/`terminal` | 保留真实进程回执；推送I/O与stdin确认；控制独立；取消观察不同于终止进程 | 原生 spawn/持久观察/停止、PTY input/resize 回执、原进程终端与恢复已接；平台和产品完整验收仍待 |
-| LSP、结构/关键词/语义检索 | Host `lsp`/`search`/`structure`/`knowledge`；Rust `compute` | 按environment/project/config/view共享服务；来源修订明确；独立准备；不等待无关索引 | 局部实现：live_root 定义/引用/诊断及可组合关键词/结构/显式语义已接原 owner 与原生历史；真实reader切代、撤权和推理账本已验收。dedicated rerank 与渐进 fast-decision 已接原逐 HTTP 回执。fixed/materialized 闭包、其余 LSP/模型消费者与远端仍未完成 |
+| LSP、结构/关键词/语义检索 | Host `lsp`/`search`/`structure`/`knowledge`；Rust `compute` | 按environment/project/config/view共享服务；来源修订明确；独立准备；不等待无关索引 | 局部实现：live_root 定义/引用/诊断及可组合关键词/结构/显式语义已接原 owner 与原生历史；真实reader切代、撤权和推理账本已验收。dedicated rerank、渐进 fast-decision 和原 Explore LLM 已接原推理回执。fixed/materialized 闭包、其余 LSP/模型消费者与远端仍未完成 |
 | 任务协作、消息、wait | Host `harness` registry/services | 单一Thread/Run事实；有来源消息；Wait持久化与游标；结果恰当去重；旧世代不污染新执行 | 真实 family 发现/互读、inform/request/reply、关联 Wait/期限、多观察屏障、child 独立新 Run 已接；完整 Host 与平台验收仍待 |
 | 计划、普通记忆、Bot知识 | Host `memory`/`knowledge`；普通Agent notes为Rust typed record | 保留各领域owner、权限和revision；不把所有知识塞入泛化状态库 | 普通 notes、真实自身计划、root/child 两调用来源、CAS 和原回执恢复已接；Bot 知识与完整自动记忆流程仍待 |
 | Goal、自动接续、辅助模型 | Host `bots`/`pi-session-automation`/`run` | 显式Goal授权、暂停/预算/用量；等待不覆盖手动暂停；辅助请求独立身份 | 显式 Goal、原用量/预算、暂停、依赖、root/child 自动接续及独立规划模型已接；其他辅助用途与完整产品验收仍待 |

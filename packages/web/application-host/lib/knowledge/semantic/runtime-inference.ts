@@ -370,6 +370,7 @@ export function createSemanticInference(
   };
   return {
     readGlobalSettings, capture,
+    requests,
     captureRerank: (expected?: import('@varin/protocol').HarnessRerankSettings): Promise<RerankInferenceCapture> => rerank ? rerank.capture(expected) : Promise.resolve({ status: 'unavailable', message: 'Rerank inference is unavailable.' }),
     captureDecision: (purpose: import("@varin/protocol").HarnessFastDecisionPurpose): Promise<DecisionInferenceCapture> => decision
       ? decision.capture(purpose) : Promise.resolve({ status: "unavailable", message: "Native decision inference is unavailable." }),

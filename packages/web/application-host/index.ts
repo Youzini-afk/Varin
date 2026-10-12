@@ -3726,7 +3726,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (error) => console.error('[HarnessKnowledge] Semantic runtime failed:', errorMessage(error)),
   });
   semanticRuntimeHolder.current = semanticRuntime;
-  const retrievalModel = createRetrievalModelStage({ inference: semanticInference,
+  const retrievalModel = createRetrievalModelStage({ inference: semanticInference, models: modelAuthority,
     readGlobalSettings: () => hostCredentialAuthority.readGlobalInferenceSettings(), kernel: kernelClient, validateSource: liveSources.validate });
   const retrievalComposition = createRetrievalComposition(extensionRuntime, {
     prepareModel: (scope, signal) => {

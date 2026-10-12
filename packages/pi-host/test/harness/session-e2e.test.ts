@@ -61,7 +61,7 @@ import { CompactionWorkerRuntime } from "../../src/compaction-worker.js";
 import { COMPACTION_SYSTEM_PROMPT, deserializeCompactionModel } from "../../src/harness/compaction-agent.js";
 import { providerSystemPrompt, serializedToolResult } from "./provider-context.js";
 import { estimateModelInputTokens } from "../../src/harness/context-request-boundary.js";
-import { EXPLORE_PLAN_SYSTEM, EXPLORE_SELECT_SYSTEM } from "../../src/harness/explore-model.js";
+import { EXPLORE_PLAN_SYSTEM, EXPLORE_SELECT_SYSTEM } from "@varin/protocol";
 
 const WORKSPACE_ID = "session-e2e-workspace";
 

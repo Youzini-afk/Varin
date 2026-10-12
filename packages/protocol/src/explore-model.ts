@@ -5,7 +5,7 @@ import type {
   ExploreQueryStartResult,
   ExploreQueryView,
   ExploreQueryViewsResult,
-} from "@varin/protocol";
+} from "./harness.js";
 
 const MECHANISM = /\b(how|why|mechanism|flow|wired|through)\b/iu;
 const MECHANISM_HAN = /怎么|如何|为何|机制|流程|为什么|怎样/;
@@ -122,6 +122,8 @@ export function parseExploreSelection(text: string): {
       ...(typeof group.gap === "string" && group.gap.trim() ? { gap: group.gap.trim() } : {}),
     }];
   });
+  // A malformed nonempty selection must not become an explicit empty replacement.
+  if (groupsIn.length > 0 && groups.length === 0) return undefined;
   const followupIn = record.followup && typeof record.followup === "object" && !Array.isArray(record.followup)
     ? record.followup as Record<string, unknown>
     : undefined;

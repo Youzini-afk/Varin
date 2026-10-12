@@ -97,7 +97,7 @@ Explore 位于 `read/grep/ls` 等直接工具和 LLM 检索子 Agent 之间：�
 [查询执行器](../../packages/web/application-host/lib/harness/explore.ts)、
 [查询服务](../../packages/web/application-host/lib/harness/explore-query-services.ts)、
 [快速决策循环](../../packages/web/application-host/lib/harness/explore-fast-decision.ts)、
-[生成模型输入输出](../../packages/pi-host/src/harness/explore-model.ts)。
+[生成模型输入输出](../../packages/protocol/src/explore-model.ts)。
 
 #### 6.1.3 一个执行器，五项职责
 
@@ -371,7 +371,7 @@ b7520322已解决“metadata声称交付、正文却没显示”的问题。本�
 | 位置 | 改动 |
 | --- | --- |
 | `packages/protocol/src/harness.ts`、`harness-settings.ts` | 内部增量收集/提交、判断输入身份与职责计划；保留显式用户策略语义 |
-| `packages/pi-host/src/harness/explore-tool.ts`、`explore-model.ts` | 按职责发批量任务，复用现有模型绑定；取消/交付沿同 query |
+| `packages/protocol/src/explore-model.ts`、`explore-model-loop.ts`；Pi `explore-tool.ts` 与 Native query port | 按职责发批量任务，复用现有模型绑定；取消/交付沿同 query |
 | `packages/web/application-host/lib/harness/explore.ts`、query-store/services | 分离来源生产、读取、增强和收集；读取与输出limit解耦；补基础动作 |
 | `explore-fast-decision.ts`、`explore-rerank.ts` | 统一批次/实际可见范围/上下文身份；按职责消费，避免全局排他和重复判断 |
 | `structure/source.ts`、LSP binder | 消费者区分 warm 增强与必要的精确导航准备，不全局关闭LSP |

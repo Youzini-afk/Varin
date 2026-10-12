@@ -207,6 +207,7 @@ impl Fixture {
                     measurement: UsageMeasurement::Actual,
                     input_tokens: Some(11),
                     output_tokens: output,
+                    ..InferenceUsage::default()
                 }
             } else {
                 InferenceUsage::default()
@@ -240,12 +241,16 @@ impl Fixture {
 fn recovered_original_owner_refines_once_without_restarting_request() {
     for started in [true, false] {
         let mut f = Fixture::new(100);
-        let request = f.admit(1);
+        let request = f.admit(2);
+        assert!(f.db.operation(&format!("inference:{}:1", f.context.operation_id)).is_err());
         f.db.dispatch_inference(&request).unwrap();
         assert_eq!(f.usage().pending_inferences, 1);
         let root = f.root.clone();
         drop(f.db);
         f.db = Catalog::open(&root).unwrap();
+        assert!(f.db.inference_session(&InferenceSessionParams {
+            parent_operation_id: f.context.operation_id.clone(), execution_owner: f.owner.clone(),
+        }).unwrap().has_requests);
         assert_eq!(f.usage().missing_inferences, 1);
         assert_eq!(f.usage().pending_inferences, 0);
         let unknown =
