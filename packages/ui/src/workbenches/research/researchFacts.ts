@@ -1,5 +1,5 @@
 import { runtimeFetch } from '@varin/application-client';
-import type { ThreadResearchAPI, ThreadResearchSelection } from '@varin/application-client';
+import type { ThreadMaterialsAPI, ThreadResearchAPI, ThreadResearchSelection } from '@varin/application-client';
 import type {
   ExperimentArtifactView,
   ExperimentAttemptView,
@@ -50,6 +50,7 @@ export interface ResearchBatchRerunItem {
 /** A string is an actual Pi session. Native selections always carry their distinct authority. */
 export type ResearchFactsOwner = string | {
   api: ThreadResearchAPI;
+  materials: ThreadMaterialsAPI;
   selection: ThreadResearchSelection;
   canSubmit: boolean;
 };

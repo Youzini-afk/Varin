@@ -10,27 +10,26 @@ use varin_runtime::execution::*;
 use varin_runtime::supervisor::RunStart;
 use varin_runtime::{Effect, Outcome, RunState};
 
-const EPOCH: &str = "web-domain-review";
-const HOST: &str = "web-domain-host";
-const GENERATION: &str = "web-domain-generation";
+pub(super) const EPOCH: &str = "web-domain-review";
+pub(super) const HOST: &str = "web-domain-host";
+pub(super) const GENERATION: &str = "web-domain-generation";
 const THREAD: &str = "thread:web";
 const BRANCH: &str = "branch:web";
 
-struct Host {
+pub(super) struct Host {
     child: Child,
     input: ChildStdin,
     frames: mpsc::Receiver<Value>,
 }
 impl Host {
     fn new() -> Self {
+        Self::with_script("packages/web/application-host/lib/kernel/web-domain-host.test-helper.ts")
+    }
+    pub(super) fn with_script(script: &str) -> Self {
         let mut child =
             Command::new(std::env::var_os("VARIN_NODE").unwrap_or_else(|| "node".into()))
                 .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.."))
-                .args([
-                    "--import",
-                    "tsx",
-                    "packages/web/application-host/lib/kernel/web-domain-host.test-helper.ts",
-                ])
+                .args(["--import", "tsx", script])
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())
@@ -55,7 +54,7 @@ impl Host {
             frames,
         }
     }
-    fn send(&mut self, value: Value) {
+    pub(super) fn send(&mut self, value: Value) {
         writeln!(self.input, "{value}").unwrap();
         self.input.flush().unwrap();
     }
@@ -67,13 +66,13 @@ impl Drop for Host {
     }
 }
 
-struct Fixture {
-    host: Host,
-    runtime: Arc<RunSupervisor>,
-    storage: Mutex<Storage>,
-    storage_root: PathBuf,
-    bridge: ToolBridge,
-    outgoing: mpsc::Receiver<Value>,
+pub(super) struct Fixture {
+    pub(super) host: Host,
+    pub(super) runtime: Arc<RunSupervisor>,
+    pub(super) storage: Mutex<Storage>,
+    pub(super) storage_root: PathBuf,
+    pub(super) bridge: ToolBridge,
+    pub(super) outgoing: mpsc::Receiver<Value>,
 }
 impl Fixture {
     fn rpc(&self, frame: &Value) -> Result<Value, KernelError> {
@@ -99,6 +98,12 @@ impl Fixture {
                     read.map(|r| r.load()).transpose().map_err(domain)?,
                 )?)
             }
+            "runtime.research.scopes" => host_job_commands::execute(
+                self.runtime.clone(),
+                method,
+                params,
+                &AtomicBool::new(false),
+            ),
             "runtime.operation.inspect"
             | "runtime.permission.open"
             | "runtime.permission.consume"
@@ -122,6 +127,51 @@ impl Fixture {
                 let mut storage = self.storage.lock().unwrap();
                 let (grant, params) =
                     storage.authorize(grant_id, EPOCH, HOST, GENERATION, method, &params)?;
+                if method == "file.materialize" {
+                    use crate::storage::materialization::Admission;
+                    let admission = storage.prepare_materialization(
+                        &params,
+                        &grant,
+                        Arc::new(AtomicBool::new(false)),
+                    )?;
+                    drop(storage);
+                    return match admission {
+                        Admission::Complete(value) => Ok(value),
+                        Admission::Work(task) => {
+                            let result = task.run(|control| {
+                                self.storage.lock().unwrap().control_materialization(
+                                    &task.operation_id,
+                                    &task.job_id,
+                                    control,
+                                    false,
+                                )
+                            });
+                            self.storage
+                                .lock()
+                                .unwrap()
+                                .finish_materialization(&task.operation_id, &task.job_id);
+                            result
+                        }
+                    };
+                }
+                if method == "file.capture" {
+                    let task = storage.prepare_capture(
+                        method,
+                        &params,
+                        &grant,
+                        Arc::new(AtomicBool::new(false)),
+                    )?;
+                    drop(storage);
+                    let body = task.run();
+                    let mut storage = self.storage.lock().unwrap();
+                    let result = (|| {
+                        let (grant, _) = storage
+                            .authorize(grant_id, EPOCH, HOST, GENERATION, method, &params)?;
+                        storage.publish_capture(&task, body?, &grant)
+                    })();
+                    storage.finish_retained_file_lease(task.lease_id());
+                    return result;
+                }
                 if method == "storage.getBlob" {
                     let task = storage.prepare_blob_read(
                         &params,
@@ -140,7 +190,7 @@ impl Fixture {
             }
         }
     }
-    fn pump(&mut self) -> Option<Value> {
+    pub(super) fn pump(&mut self) -> Option<Value> {
         while let Ok(frame) = self.outgoing.try_recv() {
             self.host.send(frame);
         }
@@ -174,7 +224,7 @@ impl Fixture {
             _ => Some(frame),
         }
     }
-    fn receive(&mut self, kind: &str) -> Value {
+    pub(super) fn receive(&mut self, kind: &str) -> Value {
         let deadline = Instant::now() + Duration::from_secs(60);
         loop {
             assert!(

@@ -1,16 +1,17 @@
 /** Native invocation and public-reader adapters into the existing Web/material owners. */
 import { isDeepStrictEqual } from 'node:util';
-import type { ThreadIdentity, ThreadMaterialsAPI, ThreadMaterialReadRequest } from '@varin/application-client';
+import type { ThreadIdentity, ThreadMaterialsAPI, ThreadMaterialArtifactReadRequest, ThreadResearchSelection } from '@varin/application-client';
 import { WEB_CAPABILITY, WEB_TOOL_DECLARATIONS } from '@varin/extension-builtins';
 import { parseVarinToolJson } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
 import { compileToolJsonSchema } from '@varin/pi-host/tool-schema';
 import {
   resolveHarnessDocumentReadingSettings,
-  type FetchResult, type HarnessDocumentReadingSettings, type HarnessWebDomainPolicy,
+  type DocumentReadRequest, type FetchResult, type HarnessDocumentReadingSettings, type HarnessWebDomainPolicy,
   type PiSettingsSnapshot, type WebFetchRequest, type WebSearchRequest, type WebSearchResult,
 } from '@varin/protocol';
 import type { DocumentReader, DocumentReaderContext } from '../harness/document-reading.js';
+import { readDocumentMaterial } from '../harness/material-read-service.js';
 import { resolveHarnessWebBinding, type HarnessWebBinding } from '../harness/harness-web-settings.js';
 import { HarnessServiceError } from '../harness/service-error.js';
 import type { createWebFetch } from '../harness/web-fetch.js';
@@ -23,6 +24,7 @@ import { threadMaterialScope } from './material-storage.js';
 import type { ExtensionToolBinding, LaunchSource, OutputBody, IncomingMedia, OutputPart } from './protocol.generated.js';
 import { runToolDomainCall, type ToolInvocationAuthority } from './tool-invocation.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
+import type { DocumentSources } from './document-sources.js';
 
 export { WEB_CAPABILITY };
 const declarations = new Map(WEB_TOOL_DECLARATIONS.map(declaration => [declaration.id.slice('varin.web.'.length),
@@ -71,7 +73,7 @@ function configuration(identity: string | null | undefined): WebConfiguration {
 function decode(method: string, value: unknown) {
   const selected = declarations.get(method);
   if (!selected || !selected.validate(value)) throw new HarnessServiceError('invalid-params',
-    'Arguments do not match the Web capability. This reader accepts snapshots, not local paths, artifacts or a model prompt.');
+    'Arguments do not match the Web capability. Select exactly one document source; a reader-model prompt is unsupported.');
   return { selected, input: parseVarinToolJson(value) };
 }
 
@@ -108,6 +110,7 @@ export interface WebRuntimeOptions {
   runtime: Pick<AgentRuntimeClient, 'familyList' | 'run' | 'launch'>;
   webFetch: ReturnType<typeof createWebFetch>;
   documentReader: DocumentReader;
+  documentSources?: DocumentSources;
   materials: WebMaterialStore;
   fetch: typeof globalThis.fetch;
   readAuth(): unknown | Promise<unknown>;
@@ -147,6 +150,7 @@ export function createWebRuntime(options: WebRuntimeOptions) {
   const user: ThreadMaterialsAPI = {
     async read(identity, request, signal = new AbortController().signal) {
       decode('read', request);
+      if (!request.snapshotId || 'path' in request || 'artifact' in request) throw new HarnessServiceError('invalid-params', 'Select a retained Thread material snapshot');
       const owner = await scope(identity, signal);
       const runId = owner.branch.activeRunId ?? owner.branch.latestRun?.runId;
       const launch = runId ? await options.runtime.launch(runId, signal) : null;
@@ -154,6 +158,21 @@ export function createWebRuntime(options: WebRuntimeOptions) {
       const config = capture(await options.settings(launch?.selection.source ?? null));
       signal.throwIfAborted();
       return options.documentReader.read(request, context(owner, config, signal));
+    },
+    async readArtifact(selection: ThreadResearchSelection, request: ThreadMaterialArtifactReadRequest, signal = new AbortController().signal) {
+      decode('read', request);
+      if (!request.artifact || 'path' in request || 'snapshotId' in request) throw new HarnessServiceError('invalid-params', 'Select an original experiment artifact');
+      const owner = await scope(selection, signal);
+      if (!options.documentSources) throw new HarnessServiceError('unavailable', 'Experiment document reading is unavailable');
+      // Resolve the selected research scope before reading source-specific settings.
+      // The original artifact iterator starts only when the shared reader consumes it.
+      const original = await options.documentSources.artifact(selection, request.artifact, signal);
+      const launch = await options.runtime.launch(selection.sourceRunId, signal);
+      const config = capture(await options.settings(launch?.selection.source ?? null));
+      signal.throwIfAborted();
+      return readDocumentMaterial(options.documentReader, request, context(owner, config, signal), {
+        readArtifact: async () => original,
+      });
     },
   };
   const capability: HostCapabilityHandler = async (method, value, call) => {
@@ -166,7 +185,8 @@ export function createWebRuntime(options: WebRuntimeOptions) {
         const owner = await invocationScope(invocation, call.signal);
         const result = method === 'search' ? await search.handle(input as WebSearchRequest, { owner, config, signal: call.signal })
           : method === 'fetch' ? await fetchPage(input as WebFetchRequest, owner, config, call.signal)
-            : await options.documentReader.read(input as unknown as ThreadMaterialReadRequest, context(owner, config, call.signal));
+            : await readDocumentMaterial(options.documentReader, input as unknown as DocumentReadRequest,
+              context(owner, config, call.signal), options.documentSources?.tool(invocation));
         if (call.signal.aborted) return { executor_stopped: true, completion: { kind: 'result', outcome: 'cancelled', effect: 'none', content: webOutput(result) } };
         return receipt(result);
       } catch (error) {

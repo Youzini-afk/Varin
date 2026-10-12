@@ -368,8 +368,22 @@ One cancelled waiter does not stop other holders; the final waiter waits for the
 drain. A started snapshot write settles before its caller releases. A fetched HTML body survives a pin
 failure with explicit `snapshotError`, rather than claiming a usable snapshot. Known PDF pixels become
 typed media in native tool output while the complete metadata and source identity remain ordinary data.
-This slice supports URL/fixed-snapshot reads; local paths, experiment artifact ingestion, collections,
-sharing, scholarly/decision services and extra reader-model prompts still need native integration.
+Native `document_read` also ingests local paths from the accepted original Run source and collected
+Experiment artifacts. `kernel/document-sources.ts` uses the existing source grant: fixed branches read
+the exact revision, live roots use the Documents-validated registration, and materialized runs capture
+their current managed working copy. It never requires selecting a second file/experiment tool, follows
+no leaf symlink, and keeps the grant and temporary capture owner until the original reads settle.
+`kernel/research-access.ts` projects the same Catalog research scope used by the research tools; an
+artifact read never creates an Experiment or grants its owner's material namespace. Public
+`ThreadsAPI.materials.readArtifact` carries the explicit original source Run; subsequent reader calls
+use the returned snapshot under the actual reader Thread. Source-less artifact selection remains
+unavailable under that original research source contract. No public local-path selector is introduced.
+
+Full and ranged material body/source reads page the same immutable record proof through Rust getBlob;
+the wire-frame maximum is not a PDF size limit. Metadata-only reader checks request zero body bytes but
+still validate the record and object. Cancellation awaits each started read/iterator and material
+commit before reporting drain. Collections/sharing, scholarly/decision services and extra reader-model
+prompts still need native integration.
 
 Harness deadline/cancellation diagnostics record the request method, admission/service/response
 phase, elapsed time, service completion and pending storage method counts. They contain no tool
@@ -396,9 +410,11 @@ the operation directory, or the query scope.
 
 ### PDF material reading (`document-reading.ts`, `material-read-service.ts`, `pdf-engine.ts`)
 
-`document_read(path)` resolves a local path through the Host Documents/scope authority and ingests its
-original bytes before probing. `document_read(snapshot_id)` reads an existing web or material snapshot
-under the caller's authority. Both call `materials.read`; network `web.fetch` stores PDF source bytes in
+`document_read(path)` resolves a local path through its original runtime's source authority and ingests
+its original bytes before probing. Pi uses its admitted Documents path; native uses the durable Run
+source described above. `document_read(snapshotId)` reads an existing web or material snapshot under
+the caller's authority. The shared `readDocumentMaterial` core also accepts an original Experiment
+artifact byte stream, with each runtime retaining its own original authorization adapter; network `web.fetch` stores PDF source bytes in
 the same material store before it asks the reader to inspect them. The source object uses
 `representation: "pdf-source-v1"`; `document.source.contentHash` / `sourceHash` identifies the original
 PDF bytes, while the current readable snapshot's `contentHash` identifies its body. A derived view's

@@ -299,8 +299,9 @@ export const createDocumentReader = (deps: { materials: Materials; engineFactory
     if (found.ref.document?.kind !== "pdf" || !found.source) return { status: "failed", url: found.ref.finalUrl, reason: "snapshot has no original PDF" };
     const sourceHash = found.ref.document.source?.contentHash ?? hash(found.source.bytes);
     const sourceSnapshotId = found.ref.document.sourceSnapshotId ?? found.ref.snapshotId;
+    const referenceRead = { byteRange: { offset: 0, length: 0 }, ...(ctx.signal ? { signal: ctx.signal } : {}) };
     const sourceRef = sourceSnapshotId === found.ref.snapshotId ? found.ref
-      : (await deps.materials.read(ctx.workspaceId, sourceSnapshotId, ctx.authority))?.ref;
+      : (await deps.materials.read(ctx.workspaceId, sourceSnapshotId, ctx.authority, referenceRead))?.ref;
     const options = ctx.engineOptions ?? {};
     const engine = engineFactory(options);
     const source = found.source.bytes;
@@ -313,7 +314,7 @@ export const createDocumentReader = (deps: { materials: Materials; engineFactory
     });
     const recheck = async (): Promise<boolean> => {
       checkAbort(ctx.signal);
-      const current = await deps.materials.read(ctx.workspaceId, snapshotId, ctx.authority);
+      const current = await deps.materials.read(ctx.workspaceId, snapshotId, ctx.authority, referenceRead);
       return !!current && current.ref.document?.source?.contentHash === sourceHash && !domainBlocked(current.ref.finalUrl, ctx.domainPolicy);
     };
     const overview = (probe?: Awaited<ReturnType<typeof engine.probe>>, textStatus: DocumentOverview["textStatus"] = "not-requested"): DocumentOverview => ({
@@ -441,13 +442,13 @@ export const createDocumentReader = (deps: { materials: Materials; engineFactory
     const cacheKey = `${ctx.workspaceId}:${sourceSnapshotId}:${analysisId}:${ctx.authority.threadId ?? `session:${ctx.authority.sessionId}`}`;
     let derived: WebSnapshotContent | null = null;
     if (deps.materials.findAnalysisConfig) {
-      derived = await deps.materials.findAnalysisConfig(ctx.workspaceId, sourceHash, configHash, toolVersions, ctx.authority, sourceSnapshotId);
+      derived = await deps.materials.findAnalysisConfig(ctx.workspaceId, sourceHash, configHash, toolVersions, ctx.authority, sourceSnapshotId, ctx.signal);
     } else if (parser === "native" && request.ocr !== true && deps.materials.findAnalysis) {
-      derived = await deps.materials.findAnalysis(ctx.workspaceId, sourceHash, analysisId, ctx.authority, sourceSnapshotId);
+      derived = await deps.materials.findAnalysis(ctx.workspaceId, sourceHash, analysisId, ctx.authority, sourceSnapshotId, ctx.signal);
     }
     if (!derived) {
       const indexedId = analysisIndex.get(cacheKey);
-      if (indexedId) derived = await deps.materials.read(ctx.workspaceId, indexedId, ctx.authority);
+      if (indexedId) derived = await deps.materials.read(ctx.workspaceId, indexedId, ctx.authority, ctx.signal ? { signal: ctx.signal } : {});
     }
     if (!derived) {
       const analyze = async (signal: AbortSignal) => {

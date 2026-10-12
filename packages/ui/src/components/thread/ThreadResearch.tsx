@@ -1,12 +1,12 @@
 import React from 'react';
-import type { ThreadIdentity, ThreadResearchAPI, ThreadResearchScope } from '@varin/application-client';
+import type { ThreadIdentity, ThreadMaterialsAPI, ThreadResearchAPI, ThreadResearchScope } from '@varin/application-client';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { useI18n } from '@/lib/i18n';
 import { ResearchFactsView } from '@/workbenches/research/ResearchFactsPanel';
 
 /** Source choices are Catalog projections. A later Run changing source never hides the older choice. */
-export function ThreadResearch({ api, identity, sourceRunId }: {
-  api: ThreadResearchAPI; identity: ThreadIdentity; sourceRunId?: string;
+export function ThreadResearch({ api, materials, identity, sourceRunId }: {
+  api: ThreadResearchAPI; materials: ThreadMaterialsAPI; identity: ThreadIdentity; sourceRunId?: string;
 }) {
   const { t } = useI18n();
   const [scopes, setScopes] = React.useState<ThreadResearchScope[]>([]);
@@ -48,9 +48,9 @@ export function ThreadResearch({ api, identity, sourceRunId }: {
   }, [api, identity.threadId, identity.branchId, sourceRunId]);
   const selected = scopes.find(scope => scope.sourceRunId === selectedRunId);
   const owner = React.useMemo(() => selectedRunId ? {
-    api, canSubmit: selected?.canSubmit ?? false,
+    api, materials, canSubmit: selected?.canSubmit ?? false,
     selection: { runtime: 'agent' as const, threadId: identity.threadId, branchId: identity.branchId, sourceRunId: selectedRunId },
-  } : null, [api, identity.threadId, identity.branchId, selectedRunId, selected?.canSubmit]);
+  } : null, [api, materials, identity.threadId, identity.branchId, selectedRunId, selected?.canSubmit]);
   if (!selected && !error) return null;
   return <section>
     {error && <p role="alert">{error}</p>}

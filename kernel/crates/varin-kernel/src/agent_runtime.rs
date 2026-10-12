@@ -3025,3 +3025,7 @@ mod mcp_interaction_review;
 #[cfg(test)]
 #[path = "web_domain_review.rs"]
 mod web_domain_review;
+
+#[cfg(test)]
+#[path = "pdf_source_review.rs"]
+mod pdf_source_review;

@@ -222,8 +222,11 @@ export interface ThreadComputerAPI {
 }
 /** Fixed retained material; authority is resolved by the Host from the real Thread. */
 export type ThreadMaterialReadRequest = Omit<DocumentReadRequest, 'path' | 'artifact' | 'snapshotId'> & { snapshotId: string };
+/** Original experiment artifact selected through a retained source Run; never a file-path grant. */
+export type ThreadMaterialArtifactReadRequest = Omit<DocumentReadRequest, 'path' | 'artifact' | 'snapshotId'> & { artifact: NonNullable<DocumentReadRequest['artifact']> };
 export interface ThreadMaterialsAPI {
   read(identity: ThreadIdentity, request: ThreadMaterialReadRequest, signal?: AbortSignal): Promise<FetchResult>;
+  readArtifact(selection: import('./research.js').ThreadResearchSelection, request: ThreadMaterialArtifactReadRequest, signal?: AbortSignal): Promise<FetchResult>;
 }
 export interface ThreadsAPI {
   materials: ThreadMaterialsAPI;

@@ -172,6 +172,60 @@ describe("web material snapshots", () => {
       options: { offset: 8, length: 5, signal: controller.signal } }]);
   });
 
+  it("pages retained source and body bytes under the same record proof and rejects incomplete pages", async () => {
+    const body = Buffer.alloc(512 * 1024 + 19, "body");
+    const source = Buffer.concat([Buffer.from("%PDF-1.7\n"), Buffer.alloc(512 * 1024, 23)]);
+    const reads: Array<{ slot: string; recordId: string; offset: number; length: number }> = [];
+    let truncate = false;
+    const opened = openStore({ client: { getBlob: async (hash, proof, range) => {
+      const bytes = opened.objects.get(hash)!;
+      const offset = range!.offset!, length = range!.length!;
+      expect(length).toBeLessThanOrEqual(256 * 1024);
+      reads.push({ ...proof, offset, length });
+      return { byteLength: bytes.length, bytesBase64: bytes.subarray(offset, offset + length - (truncate ? 1 : 0)).toString("base64") };
+    } } });
+    const ref = await opened.materials.put("ws", { ...draft("file:///paper.pdf"), document: { kind: "pdf", parser: "source" } }, body,
+      authority("pi", "thread"), { source: { bytes: source, contentType: "application/pdf" } });
+    const found = await opened.materials.read("ws", ref.snapshotId, authority("pi", "thread"), { includeSource: true });
+    expect(found?.body).toEqual(body);
+    expect(found?.source?.bytes).toEqual(source);
+    expect(reads.map(read => [read.slot, read.offset])).toEqual([
+      ["body", 0], ["body", 256 * 1024], ["body", 512 * 1024],
+      ["source", 0], ["source", 256 * 1024], ["source", 512 * 1024],
+    ]);
+    expect(reads.every(read => read.recordId === `web.snapshot:${ref.snapshotId}`)).toBe(true);
+    truncate = true;
+    await expect(opened.materials.read("ws", ref.snapshotId, authority("pi", "thread"))).rejects.toMatchObject({ code: "corrupt" });
+  });
+
+  it("waits for an in-flight retained source page on cancellation and reads no later page", async () => {
+    const controller = new AbortController();
+    let enter!: () => void, finish!: () => void, settled = false;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    const held = new Promise<void>(resolve => { finish = resolve; });
+    const source = Buffer.alloc(768 * 1024, 29);
+    const sourceOffsets: number[] = [];
+    const opened = openStore({ client: { getBlob: async (hash, proof, range) => {
+      const bytes = opened.objects.get(hash)!;
+      if (proof.slot === "source") {
+        sourceOffsets.push(range!.offset!);
+        expect(range!.signal).toBe(controller.signal);
+        if (range!.offset === 256 * 1024) { enter(); await held; }
+      }
+      return { byteLength: bytes.length, bytesBase64: bytes.subarray(range!.offset!, range!.offset! + range!.length!).toString("base64") };
+    } } });
+    const ref = await opened.materials.put("ws", { ...draft("file:///paper.pdf"), document: { kind: "pdf", parser: "source" } }, Buffer.alloc(0),
+      authority("pi", "thread"), { source: { bytes: source, contentType: "application/pdf" } });
+    const reading = opened.materials.read("ws", ref.snapshotId, authority("pi", "thread"), { includeSource: true, signal: controller.signal })
+      .catch(error => { settled = true; return error; });
+    await entered;
+    controller.abort(); await new Promise<void>(resolve => setImmediate(resolve));
+    expect(settled).toBe(false);
+    finish();
+    expect(await reading).toBe(controller.signal.reason);
+    expect(sourceOffsets).toEqual([0, 256 * 1024]);
+  });
+
   it("keeps a snapshot whose body is cited by another run while releasing unreferenced ones", async () => {
     const opened = openStore();
     const owner = authority("session-a", "thread-a", "run-a");
