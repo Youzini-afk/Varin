@@ -395,14 +395,16 @@ impl Review {
                             4
                         } else if matches!(
                             self.mode.as_str(),
-                            "semantic-cache" | "semantic-credential"
+                            "semantic-cache" | "semantic-credential" | "semantic-local-cache"
                         ) {
                             2
                         } else {
                             1
                         },
                         semantic_only: self.mode.starts_with("semantic-fixed-"),
-                        question: if self.mode.starts_with("semantic-fixed-") {
+                        question: if self.mode == "semantic-local-stop" {
+                            "HOLD_FORWARD query".into()
+                        } else if self.mode.starts_with("semantic-fixed-") {
                             "quasar rendezvous".into()
                         } else if self.mode.starts_with("llm-") || self.mode == "semantic-auto" {
                             "How does retrievalNeedle resolve its dependency?".into()
@@ -439,7 +441,7 @@ impl Review {
                     .events_after(0, 10000)
                     .unwrap()
                     .into_iter()
-                    .find(|event| event.kind == "inference.admitted")
+                    .find(|event| event.kind == "inference.admitted" && db.operation(&event.subject).unwrap().phase != OperationPhase::Terminal)
                     .unwrap();
                 let op = db
                     .capture_operation_read(db.operation(&event.subject).unwrap())
@@ -575,7 +577,7 @@ fn original_rerank_source_selection_partial_scores_and_receipts_survive_reopen()
             })
             .collect::<Vec<_>>();
         for op in &operations {
-            assert_eq!(op.intent["binding"]["api"], "http-rerank");
+            assert_eq!(op.intent["binding"]["executor"]["api"], "http-rerank");
             assert_eq!(op.intent["binding"]["requestKind"], "model_compute");
             if mode == "empty" {
                 assert_eq!(
@@ -822,3 +824,6 @@ mod semantic;
 
 #[path = "retrieval_fixed_semantic_review.rs"]
 mod fixed_semantic;
+
+#[path = "retrieval_local_semantic_review.rs"]
+mod local_semantic;

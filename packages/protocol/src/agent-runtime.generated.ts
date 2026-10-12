@@ -3,20 +3,20 @@
 export interface InferenceReceiptPendingParams {
   operationId: string;
   executionOwner: ExecutorOwner;
-  requestStarted: boolean;
+  requestStarted: boolean | null;
 }
 
 export type InferenceRequestKind = 'preparation' | 'model_compute';
+
+export type InferenceExecutor = { kind: "http"; api: string; endpoint: string; credentialScope: CredentialScope } | { kind: "local_component"; componentId: string; componentVersion: string; manifestDigest: string; modelRevision: string; workerProtocol: number };
 
 export interface InferenceBinding {
   requestKind: InferenceRequestKind;
   purpose: string;
   providerId: string;
   modelId: string;
-  api: string;
-  endpoint: string;
   configurationId: string;
-  credentialScope: CredentialScope;
+  executor: InferenceExecutor;
 }
 
 export interface InferenceUsage {
@@ -91,7 +91,7 @@ export interface InferenceStatus {
   receipt: InferenceReceipt | null;
 }
 
-export type InferenceProblem = 'cancelled' | 'transport_failed' | 'http_rejected' | 'invalid_response' | 'owner_interrupted' | 'not_dispatched' | 'receipt_pending';
+export type InferenceProblem = 'cancelled' | 'transport_failed' | 'executor_failed' | 'http_rejected' | 'invalid_response' | 'owner_interrupted' | 'not_dispatched' | 'receipt_pending';
 
 export interface McpInteractionPending extends McpInteractionRecord {
   generation?: McpSamplingGeneration;
@@ -1324,7 +1324,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 20; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 21; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 

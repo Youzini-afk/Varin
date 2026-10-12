@@ -340,7 +340,7 @@
 ],
   "runtimeExports": [
 "InferenceReceiptPendingParams",
-"InferenceSessionParams","InferenceSessionStatus","InferenceGenerateParams","InferenceRequestKind","InferenceBinding","InferenceUsage","InferenceReceipt","InferenceAdmitParams","InferenceOwnerParams","InferenceSettleParams","InferenceStatus","InferenceProblem",
+"InferenceSessionParams","InferenceSessionStatus","InferenceGenerateParams","InferenceRequestKind","InferenceExecutor","InferenceBinding","InferenceUsage","InferenceReceipt","InferenceAdmitParams","InferenceOwnerParams","InferenceSettleParams","InferenceStatus","InferenceProblem",
     "McpInteractionPending",
     "McpInteractionPresentation",
     "McpSamplingGenerateParams",
@@ -779,7 +779,7 @@
     "MediaReadParams",
     "MediaReadChunk"
   ],
-  "protocolVersion": 20,
+  "protocolVersion": 21,
   "runtimeStructs": {"ContentCollectionReport":{"fields":{"status":{"type":"ContentCollectionStatus"},"phase":{"type":"ContentCollectionPhase"},"removedObjects":{"type":"number"},"removedBytes":{"type":"number"},"removedStagingFiles":{"type":"number"},"reason":{"type":"string | null"}}},"ModelSessionConfiguration":{"fields":{"providerId":{"type":"string","optional":true},"providerFamily":{"type":"string"},"model":{"type":"string"},"endpoint":{"type":"string"},"credentialEnvironment":{"type":"string | null"},"allowAnonymous":{"type":"boolean"},"acceptsImages":{"type":"boolean","optional":true},"configurationGeneration":{"type":"number"},"maxOutputTokens":{"type":"number | null"},"azureDeployment":{"type":"string | null","optional":true},"azureApiVersion":{"type":"string | null","optional":true},"legacyMaxTokens":{"type":"boolean","optional":true},"includeStreamUsage":{"type":"boolean","optional":true},"reasoningEffort":{"type":"string | null","optional":true},"anthropicOauth":{"type":"boolean","optional":true},"adapterId":{"type":"string","optional":true},"adapterVersion":{"type":"string","optional":true},"contextWindowTokens":{"type":"number","optional":true},"thinkingLevel":{"type":"string","optional":true},"modelOptions":{"type":"unknown","optional":true}}},"KernelWorkingResultCandidate":{"fields":{"publicationId":{"type":"string"},"candidateOperationId":{"type":"string"},"workspaceId":{"type":"string"},"branchId":{"type":"string"},"root":{"type":"string"},"baseRoot":{"type":"string"},"writeRevision":{"type":"number"},"pinId":{"type":"string"},"basePinId":{"type":"string"}}}},
   "runtimeEnums": {
     "McpInteractionMode": ["Form", "Url", "Sampling"],
@@ -1258,9 +1258,10 @@
     "runtime.mcp.resource.release_source": "RunParams"
   },
   "dto": {
-"InferenceReceiptPendingParams":{"fields":{"operationId":{"type":"string"},"executionOwner":{"type":"ExecutorOwner"},"requestStarted":{"type":"boolean"}},"rustType":"varin_runtime::catalog::inference::InferenceReceiptPendingParams"},
+"InferenceReceiptPendingParams":{"fields":{"operationId":{"type":"string"},"executionOwner":{"type":"ExecutorOwner"},"requestStarted":{"type":"boolean | null"}},"rustType":"varin_runtime::catalog::inference::InferenceReceiptPendingParams"},
 "InferenceRequestKind":{"raw":"export type InferenceRequestKind = 'preparation' | 'model_compute';","rustType":"varin_runtime::catalog::inference::InferenceRequestKind"},
-"InferenceBinding":{"fields":{"requestKind":{"type":"InferenceRequestKind"},"purpose":{"type":"string"},"providerId":{"type":"string"},"modelId":{"type":"string"},"api":{"type":"string"},"endpoint":{"type":"string"},"configurationId":{"type":"string"},"credentialScope":{"type":"CredentialScope"}},"rustType":"varin_runtime::catalog::inference::InferenceBinding"},
+"InferenceExecutor":{"raw":"export type InferenceExecutor = { kind: \"http\"; api: string; endpoint: string; credentialScope: CredentialScope } | { kind: \"local_component\"; componentId: string; componentVersion: string; manifestDigest: string; modelRevision: string; workerProtocol: number };","rustType":"varin_runtime::catalog::inference::InferenceExecutor"},
+"InferenceBinding":{"fields":{"requestKind":{"type":"InferenceRequestKind"},"purpose":{"type":"string"},"providerId":{"type":"string"},"modelId":{"type":"string"},"configurationId":{"type":"string"},"executor":{"type":"InferenceExecutor"}},"rustType":"varin_runtime::catalog::inference::InferenceBinding"},
 "InferenceUsage":{"fields":{"measurement":{"type":"\"missing\" | \"estimated\" | \"actual\""},"inputTokens":{"type":"number | null"},"outputTokens":{"type":"number | null"},"cachedInputTokens":{"type":"number | null","optional":true},"cacheWriteTokens":{"type":"number | null","optional":true},"reasoningTokens":{"type":"number | null","optional":true},"pricingVersion":{"type":"string | null","optional":true}},"rustType":"varin_runtime::catalog::inference::InferenceUsage"},
 "InferenceReceipt":{"fields":{"requestStarted":{"type":"boolean | null"},"providerCompleted":{"type":"boolean"},"localExecutorStopped":{"type":"boolean"},"usage":{"type":"InferenceUsage"},"httpStatus":{"type":"number | null"},"problem":{"type":"InferenceProblem | null"}},"rustType":"varin_runtime::catalog::inference::InferenceReceipt"},
 "InferenceSessionParams":{"fields":{"parentOperationId":{"type":"string"},"executionOwner":{"type":"ExecutorOwner"}},"rustType":"varin_runtime::catalog::inference::InferenceSessionParams"},
@@ -1270,7 +1271,7 @@
 "InferenceOwnerParams":{"fields":{"operationId":{"type":"string"},"executionOwner":{"type":"ExecutorOwner"}},"rustType":"varin_runtime::catalog::inference::InferenceOwnerParams"},
 "InferenceSettleParams":{"fields":{"operationId":{"type":"string"},"executionOwner":{"type":"ExecutorOwner"},"receipt":{"type":"InferenceReceipt"},"response":{"type":"unknown"}},"rustType":"varin_runtime::catalog::inference::InferenceSettleParams"},
 "InferenceStatus":{"fields":{"requestKind":{"type":"InferenceRequestKind"},"operationId":{"type":"string"},"phase":{"type":"OperationPhase"},"outcome":{"type":"Outcome | null"},"live":{"type":"boolean"},"cancelRequested":{"type":"boolean"},"dispatched":{"type":"boolean"},"recovered":{"type":"boolean"},"receiptPending":{"type":"boolean"},"receipt":{"type":"InferenceReceipt | null"}},"rustType":"varin_runtime::catalog::inference::InferenceStatus"},
-"InferenceProblem":{"raw":"export type InferenceProblem = 'cancelled' | 'transport_failed' | 'http_rejected' | 'invalid_response' | 'owner_interrupted' | 'not_dispatched' | 'receipt_pending';","rustType":"varin_runtime::catalog::inference::InferenceProblem"},
+"InferenceProblem":{"raw":"export type InferenceProblem = 'cancelled' | 'transport_failed' | 'executor_failed' | 'http_rejected' | 'invalid_response' | 'owner_interrupted' | 'not_dispatched' | 'receipt_pending';","rustType":"varin_runtime::catalog::inference::InferenceProblem"},
     "McpInteractionPending": {"extends": ["McpInteractionRecord"], "fields": {"generation": {"type": "McpSamplingGeneration", "optional": true}}},
     "McpInteractionPresentation": {"raw": "export type McpInteractionPresentation = McpElicitationPresentation | { mode: 'sampling'; message: string };", "rustType": "serde_json::Value"},
     "McpSamplingGenerateParams": {"fields": {"operationId": {"type": "string"}, "interactionId": {"type": "string"}, "expectedRevision": {"type": "number"}, "editedRequest": {"type": "Record<string, unknown>"}, "configuration": {"type": "ModelSessionConfiguration"}, "credentialScope": {"type": "CredentialScope", "optional": true}}, "rustType": "varin_runtime::mcp_sampling::McpSamplingGenerateParams"},

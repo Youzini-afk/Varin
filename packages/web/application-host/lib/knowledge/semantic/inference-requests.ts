@@ -23,12 +23,22 @@ interface InferenceRequest {
   onReceipt?(receipt: InferenceReceipt): void;
   observe(raw: unknown): { usage?: InferenceReceipt['usage']; rawUsage: unknown; valid: boolean };
 }
+interface LocalInferenceRequest {
+  binding: InferenceBinding & { executor: Extract<InferenceBinding['executor'], { kind: 'local_component' }> };
+  request: unknown;
+  signal?: AbortSignal;
+  check(signal: AbortSignal): Promise<void>;
+  beforeDispatch?(signal: AbortSignal): Promise<void>;
+  /** Enqueues once; resolves only with worker settlement/exit, including cancellation. */
+  execute(signal: AbortSignal, dispatch: () => Promise<void>): Promise<import('./local-execution.js').LocalEmbeddingSettlement>;
+}
 export interface InferenceCall {
   readonly operationId: string;
   readonly signal: AbortSignal;
   readonly cancelled: boolean;
   assertFresh(): Promise<void>;
   request(input: InferenceRequest): Promise<Response>;
+  local(input: LocalInferenceRequest): Promise<number[][]>;
   generate(input: {
     request: Omit<InferenceGenerateParams, 'parentOperationId' | 'callerOwner' | 'ordinal'>;
     signal?: AbortSignal;
@@ -83,7 +93,7 @@ export function createInferenceRequests(options: InferenceRequestsOptions) {
       // The transport is drained, but its original bytes are not durably acknowledged.
       // Missing usage is a Catalog/Goal barrier, not a synthesized zero-cost receipt.
       observeStatus(await options.kernel.agentRuntimeRequest<InferenceStatus, 'runtime.inference.receipt_pending'>('runtime.inference.receipt_pending', {
-        operationId: params.operationId, executionOwner: params.executionOwner, requestStarted: params.receipt.requestStarted === true,
+        operationId: params.operationId, executionOwner: params.executionOwner, requestStarted: params.receipt.requestStarted,
       }));
       protections.get(params.operationId)?.release();
     } catch { report(); }
@@ -215,7 +225,70 @@ export function createInferenceRequests(options: InferenceRequestsOptions) {
             input.release(id);
           }
         }); },
+        local(input) { return own(async () => {
+          const signal = input.signal ? AbortSignal.any([combined, input.signal]) : combined;
+          signal.throwIfAborted();
+          await input.check(signal);
+          signal.throwIfAborted();
+          const id = `inference:${invocation.operationId}:${++ordinal}`;
+          const executionOwner = invocation.executorOwner;
+          const entry = { owner: executionOwner, abort: controller, cancel: () => { ownerCancelled = true; controller.abort(cancelled()); } };
+          let admitted = false;
+          let settled = false;
+          try {
+            const status = await options.kernel.agentRuntimeRequest<InferenceStatus, 'runtime.inference.admit'>('runtime.inference.admit', {
+              parentOperationId: invocation.operationId, executionOwner, ordinal, binding: input.binding, request: input.request,
+            });
+            admitted = true;
+            active.set(id, entry);
+            observeStatus(status);
+            if (status.dispatched || status.recovered || status.phase === 'terminal') { settled = true; throw new Error('inference-original-request-unavailable'); }
+            if (!status.live) throw new Error('inference-original-request-unavailable');
+            const result = await input.execute(signal, async () => {
+              // This callback is invoked by the real worker only after its queue selects this request.
+              signal.throwIfAborted();
+              await input.check(signal);
+              const ready = await options.kernel.agentRuntimeRequest<InferenceStatus, 'runtime.inference.dispatch'>('runtime.inference.dispatch', { operationId: id, executionOwner });
+              observeStatus(ready);
+              if (!ready.live) throw cancelled();
+              signal.throwIfAborted();
+              await input.beforeDispatch?.(signal);
+              await input.check(signal);
+              signal.throwIfAborted();
+            });
+            const receipt: InferenceReceipt = { requestStarted: result.requestStarted, providerCompleted: result.completed,
+              localExecutorStopped: true, usage: result.usage, httpStatus: null,
+              problem: result.error ? 'executor_failed' : result.cancelled || signal.aborted ? 'cancelled' : null };
+            settled = true;
+            try { await publish({ operationId: id, executionOwner, receipt,
+              response: result }); }
+            catch (error) { controller.abort(cancelled()); throw error; }
+            signal.throwIfAborted();
+            if (result.error || !result.vectors) throw new Error(result.error ?? 'Local embedding did not complete');
+            return result.vectors;
+          } catch (error) {
+            if (!admitted) {
+              try {
+                const original = await options.kernel.agentRuntimeRequest<Operation | null, 'runtime.operation.inspect'>('runtime.operation.inspect', { operationId: id, allowMissing: true });
+                admitted = !!original && isDeepStrictEqual(original.execution_owner, executionOwner);
+                if (admitted) {
+                  settled = true; // Unreadable original dispatch state is not never-started proof.
+                  const status = await options.kernel.agentRuntimeRequest<InferenceStatus, 'runtime.inference.status'>('runtime.inference.status', { operationId: id, executionOwner });
+                  settled = status.dispatched || status.recovered || status.phase === 'terminal';
+                }
+              } catch { /* Recovery observes the original intent; it never enqueues another request. */ }
+            }
+            if (admitted && !settled) {
+              // execute() throws only during preparation, before enqueue. Every enqueued request
+              // resolves with a physical settlement even if cancelled or its worker exits.
+              await publish({ operationId: id, executionOwner, receipt: { requestStarted: false, providerCompleted: false,
+                localExecutorStopped: true, usage: emptyUsage(), httpStatus: null, problem: signal.aborted ? 'cancelled' : 'not_dispatched' }, response: null });
+            }
+            throw error;
+          } finally { if (active.get(id) === entry) active.delete(id); }
+        }); },
         request(input) { return own(async () => {
+          if (input.binding.executor.kind !== 'http') throw new Error('HTTP inference requires an HTTP executor');
           const requestSignal = input.init.signal ? AbortSignal.any([combined, input.init.signal]) : combined;
           requestSignal.throwIfAborted();
           await input.check(requestSignal);

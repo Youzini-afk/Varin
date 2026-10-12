@@ -18,7 +18,7 @@ afterEach(async () => {
 
 const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
 
-async function makeArchive(options: { extra?: string } = {}): Promise<string> {
+async function makeArchive(options: { extra?: string; schemaVersion?: number; modelBytes?: string } = {}): Promise<string> {
   const source = await mkdtemp(join(tmpdir(), "varin-local-semantic-source-"));
   roots.push(source);
   const files: Record<string, Uint8Array> = {
@@ -35,7 +35,7 @@ async function makeArchive(options: { extra?: string } = {}): Promise<string> {
       tokenizerFile: "tokenizer.json",
     })),
     "model/tokenizer.json": new TextEncoder().encode("{}"),
-    "model/onnx/model_quantized.onnx": new TextEncoder().encode("test-onnx"),
+    "model/onnx/model_quantized.onnx": new TextEncoder().encode(options.modelBytes ?? "test-onnx"),
     [LOCAL_SEMANTIC_TRANSFORMERS_ENTRY]: new TextEncoder().encode("export default {};"),
     [LOCAL_SEMANTIC_WORKER_ENTRY]: new TextEncoder().encode("export default {};"),
   };
@@ -50,7 +50,8 @@ async function makeArchive(options: { extra?: string } = {}): Promise<string> {
     await writeFile(extraFile, "unexpected");
   }
   const manifest = {
-    schemaVersion: 2,
+    schemaVersion: options.schemaVersion ?? 3,
+    workerProtocol: 1,
     id: "local-semantic",
     version: "test-version",
     platform: process.platform,
@@ -125,4 +126,38 @@ describe("local semantic component manager", () => {
     expect(resolveInstalledModelPack(dataDir)?.root).toBe(before?.root);
     await manager.dispose();
   });
+});
+
+it('rejects obsolete component archives and active manifests while preserving their bytes', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'varin-local-semantic-old-')); roots.push(dataDir);
+  const archive = await makeArchive({ schemaVersion: 2 });
+  const manager = createLocalSemanticComponentManager({ dataDir, version: 'test', validatePack: async () => undefined });
+  await manager.importArchive(archive);
+  expect(manager.status()).toMatchObject({ status: 'failed', error: expect.stringContaining('manifest format 3 and worker protocol 1') });
+  expect((await readFile(archive)).length).toBeGreaterThan(0);
+  const parent = join(dataDir, 'optional-components/local-semantic');
+  await mkdir(join(parent, 'versions/old'), { recursive: true });
+  const manifestPath = join(parent, 'versions/old/manifest.json');
+  await writeFile(manifestPath, await readFile(join(archive, '../manifest.json')));
+  await writeFile(join(parent, 'active.json'), JSON.stringify({ schemaVersion: 1, root: 'versions/old', version: 'old' }));
+  expect(resolveInstalledModelPack(dataDir)).toBeNull();
+  const reopened = createLocalSemanticComponentManager({ dataDir, version: 'test' });
+  expect(reopened.status()).toMatchObject({ status: 'failed', error: expect.stringContaining('manifest format 3 and worker protocol 1') });
+  await reopened.dispose();
+  expect((await readFile(manifestPath, 'utf8'))).toContain('"schemaVersion":2');
+  await manager.dispose();
+});
+
+it('separates identical model names and revisions when verified graph bytes change', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'varin-local-semantic-identity-')); roots.push(dataDir);
+  const manager = createLocalSemanticComponentManager({ dataDir, version: 'test', validatePack: async () => undefined });
+  await manager.importArchive(await makeArchive({ modelBytes: 'first graph' }));
+  const before = resolveInstalledModelPack(dataDir)!;
+  await manager.importArchive(await makeArchive({ modelBytes: 'second graph' }));
+  const after = resolveInstalledModelPack(dataDir)!;
+  expect(after.recipe.modelRevision).toBe(before.recipe.modelRevision);
+  expect(after.recipe.onnxFile).toBe(before.recipe.onnxFile);
+  expect(after.space.configurationId).not.toBe(before.space.configurationId);
+  expect(after.component!.manifestDigest).not.toBe(before.component!.manifestDigest);
+  await manager.dispose();
 });

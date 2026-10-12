@@ -1,6 +1,6 @@
 # 原生 Agent 运行时实施
 
-状态：实施中，尚未切换生产运行时。更新：2026-10-12（Asia/Singapore）。
+状态：实施中，尚未切换生产运行时。更新：2026-10-13（Asia/Singapore）。
 
 综合结构审阅见[2026-10-09 实现审阅](../reviews/runtime-2026-10-09.md)，后续实现及独立行为验证见[控制路径隔离增量](../reviews/runtime-control-isolation-2026-10-09.md)。前次源码与编译审阅、各阶段行为验证分别记录；历史通过记录不代替当前代码的证据。两份设计的整体交付仍未完成。
 
@@ -12,7 +12,14 @@
 
 - 当前合同直接替代旧版本，不为历史字段、scalar 形状、旧 schema 或双轨选择入口保留兼容分支。消费者一起更新；既有在途调用冻结、当前格式恢复、世代排空和真实异构 provider 协商仍是当前语义。不得据此删除用户实际文件、成果或提前切换默认 runtime。
 - 推理用途接入不等于每个用途都有本地推理包。已有提供商 decision/rerank/embedding 的配置、真实消费者与原生执行合同仍需保留/接通；本地包当前只有已有 Bekko。用户本轮明确暂缓 native 图像生成，不计剩余交付范围；旧 Pi 的 `models.generateImages()` 基础不等于 native 已实现。§18.1/§24 的建议/评估限定已有配置的辅助请求，不能扩成默认模型链；没有另设独立“材料 rerank”产品的任务。此前清单混用用途、消费者和本地包，现以这些明确边界纠正，历史台账不充当新需求。
-- 已有本地嵌入是 `bekko-embedding-v1-a8m` 的 `local-semantic` ONNX 组件，安装、校验、worker 与 CPU 调度已实现。当前 native query 入口只接已配置的 OpenAI-compatible HTTP lease（端点可以本机或外部），尚未接通该已有本地执行器。HTTP 模拟响应下的 Catalog/Goal 验证不代表用户配置了此后端，也不代表本地路径已迁移；后续优先补原 Bekko 路径。
+- 已有本地嵌入是 `bekko-embedding-v1-a8m` 的 `local-semantic` ONNX 组件。下述增量已将其原安装/校验/worker 接入 native query 和前台文档向量，HTTP 仍是显式配置的另一执行器。HTTP 或受控本地模型的执行验证不代表用户配置了外部服务，也不代表实际 ONNX 权重、硬件质量/性能已验收；当前组件协议需按原 builder 构建 v3 包后导入。
+
+## 2026-10-12 增量：已有 Bekko 原生推理归属
+
+- 原已安装组件在 embedding 未配置时供 native semantic 查询；明确 provider 选择、禁用和无效状态不暗回退。主任务与 child 的 query、fixed/materialized 文档计算沿原 InferenceCall parent/ordinal、Catalog、Goal 与 ContentStore，每个实际 CPU 粒度有原回执。Catalog **61**、wire **21**，HTTP/local tagged 执行器共同接线，无假 endpoint/credential 或第二前台账本。
+- 原共享 worker 区分排队 ACK、实际派发、观察者取消与真正排空；晚到结果/错误/estimated 用量保留，execute 后丢失 started ACK 保持 Unknown，pending 和重开不改成 no-send、不重跑。组件代与 query/scan pin 在真实停止后释放，同字节重新导入复用，旧组件协议直接拒绝且保留资产。
+- [本片证据与复跑入口](../reviews/runtime-bekko-inference-2026-10-12.md)记录原组件导入/active/default→主与 child→Source→worker→Catalog/Goal 的真实链、原 HTTP 回归和证据边界。模型模块受控；实际 ONNX 包构建/安装、质量/性能和完整产品/平台验收仍待外层验证，本片未发布 Release 或下载权重。
+- 后续回到扩展唯一 scoped 选择、冻结依赖及共享实例/组合引用寿命。数组合同已统一，但 registry/Surface 旧全局选择权威仍待以完整实例生命周期替代，不能直接删 map。容量反馈、自动记忆/Bot 与其余两设计的确认范围继续推进。
 
 ## 2026-10-12 增量：唯一数组 routing 合同
 

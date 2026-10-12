@@ -338,6 +338,8 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     const signal = AbortSignal.any([lifecycleController.signal, changeSignal, ...(scopeSnapshot ? [scopeSnapshot.signal] : [])]);
     signal.throwIfAborted();
     const embedder = embedderOf();
+    const releaseEmbedder = embedder.retain?.();
+    try {
     const root = (await options.documents.inspectWorkspace(scope.scopeId)).root;
     if (root && scopeSnapshot && !indexPathAllowed(scopeSnapshot, path.resolve(root, documentId))
       && indexPathAllowed(scopeSnapshot, path.resolve(root, documentId), true)) return;
@@ -386,6 +388,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       failures.add(documentId);
       indexReadFailures.set(resolvedKey, failures);
     }
+    } finally { releaseEmbedder?.(); }
   };
 
   const observeDocumentMutation = (event: Omit<DocumentMutationObservation, 'owner'> & Partial<Pick<DocumentMutationObservation, 'owner'>>): void => {
@@ -464,6 +467,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     activeScanGates.set(scopeScanKey, gate);
     let resolvedKey = key;
     const runHolder: { promise?: Promise<void> } = {};
+    const releaseEmbedder = initialEmbedder.retain?.();
     const run = (async () => {
       let store: SemanticGenerationStore | undefined;
       let scanComplete = true;
@@ -709,6 +713,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
           try { options.onError?.(error); } catch { /* observational */ }
         }
       } finally {
+        releaseEmbedder?.();
         gate.resolve();
         if (activeScanGates.get(scopeScanKey) === gate) activeScanGates.delete(scopeScanKey);
         if (scanControllers.get(key) === controller) scanControllers.delete(key);
@@ -888,6 +893,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     let status = statusForEmbedder(scope, embedder);
     if (status.status === "unavailable") return { status, hits: [], gaps: [] };
     const scopeId = scopeIdentity(scope);
+    const releaseEmbedder = embedder.retain?.();
     try {
       await ensureEmbedderSpace(embedder, signal, question, "query");
       if (deferredDimensionScans.get(embedder)?.has(scopeId)) {
@@ -1055,7 +1061,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       if (error instanceof Error && error.name === "AbortError") throw error;
       try { options.onError?.(error); } catch { /* query failure is a status */ }
       return { status: { ...status, status: "failed" }, hits: [], gaps: [] };
-    }
+    } finally { releaseEmbedder?.(); }
   };
 
 
@@ -1148,12 +1154,13 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         }
         const spaceId = reader.checkpoint.spaceId;
         const cached = queryCache.get({ spaceId, purpose: 'query', embedText: question, authority: request.cacheAuthority });
-        const vector = await waitWithSignal(scheduler.enqueue('foreground', async () => {
+        const queryWork = async () => {
           active.throwIfAborted(); assertReader();
           await request.authorize(active);
           assertReader();
           return request.queryVector(question, cached, active);
-        }), active);
+        };
+        const vector = await waitWithSignal(embedder.ownsScheduling ? queryWork() : scheduler.enqueue('foreground', queryWork), active);
         active.throwIfAborted(); assertReader();
         await request.authorize(active);
         assertReader();

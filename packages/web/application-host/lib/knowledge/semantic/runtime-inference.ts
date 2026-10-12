@@ -1,3 +1,5 @@
+import { captureLocalInference } from './local-inference.js';
+import type { SemanticEmbedder } from './embedder.js';
 import { createInferenceRequests, type InferenceCall, type InferenceRequestsOptions } from './inference-requests.js';
 import { createRerankInference, type RerankInferenceAuthority, type RerankInferenceCapture } from './rerank-inference.js';
 /** Application Host inference leases. No Pi worker, project configuration or secret DTOs. */
@@ -233,8 +235,8 @@ export function createSemanticInference(
                 if (destination !== provider.requestUrl || init?.method !== 'POST' || typeof init.body !== 'string') return fail('invalid', 'embedding-request-binding-mismatch');
                 return call.request({ binding: { requestKind: 'model_compute', purpose: params.purpose === 'document'
                   ? 'code-retrieval-document-embedding' : 'code-retrieval-query-embedding',
-                  providerId: binding.providerId, modelId: binding.modelId, api: binding.protocol, endpoint: destination,
-                  configurationId: binding.configurationId, credentialScope: identity.credentialScope },
+                  providerId: binding.providerId, modelId: binding.modelId, configurationId: binding.configurationId,
+                  executor: { kind: 'http', api: binding.protocol, endpoint: destination, credentialScope: identity.credentialScope } },
                   request: { purpose: params.purpose, wire: JSON.parse(init.body) }, destination, init, connection,
                   check: validate,
                   ...(params.beforeDispatch ? { beforeDispatch: params.beforeDispatch } : {}),
@@ -417,6 +419,20 @@ export function createSemanticInference(
   };
   return {
     readGlobalSettings, capture,
+    captureLocal: async (embedder: SemanticEmbedder) => {
+      if (closed) return fail('unavailable', 'embedding-owner-closed');
+      try { settingsFrom(await readGlobalSettings()); return fail('invalid', 'embedding-local-selection-mismatch'); }
+      catch (error) { if (!(error instanceof SemanticInferenceError) || error.status !== 'unconfigured') throw error; }
+      const capturedRevocation = revocationGeneration;
+      return captureLocalInference(embedder, async signal => {
+        if (closed) return fail('unavailable', 'embedding-owner-closed');
+        signal?.throwIfAborted();
+        // Ordinary edits retain the accepted model; explicit disable remains latched.
+        try { await readGlobalSettings(); }
+        catch (error) { if (!record(error) || error.code !== 'inference-settings-invalid') throw error; }
+        if (disabled || capturedRevocation !== revocationGeneration) return fail('disabled', 'embedding-disabled');
+      });
+    },
     requests,
     captureRerank: (expected?: import('@varin/protocol').HarnessRerankSettings): Promise<RerankInferenceCapture> => rerank ? rerank.capture(expected) : Promise.resolve({ status: 'unavailable', message: 'Rerank inference is unavailable.' }),
     captureDecision: (purpose: import("@varin/protocol").HarnessFastDecisionPurpose): Promise<DecisionInferenceCapture> => decision

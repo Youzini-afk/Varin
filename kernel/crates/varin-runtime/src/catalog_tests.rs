@@ -3599,7 +3599,7 @@ fn native_inference_rejects_external_and_forged_kernel_dispatch_and_receipts() {
             db.inference_receipt_pending(&InferenceReceiptPendingParams {
                 operation_id: id.clone(),
                 execution_owner: execution_owner.clone(),
-                request_started: false
+                request_started: Some(false)
             })
             .is_err()
         );

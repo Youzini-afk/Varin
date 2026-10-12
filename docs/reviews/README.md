@@ -8,6 +8,7 @@ Last updated: 2026-10-12
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [已有 Bekko 本地原生推理](runtime-bekko-inference-2026-10-12.md) | 原组件安装/选择、主与 child Source、共享 worker、Catalog/Goal、取消排空和恢复；受控模型与真实 ONNX 验收边界 |
 | [唯一数组 routing 合同](runtime-array-routing-2026-10-12.md) | single/ordered、真实设置与原调用消费者、存储 marker/CAS、native Context 组合；不宣称第二选择权威已删除 |
 | [当前扩展声明与严格 Catalog](runtime-current-extension-contracts-2026-10-12.md) | 删除 SDK opt-in、source 吞错与历史 raw repair；真实 broker/source/当前更新与原 native 消费有限验收 |
 | [可替换 Context Budget Decision](runtime-context-budget-2026-10-12.md) | 原设置/选择、冻结摘要配方、真实主子作用域、原收费回执重开及独立后台开关修复 |

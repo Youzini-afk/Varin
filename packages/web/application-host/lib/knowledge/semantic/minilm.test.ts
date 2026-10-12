@@ -15,7 +15,7 @@ vi.mock('node:worker_threads', async () => {
       super();
       this.data = options.workerData;
       transformerState().sessionOptions.push({ intraOpNumThreads: this.data.threads, intra_op_num_threads: this.data.threads });
-      queueMicrotask(() => this.emit('message', { type: 'ready' }));
+      queueMicrotask(() => this.emit('message', { type: 'ready', protocol: 1 }));
     }
     ref() {}
     unref() {}
@@ -28,7 +28,7 @@ vi.mock('node:worker_threads', async () => {
         vector[Number.parseInt(text.slice(1),10) % MINILM_TEST_SPACE.dim] = 1;
         return vector;
       });
-      queueMicrotask(() => this.emit('message', { id:request.id, vectors }));
+      queueMicrotask(() => this.emit('message', { type: 'settled', id:request.id, vectors, requestStarted: true, completed: true, usage: { measurement: 'missing', inputTokens: null, outputTokens: 0 } }));
     }
   }
   return { Worker };

@@ -48,6 +48,7 @@ export async function acquireSourceQuery(input: {
   queryVector(question: string, cached: number[] | undefined, signal: AbortSignal): Promise<number[]>;
 }) {
   const { source, embedder, cache, scope } = input;
+  const schedule = <T>(work: () => Promise<T>): Promise<T> => embedder.ownsScheduling ? work() : input.scheduler.enqueue('foreground', work);
   const lifetime = new AbortController();
   const signal = AbortSignal.any([input.signal, lifetime.signal]);
   const roots = sourceViewRoots(source.configurationRoot, input.roots, input.indexDirectories, input.indexScope);
@@ -146,6 +147,9 @@ export async function acquireSourceQuery(input: {
             assertAvailable();
             if (!['ready', 'empty'].includes(units.status) || units.revision !== file.revision
               || input.structure.unitsRecipe && units.recipeId !== sourceRecipe) throw new Error('Source units changed or did not complete');
+            // Local packing uses the retained generation's tokenizer. Cached chunks
+            // and vectors do not trigger model preparation or an inference request.
+            await embedder.prepare(); assertAvailable();
             chunks = packStructuralUnits({ documentId: file.path, units: units.units, maxTokens: embedder.space.maxTokens,
               countTokens: text => embedder.countTokens(text) });
           }
@@ -158,7 +162,7 @@ export async function acquireSourceQuery(input: {
           }
           const missing = texts.flatMap((text, index) => vectors[index] ? [] : [{ text, index }]);
           if (missing.length) {
-            const fresh = await input.scheduler.enqueue('foreground', async () => {
+            const fresh = await schedule(async () => {
               await authorize(signal);
               return input.documentVectors(missing.map(item => item.text), [file], signal);
             });
@@ -207,7 +211,7 @@ export async function acquireSourceQuery(input: {
       if (!reader || !store || !status.publishedDocuments) return { status, hits: [], gaps: [...gaps] };
       const spaceId = spaceIdOf(embedder.space);
       const cached = cache.get({ spaceId, purpose: 'query', embedText: question, authority: input.cacheAuthority });
-      const vector = await waitWithSignal(input.scheduler.enqueue('foreground', async () => {
+      const vector = await waitWithSignal(schedule(async () => {
         await authorize(active); return input.queryVector(question, cached, active);
       }), active);
       await authorize(active);
