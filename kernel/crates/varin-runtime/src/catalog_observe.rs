@@ -69,7 +69,7 @@ impl Catalog {
     }
     pub fn list_threads(&self) -> Result<Vec<Value>> {
         let ids: Vec<String> = {
-            let mut statement = self.db.prepare("SELECT id FROM threads ORDER BY rowid")?;
+            let mut statement = self.db.prepare("SELECT t.id FROM threads t WHERE NOT EXISTS(SELECT 1 FROM runs r JOIN branches b ON b.id=r.branch_id JOIN operations o ON o.run_id=r.id WHERE b.thread_id=t.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1') ORDER BY t.rowid")?;
             let rows = statement.query_map([], |r| r.get(0))?;
             rows.collect::<std::result::Result<_, _>>()?
         };

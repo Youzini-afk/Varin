@@ -225,6 +225,8 @@ export interface OrganizerPreparedProposal {
 
 export interface OrganizerProgress {
   key: string;
+  /** Original Catalog execution; immutable batch body lives only in ContentStore. */
+  workId?: string;
   status: OrganizerProgressStatus;
   /**
    * Content fingerprint of the covered source range. Coverage only counts

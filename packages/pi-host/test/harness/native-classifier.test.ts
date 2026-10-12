@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   requestClassifier,
+  restoreClassifierResult,
   ClassifierRequestError,
   ClassifierResponseError,
   classifierWireUsage,
@@ -406,4 +407,32 @@ it('preserves an explicitly registered custom classifier protocol, routing and i
   assert.deepEqual(result.usage, { inputTokens: 27, outputTokens: 5 });
   await assert.rejects(requestClassifier({ nativeModel: model, baseUrl: model.baseUrl, model: model.id,
     state: 'evidence', questions: [judge] }), /registered implementation/);
+});
+
+
+it('restores the original successful classifier decision from frozen requests without transport', async () => {
+  const state = { goal: 'Keep durable memories', materials: [{ id: 'u0', text: 'Original frozen source' }] };
+  for (const api of ['typesafe-system-one', 'llama-cpp-classify'] as const) {
+    const model = { ...llamaModel(`memory-restore-${api}`), api };
+    const transcript: Array<{ endpoint: string; wire: unknown; response: unknown; succeeded: boolean }> = [];
+    let transports = 0;
+    const live = await requestClassifier({ nativeModel: model, baseUrl: model.baseUrl, model: model.id,
+      state, questions: [judge], apiKey: api === 'typesafe-system-one' ? 'controlled-key' : undefined,
+      fetchImpl: async (url, init) => {
+        transports++;
+        const wire = JSON.parse(String(init?.body));
+        const response = api === 'llama-cpp-classify'
+          ? llamaPreparation(String(url), wire) ?? Response.json(llamaBody)
+          : Response.json({ answers: { [judge.id]: { type: 'noul', noul: 0.23 } }, usage: { input_tokens: 9, output_tokens: 2 } });
+        transcript.push({ endpoint: String(url), wire, response: await response.clone().json(), succeeded: response.ok });
+        return response;
+      } });
+    const before = transports;
+    const restored = restoreClassifierResult({ api, modelId: model.id, state, questions: [judge], requests: transcript });
+    assert.deepEqual(restored.answers, live.answers);
+    assert.deepEqual(restored.missing, live.missing);
+    assert.equal(transports, before, 'recovery cannot dispatch or reauthorize an original request');
+    if (api === 'llama-cpp-classify') assert.throws(() => restoreClassifierResult({ api, modelId: model.id,
+      state: { goal: 'Changed source', materials: [] }, questions: [judge], requests: transcript }), /incomplete/);
+  }
 });

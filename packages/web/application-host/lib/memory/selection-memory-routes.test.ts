@@ -44,10 +44,10 @@ describe('selected memory preview and commit', () => {
     if (dirname(resolve(root)) !== resolve(tmpdir())) throw new Error('Unexpected test directory');
     await rm(root, { recursive: true, force: true });
   });
-  const preview = () => request(app).post(`${base}/preview`).set('x-test-auth', 'yes').send({ sources });
+  const preview = () => request(app).post(`${base}/preview`).set('x-test-auth', 'yes').send({ sources, requestKey: 'selection-preview-test' });
 
   it('previews without writing, then saves editable memory with exact provenance and supports undo', async () => {
-    await request(app).post(`${base}/preview`).send({ sources }).expect(401);
+    await request(app).post(`${base}/preview`).send({ sources, requestKey: 'selection-preview-test' }).expect(401);
     const { body } = await preview().expect(200);
     expect(await store.listKnowledge({})).toHaveLength(0);
     expect(narrate.mock.calls[0]![2]).not.toContain('pnpm');
@@ -81,7 +81,7 @@ describe('selected memory preview and commit', () => {
   });
 
   it('rejects fabricated source text and citations, and honors the explicitly selected personal destination', async () => {
-    await request(app).post(`${base}/preview`).set('x-test-auth', 'yes').send({ sources: [{ ...sources[0], text: 'fabricated' }] }).expect(409);
+    await request(app).post(`${base}/preview`).set('x-test-auth', 'yes').send({ requestKey: 'selection-preview-test', sources: [{ ...sources[0], text: 'fabricated' }] }).expect(409);
     expect(narrate).not.toHaveBeenCalled();
     narrate.mockResolvedValueOnce(JSON.stringify({ memories: [{ content: 'Use pnpm.', trigger: '', nature: 'decision', source: 's0', quote: 'pnpm' }] }));
     await preview().expect(500);

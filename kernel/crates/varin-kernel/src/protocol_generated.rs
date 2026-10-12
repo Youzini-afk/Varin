@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 22;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 23;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -129,6 +129,11 @@ pub(crate) const KERNEL_INPUT_ORDER_PARAMS: &[(&str, &str)] = &[
     ("runtime.input.edit", "inputId"),
 ];
 pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
+    "runtime.memory_work.admit",
+    "runtime.memory_work.read",
+    "runtime.memory_work.status",
+    "runtime.memory_work.list",
+    "runtime.memory_work.update",
     "runtime.inference.generate",
     "runtime.inference.admit",
     "runtime.inference.settle",
@@ -148,6 +153,39 @@ pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
 #[derive(Clone, Debug, Deserialize)]
 #[serde(transparent)]
 pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct MemoryWorkAdmit {
+    pub(crate) key: String,
+    pub(crate) scope_id: String,
+    pub(crate) mode: varin_runtime::catalog::memory_work::MemoryWorkMode,
+    pub(crate) execution_owner: varin_runtime::ExecutorOwner,
+    pub(crate) claims: Vec<varin_runtime::catalog::memory_work::MemoryWorkClaim>,
+    pub(crate) retry_of: RequiredNullable<String>,
+    pub(crate) recipe: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct MemoryWorkReadParams {
+    pub(crate) work_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct MemoryWorkListParams {
+    pub(crate) scope_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct MemoryWorkUpdate {
+    pub(crate) work_id: String,
+    pub(crate) execution_owner: varin_runtime::ExecutorOwner,
+    pub(crate) expected_revision: i64,
+    pub(crate) action: varin_runtime::catalog::memory_work::MemoryWorkAction,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -2934,6 +2972,27 @@ pub(crate) struct ContextFragment {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "runtime.memory_work.admit" => serde_json::from_value::<MemoryWorkAdmit>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.memory_work.read" => {
+            serde_json::from_value::<MemoryWorkReadParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.memory_work.status" => {
+            serde_json::from_value::<MemoryWorkReadParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.memory_work.list" => {
+            serde_json::from_value::<MemoryWorkListParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.memory_work.update" => serde_json::from_value::<MemoryWorkUpdate>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.inference.receipt_pending" => {
             serde_json::from_value::<InferenceReceiptPendingParams>(params.clone())
                 .map(|_| ())

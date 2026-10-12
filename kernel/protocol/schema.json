@@ -784,7 +784,7 @@
     "MediaReadParams",
     "MediaReadChunk"
   ],
-  "protocolVersion": 22,
+  "protocolVersion": 23,
   "runtimeStructs": {"ContentCollectionReport":{"fields":{"status":{"type":"ContentCollectionStatus"},"phase":{"type":"ContentCollectionPhase"},"removedObjects":{"type":"number"},"removedBytes":{"type":"number"},"removedStagingFiles":{"type":"number"},"reason":{"type":"string | null"}}},"ModelSessionConfiguration":{"fields":{"providerId":{"type":"string","optional":true},"providerFamily":{"type":"string"},"model":{"type":"string"},"endpoint":{"type":"string"},"credentialEnvironment":{"type":"string | null"},"allowAnonymous":{"type":"boolean"},"acceptsImages":{"type":"boolean","optional":true},"configurationGeneration":{"type":"number"},"maxOutputTokens":{"type":"number | null"},"azureDeployment":{"type":"string | null","optional":true},"azureApiVersion":{"type":"string | null","optional":true},"legacyMaxTokens":{"type":"boolean","optional":true},"includeStreamUsage":{"type":"boolean","optional":true},"reasoningEffort":{"type":"string | null","optional":true},"anthropicOauth":{"type":"boolean","optional":true},"adapterId":{"type":"string","optional":true},"adapterVersion":{"type":"string","optional":true},"contextWindowTokens":{"type":"number","optional":true},"thinkingLevel":{"type":"string","optional":true},"modelOptions":{"type":"unknown","optional":true}}},"KernelWorkingResultCandidate":{"fields":{"publicationId":{"type":"string"},"candidateOperationId":{"type":"string"},"workspaceId":{"type":"string"},"branchId":{"type":"string"},"root":{"type":"string"},"baseRoot":{"type":"string"},"writeRevision":{"type":"number"},"pinId":{"type":"string"},"basePinId":{"type":"string"}}}},
   "runtimeEnums": {
     "McpInteractionMode": ["Form", "Url", "Sampling"],
@@ -946,7 +946,7 @@
     "runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.source.tools","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"],
   "deferredResponseMethods": ["process.write", "process.resize", "runtime.tools.invoke"],
   "inputOrderParams": {"runtime.thread.create": "branchId", "runtime.branch.fork": "branchId", "runtime.input.submit": "branchId", "runtime.input.enqueue": "branchId", "runtime.input.edit": "inputId"},
-  "runtimeDataMethods": ["runtime.inference.generate","runtime.inference.admit","runtime.inference.settle",
+  "runtimeDataMethods": ["runtime.memory_work.admit","runtime.memory_work.read","runtime.memory_work.status","runtime.memory_work.list","runtime.memory_work.update","runtime.inference.generate","runtime.inference.admit","runtime.inference.settle",
     "runtime.mcp.sampling.review_output",
     "runtime.mcp.sampling.review_request",
     "runtime.mcp.sampling.generate",
@@ -960,6 +960,11 @@
   "response": {"v": 1, "kind": "response", "id": "request-id", "ok": true, "result": {}},
   "requestUnion": true,
   "methodParams": {
+"runtime.memory_work.admit":"MemoryWorkAdmit",
+"runtime.memory_work.read":"MemoryWorkReadParams",
+"runtime.memory_work.status":"MemoryWorkReadParams",
+"runtime.memory_work.list":"MemoryWorkListParams",
+"runtime.memory_work.update":"MemoryWorkUpdate",
 "runtime.inference.receipt_pending":"InferenceReceiptPendingParams",
 "runtime.inference.admit":"InferenceAdmitParams",
 "runtime.inference.generate":"InferenceGenerateParams",
@@ -1263,6 +1268,14 @@
     "runtime.mcp.resource.release_source": "RunParams"
   },
   "dto": {
+"MemoryWorkMode":{"raw":"export type MemoryWorkMode = 'automatic' | 'selection';","rustType":"varin_runtime::catalog::memory_work::MemoryWorkMode"},
+"MemoryWorkAction":{"raw":"export type MemoryWorkAction = {kind:'claim'} | {kind:'resume'} | {kind:'decision';keep:number[]} | {kind:'finish'} | {kind:'reject'};","rustType":"varin_runtime::catalog::memory_work::MemoryWorkAction"},
+"MemoryWorkClaim":{"fields":{"source":{"type":"string"},"start":{"type":"number"},"end":{"type":"number"}},"rustType":"varin_runtime::catalog::memory_work::MemoryWorkClaim"},
+"MemoryWorkAdmit":{"fields":{"key":{"type":"string"},"scopeId":{"type":"string"},"mode":{"type":"MemoryWorkMode"},"executionOwner":{"type":"ExecutorOwner"},"claims":{"type":"MemoryWorkClaim[]"},"retryOf":{"type":"string | null"},"recipe":{"type":"unknown"}},"rustType":"varin_runtime::catalog::memory_work::MemoryWorkAdmit"},
+"MemoryWorkStatus":{"fields":{"workId":{"type":"string"},"scopeId":{"type":"string"},"runId":{"type":"string"},"consumed":{"type":"boolean"},"inference":{"type":"InferenceStatus[]"}},"rustType":"varin_runtime::catalog::memory_work::MemoryWorkStatus"},
+"MemoryWorkReadParams":{"fields":{"workId":{"type":"string"}},"rustType":"varin_runtime::catalog::memory_work::MemoryWorkReadParams"},
+"MemoryWorkListParams":{"fields":{"scopeId":{"type":"string"}},"rustType":"varin_runtime::catalog::memory_work::MemoryWorkListParams"},
+"MemoryWorkUpdate":{"fields":{"workId":{"type":"string"},"executionOwner":{"type":"ExecutorOwner"},"expectedRevision":{"type":"number"},"action":{"type":"MemoryWorkAction"}},"rustType":"varin_runtime::catalog::memory_work::MemoryWorkUpdate"},
 "InferenceReceiptPendingParams":{"fields":{"operationId":{"type":"string"},"executionOwner":{"type":"ExecutorOwner"},"requestStarted":{"type":"boolean | null"}},"rustType":"varin_runtime::catalog::inference::InferenceReceiptPendingParams"},
 "InferenceRequestKind":{"raw":"export type InferenceRequestKind = 'preparation' | 'model_compute';","rustType":"varin_runtime::catalog::inference::InferenceRequestKind"},
 "InferenceExecutor":{"raw":"export type InferenceExecutor = { kind: \"http\"; api: string; endpoint: string; credentialScope: CredentialScope } | { kind: \"local_component\"; componentId: string; componentVersion: string; manifestDigest: string; modelRevision: string; workerProtocol: number };","rustType":"varin_runtime::catalog::inference::InferenceExecutor"},
@@ -2504,6 +2517,11 @@
     "OperationInspectParams": {"fields": {"operationId": {"type": "string"}, "allowMissing": {"type": "boolean", "optional": true}}}
   },
   "methods": {
+"runtime.memory_work.admit":"Private original Bot memory work admit",
+"runtime.memory_work.read":"Private original Bot memory work read",
+"runtime.memory_work.status":"Private original Bot memory control status without content hydration",
+"runtime.memory_work.list":"Private original Bot memory work list",
+"runtime.memory_work.update":"Private original Bot memory work update",
 "runtime.inference.receipt_pending":"Original drained inference receipt publication barrier",
 "runtime.inference.admit":"Original tool-owned inference admit",
 "runtime.inference.generate":"Original query-owned native auxiliary generation",

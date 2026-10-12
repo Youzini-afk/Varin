@@ -40,7 +40,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 62;
+pub(crate) const FORMAT: i64 = 63;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -1379,7 +1379,7 @@ impl Catalog {
             if !run.state.terminal() {
                 run.epoch = self.epoch;
                 run.revision += 1;
-                if matches!(run.state, RunState::Generating | RunState::Executing) {
+                if matches!(run.state, RunState::Generating | RunState::Executing) && !memory_work::owns_run(&tx, &run)? {
                     run.state = RunState::Waiting;
                     let key = format!("recovery:{}:{}", run.id, self.epoch);
                     let after_cursor: u64 =
@@ -1473,6 +1473,7 @@ impl Catalog {
             if mcp_interactions::sampling::recover(&tx, &mut op)? {
                 continue;
             }
+            if memory_work::recover(&tx, &mut op, self.epoch)? { continue; }
             if inference::recover(&tx, &mut op)? {
                 continue;
             }
@@ -1702,6 +1703,9 @@ pub mod media;
 
 #[path = "catalog_fork.rs"]
 pub mod forks;
+
+#[path = "catalog_memory_work.rs"]
+pub mod memory_work;
 
 #[path = "catalog_context_jobs.rs"]
 pub mod context_jobs;

@@ -52,6 +52,38 @@ never receive Agent prompt overrides or Agent notes. Bot memory continues throug
 The organizer only enumerates Bots; ordinary context assembly bypasses knowledge recall.
 Plans, observations, materials, symbol indexing and other knowledge-store users remain intact.
 
+## Bot background inference
+
+The existing organizer and explicit Bot selection preview use `memory-inference.ts`, the original
+Host model/credential authority and native inference adapters. `models.memoryOrganizer` selects the
+dedicated narrator; an unset slot keeps the existing Bot model fallback. Explicit disable, invalid
+selection and unavailable configuration are not permission to pick another model. Ordinary model
+updates preserve an admitted recipe; actual Bot Sleep and enable gates fence new execution and delivery.
+Optional `memory-organization` decision calls use their original classifier request/receipt path.
+
+Catalog owns a separate `MemoryWork` Run and its stage operations; it does not borrow a settled
+conversation's ToolIntent, query or Goal. ContentStore retains the ordered original sources, exact
+revisions/ranges, presented targets, model binding and complete recipe. Knowledge progress records the
+work reference and prepared proposals. Reopening reads original output and classifier wire receipts,
+not a newly collected batch or a new model call. A complete generation requires Stop and valid source
+citations; partial/Length output and its actual usage remain on the original operation.
+
+Sleep first closes the Bot gate, then cancels its durable work and waits for actual local executor
+drain. Wake can explicitly resume a proven unsent generation; completed advisory results are reused.
+Dispatched Unknown work keeps its original evidence and exact source claim without blocking unrelated
+new entries in the same Bot conversation. Prepared memory mutations recheck the current gate before
+each new write. An already committed MemoryService receipt is still reconciled after the gate closes.
+
+Selection requests keep one identity across rerenders/network observation. A separate explicit Retry
+can create a linked attempt only after the original local executor has stopped. Unknown provider
+billing is retained and disclosed; local drain does not claim remote cancellation or a free retry.
+Successful original output is reused. Preview writes no memory; Save and undo remain the existing
+MemoryService/source-revision path. Ordinary Agent selection stays a no-model editable note.
+
+This boundary leaves the Bot's existing Pi entry, Pi source reader, recall and context checkpoint
+consumer in place. A complete native Bot front door and its main/delegated Sleep lifecycle are separate
+remaining runtime work; background inference alone is not that cutover.
+
 The old Magic Prompts, prompt-template resource editor/expansion and ordinary knowledge
 catalog are removed. Product actions use `actionInstructions.ts`; native skills remain
 editable resources. Existing user-owned prompt files are not deleted, but Varin no longer

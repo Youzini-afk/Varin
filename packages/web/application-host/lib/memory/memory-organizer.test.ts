@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { openKnowledgeStoreEngine } from "../knowledge/store-engine.js";
 import type { KnowledgeScope, KnowledgeStore, OrganizerProgress } from "../knowledge/store-contract.js";
 import { createMemoryService, type MemoryOwner, type MemoryService } from "./memory-service.js";
-import { createMemoryOrganizer, type MemoryOrganizerBroker, type OrganizerRunSource } from "./memory-organizer.js";
+import { createMemoryOrganizer, type OrganizerRunSource } from "./memory-organizer.js";
+import { memorySourceClaims, type MemoryInference, type MemoryInferenceBinding, type MemoryWork, type MemorySelectionRequest } from "./memory-inference.js";
 import type { PiSessionEntry } from "@varin/protocol";
 import { estimateMemoryOrganizerInputTokens } from "@varin/protocol";
 import { sourceRevision } from "./memory-sources.js";
@@ -41,7 +42,8 @@ describe("memory organizer (BC2)", () => {
   let userStore: KnowledgeStore;
   let calls: StubCall[];
   let organizeText: string | (() => string | Promise<string>);
-  let fastDecisionAnswers: { value: number }[] | null;
+  let inferenceWorks: Map<string, MemoryWork>;
+  let generations: Map<string, Promise<string>>;
   let nowMs: number;
   let runSources: OrganizerRunSource[];
   let scopeSessions: Map<string, string[]>;
@@ -65,51 +67,103 @@ describe("memory organizer (BC2)", () => {
     ...overrides,
   });
 
-  const broker = (): MemoryOrganizerBroker => ({
-    requestForWorkspace: (async (_cwd: string, method: string, params: Record<string, unknown>) => {
-      calls.push({ method, params });
-      if (method === "settings.get") {
+  // This seam supplies retained inference results only. MemoryService and the
+  // TriviumDB KnowledgeStore remain real; no native transport/kernel claim is made.
+  // Keep work and original output across organizer instances for recovery tests.
+  const inference = (): MemoryInference => {
+    const active = new Map<string, AbortController>();
+    return {
+      async settings() {
+        calls.push({ method: "settings", params: {} });
+        return { harness: {
+          ...(organizerConfigured ? { models: { memoryOrganizer: { providerId: "test-provider", modelId: "test-model" } } } : {}),
+          knowledge: { autoOrganize },
+        } };
+      },
+      async model(selection) {
+        return { ...selection, name: selection.modelId, api: "openai-completions", baseUrl: "https://inference.invalid",
+          input: ["text"], ...(contextWindow === null ? {} : { contextWindow }), maxTokens: 4_096 };
+      },
+      async describeDecision() { return { status: "unconfigured" }; },
+      async bind(selection, maxOutputTokens) {
+        calls.push({ method: "bind", params: { ...selection, maxOutputTokens } });
         return {
-          global: {
-            harness: {
-              ...(organizerConfigured ? { models: { memoryOrganizer: { providerId: "test-provider", modelId: "test-model" } } } : {}),
-              knowledge: { autoOrganize },
-            },
-          },
-        } as unknown;
-      }
-      if (method === "model.list") {
-        return (contextWindow === null ? [] : [{
-          id: "test-model", provider: "test-provider", contextWindow, maxTokens: 4_096,
-        }]) as unknown;
-      }
-      if (method === "harness.inference.describe") {
-        return { fastDecision: { purposes: {} } } as unknown;
-      }
-      if (method === "harness.fastDecision") {
-        const answers = fastDecisionAnswers
-          ?? (params.questions as { id: string }[]).map((question) => ({ id: question.id, kind: "judge", value: 1 }));
-        return {
-          batchId: params.batchId,
-          providerId: "fd-provider",
-          modelId: "fd-model",
-          answers,
-          missing: [],
-        } as unknown;
-      }
-      if (method === "harness.memoryOrganize") {
-        const text = typeof organizeText === "function" ? await organizeText() : organizeText;
-        return { batchId: params.batchId, providerId: params.providerId, modelId: params.modelId, text } as unknown;
-      }
-      if (method === "harness.inference.cancel") return { cancelled: true } as unknown;
-      throw new Error(`unexpected method ${method}`);
-    }) as unknown as MemoryOrganizerBroker["requestForWorkspace"],
-  });
+          configuration: { providerId: selection.providerId, providerFamily: "openai", model: selection.modelId,
+            endpoint: "https://inference.invalid", credentialEnvironment: null, allowAnonymous: true,
+            configurationGeneration: 1, maxOutputTokens: maxOutputTokens ?? null },
+          credentialScope: { reference: "test", authority: "test", account: "test", generation: 1 },
+        };
+      },
+      async admit<R extends { binding: MemoryInferenceBinding }>(input: {
+        key: string; scopeId: string; mode: "automatic" | "selection";
+        spans: Parameters<MemoryInference["admit"]>[0]["spans"]; recipe: R; retryOf?: string;
+      }): Promise<MemoryWork<R>> {
+        const workId = `memory-work:${input.key}`;
+        const existing = inferenceWorks.get(workId);
+        if (existing) return existing as MemoryWork<R>;
+        const work: MemoryWork<R> = {
+          workId, scopeId: input.scopeId, mode: input.mode, runId: `run:${input.key}`, revision: 1,
+          executionOwner: { kind: "external", identity: "test-memory-inference", epoch: "test" },
+          cancelled: false, consumed: false, consumerFailed: false, claims: memorySourceClaims(input.spans),
+          decision: null, inference: [], recipe: input.recipe,
+        };
+        inferenceWorks.set(workId, work);
+        return work;
+      },
+      async find<R>(key: string) { return (inferenceWorks.get(`memory-work:${key}`) as MemoryWork<R> | undefined) ?? null; },
+      async read<R>(workId: string) {
+        const work = inferenceWorks.get(workId);
+        if (!work) throw new Error(`Unknown inference work: ${workId}`);
+        return work as MemoryWork<R>;
+      },
+      async list<R>(scopeId: string) {
+        return [...inferenceWorks.values()].filter(work => work.scopeId === scopeId && !work.consumed) as MemoryWork<R>[];
+      },
+      async decide(work, input) {
+        work.decision ??= input.materials.map((_, index) => index);
+        return work;
+      },
+      async generate(work, system, prompt, signal, assertSource) {
+        let original = generations.get(work.workId);
+        if (!original) {
+          await assertSource?.();
+          const controller = new AbortController();
+          const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+          const aborted = () => calls.push({ method: "generate.cancel", params: { workId: work.workId } });
+          combined.addEventListener("abort", aborted, { once: true });
+          active.set(work.workId, controller);
+          calls.push({ method: "generate", params: { workId: work.workId, system, prompt,
+            maxOutputTokens: work.recipe.binding.configuration.maxOutputTokens } });
+          original = (async () => {
+            try {
+              const text = typeof organizeText === "function" ? await organizeText() : organizeText;
+              combined.throwIfAborted();
+              return text;
+            } finally {
+              active.delete(work.workId);
+              combined.removeEventListener("abort", aborted);
+            }
+          })();
+          generations.set(work.workId, original);
+        }
+        const text = await original;
+        signal?.throwIfAborted();
+        return { work, text };
+      },
+      async finish(work) { work.consumed = true; },
+      async reject(work) { work.consumerFailed = true; },
+      async suspendScope(scopeId) {
+        for (const work of inferenceWorks.values()) if (work.scopeId === scopeId) active.get(work.workId)?.abort();
+      },
+      resumeScope() {},
+      async close() { for (const controller of active.values()) controller.abort(); },
+    };
+  };
 
   const organizer = (service: MemoryService, overrides: Partial<Parameters<typeof createMemoryOrganizer>[0]> = {}) => {
+    const owner = inference();
     const instance = createMemoryOrganizer({
-    configCwd: "/tmp/varin-config",
-    getBroker: () => broker(),
+    getInference: () => owner,
     storeForScopeId: async (scopeId) => {
       const existing = stores.get(scopeId);
       if (existing) return existing;
@@ -146,7 +200,8 @@ describe("memory organizer (BC2)", () => {
     userStore = await openStore("user", "user-store");
     calls = [];
     organizeText = JSON.stringify({ memories: [] });
-    fastDecisionAnswers = null;
+    inferenceWorks = new Map();
+    generations = new Map();
     nowMs = 1_000_000;
     runSources = [];
     scopeSessions = new Map();
@@ -217,21 +272,29 @@ describe("memory organizer (BC2)", () => {
 
   it('previews an explicit selection while automatic memory is disabled and cancels its inference', async () => {
     autoOrganize = { user: false, bot: false };
-    const org = organizer(memory());
+    const source = "Only this passage.";
+    const entry: PiSessionEntry = { type: "message", id: "entry-1", parentId: null,
+      timestamp: new Date(0).toISOString(), message: { role: "user", content: source, timestamp: 0 } };
+    scopeForSession = sessionId => sessionId === "s1" ? "bot:ws-1" : null;
+    const selection: MemorySelectionRequest = { requestKey: "selection-1", sessionId: "s1", sources: [{
+      kind: "pi-entry", id: entry.id, revision: sourceRevision(source), start: 0, end: source.length,
+    }] };
+    const prompt = JSON.stringify({ passages: [{ role: "user", text: source }] });
+    const org = organizer(memory(), { readEntries: async () => [entry] });
     try {
-      const result = await org.extractSelection('bot:ws-1', 'Extract selected memory.', 'Only this passage.', new AbortController().signal);
+      const result = await org.extractSelection('bot:ws-1', 'Extract selected memory.', prompt, new AbortController().signal, selection);
       expect(result).toBe(organizeText);
       expect(stores.size).toBe(0);
       let finish!: (value: string) => void;
       organizeText = () => new Promise<string>((resolve) => { finish = resolve; releaseInference.push(() => resolve('{"memories":[]}')); });
       const controller = new AbortController();
-      const pending = org.extractSelection('bot:ws-1', 'Extract.', 'Selected.', controller.signal);
+      const pending = org.extractSelection('bot:ws-1', 'Extract.', prompt, controller.signal, { ...selection, requestKey: 'selection-2' });
       const rejected = expect(pending).rejects.toThrow();
       await wait(() => !!finish);
       controller.abort();
       finish('{"memories":[]}');
       await rejected;
-      expect(calls.some((call) => call.method === 'harness.inference.cancel')).toBe(true);
+      expect(calls.some((call) => call.method === 'generate.cancel')).toBe(true);
     } finally { await org.dispose(); }
   });
 
@@ -250,6 +313,65 @@ describe("memory organizer (BC2)", () => {
     expect((await ws.listKnowledge({ scope: "bot", activeOnly: true })).map((item) => item.content).sort()).toEqual([
       "Catalog uses Postgres.", "Release day is Thursday.",
     ]);
+    await org.dispose();
+  });
+
+  it("drains an admitted memory write on sleep without starting the next prepared proposal", async () => {
+    const scopeId = "bot:ws-sleep-mid-commit";
+    const ws = await openStore("bot", scopeId);
+    stores.set(scopeId, ws);
+    const service = memory();
+    const owner: MemoryOwner = { scope: "bot", ownerId: "ws-sleep-mid-commit" };
+    const source = "Use Postgres and release on Thursday.";
+    await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: source, source: "user" });
+    scopeSessions.set(scopeId, ["s1"]);
+    organizeText = JSON.stringify({ memories: [
+      { action: "new", scope: "bot", content: "Catalog uses Postgres.", source: "u0", quote: "Use Postgres" },
+      { action: "new", scope: "bot", content: "Release day is Thursday.", source: "u0", quote: "release on Thursday." },
+    ] });
+    const remember = service.remember.bind(service);
+    let rememberCalls = 0;
+    service.remember = async (...args) => { rememberCalls++; return remember(...args); };
+    const create = ws.createKnowledgeIfAbsent.bind(ws);
+    let finish!: () => void;
+    let admitted = false;
+    // Pause inside the real MemoryService call, before its original store
+    // mutation completes. Sleep must drain this write, not discard its result.
+    ws.createKnowledgeIfAbsent = async (...args) => {
+      if (!admitted) {
+        admitted = true;
+        await new Promise<void>(resolve => { finish = resolve; releaseInference.push(resolve); });
+      }
+      return create(...args);
+    };
+    const org = organizer(service);
+    org.noteScope(scopeId);
+    await wait(() => Boolean(finish));
+    let drained = false;
+    const sleeping = org.suspendScope(scopeId).then(() => { drained = true; });
+    await setImmediate();
+    expect(drained).toBe(false);
+    finish();
+    await sleeping;
+
+    expect(rememberCalls).toBe(1);
+    const rows = await service.list(owner, { activeOnly: true });
+    expect(rows.map(row => row.content)).toEqual(["Catalog uses Postgres."]);
+    expect(rows[0]?.source?.kind).toBe("memory-organizer");
+    expect(rows[0]?.source?.proposalKey).toBeTruthy();
+    await expect(service.readSource(owner, rows[0]!.id)).resolves.toMatchObject([
+      { status: "available", text: "Use Postgres" },
+    ]);
+    const prepared = await ws.getOrganizerProgress("session:s1");
+    expect(prepared?.status).toBe("prepared");
+    expect(prepared?.lastError).toContain("suspended");
+    expect(prepared?.eventCursor).toBeUndefined();
+    expect(prepared?.proposals?.map(proposal => proposal.content)).toEqual([
+      "Catalog uses Postgres.", "Release day is Thursday.",
+    ]);
+    expect(prepared?.preparedSource?.key).toBe(rows[0]?.source?.key);
+    const remaining = prepared!.proposals![1]!.spans![0]!;
+    expect(source.slice(remaining.start, remaining.end)).toBe("release on Thursday.");
     await org.dispose();
   });
 
@@ -301,7 +423,7 @@ describe("memory organizer (BC2)", () => {
     await wait(async () => (await ws.getOrganizerProgress("run:r1"))?.lastError === "source progress unavailable");
     const [saved] = await userStore.listKnowledge({ scope: "user" });
     expect(saved?.content).toBe("User prefers short summaries.");
-    const narrations = calls.filter((call) => call.method === "harness.memoryOrganize").length;
+    const narrations = calls.filter((call) => call.method === "generate").length;
     await first.dispose();
     await ws.close();
     await userStore.close();
@@ -320,7 +442,7 @@ describe("memory organizer (BC2)", () => {
     const resumed = organizer(memory());
     resumed.noteScope("bot:ws-cross-store");
     await wait(async () => (await reopenedWs.getOrganizerProgress("run:r1"))?.status === "formed");
-    expect(calls.filter((call) => call.method === "harness.memoryOrganize").length).toBe(narrations);
+    expect(calls.filter((call) => call.method === "generate").length).toBe(narrations);
     expect((await reopenedWs.getOrganizerProgress("run:r1"))?.produced).toEqual([saved!.id]);
     expect((await userStore.listKnowledge({ scope: "user" })).map((item) => item.content)).toEqual(["Human-edited summary preference."]);
     await resumed.dispose();
@@ -356,14 +478,14 @@ describe("memory organizer (BC2)", () => {
     org.noteScope("bot:ws-2");
     await wait(async () => (await progressFor("bot:ws-2", "session:s1"))?.status !== undefined
       && ["formed", "reviewed-empty"].includes((await progressFor("bot:ws-2", "session:s1"))?.status ?? ""));
-    const callsAfterFirst = calls.filter((c) => c.method === "harness.memoryOrganize").length;
+    const callsAfterFirst = calls.filter((c) => c.method === "generate").length;
     org.noteScope("bot:ws-2");
     await vi.advanceTimersByTimeAsync(2200);
-    expect(calls.filter((c) => c.method === "harness.memoryOrganize").length).toBe(callsAfterFirst);
+    expect(calls.filter((c) => c.method === "generate").length).toBe(callsAfterFirst);
     const next = await ws.putEvent({ kind: "turn", at: 2, sessionId: "s1", text: "A later decision in the same conversation.", source: "user" });
     org.noteScope("bot:ws-2");
     await wait(async () => (await progressFor("bot:ws-2", "session:s1"))?.eventCursor === next.id);
-    expect(calls.filter((c) => c.method === "harness.memoryOrganize").length).toBe(callsAfterFirst + 1);
+    expect(calls.filter((c) => c.method === "generate").length).toBe(callsAfterFirst + 1);
     await org.dispose();
   });
 
@@ -393,33 +515,33 @@ describe("memory organizer (BC2)", () => {
     await org.dispose();
   });
 
-  it("marks the range failed when the model errors and retries after backoff", async () => {
+  it("retains a failed original generation without replaying it on automatic or explicit retry", async () => {
     const ws = await openStore("bot", "bot:ws-3");
     stores.set("bot:ws-3", ws);
     await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "Something worth keeping.", source: "agent" });
     scopeSessions.set("bot:ws-3", ["s1"]);
     let attempts = 0;
-    organizeText = () => { attempts += 1; if (attempts === 1) throw new Error("transport down"); return JSON.stringify({
-      memories: [{ action: "new", scope: "bot", content: "Persisted fact.", source: "u0", quote: "Something worth keeping." }],
-    }); };
+    organizeText = () => { attempts += 1; throw new Error("original request failed"); };
     const service = memory();
     const org = organizer(service);
     org.noteScope("bot:ws-3");
     await wait(async () => (await progressFor("bot:ws-3", "session:s1"))?.status === "failed");
     expect(attempts).toBe(1);
-    // Not yet retryable — backoff still active.
+    // Observing the failed original never starts another generation.
     org.noteScope("bot:ws-3");
     await vi.advanceTimersByTimeAsync(2200);
     expect(attempts).toBe(1);
-    // A deliberate user retry bypasses the automatic backoff immediately.
     org.retryScope("bot:ws-3");
-    await wait(async () => (await progressFor("bot:ws-3", "session:s1"))?.status === "formed");
-    expect(attempts).toBe(2);
-    expect((await ws.listKnowledge({ scope: "bot" })).map((k) => k.content)).toEqual(["Persisted fact."]);
+    await vi.advanceTimersByTimeAsync(2200);
+    await wait(() => org.pending === 0);
+    expect(attempts).toBe(1);
+    expect(await progressFor("bot:ws-3", "session:s1")).toMatchObject({ status: "failed", lastError: "original request failed" });
+    expect((await progressFor("bot:ws-3", "session:s1"))?.eventCursor).toBeUndefined();
+    expect(await ws.listKnowledge({ scope: "bot" })).toEqual([]);
     org.dispose();
   });
 
-  it("treats unparseable model output as a retryable failure, not empty success", async () => {
+  it("retains unparseable model output as a failure without acknowledging empty coverage", async () => {
     const ws = await openStore("bot", "bot:ws-4");
     stores.set("bot:ws-4", ws);
     await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "Material.", source: "agent" });
@@ -429,7 +551,7 @@ describe("memory organizer (BC2)", () => {
     org.noteScope("bot:ws-4");
     await wait(async () => (await progressFor("bot:ws-4", "session:s1"))?.status === "failed");
     expect(await ws.listKnowledge({ scope: "bot" })).toEqual([]);
-    // A failed range must not advance coverage — the retry recollects it.
+    // A failed range must not advance coverage.
     expect((await progressFor("bot:ws-4", "session:s1"))?.eventCursor).toBeUndefined();
     org.dispose();
   });
@@ -443,8 +565,8 @@ describe("memory organizer (BC2)", () => {
     const org = organizer(memory());
     org.noteScope("bot:ws-5");
     await vi.advanceTimersByTimeAsync(2200);
-    expect(calls.some(call => call.method === 'settings.get')).toBe(true);
-    expect(calls.filter((c) => c.method === "harness.memoryOrganize")).toEqual([]);
+    expect(calls.some(call => call.method === 'settings')).toBe(true);
+    expect(calls.filter((c) => c.method === "generate")).toEqual([]);
     expect(await progressFor("bot:ws-5", "session:s1")).toBeNull();
     org.dispose();
   });
@@ -476,11 +598,11 @@ describe("memory organizer (BC2)", () => {
     await bot.putEvent({ kind: "turn", at: 1, sessionId: "s-bot", text: "A durable Bot decision.", source: "user" });
     scopeSessions.set("bot:b-1", ["s-bot"]);
     const org = organizer(memory(), {
-      organizerModelForScope: async () => ({ providerId: "test-provider", modelId: "test-model" }),
+      organizerModelForScope: async () => ({ providerId: "bot-provider", modelId: "bot-model" }),
     });
     org.noteScope("bot:b-1");
     await wait(async () => (await bot.getOrganizerProgress("session:s-bot"))?.status === "reviewed-empty");
-    expect(calls.find((call) => call.method === "harness.memoryOrganize")?.params.modelSource).toBe("bot");
+    expect(calls.find((call) => call.method === "bind")?.params).toMatchObject({ providerId: "bot-provider", modelId: "bot-model" });
     await org.dispose();
   });
 
@@ -554,7 +676,7 @@ describe("memory organizer (BC2)", () => {
     expect(await store.getOrganizerProgress("session:s1")).toMatchObject({
       status: "failed", lastError: "session read failed",
     });
-    expect(calls.some((call) => call.method === "harness.memoryOrganize")).toBe(false);
+    expect(calls.some((call) => call.method === "generate")).toBe(false);
     await org.dispose();
     organizeText = JSON.stringify({ memories: [{}] });
     const retry = organizer(memory());
@@ -588,7 +710,7 @@ describe("memory organizer (BC2)", () => {
     org.noteScope("bot:ws");
     await wait(() => Boolean(finish));
     await started;
-    expect(calls.find((call) => call.method === "harness.memoryOrganize")?.params.prompt).toContain("last-material-marker");
+    expect(calls.find((call) => call.method === "generate")?.params.prompt).toContain("last-material-marker");
     await service.remember(owner, { content: "Old preference.", source: { kind: "user-mark", sessionId: "s1", spans: [{
       kind: "event", id: String(event.id), scopeId: "bot:ws", sessionId: "s1", revision: sourceRevision(source),
       start: source.indexOf("last-material-marker"), end: source.length,
@@ -653,7 +775,7 @@ describe("memory organizer (BC2)", () => {
     const org = organizer(service);
     org.noteScope("bot:ws-prepared");
     await wait(async () => (await progressFor("bot:ws-prepared", "session:s1"))?.status === "prepared");
-    const narrations = calls.filter((call) => call.method === "harness.memoryOrganize").length;
+    const narrations = calls.filter((call) => call.method === "generate").length;
     const prepared = await progressFor("bot:ws-prepared", "session:s1");
     expect(prepared?.proposals?.length).toBe(1);
     expect(prepared?.proposals?.[0]?.content).toBe("Catalog uses Postgres.");
@@ -663,7 +785,7 @@ describe("memory organizer (BC2)", () => {
     // uncovered until the prepared proposal has committed.
     org.noteScope("bot:ws-prepared");
     await wait(async () => (await progressFor("bot:ws-prepared", "session:s1"))?.status === "formed");
-    expect(calls.filter((call) => call.method === "harness.memoryOrganize").length).toBe(narrations);
+    expect(calls.filter((call) => call.method === "generate").length).toBe(narrations);
     expect((await progressFor("bot:ws-prepared", "session:s1"))?.eventCursor).not.toBe(later.id);
     const rows = await ws.listKnowledge({ scope: "bot" });
     expect(rows.map((row) => row.content)).toEqual(["Catalog uses Postgres."]);
@@ -682,12 +804,12 @@ describe("memory organizer (BC2)", () => {
     const org = organizer(memory());
     org.noteScope("bot:ws-revise");
     await wait(async () => (await progressFor("bot:ws-revise", "run:r1"))?.status === "reviewed-empty");
-    const narrations = calls.filter((call) => call.method === "harness.memoryOrganize").length;
+    const narrations = calls.filter((call) => call.method === "generate").length;
     // A revised report under the same run id changes the fingerprint — the
     // covered claim no longer matches and the range is reprocessed.
     runSources = [{ ...runSources[0]!, reportText: "The run shipped v2 after a rollback." }];
     org.noteScope("bot:ws-revise");
-    await wait(async () => calls.filter((call) => call.method === "harness.memoryOrganize").length === narrations + 1);
+    await wait(async () => calls.filter((call) => call.method === "generate").length === narrations + 1);
     await org.dispose();
   });
 
@@ -754,13 +876,13 @@ describe("memory organizer (BC2)", () => {
         && rows.some((row) => row.runEndOffset === reportText.length);
     }, 15_000);
     await first.dispose();
-    const narrations = calls.filter((call) => call.method === "harness.memoryOrganize").length;
-    const settingsReads = calls.filter((call) => call.method === "settings.get").length;
+    const narrations = calls.filter((call) => call.method === "generate").length;
+    const settingsReads = calls.filter((call) => call.method === "settings").length;
     const resumed = organizer(memory());
     resumed.noteScope("bot:ws-run-boundary");
-    await wait(() => calls.filter((call) => call.method === "settings.get").length > settingsReads);
+    await wait(() => calls.filter((call) => call.method === "settings").length > settingsReads);
     await wait(() => resumed.pending === 0);
-    expect(calls.filter((call) => call.method === "harness.memoryOrganize")).toHaveLength(narrations);
+    expect(calls.filter((call) => call.method === "generate")).toHaveLength(narrations);
     await resumed.dispose();
   });
 
@@ -774,12 +896,12 @@ describe("memory organizer (BC2)", () => {
     }));
     const org = organizer(memory());
     org.noteScope("bot:ws-batch-capacity");
-    await wait(() => calls.some((call) => call.method === "harness.memoryOrganize"));
-    const first = calls.find((call) => call.method === "harness.memoryOrganize")!;
+    await wait(() => calls.some((call) => call.method === "generate"));
+    const first = calls.find((call) => call.method === "generate")!;
     expect(estimateMemoryOrganizerInputTokens(String(first.params.system), String(first.params.prompt))
       + Number(first.params.maxOutputTokens)).toBeLessThanOrEqual(8_000);
     await wait(async () => (await ws.listOrganizerProgress()).filter((row) => row.status === "reviewed-empty").length === 8, 30_000);
-    expect(calls.filter((call) => call.method === "harness.memoryOrganize").length).toBeGreaterThan(1);
+    expect(calls.filter((call) => call.method === "generate").length).toBeGreaterThan(1);
     await org.dispose();
   });
 
@@ -795,8 +917,8 @@ describe("memory organizer (BC2)", () => {
     scopeSessions.set("bot:ws-existing-capacity", ["s1"]);
     const org = organizer(service);
     org.noteScope("bot:ws-existing-capacity");
-    await wait(() => calls.some((call) => call.method === "harness.memoryOrganize"));
-    const request = calls.find((call) => call.method === "harness.memoryOrganize")!;
+    await wait(() => calls.some((call) => call.method === "generate"));
+    const request = calls.find((call) => call.method === "generate")!;
     expect(estimateMemoryOrganizerInputTokens(String(request.params.system), String(request.params.prompt))
       + Number(request.params.maxOutputTokens)).toBeLessThanOrEqual(8_000);
     expect(String(request.params.prompt)).not.toContain("HUGE-MEMORY");
@@ -823,7 +945,7 @@ describe("memory organizer (BC2)", () => {
     await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.eventCursor === event.id, 15_000);
     const complete = await ws.getOrganizerProgress("session:s1");
     expect(complete?.eventPartial).toBeUndefined();
-    const pieces = calls.filter((call) => call.method === "harness.memoryOrganize")
+    const pieces = calls.filter((call) => call.method === "generate")
       .map((call) => String(call.params.prompt).split("[turn] ")[1] ?? "");
     expect(pieces.join("")).toBe(source);
     expect(pieces.join("")).not.toContain("�");
@@ -844,7 +966,7 @@ describe("memory organizer (BC2)", () => {
     org.noteScope("bot:ws-long-entry");
     await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.entryCursor === entry.id, 15_000);
     expect((await ws.getOrganizerProgress("session:s1"))?.entryPartial).toBeUndefined();
-    const pieces = calls.filter((call) => call.method === "harness.memoryOrganize")
+    const pieces = calls.filter((call) => call.method === "generate")
       .map((call) => String(call.params.prompt).split("[user] ")[1] ?? "");
     expect(pieces.join("")).toBe(source);
     await org.dispose();
@@ -862,7 +984,7 @@ describe("memory organizer (BC2)", () => {
     const org = organizer(memory());
     org.noteScope("bot:ws-many-events");
     await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.eventCursor === lastId, 10_000);
-    expect(calls.filter((call) => call.method === "harness.memoryOrganize")).toHaveLength(2);
+    expect(calls.filter((call) => call.method === "generate")).toHaveLength(2);
     await org.dispose();
   });
 
@@ -881,7 +1003,7 @@ describe("memory organizer (BC2)", () => {
     let org = organizer(service, { readEntries: async () => entries });
     org.noteScope("bot:ws-shared-source");
     await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.status === "reviewed-empty");
-    const first = String(calls.find((call) => call.method === "harness.memoryOrganize")!.params.prompt);
+    const first = String(calls.find((call) => call.method === "generate")!.params.prompt);
     expect(first).not.toContain("Use SQLite.");
     expect(first).toContain("Backups run Thursday.");
     expect(await service.readSource(owner, saved.item.id)).toMatchObject([{ status: "available", text: "Use SQLite." }]);
@@ -893,15 +1015,15 @@ describe("memory organizer (BC2)", () => {
     entries = [entry("b", "New branch uses DuckDB.", "a"), ...entries];
     org = organizer(memory(), { readEntries: async () => entries });
     org.noteScope("bot:ws-shared-source");
-    await wait(() => calls.filter((call) => call.method === "harness.memoryOrganize").length === 2);
+    await wait(() => calls.filter((call) => call.method === "generate").length === 2);
     await wait(() => org.pending === 0);
-    const second = String(calls.filter((call) => call.method === "harness.memoryOrganize")[1]!.params.prompt);
+    const second = String(calls.filter((call) => call.method === "generate")[1]!.params.prompt);
     expect(second).toContain("New branch uses DuckDB.");
     expect(second).not.toContain("Backups run Thursday.");
     entries = [entries[0]!, entry("a", "Use Postgres. Backups run Thursday.")];
     org.noteScope("bot:ws-shared-source");
-    await wait(() => calls.filter((call) => call.method === "harness.memoryOrganize").length === 3);
-    expect(String(calls.filter((call) => call.method === "harness.memoryOrganize")[2]!.params.prompt)).toContain("Use Postgres.");
+    await wait(() => calls.filter((call) => call.method === "generate").length === 3);
+    expect(String(calls.filter((call) => call.method === "generate")[2]!.params.prompt)).toContain("Use Postgres.");
     expect(await service.readSource(owner, saved.item.id)).toMatchObject([{ status: "changed" }]);
     await expect(service.readSource({ scope: "bot", ownerId: "unrelated" }, saved.item.id)).rejects.toMatchObject({ code: "not-found" });
     await org.dispose();
