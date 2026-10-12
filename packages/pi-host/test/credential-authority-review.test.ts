@@ -183,7 +183,7 @@ test('decision bindings retain accepted protocol routes, fence model-header cred
   await assert.rejects(fresh.assertAvailable(), /decision-provider-disabled/);
 });
 
-test('decision capability keeps Cloudflare protocol and explicitly reports the pending llama connection', async t => {
+test('decision capability preserves each classifier protocol and llama server routes', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'varin-decision-api-review-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   await writeFile(join(directory, 'models.json'), JSON.stringify({ providers: { decision: {
@@ -195,7 +195,15 @@ test('decision capability keeps Cloudflare protocol and explicitly reports the p
   const cloudflare = await authority.resolveDecisionBinding('decision', 'remote');
   assert.equal(cloudflare.api, 'cloudflare-workers-ai-system-one');
   assert.equal(cloudflare.requestUrl, 'https://cloudflare.invalid/accounts/fixture/ai/run');
-  await assert.rejects(authority.resolveDecisionBinding('decision', 'local'), /decision-api-unavailable/);
+  const local = await authority.resolveDecisionBinding('decision', 'local');
+  assert.equal(local.api, 'llama-cpp-classify');
+  assert.equal(local.requestUrl, 'http://localhost:8080/completion');
+  assert.deepEqual(local.routes, [
+    { requestUrl: 'http://localhost:8080/tokenize', requestKind: 'preparation' },
+    { requestUrl: 'http://localhost:8080/apply-template', requestKind: 'preparation' },
+    { requestUrl: 'http://localhost:8080/completion', requestKind: 'model_compute' },
+  ]);
+  await assert.rejects(authority.resolveDecisionBinding('decision', 'local', '/systemone'), /decision-endpoint-invalid/);
 });
 
 test('dynamic decision model headers keep one private owner and revoke old leases on environment rotation', async t => {
@@ -221,4 +229,53 @@ test('dynamic decision model headers keep one private owner and revoke old lease
   assert.notDeepEqual(second.credentialScope, first.credentialScope);
   assert.equal((await second.getAuth())?.auth.headers?.['x-account'], 'fixture-header-next');
   assert.equal(await readFile(file, 'utf8'), originalFile, 'capturing private leases never rewrites user configuration');
+});
+
+test('keyless llama retains its original credential owner and never masks a missing explicit key', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'varin-decision-keyless-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, 'models.json');
+  const provider: Record<string, unknown> = { baseUrl: 'http://localhost:8080/v1', models: [
+    { id: 'local', type: 'classifier', api: 'llama-cpp-classify' },
+    { id: 'typesafe', type: 'classifier', api: 'typesafe-system-one' },
+    { id: 'cloudflare', type: 'classifier', api: 'cloudflare-workers-ai-system-one' },
+  ] };
+  await writeFile(file, JSON.stringify({ providers: { decision: provider } }));
+  const authority = HostCredentialAuthority.open(directory);
+  const original = await authority.resolveDecisionBinding('decision', 'local');
+  assert.equal(original.requestUrl, 'http://localhost:8080/completion');
+  assert.deepEqual((await original.getAuth())?.auth, { headers: {} });
+  assert.deepEqual((await authority.resolveDecisionBinding('decision', 'local')).credentialScope, original.credentialScope);
+  await assert.rejects(authority.resolveDecisionBinding('decision', 'typesafe'), /credential-missing/);
+  await assert.rejects(authority.resolveDecisionBinding('decision', 'cloudflare'), /credential-missing/);
+  provider.apiKey = 'fixture-explicit-key';
+  await writeFile(file, JSON.stringify({ providers: { decision: provider } }));
+  await assert.rejects(original.assertAvailable(), /credential-scope-changed/);
+  const authenticated = await authority.resolveDecisionBinding('decision', 'local');
+  assert.equal((await authenticated.getAuth())?.auth.apiKey, 'fixture-explicit-key');
+  assert.notDeepEqual(authenticated.credentialScope, original.credentialScope);
+  provider.apiKey = `$VARIN_UNSET_KEY_${randomUUID().replaceAll('-', '')}`;
+  await writeFile(file, JSON.stringify({ providers: { decision: provider } }));
+  await assert.rejects(authority.resolveDecisionBinding('decision', 'local'), /credential-missing/);
+});
+
+test('keyless llama honors the configured credential owner and classifier headers without borrowing chat headers', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'varin-decision-keyless-owner-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, 'models.json');
+  const document = { providers: {
+    decision: { baseUrl: 'http://localhost:8080/v1', modelOverrides: { local: { headers: { 'x-chat-only': 'forbidden' } } },
+      models: [{ id: 'local', type: 'classifier', api: 'llama-cpp-classify', headers: { 'x-model': 'classifier-header' } }],
+      capabilities: { decision: { protocol: 'pi-classifier', credentialRef: 'keyless-owner', enabled: true } } },
+    'keyless-owner': { baseUrl: 'http://localhost:8081/v1', models: [{ id: 'owner', type: 'classifier', api: 'llama-cpp-classify' }] },
+  } };
+  await writeFile(file, JSON.stringify(document));
+  const authority = HostCredentialAuthority.open(directory);
+  const binding = await authority.resolveDecisionBinding('decision', 'local');
+  assert.equal(binding.credentialScope.reference, 'provider:keyless-owner');
+  assert.deepEqual((await binding.getAuth())?.auth, { headers: { 'x-model': 'classifier-header' } });
+  document.providers.decision.capabilities.decision.credentialRef = 'absent-owner';
+  await writeFile(file, JSON.stringify(document));
+  await assert.rejects(binding.assertAvailable(), /credential-scope-changed/);
+  await assert.rejects(authority.resolveDecisionBinding('decision', 'local'), /credential-missing/);
 });

@@ -22,10 +22,12 @@ pipeline. Fast decisions/reranking and reader-model prompts are not supplied by 
 `varin.builtin.research-decision` separately distributes `research_decide` through the single
 `RESEARCH_DECISION_TOOL_DECLARATIONS` and original `research.decision` capability. Existing material
 readers own candidate ACLs, PDF text and line selection. The original Host inference/credential owner
-binds the configured purpose; each actual TypeSafe/Cloudflare classifier HTTP request belongs to one
-Catalog Operation and the original Goal usage transaction. Unconfigured/off/unavailable inference
-never dispatches; all-rejected material never starts a paid request. Rerank and native llama.cpp
-classification remain separate integration work. This tool does not grant additional model/tool access.
+binds the configured purpose; each actual TypeSafe/Cloudflare/llama.cpp HTTP request belongs to one
+Catalog Operation. llama.cpp tokenization/template preparation keeps the same controls; only actual
+model computation participates in Goal usage. Unconfigured/off/unavailable inference never
+dispatches; all-rejected material never starts a paid request. Each score prompt identifies its real
+candidate; ordinary partial failures preserve confirmed scores, including zero, while retaining
+original order and explicit missing answers. Rerank remains separate integration work. This tool does not grant additional model/tool access.
 
 `varin.builtin.computer` provides the ordinary native single-call Computer tools. Its shared
 `COMPUTER_TOOL_DECLARATIONS` supplies the product manifest, tool directory and Host argument decoder;

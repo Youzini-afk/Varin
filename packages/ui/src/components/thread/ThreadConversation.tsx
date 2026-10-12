@@ -55,18 +55,24 @@ function InferenceStatus({ operation }: { operation: ThreadSnapshot['operations'
     ? operation.result.value as { dispatched: boolean; recovered: boolean; receipt?: InferenceReceipt } : undefined;
   const receipt = state?.receipt;
   const problem = receipt?.problem;
-  const explanation = problem === 'receipt_pending' ? 'The transport has stopped, but its original response is awaiting durable publication. Usage remains unknown until that receipt is stored.'
-    : problem === 'owner_interrupted' ? 'The original executor was interrupted. Remote usage is unconfirmed; this request will not be replayed.'
-    : problem === 'invalid_response' ? 'The provider response was stored, but valid answers were missing. Check the selected classifier protocol.'
+  const preparation = intent.binding.requestKind === 'preparation';
+  const explanation = problem === 'receipt_pending' ? preparation
+    ? 'The preparation transport has stopped, but its original response is awaiting durable publication.'
+    : 'The transport has stopped, but its original response is awaiting durable publication. Usage remains unknown until that receipt is stored.'
+    : problem === 'owner_interrupted' ? preparation
+      ? 'The original preparation executor was interrupted; this request will not be replayed.'
+      : 'The original executor was interrupted. Remote usage is unconfirmed; this request will not be replayed.'
+    : problem === 'invalid_response' ? 'The provider response was stored, but its classifier data was invalid. Check the selected protocol.'
     : problem === 'http_rejected' ? 'The provider rejected this request. Check the original connection and account.'
     : problem === 'transport_failed' ? 'The transport stopped without a complete response. Check the original service before requesting another decision.'
     : problem === 'not_dispatched' ? 'This request was not sent. Check its parent operation, Goal and current access before starting a new decision.'
     : problem === 'cancelled' ? 'Cancellation was requested. Any usage already received remains accounted.' : null;
   return <section aria-label="Decision inference" className="space-y-1 text-xs text-muted-foreground">
-    <p>{intent.binding.purpose} · {intent.binding.providerId} / {intent.binding.modelId}</p>
+    <p>{intent.binding.purpose} · {intent.binding.providerId} / {intent.binding.modelId} · {preparation ? 'Preparation' : 'Model compute'}</p>
     <p>{receipt?.requestStarted === false ? 'Not sent' : receipt?.requestStarted === true ? 'Transport started' : state?.dispatched ? 'Dispatch recorded; sending unconfirmed' : 'Awaiting dispatch'}
       {' · '}{receipt?.localExecutorStopped ? 'Local executor stopped' : 'Local executor stop unconfirmed'}</p>
-    <p>Input tokens: {receipt?.usage.inputTokens ?? 'unknown'} · Output tokens: {receipt?.usage.outputTokens ?? 'unknown'}</p>
+    {preparation ? <p>Tokenization or template preparation; no model inference usage.</p>
+      : <p>Input tokens: {receipt?.usage.inputTokens ?? 'unknown'} · Output tokens: {receipt?.usage.outputTokens ?? 'unknown'}</p>}
     {explanation && <p role="status">{explanation}</p>}
   </section>;
 }

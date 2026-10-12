@@ -4,6 +4,8 @@ import {
   requestClassifier,
   ClassifierRequestError,
   ClassifierResponseError,
+  classifierWireUsage,
+  classifierRawUsage,
 } from "../../src/harness/native-classifier.js";
 import type { FastDecisionQuestion } from "@varin/protocol";
 import { classify as classifyLlama } from "@earendil-works/pi-ai/api/llama-cpp-classify";
@@ -35,11 +37,13 @@ const score: FastDecisionQuestion = {
 describe("Varin semantics over native Pi classifiers", () => {
   it("uses native llama.cpp token probabilities without requiring an API key", async () => {
     const requests: string[] = [];
+    const signals: AbortSignal[] = [];
     const nativeModel = { type: "classifier" as const, provider: "local", api: "llama-cpp-classify" as const,
       id: "local-anonymous-fixture", name: "local", baseUrl: "http://localhost:8080/v1", contextWindow: 8_000,
       input: ["text" as const], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
     const fetchImpl: typeof fetch = async (url, init) => {
       requests.push(String(url));
+      if (init?.signal) signals.push(init.signal);
       assert.equal(new Headers(init?.headers).get("authorization"), null);
       const body = JSON.parse(String(init?.body)) as { content?: string };
       if (String(url).endsWith("/tokenize")) return jsonResponse(200, {
@@ -58,6 +62,7 @@ describe("Varin semantics over native Pi classifiers", () => {
     if (result.answers[0]?.kind === "judge") assert.ok(result.answers[0].value > 0.8);
     assert.equal(result.usage, undefined, "the provider did not report usage");
     assert.ok(requests.every(url => url.startsWith("http://localhost:8080/")));
+    assert(signals.every(signal => !signal.aborted), "normal completed transports are not cancelled during cleanup");
     await assert.rejects(() => requestClassifier({ baseUrl: nativeModel.baseUrl, model: nativeModel.id,
       nativeModel, classify: classifyLlama, state: "local evidence", questions: [judge], fetchImpl,
       endpoint: "/one-endpoint" }), /several|tokenize/);
@@ -274,4 +279,131 @@ describe("Varin semantics over native Pi classifiers", () => {
     }
   });
 
+});
+
+const llamaModel = (id: string) => ({ type: 'classifier' as const, provider: 'local', api: 'llama-cpp-classify' as const,
+  id, name: id, baseUrl: 'https://llama.invalid/root/v1/', contextWindow: 8000,
+  input: ['text' as const], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
+const llamaBody = { tokens_evaluated: 12, tokens_predicted: 1, tokens_cached: 9,
+  completion_probabilities: [{ top_logprobs: [{ id: 2, logprob: 0 }, { id: 3, logprob: -2 }] }] };
+const llamaPreparation = (url: string, body: { content?: string }) => url.endsWith('/tokenize')
+  ? Response.json({ tokens: body.content === '\n' ? [1] : body.content === '\nYes' ? [1, 2] : [1, 3] })
+  : url.endsWith('/apply-template') ? Response.json({ prompt: 'fixture prompt' }) : undefined;
+
+it('isolates real SDK label preparation across simultaneous callers and credential headers', async () => {
+  const model = llamaModel('isolated-callers');
+  const cancelled = new AbortController();
+  let started!: () => void;
+  const pending = new Promise<void>(resolve => { started = resolve; });
+  const first = requestClassifier({ nativeModel: model, baseUrl: model.baseUrl, model: model.id,
+    state: 'a', questions: [judge], signal: cancelled.signal, headers: { 'x-account': 'first' },
+    fetchImpl: async (url, init) => {
+      assert.equal(new Headers(init?.headers).get('x-account'), 'first');
+      if (String(url).endsWith('/tokenize')) {
+        started();
+        await new Promise<void>((_resolve, reject) => init!.signal!.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')), { once: true }));
+      }
+      return Response.json({ prompt: 'first' });
+    } });
+  const rejected = assert.rejects(first, ClassifierResponseError);
+  await pending;
+  let ownTokenizations = 0;
+  const second = await requestClassifier({ nativeModel: model, baseUrl: model.baseUrl, model: model.id,
+    state: 'b', questions: [judge], headers: { 'x-account': 'second' }, fetchImpl: async (url, init) => {
+      assert.equal(new Headers(init?.headers).get('x-account'), 'second');
+      if (String(url).endsWith('/tokenize')) ownTokenizations++;
+      const prepared = llamaPreparation(String(url), JSON.parse(String(init?.body)));
+      if (prepared) return prepared;
+      cancelled.abort();
+      return Response.json(llamaBody);
+    } });
+  await rejected;
+  assert.equal(ownTokenizations, 4);
+  assert.equal(second.answers.length, 1);
+  assert.deepEqual(second.usage, { inputTokens: 12, outputTokens: 1 });
+});
+
+it('retains completed questions and each retry/readout usage when a later llama question fails', async () => {
+  const model = llamaModel('partial-questions');
+  const depths: number[] = [];
+  let completions = 0;
+  await assert.rejects(requestClassifier({ nativeModel: model, baseUrl: model.baseUrl, model: model.id,
+    state: 'evidence', questions: [judge, { ...judge, id: 'later' }], fetchImpl: async (url, init) => {
+      const wire = JSON.parse(String(init?.body));
+      const prepared = llamaPreparation(String(url), wire);
+      if (prepared) return prepared;
+      depths.push(wire.n_probs); completions++;
+      if (completions === 1) return Response.json({ tokens_evaluated: 3, tokens_predicted: 0 }, { status: 503, headers: { 'retry-after': '0' } });
+      if (completions === 2) return Response.json({ ...llamaBody, completion_probabilities: [{ top_logprobs: [{ id: 2, logprob: 0 }] }] });
+      if (completions === 3) return Response.json(llamaBody);
+      return Response.json({ tokens_evaluated: 7, tokens_predicted: 1, completion_probabilities: [] });
+    } }), error => {
+      assert(error instanceof ClassifierResponseError);
+      assert.equal(error.result?.answers[0]?.id, judge.id);
+      assert.deepEqual(error.result?.missing, ['later']);
+      assert.deepEqual(error.result?.usage, { inputTokens: 34, outputTokens: 3 });
+      return true;
+    });
+  assert.deepEqual(depths, [256, 256, 4096, 256]);
+});
+
+it('waits for an aborted preparation body to drain and prevents late fallback requests', async () => {
+  const model = llamaModel('drained-preparation');
+  let abortSeen!: () => void, drain!: () => void;
+  const aborted = new Promise<void>(resolve => { abortSeen = resolve; });
+  const drained = new Promise<void>(resolve => { drain = resolve; });
+  let completed = false, requests = 0;
+  const work = requestClassifier({ nativeModel: model, baseUrl: model.baseUrl, model: model.id,
+    state: 'evidence', questions: [judge], fetchImpl: async (url, init) => {
+      requests++;
+      if (String(url).endsWith('/tokenize')) return Response.json({ invalid: true });
+      assert(String(url).endsWith('/apply-template'));
+      const stream = new ReadableStream<Uint8Array>({ start(controller) {
+        init!.signal!.addEventListener('abort', () => {
+          abortSeen();
+          void drained.then(() => controller.error(new DOMException('drained', 'AbortError')));
+        }, { once: true });
+      } });
+      return new Response(stream);
+    } });
+  void work.finally(() => { completed = true; }).catch(() => {});
+  const rejected = assert.rejects(work, ClassifierResponseError);
+  await aborted;
+  assert.equal(completed, false);
+  const originalRequests = requests;
+  drain();
+  await rejected;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests, originalRequests);
+});
+
+it('reads only real native completion counters, retaining partial and raw usage without estimates', () => {
+  const raw = { tokens_evaluated: 0, tokens_predicted: -1, tokens_cached: 5,
+    timings: { prompt_n: 7, predicted_n: 1 }, n_predict: 1 };
+  assert.deepEqual(classifierWireUsage('llama-cpp-classify', raw), { inputTokens: 0 });
+  assert.deepEqual(classifierRawUsage('llama-cpp-classify', raw), {
+    tokens_evaluated: 0, tokens_predicted: -1, tokens_cached: 5, timings: raw.timings,
+  });
+  assert.equal(classifierWireUsage('llama-cpp-classify', { timings: raw.timings, n_predict: 1 }), undefined);
+  assert.deepEqual(classifierWireUsage('llama-cpp-classify', { tokens_evaluated: Number.MAX_SAFE_INTEGER + 1, tokens_predicted: 1 }), { outputTokens: 1 });
+});
+
+it('preserves an explicitly registered custom classifier protocol, routing and its own usage', async () => {
+  const model = { ...llamaModel('custom'), api: 'fixture-custom-classifier' };
+  let actual = '';
+  const result = await requestClassifier({ nativeModel: model, baseUrl: model.baseUrl, model: model.id,
+    state: 'evidence', questions: [judge], fetchImpl: async url => { actual = String(url); return Response.json({ custom: true }); },
+    classify: async (selected, context, options) => {
+      assert.equal(selected.api, model.api);
+      const response = await options!.fetch!('https://custom.invalid/own-route', { method: 'POST', body: '{}' });
+      assert.deepEqual(await response.json(), { custom: true });
+      return { api: selected.api, provider: selected.provider, model: selected.id, stopReason: 'stop', timestamp: Date.now(),
+        answers: { [Object.keys(context.questions)[0]!]: { type: 'bool', probability: 0.25 } },
+        usage: { input: 27, output: 5, totalTokens: 32, cacheRead: 0, cacheWrite: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
+    } });
+  assert.equal(actual, 'https://custom.invalid/own-route');
+  assert.deepEqual(result.answers, [{ id: judge.id, kind: 'judge', value: 0.25 }]);
+  assert.deepEqual(result.usage, { inputTokens: 27, outputTokens: 5 });
+  await assert.rejects(requestClassifier({ nativeModel: model, baseUrl: model.baseUrl, model: model.id,
+    state: 'evidence', questions: [judge] }), /registered implementation/);
 });

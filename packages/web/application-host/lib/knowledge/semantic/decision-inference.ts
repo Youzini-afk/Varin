@@ -5,7 +5,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { parseHarnessFastDecisionSettings, resolveFastDecisionPurpose,
   type HarnessFastDecisionPurpose, type HarnessFastDecisionPurposeStatus, type HarnessFastDecisionResult,
   type HarnessFastDecisionParams, type HarnessResolvedFastDecisionBinding } from '@varin/protocol';
-import { requestClassifier, classifierWireUsage, classifierWireOutput, classifierWireResult, ClassifierResponseError } from '@varin/pi-host/classifier';
+import { requestClassifier, classifierWireUsage, classifierRawUsage, classifierWireResponseValid, ClassifierResponseError } from '@varin/pi-host/classifier';
 import type { HostDecisionProviderBinding } from '@varin/pi-host/credentials';
 import type { EgressRuntime } from '../../harness/egress.js';
 import { ResearchDecisionFailure } from '../../harness/research-decide.js';
@@ -39,7 +39,7 @@ const cancelled = () => new DOMException('Decision request cancelled', 'AbortErr
 const emptyUsage = (): InferenceReceipt['usage'] => ({ measurement: 'missing', inputTokens: null, outputTokens: null });
 const knownFailure = (error: unknown): string => {
   const code = object(error) && typeof error.code === 'string' ? error.code : '';
-  return code === 'decision-api-unavailable' ? 'The selected classifier API is not connected to this runtime yet. TypeSafe and Cloudflare System One are available.'
+  return code === 'decision-api-unavailable' ? 'The selected classifier API is unavailable. TypeSafe, Cloudflare System One and llama.cpp are supported.'
     : code === 'credential-scope-changed' ? 'The provider credential owner changed. Prepare a new decision.'
       : 'The selected decision connection is unavailable. Check its provider, endpoint and credentials.';
 };
@@ -192,14 +192,17 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
           const connection = await options.egress.prepare(provider.requestUrl);
           const fetchImpl: typeof fetch = async (url, init) => {
             const destination = new URL(String(url)).toString();
-            if (destination !== provider.requestUrl || init?.method !== 'POST' || typeof init.body !== 'string') throw new Error('decision-request-binding-changed');
-            await assertAvailable(combined);
+            const route = provider.routes.find(value => value.requestUrl === destination);
+            if (!route || init?.method !== 'POST' || typeof init.body !== 'string') throw new Error('decision-request-binding-changed');
+            const requestSignal = init.signal ? AbortSignal.any([combined, init.signal]) : combined;
+            requestSignal.throwIfAborted();
+            await assertAvailable(requestSignal);
             await guard?.();
-            combined.throwIfAborted();
+            requestSignal.throwIfAborted();
             const id = `inference:${invocation.operationId}:${++ordinal}`;
             const executionOwner = invocation.executorOwner;
             const selectedBinding: InferenceBinding = { purpose, providerId: binding.providerId, modelId: binding.modelId,
-              api: provider.api, endpoint: provider.requestUrl, configurationId: binding.configurationId, credentialScope: provider.credentialScope };
+              api: provider.api, endpoint: destination, requestKind: route.requestKind, configurationId: binding.configurationId, credentialScope: provider.credentialScope };
             let admitted = false;
             let started = false;
             let completed = false;
@@ -219,26 +222,27 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
               active.set(id, entry);
               observeStatus(status);
               if (!status.live || status.dispatched || status.recovered) throw new Error('decision-original-request-unavailable');
-              await assertAvailable(combined);
+              await assertAvailable(requestSignal);
               const ready = await options.kernel.agentRuntimeRequest<InferenceStatus, 'runtime.inference.dispatch'>('runtime.inference.dispatch', { operationId: id, executionOwner });
               observeStatus(ready);
               if (!ready.live) throw new Error('decision-dispatch-cancelled');
-              combined.throwIfAborted();
+              requestSignal.throwIfAborted();
               started = true;
               // Egress alone owns the dispatcher; SDK transport hints cannot replace its route.
               const { dispatcher: _dispatcher, ...requestInit } = init;
-              response = await connection.fetch(destination, { ...requestInit, redirect: 'manual', signal: combined });
+              response = await connection.fetch(destination, { ...requestInit, redirect: 'manual', signal: requestSignal });
               httpStatus = response.status;
               const bytes = new Uint8Array(await response.arrayBuffer());
               responseBody = Buffer.from(bytes).toString('base64');
               completed = true;
               try { raw = JSON.parse(new TextDecoder().decode(bytes)); } catch { /* Original invalid bytes still belong to this receipt. */ }
-              const actual = classifierWireUsage(provider.api, raw);
+              const actual = route.requestKind === 'model_compute' ? classifierWireUsage(provider.api, raw) : undefined;
               if (actual) usage = { measurement: 'actual', inputTokens: actual.inputTokens ?? null, outputTokens: actual.outputTokens ?? null };
               const receipt: InferenceReceipt = { requestStarted: true, providerCompleted: true, localExecutorStopped: true,
-                usage, httpStatus, problem: !response.ok ? 'http_rejected' : classifierWireResult(provider.api, binding.modelId, input.questions, raw).answers.length === 0 ? 'invalid_response' : null };
-              receipts.push(receipt);
-              try { await publish({ operationId: id, executionOwner, receipt, response: { bodyBase64: responseBody, rawUsage: classifierWireOutput(provider.api, raw)?.usage ?? null } }); }
+                usage, httpStatus, problem: !response.ok ? 'http_rejected' : raw === null ? 'invalid_response'
+                  : route.requestKind === 'model_compute' && !classifierWireResponseValid(provider.api, binding.modelId, input.questions, raw) ? 'invalid_response' : null };
+              if (route.requestKind === 'model_compute') receipts.push(receipt);
+              try { await publish({ operationId: id, executionOwner, receipt, response: { bodyBase64: responseBody, rawUsage: route.requestKind === 'model_compute' ? classifierRawUsage(provider.api, raw) : null } }); }
               catch (error) { controller.abort(cancelled()); throw error; }
               // The SDK receives exactly these already drained bytes. Cancellation cannot erase their usage.
               return new Response(bytes, { status: response.status, statusText: response.statusText, headers: response.headers });
@@ -252,20 +256,20 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
               }
               if (admitted && !completed) {
                 const receipt: InferenceReceipt = { requestStarted: started, providerCompleted: false, localExecutorStopped: true,
-                  usage, httpStatus, problem: combined.aborted ? 'cancelled' : started ? 'transport_failed' : 'not_dispatched' };
-                receipts.push(receipt);
-                try { await publish({ operationId: id, executionOwner, receipt, response: { bodyBase64: responseBody, rawUsage: classifierWireOutput(provider.api, raw)?.usage ?? null } }); }
+                  usage, httpStatus, problem: requestSignal.aborted ? 'cancelled' : started ? 'transport_failed' : 'not_dispatched' };
+                if (route.requestKind === 'model_compute' && started) receipts.push(receipt);
+                try { await publish({ operationId: id, executionOwner, receipt, response: { bodyBase64: responseBody, rawUsage: route.requestKind === 'model_compute' ? classifierRawUsage(provider.api, raw) : null } }); }
                 catch { report(); }
               }
-              if (combined.aborted) throw cancelled();
+              if (requestSignal.aborted) throw cancelled();
               throw error;
             } finally { if (active.get(id) === entry) active.delete(id); }
           };
           const result = await requestClassifier({ baseUrl: provider.baseUrl, ...(provider.endpoint ? { endpoint: provider.endpoint } : {}),
-            nativeModel: { ...(provider.nativeModel ?? { type: 'classifier' as const, api: provider.api as 'typesafe-system-one' | 'cloudflare-workers-ai-system-one',
+            nativeModel: { ...(provider.nativeModel ?? { type: 'classifier' as const, api: provider.api as 'typesafe-system-one' | 'cloudflare-workers-ai-system-one' | 'llama-cpp-classify',
               provider: binding.providerId, id: binding.modelId, name: binding.modelId, input: ['text'] as const, contextWindow: 0,
               cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }), baseUrl: provider.baseUrl,
-              api: provider.api as 'typesafe-system-one' | 'cloudflare-workers-ai-system-one' },
+              api: provider.api as 'typesafe-system-one' | 'cloudflare-workers-ai-system-one' | 'llama-cpp-classify' },
             ...(auth?.auth.apiKey === undefined ? {} : { apiKey: auth.auth.apiKey }),
             ...(auth?.auth.headers ? { headers: Object.fromEntries(Object.entries(auth.auth.headers).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) } : {}),
             model: binding.modelId, state: { goal: input.goal, materials: input.materials }, questions: input.questions, signal: combined, fetchImpl });

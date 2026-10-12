@@ -5,9 +5,16 @@ use crate::execution::{UsageMeasurement, UsageReceipt};
 use crate::providers::auth::CredentialScope;
 use serde::Deserialize;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InferenceRequestKind {
+    Preparation,
+    ModelCompute,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InferenceBinding {
+    pub request_kind: InferenceRequestKind,
     pub purpose: String,
     pub provider_id: String,
     pub model_id: String,
@@ -120,6 +127,7 @@ struct State {
 #[serde(rename_all = "camelCase")]
 pub struct InferenceStatus {
     pub operation_id: String,
+    pub request_kind: InferenceRequestKind,
     pub phase: OperationPhase,
     pub outcome: Option<Outcome>,
     pub live: bool,
@@ -305,6 +313,7 @@ impl Catalog {
         };
         Ok(InferenceStatus {
             operation_id: id.into(),
+            request_kind: i.binding.request_kind,
             phase: op.phase,
             outcome: op.outcome,
             live,
@@ -326,8 +335,10 @@ impl Catalog {
         let tx = self.db.transaction()?;
         parent_live(&tx, &op, &i, self.epoch)?;
         goals::check_dispatch(&tx, &op.run_id, i.goal.as_ref())?;
-        if let Some(goal) = &i.goal {
-            goals::dispatched(&tx, goal)?;
+        if i.binding.request_kind == InferenceRequestKind::ModelCompute {
+            if let Some(goal) = &i.goal {
+                goals::dispatched(&tx, goal)?;
+            }
         }
         s.dispatched = true;
         op.phase = OperationPhase::Running;
@@ -360,7 +371,7 @@ impl Catalog {
             return Err(conflict());
         }
         let tx = self.db.transaction()?;
-        if s.dispatched {
+        if s.dispatched && i.binding.request_kind == InferenceRequestKind::ModelCompute {
             if !s.accounted {
                 if p.request_started {
                     goals::measured(&tx, i.goal.as_ref(), &UsageReceipt::default())?;
@@ -427,6 +438,8 @@ impl Catalog {
             || (p.receipt.request_started == Some(false)
                 && p.receipt.usage != InferenceUsage::default())
             || (!s.dispatched && p.receipt.request_started != Some(false))
+            || (i.binding.request_kind == InferenceRequestKind::Preparation
+                && p.receipt.usage != InferenceUsage::default())
         {
             return Err(conflict());
         }
@@ -442,7 +455,7 @@ impl Catalog {
             }
         }
         let tx = self.db.transaction()?;
-        if s.dispatched {
+        if s.dispatched && i.binding.request_kind == InferenceRequestKind::ModelCompute {
             if s.accounted {
                 if s.receipt.as_ref().ok_or_else(conflict)?.request_started != Some(false) {
                     goals::refine_measurement(
@@ -514,7 +527,8 @@ pub(crate) fn recover(tx: &Transaction<'_>, op: &mut Operation) -> Result<bool> 
         http_status: None,
         problem: Some(InferenceProblem::OwnerInterrupted),
     });
-    if s.dispatched && !s.accounted {
+    if s.dispatched && !s.accounted && i.binding.request_kind == InferenceRequestKind::ModelCompute
+    {
         goals::measured(tx, i.goal.as_ref(), &receipt.usage.receipt())?;
         s.accounted = true;
     }

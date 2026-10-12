@@ -61,8 +61,18 @@ TypeSafe is the default API for an explicitly entered, undiscovered decision mod
 is `/systemone` appended to the model's base URL; leave the endpoint empty to use native defaults.
 llama.cpp uses several server endpoints, so configure its base URL instead of a single endpoint override.
 Native auth resolution can authorize a classifier without an API key; the decision path accepts that
-resolution instead of inventing a key requirement. A capability model's explicit API participates in
+resolution instead of inventing a key requirement. The native Host credential owner likewise binds a
+real configured keyless llama.cpp connection without a fake token. Configured key/helper failures
+still fail explicitly, and later credential/header changes revoke the old scope. A different explicit
+credential owner is allowed when that owner actually exists; model-specific headers keep their
+original ownership. A capability model's explicit API participates in
 both the frozen configuration identity and the actual native dispatch.
+The native runtime retains each actual HTTP under its original operation and credential owner.
+llama.cpp tokenization/template requests are preparation; completion retries and probability-depth
+expansion each carry their own actual raw token receipt. The SDK adaptation keeps pending labels
+request-local and completed answers visible after a later question fails; the adapter awaits all
+actual transport bodies. Explicit custom classifier implementations in Pi retain their own routes
+and returned usage rather than being restricted to the native runtime's three implemented protocols.
 Protocol-specific option counts and capacities remain properties of that API/model; the generic
 decision protocol does not impose TypeSafe's window on other classifiers.
 

@@ -421,7 +421,7 @@ passive fact interrupts an unrelated observation Wait. Physical release remains 
 Computer owner's evidence, independent of input acceptance and body failure.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version **55**, input domain 6 and collaboration domain 8 store input intents/queue bodies and context-job ownership,
+Catalog version **56**, input domain 6 and collaboration domain 8 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format **4** retains typed request origins and typed output bodies. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
@@ -435,14 +435,17 @@ before sweeping and preserves unknown files; it never deletes history or invokes
 
 `catalog_inference.rs` owns purpose-specific decision HTTP work under an already admitted tool.
 One parent/ordinal identifies one actual request, with the original external executor, frozen binding
-and Goal. Body preparation uses ContentStore publications outside the Catalog lock. Dispatch and
-pending Goal usage commit together; observed raw response/usage precedes result interpretation, and
+and Goal. Required `requestKind` distinguishes `preparation` from `model_compute`; both retain the
+original control, permission and dispatch fences. Only actual model computation registers/refines
+Goal usage. Tokenization/template requests are not missing-usage charges or invented zero-token
+computations. Body preparation uses ContentStore publications outside the Catalog lock. Model
+dispatch and pending Goal usage commit together; observed raw response/usage precedes interpretation, and
 missing token dimensions remain unknown. The transport's local stop evidence is distinct from
 provider completion. Parent/Run/Goal controls fence the corresponding child requests; a budget gate
 rejects new dispatch without retroactively cancelling otherwise valid already-dispatched work.
 Recovery retains the external owner, marks unresolved dispatch as unknown and never resends it.
 The exact original owner may refine that recovery receipt, replacing its original Goal contribution
-in the same transaction. Repeated delivery leaves revision, events and usage unchanged. Catalog 55
+in the same transaction. Repeated delivery leaves revision, events and usage unchanged. Catalog 56
 prevents an older reader from applying generic external-operation recovery to these inference facts.
 If a drained transport's full receipt cannot be published, `receipt_pending` records that exact
 owner's short unknown-usage fact before its parent callback may finish. Known no-send evidence

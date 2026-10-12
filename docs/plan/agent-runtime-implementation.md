@@ -19,6 +19,14 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-12 增量：llama.cpp decision 的准备与真实计算
+
+- 原 llama.cpp SDK 接普通 `research_decide`，沿同一配置/credential/egress/材料与 Catalog/Goal owner。Catalog **56**、wire **9**；每个真实 HTTP 保原 Operation，准备请求仍受控制但不伪造模型计费，completion 的重试/概率深度扩展逐次记真实 raw usage。
+- 单协议路线声明冻结原 server-root；真实 keyless 连接在原凭据 owner 内绑定，错误 key/helper 不降级匿名。SDK label promise 限单请求，已完成答案不会被后题失败清掉；真实 body 排空先于返回。原 Pi custom classifier route/usage 保留。
+- 实际 candidate prompt 缺目标、SDK 跨请求取消污染、并发准备提前返回、Host keyless 前置拒绝和冷安装 MCP patch offset 均已最小修复。普通部分失败保真实零分/原顺序/missing，Stop/撤权仍抑制答案且保费用。
+- 原 SDK/Host/实际 Catalog/Goal/stdout 组合、GC/重开、公开精确 Stop 与独审原失败路径的有限证据见[本片验收](../reviews/runtime-llama-decisions-2026-10-12.md)。受控 HTTP 不证明真实模型/账户/性能，完整产品 IPC 与全部平台仍单列。
+- 接续 rerank、其余用途/环境/Bot、来源/检索/组合能力。两份设计整体尚未完成；最终默认切换、Pi 删除和资产全面迁移仍由用户验收后负责。
+
 ## 2026-10-12 增量：独立 decision 与原推理回执
 
 - 普通 `research_decide` 单声明接原 TypeSafe/Cloudflare 分类器与真实材料/PDF reader，原 purpose 配置与凭据 owner 独立于主聊天模型。实际 reader hash/range/派生来源及正文预算进入材料身份，原 ACL 在派发前重核。
@@ -626,14 +634,14 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 
 ## 完整设计对照与剩余工程范围
 
-2026-10-12 按两份设计、当前源码和本文件最新已发布增量重新核对。此表替代早期仍把 Goal、策略子任务、MCP Tasks、Computer 或自动容量压缩列为未实现的中间对照；各历史阶段的原始验证记录仍保留。decision 已完成 TypeSafe/Cloudflare 与 research_decide 有限片，Native Llama、rerank 和其他用途尚未完成。实现、真实产品组合与外部平台验证分别判断，不按提交数、测试数或条目数估计完成比例。
+2026-10-12 按两份设计、当前源码和本文件最新已发布增量重新核对。此表替代早期仍把 Goal、策略子任务、MCP Tasks、Computer 或自动容量压缩列为未实现的中间对照；各历史阶段的原始验证记录仍保留。decision 已完成 TypeSafe/Cloudflare/llama.cpp 与 research_decide 有限片，rerank 和其他用途尚未完成。实现、真实产品组合与外部平台验证分别判断，不按提交数、测试数或条目数估计完成比例。
 
 以下顺序是 decision/rerank 后的工程优先级；可独立交付的领域可以并行。默认 runtime 切换、Pi 删除与全面用户资产迁移由用户验收后执行，我们负责迁移前能力、验收入口和交接清单。
 
 | 设计要求 / 剩余类别 | 已有实际能力，不再作为从零缺口 | 仍需实现或闭合的实际路径 | 验收重点 |
 | --- | --- | --- | --- |
 | 总设 §15–17：来源、语言与检索 | 固定/物化/live_root 来源、隔离可写 child 与逐项结果集成；live_root 定义/引用/诊断、可组合关键词/结构/显式语义；原 immutable reader、撤权与 embedding 账本 | fixed/materialized 的完整工程依赖闭包；其余 LSP 查询与跨文件计算版本证据；远端文件/语言/检索同源映射；检索中的 rerank/decision 组合消费者 | 固定视图不能悄悄读 live 配置/库；同名远端路径不串源；旧 reader/配置切代与取消恢复；正常可选缺失不吞选定实现失败 |
-| 总设 §12–13、§18、§24：推理用途、记忆与 Bot | 多 API 家族原生适配及原 credential owner；规划模型、embedding、TypeSafe/Cloudflare decision 与真实 research_decide；自动容量水位、分段摘要、普通 notes/计划和稳定 memory checkpoint；Goal/预算/暂停/各种持久触发 | Native Llama decision、rerank；其余建议/评估消费者与独立 image 用途；实际模型配置覆盖和服务器工作续接；可替换上下文预算策略、provider 容量反馈；完整自动记忆与 Bot 独立知识/身份/睡眠恢复/长期任务 | 每次实际外发按用途、原凭据、来源和 Goal 受理；未知 usage 不变成零；不重放潜在收费请求；原记忆 revision 和祖先压缩边界保持 |
+| 总设 §12–13、§18、§24：推理用途、记忆与 Bot | 多 API 家族原生适配及原 credential owner；规划模型、embedding、TypeSafe/Cloudflare/llama.cpp decision 与真实 research_decide；自动容量水位、分段摘要、普通 notes/计划和稳定 memory checkpoint；Goal/预算/暂停/各种持久触发 | rerank；其余建议/评估消费者与独立 image 用途；实际模型配置覆盖和服务器工作续接；可替换上下文预算策略、provider 容量反馈；完整自动记忆与 Bot 独立知识/身份/睡眠恢复/长期任务 | 每次实际外发按用途、原凭据、来源和 Goal 受理；未知 usage 不变成零；不重放潜在收费请求；原记忆 revision 和祖先压缩边界保持 |
 | 扩设 §4–9：完整能力组合与作者接口 | Provider/Transform/Decision/Observer 已有真实切片；ToolGraph、直接 child、Deliver/Pause、运行中策略换绑；SDK tools.list/describe/invoke、普通工具/嵌套调用、候选更新与 owner 独立准备；已有 typed workbench slot 声明 | 同一合同的完整 service/method/event/UI slot/props/来源/就绪状态精确查询；Agent 产包→既有授权候选→工作台挂载/释放整链；更广领域 Provider/Transform、父子作用域共享键与局部复用、多变换顺序/冲突、独占资源交接 | 不另养能力名单或第二安装器；失败候选保留旧实例；旧调用保留真实绑定；关闭 UI 不取消后台业务；仅依赖自己的工作等待准备 |
 | 总设 §14–16、§21、§24：文件与产品工作流 | 原文件工具/CAS/捕获、child 报告与 WorkingResult、family 消息/读取/Wait、历史引用与分支、Storage 与 Catalog GC 锁外准备 | 未保存编辑器草稿、Documents/Git/overview 与工作源的关联；历史/磁盘组合恢复；完整 IDE/Research/Bot 模式、通知等产品消费者接同一身份/revision/cursor | 草稿不是聊天回滚副作用；重开保留真实副本与效果；报告和代码集成各有事实；各视图不能有第二份状态权威 |
 | 总设 §19–20、§22：环境、Computer 与 MCP | Computer 原操作、精确 stop、source-less child request/Wait/handback、持久 async 脚本；MCP tools/content/Tasks/resource observers/有限交互和两次审阅 sampling；typed media 的存储与跨层消费 | 真实远端/VM 环境的一致资源映射及平台组件缺口；支持范围内 provider/server/无 UI 生命周期的实际产品组合。Wayland 可靠截图/坐标输入仍需正式会话组件；macOS JXA 已有实现但缺真实机证据。typed media 不代表全部模型音视频/image 用途已实现 | 同物理桌面共享占用、独立桌面并行；失联不证明停止；旧 epoch 不续发；MCP 可选音频/toolChoice 等明确有限支持不自动扩成整份协议实现任务；实际配置与权限流程不能被省略 |
@@ -691,7 +699,7 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 | 能力 | 当前入口/权威 | 目标交付 | 原生实现状态 |
 | --- | --- | --- | --- |
 | 会话、分支、运行中输入 | `packages/pi-host/src/session-host.ts`、`packages/runtime-broker` | ConversationStore + RunCoordinator；队列编辑、steering、停止、重连、历史回读 | 局部实现：持久队列、编辑/取消、边界输入/中断/nextRun；显式原生界面、固定 head 分页与对话分支已接入；默认路由迁移与完整恢复未完成 |
-| 模型、认证、推理用途 | Pi SDK、Host `connections`/`pi-config`/`small-model` | 各实际配置 transport、OAuth/云身份、模型覆盖、reasoning/opaque、多模态、usage；chat与embedding/rerank等各自合同 | 局部实现：native query/index embedding 与 TypeSafe/Cloudflare decision 复用真实配置/凭据 owner、原transport和持久dispatch/usage事实；Native Llama、rerank及完整认证/模型覆盖未完成 |
+| 模型、认证、推理用途 | Pi SDK、Host `connections`/`pi-config`/`small-model` | 各实际配置 transport、OAuth/云身份、模型覆盖、reasoning/opaque、多模态、usage；chat与embedding/rerank等各自合同 | 局部实现：native query/index embedding 与 TypeSafe/Cloudflare/llama.cpp decision 复用真实配置/凭据 owner、原transport和持久dispatch/usage事实；rerank及完整认证/模型覆盖未完成 |
 | 上下文、记忆checkpoint、压缩 | Pi harness/session history、Host `memory` | 原文保留；来源角色；冻结快照；祖先范围压缩；交付去重；即时记忆写入与稳定system快照 | 原生 checkpoint、自动容量水位与分段摘要 Run 已实现；可替换预算策略、provider 容量反馈与完整自动记忆产品流程仍待 |
 | 文件、草稿、恢复 | Rust `storage`；Host `documents`/`recovery`；UI Document Registry | 复用内容对象/条件写入/恢复；明确草稿owner；分支与磁盘效果区分；组合恢复可核对 | 原生文件工具、固定/可写来源、结果保留与逐项集成已有闭环；完整草稿与历史/磁盘组合恢复的产品接线仍需完成 |
 | 工作分支、基线与dispatch | Host `harness/thread-services.ts`、`thread-runtime.ts`、`kernel/storage-adapter.ts` | 持久受理立即回执；准备独立作业；批量capture；真实一致性标记；无变更报告与代码集成分开 | 固定与可写 child 持久受理、原来源准备、递归取消、报告/WorkingResult 与逐项集成已接；更广捕获与恢复产品组合仍待 |

@@ -33,14 +33,77 @@ let web: ReturnType<typeof createWebRuntime>, decision: ReturnType<typeof create
 let inference: ReturnType<typeof createSemanticInference>;
 const scopes: ExtensionToolScope[] = [];
 let requests = 0, pdfFetches = 0, mode = '', bodyDrained = false;
+let preparations=0, completions=0;
+const depths:number[]=[]; const targets:string[]=[];
+let enteredTemplate!:()=>void;
+const templateEntered=new Promise<void>(resolve=>{enteredTemplate=resolve;});
 let stopping: Promise<void> | undefined;
+async function heldPreparation(signal:AbortSignal, operationUrl:string):Promise<Response> {
+  let release!:()=>void; const allowDrain=new Promise<void>(resolve=>{release=resolve;});
+  let aborted!:()=>void; const sawAbort=new Promise<void>(resolve=>{aborted=resolve;});
+  const stream=new ReadableStream<Uint8Array>({start(controller){
+    signal.addEventListener('abort',()=>{
+      aborted();
+      void allowDrain.then(()=>{bodyDrained=true;controller.error(new DOMException('Original template transport drained','AbortError'));});
+    },{once:true});
+  }});
+  enteredTemplate();
+  stopping=(async()=>{
+    const operations=await runtime.activeOperations('thread:parent','branch:parent');
+    const operation=operations.find(value=>(value.intent as {binding?:{endpoint?:string}}).binding?.endpoint===operationUrl); assert(operation);
+    if(mode==='llama-stop-prep') await withMaterialReviewClient(runtime,web.user,async api=>{await api.cancelOperation(operation.id);});
+    await sawAbort;
+    assert.equal(bodyDrained,false,'SDK failure/Stop is not template transport drain');
+    const pending=await runtime.operation(operation.id);assert.notEqual(pending.phase,'terminal');
+    const parent=await runtime.operation((pending.intent as {parentOperationId:string}).parentOperationId);
+    assert.equal(parent.phase,'running','the original tool must retain its unfinished preparation');
+    release();
+  })().catch(error=>{release();write({kind:'fixture-failed',error:String(error)});throw error;});
+  return new Response(stream,{headers:{'content-type':'application/json'}});
+}
+async function llamaFetch(url:string,init:RequestInit):Promise<Response> {
+  const path=new URL(url).pathname;const body=JSON.parse(String(init.body)) as Record<string,unknown>;
+  assert.equal(body.model,'classifier');
+  assert(['/router/tokenize','/router/apply-template','/router/completion'].includes(path));
+  if(path==='/router/tokenize') {
+    preparations++;
+    const content=String(body.content);
+    if(mode==='llama-fail-prep' && content==='\n1') {await templateEntered;return Response.json({tokens:'invalid original tokenizer response'});}
+    return Response.json({tokens:[...content].map(char=>char.codePointAt(0))});
+  }
+  if(path==='/router/apply-template') {
+    preparations++;
+    if(mode==='llama-stop-prep'||mode==='llama-fail-prep') {assert(init.signal);return heldPreparation(init.signal,url);}
+    const messages=body.messages as {role:string;content:string}[];
+    assert.equal(messages[1]!.role,'user');
+    return Response.json({prompt:messages[1]!.content+'\n'});
+  }
+  assert.equal(body.n_predict,1);assert.equal(body.post_sampling_probs,false);
+  completions++;depths.push(Number(body.n_probs));
+  const prompt=String(body.prompt);const final=prompt.slice(prompt.lastIndexOf('Question:'));
+  const identities=['candidate-a','candidate-b'].filter(id=>final.includes(JSON.stringify(id)));
+  assert.equal(identities.length,1,'actual final question must identify exactly one target candidate');
+  const target=identities[0]!;targets.push(target);
+  if(mode==='llama-depth' && completions===1) return Response.json({tokens_evaluated:5,tokens_predicted:1,error:{message:'transient original response'}},{status:503,headers:{'retry-after':'0'}});
+  const missingLabel=mode==='llama-depth' && target==='candidate-a' && body.n_probs===256;
+  const labels=missingLabel?['0','1','2']:['0','1','2','3'];
+  const best=target==='candidate-a'?'0':'3';
+  const usage=mode==='llama-missing'?{tokens_evaluated:17}
+    :{tokens_evaluated:target==='candidate-a'?(body.n_probs===4096?7:11):13,tokens_predicted:1};
+  return Response.json({...usage,tokens_cached:3,timings:{prompt_n:2,predicted_n:1},
+    completion_probabilities:mode==='llama-partial'&&target==='candidate-b'?'malformed':[
+      {top_logprobs:labels.map(label=>({id:label.codePointAt(0),logprob:label===best?0:-1e30}))}],
+  });
+}
 const egress = createEgressRuntime({ env: {}, resolveAll: async () => [{ address: '93.184.216.34', family: 4 }],
   systemFetch: async (input, init) => {
     init.signal?.throwIfAborted();
     if (input === 'https://paper.invalid/paper.pdf') { pdfFetches++; return new Response(new Uint8Array(makePdf()), { headers: { 'content-type': 'application/pdf' } }); }
-    assert.equal(input,mode.startsWith('retry-')?'https://classifier.invalid/account/ai/run':'https://classifier.invalid/systemone'); assert.equal(init.method,'POST');
-    assert.equal(new Headers(init.headers).get('authorization'),'Bearer fixture-only-no-real-key');
+    assert.equal(init.method,'POST');
+    assert.equal(new Headers(init.headers).get('authorization'),mode==='llama-depth'?null:'Bearer fixture-only-no-real-key');
     requests++;
+    if(mode.startsWith('llama-')) return llamaFetch(String(input),init);
+    assert.equal(input,mode.startsWith('retry-')?'https://classifier.invalid/account/ai/run':'https://classifier.invalid/systemone');
     const raw = JSON.parse(String(init.body)) as { state: { goal: string; materials: unknown[] }; questions: Record<string,unknown>; input?: { state: { goal: string; materials: unknown[] }; questions: Record<string,unknown> } };
     const body = raw.input ?? raw;
     assert.equal('messages' in body,false,'decision is not a chat request');
@@ -114,10 +177,10 @@ async function initialize(frame:Record<string,unknown>) {
     };
   }
   const root=String(frame.root), agentDir=join(root,'agent'); await mkdir(agentDir,{recursive:true});
-  const api=mode.startsWith('retry-')?'cloudflare-workers-ai-system-one':'typesafe-system-one';
-  const baseUrl=mode.startsWith('retry-')?'https://classifier.invalid/account/ai':'https://classifier.invalid';
+  const api=mode.startsWith('llama-')?'llama-cpp-classify':mode.startsWith('retry-')?'cloudflare-workers-ai-system-one':'typesafe-system-one';
+  const baseUrl=mode.startsWith('llama-')?'https://classifier.invalid/router/v1':mode.startsWith('retry-')?'https://classifier.invalid/account/ai':'https://classifier.invalid';
   await writeFile(join(agentDir,'models.json'),JSON.stringify({providers:{'decision-review':{
-    apiKey:'fixture-only-no-real-key',baseUrl,models:[{id:'classifier',type:'classifier',api}],
+    ...(mode==='llama-depth'?{}:{apiKey:'fixture-only-no-real-key'}),baseUrl,models:[{id:'classifier',type:'classifier',api}],
     capabilities:{decision:{protocol:'pi-classifier',models:[{id:'classifier',api}]}}
   }}}));
   await writeFile(join(agentDir,'settings.json'),JSON.stringify({harness:{fastDecision:{default:{protocol:'pi-classifier',providerId:'decision-review',modelId:'classifier'}}}}));
@@ -142,7 +205,7 @@ async function receive(frame:Record<string,unknown>) {
   if(frame.kind==='fixture-select') return select(frame);
   if(frame.kind==='fixture-finish') {
     await stopping; for(const scope of scopes)scope.close(); await bridge.close(); await inference.close(); await extensions.stop(); await storage.dispose(); await egress.close();
-    write({kind:'fixture-finished',requests,pdfFetches,bodyDrained}); return;
+    write({kind:'fixture-finished',requests,pdfFetches,bodyDrained,preparations,completions,depths,targets}); return;
   }
   throw new Error(`Unexpected decision frame ${String(frame.kind)}`);
 }

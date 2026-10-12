@@ -192,3 +192,58 @@ index 2a6b4e4..5a9354f 100644
          supportsOpenAIGrammarTools: model.compat?.supportsOpenAIGrammarTools ?? false,
          supportsAdditionalTools: model.compat?.supportsAdditionalTools ?? false,
          supportsToolSearch: model.compat?.supportsToolSearch ?? false,
+diff --git a/dist/api/llama-cpp-classify.js b/dist/api/llama-cpp-classify.js
+--- a/dist/api/llama-cpp-classify.js
++++ b/dist/api/llama-cpp-classify.js
+@@ -223,11 +223,10 @@
+     return tokenIds(await post(request, "/tokenize", { model: request.model.id, content, add_special: false, parse_special: false }, false));
+ }
+ /**
+- * Label token IDs per server, model and label. A label is `undefined` when the
++ * Label token IDs within one classification request. A label is `undefined` when the
+  * model's vocabulary splits it into several tokens. Failed lookups are evicted
+  * so a later call retries them.
+  */
+-const labelTokenCache = new Map();
+ /**
+  * The token the model emits for `label` at the start of its reply. The reply
+  * follows a newline in the rendered template, so the label is tokenized after
+@@ -243,6 +242,7 @@
+     return alone.length === 1 ? alone[0] : undefined;
+ }
+ async function labelTokens(request, labels) {
++    const labelTokenCache = request.labelTokenCache;
+     const ids = await Promise.all(labels.map((label) => {
+         const key = `${request.root}\u0000${request.model.id}\u0000${label}`;
+         let pending = labelTokenCache.get(key);
+@@ -331,7 +331,7 @@
+         api: model.api,
+         provider: model.provider,
+         model: model.id,
+-        answers: {},
++        answers: Object.create(null),
+         stopReason: "stop",
+         timestamp: Date.now(),
+     };
+@@ -345,18 +345,15 @@
+         // Validate every question before the first request.
+         for (const id of Object.keys(context.questions))
+             renderQuestion(context, id);
+-        const request = { model, root: llamaServerRoot(model.baseUrl), options };
+-        const answers = [];
++        const request = { model, root: llamaServerRoot(model.baseUrl), options, labelTokenCache: new Map() };
+         // One question at a time: each prompt starts with the same text up to its final
+         // question, which the server's prompt cache then evaluates only once.
+         for (const [id, question] of Object.entries(context.questions)) {
+-            answers.push([id, await classifyQuestion(request, context, id, question, temperature)]);
+-        }
+-        output.answers = Object.fromEntries(answers);
++            output.answers[id] = await classifyQuestion(request, context, id, question, temperature);
++        }
+         return output;
+     }
+     catch (error) {
+-        output.answers = {};
+         output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+         output.errorMessage = formatProviderError(normalizeProviderError(error), `${LABEL} error`);
+         return output;

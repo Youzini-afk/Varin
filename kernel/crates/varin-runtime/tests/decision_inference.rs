@@ -174,8 +174,11 @@ impl Fixture {
         }
     }
     fn admit(&mut self, ordinal: u64) -> InferenceOwnerParams {
+        self.admit_kind(ordinal, InferenceRequestKind::ModelCompute)
+    }
+    fn admit_kind(&mut self, ordinal: u64, kind: InferenceRequestKind) -> InferenceOwnerParams {
         let input:InferenceAdmitParams=serde_json::from_value(json!({"parentOperationId":self.context.operation_id,"executionOwner":self.owner,"ordinal":ordinal,
-            "binding":{"purpose":"web","providerId":"fixture","modelId":"classifier","api":"typesafe-system-one","endpoint":"https://fixture.invalid/systemone","configurationId":"frozen-config",
+            "binding":{"requestKind":kind,"purpose":"web","providerId":"fixture","modelId":"classifier","api":"typesafe-system-one","endpoint":"https://fixture.invalid/systemone","configurationId":"frozen-config",
                 "credentialScope":{"reference":"provider:fixture","authority":"original-store","account":"original-account","generation":1}},
             "request":{"materials":[{"snapshotId":"original","text":"原始材料".repeat(5000)}],"questions":[{"id":"a"}]}})).unwrap();
         let body = self
@@ -422,4 +425,64 @@ fn undurable_drained_receipt_keeps_original_send_knowledge_and_late_barrier_is_i
         drop(f.db);
         std::fs::remove_dir_all(root).unwrap();
     }
+}
+
+#[test]
+fn preparations_keep_original_receipts_without_model_usage_or_replay() {
+    let mut f = Fixture::new(100);
+    let expected_output = f.usage().actual.output_tokens.known + 3;
+    let request = f.admit_kind(1, InferenceRequestKind::Preparation);
+    let status = f.db.dispatch_inference(&request).unwrap();
+    assert_eq!(status.request_kind, InferenceRequestKind::Preparation);
+    assert_eq!(f.usage().pending_inferences, 0);
+    let compute = f.admit(2);
+    f.db.dispatch_inference(&compute).unwrap();
+    assert_eq!(f.usage().pending_inferences, 1);
+    f.settle(&compute, true, Some(3));
+    assert_eq!(f.usage().actual.output_tokens.known, expected_output);
+    let root = f.root.clone();
+    drop(f.db);
+    f.db = Catalog::open(&root).unwrap();
+    assert_eq!(f.usage().actual.output_tokens.known, expected_output);
+    assert_eq!(f.usage().missing_inferences, 0);
+    assert_eq!(f.usage().pending_inferences, 0);
+    let status =
+        f.db.inference_status(&request.operation_id, &request.execution_owner)
+            .unwrap();
+    assert!(status.recovered);
+    assert_eq!(status.request_kind, InferenceRequestKind::Preparation);
+    assert!(!status.receipt.unwrap().local_executor_stopped);
+    assert!(f.db.dispatch_inference(&request).is_err());
+    f.db.inference_receipt_pending(&InferenceReceiptPendingParams {
+        operation_id: request.operation_id.clone(),
+        execution_owner: f.owner.clone(),
+        request_started: true,
+    })
+    .unwrap();
+    assert_eq!(f.usage().actual.output_tokens.known, expected_output);
+    assert_eq!(f.usage().missing_inferences, 0);
+    let value = InferenceSettleParams {
+        operation_id: request.operation_id.clone(),
+        execution_owner: f.owner.clone(),
+        receipt: InferenceReceipt {
+            request_started: Some(true),
+            provider_completed: true,
+            local_executor_stopped: true,
+            usage: InferenceUsage::default(),
+            http_status: Some(200),
+            problem: None,
+        },
+        response: json!({"tokens":[1,2]}),
+    };
+    let body =
+        f.db.prepare_inference_content()
+            .write(&value.response)
+            .unwrap();
+    let settled = f.db.settle_inference(&value, body).unwrap();
+    assert_eq!(settled.outcome, Some(Outcome::Succeeded));
+    assert_eq!(f.usage().actual.output_tokens.known, expected_output);
+    assert_eq!(f.usage().missing_inferences, 0);
+    assert_eq!(f.usage().pending_inferences, 0);
+    drop(f.db);
+    std::fs::remove_dir_all(root).unwrap();
 }
