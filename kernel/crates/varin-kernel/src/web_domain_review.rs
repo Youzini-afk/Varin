@@ -92,7 +92,7 @@ impl Fixture {
                 let p: OperationParams=serde_json::from_value(params)?;
                 Ok(operation_cancellation_receipt(&owner.lock().unwrap().operation(&p.operation_id).map_err(domain)?))
             }
-            "runtime.operation.cancel" => {
+            "runtime.operation.cancel" | "runtime.run.cancel" => {
                 let (sender,_)=mpsc::sync_channel(16);
                 let controls=control_commands::ControlCommands {
                     runtime:self.runtime.clone(),
@@ -240,7 +240,7 @@ impl Fixture {
                 let result = match reject(&frame) { Some(error)=>Err(error),None=>self.rpc(&frame) };
                 let cursor = self.runtime.catalog().lock().unwrap().event_cursor().unwrap();
                 if cursor != before {
-                    self.host.send(json!({"v":9,"kind":"runtime-event","kernelEpoch":EPOCH,"stream":"durable","cursor":cursor}));
+                    self.host.send(json!({"v":crate::protocol::PROTOCOL_VERSION,"kind":"runtime-event","kernelEpoch":EPOCH,"stream":"durable","cursor":cursor}));
                 }
                 if !deliver(&frame, &result) {
                     return Some(frame);

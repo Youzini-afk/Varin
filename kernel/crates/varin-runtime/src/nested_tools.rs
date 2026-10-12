@@ -41,6 +41,7 @@ struct ScopeState {
     accepting: bool,
     active: usize,
     calls: HashMap<String, Arc<Call>>,
+    inference_owner: Option<ExecutorOwner>,
 }
 #[derive(Default)]
 pub struct NestedTools {
@@ -51,6 +52,25 @@ pub struct NestedScopeGuard {
     owner: Arc<NestedTools>,
     operation_id: String,
     scope: Arc<Scope>,
+}
+/// A subordinate HTTP executor belongs to this real invocation, including cheap reads.
+/// This grants admission only; durable execution and receipts belong to Catalog inference.
+pub struct InferenceScopeGuard {
+    scope: Arc<Scope>,
+    owner: ExecutorOwner,
+}
+impl InferenceScopeGuard {
+    pub fn owner(&self) -> &ExecutorOwner {
+        &self.owner
+    }
+}
+impl Drop for InferenceScopeGuard {
+    fn drop(&mut self) {
+        let mut state = self.scope.state.lock().unwrap_or_else(|p| p.into_inner());
+        if state.inference_owner.as_ref() == Some(&self.owner) {
+            state.inference_owner = None;
+        }
+    }
 }
 impl NestedScopeGuard {
     /// Close admission atomically against new registrations, then drain actual calls.
@@ -109,6 +129,7 @@ impl NestedTools {
                 accepting: true,
                 active: 0,
                 calls: HashMap::new(),
+                inference_owner: None,
             }),
             drained: Condvar::new(),
         });
@@ -118,6 +139,65 @@ impl NestedTools {
             operation_id,
             scope,
         })
+    }
+    /// Trusted executor entry only. No Host request can create this delegation.
+    pub fn delegate_inference(
+        &self,
+        context: &ToolExecutionContext,
+    ) -> Result<InferenceScopeGuard, ExecutionError> {
+        let scope = self
+            .scopes
+            .lock()
+            .map_err(|_| error("invocation scopes unavailable"))?
+            .get(&context.operation_id)
+            .cloned()
+            .ok_or_else(|| error("invocation has ended"))?;
+        let mut state = scope
+            .state
+            .lock()
+            .map_err(|_| error("invocation scope unavailable"))?;
+        if scope.context != *context
+            || scope.owner != ExecutorOwner::Kernel
+            || !state.accepting
+            || scope.cancel.is_cancelled()
+            || state.inference_owner.is_some()
+        {
+            return Err(error("inference delegation unavailable"));
+        }
+        let owner = ExecutorOwner::External {
+            identity: "host.inference".into(),
+            epoch: uuid::Uuid::new_v4().to_string(),
+        };
+        state.inference_owner = Some(owner.clone());
+        drop(state);
+        Ok(InferenceScopeGuard { scope, owner })
+    }
+    /// Hold the same short admission fence through the caller's Catalog metadata commit.
+    /// Neither body I/O nor a callback into Catalog is performed by the scope itself.
+    pub(crate) fn with_inference_context<T>(
+        &self,
+        parent: &str,
+        owner: &ExecutorOwner,
+        action: impl FnOnce(&ToolExecutionContext) -> Result<T, crate::RuntimeError>,
+    ) -> Result<T, crate::RuntimeError> {
+        let scope = self
+            .scopes
+            .lock()
+            .map_err(|_| crate::RuntimeError::DispatchCancelled)?
+            .get(parent)
+            .cloned()
+            .ok_or(crate::RuntimeError::DispatchCancelled)?;
+        let state = scope
+            .state
+            .lock()
+            .map_err(|_| crate::RuntimeError::DispatchCancelled)?;
+        if !state.accepting
+            || scope.cancel.is_cancelled()
+            || state.inference_owner.as_ref() != Some(owner)
+        {
+            return Err(crate::RuntimeError::DispatchCancelled);
+        }
+        action(&scope.context)
     }
     pub fn invoke(
         &self,
@@ -464,6 +544,44 @@ mod tests {
         );
         assert_eq!(count.load(Ordering::SeqCst), 1);
     }
+    #[test]
+    fn inference_delegation_is_bound_to_the_actual_scope_and_revoked_before_query_release() {
+        let registry = Arc::new(NestedTools::default());
+        let parent = scope(
+            &registry,
+            Arc::new(|_, _| Ok(ToolExecutionReceipt::not_dispatched("unused"))),
+        );
+        let context = parent.scope.context.clone();
+        let mut wrong = context.clone();
+        wrong.run_id = "other-run".into();
+        assert!(registry.delegate_inference(&wrong).is_err());
+        let delegated = registry.delegate_inference(&context).unwrap();
+        let owner = delegated.owner().clone();
+        assert_eq!(
+            registry
+                .with_inference_context(&context.operation_id, &owner, |actual| Ok(actual.clone()))
+                .unwrap(),
+            context
+        );
+        assert!(registry.delegate_inference(&context).is_err());
+        drop(delegated);
+        assert!(
+            registry
+                .with_inference_context(&context.operation_id, &owner, |_| Ok(()))
+                .is_err()
+        );
+        let next = registry.delegate_inference(&context).unwrap();
+        assert_ne!(next.owner(), &owner);
+        parent.scope.cancel.cancel();
+        assert!(
+            registry
+                .with_inference_context(&context.operation_id, next.owner(), |_| Ok(()))
+                .is_err()
+        );
+        drop(next);
+        assert!(registry.delegate_inference(&context).is_err());
+    }
+
     #[test]
     fn nested_identifiers_encode_the_pair_without_separator_or_unicode_collisions() {
         let root = "request:tool:é外";

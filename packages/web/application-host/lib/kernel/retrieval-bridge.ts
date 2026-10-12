@@ -7,7 +7,7 @@ const record = (value: unknown): value is Record<string, unknown> => value !== n
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 export const unavailableRetrievalResult = (message: string): RetrievalResult => ({ status: 'unavailable', snippets: [], omissions: { outOfScope: 0, stale: 0, unavailable: 0 }, stages: [], message });
 const validQuery = (value: unknown): value is RetrievalQuery => {
-  if (!record(value) || !['runId','threadId','workspaceId','executionWorkspaceId','grantId','question'].every(key => text(value[key]))
+  if (!record(value) || !record(value.inferenceOwner) || value.inferenceOwner.kind !== 'external' || !text(value.inferenceOwner.identity) || !text(value.inferenceOwner.epoch) || !['runId','threadId','workspaceId','executionWorkspaceId','grantId','question'].every(key => text(value[key]))
     || !record(value.liveRoot) || !['hostId','canonicalRoot','rootId'].every(key => text(value.liveRoot && record(value.liveRoot) ? value.liveRoot[key] : undefined))) return false;
   const invocation = value.invocation;
   if (!record(invocation) || !text(invocation.toolCallId)

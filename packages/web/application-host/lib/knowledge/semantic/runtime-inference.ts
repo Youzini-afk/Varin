@@ -1,5 +1,7 @@
+import { createInferenceRequests, type InferenceRequestsOptions } from './inference-requests.js';
+import { createRerankInference, type RerankInferenceAuthority, type RerankInferenceCapture } from './rerank-inference.js';
 /** Application Host inference leases. No Pi worker, project configuration or secret DTOs. */
-import { createDecisionInference, type DecisionInferenceAuthority, type DecisionInferenceOptions, type DecisionInferenceCapture } from './decision-inference.js';
+import { createDecisionInference, type DecisionInferenceAuthority, type DecisionInferenceCapture } from './decision-inference.js';
 import { createHash } from 'node:crypto';
 import {
   HarnessInferenceSettingsValidationError, parseHarnessEmbeddingSettings,
@@ -25,7 +27,7 @@ export interface SemanticProviderBinding {
   currentScope(): Promise<CredentialScope>;
   getAuth(): ReturnType<ExistingModelAuthRuntime['getAuth']>;
 }
-export interface SemanticInferenceAuthority extends Partial<DecisionInferenceAuthority> {
+export interface SemanticInferenceAuthority extends Partial<DecisionInferenceAuthority>, Partial<RerankInferenceAuthority> {
   resolveEmbeddingBinding(providerId: string, modelId: string): Promise<SemanticProviderBinding>;
   readGlobalInferenceSettings(): Promise<unknown>;
 }
@@ -107,10 +109,13 @@ const frozenReceipt = (receipt: SemanticInferenceReceipt): SemanticInferenceRece
 export function createSemanticInference(
   authority: SemanticInferenceAuthority,
   settingsOwner: SemanticInferenceSettingsOwner = { readGlobalSettings: () => authority.readGlobalInferenceSettings() },
-  options: { decision?: DecisionInferenceOptions; ledger?: SemanticInferenceLedger; fetchImpl?: typeof fetch; onReceipt?(receipt: SemanticInferenceReceipt): void } = {},
+  options: { requests?: InferenceRequestsOptions; ledger?: SemanticInferenceLedger; fetchImpl?: typeof fetch; onReceipt?(receipt: SemanticInferenceReceipt): void } = {},
 ) {
-  const decision = options.decision && authority.resolveDecisionBinding ? createDecisionInference({ resolveDecisionBinding: authority.resolveDecisionBinding.bind(authority) },
-    () => settingsOwner.readGlobalSettings(), options.decision) : undefined;
+  const requests = options.requests ? createInferenceRequests(options.requests) : undefined;
+  const rerank = options.requests && requests && authority.resolveRerankBinding ? createRerankInference({ resolveRerankBinding: authority.resolveRerankBinding.bind(authority) },
+    () => settingsOwner.readGlobalSettings(), options.requests, requests) : undefined;
+  const decision = options.requests && requests && authority.resolveDecisionBinding ? createDecisionInference({ resolveDecisionBinding: authority.resolveDecisionBinding.bind(authority) },
+    () => settingsOwner.readGlobalSettings(), options.requests, requests) : undefined;
   let closed = false;
   let closing: Promise<void> | undefined;
   const controllers = new Set<AbortController>();
@@ -365,6 +370,7 @@ export function createSemanticInference(
   };
   return {
     readGlobalSettings, capture,
+    captureRerank: (expected?: import('@varin/protocol').HarnessRerankSettings): Promise<RerankInferenceCapture> => rerank ? rerank.capture(expected) : Promise.resolve({ status: 'unavailable', message: 'Rerank inference is unavailable.' }),
     captureDecision: (purpose: import("@varin/protocol").HarnessFastDecisionPurpose): Promise<DecisionInferenceCapture> => decision
       ? decision.capture(purpose) : Promise.resolve({ status: "unavailable", message: "Native decision inference is unavailable." }),
     inferenceFacts: (filter?: SemanticInferenceFactFilter) => options.ledger
@@ -383,7 +389,9 @@ export function createSemanticInference(
         controllers.clear();
         await Promise.all([...pending]);
         await Promise.allSettled([...transports]);
-        await decision?.close();
+        decision?.close();
+        rerank?.close();
+        await requests?.close();
         await options.ledger?.close();
       })().catch(error => { closing = undefined; throw error; });
       return closing;

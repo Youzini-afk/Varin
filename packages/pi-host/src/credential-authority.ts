@@ -16,6 +16,7 @@ import type { AuthOperationOptions, AuthResult, Credential, CredentialInfo, Cred
 
 import { ProviderConfigurationManager } from './provider-configuration.js';
 import { embeddingConfigurationId, embeddingRequestUrl } from '@varin/protocol/node/embeddings';
+import { rerankRequestUrl } from './harness/http-rerank.js';
 import { classifierRequestRoutes, isSupportedClassifierApi, type ClassifierRequestRoute } from './harness/native-classifier.js';
 
 export interface HostEmbeddingProviderBinding {
@@ -31,7 +32,7 @@ export interface HostEmbeddingProviderBinding {
   currentScope(): Promise<HostCredentialScope>;
   getAuth(): Promise<AuthResult | undefined>;
 }
-export interface HostDecisionProviderBinding extends HostEmbeddingProviderBinding {
+export interface HostInferenceProviderBinding extends HostEmbeddingProviderBinding {
   api: string;
   routes: readonly ClassifierRequestRoute[];
   /** Private resolved model, never serialized into Catalog or public metadata. */
@@ -534,10 +535,13 @@ export class HostCredentialAuthority implements CredentialStore {
   resolveEmbeddingBinding(providerId: string, modelId: string): Promise<HostEmbeddingProviderBinding> {
     return this.#resolveInferenceBinding(providerId, modelId, 'embedding');
   }
-  resolveDecisionBinding(providerId: string, modelId: string, endpoint?: string): Promise<HostDecisionProviderBinding> {
+  resolveDecisionBinding(providerId: string, modelId: string, endpoint?: string): Promise<HostInferenceProviderBinding> {
     return this.#resolveInferenceBinding(providerId, modelId, 'decision', endpoint);
   }
-  async #resolveInferenceBinding(providerId: string, modelId: string, kind: 'embedding' | 'decision', endpointOverride?: string): Promise<HostDecisionProviderBinding> {
+  resolveRerankBinding(providerId: string, modelId: string, endpoint?: string): Promise<HostInferenceProviderBinding> {
+    return this.#resolveInferenceBinding(providerId, modelId, 'rerank', endpoint);
+  }
+  async #resolveInferenceBinding(providerId: string, modelId: string, kind: 'embedding' | 'decision' | 'rerank', endpointOverride?: string): Promise<HostInferenceProviderBinding> {
     const providers = this.#inferenceOwner();
     const cwd = this.#modelsPath ? dirname(this.#modelsPath) : getAgentDir();
     const resolveProvider = async () => {
@@ -553,17 +557,17 @@ export class HostCredentialAuthority implements CredentialStore {
         throw publicFailure(`${kind}-provider-disabled`);
       }
       if (!provider && !editable) throw publicFailure(`${kind}-provider-unavailable`);
-      if (capability && capability.protocol !== (kind === 'embedding' ? 'openai-compatible' : 'pi-classifier')) throw publicFailure(`${kind}-protocol-invalid`);
+      if (capability && capability.protocol !== (kind === 'embedding' ? 'openai-compatible' : kind === 'rerank' ? 'http-rerank' : 'pi-classifier')) throw publicFailure(`${kind}-protocol-invalid`);
       const capabilityModel = capability?.models?.find(entry => entry.id === modelId);
       const baseUrl = capabilityModel?.baseUrl ?? capability?.baseUrl ?? (capability && kind !== 'decision' ? undefined : model?.baseUrl) ?? editable?.baseUrl ?? provider?.baseUrl;
       if (!baseUrl) throw publicFailure(`${kind}-endpoint-unavailable`);
       const endpoint = endpointOverride ?? capability?.endpoint;
-      const api = kind === 'decision' ? capabilityModel?.api ?? model?.api ?? 'typesafe-system-one' : 'openai-compatible';
+      const api = kind === 'decision' ? capabilityModel?.api ?? model?.api ?? 'typesafe-system-one' : kind === 'rerank' ? 'http-rerank' : 'openai-compatible';
       if (kind === 'decision' && !isSupportedClassifierApi(api)) {
         throw publicFailure('decision-api-unavailable');
       }
       let routes: readonly ClassifierRequestRoute[];
-      try { routes = kind === 'embedding' ? [{ requestUrl: new URL(embeddingRequestUrl(baseUrl, endpoint)).toString(), requestKind: 'model_compute' }]
+      try { routes = kind !== 'decision' ? [{ requestUrl: new URL(kind === 'rerank' ? rerankRequestUrl(baseUrl, endpoint) : embeddingRequestUrl(baseUrl, endpoint)).toString(), requestKind: 'model_compute' }]
         : classifierRequestRoutes(api, baseUrl, endpoint); } catch { throw publicFailure(`${kind}-endpoint-invalid`); }
       for (const route of routes) {
         const url = new URL(route.requestUrl);
@@ -654,7 +658,7 @@ export class HostCredentialAuthority implements CredentialStore {
     };
     return { providerId, modelId, api: selected.api, routes: selected.routes, ...(selected.nativeModel ? { nativeModel: selected.nativeModel } : {}), baseUrl: selected.baseUrl, ...(selected.endpoint ? { endpoint: selected.endpoint } : {}),
       requestUrl: selected.requestUrl, configurationId: kind === 'embedding' ? embeddingConfigurationId(providerId, modelId, selected.baseUrl, selected.endpoint)
-        : createHash('sha256').update(JSON.stringify({ providerId, modelId, api: selected.api, endpoint: selected.requestUrl, credentialRef: selected.credentialRef, credentialScope: scope, modelHeaderRevision: selected.modelHeaderRevision, schema: 'decision.v1' })).digest('hex'),
+        : createHash('sha256').update(JSON.stringify({ providerId, modelId, api: selected.api, endpoint: selected.requestUrl, credentialRef: selected.credentialRef, credentialScope: scope, modelHeaderRevision: selected.modelHeaderRevision, schema: `${kind}.v1` })).digest('hex'),
       credentialRef: selected.credentialRef, credentialScope: Object.freeze({ ...scope }), assertAvailable,
       currentScope: async () => { await assertAvailable(); return { ...scope }; },
       getAuth: async () => { await assertAvailable(); const current = await this.#inferenceCredentialState(selected.credentialRef, initial.configuration, allowAnonymous);

@@ -2344,3 +2344,43 @@ it('uses the actual Thread model and sampling lifecycle in the conversation, req
   expect(container.textContent).toContain('Response delivery started'); expect(container.textContent).not.toContain('Response transport confirmed');
   expect(f.api.respondMcpInteraction).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
 });
+
+it('projects a delegated rerank request independently of its cheap query, preserving unknown usage after Stop', async () => {
+  const f = fixture(true);
+  const source = { ...f.view.activeRun!, state: 'cancelled' as const, cancel_requested: true };
+  f.view.activeRun = null;
+  f.view.thread.branches[0]!.active_run_id = null;
+  f.view.thread.branches[0]!.latest_run = source;
+  const operation: ThreadSnapshot['operations'][number] = {
+    id: 'inference:original-query:1', run_id: 'ui-run', epoch: 1, revision: 1, phase: 'running', outcome: null,
+    effect: 'dispatched', cancel_requested: false, lifetime: 'run', handed_off: true,
+    executor: 'inference.http.v1', execution_owner: { kind: 'external', identity: 'host.inference', epoch: 'original' },
+    external_receipt: null, call_completion: null, waiting_on: null,
+    intent: { kind: 'inference_request_v1', parentOperationId: 'original-query', binding: {
+      purpose: 'code-retrieval-rerank', providerId: 'rank-provider', modelId: 'rank-model', requestKind: 'model_compute',
+    } }, result: { kind: 'control', value: { dispatched: true, recovered: false } },
+  };
+  f.view.operations = [operation];
+  const cancel = vi.fn<ThreadsAPI['cancelOperation']>(async id => {
+    expect(id).toBe(operation.id);
+    operation.cancel_requested = true;
+    return operation;
+  });
+  f.api.cancelOperation = cancel;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  expect(container.textContent).toContain('code-retrieval-rerank');
+  expect(container.textContent).toContain('Local executor stop unconfirmed');
+  await act(async () => button('Stop inference request').click());
+  expect(cancel).toHaveBeenCalledExactlyOnceWith(operation.id);
+  expect(container.textContent).toContain('Local executor stop unconfirmed');
+  operation.phase = 'terminal'; operation.outcome = 'cancelled'; operation.effect = 'confirmed'; operation.revision++;
+  operation.result = { kind: 'control', value: { dispatched: true, recovered: false, receipt: {
+    requestStarted: true, providerCompleted: true, localExecutorStopped: true,
+    usage: { measurement: 'missing', inputTokens: null, outputTokens: null }, httpStatus: 200, problem: null,
+  } } };
+  await act(async () => f.emit({ cursor: 1, subject: operation.id, revision: operation.revision, kind: 'inference.settled', data: {} }));
+  expect(container.textContent).toContain('Local executor stopped');
+  expect(container.textContent).toContain('Input tokens: unknown');
+  expect(container.textContent).toContain('Output tokens: unknown');
+  expect(container.textContent).toContain('does not establish input/output token usage or cost');
+});

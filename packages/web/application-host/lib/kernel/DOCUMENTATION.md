@@ -755,7 +755,8 @@ publication's coverage/lifecycle; a capability implementation ID never substitut
 model configuration. Cold or
 missing publications do not start indexing or wait for first publication. Semantic selection never
 chooses another model, silently selects local embeddings, or performs a paid preparation probe.
-The existing embedding settings configure the explicit remote backend; model reranking remains disabled.
+The existing embedding settings configure the explicit remote backend. The separately selected
+model stage uses the original code-retrieval settings and dedicated rerank binding described below.
 
 Semantic candidates contain index identities, not authoritative source bodies. The owner checks the
 original Run grant before query embedding, before and after authorized Documents reads, and before
@@ -780,11 +781,40 @@ Each snippet has path, inclusive one-based line bounds and actual Documents revi
 Documents content revision; verify a follow-up full read against the snippet's content digest/bytes.
 Live observations do not claim an atomic workspace snapshot.
 
-This increment does not connect production model reranking, fixed/materialized retrieval, a complete
-fixed LSP dependency closure or remote retrieval. The default Pi route is unchanged; native recall
+Fixed/materialized retrieval, a complete fixed LSP dependency closure and remote retrieval remain
+separate work. The default Pi route is unchanged; native recall
 uses its own explicit backend/published-reader acquisition through the existing semantic owner rather
 than the Pi wrapper that resolves a mutable backend at search time. Query bindings retain actual owner
 references, not a frozen wrapper around whichever backend/index happens to be current later.
+
+### Dedicated rerank in native live-root retrieval
+
+`retrieval-model.ts` consumes the existing global `harness.codeRetrieval.decision` selector and
+`harness.rerank` connection. The extension plan still selects structural/semantic composition; it
+is not a second model selector. `source` dispatches nothing, an explicit unavailable reranker stays
+unavailable, and `auto` respects an explicitly enabled Explore model slot before fast-decision rather than silently
+choosing a different paid model. Native fast-decision/LLM retrieval consumers are still explicitly
+unsupported in this slice; an absent or disabled Explore slot continues through the existing native
+choices. Slot parsing/resolution comes from the shared configuration contract, not another model list.
+A query pins its actual credential/configuration binding through the original Host credential owner.
+Deleting the original rerank selection is explicit Off and retires retained leases; normal/invalid
+replacement candidates leave accepted bindings intact. A nonempty request with no scored documents
+is a failed model stage, while its original response and usage evidence are retained.
+
+`knowledge/semantic/inference-requests.ts` is the shared decision/rerank HTTP lifecycle. The real
+Kernel invocation scope delegates the query identity; original Catalog Operations/Goal own each
+HTTP request, dispatch, raw response and late receipt. No synthetic model tool call or extra ledger
+is needed for a cheap read. Source grant and original Documents identity are checked before/after
+the model wait, and Rust still reconstructs final snippets from verified revisions and line ranges.
+There is no source lease held over HTTP. Cancellation can detach the cheap query while its actual
+HTTP child remains pending; local drain is recorded only by the original transport owner.
+
+The original http-rerank parser preserves zero scores and partial results. Scored candidates sort
+stably ahead of unscored or over-budget candidates, whose original order remains visible with partial
+status. This generic protocol does not define input/output token dimensions: raw usage/meta are
+retained, but total tokens are not relabeled as input and output is not invented as zero. Actual
+requests therefore retain missing usage under the original Goal barrier. Protocol-specific known
+metering and material/Explore model-purpose consumers remain follow-on work.
 
 ### Model item identity and committed-history recovery
 
@@ -816,7 +846,8 @@ execution passed 12. The unchanged content owner retained its earlier 7 passing 
 scoped suites, not whole-repository or visual UI acceptance. The [implementation plan](../../../../../docs/plan/agent-runtime-implementation.md)
 records the initial provider-ID collision and corrected candidate-publication fixture sequence;
 neither initial failure is counted as a passing run. No paid models or huge-frame/kill experiments
-were used. The model reranking and fixed-source limits above remain in force; semantic lease acceptance is recorded separately.
+were used. These historical checks did not cover model reranking; its later acceptance is recorded
+separately below. Fixed-source limits remain in force.
 
 ## Native child source and result owners
 

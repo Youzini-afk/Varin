@@ -3058,3 +3058,6 @@ mod scholarly_discovery_review;
 #[cfg(test)]
 #[path = "background_decision_review.rs"]
 mod background_decision_review;
+#[cfg(test)]
+#[path = "retrieval_rerank_review.rs"]
+mod retrieval_rerank_review;

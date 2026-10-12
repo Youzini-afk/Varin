@@ -31,6 +31,10 @@
       "types": "./dist/credential-authority.d.ts",
       "import": "./dist/credential-authority.js"
     },
+    "./rerank": {
+      "types": "./dist/harness/http-rerank.d.ts",
+      "import": "./dist/harness/http-rerank.js"
+    },
     "./classifier": {
       "types": "./dist/harness/native-classifier.d.ts",
       "import": "./dist/harness/native-classifier.js"

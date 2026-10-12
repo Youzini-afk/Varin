@@ -414,6 +414,13 @@ impl KernelToolExecutor {
                 "Retrieval owner is not connected",
             )
         })?;
+        let invocations = self.retrieval_invocations.as_ref().ok_or_else(|| {
+            ExecutionError::new(
+                "retrieval_owner_unavailable",
+                "Retrieval invocation owner is unavailable",
+            )
+        })?;
+        let inference = invocations.delegate_inference(context)?;
         // These identities already belong to the committed model exchange or policy graph.
         // Recovery reuses them; the private bridge's random request ID is transport-only.
         let invocation = match &context.origin {
@@ -431,7 +438,7 @@ impl KernelToolExecutor {
                 "nodeId":node_id, "toolCallId":call.call_id})
             }
         };
-        let mut query = json!({"invocation":invocation,"runId":self.binding.run_id,"threadId":self.binding.thread_id,
+        let mut query = json!({"invocation":invocation,"inferenceOwner":inference.owner(),"runId":self.binding.run_id,"threadId":self.binding.thread_id,
             "workspaceId":self.binding.workspace_id,"executionWorkspaceId":self.binding.execution_workspace_id,
             "liveRoot":self.binding.live_root,"grantId":self.binding.grant_id,"projectId":self.retrieval_project_id,"question":args.question});
         if let Some(paths) = &args.paths {
@@ -440,7 +447,10 @@ impl KernelToolExecutor {
         if let Some(limit) = args.limit {
             query["limit"] = json!(limit);
         }
-        let raw = bridge.query(query, cancel)?;
+        let raw = bridge.query(query, cancel);
+        // Close admission before returning a cancelled observer; child receipts remain independent.
+        drop(inference);
+        let raw = raw?;
         let mut reply: Reply = serde_json::from_value(raw).map_err(|_| invalid())?;
         if !STATUSES.contains(&reply.status.as_str())
             || !reply.omissions.valid()

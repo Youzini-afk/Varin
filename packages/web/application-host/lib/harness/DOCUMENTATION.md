@@ -303,8 +303,9 @@ Global singleton that owns:
 
 The Pi adapter resolves embedding, reranking and fast decisions through its original provider capabilities.
 Native embedding and TypeSafe/Cloudflare/llama.cpp decisions use the existing Host inference/credential owner
-directly; native decision HTTP/Goal facts belong to Catalog. Rerank and other classifier APIs still
-require their own native integration.
+directly; native decision/rerank HTTP/Goal facts belong to Catalog. Native live-root code retrieval
+now uses the dedicated rerank binding. Other model-stage purposes and classifier APIs still require
+their own native integration.
 Their connection/credential defaults and model declarations are independent of the native chat API;
 the Host receives only frozen, credential-free bindings. User/operator metadata can override the
 operation's address, path and credential owner; project configuration cannot redirect background
@@ -347,7 +348,8 @@ fail instead of becoming an empty success, while absent optional fields remain v
 open-access locations are ordinary external result data, not instructions or downloaded content.
 Selecting a paper identity into `materials`, or explicitly fetching its URL and reading the resulting
 snapshot, uses the original material/Storage/public-reader owners. Fast decisions use the separate
-ordinary `research_decide` tool described below; reranking remains separate integration work.
+ordinary `research_decide` tool described below. Dedicated rerank is connected to native live-root
+code retrieval; scholarly/material reranking remains separate consumer work.
 This metadata adapter does not open a Pi model session.
 
 `web.fetch` pins fetched bodies as `web.snapshot` kernel records (`web-materials.ts`): content-hash

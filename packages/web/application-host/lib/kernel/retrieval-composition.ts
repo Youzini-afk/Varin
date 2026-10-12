@@ -36,6 +36,12 @@ export interface RetrievalSemanticLease {
   inferenceReceipts?(): readonly SemanticInferenceReceipt[];
   release(): void;
 }
+export interface RetrievalModelLease {
+  readonly stage: NonNullable<RetrievalPipelineConfiguration['model']>;
+  assertAvailable(): void;
+  validateAvailable(signal?: AbortSignal): Promise<void>;
+  release(): void;
+}
 export interface RetrievalPipelineBinding extends BoundRetrievalPipeline {
   readonly selection: Readonly<RetrievalSelection>;
   assertAvailable(): void;
@@ -55,6 +61,7 @@ interface ScopeCache {
  * This cache owns no index, parser, configuration file, filesystem or model capability. Every
  * query retains its own real Host service generation pin until its caller releases the binding. */
 export function createRetrievalComposition(runtime: ApplicationExtensionRuntime, options: {
+  prepareModel?: (scope: RetrievalCompositionScope, signal?: AbortSignal) => Promise<RetrievalModelLease>;
   structure?: NonNullable<RetrievalPipelineConfiguration['structure']>['implementation'];
   /** Capture only; preparation never embeds the question, reads candidate text or starts indexing. */
   prepareSemantic?: (scope: RetrievalCompositionScope, signal?: AbortSignal) => Promise<RetrievalSemanticLease>;
@@ -81,6 +88,7 @@ export function createRetrievalComposition(runtime: ApplicationExtensionRuntime,
       signal?.throwIfAborted();
       const pin = selected.pin();
       let semantic: RetrievalSemanticLease | undefined;
+      let model: RetrievalModelLease | undefined;
       try {
         const provider = runtime.services.getSnapshot().providers.find(item => item.providerId === selected.providerId && item.status === 'active');
         const artifactId = provider && runtime.supervisor.getActiveArtifactIdentity(provider);
@@ -177,39 +185,53 @@ export function createRetrievalComposition(runtime: ApplicationExtensionRuntime,
         }
         assertCandidate();
         if (state.current?.selectedKey !== selectedKey || !state.owner) throw new Error('Retrieval plan preparation was superseded');
+        if (options.prepareModel) {
+          const preparing = options.prepareModel(scope, signal);
+          try { model = await waitWithSignal(preparing, signal); }
+          catch (error) { void preparing.then(late => late.release(), () => {}); throw error; }
+          await assertSelection();
+          model.assertAvailable();
+        }
         const pipeline = state.owner.capture();
         const selection = state.current.selection;
         // Query resources never enter the shared publication. Each query captures and owns its
         // real backend/reader lease, including independently acquired refs for identical plans.
         const semanticStage = semantic?.stage;
-        const stages = semanticStage ? Object.freeze(pipeline.plan.stages.map(stage => stage.kind === 'semantic'
+        const semanticStages = semanticStage ? Object.freeze(pipeline.plan.stages.map(stage => stage.kind === 'semantic'
           ? Object.freeze({ kind: 'semantic' as const, providerId: semanticStage.providerId,
             configurationId: semanticStage.configurationId, status: semanticStage.status }) : stage)) : pipeline.plan.stages;
+        const modelStage = model?.stage;
+        const stages = modelStage ? Object.freeze(semanticStages.map(stage => stage.kind === 'model'
+          ? Object.freeze({ kind: 'model' as const, providerId: modelStage.providerId, configurationId: modelStage.configurationId, status: modelStage.status }) : stage)) : semanticStages;
         const metadata = semantic ? Object.freeze({ ...semantic.metadata,
           ...(semantic.metadata.credential ? { credential: Object.freeze({ ...semantic.metadata.credential }) } : {}) }) : undefined;
-        const id = metadata ? createHash('sha256').update(JSON.stringify([pipeline.plan.id, stages, metadata])).digest('hex') : pipeline.plan.id;
+        const id = metadata || modelStage ? createHash('sha256').update(JSON.stringify([pipeline.plan.id, stages, metadata])).digest('hex') : pipeline.plan.id;
         const implementation = semanticStage?.status === 'ready' ? semanticStage.implementation : undefined;
         const lease = semantic;
+        const modelLease = model;
         let released = false;
         const assertAvailable = (): void => {
           if (released) throw new Error('Retrieval query binding was released');
           signal?.throwIfAborted();
           pin.assertAvailable();
           lease?.assertAvailable();
+          modelLease?.assertAvailable();
         };
         return Object.freeze({ ...pipeline,
+          ...(modelStage?.status === 'ready' && modelStage.implementation ? { model: modelStage.implementation } : {}),
           ...(implementation ? { semantic: Object.freeze({ search: implementation.search.bind(implementation) }) } : {}),
           plan: Object.freeze({ ...pipeline.plan, id, stages, selection, ...(metadata ? { semantic: metadata } : {}) }), selection,
           assertAvailable,
           validateAvailable: async (validationSignal?: AbortSignal) => {
             assertAvailable(); validationSignal?.throwIfAborted();
             await lease?.validateAvailable(validationSignal ?? signal);
+            await modelLease?.validateAvailable(validationSignal ?? signal);
             assertAvailable(); validationSignal?.throwIfAborted();
           },
           ...(lease?.inferenceReceipts ? { inferenceReceipts: () => lease.inferenceReceipts!() } : {}),
-          release: () => { if (released) return; released = true; try { lease?.release(); } finally { pin.release(); } },
+          release: () => { if (released) return; released = true; try { lease?.release(); } finally { try { modelLease?.release(); } finally { pin.release(); } } },
         });
-      } catch (error) { try { semantic?.release(); } finally { pin.release(); } throw error; }
+      } catch (error) { try { semantic?.release(); } finally { try { model?.release(); } finally { pin.release(); } } throw error; }
     },
   };
 }

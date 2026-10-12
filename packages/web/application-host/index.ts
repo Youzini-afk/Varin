@@ -1,3 +1,4 @@
+import { createRetrievalModelStage } from './lib/kernel/retrieval-model.js';
 import { mergeHarnessWebDomainPolicy } from '@varin/protocol';
 import { createResearchDecisionRuntime, RESEARCH_DECISION_CAPABILITY } from './lib/kernel/research-decision.js';
 import { createResearchDiscoveryRuntime, RESEARCH_DISCOVERY_CAPABILITY } from './lib/kernel/research-discovery.js';
@@ -3674,8 +3675,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const semanticInference = createSemanticInference(hostCredentialAuthority, {
     readGlobalSettings: () => hostCredentialAuthority.readGlobalInferenceSettings(),
   }, { ledger: createSemanticInferenceLedger({ dataDir: VARIN_DATA_DIR, hostId }),
-    decision: { kernel: kernelClient, runtime: agentRuntime, egress: egressRuntime,
-      onError: () => console.error('[Decision] Original inference receipt requires attention') } });
+    requests: { kernel: kernelClient, runtime: agentRuntime, egress: egressRuntime,
+      onError: () => console.error('[Inference] Original inference receipt requires attention') } });
   researchDecisionOwner.current = createResearchDecisionRuntime({ inference: semanticInference, materials: webRuntimeOwner.current,
     settings: async source => {
       const root = source ? (await documentsAuthority.inspectWorkspace(source.workspace_id)).root : undefined;
@@ -3725,7 +3726,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (error) => console.error('[HarnessKnowledge] Semantic runtime failed:', errorMessage(error)),
   });
   semanticRuntimeHolder.current = semanticRuntime;
+  const retrievalModel = createRetrievalModelStage({ inference: semanticInference,
+    readGlobalSettings: () => hostCredentialAuthority.readGlobalInferenceSettings(), kernel: kernelClient, validateSource: liveSources.validate });
   const retrievalComposition = createRetrievalComposition(extensionRuntime, {
+    prepareModel: (scope, signal) => {
+      if (!scope.query) throw new Error('Native retrieval model requires its original query');
+      return retrievalModel.prepare(scope.query, signal ?? new AbortController().signal);
+    },
     structure: structureSource,
     prepareSemantic: async (scope, signal) => {
       const query = scope.query;

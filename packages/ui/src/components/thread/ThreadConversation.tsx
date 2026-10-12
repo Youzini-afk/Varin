@@ -36,7 +36,7 @@ import { ThreadQueuedInput } from './ThreadQueuedInput';
 import { ThreadChildReport } from './ThreadChildReport';
 
 const operationCancelLabel = (operation: ThreadSnapshot['operations'][number]): string => {
-  if ((operation.intent as { kind?: string } | null)?.kind === 'decision_request_v1') return 'Stop decision request';
+  if ((operation.intent as { kind?: string } | null)?.kind === 'inference_request_v1') return 'Stop inference request';
   if (operation.mcp_resource_subscription) return 'Stop resource observation';
   if (operation.host_job?.mcpTask) return 'Request remote task cancellation';
   if (operation.executor === 'dispatch') return 'Cancel child task';
@@ -50,7 +50,7 @@ const operationCancelLabel = (operation: ThreadSnapshot['operations'][number]): 
 
 function InferenceStatus({ operation }: { operation: ThreadSnapshot['operations'][number] }) {
   const intent = operation.intent as { kind?: string; binding?: InferenceBinding } | null;
-  if (intent?.kind !== 'decision_request_v1' || !intent.binding) return null;
+  if (intent?.kind !== 'inference_request_v1' || !intent.binding) return null;
   const state = operation.result?.kind === 'control'
     ? operation.result.value as { dispatched: boolean; recovered: boolean; receipt?: InferenceReceipt } : undefined;
   const receipt = state?.receipt;
@@ -62,17 +62,19 @@ function InferenceStatus({ operation }: { operation: ThreadSnapshot['operations'
     : problem === 'owner_interrupted' ? preparation
       ? 'The original preparation executor was interrupted; this request will not be replayed.'
       : 'The original executor was interrupted. Remote usage is unconfirmed; this request will not be replayed.'
-    : problem === 'invalid_response' ? 'The provider response was stored, but its classifier data was invalid. Check the selected protocol.'
+    : problem === 'invalid_response' ? 'The provider response was stored, but its model result was invalid. Check the selected protocol.'
     : problem === 'http_rejected' ? 'The provider rejected this request. Check the original connection and account.'
-    : problem === 'transport_failed' ? 'The transport stopped without a complete response. Check the original service before requesting another decision.'
-    : problem === 'not_dispatched' ? 'This request was not sent. Check its parent operation, Goal and current access before starting a new decision.'
+    : problem === 'transport_failed' ? 'The transport stopped without a complete response. Check the original service before requesting another inference.'
+    : problem === 'not_dispatched' ? 'This request was not sent. Check its parent operation, Goal and current access before starting a new inference.'
     : problem === 'cancelled' ? 'Cancellation was requested. Any usage already received remains accounted.' : null;
-  return <section aria-label="Decision inference" className="space-y-1 text-xs text-muted-foreground">
+  return <section aria-label="Inference request" className="space-y-1 text-xs text-muted-foreground">
     <p>{intent.binding.purpose} · {intent.binding.providerId} / {intent.binding.modelId} · {preparation ? 'Preparation' : 'Model compute'}</p>
     <p>{receipt?.requestStarted === false ? 'Not sent' : receipt?.requestStarted === true ? 'Transport started' : state?.dispatched ? 'Dispatch recorded; sending unconfirmed' : 'Awaiting dispatch'}
       {' · '}{receipt?.localExecutorStopped ? 'Local executor stopped' : 'Local executor stop unconfirmed'}</p>
     {preparation ? <p>Tokenization or template preparation; no model inference usage.</p>
       : <p>Input tokens: {receipt?.usage.inputTokens ?? 'unknown'} · Output tokens: {receipt?.usage.outputTokens ?? 'unknown'}</p>}
+    {!preparation && receipt?.providerCompleted && receipt.usage.measurement === 'missing'
+      && <p>The response does not establish input/output token usage or cost.</p>}
     {explanation && <p role="status">{explanation}</p>}
   </section>;
 }
