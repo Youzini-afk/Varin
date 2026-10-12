@@ -71,6 +71,7 @@ export interface VarinExtensionServiceProvision {
   multiple?: boolean;
   version: number;
   tool?: VarinExtensionToolDeclaration;
+  contract?: import('./runtime-contracts.js').VarinExtensionServiceContract;
 }
 
 export type VarinExtensionContributionKind =

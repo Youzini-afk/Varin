@@ -1,6 +1,9 @@
 import type { AgentInputContext, PiRuntimeSnapshot, WorkFocusId } from '@varin/protocol';
 import type { WorktreeMetadata, DraftStarterRef, FileEditorSettingsPatch } from './ui-dto.js';
 import type {
+  VarinApplicationSurface,
+  VarinRuntimeContractRequest,
+  VarinRuntimeContractResult,
   VarinExtensionActualState,
   VarinExtensionAssetPayload,
   VarinExtensionAssetRequest,
@@ -1514,7 +1517,15 @@ export interface SmartSearchAPI {
   doctor(): Promise<SmartSearchDoctorResponse>;
 }
 
+/** User-selected presentation context. The Host resolves directory identity and trust.
+ * Run identity and service-routing overrides are deliberately not client inputs. */
+export interface RuntimeContractContext {
+  directory?: string;
+  surface?: VarinApplicationSurface;
+}
+
 export interface ExtensionsAPI {
+  queryContracts(request: VarinRuntimeContractRequest, context?: RuntimeContractContext, signal?: AbortSignal): Promise<VarinRuntimeContractResult>;
   activateExtension(extensionId: string): Promise<void>;
   catalog(): Promise<VarinExtensionCatalogAvailability>;
   discardPreparedCandidate(extensionId: string, candidateIntegrity: string): Promise<void>;

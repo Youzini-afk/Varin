@@ -1096,6 +1096,17 @@ export class BrokeredHostSupervisor {
         this.#ownerGrants.delete(ownerStorageKey(owner));
         broker.forceTerminate();
         if (selection.manifest.entrypoints?.host?.mode === "native") this.#nativeRestartRequired.add(entry.manifest.id);
+        // Direct service preparation has no startup/reconcile catch to publish its failure.
+        // Retain a real old generation, and never overwrite a later selection/cancellation.
+        if (!controller.signal.aborted && (this.#epochs.get(entry.manifest.id) ?? 0) === epoch
+          && this.#generations.get(entry.manifest.id) === generation) {
+          const active = this.#active.get(entry.manifest.id);
+          await this.#reportActual(entry.manifest.id, diagnosticState(
+            snapshot.hostId, entry.desired.revision, active?.owner.generation ?? generation,
+            active ? 'active' : 'failed', active ? 'host_candidate_activation_failed' : 'host_activation_failed',
+            error instanceof Error ? error.message : String(error),
+          )).catch(() => undefined);
+        }
         throw error;
       }
     } finally {
@@ -1122,7 +1133,7 @@ export class BrokeredHostSupervisor {
       const key = serviceKey(value.id, Number(value.version));
       const descriptor = declared.get(key);
       if (!descriptor) throw new Error(`Host provided undeclared service: ${key}`);
-      if (descriptor.tool !== undefined || value.tool !== undefined) {
+      if (descriptor.tool !== undefined || value.tool !== undefined || descriptor.contract !== undefined || value.contract !== undefined) {
         const provided = parseVarinExtensionServiceProvision(value);
         if (!isDeepStrictEqual(provided, descriptor)) throw new Error(`Host service declaration differs from manifest: ${key}`);
       }
@@ -1152,7 +1163,7 @@ export class BrokeredHostSupervisor {
     });
     const registered = new Set(provisions.map(({ descriptor }) => serviceKey(descriptor.id, descriptor.version)));
     for (const [key, descriptor] of declared) {
-      if (descriptor.tool && !registered.has(key)) throw new Error(`Host activation did not register declared tool service: ${key}`);
+      if ((descriptor.tool || descriptor.contract) && !registered.has(key)) throw new Error(`Host activation did not register declared service contract: ${key}`);
     }
     return provisions;
   }

@@ -55,6 +55,16 @@ describe('createWebExtensionsAPI', () => {
     expect(target.searchParams.get('varin_url_token')).toBe('local-url-token');
   });
 
+  it('rejects a malformed contract response through the shared decoder', async () => {
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { location: { href: 'https://host.example/', origin: 'https://host.example' } },
+    });
+    fetchWithoutRuntimeRouting.mockResolvedValue(Response.json({ action: 'list', kind: 'service', entries: [] }));
+    const { createWebExtensionsAPI } = await import('./extensions');
+    await expect(createWebExtensionsAPI().queryContracts({ action: 'list', kind: 'service' })).rejects.toThrow();
+  });
+
   it('reloads a local source by stored extension identity without sending a source specifier', async () => {
     Object.defineProperty(globalThis, 'window', {
       configurable: true,

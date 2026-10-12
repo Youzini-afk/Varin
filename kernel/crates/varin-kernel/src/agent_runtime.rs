@@ -1,5 +1,8 @@
 //! Agent control is independent of the file/process Storage execution queue.
 //! Only the authenticated parent Host may use this management channel. It is not a tool grant.
+#[cfg(test)]
+#[path = "runtime_contract_review.rs"]
+mod runtime_contract_review;
 use crate::error::{response_error, KernelError};
 use crate::protocol::{
     reject_unknown_fields, response_ok, validate_method_params, PROTOCOL_VERSION,
@@ -1972,6 +1975,28 @@ pub(crate) fn spawn(
                                 .map_err(|_| {
                                     KernelError::Storage("content reader unavailable".into())
                                 })?;
+                            deferred = true;
+                            return Ok(Value::Null);
+                        }
+                        if method == "runtime.tools.inspect" {
+                            let p: NestedToolInspectParams = serde_json::from_value(params)?;
+                            let registry = runtime.catalog().lock()
+                                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?.nested_tools();
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            // The original read pool also keeps large schemas off Agent/control admission.
+                            content_tasks.send(Box::new(move || {
+                                let result = registry.inspect(&p.parent_operation_id, &p.executor_owner, p.name.as_deref())
+                                    .map_err(|error| KernelError::Operation(format!("{}: {}", error.code, error.message)))
+                                    .and_then(|inspection| serde_json::to_value(inspection).map_err(KernelError::from));
+                                let response = match result {
+                                    Ok(value) => response_ok(&response_id, value),
+                                    Err(error) => response_error(&response_id, &error),
+                                };
+                                done(&response_id);
+                                let _ = response_sender.send(response);
+                            })).map_err(|_| KernelError::Storage("content reader unavailable".into()))?;
                             deferred = true;
                             return Ok(Value::Null);
                         }

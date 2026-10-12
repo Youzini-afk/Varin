@@ -119,6 +119,20 @@ uses that boundary for accepted experiments and observation waits. This is not a
 durable job store. A declared read operation
 still needs its ordinary capability grants and the Host's current invocation authority.
 
+Tool callbacks can inspect their exact accepted directory with `await call.tools.list()` and
+`await call.tools.describe(name)`. Both require the existing `runtime.tools` capability and a live
+invocation. Results identify `origin: 'accepted_run'`, the original Run ID and tool-schema generation;
+listing returns short names/versions/descriptions, while describe returns the original complete
+`ToolSchema` or null for an unselected name. These reads do not select or enable anything. The
+original parent-operation/executor identity and cancellation fence remain authoritative.
+
+The ordinary `runtime_contract` tool exposes those same reads with `{ action: 'list', kind: 'tool' }`
+and `{ action: 'describe', kind: 'tool', name }`. Its service/UI queries instead identify
+`origin: 'current_catalog'`: installed declarations, original scoped routing and observed owner
+lifecycle. Current metadata is not a promise that a tool is in this Run or that invocation is permitted.
+See [runtime contract discovery](../../docs/ops/varin-extension-authoring.md#runtime-contract-discovery)
+for method/event schemas and UI author seams.
+
 Tool callbacks can compose other selected tools with
 `await call.tools.invoke({ callId: 'memory', name: 'memory', arguments: { action: 'read' } })`.
 Declare `runtime.tools` in the Host entrypoint's capabilities. The returned `NestedToolReceipt`

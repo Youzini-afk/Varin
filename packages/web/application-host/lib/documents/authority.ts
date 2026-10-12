@@ -797,6 +797,43 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
   };
 
+  // Shared directory admission for explicit registration and read-only metadata lookup.
+  const admitWorkspaceDirectory = async (value: unknown): Promise<string> => {
+    const rawPath = typeof value === 'string' ? value.trim() : '';
+    if (!rawPath) {
+      throw new DocumentAuthorityError('Workspace path is required', { code: 'failed', statusCode: 400 });
+    }
+    let canonicalPath: string;
+    try {
+      canonicalPath = await canonicalizePathIdentity(rawPath, { fsPromises, pathModule });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        throw new DocumentAuthorityError('Workspace path does not exist', { code: 'failed', statusCode: 404 });
+      }
+      throw error;
+    }
+    const stat = await fsPromises.stat(canonicalPath);
+    if (!stat.isDirectory()) {
+      throw new DocumentPathError('Workspace path is not a directory', 400);
+    }
+    if (!await isAllowedRoot(canonicalPath)) {
+      throw new DocumentPathError(`Workspace path is outside the Host deployment boundary: ${canonicalPath}`);
+    }
+    return canonicalPath;
+  };
+
+  /** Read the existing namespace without registering a workspace or publishing an epoch. */
+  const lookupWorkspacePath = async (value: unknown): Promise<{ canonicalPath: string; workspaceId: string | null }> => {
+    try {
+      const canonicalPath = await admitWorkspaceDirectory(value);
+      if (!await isTrusted(canonicalPath)) throw new DocumentUntrustedError();
+      const mapping = await registry.findExact(canonicalPath, 'directory');
+      return { canonicalPath, workspaceId: mapping?.workspaceId ?? null };
+    } catch (error) {
+      return fail(error);
+    }
+  };
+
   const resolveWorkspace = async (input: ResolveWorkspaceInput = {}): Promise<ResolveWorkspaceResult> => {
     try {
       if (input.workspaceId) {
@@ -810,26 +847,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         const mutation = await mutations.inspect(mapping.workspaceId);
         return { workspaceId: mapping.workspaceId, hostId, epoch: mutation.epoch };
       }
-      const rawPath = typeof input.path === 'string' ? input.path.trim() : '';
-      if (!rawPath) {
-        throw new DocumentAuthorityError('Workspace path is required', { code: 'failed', statusCode: 400 });
-      }
-      let canonicalPath: string;
-      try {
-        canonicalPath = await canonicalizePathIdentity(rawPath, { fsPromises, pathModule });
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
-          throw new DocumentAuthorityError('Workspace path does not exist', { code: 'failed', statusCode: 404 });
-        }
-        throw error;
-      }
-      const stat = await fsPromises.stat(canonicalPath);
-      if (!stat.isDirectory()) {
-        throw new DocumentPathError('Workspace path is not a directory', 400);
-      }
-      if (!await isAllowedRoot(canonicalPath)) {
-        throw new DocumentPathError(`Workspace path is outside the Host deployment boundary: ${canonicalPath}`);
-      }
+      const canonicalPath = await admitWorkspaceDirectory(input.path);
       const mapping = await registry.resolve({ canonicalPath, create: true });
       if (!mapping) throw new DocumentAuthorityError('Workspace resolution failed', { code: 'failed', statusCode: 500 });
       const mutation = await mutations.inspect(mapping.workspaceId);
@@ -2333,6 +2351,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   return {
     hostId,
     resolveWorkspace,
+    lookupWorkspacePath,
     /** Resource location and trust only; does not enter the mutation ledger. */
     getWorkspace: (workspaceId: string, signal?: AbortSignal) => waitWithSignal(loadWorkspace(workspaceId), signal),
     resolveResourceIdentity,

@@ -9,6 +9,8 @@ import { createDocumentSources } from './lib/kernel/document-sources.js';
 import { createMaterialStorageAccess } from './lib/kernel/material-storage.js';
 import { createScriptRuntime, SCRIPT_CAPABILITY } from './lib/kernel/script-runtime.js';
 import { createNestedToolOwner, VARIN_RUNTIME_TOOLS_CAPABILITY } from './lib/kernel/nested-tool-owner.js';
+import { createRuntimeContractOwner } from './lib/kernel/runtime-contract-owner.js';
+import { VARIN_RUNTIME_CONTRACTS_CAPABILITY } from '@varin/extension-contract';
 import { readHostHarnessSettings } from '@varin/pi-host/settings-authority';
 import { DocumentsFileObservationOwner } from './lib/kernel/file-observation-owner.js';
 import { FileObservationService } from './lib/kernel/file-observation-service.js';
@@ -4321,6 +4323,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const unregisterResearchDecisionCapability = extensionRuntime.capabilities.register(RESEARCH_DECISION_CAPABILITY, researchDecisionOwner.current.capability);
   const unregisterResearchDiscoveryCapability = extensionRuntime.capabilities.register(RESEARCH_DISCOVERY_CAPABILITY, researchDiscoveryOwner.current.capability);
   const unregisterWebCapability = extensionRuntime.capabilities.register(WEB_CAPABILITY, webRuntimeOwner.current.capability);
+  const unregisterRuntimeContractCapability = extensionRuntime.capabilities.register(
+    VARIN_RUNTIME_CONTRACTS_CAPABILITY, createRuntimeContractOwner({ extensions: extensionRuntime, kernel: kernelClient }),
+  );
   const unregisterNestedToolCapability = extensionRuntime.capabilities.register(VARIN_RUNTIME_TOOLS_CAPABILITY, createNestedToolOwner(kernelClient));
   const unregisterScriptCapability = extensionRuntime.capabilities.register(SCRIPT_CAPABILITY, scriptRuntimeOwner.current.capability);
   const unregisterComputerCapability = extensionRuntime.capabilities.register(COMPUTER_CAPABILITY, computerRuntimeOwner.current.capability);
@@ -4862,6 +4867,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       followUpService.dispose();
       piSessionAutomation.stop();
       piSessionTitles.stop();
+      unregisterRuntimeContractCapability();
       unregisterNestedToolCapability();
       unregisterComputerCapability();
       unregisterScriptCapability();

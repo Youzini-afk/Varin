@@ -857,3 +857,38 @@ The workflow uses npm Trusted Publishing with GitHub OIDC. It has no `NPM_TOKEN`
 GitHub Environment gate. Each package trusts repository `Youzini-afk/Varin`, workflow filename
 `npm-publish.yml`, no environment claim, and the `npm publish` action. GitHub obtains a short-lived
 credential for each run, and npm attaches provenance automatically.
+
+
+## Runtime contract discovery
+
+The ordinary `runtime_contract` tool provides two explicitly different views:
+
+- `{ "action": "list", "kind": "tool" }` and
+  `{ "action": "describe", "kind": "tool", "name": "runtime_contract" }` inspect the invoking
+  Run's accepted tools through the same SDK `call.tools.list/describe` owner. Results identify
+  `accepted_run`, Run ID and generation. A missing tool returns null and is not enabled by discovery.
+- `{ "action": "list", "kind": "service" }` lists current declarations and original preparation
+  facts. `{ "action": "describe", "kind": "service", "serviceId": "varin.context.fragments",
+  "version": 1, "member": { "kind": "method", "name": "describe" } }` requests one method.
+  `member.kind: "event"` selects an event schema; `extensionId` disambiguates an installed declaration.
+  These results identify `current_catalog`, owner revisions and scoped selection. They do not grant
+  invocation, prepare a cold provider or replace the accepted Run directory.
+- `{ "action": "describe", "kind": "ui_slot", "id": "workbench.editor.actions" }` reads the
+  same slot props schema that defines the actual mount boundary. Shell hosting declarations and
+  `live: "unobserved"` are separate facts. A Host-only tool call has no invented active renderer.
+
+Authenticated clients use `RuntimeAPIs.extensions.queryContracts(request, { directory?, surface? })`
+for the current-catalog view. The trusted Host resolves an already-registered workspace identity
+without creating one; an allowed unregistered directory can retain its canonical project routing,
+while workspace-specific workbench selection remains absent. The caller cannot choose a Run,
+executor, provider-generation authority or arbitrary routing object. Exact User API shapes remain in
+`packages/application-client`; this endpoint has no invocation-scoped tool directory.
+
+A service may declare `contract: { methods, events?, participation? }` in its existing service
+provision. Method entries carry `inputSchema`, `outputSchema`, optional description/examples and
+`source: { path, line? }`; events carry their schema and optional source. Source paths are package
+relative and do not expose Host installation paths. Import that same descriptor at activation.
+Ordinary tool execute metadata derives from the existing tool declaration. The context-fragments
+provider is a complete built-in method example; owners without such declarations report
+`undeclared`. This phase does not claim complete metadata for every legacy service or full
+Application API reflection. No catalog is injected into every prompt or tool result.

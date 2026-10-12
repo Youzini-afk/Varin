@@ -102,7 +102,7 @@ records typed dependencies in its manifests. Original publication protection spa
 the short identity/epoch/revision-checked commit. GC follows those dependencies from the existing
 history, input, operation, event, policy and request roots. Catalog retains only original metadata;
 byte reads, hash/base64 work and provider serialization stay outside its control lock. Catalog
-format **58**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **17** reject older internal
+format **58**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **18** reject older internal
 formats directly. These are distinct from policy service **4** and private script worker protocol **2**.
 
 `runtime.output.media.read` uses the original caller Thread/branch plus an actual history, queued
@@ -474,7 +474,7 @@ inference Operation, original ToolOrigin and frozen Goal. Tagged callers disting
 tool from that real query context. Scope exit/cancellation forbids new requests but does not erase an
 already-dispatched child or its exact-owner receipt. Recovery cannot recreate the vanished scope.
 A cheap query may detach promptly while the child transport remains active; only the child's original
-receipt establishes local drain and updates its pending/unknown Goal usage. Catalog 58 and wire 17
+receipt establishes local drain and updates its pending/unknown Goal usage. Catalog 58 and wire 18
 retain explicit caller proof and native-generation facts, without an alias or older-format reader.
 
 Retrieval consumes the original LaunchSource in live, fixed-revision and materialized modes. The
@@ -709,6 +709,15 @@ another call. The extension cannot supply a Run, epoch, schema version, source o
 frozen directory and `InvocationRunner` serve model, policy and nested calls, including preparation,
 resource admission, current authorization, dispatch and settlement. Catalog resolves original source
 and policy/model boundaries through immutable parent intents rather than parsing operation IDs.
+
+The same live `NestedTools` scope supports `call.tools.list/describe` and the ordinary
+`runtime_contract` tool's `kind: tool` branch. The private `runtime.tools.inspect` request authenticates
+the original parent Operation/executor and returns only its frozen directory, identified as
+`accepted_run`. It never builds a new launch or consults today's installed catalog. Large schema
+cloning/serialization runs in the existing content worker outside Catalog and scope admission locks.
+Cancellation, closed scopes and mismatched executors reject inspection. Current service/UI metadata
+is separately identified as `current_catalog` by the existing Host owners; both views remain ordinary
+tool results in the original ContentStore/history/Policy evidence, with no extra inventory ledger.
 
 The live scope closes admission before draining its registered calls, including abandoned extension
 promises. Parent cancellation and exact nested-operation cancellation reach the original executor.

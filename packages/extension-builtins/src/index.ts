@@ -1,3 +1,5 @@
+import { RUNTIME_CONTRACT_TOOL_DECLARATIONS, VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION_ID } from './runtime-contract-tools.js';
+export { RUNTIME_CONTRACT_TOOL_DECLARATIONS, VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION_ID } from './runtime-contract-tools.js';
 import { RESEARCH_DECISION_CAPABILITY, RESEARCH_DECISION_TOOL_DECLARATIONS, VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION_ID } from './research-decision-tools.js';
 export { RESEARCH_DECISION_CAPABILITY, RESEARCH_DECISION_TOOL_DECLARATIONS, VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION_ID } from './research-decision-tools.js';
 import { RESEARCH_DISCOVERY_CAPABILITY, RESEARCH_DISCOVERY_TOOL_DECLARATIONS, VARIN_BUILTIN_RESEARCH_DISCOVERY_EXTENSION_ID } from './research-discovery-tools.js';
@@ -32,6 +34,10 @@ import {
   VARIN_TRANSITION_SCENE_DATA_CONTRACT,
   VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE,
   VARIN_CORE_SERVICE_VERSION,
+  VARIN_RUNTIME_CONTRACTS_CAPABILITY,
+  VARIN_RUNTIME_TOOLS_CAPABILITY,
+  VARIN_CONTEXT_FRAGMENTS_SERVICE,
+  parseVarinExtensionServiceProvision,
   VARIN_WORKSPACE_RECOVERY_SERVICE_ID,
   VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION,
   VARIN_WORKBENCH_LAYOUT_SERVICE_ID,
@@ -594,6 +600,13 @@ export const VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION: VarinBuiltinExtensionDefi
   },
 };
 
+export const VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION: VarinBuiltinExtensionDefinition = {
+  enabledByDefault: true,
+  manifest: { id: VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION_ID, displayName: 'Runtime contracts', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
+    entrypoints: { host: { activation: ['service-request'], file: 'host.cjs', mode: 'brokered' } },
+    capabilities: { host: [VARIN_RUNTIME_CONTRACTS_CAPABILITY, VARIN_RUNTIME_TOOLS_CAPABILITY] }, provides: { services: [...RUNTIME_CONTRACT_TOOL_DECLARATIONS] } },
+};
+
 export const VARIN_BUILTIN_SCRIPT_EXTENSION: VarinBuiltinExtensionDefinition = {
   enabledByDefault: true,
   manifest: { id: VARIN_BUILTIN_SCRIPT_EXTENSION_ID, displayName: 'Managed JavaScript', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
@@ -635,7 +648,7 @@ export const VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION: VarinBuiltinExtensionDef
     id: VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION_ID, displayName: "Varin Context Guidance",
     version: "1.0.0", schemaVersion: 1, engines: { varin: "*" },
     entrypoints: { host: { activation: ["service-request"], file: "host.cjs", mode: "brokered" } },
-    provides: { services: [{ id: "varin.context.fragments", version: 1, multiple: true }] },
+    provides: { services: [parseVarinExtensionServiceProvision(VARIN_CONTEXT_FRAGMENTS_SERVICE)] },
   },
 };
 
@@ -726,6 +739,7 @@ export const VARIN_BUILTIN_EXTENSION_DEFINITIONS: readonly VarinBuiltinExtension
   VARIN_BUILTIN_RESEARCH_DISCOVERY_EXTENSION,
   VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION,
   VARIN_BUILTIN_SCRIPT_EXTENSION,
+  VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION,
   VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION,
   VARIN_BUILTIN_RETRIEVAL_KEYWORD_EXTENSION,
   VARIN_BUILTIN_RETRIEVAL_SEMANTIC_EXTENSION,

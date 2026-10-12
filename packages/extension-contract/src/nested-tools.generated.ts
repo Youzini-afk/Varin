@@ -22,6 +22,30 @@ export interface NestedToolReceipt {
   completion: OperationCallCompletion<ResolvedMedia>;
 }
 
+export interface NestedToolSummary {
+  name: string;
+  version: string;
+  description: string;
+}
+
+export type NestedToolInspection = {
+  origin: 'accepted_run'; permission: 'checked_on_invocation'; runId: string; generation: number;
+} & ({ action: 'list'; tools: NestedToolSummary[] } | { action: 'describe'; tool: LaunchTool | null });
+
+export interface LaunchTool {
+  name: string;
+  version: string;
+  description: string;
+  schema: unknown;
+  output_schema: unknown;
+  metadata: ToolMetadata | null;
+  requirements?: ToolRequirements;
+}
+
+export interface ToolMetadata { service_id: string; service_version: number; completion: 'result' | 'job'; lifetime?: 'thread' | 'environment'; operation: 'read' | 'effect'; examples?: unknown[]; source?: {path: string; line?: number}; }
+
+export interface ToolRequirements { source: 'source' | 'physical' | 'live'; process: boolean; }
+
 export interface OutputEvidenceRef { action_id: string; node_id: string; content_ref: string }
 
 export type ContentProvenance = {kind:'system_instruction';source:string} | {kind:'goal_instruction';goal_id:string;generation:number} | {kind:'user_instruction';input_id:string} | {kind:'sampling';interaction_id:string;role:'system'|'user'|'assistant'} | {kind:'assistant'} | {kind:'policy_output';action_id:string;identity:{name:string;version:string}} | {kind:'tool_data';call_id:string} | {kind:'policy_tool_data';reference:OutputEvidenceRef} | {kind:'external_data';source:string} | {kind:'agent_message';thread_id:string} | {kind:'environment_fact';event_id:string};

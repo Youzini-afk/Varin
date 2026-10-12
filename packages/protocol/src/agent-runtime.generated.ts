@@ -1324,7 +1324,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 17; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 18; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -1363,6 +1363,16 @@ export interface LaunchSource {
 }
 
 export interface ToolMetadata { service_id: string; service_version: number; completion: 'result' | 'job'; lifetime?: 'thread' | 'environment'; operation: 'read' | 'effect'; examples?: unknown[]; source?: {path: string; line?: number}; }
+
+export interface NestedToolSummary {
+  name: string;
+  version: string;
+  description: string;
+}
+
+export type NestedToolInspection = {
+  origin: 'accepted_run'; permission: 'checked_on_invocation'; runId: string; generation: number;
+} & ({ action: 'list'; tools: NestedToolSummary[] } | { action: 'describe'; tool: LaunchTool | null });
 
 export interface NestedToolInput {
   callId: string;

@@ -10,8 +10,13 @@ import type {
   ExtensionPackageManager,
 } from '@varin/extension-host';
 import type { Express, Request, RequestHandler, Response } from 'express';
+import { projectContainsPath, type RuntimeContractContext, type ProjectFolders } from '@varin/application-client';
+import type { DocumentAuthority } from '../documents/authority.js';
+import { isDocumentAuthorityError } from '../documents/errors.js';
 import {
   VarinExtensionContractError,
+  parseVarinRuntimeContractRequest,
+  type VarinRuntimeContractScope,
   parseVarinExtensionActualState,
   parseVarinExtensionCandidateCapabilityReviewRequest,
   parseVarinExtensionCapabilityReviewRequest,
@@ -26,6 +31,8 @@ interface ExtensionRouteDependencies {
   extensionCatalog: ApplicationExtensionCatalog;
   extensionPackages: ExtensionPackageManager;
   extensionRuntime?: ApplicationExtensionRuntime | null;
+  documents?: Pick<DocumentAuthority, 'lookupWorkspacePath'>;
+  readProjects?: () => Promise<Array<ProjectFolders & { id: string }>>;
   uiAuthController: {
     requireAuth: RequestHandler;
     requireSessionAuth: RequestHandler;
@@ -136,8 +143,65 @@ export const registerExtensionRoutes = (app: Express, {
   extensionCatalog,
   extensionPackages,
   extensionRuntime,
+  documents,
+  readProjects,
   uiAuthController,
 }: ExtensionRouteDependencies): void => {
+  app.post(
+    '/api/varin/extensions/v1/contracts/query',
+    uiAuthController.requireAuth,
+    async (req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+      if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
+      let request;
+      let context: RuntimeContractContext;
+      try {
+        const body = asRecord(req.body);
+        if (!body || Object.keys(body).some((key) => key !== 'request' && key !== 'context')) {
+          throw new Error('Contract query requires a request and optional presentation context');
+        }
+        request = parseVarinRuntimeContractRequest(body.request);
+        const raw = body.context === undefined ? {} : asRecord(body.context);
+        if (!raw || Object.keys(raw).some((key) => key !== 'directory' && key !== 'surface')) {
+          throw new Error('Contract context accepts only directory and surface');
+        }
+        if (raw.directory !== undefined && (typeof raw.directory !== 'string' || !raw.directory.trim())) {
+          throw new Error('Contract directory must be nonempty');
+        }
+        if (raw.surface !== undefined && raw.surface !== 'web' && raw.surface !== 'desktop' && raw.surface !== 'mobile') {
+          throw new Error('Contract surface is invalid');
+        }
+        context = raw as RuntimeContractContext;
+      } catch (error) {
+        return res.status(400).json({ error: { code: 'invalid_request', message: error instanceof Error ? error.message : 'Invalid contract query', retryable: false } });
+      }
+      try {
+        // This is the authenticated User's current-catalog view, not a Run view.
+        // Existing workbench and service-routing settings both use the default User.
+        const scope: VarinRuntimeContractScope = {
+          routing: { userId: 'default' },
+          workbench: { surface: context.surface ?? 'web', userId: 'default' },
+        };
+        if (context.directory !== undefined) {
+          if (!documents) return res.status(501).json({ error: { code: 'workspace_authority_unavailable', retryable: true } });
+          const workspace = await documents.lookupWorkspacePath(context.directory);
+          const project = (await readProjects?.())?.find((entry) => projectContainsPath(entry, workspace.canonicalPath));
+          // Service routing retains its existing canonical-directory namespace;
+          // workbench layout uses only an existing Documents ID. A query never creates one.
+          // Neither namespace grants source access.
+          scope.routing = { userId: 'default', workspaceId: workspace.canonicalPath, ...(project ? { projectId: project.id } : {}) };
+          if (workspace.workspaceId) scope.workbench = { ...scope.workbench!, workspaceId: workspace.workspaceId };
+        }
+        return res.json(await extensionRuntime.queryContracts(request, scope));
+      } catch (error) {
+        if (isDocumentAuthorityError(error)) {
+          return res.status(error.statusCode).json({ error: { code: error.code, message: error.message, retryable: false } });
+        }
+        return res.status(500).json({ error: { code: 'contract_query_failed', message: 'Failed to read runtime contracts', retryable: true } });
+      }
+    },
+  );
+
   app.get('/extensions/recovery', uiAuthController.requireSessionAuth, (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.type('html').send(renderExtensionRecoveryPage());

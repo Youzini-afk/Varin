@@ -55,6 +55,21 @@ path. Registry invocation indexes only the requested service (or directly looks 
 provider); it does not scan all installed providers. Selected-provider failure never falls back to a
 different implementation. Non-authoritative routing cannot create a new binding.
 
+`ApplicationExtensionRuntime.queryContracts` reads current service and UI-slot contracts from the
+same manifest, routing, registry and workbench owners. It never activates a provider or invokes its
+`inspect` callback. Read-only workbench snapshots do not migrate profiles or resolve/create workspace
+identities. Revisions and original lifecycle codes distinguish declared/cold, active, draining,
+disabled, failed and unresolved selections. Missing method metadata is `undeclared`, not an empty
+schema. A normal preparation failure is recorded by its original extension owner, without replacing
+an older still-active generation. Unsupported shell contract versions remain unresolved rather than
+being parsed as the current format. Host slot metadata cannot prove a Surface is actually mounted.
+
+Optional `ServiceProvision.contract` carries method/event schemas, author examples and package-relative
+source locations through the same manifest and activation descriptor. A declared method must be
+callable through the original handler lookup at activation. Tool execute schemas derive from the
+existing `tool` declaration; no second tool schema is maintained. This is a finite author contract,
+not automatic reflection over every Application API or every provider implementation.
+
 A bound handle admits ordinary calls while its generation is active. A caller freezing an exchange
 can explicitly pin that generation, including its real broker drain lifetime, and must release the
 pin after settling the exchange. An accepted child can derive an independent pin through `bindPinned`

@@ -8,6 +8,12 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-12 增量：同源合同发现与真实调用工具目录
+
+- 普通 `runtime_contract` 区分 `current_catalog` 的 service/method/event/UI slot 与 `accepted_run` 的原冻结工具。SDK `call.tools.list/describe` 本片才真正补齐，旧能力表的提前完成表述已纠正。Catalog **58**、私有 wire **18**。
+- 查询复用原 manifest/routing/registry/workbench 与 live invocation；无 provider inspect/冷激活、无目录注入、无第二安装/授权目录。method/event 声明与激活一致，六 UI slot props 类型/schema 同源；未知合同和实际 mount 状态诚实表示。
+- 原 client/认证 route、普通 broker/SDK/Policy/nested/child、结果与 GC 重开路径及独审与整合发现的真实边界修复见[本片记录](../reviews/runtime-contract-discovery-2026-10-12.md)。Host/UI 类型通过；完整 Web 类型仍有与 HEAD 源码逐条一致的 113 条旧跨层测试归属诊断，未标通过。全部 legacy service metadata、完整 API/实现源码查询、Agent 产包至实际挂载/释放和更深组合继续推进，未以此宣称扩展设计全部完成。
+
 ## 2026-10-12 增量：原来源的更多只读语言查询
 
 - 原 Rust 工具声明新增 hover、工程/文档 symbols 与单查询双向 call hierarchy；既有三语言工具与显式用户数组保留，默认目录按原声明发现。Catalog **58**、私有 wire **17**。
@@ -709,7 +715,7 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 | --- | --- | --- | --- |
 | 总设 §15–17：来源、语言与检索 | 固定/物化/live_root 来源、隔离可写 child 与逐项结果集成；三类来源的定义/引用/诊断/hover/symbols/call hierarchy、关键词/结构/显式语义、dedicated rerank、渐进 fast-decision 与 Explore LLM；原 immutable reader、撤权和推理账本；固定工程派生视图及实际 child 消费 | 其余编辑器语言/编辑候选与跨文件计算版本证据；远端文件/语言/检索同源映射；材料 rerank 组合消费者、本地 native embedding；更多 provider/工程规模下的来源合同验证 | 固定捕获树不能悄悄读 live 配置，目录外 provider environment 明确标识；同名远端路径不串源；旧 reader/配置切代与取消恢复；正常可选缺失不吞选定实现失败 |
 | 总设 §12–13、§18、§24：推理用途、记忆与 Bot | 多 API 家族原生适配及原 credential owner；规划模型、embedding、TypeSafe/Cloudflare/llama.cpp decision 与真实 research_decide；自动容量水位、分段摘要、普通 notes/计划和稳定 memory checkpoint；Goal/预算/暂停/各种持久触发 | 其他检索/材料 rerank 消费者、协议特定已知计量；其余建议/评估消费者与独立 image 用途；实际模型配置覆盖和服务器工作续接；可替换上下文预算策略、provider 容量反馈；完整自动记忆与 Bot 独立知识/身份/睡眠恢复/长期任务 | 每次实际外发按用途、原凭据、来源和 Goal 受理；未知 usage 不变成零；不重放潜在收费请求；原记忆 revision 和祖先压缩边界保持 |
-| 扩设 §4–9：完整能力组合与作者接口 | Provider/Transform/Decision/Observer 已有真实切片；ToolGraph、直接 child、Deliver/Pause、运行中策略换绑；SDK tools.list/describe/invoke、普通工具/嵌套调用、候选更新与 owner 独立准备；已有 typed workbench slot 声明 | 同一合同的完整 service/method/event/UI slot/props/来源/就绪状态精确查询；Agent 产包→既有授权候选→工作台挂载/释放整链；更广领域 Provider/Transform、父子作用域共享键与局部复用、多变换顺序/冲突、独占资源交接 | 不另养能力名单或第二安装器；失败候选保留旧实例；旧调用保留真实绑定；关闭 UI 不取消后台业务；仅依赖自己的工作等待准备 |
+| 扩设 §4–9：完整能力组合与作者接口 | Provider/Transform/Decision/Observer 已有真实切片；ToolGraph、直接 child、Deliver/Pause、运行中策略换绑；SDK tools.invoke；本片新增原冻结tools.list/describe与普通runtime_contract、同源service/method/event/UI slot/props/准备状态有限查询；普通工具/嵌套调用、候选更新与 owner 独立准备 | 其余legacy service元数据、完整API/实现源码查询；Agent 产包→既有授权候选→工作台挂载/释放整链；更广领域 Provider/Transform、父子作用域共享键与局部复用、多变换顺序/冲突、独占资源交接 | 不另养能力名单或第二安装器；失败候选保留旧实例；旧调用保留真实绑定；关闭 UI 不取消后台业务；仅依赖自己的工作等待准备 |
 | 总设 §14–16、§21、§24：文件与产品工作流 | 原文件工具/CAS/捕获、child 报告与 WorkingResult、family 消息/读取/Wait、历史引用与分支、Storage 与 Catalog GC 锁外准备 | 未保存编辑器草稿、Documents/Git/overview 与工作源的关联；历史/磁盘组合恢复；完整 IDE/Research/Bot 模式、通知等产品消费者接同一身份/revision/cursor | 草稿不是聊天回滚副作用；重开保留真实副本与效果；报告和代码集成各有事实；各视图不能有第二份状态权威 |
 | 总设 §19–20、§22：环境、Computer 与 MCP | Computer 原操作、精确 stop、source-less child request/Wait/handback、持久 async 脚本；MCP tools/content/Tasks/resource observers/有限交互和两次审阅 sampling；typed media 的存储与跨层消费 | 真实远端/VM 环境的一致资源映射及平台组件缺口；支持范围内 provider/server/无 UI 生命周期的实际产品组合。Wayland 可靠截图/坐标输入仍需正式会话组件；macOS JXA 已有实现但缺真实机证据。typed media 不代表全部模型音视频/image 用途已实现 | 同物理桌面共享占用、独立桌面并行；失联不证明停止；旧 epoch 不续发；MCP 可选音频/toolChoice 等明确有限支持不自动扩成整份协议实现任务；实际配置与权限流程不能被省略 |
 | 总设 §7–9、§23、§27–28，扩设 §10–12：全局组合与发行实证 | 跨 Run 原子资源/FIFO、FileSearch 任务族公平、事件背压、正文/回执 ContentStore、锁外捕获/GC、分层产品投影已各有真实纵切 | 其余资源分类/provider 配额与全域共享准备；大内容请求成本、原始控制隔离的组合负载；Web/Electron/Mobile/无 UI Host 的完整后端寿命、安装升级/数据保留；代表性冷/热/并发/更新成本 | 只跑源码或受控 stdio 不称产品 IPC/真机/真账号通过；不预设性能倍数或任意门槛；未用扩展不增加热路径扫描；旧世代按实际引用释放；验证中发现的产品缺陷仍需修复 |

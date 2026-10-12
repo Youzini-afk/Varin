@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 17;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 18;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -413,6 +413,14 @@ pub(crate) struct ComputerRequestReconcileParams {
 pub(crate) struct ComputerRequestWaitParams {
     pub(crate) operation_id: String,
     pub(crate) request_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NestedToolInspectParams {
+    pub(crate) parent_operation_id: String,
+    pub(crate) executor_owner: varin_runtime::ExecutorOwner,
+    pub(crate) name: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3093,6 +3101,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         }
         "runtime.computer.request.wait" => {
             serde_json::from_value::<ComputerRequestWaitParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.tools.inspect" => {
+            serde_json::from_value::<NestedToolInspectParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

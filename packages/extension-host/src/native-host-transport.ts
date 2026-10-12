@@ -180,12 +180,15 @@ export class NativeHostTransport implements BrokeredHostTransport {
           },
           services: {
             provide: (descriptorValue, handler) => {
-              const descriptor = descriptorValue as { id?: unknown; version?: unknown };
+              const descriptor = descriptorValue as { id?: unknown; version?: unknown; contract?: { methods?: Record<string, unknown> } };
               const key = `${String(descriptor.id ?? "")}@${Number(descriptor.version)}`;
               if (!descriptor.id || !Number.isSafeInteger(descriptor.version) || Number(descriptor.version) <= 0) {
                 throw new Error("Trusted-native Host service descriptor is invalid");
               }
               if (!handler || typeof handler !== "object") throw new Error(`Trusted-native Host service handler is invalid: ${key}`);
+              for (const method of Object.keys(descriptor.contract?.methods ?? {})) {
+                if (typeof handler[method] !== 'function') throw new Error(`Host service declared method is unavailable: ${key}.${method}`);
+              }
               if (stagedHandlers.has(key)) throw new Error(`Trusted-native Host service provided more than once: ${key}`);
               stagedHandlers.set(key, handler);
               provisions.push(descriptorValue);
