@@ -127,7 +127,7 @@ async function fixture(options: { main?: Reply; planner?: Reply; planningAuth?: 
   const storage = documents ? new KernelStorageAdapter({ client: kernel, hostId: 'planning-host-review', storageRoot: root,
     resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root }) : undefined;
   const resources = documents && storage ? resourceScopeFixture(root, createKernelWorkspaceWorkingStateAccess(storage), documents, undefined, (input, consume) => storage.withResourceRead(input, consume)) : undefined;
-  const prepareSource = documents && storage && resources ? createThreadSourcePreparer({ documents, workingStates: createKernelWorkspaceWorkingStateAccess(storage), prepareResources: resources.prepareSourceCapture }) : undefined;
+  const prepareSource = documents && storage && resources ? createThreadSourcePreparer({ sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates: createKernelWorkspaceWorkingStateAccess(storage), prepareResources: resources.prepareSourceCapture }) : undefined;
   if (documents && storage) {
     await fs.mkdir(workspace);
     cleanups.push(async () => { if (!closed) { await storage.dispose(); await documents.dispose(); } });

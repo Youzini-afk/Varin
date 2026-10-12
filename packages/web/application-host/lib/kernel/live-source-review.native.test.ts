@@ -64,7 +64,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const workingStates = createKernelWorkspaceWorkingStateAccess(storage);
   const liveSources = createLiveSourceOwner({ documents, kernel });
   const resources = resourceScopeFixture(root, workingStates, documents, liveSources.validate, (input, consume) => storage.withResourceRead(input, consume));
-  const prepare = createThreadSourcePreparer({ documents, workingStates, liveSources, prepareResources: resources.prepareSourceCapture });
+  const prepare = createThreadSourcePreparer({ sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, liveSources, prepareResources: resources.prepareSourceCapture });
   const personalization = createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'selected-project' }) });
   const prepareContext = createThreadContext({ personalization, resources, projectForWorkspace: async () => 'selected-project' });
   kernel.setMemoryOwner(createMemoryOwner({ personalization, prepareContext }));

@@ -6,16 +6,12 @@ import type { SpawnOptions } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 import { requireAppliedProcessInteraction } from "./process-interaction.js";
-import { ManagedProcessLaunchError, type ManagedPipedProcessHandle } from "../process/types.js";
+import { ManagedProcessLaunchError, type ManagedPipedProcessHandle, type ManagedProcessIdentity, type ManagedProcessAdmission } from "../process/types.js";
 import { canonicalizePathIdentity } from "../workspace/path-safety.js";
 import type { KernelClient, KernelGrantHandle, KernelScopedClient, KernelProcessSubscription } from "./kernel-client.js";
 import type { KernelMethodParams, KernelProcessSnapshot, KernelProcessStreamEvent } from "./protocol.generated.js";
 
-export interface NativeProcessIdentity {
-  workspaceId: string;
-  executionWorkspaceId: string;
-  canonicalRoot: string;
-}
+export type NativeProcessIdentity = ManagedProcessIdentity;
 interface Options {
   client: KernelClient;
   resolveIdentity(cwd: string): Promise<NativeProcessIdentity>;
@@ -324,8 +320,8 @@ export function createKernelProcessService(options: Options) {
     stopping = true;
     for (const handle of handles) handle.invalidate(error);
   });
-  const context = async (cwd: string) => {
-    const resolvedIdentity = await options.resolveIdentity(cwd);
+  const context = async (cwd: string, admission?: ManagedProcessAdmission, signal = new AbortController().signal) => {
+    const resolvedIdentity = admission ? await admission(signal) : await options.resolveIdentity(cwd);
     const identity = {
       ...resolvedIdentity,
       canonicalRoot: await canonicalizePathIdentity(resolvedIdentity.canonicalRoot),
@@ -349,13 +345,13 @@ export function createKernelProcessService(options: Options) {
     }
     return existing;
   };
-  const launch = async (command: string, args: readonly string[], input: SpawnOptions, mode: "pipe" | "pty", cols = 80, rows = 24): Promise<KernelManagedProcess> => {
+  const launch = async (command: string, args: readonly string[], input: SpawnOptions, mode: "pipe" | "pty", cols = 80, rows = 24, admission?: ManagedProcessAdmission): Promise<KernelManagedProcess> => {
     input.signal?.throwIfAborted();
     if (stopping || !options.client.isReady) throw new Error("Native process authority is unavailable or stopping");
     if (typeof input.cwd !== "string" || !path.isAbsolute(input.cwd)) throw new Error("Native process launch requires an admitted absolute cwd");
     if (input.shell || input.detached || input.uid !== undefined || input.gid !== undefined) throw new Error("Native process launch does not accept an alternate shell, detached identity, uid or gid");
     const canonicalCwd = await canonicalizePathIdentity(input.cwd);
-    const resolved = await context(input.cwd);
+    const resolved = await context(input.cwd, admission, input.signal);
     if (stopping) throw new Error("Native process authority is stopping");
     const cwd = path.relative(resolved.identity.canonicalRoot, canonicalCwd).replaceAll("\\", "/");
     if (cwd === ".." || cwd.startsWith("../") || path.isAbsolute(cwd)) throw new Error("Native process cwd is outside its admitted root");
@@ -365,6 +361,14 @@ export function createKernelProcessService(options: Options) {
       cwd, command, args: [...args], mode, cols, rows,
       env: Object.entries(input.env ?? process.env).flatMap(([name, value]) => value === undefined || name === "NODE_CHANNEL_FD" ? [] : [{ name, value }]),
     };
+    // The trusted source callback belongs to the original source owner, not the JSON
+    // caller. Preparation/grant creation may have waited; re-admit at actual spawn.
+    if (admission) {
+      const current = await admission(input.signal ?? new AbortController().signal);
+      if (current.workspaceId !== resolved.identity.workspaceId || current.executionWorkspaceId !== resolved.identity.executionWorkspaceId
+        || await canonicalizePathIdentity(current.canonicalRoot) !== resolved.identity.canonicalRoot) throw new Error('Process source changed before launch');
+    }
+    input.signal?.throwIfAborted();
     const initial = await resolved.client.processSpawn(params);
     const epoch = options.client.kernelEpoch;
     if (!epoch) throw new Error("Native process epoch was lost during startup");
@@ -400,6 +404,9 @@ export function createKernelProcessService(options: Options) {
   };
   return {
     spawn: (command: string, args: readonly string[], input: SpawnOptions) => trackedLaunch(command, args, input, "pipe"),
+    /** Host-private source admission. Never exposed in process tool JSON or extension contracts. */
+    spawnAdmitted: (admission: ManagedProcessAdmission, command: string, args: readonly string[], input: SpawnOptions) =>
+      trackedLaunch(command, args, input, "pipe", 80, 24, admission),
     ptyProvider: {
       backend: "rust-kernel",
       async spawn(command: string, args: string[], input: Record<string, unknown>) {

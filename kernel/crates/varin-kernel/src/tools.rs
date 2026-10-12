@@ -1,14 +1,14 @@
 //! Selected tools reuse the existing Storage owner through typed in-process messages.
 //! No second catalog, file writer, process manager, or management-authority fallback exists here.
-use crate::error::{KernelError, error_code};
+use crate::error::{error_code, KernelError};
 use crate::model::Grant;
-use crate::storage::Storage;
 use crate::storage::file_mutations::{FileEditArgs, FileWriteArgs, TextMutation};
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use crate::storage::Storage;
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::BTreeSet;
-use std::sync::{Arc, mpsc};
+use std::sync::{mpsc, Arc};
 use varin_runtime::execution::{
     Access, CancellationToken, CompletionKind, ExecutionError, FrozenToolContext, PreparedToolCall,
     ResourceClaim, ResourceIntent, ToolCall, ToolCompletion, ToolContract, ToolExecutionContext,
@@ -69,9 +69,9 @@ impl ToolKind {
         use varin_runtime::execution::{ToolRequirements, ToolSourceRequirement::*};
         let source = match self {
             Self::FileRead | Self::FileList | Self::FileSearch | Self::CodeRetrieval => Source,
-            Self::LanguageDefinition
-            | Self::LanguageReferences
-            | Self::LanguageDiagnostics => Live,
+            Self::LanguageDefinition | Self::LanguageReferences | Self::LanguageDiagnostics => {
+                Physical
+            }
             _ => Physical,
         };
         ToolRequirements {
@@ -718,14 +718,13 @@ impl KernelResourceClient {
     pub(crate) fn with_admission_control(
         mut self,
         watch: impl Fn(
-            &ToolBinding,
-            &CancellationToken,
-        ) -> Result<
-            varin_runtime::execution_capacity::AdmissionControlGuard,
-            ExecutionError,
-        > + Send
-        + Sync
-        + 'static,
+                &ToolBinding,
+                &CancellationToken,
+            )
+                -> Result<varin_runtime::execution_capacity::AdmissionControlGuard, ExecutionError>
+            + Send
+            + Sync
+            + 'static,
     ) -> Self {
         self.admission_control = Some(Arc::new(watch));
         self
@@ -1024,7 +1023,10 @@ impl KernelToolExecutor {
         if binding.enabled_tools.iter().any(|kind| {
             matches!(
                 kind,
-                ToolKind::FileRead | ToolKind::FileList | ToolKind::FileSearch | ToolKind::CodeRetrieval
+                ToolKind::FileRead
+                    | ToolKind::FileList
+                    | ToolKind::FileSearch
+                    | ToolKind::CodeRetrieval
             )
         }) && binding.source_mode == SourceMode::FixedBranch
             && !binding
@@ -1094,7 +1096,7 @@ impl KernelToolExecutor {
                 "process spawn requires a registered root",
             ));
         }
-        if binding.source_mode != SourceMode::LiveRoot
+        if binding.source_mode == SourceMode::FixedBranch
             && binding.enabled_tools.iter().any(|kind| {
                 matches!(
                     kind,
@@ -1106,7 +1108,7 @@ impl KernelToolExecutor {
         {
             return Err(ExecutionError::new(
                 "language_source_unavailable",
-                "Language tools require live_root; fixed dependency closure is not available",
+                "Fixed language tools require a complete source-aware dependency adapter; physical sources use live dependencies",
             ));
         }
         let schemas = Self::selected_schemas(&binding.enabled_tools);
@@ -1164,13 +1166,14 @@ impl KernelToolExecutor {
             .into_iter()
             .zip(enabled)
             .map(|(schema, kind)| match kind {
-                ToolKind::FileRead | ToolKind::FileList | ToolKind::FileSearch | ToolKind::CodeRetrieval => {
-                    crate::run_tools::BuiltinSchema::child(
-                        schema,
-                        kind.requirements().source.into(),
-                        &[Worker, Retrieval],
-                    )
-                }
+                ToolKind::FileRead
+                | ToolKind::FileList
+                | ToolKind::FileSearch
+                | ToolKind::CodeRetrieval => crate::run_tools::BuiltinSchema::child(
+                    schema,
+                    kind.requirements().source.into(),
+                    &[Worker, Retrieval],
+                ),
                 ToolKind::FileWrite
                 | ToolKind::FileEdit
                 | ToolKind::ProcessSpawn
@@ -1184,7 +1187,11 @@ impl KernelToolExecutor {
                 ),
                 ToolKind::LanguageDefinition
                 | ToolKind::LanguageReferences
-                | ToolKind::LanguageDiagnostics => crate::run_tools::BuiltinSchema::main_only(schema),
+                | ToolKind::LanguageDiagnostics => crate::run_tools::BuiltinSchema::child(
+                    schema,
+                    kind.requirements().source.into(),
+                    &[Worker],
+                ),
             })
             .collect()
     }
@@ -1585,7 +1592,9 @@ impl KernelToolExecutor {
             && source.revision == u64::try_from(bound.revision).ok()
             && matches!(
                 operation,
-                ResourceOperation::FileRead(_) | ResourceOperation::FileQuery(_) | ResourceOperation::RetrievalQuery(_)
+                ResourceOperation::FileRead(_)
+                    | ResourceOperation::FileQuery(_)
+                    | ResourceOperation::RetrievalQuery(_)
             )
             && contract.read_only
             && contract.completion == CompletionKind::Result
@@ -2168,6 +2177,41 @@ fn serve_resource_immediate(
             storage.clear_cancellation();
             return result;
         }
+        if matches!(
+            request.operation,
+            ResourceOperation::RetrievalQuery(_) | ResourceOperation::LanguageQuery(_)
+        ) {
+            if matches!(request.operation, ResourceOperation::LanguageQuery(_)) {
+                // Keep the original file scope/lease admission without returning its
+                // authorize-only null before the source descriptor is assembled.
+                storage.set_cancellation(request.cancellation.shared_flag());
+                let admission = storage.file_read(&authorized, &grant, false);
+                storage.clear_cancellation();
+                admission?;
+            }
+            let source = request.binding.source_selection()?;
+            if source.mode == SourceMode::FixedBranch {
+                // Metadata validates the exact original revision, without scanning its tree.
+                let (source_grant, params) = storage.authorize(
+                    Some(&request.binding.grant_id),
+                    epoch,
+                    host_id,
+                    host_generation,
+                    "branch.read",
+                    &json!({"branchId":source.branch_id,
+                        "revision":source.revision,"includeEntries":false}),
+                )?;
+                validate_binding(&source_grant, &request.binding, &request.context)?;
+                storage.dispatch(
+                    "branch.read",
+                    &params,
+                    Some(&request.binding.grant_id),
+                    &source_grant,
+                )?;
+            }
+            let physical = storage.source_physical_root(&request.binding, &grant, host_id)?;
+            return Ok(json!({"source":source,"physicalRoot":physical}));
+        }
         if method == "file.read" {
             storage.set_cancellation(request.cancellation.shared_flag());
             let result = storage.file_read(&authorized, &grant, !request.authorize_only);
@@ -2207,19 +2251,7 @@ fn serve_resource_immediate(
                 request.authorize_only,
             );
         }
-        if matches!(request.operation, ResourceOperation::RetrievalQuery(_)) {
-            let source = request.binding.source_selection()?;
-            if source.mode == SourceMode::FixedBranch {
-                // Metadata validates the exact original revision, without scanning its tree.
-                let (source_grant, params) = storage.authorize(Some(&request.binding.grant_id), epoch,
-                    host_id, host_generation, "branch.read", &json!({"branchId":source.branch_id,
-                        "revision":source.revision,"includeEntries":false}))?;
-                validate_binding(&source_grant, &request.binding, &request.context)?;
-                storage.dispatch("branch.read", &params, Some(&request.binding.grant_id), &source_grant)?;
-            }
-            let physical = storage.source_physical_root(&request.binding, &grant, host_id)?;
-            return Ok(json!({"source":source,"physicalRoot":physical}));
-        }
+
         if request.authorize_only {
             return Ok(Value::Null);
         }

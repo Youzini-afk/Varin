@@ -102,7 +102,7 @@ records typed dependencies in its manifests. Original publication protection spa
 the short identity/epoch/revision-checked commit. GC follows those dependencies from the existing
 history, input, operation, event, policy and request roots. Catalog retains only original metadata;
 byte reads, hash/base64 work and provider serialization stay outside its control lock. Catalog
-format **58**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **14** reject older internal
+format **58**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **15** reject older internal
 formats directly. These are distinct from policy service **4** and private script worker protocol **2**.
 
 `runtime.output.media.read` uses the original caller Thread/branch plus an actual history, queued
@@ -474,7 +474,7 @@ inference Operation, original ToolOrigin and frozen Goal. Tagged callers disting
 tool from that real query context. Scope exit/cancellation forbids new requests but does not erase an
 already-dispatched child or its exact-owner receipt. Recovery cannot recreate the vanished scope.
 A cheap query may detach promptly while the child transport remains active; only the child's original
-receipt establishes local drain and updates its pending/unknown Goal usage. Catalog 58 and wire 12
+receipt establishes local drain and updates its pending/unknown Goal usage. Catalog 58 and wire 15
 retain explicit caller proof and native-generation facts, without an alias or older-format reader.
 
 Retrieval consumes the original LaunchSource in live, fixed-revision and materialized modes. The
@@ -1282,7 +1282,9 @@ extension and MCP tools retain the actual parent request's exact bindings; the c
 new capabilities from later routing or configuration. Ordinary AgentPolicy and its declared planning
 roles use the child Run's own policy generations and credentials; the policy cannot expand this frozen
 tool directory. Original Computer request/assignment bindings are ordinary selected extension calls;
-primary Goal, LSP and remaining remote child bindings retain their separate authority. Explicit parent Integration is a separate
+language tools retain the original source/supervisor/process authority and require a physical
+materialized child source; Worker defaults include them while the read-only Retrieval default does not.
+Primary Goal and remaining remote child bindings retain their separate authority. Explicit parent Integration is a separate
 authorized action.
 
 The frozen dispatch body retains original tool declarations, schema generation, MCP provenance and

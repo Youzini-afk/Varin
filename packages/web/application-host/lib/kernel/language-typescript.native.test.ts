@@ -11,6 +11,7 @@ import { createNativeProcessTestHarness } from '../process/native-process.test-h
 import { createLanguageSupervisor } from '../lsp/supervisor.js';
 import { createLanguageOwner } from './language-owner.js';
 import { createLiveSourceOwner } from './live-source.js';
+import { createSourceQueryOwner } from './source-query.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { testRange } from './language.test-helper.js';
 
@@ -25,7 +26,8 @@ it('executes all three live tools end to end through the bundled TypeScript serv
   const runtimeClient = createNativeProcessTestHarness(documents.authority);
   const { service, client } = await runtimeClient.get();
   const spawn = vi.fn(service.spawn);
-  const supervisor = createLanguageSupervisor({ documents: documents.authority, spawn });
+  const spawnAdmitted = vi.fn(service.spawnAdmitted);
+  const supervisor = createLanguageSupervisor({ documents: documents.authority, spawn, spawnAdmitted });
   const diagnosticEvents: Array<{ resourceId: string; items: Array<Record<string, unknown>>; contentRevision?: string }> = [];
   supervisor.subscribe(documents.identity.workspaceId, value => {
     const event = value as { kind?: string; resourceId: string; items: Array<Record<string, unknown>>; contentRevision?: string };
@@ -37,11 +39,15 @@ it('executes all three live tools end to end through the bundled TypeScript serv
   const liveSources = createLiveSourceOwner({ documents: documents.authority, kernel: client });
   const liveRoot = await liveSources.prepare(documents.identity.workspaceId, documents.identity.workspaceId, 'real-ts-thread');
   const validateSource = vi.fn(liveSources.validate);
-  const owner = createLanguageOwner({ documents: documents.authority, supervisor, validateSource });
+  const owner = createLanguageOwner({ documents: documents.authority, supervisor,
+    sources: createSourceQueryOwner({ documents: documents.authority, kernel: client, validateLiveSource: validateSource }) });
+  const ownerGrant = await client.issueGrant({ grantId: 'real-ts-owner-grant', threadId: 'real-ts-thread', runId: 'real-ts-run',
+    owningWorkspace: documents.identity.workspaceId, executionWorkspace: documents.identity.workspaceId,
+    capabilities: ['storage.read', 'storage.write'], pathScopes: [''] });
   type Query = Parameters<typeof owner>[0];
   const query = (overrides: Partial<Query>): Query => ({ runId: 'real-ts-run', threadId: 'real-ts-thread',
-    workspaceId: documents.identity.workspaceId, executionWorkspaceId: documents.identity.workspaceId,
-    liveRoot,
+    grantId: ownerGrant.grantId, source: { mode: 'live_root', workspace_id: documents.identity.workspaceId,
+      execution_workspace_id: documents.identity.workspaceId, branch_id: null, revision: null, live_root: liveRoot }, physicalRoot: liveRoot,
     method: 'definition', path: 'main.ts', line: 1, character: 0, ...overrides });
   const invoke = (overrides: Partial<Query>) => owner(query(overrides), new AbortController().signal);
   const targetFirstLine = 'export const emoji = "😀"; export function greet(name: string): string {';
@@ -54,6 +60,7 @@ it('executes all three live tools end to end through the bundled TypeScript serv
     await fs.writeFile(path.join(documents.workspaceRoot, 'util.ts'), `${targetFirstLine}\r\n  return "Hello " + name;\r\n}\r\n`);
     await fs.writeFile(path.join(documents.workspaceRoot, 'main.ts'), `import { greet } from './util';\r\n${sourceSecondLine}\r\n`);
     expect(spawn).not.toHaveBeenCalled();
+    expect(spawnAdmitted).not.toHaveBeenCalled();
     const sourceSnapshot = await documents.authority.readSnapshot(documents.resource('main.ts'));
     if (sourceSnapshot.status !== 'ready') throw new Error('Expected readable TypeScript source fixture');
     // This bundled server publishes real diagnostics without versions. Its observations may
@@ -71,7 +78,7 @@ it('executes all three live tools end to end through the bundled TypeScript serv
       source: { revision: sourceSnapshot.revision } });
     const definition = await invoke({ character: sourceSecondLine.indexOf('greet') });
     expect(definition).toMatchObject({ status: 'ready',
-      source: { resourceId: 'main.ts', revision: sourceSnapshot.revision, view: 'agent', dependencies: 'live',
+      source: { resourceId: 'main.ts', revision: sourceSnapshot.revision, view: expect.stringMatching(/^agent:source:/), dependencies: 'live',
         providerId: 'varin.typescript-language' },
       omissions: { outOfScope: 0, unmappable: 0, stale: 0, unavailable: 0 },
       items: [expect.objectContaining({ resource: documents.resource('util.ts'),
@@ -170,7 +177,7 @@ it('executes all three live tools end to end through the bundled TypeScript serv
     const invalidated = new Promise<void>(resolve => {
       const subscription = supervisor.subscribe(documents.identity.workspaceId, value => {
         const event = value as { kind?: string; view?: string };
-        if (event.kind === 'diagnostics-invalidated' && event.view === 'agent') { subscription.close(); resolve(); }
+        if (event.kind === 'diagnostics-invalidated' && event.view?.startsWith('agent:source:')) { subscription.close(); resolve(); }
       });
     });
     await fs.writeFile(path.join(documents.workspaceRoot, 'main.ts'), `import { greet } from './util';\r\n${changedSecondLine}\r\n`);
@@ -187,7 +194,8 @@ it('executes all three live tools end to end through the bundled TypeScript serv
       expect(await invoke({ method: 'diagnostics' })).toMatchObject({ status: 'pending', diagnosticVerification: 'unversioned',
         items: [], source: { revision: updated.revision } });
     }, { timeout: 15_000, interval: 100 });
-    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(spawnAdmitted).toHaveBeenCalledTimes(1);
     await supervisor.dispose();
     expect((await service.list(documents.workspaceRoot)).every(process => !process.writerActive)).toBe(true);
   } finally { await supervisor.dispose(); await runtimeClient.dispose(); await documents.cleanup(); }

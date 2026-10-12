@@ -500,7 +500,7 @@ impl ChildDispatchSelection {
         }
         if mode == ChildWorkMode::ReadOnly && tools.iter().any(|name| self.physical_tool(name)) {
             return Err(RuntimeError::Invalid(
-                "selected child effects require a private physical source".into(),
+                "selected child tools require a private physical source; select isolated_write or source-compatible tools".into(),
             ));
         }
         tools.sort();

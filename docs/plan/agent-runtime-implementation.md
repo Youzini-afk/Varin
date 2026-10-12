@@ -8,6 +8,13 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-12 增量：物化来源的原语言服务
+
+- 原三语言工具接实际 materialized working copy，共用 SourceQueryOwner、原 Documents 注册/信任、Run grant、supervisor 与 Rust 进程。原配置身份不充当 cwd，dependency 明确 live；Catalog **58**、私有 wire **15**直接拒旧。
+- source 工具目录来自 Rust 原声明，删 Host 重复名单；Worker 默认包含 Physical 语言工具，只读 Retrieval 默认保持兼容。显式用户数组由原准入给可操作诊断，不静默重写。
+- query 取消、Run 引用、撤权 ACK 与实际停止分开；child capture 等同 owner 排空及原 writer 屏障。真实整链和独审闭合 file.read 早返回、失败 watcher 恢复、无关 view 互等、较早终态引用的退役关联、跨语言取消误关 watch。
+- 当前真实 TypeScript/源码配置/15份原历史/重开、独立反例及共享消费者证据见[本片记录](../reviews/runtime-source-language-2026-10-12.md)。冷 alias、diagnostics 测试 gate、主 Run 实际执行与 child 目录准入分别留证；固定闭包、实际 child LSP 执行、远端来源和完整平台/产品验收仍需推进。
+
 ## 2026-10-11 整合验收
 
 本次按两份设计复核最新实现，并运行 Windows Host → IPC → Rust 的实际业务链路。

@@ -6,7 +6,7 @@ Rust kernel. Renderers never spawn language servers.
 
 ## Entrypoints
 
-- `supervisor.ts`: `createLanguageSupervisor({ documents, spawn, pathModule, env, isTrusted, hostViewIdleMs, hostViewDocumentLimit, now })`
+- `supervisor.ts`: `createLanguageSupervisor({ documents, spawn, spawnAdmitted, pathModule, env, isTrusted, hostViewIdleMs, hostViewDocumentLimit, now })`
 - `language-view.ts`: `createLanguageViewBinder({ documents, supervisor })` — binds one document in the
   Host-owned view to a named text identity (fixed editor draft or disk revision)
 - `jsonrpc.ts`: Content-Length framed JSON-RPC client/server
@@ -55,6 +55,11 @@ editor's live buffer and an agent turn's fixed text (D-087):
 - `agent:<content hash>` — a fixed draft view. Its captured buffers are synchronized together; identical
   draft contents can share the same view across sessions. Fixed buffers and active query documents are
   not LRU-evicted. These views expire independently of a retained project disk view.
+- `agent:source:<identity>` — an admitted native physical source, retained by actual Run/grant references.
+  The original project namespace selects configuration; the admitted live root or managed working copy
+  supplies cwd, root URI, workspace folders, file mapping and its watcher. Compatible callers share the
+  same supervisor session and startup. Query cancellation does not withdraw its Run's reference, and
+  the legacy idle reaper does not retire this view. Last-reference release waits for actual process exit.
 
 Language-capable child runs materialize their existing WorkingState execution directory before the
 first prompt. Navigation, diagnostics and LSP structure fallback resolve source aliases to that
@@ -77,7 +82,7 @@ lazy projects. The surface view is initialized without taking ownership of edito
 project-index manager still owns persisted semantic/structure index recovery and incremental updates.
 
 Cancelling one waiter leaves other callers intact; the final cancelled startup waiter aborts its owned
-preparation. Initialization has a configurable 45-second default handshake deadline so a silent server
+preparation only when no native source owner retains it. Initialization has a configurable 45-second default handshake deadline so a silent server
 cannot leave one shared startup promise pending forever. Failed startup closes the owned process before
 a later call can replace it. LSP Harness transport follows this lifecycle, rather than applying the generic
 deadline over installation and startup. Text acquisition and actual feature requests retain separate
@@ -106,8 +111,10 @@ Provider disable/reload clears its diagnostics and generation. Commands are exec
 only for the provider/document generation that produced them, and only when the server declared that
 command in `executeCommandProvider`.
 
-Project-provided (`source: 'workspace'`) commands run only when `isTrusted(root)` is true.
-Production uses the Host workspace-root guard for this decision. There is no HTTP route that registers providers.
+Project-provided (`source: 'workspace'`) commands require the original project's trust. Ordinary
+workspace views use the Host workspace-root guard; native source views re-admit the original Documents
+registration and trust through their source owner, including immediately before actual managed spawn.
+The managed-copy path does not itself confer trust. There is no HTTP route that registers providers.
 
 ## Routes
 
@@ -158,10 +165,12 @@ remain degraded/failed with the owner retained. Synchronous fake-child unit seam
 real LSP initialization/completion/disposal is covered by the
 [native consumer tests](../kernel/process-consumers.native.test.ts). See [process ownership](../process/DOCUMENTATION.md).
 
-## Native live queries
+## Native physical-source queries
 
 Native Threads call this same supervisor through the private native language adapter. They bind the
-Host disk view only, using the selected live environment's Documents identity. Native navigation opts
+actual live or materialized source through the shared `SourceQueryOwner`, using the original frozen
+selection, Run grant and Documents registration. `KernelProcessService.spawnAdmitted` consumes a trusted
+source-owner callback; it is not a public path/cwd permission. Native navigation opts
 into strict URI/range projection and omission reasons; ordinary Pi/editor location shapes are unchanged.
 The supervisor retains diagnostic publications for native readers. Snapshot reads do not start
 a service or wait for a future publication; missing/unversioned evidence is pending, while changed view
@@ -170,8 +179,18 @@ verification and no claimed range revision; empty unversioned publications never
 
 Returned locations are still server observations. The native resource owner separately admits and reads
 the target before delivery; a cross-file observed revision does not certify which bytes produced an LSP
-range. Imports, native project configuration and compiler libraries remain live dependencies. No fixed
-or materialized native language mode is offered without a pinned dependency closure.
+range. Imports, native project configuration and compiler libraries remain live dependencies, explicitly
+reported as `dependencies: live`. A materialized source uses its real working copy rather than the old
+project directory or its immutable base. Fixed branches remain unsupported until a complete project
+view or source-aware dependency adapter exists; didOpen alone is not a fixed dependency closure.
+
+Terminal Run notifications and explicit grant retirement withdraw source references without treating
+their ACK as a process-stop receipt. Writable child result capture separately awaits the same
+supervisor's drain and still passes Rust's original directory-writer barrier. Another retained Run can
+keep a shared process alive. Epoch loss invalidates old queries but does not manufacture an exit or
+replace a still-unconfirmed process. Native language tools require a physical source: Worker defaults
+include them; the read-only Retrieval default does not. Explicit read-only selection reports the need
+for `isolated_write` or compatible tools rather than silently dropping user selections.
 
 Focused native acceptance includes the real already-bundled TypeScript provider through all three
 native tools: cross-file definition/reference and actual unversioned diagnostics retained as pending.
@@ -180,3 +199,8 @@ stale source behavior also have controlled-provider coverage; existing Pi naviga
 adapter regressions passed. Exact suite counts and the frozen native build are recorded in the
 [implementation plan](../../../../../docs/plan/agent-runtime-implementation.md#已核验增量live-root-原生语言工具).
 This does not certify fixed dependency closure, all language providers or all deployment platforms.
+
+The [materialized-source review](../../../../../docs/reviews/runtime-source-language-2026-10-12.md)
+records actual working-copy imports/configuration, original Rust history, watcher recovery and precise
+reference retirement. It distinguishes cold TypeScript aliases, test-gated diagnostic publications,
+main Run execution and child-directory admission; none is promoted into an untested guarantee.

@@ -1,11 +1,13 @@
 import path from 'node:path';
+import fs from 'node:fs';
+import { createWorkspaceWatcher, type WorkspaceWatcher } from '../documents/watch.js';
 import { languageIdForPath } from '@varin/protocol';
 import { waitWithSignal } from '../cancellation.js';
 import type {
   SpawnOptionsWithStdioTuple,
   StdioPipe,
 } from 'node:child_process';
-import { launchOwnedProcess, terminateOwnedProcess, type ManagedProcessOwner, type ManagedPipedProcessHandle } from "../process/types.js";
+import { launchOwnedProcess, terminateOwnedProcess, type ManagedProcessOwner, type ManagedPipedProcessHandle, type ManagedProcessAdmission } from "../process/types.js";
 import { pathToFileURL } from 'node:url';
 import { createJsonRpcClient } from './jsonrpc.js';
 import {
@@ -188,6 +190,27 @@ interface LanguageProviderDescriptor extends Record<string, unknown> {
   workspaceId?: unknown;
 }
 
+/** One reference to an already admitted source. Configuration still routes by workspaceId.
+ * The supervisor owns sharing, watcher, startup, generations and physical process lifetime. */
+export interface LanguageSourceView {
+  view: LanguageViewId;
+  workspaceId: string;
+  root: string;
+  runId: string;
+  grantId: string;
+  admitProcess: ManagedProcessAdmission;
+  read(resourceId: string, signal: AbortSignal): Promise<{ status: string; content?: string; revision?: string }>;
+}
+interface RetainedSourceView {
+  workspaceId: string;
+  view: LanguageViewId;
+  root: string;
+  owners: Map<string, LanguageSourceView>;
+  watch: WorkspaceWatcher | null;
+  closing?: Promise<void>;
+  retiringOwners?: Array<Pick<LanguageSourceView, 'runId' | 'grantId'>>;
+}
+
 interface LanguageSupervisorOptions {
   activateProviders?: (request: { languageId: string; workspaceId: string }) => Promise<void>;
   prepareProvider?: (providerId: string, root: string, signal: AbortSignal) => Promise<{ command: string; args: readonly string[]; initializationOptions?: Readonly<Record<string, unknown>> } | null>;
@@ -200,7 +223,10 @@ interface LanguageSupervisorOptions {
     args: readonly string[],
     options: SpawnOptionsWithStdioTuple<StdioPipe, StdioPipe, StdioPipe>,
   ) => ManagedPipedProcessHandle | Promise<ManagedPipedProcessHandle>;
-  /** Host-owned views release their server after this much inactivity. */
+  /** Internal source-owner route; never selected through LanguageRequest JSON. */
+  spawnAdmitted?: (admission: ManagedProcessAdmission, command: string, args: readonly string[],
+    options: SpawnOptionsWithStdioTuple<StdioPipe, StdioPipe, StdioPipe>) => ManagedPipedProcessHandle | Promise<ManagedPipedProcessHandle>;
+  /** Legacy Pi/editor views release their server after this much inactivity. */
   hostViewIdleMs?: number;
   /** Documents a Host-owned view keeps open before closing the least recently used. */
   hostViewDocumentLimit?: number;
@@ -340,6 +366,7 @@ export const createLanguageSupervisor = ({
   prepareProvider,
   documents,
   spawn,
+  spawnAdmitted,
   pathModule = path,
   env = process.env,
   isTrusted = async () => false,
@@ -389,6 +416,24 @@ export const createLanguageSupervisor = ({
 
   const inflight = new Map<string, { promise: Promise<LanguageSessionRecord | null>; controller: AbortController; users: number; workspaceId: string; view: LanguageViewId }>();
   const retainedWorkspaces = new Map<string, number>();
+  const sourceViews = new Map<string, RetainedSourceView>();
+  const sourceViewKey = (workspaceId: string, view: LanguageViewId) => `${workspaceId}\0${view}`;
+  const sourceView = (workspaceId: string, view: LanguageViewId) => sourceViews.get(sourceViewKey(workspaceId, view));
+  const withSourceOwner = async <T>(entry: RetainedSourceView, signal: AbortSignal,
+    consume: (owner: LanguageSourceView) => Promise<T>): Promise<T> => {
+    signal.throwIfAborted();
+    if (entry.closing || sourceView(entry.workspaceId, entry.view) !== entry) throw new Error('Language source view is retiring');
+    let failure: unknown = new Error('Language source authority is no longer retained');
+    for (const [key, owner] of entry.owners) {
+      try {
+        const result = await consume(owner);
+        signal.throwIfAborted();
+        if (entry.owners.get(key) !== owner || entry.closing) continue;
+        return result;
+      } catch (error) { signal.throwIfAborted(); failure = error; }
+    }
+    throw failure;
+  };
   const fileWatches = new Map<string, ReturnType<DocumentAuthority['watch']>>();
   let disposed = false;
 
@@ -600,7 +645,8 @@ export const createLanguageSupervisor = ({
       return await waitWithSignal(pending.promise, signal);
     } finally {
       pending.users -= 1;
-      if (pending.users === 0 && signal?.aborted && inflight.get(key) === pending) pending.controller.abort();
+      if (pending.users === 0 && signal?.aborted && inflight.get(key) === pending
+        && !sourceView(workspaceId, view)?.owners.size) pending.controller.abort();
     }
   };
 
@@ -633,9 +679,23 @@ export const createLanguageSupervisor = ({
 
     let workspace;
     try {
-      workspace = await documents.getWorkspace(workspaceId, controller.signal);
+      const source = sourceView(workspaceId, view);
+      if (source) {
+        await withSourceOwner(source, controller.signal, owner => owner.admitProcess(controller.signal));
+        workspace = { root: source.root };
+      } else {
+        if (view.startsWith('agent:source:')) throw new Error('Language source view is no longer retained');
+        workspace = await documents.getWorkspace(workspaceId, controller.signal);
+      }
     } catch (error) {
+      // Cancelling one provider's startup does not withdraw the shared source watch.
       controller.signal.throwIfAborted();
+      // fs.watch may return a handle for a temporarily unavailable recursive root.
+      // Failed source admission cannot certify that handle; retry from this same
+      // view on the next admitted query rather than retaining a silent watcher.
+      const source = sourceView(workspaceId, view);
+      source?.watch?.close();
+      if (source) source.watch = null;
       const failed = createRecord({
         workspaceId,
         languageId,
@@ -653,7 +713,10 @@ export const createLanguageSupervisor = ({
       return failed;
     }
 
-    if (provider.source === 'workspace' && !await isTrusted(workspace.root)) {
+    const trusted = provider.source !== 'workspace' || Boolean(sourceView(workspaceId, view)) || await isTrusted(workspace.root);
+    controller.signal.throwIfAborted();
+    if (!providers.includes(provider)) throw new Error('Language provider changed during source admission');
+    if (!trusted) {
       const failed = createRecord({
         workspaceId,
         languageId,
@@ -694,7 +757,13 @@ export const createLanguageSupervisor = ({
         const prepared = await prepareProvider?.(provider.providerId, workspace.root, signal);
         if (prepared?.initializationOptions) initializationOptions = { ...prepared.initializationOptions, ...initializationOptions };
         signal.throwIfAborted();
-        return spawn(prepared?.command ?? provider.command, prepared?.args ?? provider.args, {
+        const source = sourceView(workspaceId, view);
+        if (view.startsWith('agent:source:') && (!source || !spawnAdmitted)) throw new Error('The admitted source process owner is unavailable');
+        const launch = source && spawnAdmitted
+          ? (command: string, args: readonly string[], options: SpawnOptionsWithStdioTuple<StdioPipe, StdioPipe, StdioPipe>) =>
+            spawnAdmitted(active => withSourceOwner(source, active, owner => owner.admitProcess(active)), command, args, options)
+          : spawn;
+        return launch(prepared?.command ?? provider.command, prepared?.args ?? provider.args, {
         cwd: workspace.root,
         env: {
           ...env,
@@ -792,7 +861,7 @@ export const createLanguageSupervisor = ({
     });
 
     try {
-      if (!fileWatches.has(workspaceId)) {
+      if (!sourceView(workspaceId, view) && !fileWatches.has(workspaceId)) {
         fileWatches.set(workspaceId, documents.watch(workspaceId, event => {
           if (event.kind === 'invalidated' && event.resource) {
             const resources = new Set<string>();
@@ -964,7 +1033,7 @@ export const createLanguageSupervisor = ({
     const deadline = now() - hostViewIdleMs;
     for (const [key, record] of [...sessions]) {
       const idleEligible = isHostOwnedView(record.view) || !desiredDocuments.get(key)?.size;
-      if (!idleEligible || record.usedAt > deadline || record.activeRequests > 0
+      if (sourceView(record.workspaceId, record.view) || !idleEligible || record.usedAt > deadline || record.activeRequests > 0
         || ((record.view === AGENT_LANGUAGE_VIEW || record.view === SURFACE_LANGUAGE_VIEW) && retainedWorkspaces.has(record.workspaceId))
         || inflight.has(key)) continue;
       await disposeRecord(record, 'Host language view released after idle');
@@ -1383,9 +1452,9 @@ export const createLanguageSupervisor = ({
     },
   });
 
-  const observeDocumentMutation = (event: Pick<DocumentMutationObservation, 'workspaceId' | 'resourceId' | 'kind'>): void => {
+  const observeDocumentMutation = (event: Pick<DocumentMutationObservation, 'workspaceId' | 'resourceId' | 'kind'>, targetView?: LanguageViewId): void => {
     for (const [key, record] of sessions) {
-      if (record.workspaceId !== event.workspaceId || !record.rpc || (record.status !== 'ready' && record.status !== 'degraded')) continue;
+      if (record.workspaceId !== event.workspaceId || (targetView ? record.view !== targetView : Boolean(sourceView(record.workspaceId, record.view))) || !record.rpc || (record.status !== 'ready' && record.status !== 'degraded')) continue;
       const resourceId = event.resourceId.replaceAll('\\', '/');
       const absolute = pathModule.resolve(record.root, resourceId);
       const relative = pathModule.relative(record.root, absolute);
@@ -1417,7 +1486,11 @@ export const createLanguageSupervisor = ({
       if (isHostOwnedView(record.view) && open) {
         // Watch delivery can follow a bind that already read the new disk bytes.
         // Invalidate only when the current binding differs from disk.
-        void documents.readSnapshot({ workspaceId: record.workspaceId, resourceId }).then(snapshot => {
+        const source = sourceView(record.workspaceId, record.view);
+        const read = source
+          ? withSourceOwner(source, new AbortController().signal, owner => owner.read(resourceId, new AbortController().signal))
+          : documents.readSnapshot({ workspaceId: record.workspaceId, resourceId });
+        void read.then(snapshot => {
           const current = record.documents.get(resourceId);
           if (snapshot.status === 'ready' && current?.contentRevision === snapshot.revision) return;
           invalidate();
@@ -1426,7 +1499,97 @@ export const createLanguageSupervisor = ({
     }
   };
 
+  const releaseSourceViews = async (match: { runId?: string; grantId?: string }): Promise<void> => {
+    const retirements: Promise<void>[] = [];
+    const matches = (owner: Pick<LanguageSourceView, 'runId' | 'grantId'>) =>
+      (match.runId === undefined || owner.runId === match.runId)
+      && (match.grantId === undefined || owner.grantId === match.grantId);
+    for (const [key, source] of sourceViews) {
+      const withdrawn: Array<Pick<LanguageSourceView, 'runId' | 'grantId'>> = [];
+      for (const [ownerKey, owner] of source.owners) {
+        if (matches(owner)) {
+          withdrawn.push({ runId: owner.runId, grantId: owner.grantId });
+          source.owners.delete(ownerKey);
+        }
+      }
+      // A terminal notification may withdraw one Run before another Run removes
+      // the final shared reference. Keep every withdrawn original identity on this
+      // same record until actual exit, so later source settlement joins its drain.
+      if (withdrawn.length) {
+        source.retiringOwners ??= [];
+        for (const owner of withdrawn) if (!source.retiringOwners.some(previous =>
+          previous.runId === owner.runId && previous.grantId === owner.grantId)) source.retiringOwners.push(owner);
+      }
+      if (source.owners.size) continue;
+      // A slow unrelated view is not part of this release.
+      if (!withdrawn.length && !source.retiringOwners?.some(matches)
+        && (match.runId !== undefined || match.grantId !== undefined)) continue;
+      if (!source.closing) {
+        const starts = [...inflight.values()].filter(start => start.workspaceId === source.workspaceId && start.view === source.view);
+        for (const start of starts) start.controller.abort();
+        source.closing = (async () => {
+          await Promise.allSettled(starts.map(start => start.promise));
+          for (const [sessionId, record] of sessions) {
+            if (record.workspaceId !== source.workspaceId || record.view !== source.view) continue;
+            await disposeRecord(record, 'Source language view released');
+            if (sessions.get(sessionId) === record) sessions.delete(sessionId);
+            desiredDocuments.delete(sessionId);
+          }
+          source.watch?.close();
+          source.watch = null;
+          if (sourceViews.get(key) === source) sourceViews.delete(key);
+        })();
+        void source.closing.catch(() => { delete source.closing; }); // Retain source/process; an explicit retry still waits on the original handle.
+      }
+      retirements.push(source.closing);
+    }
+    await Promise.all(retirements);
+  };
+  const retainSourceView = async (binding: LanguageSourceView, signal: AbortSignal): Promise<void> => {
+    signal.throwIfAborted();
+    if (disposed || !binding.view.startsWith('agent:source:')) throw new Error('Invalid or disposed language source view');
+    const key = sourceViewKey(binding.workspaceId, binding.view);
+    let source = sourceViews.get(key);
+    if (source?.closing) { await waitWithSignal(source.closing, signal); source = sourceViews.get(key); }
+    signal.throwIfAborted();
+    if (source && source.root !== binding.root) throw new Error('Language view root changed');
+    if (!source) {
+      source = { workspaceId: binding.workspaceId, view: binding.view, root: binding.root, owners: new Map(), watch: null };
+      sourceViews.set(key, source);
+    }
+    // Record the original reference before watch preparation, which may throw
+    // synchronously. Targeted Run/grant retirement must still own that attempt.
+    const ownerKey = `${binding.runId}\0${binding.grantId}`;
+    if (!source.owners.has(ownerKey)) source.owners.set(ownerKey, binding);
+    if (!source.watch) {
+      const held = source;
+      source.watch = createWorkspaceWatcher({ workspaceId: binding.workspaceId, rootPath: binding.root,
+        fsModule: fs, fsPromises: fs.promises, pathModule,
+        onEvent(event) {
+          if (sourceViews.get(key) !== held || held.closing) return;
+          if (event.kind === 'invalidated' && event.resource) {
+            const resources = new Set<string>();
+            for (const record of sessions.values()) if (record.workspaceId === binding.workspaceId && record.view === binding.view) {
+              for (const resourceId of record.documents.keys()) if (resourceId === event.resource.resourceId
+                || resourceId.startsWith(`${event.resource.resourceId}/`)) resources.add(resourceId);
+            }
+            for (const resourceId of resources) observeDocumentMutation({ workspaceId: binding.workspaceId, resourceId, kind: 'modified' }, binding.view);
+          } else if (event.resource) observeDocumentMutation({ ...event.resource,
+            kind: event.kind === 'deleted' ? 'deleted' : event.kind === 'created' ? 'created' : 'modified' }, binding.view);
+          else if (event.kind === 'reset') {
+            for (const record of sessions.values()) {
+              if (record.workspaceId !== binding.workspaceId || record.view !== binding.view) continue;
+              record.documentEpoch += 1;
+              record.diagnosticSnapshots.clear();
+              for (const resourceId of record.documents.keys()) observeDocumentMutation({ workspaceId: binding.workspaceId, resourceId, kind: 'modified' }, binding.view);
+            }
+          }
+        } });
+    } else if (!source.watch.connected) source.watch.reconnect();
+  };
+
   return {
+    retainSourceView, releaseSourceViews,
     registerProvider(descriptor: LanguageProviderDescriptor, owner?: LanguageOwner) {
       const languageIds = Array.isArray(descriptor?.languageIds)
         ? descriptor.languageIds.filter((id) => typeof id === 'string' && id)
@@ -1462,10 +1625,12 @@ export const createLanguageSupervisor = ({
       if (existingIndex >= 0) providers.splice(existingIndex, 1, next);
       else providers.push(next);
       if (existing) {
+        // Keep the shared startup entry until its actual launch/stop settles. A replacement
+        // cannot race a provider that is still awaiting source admission or initialization.
+        for (const [key, pending] of inflight) if (key.split('\0')[1] === existing.providerId) pending.controller.abort();
         for (const [key, record] of sessions) {
           if (record.providerId !== existing.providerId) continue;
           retireRecord(key, record, 'Language provider updated');
-          inflight.delete(key);
         }
       }
       return next;
@@ -1478,6 +1643,9 @@ export const createLanguageSupervisor = ({
       if (index < 0) return { status: 'not-owned', providerId };
       const [removed] = providers.splice(index, 1);
       if (!removed) return { status: 'not-owned', providerId };
+      const starts = [...inflight].filter(([key]) => key.split('\0')[1] === removed.providerId).map(([, start]) => start);
+      for (const start of starts) start.controller.abort();
+      await Promise.allSettled(starts.map(start => start.promise));
       for (const [key, record] of sessions) {
         if (record.providerId !== removed.providerId) continue;
         await disposeRecord(record, 'Language provider disabled');
@@ -1833,6 +2001,8 @@ export const createLanguageSupervisor = ({
       await Promise.allSettled([...inflight.values()].map(start => start.promise));
       await Promise.all([...sessions.values()].map((record) => disposeRecord(record, 'Language supervisor disposed')));
       sessions.clear();
+      for (const source of sourceViews.values()) source.watch?.close();
+      sourceViews.clear();
       desiredDocuments.clear();
       inflight.clear();
       workspaceListeners.clear();

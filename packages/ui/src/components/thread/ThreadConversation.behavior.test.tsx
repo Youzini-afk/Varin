@@ -890,13 +890,13 @@ it('requires an explicit live workspace choice and discloses direct effects befo
   expect(f.submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ source: prepared.source, text: 'work on these actual files' }));
 });
 
-it.each(['fixed_branch', 'materialized'] as const)('reprepares %s from a live language-capable workspace without retaining live-only tools', async mode => {
+it.each(['fixed_branch', 'materialized'] as const)('reprepares %s and submits the new source tool directory unchanged', async mode => {
   const f = fixture();
   const languageTools = ['language_definition', 'language_references', 'language_diagnostics'] as const;
   const live = { path: '/workspace/project', source: { workspaceId: 'selected-workspace', executionWorkspaceId: 'selected-workspace', mode: 'live_root' as const,
     liveRoot: { hostId: 'host', canonicalRoot: '/workspace/project', rootId: 'live-root' }, tools: ['file_read' as const, ...languageTools] } };
   const fixed = { path: '/workspace/project', source: { workspaceId: 'selected-workspace', executionWorkspaceId: 'selected-workspace', branchId: 'captured-source', revision: 0,
-    mode, tools: mode === 'fixed_branch' ? ['file_read' as const] : ['file_read' as const, 'file_write' as const] } };
+    mode, tools: mode === 'fixed_branch' ? ['file_read' as const] : [...live.source.tools, 'file_write' as const] } };
   f.api.prepareSource = vi.fn().mockResolvedValueOnce(live).mockResolvedValueOnce(fixed);
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} initialWorkspacePath="/workspace/project" />); });
   await edit('[aria-label="Workspace access"]', 'live_root', 'change');
@@ -910,7 +910,7 @@ it.each(['fixed_branch', 'materialized'] as const)('reprepares %s from a live la
   await edit('[aria-label="Message thread"]', 'use the newly prepared source');
   await submitForm(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.closest('form')!);
   expect(f.submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ source: fixed.source }));
-  for (const tool of languageTools) expect(f.submit.mock.calls[0]![0].source?.tools).not.toContain(tool);
+  expect(f.submit.mock.calls[0]![0].source?.tools).toEqual(fixed.source.tools);
 });
 
 function pauseView(view: ThreadSnapshot, waitId = 'wait:policy-one') {

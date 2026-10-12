@@ -72,15 +72,15 @@ export function createRetrievalOwner({ sources, kernel, pipelines, preparePipeli
       signal.throwIfAborted();
       binding.assertAvailable?.();
       await waitWithSignal(sources.validate(query, signal), signal);
-      const grant = kernel.retrievalGrant(query);
+      const grant = kernel.sourceGrant(query);
       const validateBinding = async (): Promise<void> => {
         signal.throwIfAborted();
         binding.assertAvailable?.();
-        kernel.retrievalGrant(query);
+        kernel.sourceGrant(query);
         if (binding.validateAvailable) await waitWithSignal(binding.validateAvailable(signal), signal);
         signal.throwIfAborted();
         binding.assertAvailable?.();
-        kernel.retrievalGrant(query);
+        kernel.sourceGrant(query);
       };
       await validateBinding();
       const grantedRoots = grant.pathScopes.map(relative);
@@ -299,7 +299,7 @@ export function createRetrievalOwner({ sources, kernel, pipelines, preparePipeli
           }
         }
         binding.assertAvailable?.();
-        kernel.retrievalGrant(query);
+        kernel.sourceGrant(query);
         if (binding.model?.kind === 'snippets' && result.snippets.length) {
           // Recheck the exact permit immediately before sending any source to a selected model.
           for (const path of new Set(result.snippets.map(item => item.path))) {

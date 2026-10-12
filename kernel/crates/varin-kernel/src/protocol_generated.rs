@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 14;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 15;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -28,6 +28,7 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.operation.status",
     "runtime.child.cancel",
     "runtime.child.capabilities",
+    "runtime.source.tools",
     "runtime.tree.cancel",
     "runtime.goal.control",
     "runtime.followup.control",
@@ -87,6 +88,7 @@ pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "runtime.operation.status",
     "runtime.child.cancel",
     "runtime.child.capabilities",
+    "runtime.source.tools",
     "runtime.tree.cancel",
     "runtime.goal.control",
     "runtime.followup.control",
@@ -2252,6 +2254,12 @@ pub(crate) struct TreeCancelParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceToolsParams {
+    pub(crate) mode: varin_runtime::SourceMode,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ChildWaitParams {
     pub(crate) wait_id: String,
 }
@@ -4004,6 +4012,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.child.capabilities" => serde_json::from_value::<KernelEmptyParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.source.tools" => serde_json::from_value::<SourceToolsParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.child.release" => serde_json::from_value::<ChildExecutionParams>(params.clone())

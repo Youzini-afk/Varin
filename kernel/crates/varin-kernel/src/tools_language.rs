@@ -37,7 +37,7 @@ impl LanguageQueryArgs {
 }
 pub(super) fn schema(kind: ToolKind) -> Value {
     let navigation = kind != ToolKind::LanguageDiagnostics;
-    let mut properties = json!({"path":{"type":"string","description":"Normalized path relative to the selected live workspace."}});
+    let mut properties = json!({"path":{"type":"string","description":"Normalized path relative to the selected source workspace."}});
     if navigation {
         for key in ["line", "character"] {
             properties[key] = json!({"type":"integer","minimum":0,"maximum":4294967295u64,"description":"Zero-based UTF-16 position."});
@@ -150,27 +150,51 @@ impl KernelToolExecutor {
         let mut identity: Option<(String, u64)> = None;
         loop {
             let offset = bytes.len() as u64;
-            let value = self.resources.call(&self.binding, context,
-                ResourceOperation::FileRead(FileReadArgs { path: path.into(), offset,
-                    length: Some(crate::protocol::MAX_BLOB_RESPONSE_BYTES as u64) }),
-                false, cancel).map_err(|failure| ExecutionError::new(error_code(&failure.error), failure.error.to_string()))?;
+            let value = self
+                .resources
+                .call(
+                    &self.binding,
+                    context,
+                    ResourceOperation::FileRead(FileReadArgs {
+                        path: path.into(),
+                        offset,
+                        length: Some(crate::protocol::MAX_BLOB_RESPONSE_BYTES as u64),
+                    }),
+                    false,
+                    cancel,
+                )
+                .map_err(|failure| {
+                    ExecutionError::new(error_code(&failure.error), failure.error.to_string())
+                })?;
             let part = observation_bytes(&value)?;
             let content = &value["content"];
-            let invalid = || ExecutionError::new("language_source_unavailable", "Incomplete fixed source byte continuation");
+            let invalid = || {
+                ExecutionError::new(
+                    "language_source_unavailable",
+                    "Incomplete fixed source byte continuation",
+                )
+            };
             let hash = content["hash"].as_str().ok_or_else(invalid)?;
             let total = content["byteLength"].as_u64().ok_or_else(invalid)?;
             let next = offset.checked_add(part.len() as u64).ok_or_else(invalid)?;
             if content["offset"].as_u64() != Some(offset)
                 || content["nextOffset"].as_u64() != Some(next)
-                || next > total || (next == offset && next < total)
+                || next > total
+                || (next == offset && next < total)
                 || content["eof"].as_bool() != Some(next == total)
-                || identity.as_ref().is_some_and(|(original_hash, original_total)| original_hash != hash || *original_total != total)
+                || identity
+                    .as_ref()
+                    .is_some_and(|(original_hash, original_total)| {
+                        original_hash != hash || *original_total != total
+                    })
             {
                 return Err(invalid());
             }
             identity = Some((hash.into(), total));
             bytes.extend(part);
-            if next == total { return observe_bytes(bytes); }
+            if next == total {
+                return observe_bytes(bytes);
+            }
         }
     }
     pub(super) fn observe_language_path(
@@ -225,9 +249,21 @@ impl KernelToolExecutor {
                 "Language owner is not connected",
             )
         })?;
+        let admitted = self
+            .resources
+            .call(
+                &self.binding,
+                context,
+                ResourceOperation::LanguageQuery(args.clone()),
+                true,
+                cancel,
+            )
+            .map_err(|failure| {
+                ExecutionError::new(error_code(&failure.error), failure.error.to_string())
+            })?;
         let mut query = json!({"runId":self.binding.run_id,"threadId":self.binding.thread_id,
-            "workspaceId":self.binding.workspace_id,"executionWorkspaceId":self.binding.execution_workspace_id,
-            "liveRoot":self.binding.live_root,"method":args.method,"path":args.path});
+            "grantId":self.binding.grant_id,"source":admitted["source"],"physicalRoot":admitted["physicalRoot"],
+            "method":args.method,"path":args.path});
         if let Some(line) = args.line {
             query["line"] = json!(line);
         }
@@ -252,10 +288,8 @@ impl KernelToolExecutor {
                     .iter()
                     .filter(|(key, _)| {
                         [
-                            "mode",
-                            "workspaceId",
-                            "executionWorkspaceId",
-                            "liveRoot",
+                            "selection",
+                            "physicalRoot",
                             "resourceId",
                             "revision",
                             "view",
@@ -304,14 +338,13 @@ impl KernelToolExecutor {
         {
             let provenance = &result["source"];
             if provenance["revision"].as_str().is_none_or(str::is_empty)
-                || provenance["mode"] != "live_root"
+                || provenance["selection"] != admitted["source"]
+                || provenance["physicalRoot"] != admitted["physicalRoot"]
                 || provenance["dependencies"] != "live"
-                || provenance["workspaceId"].as_str() != Some(&self.binding.workspace_id)
-                || provenance["executionWorkspaceId"].as_str()
-                    != Some(&self.binding.execution_workspace_id)
                 || provenance["resourceId"].as_str() != Some(&args.path)
-                || provenance["liveRoot"] != json!(self.binding.live_root)
-                || provenance["view"] != "agent"
+                || provenance["view"].as_str().is_none_or(|view| {
+                    !view.starts_with("agent:source:") || view.len() == "agent:source:".len()
+                })
                 || provenance["documentVersion"].as_u64().is_none()
                 || provenance["generation"].as_u64().is_none()
                 || provenance

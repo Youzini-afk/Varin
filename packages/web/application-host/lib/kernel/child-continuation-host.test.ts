@@ -194,3 +194,37 @@ it.each(['dispatch', 'user_continuation', 'message_request', 'followup', 'calend
     expect(withBranchStore).not.toHaveBeenCalled(); expect(runtime.failChild).not.toHaveBeenCalled(); expect(errors).toEqual([]);
   } finally { collaboration.stop(); }
 });
+
+
+it('cancels child settlement observation while the original language process still drains', async () => {
+  const child = execution();
+  child.source = { kind: 'ready', handoff: null,
+    selection: { ...source, mode: 'materialized' },
+    pin: { pin_id: 'source-pin', root: 'fixed-result-root', source },
+    provenance: { consistency: 'fixed-root', root: 'fixed-result-root' } };
+  child.receipt = { run_id: 'original-child-run', input_id: 'input', thread_id: identity.threadId, branch_id: identity.branchId, cursor: 8 };
+  let stopped!: () => void;
+  let drained = false;
+  const drain = new Promise<void>(resolve => { stopped = () => { drained = true; resolve(); }; });
+  const releaseLanguageSource = vi.fn(async (_runId: string) => drain);
+  const readRun = vi.fn();
+  const runtime = { onEvent: () => () => {}, onExit: () => () => {}, onReady: () => () => {}, run: readRun };
+  const collaboration = new ThreadCollaboration({ kernel: { releaseLanguageSource } as unknown as KernelClient,
+    runtime: runtime as unknown as AgentRuntimeClient, storageAdapter: {} as never, sourceCaptureOwners: {} as never,
+    resolveLiveSource: async () => { throw new Error('No live source'); }, prepareContext: vi.fn() as never,
+    continueRun: vi.fn(), recoverLaunches: vi.fn(), onError: vi.fn() });
+  const controller = new AbortController();
+  try {
+    // Exercise the existing settlement boundary without replacing the source or
+    // process owner. Its caller owns cancellation, not the retained drain.
+    const settlement = (collaboration as unknown as { settle(child: DelegatedExecution, signal: AbortSignal): Promise<DelegatedExecution> })
+      .settle(child, controller.signal);
+    expect(releaseLanguageSource).toHaveBeenCalledWith('original-child-run');
+    controller.abort();
+    await expect(settlement).rejects.toMatchObject({ name: 'AbortError' });
+    expect(drained).toBe(false);
+    expect(readRun).not.toHaveBeenCalled();
+    stopped(); await drain;
+    expect(readRun).not.toHaveBeenCalled();
+  } finally { stopped(); collaboration.stop(); }
+});

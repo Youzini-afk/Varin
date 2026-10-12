@@ -285,6 +285,10 @@ export class ThreadCollaboration {
     const source = this.childSource(child);
     if (source?.mode !== 'materialized') throw new Error('Writable child lost its private source');
     const runId = child.receipt.run_id;
+    // The terminal notification withdraws this Run's language reference, but is not
+    // a process exit receipt. Capture waits on the same supervisor's actual drain.
+    await waitWithSignal(kernel.releaseLanguageSource(runId), signal);
+    signal.throwIfAborted();
     const publicationId = `child-result:${child.execution_id}`;
     const phases = child.code_result.kind === 'pending' ? ['source'] as const : ['result', 'source'] as const;
     for (const purpose of phases) {

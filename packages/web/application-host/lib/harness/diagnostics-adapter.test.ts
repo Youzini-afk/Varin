@@ -136,15 +136,26 @@ it("keeps invalidated publication pending and recovers only after rebinding the 
       const bound = await bind(...args);
       if (invalidateNext) {
         invalidateNext = false;
-        // Deterministic equivalent of a delayed external watch event after binding.
+        // Change the actual disk source after binding. A delayed watch event for
+        // unchanged bytes correctly preserves the current publication.
+        const invalidated = new Promise<void>(resolve => {
+          const subscription = language.subscribe(harness.identity.workspaceId, value => {
+            const event = value as { kind?: string; view?: string };
+            if (event.kind === 'diagnostics-invalidated' && event.view === AGENT_LANGUAGE_VIEW) {
+              subscription.close(); resolve();
+            }
+          });
+        });
+        await fs.promises.writeFile(path.join(harness.workspaceRoot, resourceId), 'export const fixed = true;\n');
         language.observeDocumentMutation({ workspaceId: harness.identity.workspaceId, resourceId, kind: 'modified' });
+        await invalidated;
       }
       return bound;
     };
     const pending = await service.handle({ path: resourceId, waitMs: 10 }, context);
     expect(pending).toMatchObject({ status: 'pending', diagnostics: [], revision: (before as { revision: string }).revision });
     const rebound = await service.handle({ path: resourceId, waitMs: 2_000 }, context);
-    expect(rebound).toMatchObject({ status: 'ready', revision: (before as { revision: string }).revision,
-      diagnostics: [expect.objectContaining({ message: 'fixture error' })] });
+    expect(rebound).toMatchObject({ status: 'ready', diagnostics: [] });
+    expect((rebound as { revision: string }).revision).not.toBe((before as { revision: string }).revision);
   } finally { await language.dispose(); await harness.cleanup(); }
 });

@@ -3,8 +3,8 @@ import { LanguageBridge, type PrivateLanguageResponse, unavailableLanguageResult
 import { deferred } from './language.test-helper.js';
 import type { LanguageResult } from './language-owner.js';
 
-const query = { runId: 'run', threadId: 'thread', workspaceId: 'workspace', executionWorkspaceId: 'workspace',
-  liveRoot: { hostId: 'host', rootId: 'root', canonicalRoot: '/workspace' }, method: 'definition', path: 'source.ts', line: 0, character: 0 };
+const physicalRoot = { hostId: 'host', rootId: 'root', canonicalRoot: '/workspace' };
+const query = { runId: 'run', threadId: 'thread', grantId: 'grant', source: { mode: 'live_root', workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: null, revision: null, live_root: physicalRoot }, physicalRoot, method: 'definition', path: 'source.ts', line: 0, character: 0 };
 const request = (id: string, epoch = 'current') => ({ v: 1, kind: 'language-request', id, kernelEpoch: epoch, query });
 
 it('does not dispatch old-epoch requests or let a late old-epoch result enter the new channel', async () => {
@@ -60,11 +60,37 @@ it('consumes malformed private traffic without dispatching an invalid query and 
   const owner = vi.fn(async () => unavailableLanguageResult('owner'));
   const bridge = new LanguageBridge(() => 'current', async response => { replies.push(response); }, () => {});
   bridge.setOwner(owner);
-  for (const invalid of [{ line: -1 }, { character: 1.5 }, { method: 'executeCommand' }, { liveRoot: {} }]) {
+  for (const invalid of [{ line: -1 }, { character: 1.5 }, { method: 'executeCommand' }, { physicalRoot: {} }]) {
     bridge.consume({ ...request(`invalid-${replies.length}`), query: { ...query, ...invalid } });
     await vi.waitFor(() => expect(replies.at(-1)?.result.status).toBe('unavailable'));
   }
   expect(owner).not.toHaveBeenCalled();
   expect(bridge.consume({ v: 1, kind: 'public-event' })).toBe(false);
+  bridge.close();
+});
+
+it('withdraws only the retired source and waits for its actual view drain', async () => {
+  const held = deferred<LanguageResult>(), drain = deferred<void>();
+  const responses: PrivateLanguageResponse[] = [];
+  const signals = new Map<string, AbortSignal>();
+  const owner = Object.assign(async (input: { runId: string }, signal: AbortSignal) => { signals.set(input.runId, signal); return held.promise; }, {
+    releaseSource: vi.fn(async () => drain.promise),
+  });
+  const bridge = new LanguageBridge(() => 'current', async response => { responses.push(response); }, () => {});
+  bridge.setOwner(owner);
+  bridge.consume(request('one'));
+  bridge.consume({ ...request('two'), query: { ...query, runId: 'other-run', grantId: 'other-grant' } });
+  let finished = false;
+  const retiring = bridge.releaseSource({ grantId: 'grant' }).then(() => { finished = true; });
+  await vi.waitFor(() => expect(responses).toHaveLength(1));
+  expect(responses[0]).toMatchObject({ id: 'one', result: { status: 'cancelled' } });
+  expect(signals.get('run')?.aborted).toBe(true);
+  expect(signals.get('other-run')?.aborted).toBe(false);
+  expect(finished).toBe(false);
+  drain.resolve(); await retiring;
+  expect(finished).toBe(true);
+  held.resolve(unavailableLanguageResult('second source still works'));
+  await vi.waitFor(() => expect(responses).toHaveLength(2));
+  expect(responses[1]).toMatchObject({ id: 'two', result: { status: 'unavailable', message: 'second source still works' } });
   bridge.close();
 });

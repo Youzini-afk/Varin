@@ -36,6 +36,8 @@ export interface BindLanguageDocumentInput {
   signal?: AbortSignal;
   reportPhase?: (phase: string) => void;
   warmOnly?: boolean;
+  /** Host-private admitted bytes and view; never interpreted as a Documents registration. */
+  sourceView?: { view: LanguageViewId; content: string; revision: string; source: LanguageTextSource };
 }
 
 export type ResolveLanguageTarget = (input: BindLanguageDocumentInput) => Promise<{
@@ -65,6 +67,7 @@ export function createLanguageViewBinder(deps: LanguageViewBinderDeps) {
   const resolveText = async (
     input: BindLanguageDocumentInput,
   ): Promise<{ content: string; revision: string; source: LanguageTextSource } | { status: 'unavailable'; message: string }> => {
+    if (input.sourceView) return input.sourceView;
     const resource = { workspaceId: input.workspaceId, resourceId: input.resourceId };
     if (input.text === 'input-context' && input.sessionId && input.inputContext) {
       const draft = deps.readSource
@@ -110,10 +113,10 @@ export function createLanguageViewBinder(deps: LanguageViewBinderDeps) {
       if ('status' in draft) return draft;
       drafts.set(resourceId, draft);
     }
-    const view: LanguageViewId = drafts.size
+    const view: LanguageViewId = input.sourceView?.view ?? (drafts.size
       ? `agent:${createHash('sha256').update(JSON.stringify([...drafts].map(([resourceId, draft]) => [resourceId, draft.content]))).digest('hex')}`
-      : AGENT_LANGUAGE_VIEW;
-    const revisionFor = (document: { content: string; revision: string }): string => view === AGENT_LANGUAGE_VIEW
+      : AGENT_LANGUAGE_VIEW);
+    const revisionFor = (document: { content: string; revision: string }): string => input.sourceView || view === AGENT_LANGUAGE_VIEW
       ? document.revision : `language:${createHash('sha256').update(document.content).digest('hex')}`;
     input.reportPhase?.('lsp:sync');
     // A draft view includes the other captured buffers too: imported files
