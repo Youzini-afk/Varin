@@ -2,7 +2,7 @@
 //! Reuses the original language/process/Storage rendezvous; only model choices are controlled.
 use super::*;
 use varin_runtime::catalog::collaboration::{
-    ChildSourcePin, ChildSourceProvenance, ChildSourceRoot, ChildTask,
+    ChildCodeResult, ChildSourcePin, ChildSourceProvenance, ChildSourceRoot, ChildTask,
 };
 use varin_runtime::catalog::launches::SourceSelection;
 use varin_runtime::composition::tools::ToolDirectory;
@@ -362,6 +362,16 @@ fn default_fixed_and_materialized_children_execute_language_and_retain_reports_a
             let mut db = owner.lock().unwrap();
             db.reconcile_child_reports().unwrap();
             let terminal = db.child_task(&child.operation_id).unwrap();
+            if mode == SourceMode::Materialized {
+                assert!(
+                    matches!(
+                        terminal.code_result,
+                        ChildCodeResult::Pending | ChildCodeResult::Settling { .. }
+                    ),
+                    "this fixture does not execute Host code-result settlement: {:?}",
+                    terminal.code_result
+                );
+            }
             let report = terminal
                 .report
                 .clone()
@@ -424,7 +434,7 @@ fn default_fixed_and_materialized_children_execute_language_and_retain_reports_a
         review.receive("fixture-gc-finished");
         review.f.host.send(json!({"kind":"fixture-finish"}));
         let finished = review.receive("fixture-finished");
-        assert_eq!(finished["sourceQueries"], 5);
+        assert_eq!(finished["sourceQueries"], SCRIPT_CALLS);
         assert_eq!(finished["processSpawns"], 1);
         let storage_root = review.f.storage_root.clone();
         drop(owner);

@@ -1233,10 +1233,12 @@ export interface LanguageQuery {
   grantId: string;
   source: LaunchSource;
   physicalRoot: LiveRoot | null;
-  method: string;
+  method: "definition" | "references" | "diagnostics" | "hover" | "workspace_symbols" | "document_symbols" | "call_hierarchy";
   path: string;
   line?: number;
   character?: number;
+  query?: string;
+  direction?: "incoming" | "outgoing";
 }
 
 export interface HistoryPageParams {
@@ -1322,7 +1324,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 16; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 17; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 

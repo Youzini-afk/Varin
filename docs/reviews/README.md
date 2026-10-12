@@ -8,6 +8,7 @@ Last updated: 2026-10-12
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [原来源的更多只读语言查询](runtime-language-queries-2026-10-12.md) | hover、symbols、私有 call hierarchy 与实际 TypeScript 主/child/Policy、原回执/GC/重开；有限跨层验收 |
 | [固定工程语言视图与真实 child 消费（2026-10-12）](runtime-fixed-language-2026-10-12.md) | 原不可变工程/派生物化资源、共享准备与精确退出、实际 child LSP/报告、新查询重开；有限跨层验收 |
 | [物化来源的原语言服务（2026-10-12）](runtime-source-language-2026-10-12.md) | 原 Source/配置/受管进程、实际 TS 依赖与历史、精确引用排空和失败恢复；有限跨层验收 |
 | [固定与物化来源的语义候选（2026-10-12）](runtime-fixed-semantic-2026-10-12.md) | 原 source/units/差分 publication、foreground 推理归属、semantic-only 最终正文与取消恢复；有限跨层验收 |

@@ -102,7 +102,7 @@ records typed dependencies in its manifests. Original publication protection spa
 the short identity/epoch/revision-checked commit. GC follows those dependencies from the existing
 history, input, operation, event, policy and request roots. Catalog retains only original metadata;
 byte reads, hash/base64 work and provider serialization stay outside its control lock. Catalog
-format **58**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **16** reject older internal
+format **58**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **17** reject older internal
 formats directly. These are distinct from policy service **4** and private script worker protocol **2**.
 
 `runtime.output.media.read` uses the original caller Thread/branch plus an actual history, queued
@@ -474,7 +474,7 @@ inference Operation, original ToolOrigin and frozen Goal. Tagged callers disting
 tool from that real query context. Scope exit/cancellation forbids new requests but does not erase an
 already-dispatched child or its exact-owner receipt. Recovery cannot recreate the vanished scope.
 A cheap query may detach promptly while the child transport remains active; only the child's original
-receipt establishes local drain and updates its pending/unknown Goal usage. Catalog 58 and wire 16
+receipt establishes local drain and updates its pending/unknown Goal usage. Catalog 58 and wire 17
 retain explicit caller proof and native-generation facts, without an alias or older-format reader.
 
 Retrieval consumes the original LaunchSource in live, fixed-revision and materialized modes. The
@@ -1287,7 +1287,10 @@ defaults include them: a fixed child lazily prepares an original Storage-derived
 while a materialized child uses its actual working copy. Backend preparation does not grant the child
 file-write/process tools, and the original language backend requires whole-project source read scope.
 Actual child execution/report evidence and its settlement boundary are recorded in the
-[fixed-language review](../../../docs/reviews/runtime-fixed-language-2026-10-12.md).
+[fixed-language review](../../../docs/reviews/runtime-fixed-language-2026-10-12.md). The same directory
+now includes hover, workspace/document symbols and one-query incoming/outgoing call hierarchy;
+[rich-query evidence](../../../docs/reviews/runtime-language-queries-2026-10-12.md) distinguishes real
+main/child execution, read-only Policy graph receipts and the remaining nested-result verification.
 Primary Goal and remaining remote child bindings retain their separate authority. Explicit parent Integration is a separate
 authorized action.
 

@@ -216,3 +216,31 @@ main Run execution and child-directory admission; none is promoted into an untes
 The subsequent [fixed-language review](../../../../../docs/reviews/runtime-fixed-language-2026-10-12.md)
 records actual fixed-project imports/config, fresh queries after reopening, and actual read-only/Worker
 child language/report consumers. Worker code-result publication remains a separate tested boundary.
+
+## Source-bound read-only query composition
+
+The native source adapter now consumes the original hover and workspace/document symbol methods as
+well as a finite incoming/outgoing call query. Strict source result mapping is distinct from legacy
+editor projection: an invalid explicit URI is never converted to an implicit current-file symbol;
+real nested DocumentSymbol nodes inherit their actual document. Hover links remain literal markup.
+
+`sourceCallHierarchy` combines prepare and relation requests on the existing supervisor. Raw provider
+items stay private to that query and never enter the editor/knowledge token map or durable tool results.
+`requestFeature` rechecks this invocation's source admission immediately before every RPC, including
+after shared session preparation; the callback belongs to the original SourceQueryOwner, not arbitrary
+extension middleware. Original request/session/document fences and cancellation still apply. A caller
+losing permission cannot continue using another retained Run's valid source reference.
+
+The source adapter returns mapped edges with sites on the real `from` resource. It does not infer sites
+from the input anchor or target. Original Rust post-admission reads every target under the same source
+grant and retains actual observations separately from unproven cross-file computation versions. Existing
+editor and knowledge APIs continue using their existing methods. This does not move editor commands or
+workspace edits into a read-only native call. Evidence is recorded in the
+[language query review](../../../../../docs/reviews/runtime-language-queries-2026-10-12.md).
+
+For a mutable source file that was opened as a Host-owned disk overlay, a watcher read of changed
+text sends that exact reader observation through the original document-version sequence before
+closing the overlay. A close notification alone does not guarantee that a provider has dirtied its
+cached disk text. The read's original session/open binding must still be current; a delayed success
+or failure cannot close a newer query binding. Missing/unreadable text never becomes a fake empty
+change. Fixed source views and editor-owned buffers retain their separate invalidation rules.

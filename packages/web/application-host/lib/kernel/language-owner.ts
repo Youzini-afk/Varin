@@ -43,7 +43,6 @@ export function createLanguageOwner({ documents, supervisor, sources }: {
     await sources.validateLanguage(query, signal);
     const languageId = languageIdForPath(query.path);
     if (!languageId) return failure('unsupported', 'No language is known for this file');
-    if (!['definition', 'references', 'diagnostics'].includes(query.method)) return failure('unsupported', 'Unsupported language query');
     const observed = await sources.read(query, query.path, signal);
     if (observed.status !== 'ready') return failure(observed.status === 'stale' ? 'stale' : 'unavailable', observed.message);
     // Same actual environment across Runs shares one service. Provider/configuration generations
@@ -63,7 +62,8 @@ export function createLanguageOwner({ documents, supervisor, sources }: {
     const bound = await binder.bind({ workspaceId: query.source.workspace_id, resourceId: query.path, languageId, text: 'disk', signal,
       sourceView: { view, content: observed.content, revision: observed.revision, source: query.source.mode === 'fixed_branch' ? 'working-branch' : 'disk' } });
     if (bound.status !== 'bound') return failure('unavailable', bound.message);
-    if (query.method !== 'diagnostics') {
+    const positional = query.method === 'definition' || query.method === 'references' || query.method === 'hover' || query.method === 'call_hierarchy';
+    if (positional) {
       const row = Number.isSafeInteger(query.line) && query.line! >= 0 ? observed.content.split('\n')[query.line!] : undefined;
       const text = row?.endsWith('\r') ? row.slice(0, -1) : row;
       if (text === undefined || !Number.isSafeInteger(query.character) || query.character! < 0 || query.character! > text.length) {
@@ -79,7 +79,8 @@ export function createLanguageOwner({ documents, supervisor, sources }: {
     const request = { view: bound.view, resource: bound.resource, languageId,
       expectedRevision: bound.languageRevision, generation: bound.generation,
       documentVersion: bound.documentVersion, expectedViewRevision: bound.viewRevision,
-      ...(query.method !== 'diagnostics' ? { position: { line: query.line, character: query.character } } : {}),
+      ...(positional ? { position: { line: query.line, character: query.character } } : {}),
+      ...(query.method === 'workspace_symbols' ? { query: query.query } : {}),
       ...(query.method === 'references' ? { includeDeclaration: true } : {}),
     };
     const options = { signal, onRejectedLocation: (reason: 'outOfScope' | 'unmappable') => { result.omissions[reason] += 1; } };
@@ -94,7 +95,20 @@ export function createLanguageOwner({ documents, supervisor, sources }: {
       }
       // Pull "unchanged" without a previous resultId is not evidence of clean diagnostics.
       if (response.status === 'ready' && !Array.isArray(response.value)) response = { status: 'pending' };
-    } else response = record(await supervisor[query.method === 'definition' ? 'definition' : 'references'](request, options));
+    } else if (query.method === 'call_hierarchy') {
+      response = record(await supervisor.sourceCallHierarchy(request, { ...options, direction: query.direction!,
+        admitSource: async () => {
+          // The shared view may be retained by another Run. Every RPC in this query
+          // still needs this caller's current grant and exact derived source.
+          await sources.validateLanguage(query, signal);
+          await supervisor.checkSourceView(query.source.workspace_id, view, environment, signal);
+        },
+      }));
+    } else {
+      const method = query.method === 'document_symbols' ? 'documentSymbols'
+        : query.method === 'workspace_symbols' ? 'workspaceSymbols' : query.method;
+      response = record(await supervisor[method](request, options));
+    }
     signal.throwIfAborted();
     await sources.validateLanguage(query, signal);
     try { await supervisor.checkSourceView(query.source.workspace_id, view, environment, signal); }
@@ -111,7 +125,9 @@ export function createLanguageOwner({ documents, supervisor, sources }: {
         : response.reason === 'unsupported' ? 'unsupported' : 'unavailable';
       return { ...result, status, ...(typeof response.message === 'string' ? { message: response.message } : {}) };
     }
-    result.items = (Array.isArray(response.value) ? response.value : []).map(value => {
+    const values = query.method === 'hover' ? (response.value === null ? [] : [{ ...record(response.value), resource: bound.resource }])
+      : Array.isArray(response.value) ? response.value : [];
+    result.items = values.map(value => {
       const item = { ...record(value) };
       // Diagnostics expose their primary location. Related messages remain an editor projection,
       // rather than smuggling unadmitted nested resources into a tool result.

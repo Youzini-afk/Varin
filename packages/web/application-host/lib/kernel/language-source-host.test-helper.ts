@@ -34,7 +34,7 @@ let expectClean = false;
 const runViews = new Map<string, string>();
 const diagnostics: Array<{ kind: string; view?: string; resourceId: string; items: Array<Record<string, unknown>> }> = [];
 const files = ['tsconfig.json', 'config/base.json', 'main.ts', 'util.ts', 'src/shared.ts'];
-const main = (marker: string) => `import { greet } from './util';\nimport { shared } from '@model/shared';\nexport const marker = "${marker}";\nexport const message: number = greet(shared);\n`;
+const main = (marker: string) => `import { greet } from './util';\nimport { shared } from '@model/shared';\nexport const marker = "${marker}";\nexport const message: number = greet(shared);\nexport namespace Shelf {\n  export function invoke(name: string) { return greet(name); }\n}\n`;
 async function eventually(check: () => boolean, message: string) {
   const deadline = Date.now() + 20_000;
   while (!check()) { assert(Date.now() < deadline, message); await pause(25); }
@@ -70,7 +70,7 @@ async function initialize(frame: Record<string, unknown>) {
       baseUrl: '..', paths: { '@model/*': ['src/*'] },
     } }));
     await writeFile(join(workspace, 'main.ts'), main('CAPTURED_B'));
-    await writeFile(join(workspace, 'util.ts'), '// B relative import\nexport function greet(name: string): string { return "B " + name; }\n');
+    await writeFile(join(workspace, 'util.ts'), '// B relative import\nexport function greet(name: string): string { return decorate(name); }\nfunction decorate(name: string): string { return "B " + name; }\n');
     await writeFile(join(workspace, 'src/shared.ts'), '// B path alias\nexport const shared = "Varin";\n');
   }
   kernel = new KernelClient({ hostId: HOST, hostGeneration: GENERATION, storageRoot, buildVersion: '0.9.25' });
@@ -87,6 +87,10 @@ async function initialize(frame: Record<string, unknown>) {
     : await documents.resolveWorkspace({ path: workspace });
   if (saved) {
     source = saved;
+  } else if (frame.mode === 'live_root') {
+    const liveRoot = await live.prepare(identity.workspaceId, identity.workspaceId, 'thread:language');
+    source = { mode: 'live_root', workspace_id: identity.workspaceId, execution_workspace_id: identity.workspaceId,
+      branch_id: null, revision: null, live_root: liveRoot };
   } else {
     const liveRoot = await live.prepare(identity.workspaceId, identity.workspaceId, 'thread:language');
     const seed = await kernel.issueGrant({ grantId: 'language-source:capture', threadId: 'thread:language',
@@ -170,6 +174,14 @@ async function select(frame: Record<string, unknown>) {
     capabilities: source.mode === 'fixed_branch' ? ['storage.read'] : ['storage.read', 'storage.write'], pathScopes: [''] });
   grants.push(grant);
   const actor = kernel.scoped(grant);
+  if (source.mode === 'live_root') {
+    assert(source.live_root);
+    physicalRoot = source.live_root;
+    const revisions = Object.fromEntries(await Promise.all(['main.ts', 'util.ts', 'src/shared.ts'].map(async path =>
+      [path, revisionFromBytes(await readFile(join(physicalRoot!.canonicalRoot, path)))])));
+    write({ kind: 'fixture-selected', grantId: grant.grantId, physicalRoot, revisions });
+    return;
+  }
   if (source.mode === 'fixed_branch') {
     physicalRoot = null;
     const adapter = new KernelStorageAdapter({ client: kernel, hostId: HOST, storageRoot,

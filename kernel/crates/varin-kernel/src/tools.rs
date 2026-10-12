@@ -44,6 +44,10 @@ pub(crate) enum ToolKind {
     LanguageDefinition,
     LanguageReferences,
     LanguageDiagnostics,
+    LanguageHover,
+    LanguageSymbols,
+    LanguageDocumentSymbols,
+    LanguageCallHierarchy,
     CodeRetrieval,
 }
 impl ToolKind {
@@ -62,6 +66,10 @@ impl ToolKind {
             Self::LanguageDefinition => "language_definition",
             Self::LanguageReferences => "language_references",
             Self::LanguageDiagnostics => "language_diagnostics",
+            Self::LanguageHover => "language_hover",
+            Self::LanguageSymbols => "language_symbols",
+            Self::LanguageDocumentSymbols => "language_document_symbols",
+            Self::LanguageCallHierarchy => "language_call_hierarchy",
             Self::CodeRetrieval => "code_retrieval",
         }
     }
@@ -69,9 +77,13 @@ impl ToolKind {
         use varin_runtime::execution::{ToolRequirements, ToolSourceRequirement::*};
         let source = match self {
             Self::FileRead | Self::FileList | Self::FileSearch | Self::CodeRetrieval => Source,
-            Self::LanguageDefinition | Self::LanguageReferences | Self::LanguageDiagnostics => {
-                Source
-            }
+            Self::LanguageDefinition
+            | Self::LanguageReferences
+            | Self::LanguageDiagnostics
+            | Self::LanguageHover
+            | Self::LanguageSymbols
+            | Self::LanguageDocumentSymbols
+            | Self::LanguageCallHierarchy => Source,
             _ => Physical,
         };
         ToolRequirements {
@@ -123,6 +135,10 @@ impl ToolKind {
             Self::LanguageDiagnostics => {
                 "Read diagnostics from the admitted source's language provider."
             }
+            Self::LanguageHover => "Read type, signature and documentation at a zero-based UTF-16 source position.",
+            Self::LanguageSymbols => "Find workspace symbols matching query using a representative source file's language provider.",
+            Self::LanguageDocumentSymbols => "Read the source document's hierarchical symbols.",
+            Self::LanguageCallHierarchy => "Find incoming or outgoing calls at a zero-based UTF-16 source position. Returned call-site ranges belong to the from resource.",
             Self::CodeRetrieval => {
                 "Retrieve code context from the admitted source using the selected retrieval service."
             }
@@ -143,6 +159,10 @@ impl ToolKind {
             Self::LanguageDefinition,
             Self::LanguageReferences,
             Self::LanguageDiagnostics,
+            Self::LanguageHover,
+            Self::LanguageSymbols,
+            Self::LanguageDocumentSymbols,
+            Self::LanguageCallHierarchy,
             Self::CodeRetrieval,
         ]
         .into_iter()
@@ -330,7 +350,11 @@ impl ResourceOperation {
             }
             ToolKind::LanguageDefinition
             | ToolKind::LanguageReferences
-            | ToolKind::LanguageDiagnostics => {
+            | ToolKind::LanguageDiagnostics
+            | ToolKind::LanguageHover
+            | ToolKind::LanguageSymbols
+            | ToolKind::LanguageDocumentSymbols
+            | ToolKind::LanguageCallHierarchy => {
                 return LanguageQueryArgs::parse(kind, args).map(Self::LanguageQuery);
             }
             ToolKind::FileList | ToolKind::FileSearch => {
@@ -1028,6 +1052,7 @@ impl KernelToolExecutor {
                     | ToolKind::FileSearch
                     | ToolKind::CodeRetrieval
                     | ToolKind::LanguageDefinition | ToolKind::LanguageReferences | ToolKind::LanguageDiagnostics
+                    | ToolKind::LanguageHover | ToolKind::LanguageSymbols | ToolKind::LanguageDocumentSymbols | ToolKind::LanguageCallHierarchy
             )
         }) && binding.source_mode == SourceMode::FixedBranch
             && !binding
@@ -1173,7 +1198,11 @@ impl KernelToolExecutor {
                 ),
                 ToolKind::LanguageDefinition
                 | ToolKind::LanguageReferences
-                | ToolKind::LanguageDiagnostics => crate::run_tools::BuiltinSchema::child(
+                | ToolKind::LanguageDiagnostics
+                | ToolKind::LanguageHover
+                | ToolKind::LanguageSymbols
+                | ToolKind::LanguageDocumentSymbols
+                | ToolKind::LanguageCallHierarchy => crate::run_tools::BuiltinSchema::child(
                     schema,
                     kind.requirements().source.into(),
                     &[Worker, Retrieval],
@@ -1843,7 +1872,11 @@ fn tool_schema(kind: ToolKind) -> Value {
         ToolKind::CodeRetrieval => return retrieval::schema(),
         ToolKind::LanguageDefinition
         | ToolKind::LanguageReferences
-        | ToolKind::LanguageDiagnostics => return language::schema(kind),
+        | ToolKind::LanguageDiagnostics
+        | ToolKind::LanguageHover
+        | ToolKind::LanguageSymbols
+        | ToolKind::LanguageDocumentSymbols
+        | ToolKind::LanguageCallHierarchy => return language::schema(kind),
         ToolKind::FileList | ToolKind::FileSearch => {
             return discovery::schema(kind == ToolKind::FileSearch);
         }

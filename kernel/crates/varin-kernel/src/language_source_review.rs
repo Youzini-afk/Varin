@@ -21,13 +21,20 @@ mod admission;
 use admission::InputAdmission;
 #[path = "child_language_review.rs"]
 mod child_review;
+#[path = "language_policy_consumers_review.rs"]
+mod policy_consumers_review;
 const THREAD: &str = "thread:language";
 const BRANCH: &str = "branch:language";
-const TOOLS: [&str; 3] = [
+const TOOLS: [&str; 7] = [
     "language_definition",
     "language_references",
     "language_diagnostics",
+    "language_hover",
+    "language_symbols",
+    "language_document_symbols",
+    "language_call_hierarchy",
 ];
+const SCRIPT_CALLS: usize = 10;
 
 struct Script;
 impl ModelProvider for Script {
@@ -59,6 +66,29 @@ impl ModelProvider for Script {
             Content::ToolResult { result } if result.call_id.starts_with(&prefix))
             })
             .count();
+        // The bundled provider can legitimately return no call item for an import
+        // alias. Follow the actual admitted definition to the declaration instead
+        // of assuming that every reference position has a prepare result.
+        let declaration = if completed >= 8 {
+            request
+                .view
+                .history
+                .iter()
+                .find_map(|item| match &item.content {
+                    Content::ToolResult { result } if result.call_id == format!("{prefix}2") => {
+                        match &result.completion {
+                            ToolCompletion::Result { content, .. } => {
+                                Some(content.data["items"][0].clone())
+                            }
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                })
+                .expect("the original definition result must precede relation queries")
+        } else {
+            Value::Null
+        };
         // Record the actual cold answer, then let the ordinary diagnostics tool observe
         // the real publication before requiring precise cross-file definitions.
         let calls = [
@@ -79,7 +109,25 @@ impl ModelProvider for Script {
                 "language_references",
                 json!({"path":"main.ts","line":3,"character":31}),
             ),
+            (
+                "language_hover",
+                json!({"path":"main.ts","line":3,"character":31}),
+            ),
+            (
+                "language_symbols",
+                json!({"path":"main.ts","query":"greet"}),
+            ),
+            ("language_document_symbols", json!({"path":"main.ts"})),
+            (
+                "language_call_hierarchy",
+                json!({"path":declaration["resource"]["resourceId"],"line":declaration["targetSelectionRange"]["start"]["line"],"character":declaration["targetSelectionRange"]["start"]["character"],"direction":"incoming"}),
+            ),
+            (
+                "language_call_hierarchy",
+                json!({"path":declaration["resource"]["resourceId"],"line":declaration["targetSelectionRange"]["start"]["line"],"character":declaration["targetSelectionRange"]["start"]["character"],"direction":"outgoing"}),
+            ),
         ];
+        assert_eq!(calls.len(), SCRIPT_CALLS);
         let Some((name, arguments)) = calls.get(completed) else {
             return Ok(FinishReason::Stop);
         };
@@ -369,6 +417,13 @@ impl Review {
                 crate::collaboration::resolve_selection(&selected, &input).unwrap();
             for name in TOOLS {
                 let schema = schemas.iter().find(|schema| schema.name == name);
+                if id == "custom:language_reader" && !TOOLS[..3].contains(&name) {
+                    assert!(
+                        schema.is_none(),
+                        "an explicit custom tool selection must not gain new defaults"
+                    );
+                    continue;
+                }
                 assert!(
                     schema.is_some(),
                     "fixed language is available to the original read-only profile"
@@ -417,6 +472,9 @@ impl Review {
         let fixed = json!({"branchId":source["branch_id"],"revision":source["revision"]});
         if source["mode"] == "fixed_branch" {
             value["fileSource"] = fixed;
+        } else if source["mode"] == "live_root" {
+            value["liveRoot"] = source["live_root"].clone();
+            value["rootId"] = selected["physicalRoot"]["rootId"].clone();
         } else {
             value["materializedSource"] = fixed;
             value["environmentRunId"] = source["environment_run_id"].clone();
@@ -434,6 +492,16 @@ impl Review {
         observe: bool,
         provider: Arc<dyn ModelProvider>,
     ) -> Vec<Value> {
+        self.execute_with_policy(run, source, observe, provider, Arc::new(DefaultAgentPolicy))
+    }
+    fn execute_with_policy(
+        &mut self,
+        run: &str,
+        source: ToolBinding,
+        observe: bool,
+        provider: Arc<dyn ModelProvider>,
+        policy: Arc<dyn AgentPolicy>,
+    ) -> Vec<Value> {
         let executor = Arc::new(
             KernelToolExecutor::new(source, self.resource_client.clone())
                 .unwrap()
@@ -449,7 +517,7 @@ impl Review {
                     policy_state: Value::Null,
                     provider,
                     tools: executor,
-                    policy: Arc::new(DefaultAgentPolicy),
+                    policy,
                     context_preparation: Arc::new(NoopContextPreparation),
                     progress: ProgressSink::default(),
                 },
@@ -571,18 +639,22 @@ fn enabled() -> BTreeSet<ToolKind> {
         ToolKind::LanguageDefinition,
         ToolKind::LanguageReferences,
         ToolKind::LanguageDiagnostics,
+        ToolKind::LanguageHover,
+        ToolKind::LanguageSymbols,
+        ToolKind::LanguageDocumentSymbols,
+        ToolKind::LanguageCallHierarchy,
     ]
     .into_iter()
     .collect()
 }
 fn assert_results(results: &[Value], selected: &Value, source: &Value, changed: bool) {
-    assert_eq!(results.len(), 5);
-    for result in results {
+    assert_eq!(results.len(), SCRIPT_CALLS);
+    for (index, result) in results.iter().enumerate() {
         assert_eq!(result["source"]["selection"], *source, "{result}");
         assert_eq!(result["source"]["physicalRoot"], selected["physicalRoot"]);
         assert_eq!(
             result["source"]["revision"],
-            selected["revisions"]["main.ts"]
+            selected["revisions"][if index >= 8 { "util.ts" } else { "main.ts" }]
         );
         assert_eq!(
             result["source"]["dependencies"],
@@ -652,6 +724,134 @@ fn assert_results(results: &[Value], selected: &Value, source: &Value, changed: 
         .any(|item| item["resource"]["resourceId"] == "main.ts"
             && item["range"]["start"]["line"] == 3
             && item["rangeRevision"] == selected["revisions"]["main.ts"]));
+    assert_rich_results(&results[5..], selected, changed);
+}
+fn assert_rich_results(results: &[Value], selected: &Value, changed: bool) {
+    assert_eq!(results.len(), 5);
+    for result in results {
+        assert_eq!(result["status"], "ready", "{result}");
+    }
+    let hover = &results[0]["items"];
+    assert_eq!(hover.as_array().unwrap().len(), 1, "{hover}");
+    let contents = hover[0]["contents"].as_array().unwrap();
+    let text = contents
+        .iter()
+        .map(|part| part["value"].as_str().unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("greet"), "{text}");
+    assert!(
+        text.contains(if changed { "): number" } else { "): string" }),
+        "{text}"
+    );
+    assert_eq!(hover[0]["resource"]["resourceId"], "main.ts");
+    assert_eq!(
+        hover[0]["observedRevision"],
+        selected["revisions"]["main.ts"]
+    );
+
+    let symbols = results[1]["items"].as_array().unwrap();
+    let greet = symbols
+        .iter()
+        .find(|item| item["name"] == "greet")
+        .expect("real workspace symbol in the captured dependency");
+    assert_eq!(greet["resource"]["resourceId"], "util.ts");
+    assert_eq!(greet["range"]["start"]["line"], if changed { 3 } else { 1 });
+    assert_eq!(greet["observedRevision"], selected["revisions"]["util.ts"]);
+    assert!(greet["rangeRevision"].is_null());
+
+    let document = results[2]["items"].as_array().unwrap();
+    let shelf = document
+        .iter()
+        .find(|item| item["name"] == "Shelf")
+        .expect("real document namespace symbol");
+    let invoke = shelf["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["name"] == "invoke")
+        .expect("real nested function symbol");
+    for symbol in [shelf, invoke] {
+        assert_eq!(symbol["resource"]["resourceId"], "main.ts");
+        assert_eq!(symbol["observedRevision"], selected["revisions"]["main.ts"]);
+        assert_eq!(symbol["rangeRevision"], selected["revisions"]["main.ts"]);
+    }
+
+    let incoming = results[3]["items"].as_array().unwrap();
+    assert!(
+        incoming
+            .iter()
+            .any(|edge| edge["from"]["resource"]["resourceId"] == "main.ts"
+                && edge["to"]["resource"]["resourceId"] == "util.ts"
+                && edge["fromRanges"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|range| range["start"]["line"] == 3)),
+        "{incoming:?}"
+    );
+    let module = incoming
+        .iter()
+        .find(|edge| {
+            edge["fromRanges"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|range| range["start"]["line"] == 3)
+        })
+        .unwrap();
+    // This real TypeScript response ends its module at character 2 on the
+    // final `}` line of length 1. LSP interprets that column as end-of-line.
+    assert_eq!(
+        module["from"]["range"]["end"],
+        json!({"line":6,"character":1})
+    );
+    for edge in incoming {
+        assert_eq!(
+            edge["from"]["observedRevision"],
+            selected["revisions"][edge["from"]["resource"]["resourceId"].as_str().unwrap()]
+        );
+        assert_eq!(
+            edge["to"]["observedRevision"],
+            selected["revisions"]["util.ts"]
+        );
+        assert_eq!(
+            edge["to"]["rangeRevision"],
+            selected["revisions"]["util.ts"]
+        );
+    }
+    let outgoing = results[4]["items"].as_array().unwrap();
+    if changed {
+        assert!(
+            outgoing.is_empty(),
+            "the changed implementation has no function call: {outgoing:?}"
+        );
+    } else {
+        let edge = outgoing
+            .iter()
+            .find(|edge| edge["to"]["name"] == "decorate")
+            .expect("original dependency calls decorate");
+        // Sites belong to the actual caller function, not an arbitrary target.
+        assert_eq!(edge["from"]["resource"]["resourceId"], "util.ts");
+        assert_eq!(edge["from"]["name"], "greet");
+        assert_eq!(
+            edge["from"]["observedRevision"],
+            selected["revisions"]["util.ts"]
+        );
+        assert_eq!(
+            edge["to"]["observedRevision"],
+            selected["revisions"]["util.ts"]
+        );
+        assert!(edge["fromRanges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|range| range["start"]["line"] == 1));
+        assert_eq!(
+            edge["from"]["rangeRevision"],
+            selected["revisions"]["util.ts"]
+        );
+    }
 }
 
 #[test]
@@ -762,7 +962,7 @@ fn materialized_typescript_dependencies_history_and_shared_process_stop_survive_
     review.f.host.send(json!({"kind":"fixture-finish"}));
     let finished = review.receive("fixture-finished");
     assert_eq!(finished["processSpawns"], 1);
-    assert_eq!(finished["sourceQueries"], 15);
+    assert_eq!(finished["sourceQueries"], 3 * SCRIPT_CALLS);
     let history = review
         .f
         .runtime
@@ -932,7 +1132,7 @@ fn fixed_typescript_project_revisions_share_only_their_view_and_query_again_afte
     review.f.host.send(json!({"kind":"fixture-finish"}));
     let finished = review.receive("fixture-finished");
     assert_eq!(finished["processSpawns"], 2);
-    assert_eq!(finished["sourceQueries"], 15);
+    assert_eq!(finished["sourceQueries"], 3 * SCRIPT_CALLS);
     let history = review
         .f
         .runtime
@@ -983,7 +1183,65 @@ fn fixed_typescript_project_revisions_share_only_their_view_and_query_again_afte
     reopened.f.host.send(json!({"kind":"fixture-finish"}));
     let finished = reopened.receive("fixture-finished");
     assert_eq!(finished["processSpawns"], 1);
-    assert_eq!(finished["sourceQueries"], 5);
+    assert_eq!(finished["sourceQueries"], SCRIPT_CALLS);
     drop(reopened);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+#[ignore = "requires bundled TypeScript and fresh Rust process worker; original live source over stdio"]
+fn live_typescript_rich_queries_keep_the_original_root_and_history_after_drain() {
+    let root = std::env::temp_dir().join(format!("varin-live-language-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let mut review = Review::open(&root);
+    let source = review.initialize(&root, "live_root", false);
+    assert_eq!(source["mode"], "live_root");
+    assert!(source["branch_id"].is_null());
+    let run = review.admit(source.clone(), "live-rich-language");
+    let (binding, selected) = review.select(&run, &source);
+    let results = review.execute(&run, binding.clone(), true);
+    assert_results(&results, &selected, &source, false);
+    assert!(results
+        .iter()
+        .all(|result| result["source"].get("derivedView").is_none()));
+    review
+        .f
+        .host
+        .send(json!({"kind":"fixture-drain","runId":run}));
+    review.receive("fixture-drained");
+    assert!(
+        review.root_idle(&binding),
+        "the original live process writer really stopped"
+    );
+    assert!(
+        root.join("workspace/main.ts").is_file(),
+        "live project is not a disposable derived view"
+    );
+    let owner = review.f.runtime.catalog();
+    let history = owner.lock().unwrap().execution_history(BRANCH).unwrap();
+    let collection = owner
+        .lock()
+        .unwrap()
+        .prepare_content_collection(Default::default());
+    assert_eq!(
+        collection.run().status,
+        varin_runtime::ContentCollectionStatus::Completed
+    );
+    review
+        .f
+        .host
+        .send(json!({"kind":"fixture-release","grantId":binding.grant_id}));
+    review.receive("fixture-released");
+    review.f.host.send(json!({"kind":"fixture-gc"}));
+    review.receive("fixture-gc-finished");
+    review.f.host.send(json!({"kind":"fixture-finish"}));
+    let finished = review.receive("fixture-finished");
+    assert_eq!(finished["sourceQueries"], SCRIPT_CALLS);
+    assert_eq!(finished["processSpawns"], 1);
+    drop(owner);
+    drop(review);
+    let catalog = Catalog::open(root.join("catalog")).unwrap();
+    assert_eq!(catalog.execution_history(BRANCH).unwrap(), history);
+    drop(catalog);
     std::fs::remove_dir_all(root).unwrap();
 }

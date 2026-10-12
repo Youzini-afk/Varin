@@ -691,8 +691,9 @@ The initial live AGENTS.md is read through Documents and its actual revision is 
 existing context checkpoint. Later disk changes remain live for file tools but do not retroactively
 rewrite that instruction checkpoint. Ordinary instruction/memory refresh retains its existing owner.
 
-Live, fixed and materialized selections expose `language_definition`, `language_references`, and
-`language_diagnostics`. Native tool contracts, grant admission and history remain in Rust;
+Live, fixed and materialized selections expose definition, references, diagnostics, hover, workspace
+symbols, hierarchical document symbols and one-query incoming/outgoing call hierarchy. Native tool
+contracts, names, grant admission and history remain in the original Rust declarations;
 `language-owner.ts` reads the exact original source through the shared `source-query.ts` owner and binds
 its text through the existing LanguageViewBinder and selected
 LanguageSupervisor. The private epoch-bound language bridge does not own another process, provider
@@ -709,7 +710,7 @@ directory-writer barrier. A notification/withdrawal ACK is not a stopped-process
 
 `runtime.source.tools` projects the original Rust declarations and source requirements. Source
 preparation and saved launch continuation consume that directory instead of maintaining parallel
-Host tool-name lists. Private wire 16 carries the original selection/root/grant, and result provenance
+Host tool-name lists. Private wire 17 carries the original selection/root/grant, and result provenance
 nests source selection separately from the queried document revision. Catalog 58 is unchanged.
 
 Fixed language views use the original Storage `file.materializedView.prepare/check/release` resource
@@ -743,20 +744,30 @@ Actual nonempty observations are retained and admitted, with `rangeRevision: nul
 file observation does not prove the diagnostics were computed from that revision. Omissions preserve
 pending verification rather than upgrading the observation to verified partial/clean.
 
+Hover markup remains literal provider data with its optional range. Symbols recursively retain their actual
+resource: only URI-less document nodes inherit the queried document, while an explicit rejected workspace
+URI cannot become a local symbol. The original supervisor's source call query keeps raw prepared items
+in query-local memory and sends them back only to that provider; it neither clears shared editor tokens
+nor exposes opaque data in tool history. Every relation RPC checks the invoking Run's source authority
+and signal after shared preparation, immediately before dispatch. Returned edges use `{from,to,fromRanges}`;
+site ranges belong to `from`, including when prepare at an import alias resolves to another file. Rust
+admits each resource and range using one query observation cache, without a generic JSON walker or a new
+permission registry. See the [language query review](../../../../../docs/reviews/runtime-language-queries-2026-10-12.md).
+
 Host replies are serialized and checked against the existing frame budget before touching the shared
 kernel writer. Oversized/nonserializable language replies become a small unavailable receipt. Language
 result chunking is not implemented. Oversized transient Rust progress is omitted before the shared
 writer; durable tool content remains available through existing chunked history reads. Transport loss
 still retires the actual private channel.
 
-Fixed-branch language selection remains explicitly unavailable. Materialized language queries use the
-actual working copy and explicitly report live dependencies; they do not pin external symlinks,
-project configuration outside the copy or compiler libraries. A workspace cwd and didOpen overlay
-do not establish a fixed dependency closure.
-
-The current physical-source behavior, actual TypeScript/Storage/history evidence and remaining
-child/fixed/platform limits are recorded in the
-[materialized language review](../../../../../docs/reviews/runtime-source-language-2026-10-12.md).
+Fixed-branch language queries use a Storage-derived captured project while their source identity remains
+the original branch/revision. Materialized queries use the actual working copy and report live dependencies.
+External symlinks, configuration outside the captured tree and compiler libraries remain provider-environment
+inputs; neither a workspace cwd nor a didOpen overlay is an OS sandbox. The
+[fixed language review](../../../../../docs/reviews/runtime-fixed-language-2026-10-12.md) records actual
+TypeScript, child, Storage/history and reopen evidence, including remaining platform and Worker settlement
+boundaries. The preceding [materialized review](../../../../../docs/reviews/runtime-source-language-2026-10-12.md)
+retains its historical verification scope.
 
 The native `run_launches` domain is format 3; current Catalog/content versions are recorded in the
 [runtime README](../../../../../kernel/crates/varin-runtime/README.md).

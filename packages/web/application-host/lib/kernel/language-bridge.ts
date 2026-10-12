@@ -11,9 +11,20 @@ const validQuery = (value: unknown): value is LanguageQuery => {
     || !record(value.source) || !['workspace_id','execution_workspace_id'].every(key => text(record(value.source) ? value.source[key] : undefined))
     || !['live_root','materialized','fixed_branch'].includes(String(value.source.mode))
     || !(value.physicalRoot === null || record(value.physicalRoot) && ['hostId','canonicalRoot','rootId'].every(key => text(record(value.physicalRoot) ? value.physicalRoot[key] : undefined)))
-    || !['definition','references','diagnostics'].includes(String(value.method))) return false;
-  return value.method === 'diagnostics' ? value.line === undefined && value.character === undefined
-    : [value.line,value.character].every(position => Number.isSafeInteger(position) && Number(position) >= 0);
+) return false;
+  const noPosition = value.line === undefined && value.character === undefined;
+  const position = [value.line, value.character].every(item => Number.isSafeInteger(item) && Number(item) >= 0 && Number(item) <= 4294967295);
+  switch (value.method) {
+    case 'definition': case 'references': case 'hover':
+      return position && value.query === undefined && value.direction === undefined;
+    case 'diagnostics': case 'document_symbols':
+      return noPosition && value.query === undefined && value.direction === undefined;
+    case 'workspace_symbols':
+      return noPosition && typeof value.query === 'string' && value.direction === undefined;
+    case 'call_hierarchy':
+      return position && value.query === undefined && (value.direction === 'incoming' || value.direction === 'outgoing');
+    default: return false;
+  }
 };
 /** Only private kernel frames reach this adapter. Calls never enter a serial Host queue. */
 export class LanguageBridge {
