@@ -5,7 +5,7 @@ import type { FamilyRunsParams, FamilyReadParams, FamilyItemParams, FollowupRegi
 import { PlanConflict } from './plan-service.js';
 import { parseThreadImages } from './thread-images.js';
 import type { Express, RequestHandler } from 'express';
-import type { ThreadIdentity, ThreadModel, ThreadSubmit, ThreadThinkingLevel, ThreadResearchAPI, ThreadResearchSelection, ThreadComputerAPI } from '@varin/application-client';
+import type { ThreadIdentity, ThreadModel, ThreadSubmit, ThreadThinkingLevel, ThreadResearchAPI, ThreadResearchSelection, ThreadComputerAPI, ThreadMaterialsAPI, ThreadMaterialReadRequest } from '@varin/application-client';
 import { ComputerError } from '../computer/computer-error.js';
 import { HarnessServiceError } from '../harness/service-error.js';
 import { KernelClientError } from './kernel-client.js';
@@ -65,8 +65,9 @@ const modelSelection = (value: unknown): ThreadModel => {
 };
 
 /** Mounted in the existing authenticated Application Host, shared by Web and Electron. */
-export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requireAuth: RequestHandler, research?: ThreadResearchAPI, computer?: ThreadComputerAPI): void {
+export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requireAuth: RequestHandler, research?: ThreadResearchAPI, computer?: ThreadComputerAPI, materials?: ThreadMaterialsAPI): void {
   const fields: Record<string, readonly string[]> = {
+    'materials/read': ['runtime', 'threadId', 'branchId', 'request'],
     'media/read': ['runtime', 'threadId', 'branchId', 'holder', 'partIndex', 'chunkIndex', 'expectedContentRef'],
     'computer/decide': ['runtime', 'threadId', 'branchId', 'requestId', 'expectedRevision', 'decision', 'key', 'reason'],
     'computer/state': ['runtime', 'threadId', 'branchId'],
@@ -171,6 +172,10 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       } finally { response.removeListener('close', closed); }
     });
   };
+  if (materials) {
+    // The material owner validates the request and derives its domain from the real Thread.
+    post('materials/read', (body, signal) => materials.read(identity(body), object(body.request) as ThreadMaterialReadRequest, signal));
+  }
   if (computer) {
     post('computer/decide', (body, signal) => computer.decide(identity(body), { requestId: text(body.requestId), expectedRevision: Number(body.expectedRevision), decision: body.decision as 'grant' | 'deny', key: text(body.key), ...(body.reason === undefined ? {} : { reason: body.reason as string }) }, signal));
     post('computer/state', (body, signal) => computer.state(identity(body), signal));

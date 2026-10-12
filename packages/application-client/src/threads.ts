@@ -1,3 +1,4 @@
+import type { DocumentReadRequest, FetchResult } from '@varin/protocol';
 import type { McpInteractionListParams, McpInteractionReadParams, McpInteractionRespondParams, McpInteractionPage, McpInteractionView, McpSamplingRequestReviewParams, McpSamplingOutputReviewParams } from '@varin/protocol';
 import type { MediaReadParams, MediaReadChunk } from '@varin/protocol';
 import type { ComputerAutomationProjection, ComputerAutomationState } from '@varin/protocol';
@@ -219,7 +220,13 @@ export interface ThreadComputerAPI {
    * An uncertain retry keeps the original key and decision; no Run is created by this command. */
   decide(identity: ThreadIdentity, request: { requestId: string; expectedRevision: number; decision: 'grant' | 'deny'; key: string; reason?: string }, signal?: AbortSignal): Promise<{ state: ComputerAutomationState }>;
 }
+/** Fixed retained material; authority is resolved by the Host from the real Thread. */
+export type ThreadMaterialReadRequest = Omit<DocumentReadRequest, 'path' | 'artifact' | 'snapshotId'> & { snapshotId: string };
+export interface ThreadMaterialsAPI {
+  read(identity: ThreadIdentity, request: ThreadMaterialReadRequest, signal?: AbortSignal): Promise<FetchResult>;
+}
 export interface ThreadsAPI {
+  materials: ThreadMaterialsAPI;
   computer: ThreadComputerAPI;
   research?: import('./research.js').ThreadResearchAPI;
   messages?: ThreadMessagesAPI;

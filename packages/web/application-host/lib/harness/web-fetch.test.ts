@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createWebFetch } from "./web-fetch.js";
 import type { SsrfPolicy, DomainPolicy } from "./web-fetch.js";
+import { createMaterialStoreFixture } from "./web-materials.test-helper.js";
 import type { WebFetchReceiptDraft } from "./web-fetch-receipt.js";
 
 // Minimal SSRF mock that blocks known private addresses
@@ -269,10 +270,15 @@ describe("web-fetch service", () => {
       signal: controller.signal,
     });
     await new Promise((resolve) => setImmediate(resolve));
+    let settled = false;
+    const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" }).then(() => { settled = true; });
     controller.abort(new DOMException("cancelled", "AbortError"));
-    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(settled).toBe(false);
     expect(service.cache.size).toBe(0);
     resolveBody("late body");
+    await rejected;
+    expect(service.cache.size).toBe(0);
   });
 
   it("returns redirect-cross-host for cross-domain redirects", async () => {
@@ -501,7 +507,8 @@ describe("web-fetch service", () => {
       text: () => body,
     });
     globalThis.fetch = mockFetch as never;
-    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy });
+    const opened = createMaterialStoreFixture();
+    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy, materials: opened.materials });
     const ctx = (sessionId: string, signal?: AbortSignal) => ({
       workspaceId: "ws",
       authority: { owningWorkspaceId: "ws", sessionId },
@@ -522,6 +529,7 @@ describe("web-fetch service", () => {
     expect(resultB.status).toBe("ok");
     if (resultB.status === "ok") expect(resultB.markdown).toContain("shared page body");
     expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect([...opened.records.values()].map(record => record.sessionId)).toEqual(["session-b"]);
   });
 
   it("aborts the shared request when the last waiter leaves", async () => {
@@ -542,11 +550,47 @@ describe("web-fetch service", () => {
       signal: controller.signal,
     });
     await new Promise((resolve) => setImmediate(resolve));
+    let settled = false;
+    const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" }).then(() => { settled = true; });
     controller.abort(new DOMException("cancelled", "AbortError"));
-    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
     await new Promise((resolve) => setImmediate(resolve));
-    expect(service.inflight.size).toBe(0);
+    expect(settled).toBe(false);
+    expect(service.inflight.size).toBe(1);
     resolveBody("late");
+    await rejected;
+    expect(service.inflight.size).toBe(0);
+  });
+
+  it("keeps its own snapshot commit alive through cancellation and reports persistence failures", async () => {
+    globalThis.fetch = vi.fn(async () => new Response("original body", { headers: { "content-type": "text/plain" } }));
+    const opened = createMaterialStoreFixture();
+    let start!: () => void;
+    const entered = new Promise<void>(resolve => { start = resolve; });
+    let finish!: () => void;
+    const release = new Promise<void>(resolve => { finish = resolve; });
+    const put = vi.fn(async (...args: Parameters<typeof opened.materials.put>) => {
+      start(); await release; return opened.materials.put(...args);
+    });
+    const service = createWebFetch({ ssrf: createMockSsrf(), materials: { ...opened.materials, put } });
+    const controller = new AbortController();
+    let settled = false;
+    const pending = service.fetch({ url: "https://example.com/commit" }, { ...fetchContext, signal: controller.signal })
+      .then(value => { settled = true; return value; });
+    await entered;
+    controller.abort();
+    await new Promise(resolve => setImmediate(resolve));
+    expect(settled).toBe(false);
+    finish();
+    const result = await pending;
+    expect(result.status === "ok" && result.snapshot?.snapshotId).toBeTruthy();
+    expect(put).toHaveBeenCalledOnce();
+    const failed = createWebFetch({ ssrf: createMockSsrf(), materials: {
+      ...opened.materials, put: async () => { throw Object.assign(new Error("original record writer failed"), { code: "storage-unavailable" }); },
+    } });
+    const unpinned = await failed.fetch({ url: "https://example.com/failure" }, fetchContext);
+    expect(unpinned).toMatchObject({ status: "ok", markdown: "original body",
+      snapshotError: { message: "original record writer failed", code: "storage-unavailable" } });
+    expect(unpinned.status === "ok" && unpinned.snapshot).toBeUndefined();
   });
 
   it("refresh bypasses the cache and the in-flight share", async () => {
@@ -719,6 +763,38 @@ describe("structured reading (D-315 L3)", () => {
 
     const badTable = await service.fetch({ snapshotId, position: { kind: "element", element: "table", index: 9 } }, fetchContext);
     expect(badTable.status).toBe("position-not-found");
+  });
+
+  it("finds literal webpage passages through URL, cache and fixed snapshots without changing the pinned body", async () => {
+    const { materials } = createMaterialStoreFixture();
+    globalThis.fetch = async () => new Response(structuredMarkdown, { headers: { "content-type": "text/plain" } });
+    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy, materials });
+    const url = "https://example.com/find";
+    const fetched = await service.fetch({ url, find: "mETHODS body" }, fetchContext);
+    if (fetched.status !== "ok") throw new Error("fetch failed");
+    expect(fetched.markdown).toContain('1 matching lines for "mETHODS body"');
+    expect(fetched.markdown).toContain("8: Methods body.");
+    expect(fetched.markdown).not.toContain("Appendix body.");
+    const cached = await service.fetch({ url, find: "mETHODS body" }, fetchContext);
+    const fixed = await service.fetch({ snapshotId: fetched.snapshot!.snapshotId, find: "mETHODS body" }, fetchContext);
+    expect(cached).toMatchObject({ status: "ok", markdown: fetched.markdown, fromCache: true });
+    expect(fixed).toMatchObject({ status: "ok", markdown: fetched.markdown, snapshot: fetched.snapshot });
+    const whole = await service.fetch({ snapshotId: fetched.snapshot!.snapshotId }, fetchContext);
+    expect(whole).toMatchObject({ status: "ok", markdown: structuredMarkdown, snapshot: fetched.snapshot });
+    for (const source of [{ url }, { snapshotId: fetched.snapshot!.snapshotId }]) {
+      for (const position of [{ kind: "lines" as const, startLine: 7, endLine: 14 }, { kind: "section" as const, title: "Methods" }]) {
+        const selected = await service.fetch({ ...source, position, find: "Methods body" }, fetchContext);
+        expect(selected).toMatchObject({ status: "ok", range: { startLine: 7, totalLines: 17 }, snapshot: fetched.snapshot });
+        if (selected.status !== "ok") throw new Error("selection failed");
+        expect(selected.markdown).toContain("Extracted page: 17 lines.");
+        expect(selected.markdown).toContain("8: Methods body.");
+        expect(selected.markdown).not.toContain("Intro body");
+      }
+    }
+    const invalid = { position: { kind: "lines" as const, startLine: 3, endLine: 1 } };
+    for (const source of [{ url }, { snapshotId: fetched.snapshot!.snapshotId }]) {
+      expect(await service.fetch({ ...source, ...invalid }, fetchContext)).toMatchObject({ status: "failed", reason: "endLine must be greater than or equal to startLine" });
+    }
   });
 
   it("applies a position slice on a URL fetch result", async () => {

@@ -1,13 +1,14 @@
 # 验收与证据
 
 Status: evidence navigation — 区分当前边界、当时的验证结果和待评估候选。
-Last updated: 2026-10-11
+Last updated: 2026-10-12
 
 [当前状态](../status.md)引用这里的结论，不复制长篇验证记录。每份记录以自身的基线和场景为准；
 本目录的存在不意味着本次文档整理重新运行了全部产品验收。
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [原 Web 工具与固定 PDF 材料（2026-10-12）](runtime-web-materials-2026-10-12.md) | 原搜索/材料/Thread grant、实际 PDF/typed 输出与公开 reader；共享取消、固定快照/重开及三条反例修复 |
 | [原 MCP sampling 双重审查（2026-10-11）](runtime-mcp-sampling-2026-10-11.md) | 原模型/凭据/Goal 计量、独立生成 Operation、两次公开 review、实际 HTTP/Task 及取消恢复；六处接缝修复 |
 | [原 MCP 错误来源 URL 交互（2026-10-11）](runtime-mcp-error-interactions-2026-10-11.md) | 原 RPC error/Task、零伪答复/重放、共享正文与公开消费者；迟到完成提交线和自然退休 |
 | [原 MCP 用户交互（2026-10-11）](runtime-mcp-interactions-2026-10-11.md) | 原 form/URL、HTTP/Task 关联、公开用户响应、真实 child/nested/policy 与取消/恢复证据 |

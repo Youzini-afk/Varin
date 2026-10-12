@@ -3021,3 +3021,7 @@ mod mcp_task_review;
 #[cfg(test)]
 #[path = "mcp_interaction_review.rs"]
 mod mcp_interaction_review;
+
+#[cfg(test)]
+#[path = "web_domain_review.rs"]
+mod web_domain_review;

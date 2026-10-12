@@ -19,6 +19,7 @@ export * from "./harness-followups.js";
 export * from "./harness-scheduled-tasks.js";
 export * from "./harness-compaction.js";
 export * from "./harness-web.js";
+export * from "./web-page-text.js";
 export * from "./harness-history.js";
 export * from "./harness-tools.js";
 export * from "./harness-todo.js";

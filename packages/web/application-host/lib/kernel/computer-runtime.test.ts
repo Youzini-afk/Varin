@@ -100,7 +100,7 @@ async function fixture(records = new Map<string, KernelRecordResult>()) {
   async function invoke(method: string, args: Record<string, unknown>, threadId = 'root', policy = false, signal = new AbortController().signal) {
     const declaration = COMPUTER_TOOL_DECLARATIONS.find(value => value.id === `varin.computer.${method}`)!;
     const runId = `${threadId}-run`;
-    const config = await computer.prepareConfiguration({ runId, threadId }, []);
+    const config = await computer.prepareConfiguration({ runId, threadId, source: null }, []);
     const origin: ToolOrigin = policy ? { kind: 'policy_action', action_id: `policy-${method}`, node_id: 'input' } : { kind: 'model_step', request_id: `model-${method}` };
     let receipt!: ToolExecutionReceipt;
     const content = await withToolInvocation({ owner, signal, authority: { callId: 'input', executorOwner: { kind: 'kernel' }, invocationId: 'controlled-invocation', runId, threadId,
@@ -266,12 +266,12 @@ test('human input marker remains unconfirmed after restart and a new helper cann
 test('the original null desktop configuration survives required binding preparation', async () => {
   const f = await fixture();
   try {
-    const original = await f.computer.prepareConfiguration({ runId: 'root-run', threadId: 'root' }, []);
+    const original = await f.computer.prepareConfiguration({ runId: 'root-run', threadId: 'root', source: null }, []);
     const declaration = COMPUTER_TOOL_DECLARATIONS[0]!;
     const identity = original(declaration);
     assert.equal(JSON.parse(identity!).defaultDesktopId, null);
     await f.computers.ensureLocal(); await f.computers.setDefaultDesktop('local-console'); await f.computers.prewarm('local-console');
-    const rebound = await f.computer.prepareConfiguration({ runId: 'root-run', threadId: 'root' }, [{ configurationIdentity: identity } as never]);
+    const rebound = await f.computer.prepareConfiguration({ runId: 'root-run', threadId: 'root', source: null }, [{ configurationIdentity: identity } as never]);
     assert.equal(rebound(declaration, identity), identity);
     assert.throws(() => rebound(declaration, null), /original Computer tool configuration/u);
   } finally { await f.cleanup(); }
@@ -281,12 +281,12 @@ test('a malformed Computer default is frozen only for its selected services whil
   const f = await fixture();
   try {
     const declaration = COMPUTER_TOOL_DECLARATIONS[0]!;
-    const original = (await f.computer.prepareConfiguration({ runId: 'root-run', threadId: 'root' }, []))(declaration);
+    const original = (await f.computer.prepareConfiguration({ runId: 'root-run', threadId: 'root', source: null }, []))(declaration);
     await writeFile(join(f.dataDir, 'computer-target.json'), '{broken', 'utf8');
-    const captured = await f.computer.prepareConfiguration({ runId: 'root-run', threadId: 'root' }, []);
+    const captured = await f.computer.prepareConfiguration({ runId: 'root-run', threadId: 'root', source: null }, []);
     assert.equal(captured({ ...declaration, id: 'example.independent.read' }), null);
     assert.throws(() => captured(declaration), SyntaxError);
-    const rebound = await f.computer.prepareConfiguration({ runId: 'root-run', threadId: 'root' }, [{ configurationIdentity: original } as never]);
+    const rebound = await f.computer.prepareConfiguration({ runId: 'root-run', threadId: 'root', source: null }, [{ configurationIdentity: original } as never]);
     assert.equal(rebound(declaration, original), original);
     await f.computers.setDefaultDesktop(null);
     assert.throws(() => captured(declaration), SyntaxError);

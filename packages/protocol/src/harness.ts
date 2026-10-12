@@ -353,6 +353,8 @@ export type FetchResult =
     receipt?: RetrievalUrlReceipt;
     /** Content-pinned snapshot when the Host material store is wired. */
     snapshot?: WebSnapshotRef;
+    /** Fetch succeeded, but durable material publication failed. No snapshot is claimed. */
+    snapshotError?: { message: string; code?: string };
     /** Original material reference, unaffected by a new text/structure analysis. */
     sourceSnapshot?: WebSnapshotRef;
     overview?: DocumentOverview;

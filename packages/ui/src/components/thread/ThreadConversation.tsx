@@ -1,3 +1,5 @@
+import { ThreadMaterials } from './ThreadMaterials';
+import { buildPdfMaterialCitationMarkdown } from '@/lib/pi-runtime/pdfMaterialCitation';
 import { ComputerAutomationSection } from '@/components/pi-session/ComputerAutomationSection';
 import { useComputerAutomation } from '@/stores/useComputerAutomation';
 import { ChildExecutions, ThreadExecutions } from './ThreadExecutions';
@@ -276,7 +278,12 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const previousHistory = historyView ? historyView.previous : snapshot?.historyPage.previous;
   const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, text, images, providerId, modelId, thinkingLevel, inputMode, preparedSource?.source]);
   const sourceCannotBeApplied = active && Boolean(preparedSource) && pendingInput.current?.fingerprint !== submissionFingerprint();
-  return <section className="flex h-full min-h-0 flex-col" aria-label="Thread conversation">
+  return <ThreadMaterials api={api.materials} identity={identity} onAddRegion={acceptsImages === false ? undefined : region => {
+    if (pendingAction.current) throw new Error('Wait for the current message before adding a PDF selection.');
+    setText(current => [current.trimEnd(), buildPdfMaterialCitationMarkdown(region.title, region)].filter(Boolean).join('\n\n'));
+    setImages(current => [...current, region.image]);
+    messageInput.current?.focus();
+  }}><section className="flex h-full min-h-0 flex-col" aria-label="Thread conversation">
     <div className="border-b px-4 py-2 text-xs text-muted-foreground">thread · {identity.threadId} · branch {identity.branchId.slice(-8)} · {run?.state ?? 'Ready'}{pause ? ' · Paused' : run?.waiting_on ? ` · ${run.waiting_on}` : ''}</div>
     <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-4">
       <div className="mx-auto flex max-w-3xl items-center gap-2">
@@ -456,5 +463,5 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         {run && launch?.startable && launch.requires_rebind && !pause && <Button type="button" variant="ghost" disabled={pending} onClick={() => void act(() => api.retryPreparation(run.id))}>Retry preparation</Button>}
       </div>
     </form>
-  </section>;
+  </section></ThreadMaterials>;
 }

@@ -1,7 +1,7 @@
 import type { JsonValue } from "@varin/extension-contract";
 import type { HostCapabilityHandler } from "@varin/extension-host";
-import { WebSnapshotReadError, type WebMaterialStore } from "../harness/web-materials.js";
-import { requireToolInvocation } from "./tool-invocation.js";
+import { WebSnapshotReadError, type WebMaterialStore, type WebSnapshotReadAuthority } from "../harness/web-materials.js";
+import { requireToolInvocation, type ToolInvocationAuthority } from "./tool-invocation.js";
 
 export const MATERIAL_SNAPSHOT_CAPABILITY = "materials.snapshot";
 
@@ -56,19 +56,17 @@ const parseReadInput = (params: JsonValue): MaterialSnapshotReadInput => {
 /** The capability reads already-stored text only. It never fetches, parses a
  * document, launches OCR, or changes a material record. Permissions and active
  * invocation identity come from the shared tool admission, not these inputs. */
-export function createMaterialToolOwner(materials: Pick<WebMaterialStore, "read">): HostCapabilityHandler {
+export function createMaterialToolOwner(materials: Pick<WebMaterialStore, "read">,
+  resolveAuthority: (invocation: ToolInvocationAuthority, signal: AbortSignal) => Promise<WebSnapshotReadAuthority>,
+): HostCapabilityHandler {
   return async (method, params, context): Promise<MaterialSnapshotReadResult> => {
     context.signal.throwIfAborted();
     const invocation = requireToolInvocation(context);
-    if (!invocation.source) throw new Error("Material snapshot reads require a Run source workspace");
     if (method !== "read") throw new Error(`Unknown material snapshot method: ${method}`);
     const input = parseReadInput(params);
     try {
-      const found = await materials.read(invocation.source.workspace_id, input.snapshotId, {
-        kind: "thread",
-        owningWorkspaceId: invocation.source.workspace_id,
-        threadId: invocation.threadId,
-      }, {
+      const authority = await resolveAuthority(invocation, context.signal);
+      const found = await materials.read(authority.owningWorkspaceId, input.snapshotId, authority, {
         byteRange: { offset: input.offset, length: input.maxBytes },
         ...(input.expectedContentHash === undefined ? {} : { expectedContentHash: input.expectedContentHash }),
         signal: context.signal,

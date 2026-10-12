@@ -1,4 +1,5 @@
 import React from 'react';
+import { ThreadMaterialLinks } from './ThreadMaterials';
 import type { OutputBody, OutputMediaHolder, StoredMedia } from '@varin/protocol';
 import { getRuntimeEndpointGeneration, readThreadMedia, ThreadRequestError, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import type { ThreadIdentity, ThreadsAPI } from '@varin/application-client';
@@ -66,6 +67,7 @@ function MediaView({ api, identity, holder, media, partIndex, host }: Scope & { 
 
 export function ThreadOutput({ api, identity, holder, output, messageId }: Scope & { output: OutputBody; messageId: string }) {
   return <div aria-label="Typed output">
+    <ThreadMaterialLinks data={output.data} />
     {output.parts.map((part, index) => part.kind === 'text'
       ? <MarkdownRenderer key={index} messageId={`${messageId}:${index}`} content={part.text} />
       : <ThreadMedia key={index} api={api} identity={identity} holder={holder} media={part.media} partIndex={index} />)}

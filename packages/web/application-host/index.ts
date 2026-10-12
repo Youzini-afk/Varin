@@ -1,3 +1,6 @@
+import { readHostSettingsSnapshot } from '@varin/pi-host/settings-authority';
+import { createWebRuntime, WEB_CAPABILITY } from './lib/kernel/web-runtime.js';
+import { createMaterialStorageAccess } from './lib/kernel/material-storage.js';
 import { createScriptRuntime, SCRIPT_CAPABILITY } from './lib/kernel/script-runtime.js';
 import { createNestedToolOwner, VARIN_RUNTIME_TOOLS_CAPABILITY } from './lib/kernel/nested-tool-owner.js';
 import { readHostHarnessSettings } from '@varin/pi-host/settings-authority';
@@ -38,7 +41,7 @@ import { createMcpTaskRecovery } from './lib/kernel/mcp-task-recovery.js';
 import { createMcpLease } from './lib/kernel/mcp-owner.js';
 import { createChildMcpPreparer } from './lib/kernel/mcp-child-preparation.js';
 import { createExtensionTools } from './lib/kernel/extension-tool-owner.js';
-import { createMaterialToolOwner, MATERIAL_SNAPSHOT_CAPABILITY } from './lib/kernel/material-tool-owner.js';
+import { MATERIAL_SNAPSHOT_CAPABILITY } from './lib/kernel/material-tool-owner.js';
 import { createIntegrationToolOwner, createIntegrationTargetOpener, createIntegrationReceiptReconciler, CHILD_INTEGRATION_CAPABILITY } from './lib/kernel/integration-tool-owner.js';
 import { createMcpHarnessServices } from './lib/harness/mcp-service.js';
 import { sharedHostCredentialAuthority } from '@varin/runtime-broker';
@@ -1926,6 +1929,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const desktopControlHolder = `desktop:${hostId}`;
   const scriptRuntimeOwner: { current?: ReturnType<typeof createScriptRuntime> } = {};
   const computerRuntimeOwner: { current?: ReturnType<typeof createComputerRuntime> } = {};
+  const webRuntimeOwner: { current?: ReturnType<typeof createWebRuntime> } = {};
   const resolveComputerWork = async (work: import('@varin/protocol').ComputerWorkRef) => {
     if (work.runtime === 'pi') return resolvePiComputerWork(threadRegistry, work.sessionId);
     if (!computerRuntimeOwner.current) throw new ComputerError('computer-owner-unavailable', 'The Agent Computer identity owner is unavailable');
@@ -2241,7 +2245,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // Source views own private kernel records, not user workspace recovery or disk mutations.
   const sourceViews = createSourceViewStore(createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter));
   const retrievalArtifacts = createRetrievalArtifactAccess(harnessWorkingStates);
-  const webMaterials = createWebMaterialStore(harnessWorkingStates);
+  const webMaterials = createWebMaterialStore(createMaterialStorageAccess({ kernel: kernelClient, storage: kernelStorageAdapter, legacy: harnessWorkingStates }));
   webMaterialAccess.put = webMaterials.put;
   webMaterialAccess.read = webMaterials.read;
   webMaterialAccess.findAnalysis = webMaterials.findAnalysis;
@@ -3020,13 +3024,22 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   }), liveSources.validate, createExtensionTools({runtime:extensionRuntime,kernel:kernelClient,prepareConfiguration: async (run, required) => {
     if (!scriptRuntimeOwner.current) throw new Error('Script tool preparation is unavailable');
     if (!computerRuntimeOwner.current) throw new ComputerError('computer-owner-unavailable', 'Computer tool preparation is unavailable');
-    return scriptRuntimeOwner.current.prepareConfiguration(await computerRuntimeOwner.current.prepareConfiguration(run, required));
+    if (!webRuntimeOwner.current) throw new Error('Web tool preparation is unavailable');
+    return webRuntimeOwner.current.prepareConfiguration(run, required,
+      await scriptRuntimeOwner.current.prepareConfiguration(await computerRuntimeOwner.current.prepareConfiguration(run, required)));
   },currentPolicy:async runId=>{
     const launch=await kernelClient.agentRuntimeRequest<import('./lib/kernel/protocol.generated.js').LaunchIntent|null,'runtime.launch.inspect'>('runtime.launch.inspect',{runId});
     const workspace=launch?.selection.source?await documentsAuthority.inspectWorkspace(launch.selection.source.workspace_id):undefined;
     const cwd=workspace?.root??mcpAgentDir;
     return readMcpHostPermissionPolicy(mcpAgentDir,cwd,Boolean(workspace)&&mcpHostProjectTrusted(mcpAgentDir,cwd));
   }}));
+  webRuntimeOwner.current = createWebRuntime({ runtime: agentRuntime, webFetch: webFetchService, documentReader, materials: webMaterials,
+    fetch: egressRuntime.fetch as typeof globalThis.fetch, readAuth: readPiAuthFile,
+    settings: async source => {
+      const root = source ? (await documentsAuthority.inspectWorkspace(source.workspace_id)).root : undefined;
+      return readHostSettingsSnapshot(mcpAgentDir, root, root !== undefined && mcpHostProjectTrusted(mcpAgentDir, root));
+    },
+  });
   const fileObservationOwner = new DocumentsFileObservationOwner(documentsAuthority, liveSources.validate,
     receiptId => fileObservations.changed(receiptId));
   const fileObservations = new FileObservationService(agentRuntime, fileObservationOwner,
@@ -3133,7 +3146,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (_error: Error) => console.error('[Research] Original job reconciliation requires attention'),
   });
   computerRuntimeOwner.current.start(error => console.error('[Computer] Native execution cleanup is unconfirmed:', error instanceof Error ? error.message : String(error)));
-  registerThreadRoutes(app, threads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), researchRuntime.user, computerRuntimeOwner.current.user);
+  registerThreadRoutes(app, threads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), researchRuntime.user, computerRuntimeOwner.current.user, webRuntimeOwner.current.user);
   registerAgentProfileRoutes(app, createAgentProfilesAPI({ settings: hostCredentialAuthority.globalSettingsAuthority,
     capabilities: signal => agentRuntime.childCapabilities(signal),
     onChanged: () => {
@@ -4250,7 +4263,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       }
     },
   });
-  const unregisterMaterialToolCapability=extensionRuntime.capabilities.register(MATERIAL_SNAPSHOT_CAPABILITY,createMaterialToolOwner(webMaterials));
+  const unregisterMaterialToolCapability = extensionRuntime.capabilities.register(MATERIAL_SNAPSHOT_CAPABILITY, webRuntimeOwner.current.snapshotCapability);
+  const unregisterWebCapability = extensionRuntime.capabilities.register(WEB_CAPABILITY, webRuntimeOwner.current.capability);
   const unregisterNestedToolCapability = extensionRuntime.capabilities.register(VARIN_RUNTIME_TOOLS_CAPABILITY, createNestedToolOwner(kernelClient));
   const unregisterScriptCapability = extensionRuntime.capabilities.register(SCRIPT_CAPABILITY, scriptRuntimeOwner.current.capability);
   const unregisterComputerCapability = extensionRuntime.capabilities.register(COMPUTER_CAPABILITY, computerRuntimeOwner.current.capability);
@@ -4809,6 +4823,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       if (ownsExtensionRuntime) await extensionRuntime.stop();
       unregisterPiRuntimeCapability();
       unregisterMaterialToolCapability();
+      unregisterWebCapability();
       unregisterChildIntegrationCapability();
       unregisterScheduleCapability();
       unregisterDocumentsCapability();

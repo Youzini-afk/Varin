@@ -4,6 +4,7 @@ import {
   VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
   VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION_ID,
   VARIN_BUILTIN_COMPUTER_EXTENSION_ID,
+  VARIN_BUILTIN_WEB_EXTENSION_ID,
   VARIN_BUILTIN_SCRIPT_EXTENSION_ID,
   VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION_ID,
   VARIN_BUILTIN_RETRIEVAL_KEYWORD_EXTENSION_ID,
@@ -37,6 +38,7 @@ export const resolveVarinBuiltinPackageRoot = (
 };
 
 export const VARIN_BUILTIN_EXTENSION_PACKAGE_ROOTS: ReadonlyMap<string, string> = new Map([
+  [VARIN_BUILTIN_WEB_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL("./builtin-packages/web/", import.meta.url)))],
   [VARIN_BUILTIN_SCRIPT_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL("./builtin-packages/scripts/", import.meta.url)))],
   [VARIN_BUILTIN_COMPUTER_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL("./builtin-packages/computer/", import.meta.url)))],
   [VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL("./builtin-packages/context-fragments/", import.meta.url)))],

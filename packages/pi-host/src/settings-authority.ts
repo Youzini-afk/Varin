@@ -18,6 +18,18 @@ export function readHostHarnessSettings(agentDir: string, configCwd: string, pro
   return mergeHarnessSettings(global.harness ?? {}, projectTrusted ? project.harness ?? {} : {});
 }
 
+/** Domain configuration read from the same revisioned files. An absent source
+ * reads only the user assets; a project is consulted only after Host trust. */
+export async function readHostSettingsSnapshot(agentDir: string, configCwd?: string, projectTrusted = false): Promise<PiSettingsSnapshot> {
+  const [global, project] = await Promise.all([
+    new JsonObjectFileEditor(join(agentDir, 'settings.json')).read(),
+    projectTrusted && configCwd ? new JsonObjectFileEditor(join(configCwd, '.pi', 'settings.json')).read()
+      : Promise.resolve({ document: {}, revision: 'unselected' }),
+  ]);
+  return { global: global.document, globalRevision: global.revision, project: project.document,
+    projectRevision: project.revision, projectTrusted: projectTrusted && configCwd !== undefined };
+}
+
 /** Original SettingsManager/file-lock authority, usable without constructing an AgentSession. */
 export async function settingsSnapshot(settings: SettingsManager, agentDir: string, cwd: string): Promise<PiSettingsSnapshot> {
   const [global, project] = await Promise.all([
