@@ -46,6 +46,17 @@ code. Native Vitest resolves those same imports to the original Host source, so 
 declarations or a mock implementation at runtime. `*.native.test.ts` still runs only through the
 [dedicated kernel acceptance entry](../../docs/development.md#repository-and-build-facts).
 
+The ordered extension-routing consumer check uses real settings controls, the original Web client,
+the authenticated Express Router and extension-routing file CAS, without a listener or kernel process.
+After preparing the shared dependencies, run it from the repository root:
+
+```bash
+node node_modules/vitest/vitest.mjs run --config packages/web/vitest.config.ts packages/web/src/api/extensions-routing-consumer.test.ts --maxWorkers=1
+```
+
+It covers reordering, missing members, Host/client reload, stale revision rejection, explicit empty
+selection versus automatic routing, and the existing single-provider and workspace rules.
+
 ## Generated blocks in the HTML entry points
 
 `index.html` and `mini-chat.html` paint the splash before any module is evaluated, so they cannot

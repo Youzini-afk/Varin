@@ -163,3 +163,12 @@ existing capability decisions, and never enables a new package. Its committed ap
 can survive cancellation and resume on restart. A selected artifact is distinct from actual Host or
 Surface activation. The [authored panel example](../../examples/extensions/agent-authored-panel/README.md)
 uses the same package, build, tool, view and disposal contracts as other extensions.
+
+
+`provideContextFragments(context, { sections }, { declareContract: true })` supplies a frozen
+`varin.context.fragments@1` declaration. Its manifest uses `VARIN_CONTEXT_FRAGMENTS_SERVICE`, including
+`contract.composition: "ordered"`, to allow explicit ordered routing. The body/method stays v1.
+Each provider owns its section names; identical names in different providers remain distinct.
+Instruction/data roles are preserved and the helper accepts no callback, model, network or mutable
+history input. An older undeclared provider can still be selected by the original single-provider
+rule, but joining a collection requires explicit metadata in its own authored manifest.

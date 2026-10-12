@@ -17,12 +17,15 @@ import {
 export function resolveDeclaredServiceRouting(
   catalog: VarinExtensionCatalogSnapshot, routing: VarinExtensionServiceRoutingSnapshot,
   serviceId: string, version: number, context?: VarinExtensionServiceRoutingContext, defaultProviderKey?: string,
+  composition?: "ordered",
 ) {
   const candidates = catalog.extensions.filter(entry => entry.desired.enabled && entry.manifest.entrypoints?.host
     && entry.manifest.provides?.services?.some(service => service.id === serviceId && service.version === version))
-    .map(entry => ({ providerKey: `${entry.manifest.id}:host:${serviceId}@${version}`, providerId: entry.manifest.id }));
+    .map(entry => ({ providerKey: `${entry.manifest.id}:host:${serviceId}@${version}`, providerId: entry.manifest.id,
+      ...(entry.manifest.provides!.services!.find(service => service.id === serviceId && service.version === version)!.contract?.composition
+        ? { composition: 'ordered' as const } : {}) }));
   return resolveVarinExtensionServiceRouting({ candidates, document: routing.document, serviceId, version,
-    ...(context ? { context } : {}), ...(defaultProviderKey ? { defaultProviderKey } : {}) });
+    ...(context ? { context } : {}), ...(defaultProviderKey ? { defaultProviderKey } : {}), ...(composition ? { composition } : {}) });
 }
 
 function methodNames(descriptor: VarinExtensionServiceProvision): string[] | null {
@@ -74,6 +77,7 @@ function serviceSummary(state: VarinExtensionHostStateSnapshot, serviceId: strin
       actual: entry.actual.filter(actual => actual.hostId === state.catalog.hostId && actual.realmKind === 'host')
         .map(actual => ({ status: actual.status, generation: actual.generation, codes: actual.diagnostics.map(diagnostic => diagnostic.code) })),
       contractStatus: descriptor.contract || descriptor.tool ? 'declared' as const : 'undeclared' as const,
+      ...(descriptor.contract?.composition ? { composition: descriptor.contract.composition } : {}),
       methods: methodNames(descriptor), events: descriptor.contract?.events ? Object.keys(descriptor.contract.events).sort() : null,
       requirements: structuredClone(entry.manifest.requires?.services ?? []),
     }];
@@ -90,11 +94,19 @@ function serviceSummary(state: VarinExtensionHostStateSnapshot, serviceId: strin
       : { status: 'unavailable', codes: ['selected_unavailable'] };
     return summary;
   }
-  const resolution = resolveDeclaredServiceRouting(state.catalog, state.routing, serviceId, version, scope.routing);
-  const active = providers.find(provider => provider.status === 'active' && provider.providerKey === resolution.providerKey
-    && currentDeclarationMatches(provider));
-  summary.selection = { status: resolution.status, codes: resolution.diagnostics.map(diagnostic => diagnostic.code),
-    ...(resolution.providerKey ? { providerKey: resolution.providerKey } : {}), ...(active ? { providerId: active.providerId } : {}) };
+  const resolution = resolveDeclaredServiceRouting(state.catalog, state.routing, serviceId, version, scope.routing, undefined, "ordered");
+  if (resolution.composition === 'ordered') {
+    const active = resolution.providerKeys?.map(key => providers.find(provider => provider.status === 'active'
+      && provider.providerKey === key && currentDeclarationMatches(provider)));
+    summary.selection = { status: resolution.status, codes: resolution.diagnostics.map(diagnostic => diagnostic.code),
+      composition: 'ordered', ...(resolution.providerKeys ? { providerKeys: resolution.providerKeys } : {}),
+      ...(active?.every(provider => provider !== undefined) ? { providerIds: active.map(provider => provider!.providerId) } : {}) };
+  } else {
+    const active = providers.find(provider => provider.status === 'active' && provider.providerKey === resolution.providerKey
+      && currentDeclarationMatches(provider));
+    summary.selection = { status: resolution.status, codes: resolution.diagnostics.map(diagnostic => diagnostic.code),
+      ...(resolution.providerKey ? { providerKey: resolution.providerKey } : {}), ...(active ? { providerId: active.providerId } : {}) };
+  }
   return summary;
 }
 

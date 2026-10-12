@@ -64,6 +64,13 @@ writing Pi session files or the Host harness's existing execution records.
   entire ancestor. A manual earlier boundary can select the original history. Personalization refresh
   stages unchanged/new candidates outside Catalog, preserves the admitted memory snapshot, and publishes
   against the captured active checkpoint. Failed, cancelled or stale candidates leave that checkpoint intact.
+- `composition::context` binds an explicitly ordered immutable collection of declared context transforms.
+  Each provider/content/section tuple retains its own identity and instruction/data provenance; equal
+  local section names from different providers do not collide. Replacing one member reuses unchanged
+  implementations, while accepted requests and persisted checkpoints keep their original bytes.
+  Host routing and exact-generation pins govern new preparation, including source-free children;
+  later provider withdrawal does not erase already admitted context. Pure application stays outside
+  Catalog and never calls extension code, retrieval or a model.
 - Automatic capacity preparation consumes existing user/trusted-project settings and the actual selected
   model capacity. Local estimates include serialized tools and text; unknown media costs remain unknown.
   A summary is an independent, tool-free Run with its own credential owner. Background preparation leaves
@@ -102,7 +109,7 @@ records typed dependencies in its manifests. Original publication protection spa
 the short identity/epoch/revision-checked commit. GC follows those dependencies from the existing
 history, input, operation, event, policy and request roots. Catalog retains only original metadata;
 byte reads, hash/base64 work and provider serialization stay outside its control lock. Catalog
-format **58**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **18** reject older internal
+format **59**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **19** reject older internal
 formats directly. These are distinct from policy service **4** and private script worker protocol **2**.
 
 `runtime.output.media.read` uses the original caller Thread/branch plus an actual history, queued
@@ -188,7 +195,8 @@ hydration run outside the owner. Model requests and policy nodes bind a `resourc
 their existing context identity. Reading requires the actual Run/origin/call and selected checkpoint.
 
 Resource refresh is a separate compare-and-swap boundary. It preserves summary/history anchor, ordinary
-memory snapshot, personalization identity and composition while replacing resource sections/provenance.
+memory snapshot and personalization identity while replacing resource sections/provenance. The Host
+prepares the current selected pure transforms in that same admitted scope; failure preserves the old checkpoint.
 An explicit input source change prepares its new resource context and commits both in the original input
 transaction. Repeated accepted input keys return the original receipt without validating a newer candidate. The Host
 uses the same command/launch contract through read-only `runtime.input.receipt` before preparing new

@@ -8,6 +8,7 @@ Last updated: 2026-10-12
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [有序纯 Context Transform](runtime-context-transforms-2026-10-12.md) | 原选择/配置作用域、真实 broker 与模型序列化、child ContextRead、取消和 GC 重开；有限跨层验收 |
 | [显式 Host 与 Surface 更新组](runtime-readiness-groups-2026-10-12.md) | 指定成员真实准备、原 Catalog 提交/取消、失败保旧与已选恢复；有限跨层证据 |
 | [Agent 产包与原扩展生命周期](runtime-authored-extensions-2026-10-12.md) | 原 Source/授权/Artifact 到 Model、Policy 与真实 Surface watch/mount；原资源归属/取消修复及有限验收 |
 | [原来源的更多只读语言查询](runtime-language-queries-2026-10-12.md) | hover、symbols、私有 call hierarchy 与实际 TypeScript 主/child/Policy、原回执/GC/重开；有限跨层验收 |

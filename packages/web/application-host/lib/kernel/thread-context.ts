@@ -23,10 +23,10 @@ export interface AdmittedContextScope {
   childProfile?: ChildSelectedProfile;
 }
 export interface ContextPreparer {
-  (identity: ThreadIdentity, source: ThreadSource | null, admitted: AdmittedContextScope): Promise<InitialContext>;
-  main(identity: ThreadIdentity, source: ThreadSource | null): Promise<InitialContext>;
-  refresh?(checkpoint: ContextCheckpoint): Promise<InitialContext>;
-  compact?(checkpoint: ContextCheckpoint): Promise<InitialContext>;
+  (identity: ThreadIdentity, source: ThreadSource | null, admitted: AdmittedContextScope, signal?: AbortSignal): Promise<InitialContext>;
+  main(identity: ThreadIdentity, source: ThreadSource | null, signal?: AbortSignal): Promise<InitialContext>;
+  refresh?(checkpoint: ContextCheckpoint, signal?: AbortSignal): Promise<InitialContext>;
+  compact?(checkpoint: ContextCheckpoint, signal?: AbortSignal): Promise<InitialContext>;
   forSource?(checkpoint: ContextCheckpoint, source: ThreadSource | null, signal?: AbortSignal): Promise<InitialContext>;
   refreshResources?(checkpoint: ContextCheckpoint, options?: ResourceRefreshOptions): Promise<InitialContext>;
 }
@@ -60,7 +60,8 @@ const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(va
  */
 export function createThreadContext(owners: ContextOwners): ContextPreparer {
   const authority = createAgentResourceAuthority();
-  const render = async (basis: ContextPersonalization, resources: ContextResources | undefined, updateMemory = false): Promise<InitialContext> => {
+  const render = async (basis: ContextPersonalization, resources: ContextResources | undefined, updateMemory = false, signal?: AbortSignal): Promise<InitialContext> => {
+    signal?.throwIfAborted();
     const catalog = await owners.personalization.catalog();
     const scopes: AgentMemoryScope[] = [{ kind: 'global' },
       ...(basis.projectId ? [{ kind: 'project' as const, id: basis.projectId }] : []),
@@ -79,8 +80,11 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
       profiles, memories: memorySnapshot.memories as AgentMemoryNote[],
     };
     const original = Object.fromEntries(basis.originalSections.map(section => [section.name, section.content]));
+    // projectRoot is the original admitted configuration namespace, never the execution cwd.
     const composition = owners.composition ? await owners.composition({ sessionId: basis.sessionId,
-      ...(basis.projectId ? { projectId: basis.projectId } : {}) }) : basis.contextComposition;
+      ...(basis.projectId ? { projectId: basis.projectId } : {}),
+      ...(resources?.snapshot.scope.projectRoot ? { workspaceId: resources.snapshot.scope.projectRoot } : {}) }, signal) : basis.contextComposition;
+    signal?.throwIfAborted();
     const { contextComposition: _oldComposition, ...provenance } = basis;
     const { runtime_identity: _profileIdentity, child_profile: _profileChild, ...personalized } = personalizeAgentSystemPrompt(original, context);
     return {
@@ -107,12 +111,12 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
     if (prepared.status !== 'ready') throw new ResourceScopeError(prepared);
     return prepared.snapshot;
   }, options);
-  const initial = async (identity: ThreadIdentity, source: ThreadSource | null, admitted: AdmittedContextScope): Promise<InitialContext> => {
-    const snapshot = await prepareResources(identity, source, admitted);
+  const initial = async (identity: ThreadIdentity, source: ThreadSource | null, admitted: AdmittedContextScope, signal?: AbortSignal): Promise<InitialContext> => {
+    const snapshot = await prepareResources(identity, source, admitted, signal ? { signal } : undefined);
     return render({ memorySnapshot: { revision: 0, memories: [] }, configurationDigest: '', mode: admitted.mode,
       threadRole: admitted.threadRole, revision: 0, sessionId: identity.threadId, projectId: admitted.projectId,
       originalSections: Object.entries({ ...sections(snapshot), ...(admitted.childProfile?.instructions ? { child_profile: admitted.childProfile.instructions } : {}) }).map(([name, content]) => ({ name, content })),
-      instructionSources: [...sources(snapshot), ...(admitted.childProfile?.preset_id ? [`agent.child-profile:${JSON.stringify({ catalogIdentity: admitted.childProfile.catalog_identity, presetId: admitted.childProfile.preset_id })}`] : [])] }, { source: resourceSource(source), snapshot }, true);
+      instructionSources: [...sources(snapshot), ...(admitted.childProfile?.preset_id ? [`agent.child-profile:${JSON.stringify({ catalogIdentity: admitted.childProfile.catalog_identity, presetId: admitted.childProfile.preset_id })}`] : [])] }, { source: resourceSource(source), snapshot }, true, signal);
   };
   const replaceResources = async (checkpoint: ContextCheckpoint, source: ThreadSource | null,
     options: ResourceRefreshOptions | undefined, retainSource: boolean): Promise<InitialContext> => {
@@ -131,7 +135,7 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
     const candidate = await render({ ...basis,
       originalSections: [...Object.entries(sections(snapshot)).map(([name, content]) => ({ name, content })),
         ...basis.originalSections.filter(section => section.name === 'child_profile')],
-      instructionSources: [...sources(snapshot), ...basis.instructionSources.filter(source => source.startsWith('agent.child-profile:'))] }, { source: retainSource ? previous.source : resourceSource(source), snapshot });
+      instructionSources: [...sources(snapshot), ...basis.instructionSources.filter(source => source.startsWith('agent.child-profile:'))] }, { source: retainSource ? previous.source : resourceSource(source), snapshot }, false, options?.signal);
     options?.signal?.throwIfAborted();
     // Resource publication does not acknowledge a newer memory note snapshot.
     return { ...candidate, memoryCheckpoint: checkpoint.proposal.memory_checkpoint };
@@ -144,17 +148,17 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
       if (!checkpoint.resources) throw new Error('Context has no frozen resource provenance');
       return replaceResources(checkpoint, resourceThreadSource(checkpoint.resources.source), options, true);
     },
-    async main(identity: ThreadIdentity, source: ThreadSource | null): Promise<InitialContext> {
+    async main(identity: ThreadIdentity, source: ThreadSource | null, signal?: AbortSignal): Promise<InitialContext> {
       return initial(identity, source, { mode: 'agent', threadRole: 'main',
-        projectId: source ? await owners.projectForWorkspace(source.workspaceId) ?? null : null });
+        projectId: source ? await owners.projectForWorkspace(source.workspaceId) ?? null : null }, signal);
     },
-    async compact(checkpoint: ContextCheckpoint): Promise<InitialContext> {
+    async compact(checkpoint: ContextCheckpoint, signal?: AbortSignal): Promise<InitialContext> {
       if (!checkpoint.personalization) throw new Error('Context has no frozen personalization provenance');
-      return render(checkpoint.personalization, checkpoint.resources, true);
+      return render(checkpoint.personalization, checkpoint.resources, true, signal);
     },
-    async refresh(checkpoint: ContextCheckpoint): Promise<InitialContext> {
+    async refresh(checkpoint: ContextCheckpoint, signal?: AbortSignal): Promise<InitialContext> {
       if (!checkpoint.personalization) throw new Error('Context has no frozen personalization provenance');
-      return render(checkpoint.personalization, checkpoint.resources);
+      return render(checkpoint.personalization, checkpoint.resources, false, signal);
     },
   });
 }

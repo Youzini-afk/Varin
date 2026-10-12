@@ -28,6 +28,8 @@ export interface VarinServiceEventContract {
 /** Optional declarative metadata. Absence is not an empty method/event contract. */
 export interface VarinExtensionServiceContract {
   participation?: 'provider' | 'transform' | 'decision' | 'observer';
+  /** Explicit selection order is part of this contract. Omission never implies collection support. */
+  composition?: 'ordered';
   methods: Record<string, VarinServiceMethodContract>;
   events?: Record<string, VarinServiceEventContract>;
 }
@@ -68,6 +70,7 @@ export interface VarinRuntimeServiceImplementation {
   /** Original owner observations. An empty array provides no lifecycle evidence. */
   actual: Array<{ status: VarinExtensionActualStatus; generation: number; codes: string[] }>;
   contractStatus: 'declared' | 'undeclared';
+  composition?: 'ordered';
   methods: string[] | null;
   events: string[] | null;
   /** Manifest dependency declarations, never inferred readiness or capability grants. */
@@ -91,6 +94,9 @@ export interface VarinRuntimeServiceSummary {
     status: 'resolved' | 'ambiguous' | 'unavailable' | 'stale';
     providerKey?: string;
     providerId?: string;
+    composition?: 'ordered';
+    providerKeys?: string[];
+    providerIds?: string[];
     codes: string[];
   };
 }
@@ -204,8 +210,9 @@ function schema(value: unknown): VarinContractSchema {
 }
 export function parseVarinExtensionServiceContract(value: unknown): VarinExtensionServiceContract {
   const raw = record(parseVarinToolJson(value), 'Service contract');
-  fields(raw, ['participation', 'methods', 'events'], 'Service contract');
+  fields(raw, ['participation', 'composition', 'methods', 'events'], 'Service contract');
   if (raw.participation !== undefined && !['provider', 'transform', 'decision', 'observer'].includes(String(raw.participation))) throw new Error('Service participation is invalid');
+  if (raw.composition !== undefined && raw.composition !== 'ordered') throw new Error('Service composition is invalid');
   const methods = Object.fromEntries(Object.entries(record(raw.methods, 'Service methods')).map(([name, value]) => {
     text(name, 'Method name');
     const method = record(value, 'Service method');
@@ -226,7 +233,7 @@ export function parseVarinExtensionServiceContract(value: unknown): VarinExtensi
       ...(event.source === undefined ? {} : { source: parseVarinContractSource(event.source) }),
     } satisfies VarinServiceEventContract];
   }));
-  return { methods, ...(events ? { events } : {}),
+  return { methods, ...(events ? { events } : {}), ...(raw.composition === undefined ? {} : { composition: 'ordered' as const }),
     ...(raw.participation === undefined ? {} : { participation: raw.participation as NonNullable<VarinExtensionServiceContract['participation']> }) };
 }
 
@@ -256,6 +263,14 @@ export function parseVarinRuntimeContractResult(value: unknown): VarinRuntimeCon
     requireValue(['resolved', 'ambiguous', 'unavailable', 'stale'].includes(String(selection.status)));
     strings(selection.codes);
     for (const key of ['providerId', 'providerKey']) if (selection[key] !== undefined) text(selection[key], key);
+    if (selection.composition !== undefined) requireValue(selection.composition === 'ordered');
+    for (const key of ['providerIds', 'providerKeys']) if (selection[key] !== undefined) strings(selection[key]);
+    if (selection.composition === 'ordered') {
+      requireValue(selection.providerId === undefined && selection.providerKey === undefined);
+      if (selection.providerKeys !== undefined) requireValue(new Set(selection.providerKeys as string[]).size === (selection.providerKeys as string[]).length);
+      if (selection.providerIds !== undefined) requireValue(Array.isArray(selection.providerKeys)
+        && (selection.providerIds as string[]).length === selection.providerKeys.length);
+    } else requireValue(selection.providerKeys === undefined && selection.providerIds === undefined);
     for (const value of list(item.instances)) {
       const instance = record(value, 'Service instance');
       for (const key of ['providerId', 'providerKey', 'extensionId', 'extensionVersion']) text(instance[key], key);
@@ -263,6 +278,7 @@ export function parseVarinRuntimeContractResult(value: unknown): VarinRuntimeCon
     }
     for (const value of list(item.implementations)) {
       const implementation = record(value, 'Service implementation');
+      if (implementation.composition !== undefined) requireValue(implementation.composition === 'ordered');
       const artifacts = record(implementation.artifacts, 'Implementation artifacts');
       for (const slot of ['selected', 'candidate']) if (artifacts[slot] !== null) {
         const artifact = parseVarinRuntimeSourceArtifact(artifacts[slot]);

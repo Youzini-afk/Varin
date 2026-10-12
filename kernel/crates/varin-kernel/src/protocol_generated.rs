@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 18;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 19;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -2781,11 +2781,9 @@ pub(crate) struct MemorySnapshot {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ContextComposition {
-    pub(crate) provider_id: String,
-    pub(crate) content_version: String,
     pub(crate) scope_id: String,
     pub(crate) selection_revision: i64,
-    pub(crate) sections: Vec<ContextFragment>,
+    pub(crate) transforms: Vec<ContextTransform>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2869,10 +2867,10 @@ pub(crate) struct KernelReviewFinding {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct ContextFragment {
-    pub(crate) name: String,
-    pub(crate) kind: String,
-    pub(crate) content: String,
+pub(crate) struct ContextTransform {
+    pub(crate) provider_id: String,
+    pub(crate) content_version: String,
+    pub(crate) sections: Vec<ContextFragment>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2922,6 +2920,14 @@ pub(crate) struct KernelVerificationInputIdentity {
     pub(crate) start_tree_hash: Option<String>,
     pub(crate) end_tree_hash: Option<String>,
     pub(crate) reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ContextFragment {
+    pub(crate) name: String,
+    pub(crate) kind: String,
+    pub(crate) content: String,
 }
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {

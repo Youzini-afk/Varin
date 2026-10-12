@@ -36,8 +36,8 @@ async function fixture() {
     { id: 1, scope: { kind: 'global' }, content: 'FROZEN NOTE', updatedAt: '2026-10-10T00:00:00Z' }] };
   // A user-only scope must not touch any workspace owner or the test runner's HOME.
   const resources = resourceScopeFixture(root, { withBranchStore: async () => { throw new Error('No workspace admitted'); } } as never);
-  const composition = vi.fn(async () => ({ providerId: 'context-provider', contentVersion: 'version', scopeId: identity.threadId,
-    selectionRevision: 1, sections: [{ name: 'contribution', kind: 'instruction', content: 'TRANSFORM APPLIES IN RUST' }] }));
+  const composition = vi.fn(async () => ({ scopeId: identity.threadId, selectionRevision: 1,
+    transforms: [{ providerId: 'context-provider', contentVersion: 'version', sections: [{ name: 'contribution', kind: 'instruction', content: 'TRANSFORM APPLIES IN RUST' }] }] }));
   const prepare = createThreadContext({ resources, composition, personalization: { catalog: async () => structuredClone(catalog) }, projectForWorkspace: async () => undefined });
   const context = await prepare.main(identity, null);
   return { root, agentDir, resources, prepare, context, composition, setCatalog: (value: AgentPersonalizationCatalog) => { catalog = value; } };

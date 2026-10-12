@@ -138,3 +138,14 @@ It is a trusted Surface-host transaction report, not a credential, durable windo
 proof that an entire screen is visible. Connected contribution consumers must finish their real
 mount preparation before the report; entrypoint activation without a mounted consumer proves only
 entrypoint readiness. Exact provider handles retain the existing generation handshake.
+
+
+Context fragments retain the author `describe` v1 declaration. `ServiceProvision.contract.composition:
+"ordered"` explicitly opts a provider into that contract's collection consumer; `multiple` alone
+does not. Original routing rules keep `providerKey`, or explicitly choose ordered `providerKeys`.
+The fields are mutually exclusive, repeated keys reject, and an empty list means no contribution.
+Every selected member is required; fallback, if enabled, chooses an entire lower-priority rule and
+never shortens a partially available collection. Equally ranked different orders conflict.
+Single-service invocation rejects any collection rule, including a one-member list. User single-value
+configuration and external extension assets are not rewritten. The routing document remains the same
+owner/schema with the additive rule shape, and inspection reports collection order separately.

@@ -19,6 +19,7 @@ test('existing context method contract survives manifest parsing without loading
     inputSchema: VARIN_CONTEXT_FRAGMENTS_CONTRACT.inputSchema,
     outputSchema: VARIN_CONTEXT_FRAGMENTS_CONTRACT.outputSchema,
   });
+  assert.equal(declaration.contract?.composition, 'ordered');
   assert.deepEqual(parseVarinExtensionServiceProvision(declaration), declaration);
   (declaration.contract!.methods.describe as VarinServiceMethodContract).outputSchema = false;
   assert.notEqual(VARIN_CONTEXT_FRAGMENTS_CONTRACT.outputSchema, false, 'parsed metadata is detached from the author declaration');
@@ -41,6 +42,14 @@ test('published manifest schema and runtime reject unsafe source locators and ma
     events: { changed: { schema: { type: 'string' } } },
   } });
   assert.equal(validate(valid), true);
+  const composed = structuredClone(valid);
+  const compositionContract = (composed.provides.services[0] as { contract: Record<string, unknown> }).contract;
+  Object.assign(compositionContract, { composition: 'ordered' });
+  assert.equal(validate(composed), true);
+  assert.doesNotThrow(() => parseVarinExtensionManifest(composed));
+  Object.assign(compositionContract, { composition: 'installation-order' });
+  assert.equal(validate(composed), false);
+  assert.throws(() => parseVarinExtensionManifest(composed));
   assert.doesNotThrow(() => parseVarinExtensionManifest(valid));
   const invalid = structuredClone(valid);
   (invalid.provides.services[0] as { contract: { methods: object } }).contract.methods = { read: { outputSchema: {} } };

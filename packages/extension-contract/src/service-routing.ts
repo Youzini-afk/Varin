@@ -19,13 +19,18 @@ export interface VarinExtensionServiceRoutingContext {
   workspaceId?: string;
 }
 
-export interface VarinExtensionServiceRoutingRule {
+interface ServiceRoutingRuleBase {
   allowFallback: boolean;
-  providerKey: string;
   scope: VarinExtensionServiceRoutingContext;
   serviceId: string;
   version: number;
 }
+
+/** A collection is explicit even when it contains zero or one provider. */
+export type VarinExtensionServiceRoutingRule = ServiceRoutingRuleBase & (
+  | { providerKey: string; providerKeys?: never }
+  | { providerKeys: string[]; providerKey?: never }
+);
 
 export interface VarinExtensionServiceRoutingDocument {
   revision: number;
@@ -55,11 +60,15 @@ export interface VarinExtensionServiceRoutingRuleRemoveRequest {
 }
 
 export interface VarinExtensionServiceRoutingCandidate {
+  composition?: "ordered";
   providerId: string;
   providerKey: string;
 }
 
 export interface VarinExtensionServiceRoutingResolution {
+  composition?: "ordered";
+  providerIds?: string[];
+  providerKeys?: string[];
   diagnostics: VarinExtensionDiagnostic[];
   matchedRule?: VarinExtensionServiceRoutingRule;
   providerId?: string;
@@ -124,9 +133,19 @@ export const parseVarinExtensionServiceRoutingRule = (value: unknown): VarinExte
   const raw = record(value);
   if (!raw) throw new Error("Service routing rule must be an object");
   if (typeof raw.allowFallback !== "boolean") throw new Error("Service routing rule allowFallback must be boolean");
+  if ((raw.providerKey === undefined) === (raw.providerKeys === undefined)) {
+    throw new Error("Service routing rule requires exactly one of providerKey or providerKeys");
+  }
+  let selection: { providerKey: string } | { providerKeys: string[] };
+  if (raw.providerKeys !== undefined) {
+    if (!Array.isArray(raw.providerKeys)) throw new Error("providerKeys must be an ordered array");
+    const providerKeys = raw.providerKeys.map(key => text(key, "providerKeys member"));
+    if (new Set(providerKeys).size !== providerKeys.length) throw new Error("providerKeys must not repeat a provider");
+    selection = { providerKeys };
+  } else selection = { providerKey: text(raw.providerKey, "providerKey") };
   return {
     allowFallback: raw.allowFallback,
-    providerKey: text(raw.providerKey, "providerKey"),
+    ...selection,
     scope: parseVarinExtensionServiceRoutingContext(raw.scope),
     serviceId: serviceId(raw.serviceId, "serviceId"),
     version: revision(raw.version, "version", false),
@@ -244,6 +263,8 @@ const routingDiagnostic = (code: string, message: string): VarinExtensionDiagnos
 
 export const resolveVarinExtensionServiceRouting = (options: {
   candidates: readonly VarinExtensionServiceRoutingCandidate[];
+  /** Only a concrete ordered-contract consumer may opt into collection resolution. */
+  composition?: "ordered";
   /** Distribution default, considered only after all applicable explicit routing rules. */
   defaultProviderKey?: string;
   context?: VarinExtensionServiceRoutingContext;
@@ -274,8 +295,8 @@ export const resolveVarinExtensionServiceRouting = (options: {
       peers.push(current);
       index += 1;
     }
-    const providerKeys = new Set(peers.map((rule) => rule.providerKey));
-    if (providerKeys.size > 1) {
+    const selections = new Set(peers.map(rule => JSON.stringify([rule.providerKeys ?? rule.providerKey, rule.allowFallback])));
+    if (selections.size > 1) {
       return {
         diagnostics: [routingDiagnostic(
           "service_selection_scope_conflict",
@@ -285,21 +306,30 @@ export const resolveVarinExtensionServiceRouting = (options: {
       };
     }
     const rule = peers[0] as VarinExtensionServiceRoutingRule;
-    const provider = candidates.find((candidate) => candidate.providerKey === rule.providerKey);
-    if (provider) {
-      return {
-        diagnostics,
-        matchedRule: rule,
-        providerId: provider.providerId,
-        providerKey: provider.providerKey,
-        status: "resolved",
+    if (rule.providerKeys !== undefined) {
+      if (options.composition !== "ordered") return { diagnostics: [...diagnostics, routingDiagnostic(
+        "service_selection_collection_required", `Ordered selection for ${id}@${version} requires its collection consumer`,
+      )], matchedRule: rule, composition: "ordered", providerKeys: rule.providerKeys, status: "unavailable" };
+      const selected = rule.providerKeys.map(key => candidates.find(candidate => candidate.providerKey === key));
+      if (selected.some(candidate => candidate && candidate.composition !== "ordered")) return {
+        diagnostics: [...diagnostics, routingDiagnostic("service_selection_composition_unsupported",
+          `Every selected provider must declare ordered composition for ${id}@${version}`)],
+        matchedRule: rule, composition: "ordered", providerKeys: rule.providerKeys, status: "unavailable",
       };
+      if (selected.every(candidate => candidate !== undefined)) return {
+        diagnostics, matchedRule: rule, composition: "ordered", providerKeys: rule.providerKeys,
+        providerIds: selected.map(candidate => candidate!.providerId), status: "resolved",
+      };
+      diagnostics.push(routingDiagnostic(rule.allowFallback ? "service_selection_fallback" : "service_selection_provider_unavailable",
+        `Selected providers ${rule.providerKeys.filter((_, index) => !selected[index]).join(", ")} are unavailable for ${id}@${version}`));
+      if (!rule.allowFallback) return { diagnostics, matchedRule: rule, composition: "ordered", providerKeys: rule.providerKeys, status: "unavailable" };
+    } else {
+      const provider = candidates.find(candidate => candidate.providerKey === rule.providerKey);
+      if (provider) return { diagnostics, matchedRule: rule, providerId: provider.providerId, providerKey: provider.providerKey, status: "resolved" };
+      diagnostics.push(routingDiagnostic(rule.allowFallback ? "service_selection_fallback" : "service_selection_provider_unavailable",
+        `Selected provider ${rule.providerKey} is unavailable for ${id}@${version}`));
+      if (!rule.allowFallback) return { diagnostics, matchedRule: rule, providerKey: rule.providerKey, status: "unavailable" };
     }
-    diagnostics.push(routingDiagnostic(
-      rule.allowFallback ? "service_selection_fallback" : "service_selection_provider_unavailable",
-      `Selected provider ${rule.providerKey} is unavailable for ${id}@${version}`,
-    ));
-    if (!rule.allowFallback) return { diagnostics, matchedRule: rule, providerKey: rule.providerKey, status: "unavailable" };
   }
   const defaultProvider = options.defaultProviderKey
     ? candidates.find(candidate => candidate.providerKey === options.defaultProviderKey) : undefined;

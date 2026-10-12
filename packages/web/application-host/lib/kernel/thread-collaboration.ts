@@ -382,7 +382,7 @@ export class ThreadCollaboration {
         if (child.trigger.kind !== 'dispatch' && (!checkpoint || !prepareContext.forSource)) throw new Error('Continuation context provenance is unavailable');
         const context = await waitWithSignal(checkpoint
           ? prepareContext.forSource!(checkpoint, source, signal)
-          : prepareContext(identity, source, { mode: 'agent', threadRole: 'worker', projectId: child.project_id, childProfile: child.selected_profile }), signal);
+          : prepareContext(identity, source, { mode: 'agent', threadRole: 'worker', projectId: child.project_id, childProfile: child.selected_profile }, signal), signal);
         let inputPreparation: InputResourcePreparation | undefined;
         if (child.trigger.kind === 'user_continuation') {
           const input = child.input as { text?: unknown } | string;

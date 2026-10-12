@@ -1098,6 +1098,7 @@
         "methods"
       ],
       "properties": {
+        "composition": { "enum": ["ordered"] },
         "participation": {
           "enum": [
             "provider",

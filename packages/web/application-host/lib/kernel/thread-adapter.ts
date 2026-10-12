@@ -113,7 +113,7 @@ export class ThreadAdapter {
         signal?.throwIfAborted();
         const checkpoint = await this.runtime.context(identity.branchId, signal);
         if (!checkpoint) return;
-        const context = await waitWithSignal(this.prepareContext!.refresh!(checkpoint), signal);
+        const context = await waitWithSignal(this.prepareContext!.refresh!(checkpoint, signal), signal);
         signal?.throwIfAborted();
         if (context.effectiveSystemPrompt === checkpoint.proposal.effective_system_prompt
           && JSON.stringify(context.instructionSources) === JSON.stringify(checkpoint.proposal.instruction_sources)
@@ -418,7 +418,7 @@ export class ThreadAdapter {
     await this.admitSource(source, identity);
     const model = await this.models.resolveModel(definition.target.model as ThreadModel);
     if (!this.prepareContext) throw new Error('Calendar context preparation is unavailable');
-    const initialContext = await this.prepareContext.main(identity, source);
+    const initialContext = await this.prepareContext.main(identity, source, signal);
     const skill = await this.skillInput(identity, initialContext.resources, preparation.instruction, signal);
     const childDispatch = this.prepareChildProfiles ? await this.prepareChildProfiles({ parent: {
       configuration: model.configuration, credential_scope: await model.credentialOwner.scope(),

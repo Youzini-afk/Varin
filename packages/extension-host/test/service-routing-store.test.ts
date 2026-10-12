@@ -42,6 +42,15 @@ test("service routing persists stable provider selections and rejects stale revi
       version: 1,
     });
     assert.deepEqual(removed.document.rules, []);
+    const ordered = await routes.upsertRule({ expectedRevision: removed.document.revision,
+      rule: { allowFallback: false, providerKeys: ["second", "first"], scope: { userId: "default" }, serviceId: "varin.context.fragments", version: 1 } });
+    const reopened = new ServiceRoutingStore({ hostId, storage: new ExtensionStorageStore(dataDir) });
+    assert.deepEqual((await reopened.read()).document, ordered.document);
+    const empty = await reopened.upsertRule({ expectedRevision: ordered.document.revision,
+      rule: { allowFallback: true, providerKeys: [], scope: { userId: "default" }, serviceId: "varin.context.fragments", version: 1 } });
+    assert.deepEqual(empty.document.rules[0]?.providerKeys, []);
+    assert.throws(() => reopened.upsertRule({ expectedRevision: empty.document.revision,
+      rule: { allowFallback: false, providerKeys: ["repeat", "repeat"], scope: { userId: "default" }, serviceId: "varin.context.fragments", version: 1 } }));
   } finally {
     await rm(dataDir, { force: true, recursive: true });
   }

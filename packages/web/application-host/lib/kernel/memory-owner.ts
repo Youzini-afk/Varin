@@ -28,7 +28,7 @@ export function createMemoryOwner(options: { personalization: AgentPersonalizati
         if (!checkpoint?.personalization || !options.prepareContext.refresh
           || checkpoint.personalization.sessionId !== admitted.sessionId || checkpoint.personalization.projectId !== admitted.projectId
           || checkpoint.personalization.mode !== admitted.mode) throw new AgentPersonalizationError('Context does not identify the admitted memory owner');
-        const context = await options.prepareContext.refresh(checkpoint);
+        const context = await options.prepareContext.refresh(checkpoint, signal);
         const state = await options.personalization.runtimeState();
         signal.throwIfAborted();
         return { status: 'ready', context, state: { revision: state.catalog.revision,

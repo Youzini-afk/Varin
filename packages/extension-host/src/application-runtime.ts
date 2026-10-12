@@ -62,6 +62,12 @@ import { ExtensionStorageError } from "./errors.js";
 import { ExtensionStorageStore } from "./storage-store.js";
 import { WorkbenchProfileStore } from "./workbench-profile-store.js";
 
+export interface HostServicePreparationOptions { defaultProviderKey?: string; expectedRoutingRevision?: number }
+export interface PreparedHostServiceCollection {
+  readonly bindings: readonly HostServiceBinding[];
+  readonly routingRevision: number;
+}
+
 export interface ApplicationExtensionRuntimeOptions {
   brokerScript: string;
   brokerShutdownGraceMs?: number;
@@ -192,6 +198,13 @@ export class ApplicationExtensionRuntime {
       if (revision === this.#revision) return queryRuntimeContracts({ catalog, services, routing, workbench, revision }, request, scope,
         owner => this.supervisor.getRetainedArtifactIdentity(owner));
     }
+  }
+
+  /** A stable preparation-cache token only outside original lifecycle mutations. It never
+   * snapshots or activates the catalog, and is not a second selection/configuration revision. */
+  get preparationRevision(): number | undefined {
+    if (this.#stopped) throw new Error("Application extension runtime is stopped");
+    return this.#mutations.size === 0 ? this.#revision : undefined;
   }
 
   subscribe(listener: () => void): () => void {
@@ -522,37 +535,58 @@ export class ApplicationExtensionRuntime {
    * Routing remains owned by ServiceRoutingStore; the returned handle is not another selection store.
    * Callers with a frozen exchange can pin the handle and must release it when that exchange settles.
    */
-  async prepareService(request: VarinExtensionServiceInvocationRequest | unknown, options?: { defaultProviderKey?: string; expectedRoutingRevision?: number }): Promise<HostServiceBinding> {
+  async prepareService(request: VarinExtensionServiceInvocationRequest | unknown, options?: HostServicePreparationOptions): Promise<HostServiceBinding> {
+    return (await this.#prepareServices(request, options, false)).bindings[0]!;
+  }
+
+  /** Explicit ordered-contract consumer. Never changes the ordinary service invocation shape. */
+  prepareServiceCollection(request: VarinExtensionServiceInvocationRequest | unknown,
+    options?: HostServicePreparationOptions): Promise<PreparedHostServiceCollection> {
+    return this.#prepareServices(request, options, true);
+  }
+
+  async #prepareServices(request: VarinExtensionServiceInvocationRequest | unknown,
+    options: HostServicePreparationOptions | undefined, collection: boolean): Promise<PreparedHostServiceCollection> {
     if (this.#stopped) throw new Error("Application extension runtime is stopped");
     const parsed = parseVarinExtensionServiceInvocationRequest(request);
-    if (parsed.providerId) return this.services.bind(parsed.serviceId, parsed.version, parsed.providerId);
+    if (parsed.providerId && !collection) return { bindings: [this.services.bind(parsed.serviceId, parsed.version, parsed.providerId)], routingRevision: 0 };
     const [catalog, routing] = await Promise.all([this.catalog.snapshot(), this.routing.read()]);
     if (!catalog.authoritative || !routing.authoritative) throw new Error("Cannot prepare a Host service from stale selection state");
     if (options?.expectedRoutingRevision !== undefined && routing.document.revision !== options.expectedRoutingRevision) {
       throw new Error("Host service routing changed during preparation");
     }
-    const legacySelection = this.services.getSnapshot().selections[`${parsed.serviceId}@${parsed.version}`];
-    if (legacySelection) return this.services.bind(parsed.serviceId, parsed.version, legacySelection);
+    const result = (bindings: HostServiceBinding[]): PreparedHostServiceCollection => ({ bindings, routingRevision: routing.document.revision });
+    const explicit = parsed.providerId ?? this.services.getSnapshot().selections[`${parsed.serviceId}@${parsed.version}`];
+    if (explicit) return result([this.services.bind(parsed.serviceId, parsed.version, explicit)]);
     const resolution = resolveDeclaredServiceRouting(catalog, routing, parsed.serviceId, parsed.version,
-      parsed.routing, options?.defaultProviderKey);
-    if (resolution.status !== "resolved" || !resolution.providerId || !resolution.providerKey) {
+      parsed.routing, options?.defaultProviderKey, collection ? 'ordered' : undefined);
+    if (resolution.status !== "resolved") {
       throw new HostServiceBindingError(resolution.status === "ambiguous" ? "ambiguous"
         : resolution.matchedRule ? "selected_unavailable" : "missing",
         resolution.diagnostics.map(diagnostic => diagnostic.message).join("; ") || "Host service provider is unavailable");
     }
-    // Prepare only the selected root and its declared dependencies, never every installed provider.
-    await this.#ensureBuiltinArtifact(resolution.providerId);
-    await this.supervisor.activateExtension(resolution.providerId);
+    const ids = resolution.providerIds ?? (resolution.providerId ? [resolution.providerId] : []);
+    const keys = resolution.providerKeys ?? (resolution.providerKey ? [resolution.providerKey] : []);
+    // Independent selected roots reuse the original supervisor's preparation identities. The
+    // consumer may cancel its wait without destroying preparation shared with another caller.
+    await Promise.all(ids.map(async id => {
+      await this.#ensureBuiltinArtifact(id);
+      await this.supervisor.activateExtension(id);
+    }));
     if (this.#stopped) throw new Error("Application extension runtime is stopped");
     const currentRouting = await this.routing.read();
     if (!currentRouting.authoritative || currentRouting.document.revision !== routing.document.revision) {
       throw new Error("Host service routing changed during preparation");
     }
-    const provider = this.services.getSnapshot().providers.find(candidate => candidate.status === "active"
-      && candidate.providerKey === resolution.providerKey);
-    if (!provider) throw new HostServiceBindingError("selected_unavailable", "Selected Host service provider did not become ready");
-    this.#publish();
-    return this.services.bind(parsed.serviceId, parsed.version, provider.providerId);
+    const providers = this.services.getSnapshot().providers;
+    const bindings = keys.map(key => {
+      const provider = providers.find(candidate => candidate.status === "active" && candidate.providerKey === key);
+      if (!provider) throw new HostServiceBindingError("selected_unavailable", "Selected Host service provider did not become ready");
+      return this.services.bind(parsed.serviceId, parsed.version, provider.providerId);
+    });
+    // Registry/supervisor lifecycle owners publish actual changes. A pure binding read must
+    // not invalidate otherwise unchanged preparation caches in another scope.
+    return result(bindings);
   }
 
   setServiceSelection(requestValue: VarinExtensionServiceSelectionRequest | unknown): Promise<VarinExtensionHostStateSnapshot> {
