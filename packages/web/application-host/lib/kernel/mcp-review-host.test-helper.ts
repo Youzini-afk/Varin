@@ -121,7 +121,7 @@ createInterface({input:process.stdin}).on('line',line=>{const q=JSON.parse(line)
     environmentId: 'fixture-host:global', executionScope: 'global', projectTrusted: false,
     sessionId: 'agent:thread' }, () => changed?.());
   recover = createMcpTaskRecovery({ kernel, authority, agentDir, hostId: 'fixture-host',
-    inspectWorkspace: async () => { throw new Error('Source-less task acquired an unrelated workspace'); },
+    admitWorkspaceRegistration: async () => { throw new Error('Source-less task acquired an unrelated workspace'); },
     projectTrusted: () => false, validateLiveSource: async () => { throw new Error('Source-less task acquired a live source'); },
   });
   let original = scope.snapshot();

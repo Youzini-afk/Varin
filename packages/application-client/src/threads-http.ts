@@ -1,11 +1,11 @@
 import { parseComputerAutomationProjection, parseComputerAutomationState } from '@varin/protocol';
-import type { ThreadsAPI } from './threads.js';
+import { threadSourceFailureMessage, type ThreadsAPI } from './threads.js';
 import { runtimeFetch } from './transport/runtime-fetch.js';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointWillChange } from './transport/runtime-switch.js';
 
 export class ThreadRequestError extends Error {
   constructor(readonly status: number, readonly code: string, readonly admission?: 'not_started') {
-    super(`Thread request failed (${status})`);
+    super(threadSourceFailureMessage(code) ?? `Thread request failed (${status})`);
     this.name = 'ThreadRequestError';
   }
 }

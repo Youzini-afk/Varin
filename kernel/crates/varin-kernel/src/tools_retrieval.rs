@@ -285,6 +285,8 @@ struct Snippet {
 #[derive(Deserialize)]
 struct Reply {
     status: String,
+    #[serde(rename = "sourceFailure")]
+    source_failure: Option<varin_runtime::catalog::launches::SourceFailureCode>,
     plan: Option<Plan>,
     source: Option<varin_runtime::catalog::launches::SourceSelection>,
     #[serde(rename = "physicalRoot")]
@@ -499,6 +501,9 @@ impl KernelToolExecutor {
             reply.snippets.clear();
         }
         let content_status = matches!(reply.status.as_str(), "ready" | "empty" | "partial");
+        if reply.source_failure.is_some() && (content_status || !reply.snippets.is_empty()) {
+            return Err(invalid());
+        }
         if reply.plan.is_some() != reply.source.is_some()
             || (content_status && reply.plan.is_none())
         {
@@ -541,15 +546,15 @@ impl KernelToolExecutor {
         }) {
             return Err(invalid());
         }
-        let source_message = (self.binding.source_mode != SourceMode::LiveRoot
+        let source_message = reply.source_failure.map(|code| code.message()).or_else(|| (self.binding.source_mode != SourceMode::LiveRoot
             && reply.plan.as_ref().is_some_and(|plan| plan.stages.iter().any(|stage|
                 stage.kind == "semantic" && stage.status == "unsupported")))
-            .then_some("Semantic retrieval is unsupported for this source view. Use keyword and source-local syntax evidence, or select a live source for the configured semantic index.");
+            .then_some("Semantic retrieval is unsupported for this source view. Use keyword and source-local syntax evidence, or select a live source for the configured semantic index."));
         // Reconstructed spans can be much larger than untrusted Host content. Bound the
         // complete projection by the existing wire-derived content budget, reserving 64
         // bytes for three growing safe-integer counters and the final status spelling.
         let metadata_size = serde_json::to_vec(&json!({"status":&reply.status,"snippets":[],
-            "source":&reply.source,"physicalRoot":&reply.physical_root,"message":source_message,"omissions":&reply.omissions}))
+            "source":&reply.source,"physicalRoot":&reply.physical_root,"message":source_message,"error":reply.source_failure.map(|code| code.as_str()),"omissions":&reply.omissions}))
         .map_err(|_| invalid())?
         .len();
         let mut output_budget = crate::protocol::MAX_BLOB_RESPONSE_BYTES
@@ -700,6 +705,7 @@ impl KernelToolExecutor {
         let mut result =
             json!({"status":reply.status,"snippets":snippets,"omissions":reply.omissions});
         if let Some(message) = source_message { result["message"] = json!(message); }
+        if let Some(code) = reply.source_failure { result["error"] = json!(code.as_str()); }
         if let Some(source) = reply.source {
             result["source"] = json!(source);
             result["physicalRoot"] = json!(reply.physical_root);

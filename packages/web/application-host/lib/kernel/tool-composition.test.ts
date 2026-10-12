@@ -285,6 +285,10 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
     undefined,
     undefined,
     preparer,
+    async (id, signal) => {
+      signal?.throwIfAborted();
+      expect(['workspace', 'execution']).toContain(id);
+    },
   );
   return {
     runtime,

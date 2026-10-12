@@ -64,7 +64,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const documents = createDocumentAuthority({ hostId: 'http-review', dataDir: path.join(root, 'documents'), isAllowedRoot: async () => true, isTrusted: async () => true });
   const storage = new KernelStorageAdapter({ client: kernel, hostId: 'http-review', storageRoot: root, resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root });
   const workingStates = createKernelWorkspaceWorkingStateAccess(storage);
-  const resources = resourceScopeFixture(root, workingStates, documents);
+  const resources = resourceScopeFixture(root, workingStates, documents, undefined, (input, consume) => storage.withResourceRead(input, consume));
   const prepare = createThreadSourcePreparer({ documents, workingStates, prepareResources: resources.prepareSourceCapture });
   const personalization = createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'selected-project' }) });
   const prepareContext = createThreadContext({ personalization, resources, projectForWorkspace: async () => 'selected-project' });
@@ -116,7 +116,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result})+'\\n')
     } else lease=await mcp.acquire(scope(input.threadId), { servers: selectedServers==='composed'?[]:selectedServers, ...(signal ? { signal } : {}) });
     const tracked = { ...lease, callTool: async (...args: Parameters<typeof lease.callTool>) => { transportTrace.push({ stage: 'enter', run: input.runId }); try { const result = await lease.callTool(...args); transportTrace.push({ stage: 'returned', run: input.runId }); return result; } catch (error) { transportTrace.push({ stage: 'error', error: String(error), run: input.runId }); throw error; } } };
     return createMcpLease({ lease: tracked, kernel, currentPolicy: async () => ({ mode: 'normal', rules: [] }) });
-  });
+  }, undefined, undefined, undefined, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal));
   const adapter = new ThreadAdapter(runtime, {
     resolveModel: async selection => {
       if (selection.providerId !== 'fixture-provider' || selection.modelId !== 'fixture-model') throw new Error('unselected model');

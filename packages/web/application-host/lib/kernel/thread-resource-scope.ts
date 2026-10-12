@@ -1,3 +1,4 @@
+import { sourceFailureCode } from './source-admission-error.js';
 /** Host admission and original-source capture for instruction/skill resources.
  * WorkingState/Storage owns source bytes and receipts; this module owns no mutable catalog. */
 import { randomUUID } from 'node:crypto';
@@ -35,7 +36,7 @@ export interface ResourceSourceReadInput {
 export interface ResourceSourceReadView {
   store: Pick<WorkingStateRootStore, 'readPath' | 'listPaths' | 'readContent'>;
   pin: WorkingStatePinnedRoot;
-  original: WorkingOriginalSource | null;
+  readOriginalSource(): Promise<WorkingOriginalSource | null>;
   admitSymlinkTarget?(finalPath: string): Promise<void>;
 }
 export interface ThreadResourceScopeOptions {
@@ -55,7 +56,7 @@ export interface ThreadResourceScope {
 export interface ThreadResourceScopeOwners {
   agentDir: string;
   homeDir?: string;
-  documents: Pick<DocumentAuthority, 'inspectWorkspace' | 'readSnapshot'>;
+  documents: Pick<DocumentAuthority, 'inspectWorkspace' | 'readSnapshot' | 'admitWorkspaceRegistration'>;
   workingStates: WorkspaceWorkingStateRootAccess;
   validateLiveSource: LiveSourceResolver;
   projectTrusted(root: string): boolean | Promise<boolean>;
@@ -63,7 +64,7 @@ export interface ThreadResourceScopeOwners {
   resolvePrimaryWorktreeRoot?(directory: string): Promise<{ root: string }>;
   configuration(root?: string): Promise<{ packages: InstalledAgentResourcePackage[] }>;
   /** Existing Storage authority, readonly grant and exact branch/view. No physical root or effect methods. */
-  withSourceRead?<T>(input: ResourceSourceReadInput, consume: (view: ResourceSourceReadView) => Promise<T>): Promise<T>;
+  withSourceRead<T>(input: ResourceSourceReadInput, consume: (view: ResourceSourceReadView) => Promise<T>): Promise<T>;
 }
 const normalize = (value: string) => relativeResourcePath(value);
 const sorted = (values: Iterable<string>) => [...new Set(values)].sort();
@@ -503,6 +504,10 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
     const selected = request && request.kind !== 'instruction-scope' ? snapshot.skills.find(skill => skill.id === request.resourceId) : undefined;
     const authorize = async () => {
       signal?.throwIfAborted();
+      if (source && source.mode !== 'live_root') {
+        await owners.documents.admitWorkspaceRegistration(source.workspaceId, signal);
+        if (source.executionWorkspaceId !== source.workspaceId) await owners.documents.admitWorkspaceRegistration(source.executionWorkspaceId, signal);
+      }
       if (selected?.requiresProjectTrust) {
         if (!snapshot.scope.projectRoot) throw new ResourceScopeError(resourceFailure({ domainId: 'agent-resources', viewId: snapshot.id }, '', 'invalid', 'Resource trust has no original configuration root'));
         if (!await owners.projectTrusted(snapshot.scope.projectRoot)) throw new ResourceScopeError(resourceFailure({ domainId: 'agent-resources', viewId: snapshot.id }, '', 'denied', 'Project resource trust was revoked'));
@@ -527,11 +532,12 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
       const unavailable = (target: string) => resourceFailure(declared, target, 'unavailable', 'Resource dependency was not captured in an available original view');
       const access = async <T extends ResourceFileResult | ResourceDirectoryResult>(target: string, action: (reader: ResourceReader) => Promise<T>): Promise<T> => {
         signal?.throwIfAborted();
-        if (declared.consistency !== 'immutable' || !source || source.mode === 'live_root' || !owners.withSourceRead) return unavailable(target) as T;
+        if (declared.consistency !== 'immutable' || !source || source.mode === 'live_root') return unavailable(target) as T;
         try {
           const paths = requestPaths();
           if (!paths.length) return unavailable(target) as T;
-          return await owners.withSourceRead({ identity, source, paths, ...(options.runId ? { runId: options.runId } : {}), ...(signal ? { signal } : {}) }, async ({ store, pin, original, admitSymlinkTarget }) => {
+          return await owners.withSourceRead({ identity, source, paths, ...(options.runId ? { runId: options.runId } : {}), ...(signal ? { signal } : {}) }, async ({ store, pin, readOriginalSource, admitSymlinkTarget }) => {
+            const original = await readOriginalSource();
             const capture = original?.provenance.resources;
             const base = createPinnedResourceReader({ domainId: `workspace:${source.workspaceId}`, store, pin, coverage: capture?.coverage ?? noCoverage(),
               ...(request?.kind === 'instruction-scope' && admitSymlinkTarget ? { admitSymlinkTarget } : {}) });
@@ -573,6 +579,10 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
       const result = await consume({ admittedScope: scope, readers: domainReaders(scope) });
       signal?.throwIfAborted();
       if (source?.mode === 'live_root') await owners.validateLiveSource(source, signal);
+      else if (source) {
+        await owners.documents.admitWorkspaceRegistration(source.workspaceId, signal);
+        if (source.executionWorkspaceId !== source.workspaceId) await owners.documents.admitWorkspaceRegistration(source.executionWorkspaceId, signal);
+      }
       if (scope.projectTrusted && scope.project?.displayRoot && !await owners.projectTrusted(scope.project.displayRoot)) {
         throw new ResourceScopeError(resourceFailure({ domainId: 'agent-resources', viewId: options.snapshot?.id ?? 'admission' }, '', 'denied', 'Project resource trust was revoked'));
       }
@@ -601,26 +611,25 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
         return finish();
       }, 'shared', { threadId: identity.threadId });
     }
-    return owners.workingStates.withBranchStore(source.workspaceId, 'resource-fixed-scope', async store => {
-      const pin = await store.pinBranch(source.branchId, { revision: source.revision, ...(signal ? { signal } : {}) });
-      try {
-        const original = await store.readOriginalSource(source.branchId, signal ? { signal } : {});
-        const capture = original?.provenance.resources;
-        const root = capture?.root ?? (await owners.documents.inspectWorkspace(source.workspaceId, signal ? { signal } : {})).root;
-        scope.projectTrusted = await owners.projectTrusted(root);
-        scope.sourceIdentity = `workspace:${source.workspaceId}:${source.branchId}@${source.revision}:${pin.root}`;
-        const base = createPinnedResourceReader({ domainId: `workspace:${source.workspaceId}`, store, pin, coverage: capture?.coverage ?? noCoverage() });
-        const reader = capture ? withSourceLinks(base, capture) : base;
-        scope.project = { reader, cwd: capture?.cwd ?? '', skillAncestorBoundary: capture?.skillAncestorBoundary ?? '', displayRoot: root };
-        if (capture) applyCapture(scope, reader, capture);
-        return await finish();
-      } finally { await pin.release(); }
-    }, 'shared', { threadId: identity.threadId });
+    const registration = await owners.documents.admitWorkspaceRegistration(source.workspaceId, signal);
+    if (source.executionWorkspaceId !== source.workspaceId) await owners.documents.admitWorkspaceRegistration(source.executionWorkspaceId, signal);
+    return owners.withSourceRead({ identity, source, paths: [''], ...(signal ? { signal } : {}), ...(options.runId ? { runId: options.runId } : {}) }, async ({ store, pin, readOriginalSource }) => {
+      const original = await readOriginalSource();
+      const capture = original?.provenance.resources;
+      const root = capture?.root ?? registration.canonicalPath;
+      scope.projectTrusted = await owners.projectTrusted(root);
+      scope.sourceIdentity = `workspace:${source.workspaceId}:${source.branchId}@${source.revision}:${pin.root}`;
+      const base = createPinnedResourceReader({ domainId: `workspace:${source.workspaceId}`, store, pin, coverage: capture?.coverage ?? noCoverage() });
+      const reader = capture ? withSourceLinks(base, capture) : base;
+      scope.project = { reader, cwd: capture?.cwd ?? '', skillAncestorBoundary: capture?.skillAncestorBoundary ?? '', displayRoot: root };
+      if (capture) applyCapture(scope, reader, capture);
+      return finish();
+    });
   };
   const withScope: ThreadResourceScope['withScope'] = async (identity, source, admitted, consume, options = {}) => {
     try { return await (options.snapshot ? readSnapshotScope : withScopeImpl)(identity, source, admitted, consume, options); }
     catch (error) {
-      if (error instanceof ResourceScopeError) throw error;
+      if (error instanceof ResourceScopeError || sourceFailureCode(error)) throw error;
       const status = options.signal?.aborted || (error as Error)?.name === 'AbortError' ? 'cancelled'
         : ['EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException)?.code ?? '') ? 'denied' : 'unavailable';
       throw new ResourceScopeError(resourceFailure({ domainId: 'agent-resources', viewId: options.snapshot?.id ?? 'admission' }, '', status,

@@ -124,7 +124,7 @@ async function initialize(frame:Record<string,unknown>) {
   transport.handshakeResult={hostId:HOST,storageRoot:String(frame.storageRoot),kernelEpoch:String(frame.epoch)} as KernelHandshakeResult;
   Object.defineProperty(kernel,'requestRaw',{value:request});
   Object.defineProperty(kernel,'write',{value:async(value:unknown)=>{write(value);}});
-  runtime=new AgentRuntimeClient(kernel);
+  runtime=new AgentRuntimeClient(kernel, undefined, undefined, undefined, undefined, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal));
   documents=createDocumentAuthority({hostId:HOST,dataDir:join(root,'documents'),isTrusted:async()=>true,
     isAllowedRoot:async(candidate:string)=>candidate===workspace||candidate.startsWith(workspace+'/')});
   const identity=await documents.resolveWorkspace({path:workspace});

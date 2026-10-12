@@ -273,7 +273,7 @@ async function sourceReleaseFixture() {
     signal: new AbortController().signal, checkObservation: async () => {} });
   const collaboration = new ThreadCollaboration({ kernel, runtime,
     storageAdapter: {} as never, resolveLiveSource: async () => { throw new Error('Must not reacquire source'); },
-    sourceCaptureOwners: {} as never, workingStates: {} as never, prepareContext: {} as never,
+    sourceCaptureOwners: {} as never,  prepareContext: {} as never,
     continueRun: async () => { throw new Error('Must not restart the child'); }, recoverLaunches: async () => {},
     onError: (_id, error) => errors.push(error) });
   return { trace, faults, fence, body, cleanup, errors, requests, resources, runtime, collaboration, unpin, retire, detach,

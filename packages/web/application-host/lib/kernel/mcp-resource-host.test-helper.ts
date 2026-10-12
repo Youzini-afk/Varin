@@ -22,7 +22,7 @@ export async function createResourceFixture(options: {
   let consumer: Awaited<ReturnType<typeof import('./mcp-consumer-host.test-helper.js').createMcpConsumers>> | undefined;
   const resources = createMcpResourceRuntime({ kernel, runtime,
     recover: createMcpResourceRecovery({ kernel, authority, agentDir, hostId: 'fixture-host',
-      inspectWorkspace: async () => { throw new Error('Global resource observer requested a workspace'); },
+      admitWorkspaceRegistration: async () => { throw new Error('Global resource observer requested a workspace'); },
       projectTrusted: () => false,
       currentPolicy: async () => ({ mode: 'normal', rules: [] }),
       validateLiveSource: async () => { throw new Error('Global resource observer requested a live source'); },

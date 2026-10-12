@@ -141,7 +141,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
     const workingStates = createKernelWorkspaceWorkingStateAccess(storage);
     const personalization = createAgentPersonalization({ client: kernel,
       context: async () => ({ bot: false, projectId }) });
-    const resources = resourceScopeFixture(root, workingStates, documents);
+    const resources = resourceScopeFixture(root, workingStates, documents, undefined, (input, consume) => storage.withResourceRead(input, consume));
     const originalContext = createThreadContext({ personalization, resources,
       projectForWorkspace: async () => projectId });
     const prepareContext = options.context?.(originalContext) ?? originalContext;
@@ -189,7 +189,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
         policyDecisions.push(structuredClone(input));
         return lease.decide(input, signal);
       } };
-    }, observe: ({threadId}, changed, signal) => createAgentPolicy(extensions).observe({sessionId:threadId,projectId}, changed, signal) } : undefined);
+    }, observe: ({threadId}, changed, signal) => createAgentPolicy(extensions).observe({sessionId:threadId,projectId}, changed, signal) } : undefined, undefined, undefined, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal));
     const knowledge = options.plans ? await openUserKnowledgeStore({ dataDir: root, hostId: 'child-review-host', embedding: null }) : undefined;
     const plans = knowledge ? new PlanService(runtime, async () => knowledge) : undefined;
     if (knowledge) kernel.setPlanOwner(createPlanOwner(async () => knowledge, runtime));
@@ -200,9 +200,9 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
     }, rebindModel: async () => credentialOwner };
     const settings = new GlobalSettingsAuthority(agentDir);
     const profiles = createAgentProfilesAPI({ settings, capabilities: signal => runtime.childCapabilities(signal) });
-    const adapter = new ThreadAdapter(runtime, models, createThreadSourceAdmission({ documents, workingStates, runtime }), (_runId, error) => { errors.push(error); }, createThreadSourcePreparer({ documents, workingStates, prepareResources: resources.prepareSourceCapture }), prepareContext, plans, undefined, undefined,
+    const adapter = new ThreadAdapter(runtime, models, createThreadSourceAdmission({ documents, withSourceRead: (input, consume) => storage.withResourceRead(input, consume), runtime }), (_runId, error) => { errors.push(error); }, createThreadSourcePreparer({ documents, workingStates, prepareResources: resources.prepareSourceCapture }), prepareContext, plans, undefined, undefined,
       createChildProfilePreparer({ settings: async () => (await settings.read()).document, capabilities: signal => runtime.childCapabilities(signal), models }));
-    const collaboration = options.collaboration === false ? undefined : new ThreadCollaboration({ kernel, storageAdapter: storage, resolveLiveSource: async () => { throw new Error("Fixed source fixture"); }, sourceCaptureOwners: { documents, prepareResources: resources.prepareSourceCapture, inspectInventory: async () => { throw new Error("Fixed source fixture"); } }, runtime, workingStates, prepareContext, continueRun: (runId, signal) => adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => adapter.recover(signal), onError: (_operation, error) => { errors.push(error); } });
+    const collaboration = options.collaboration === false ? undefined : new ThreadCollaboration({ kernel, storageAdapter: storage, resolveLiveSource: async () => { throw new Error("Fixed source fixture"); }, sourceCaptureOwners: { documents, prepareResources: resources.prepareSourceCapture, inspectInventory: async () => { throw new Error("Fixed source fixture"); } }, runtime,  prepareContext, continueRun: (runId, signal) => adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => adapter.recover(signal), onError: (_operation, error) => { errors.push(error); } });
     const app = express();
     registerCommonRequestMiddleware(app, { express });
     registerThreadRoutes(app, adapter, (request, response, next) => {

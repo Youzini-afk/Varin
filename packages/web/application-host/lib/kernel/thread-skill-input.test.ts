@@ -33,7 +33,7 @@ async function fixture() {
   const unexpected = vi.fn(async () => { throw new Error('Skill activation must not open a source or rediscover resources'); });
   const trust = vi.fn<ThreadResourceScopeOwners['projectTrusted']>(() => true);
   const scope = createThreadResourceScope({ agentDir: userRoot, workingStates: { withBranchStore: unexpected },
-    documents: { inspectWorkspace: unexpected, readSnapshot: unexpected }, configuration: unexpected,
+    documents: { admitWorkspaceRegistration: async () => ({ workspaceId: 'workspace', canonicalPath: root, hostId: 'test', kind: 'directory' }), inspectWorkspace: unexpected, readSnapshot: unexpected }, configuration: unexpected,
     validateLiveSource: unexpected, withSourceRead: unexpected, projectTrusted: trust });
   return { root, projectRoot, resources, unexpected, trust, scope, prepare: createThreadSkillInputPreparer(scope) };
 }

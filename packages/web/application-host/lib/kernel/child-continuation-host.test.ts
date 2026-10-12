@@ -125,7 +125,7 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
   const prepareSkillInput = vi.fn(async () => ({ status: 'ready', skill }));
   const continueRun = vi.fn(async () => {});
   const collaboration = new ThreadCollaboration({ kernel: kernel as never, storageAdapter: {} as never, resolveLiveSource: async () => { throw new Error('No live source'); }, sourceCaptureOwners: {} as never,
-    runtime: runtime as unknown as AgentRuntimeClient, workingStates: { withBranchStore: async (_workspace, _purpose, work) => work(store as never, {} as never) },
+    runtime: runtime as unknown as AgentRuntimeClient,
     prepareContext: prepareContext as never, prepareSkillInput: prepareSkillInput as never, continueRun, recoverLaunches: async () => {}, onError: (_id, error) => errors.push(error) });
   try {
     await collaboration.recover();
@@ -179,7 +179,7 @@ it.each(['dispatch', 'user_continuation', 'message_request', 'followup', 'calend
   const kernel = { reconcileChildToolHandoffs() {}, claimChildSource: vi.fn(), releaseChildToolHandoff: vi.fn() };
   const withBranchStore = vi.fn(); const continueRun = vi.fn(async () => {});
   const collaboration = new ThreadCollaboration({ kernel: kernel as never, runtime: runtime as unknown as AgentRuntimeClient,
-    workingStates: { withBranchStore }, storageAdapter: {} as never, sourceCaptureOwners: {} as never,
+     storageAdapter: {} as never, sourceCaptureOwners: {} as never,
     resolveLiveSource: async () => { throw new Error('No file source was selected'); }, prepareContext: prepareContext as never,
     continueRun, recoverLaunches: async () => {}, onError: (_id, error) => errors.push(error) });
   try {

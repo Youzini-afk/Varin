@@ -1,3 +1,4 @@
+import { DocumentWorkspaceUnregisteredError } from '../documents/errors.js';
 import { KERNEL_PROTOCOL_VERSION } from './protocol.generated.js';
 import { EventEmitter } from 'node:events';
 import type { Express, Request, RequestHandler, Response as ExpressResponse } from 'express';
@@ -138,7 +139,7 @@ it('slow startup launch cannot block the existing child/process pump or a later 
   });
   const continues = vi.fn(async (runId: string, signal: AbortSignal) => { if (runId === f.run.id) await f.adapter.continueLaunch(runId, { signal }); });
   const collaboration = new ThreadCollaboration({ kernel: { reconcileChildToolHandoffs() {}, releaseChildToolHandoff() {} } as never, storageAdapter: {} as never, resolveLiveSource: async () => { throw new Error("No source expected"); }, sourceCaptureOwners: {} as never, runtime: runtime as unknown as AgentRuntimeClient,
-    workingStates: {} as never, prepareContext: (async () => { throw new Error('No child preparation expected'); }) as never,
+     prepareContext: (async () => { throw new Error('No child preparation expected'); }) as never,
     continueRun: continues, recoverLaunches: signal => f.adapter.recover(signal), onError: (_id, error) => { f.errors.push(error); } });
   try {
     await collaboration.recover();
@@ -166,7 +167,7 @@ it.each(['ingress.run_ready', 'goal.run_ready', 'observation.run_ready'] as cons
   const continues = vi.fn((runId: string, signal: AbortSignal) => f.adapter.continueLaunch(runId, { signal }));
   const collaboration = new ThreadCollaboration({ kernel: { reconcileChildToolHandoffs() {}, releaseChildToolHandoff() {} } as never, storageAdapter: {} as never,
     resolveLiveSource: async () => { throw new Error('Unexpected source'); }, sourceCaptureOwners: {} as never,
-    runtime: runtime as unknown as AgentRuntimeClient, workingStates: {} as never, prepareContext: {} as never,
+    runtime: runtime as unknown as AgentRuntimeClient,  prepareContext: {} as never,
     continueRun: continues, recoverLaunches: signal => f.adapter.recover(signal), onError: (_id, error) => { f.errors.push(error); } });
   const notify = () => listener({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: events.at(-1)!.cursor });
   try {
@@ -208,7 +209,7 @@ it.each(['ingress.run_ready', 'goal.run_ready', 'observation.run_ready'] as cons
   });
   const collaboration = new ThreadCollaboration({ kernel: { reconcileChildToolHandoffs() {}, releaseChildToolHandoff() {} } as never, storageAdapter: {} as never,
     resolveLiveSource: async () => { throw new Error('Unexpected source'); }, sourceCaptureOwners: {} as never,
-    runtime: runtime as unknown as AgentRuntimeClient, workingStates: {} as never, prepareContext: {} as never,
+    runtime: runtime as unknown as AgentRuntimeClient,  prepareContext: {} as never,
     continueRun: (runId, signal) => f.adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => f.adapter.recover(signal),
     onError: (_id, error) => { f.errors.push(error); } });
   try {
@@ -396,7 +397,7 @@ it.each(['child_revision', 'process_receipt'] as const)('%s observed during an a
   });
   const continueRun = vi.fn(async () => { await gate; });
   const collaboration = new ThreadCollaboration({ kernel: { reconcileChildToolHandoffs() {}, releaseChildToolHandoff() {} } as never, storageAdapter: {} as never, resolveLiveSource: async () => { throw new Error('Unexpected source'); }, sourceCaptureOwners: {} as never,
-    runtime: runtime as unknown as AgentRuntimeClient, workingStates: {} as never, prepareContext: {} as never,
+    runtime: runtime as unknown as AgentRuntimeClient,  prepareContext: {} as never,
     continueRun, recoverLaunches: async () => {}, onError: (_id, error) => { f.errors.push(error); } });
   try {
     await collaboration.recover(); expect(continueRun).toHaveBeenCalledOnce();
@@ -430,7 +431,7 @@ it('domain receipt discovery keeps the new epoch wake while an aborted old disco
   });
   const reconcileDomainReceipts = vi.fn(async (_signal: AbortSignal) => {}).mockImplementationOnce(async () => { await gate; });
   const collaboration = new ThreadCollaboration({ kernel: { reconcileChildToolHandoffs() {}, releaseChildToolHandoff() {} } as never, storageAdapter: {} as never, resolveLiveSource: async () => { throw new Error('Unexpected source'); }, sourceCaptureOwners: {} as never,
-    runtime: runtime as unknown as AgentRuntimeClient, workingStates: {} as never, prepareContext: {} as never,
+    runtime: runtime as unknown as AgentRuntimeClient,  prepareContext: {} as never,
     continueRun: async () => {}, recoverLaunches: async () => {}, reconcileDomainReceipts, onError: (_id, error) => { f.errors.push(error); } });
   try {
     await collaboration.recover(); expect(reconcileDomainReceipts).toHaveBeenCalledOnce();
@@ -477,7 +478,7 @@ it('an unrelated observation error remains visible without blocking original sav
   const continueRun = vi.fn(async (runId: string, signal: AbortSignal) => f.adapter.continueLaunch(runId, { signal }));
   const collaboration = new ThreadCollaboration({ kernel: { reconcileChildToolHandoffs() {}, releaseChildToolHandoff() {} } as never,
     storageAdapter: {} as never, resolveLiveSource: async () => { throw new Error('Unexpected source'); }, sourceCaptureOwners: {} as never,
-    runtime: runtime as unknown as AgentRuntimeClient, workingStates: {} as never, prepareContext: {} as never,
+    runtime: runtime as unknown as AgentRuntimeClient,  prepareContext: {} as never,
     continueRun, recoverLaunches: signal => f.adapter.recover(signal), onError: (_id, error) => f.errors.push(error) });
   try {
     await collaboration.recover();
@@ -493,4 +494,26 @@ it('an unrelated observation error remains visible without blocking original sav
     expect(reconcileObservations).toHaveBeenCalledTimes(2);
     expect(f.errors).toEqual([failure, failure]);
   } finally { collaboration.stop(); }
+});
+
+it('public source failure projection accepts typed owners and rejects forged reserved error codes', async () => {
+  const f = fixture();
+  const prepare = vi.spyOn(f.adapter, 'prepareSource');
+  const handlers = new Map<string, RequestHandler>();
+  registerThreadRoutes({ post: (route: string, ...chain: RequestHandler[]) => handlers.set(route, chain.at(-1)!), get() {} } as unknown as Express,
+    f.adapter, (_request, _response, next) => next());
+  vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+    let status = 200; let output: unknown;
+    const response = Object.assign(new EventEmitter(), { writableEnded: false,
+      status(value: number) { status = value; return this; }, json(value: unknown) { output = value; this.writableEnded = true; return this; } });
+    await handlers.get(new URL(url, 'http://fixture.invalid').pathname)!({ body: JSON.parse(String(init.body)) } as Request, response as unknown as ExpressResponse, () => {});
+    return Response.json(output, { status });
+  });
+  const api = createThreadsHttpAPI();
+  const request = { ...identity, key: 'source', path: '/selected', mode: 'fixed_branch' as const };
+  prepare.mockRejectedValueOnce(new DocumentWorkspaceUnregisteredError());
+  await expect(api.prepareSource(request)).rejects.toMatchObject({ status: 404, code: 'source_registration_missing',
+    message: 'The source is not registered on this Host. Restore its original registration or select a new source.' });
+  prepare.mockRejectedValueOnce(Object.assign(new Error('Private upstream detail'), { code: 'source_registration_missing' }));
+  await expect(api.prepareSource(request)).rejects.toMatchObject({ code: 'thread-request-failed', message: 'Thread request failed (400)' });
 });

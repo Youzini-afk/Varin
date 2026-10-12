@@ -1,3 +1,5 @@
+import { threadSourceFailureMessage } from '@varin/application-client';
+import { sourceFailureCode } from './source-admission-error.js';
 import type { McpElicitationResponse, McpSamplingRequestAction, McpSamplingOutputAction } from '@varin/protocol';
 import type { OutputMediaHolder } from '@varin/protocol';
 import { parseComputerWorkRef, parseComputerExecutionRef } from '@varin/protocol';
@@ -162,10 +164,13 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       }
       catch (error) {
         // Errors from credentials/model services can contain upstream bodies. Do not echo them.
+        const sourceCode = sourceFailureCode(error);
+        if (sourceCode) { response.status(sourceCode === 'source_authority_denied' ? 403 : sourceCode === 'source_registration_missing' ? 404 : 409).json({ code: sourceCode, error: threadSourceFailureMessage(sourceCode) }); return; }
         const conflict = error instanceof PlanConflict || error instanceof KernelClientError && error.code === 'operation-error' && error.message.startsWith('operation error: conflict:');
         if (error instanceof ComputerError) { response.status(error.computerCode === 'computer-work-not-found' ? 404 : error.computerCode === 'computer-execution-stale' ? 409 : error.computerCode === 'computer-request-invalid' ? 400 : 503).json({ code: error.computerCode, error: error.message }); return; }
-        const code = conflict ? 'thread-conflict' : error instanceof HarnessServiceError ? error.harnessCode
+        const suppliedCode = conflict ? 'thread-conflict' : error instanceof HarnessServiceError ? error.harnessCode
           : error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'thread-request-failed';
+        const code = threadSourceFailureMessage(suppliedCode) ? 'thread-request-failed' : suppliedCode;
         const status = code.includes('conflict') ? 409 : code === 'denied' || code === 'forbidden' ? 403
           : code === 'not-found' ? 404 : code === 'unavailable' || code === 'timeout' ? 503 : 400;
         response.status(status).json({ code, error: 'Thread request could not be completed',

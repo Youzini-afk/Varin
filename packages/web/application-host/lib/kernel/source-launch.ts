@@ -1,19 +1,38 @@
+import { SourceAdmissionError, sourceReadError } from './source-admission-error.js';
 import type { LiveSourceResolver } from './live-source.js';
 import type { ThreadSource } from '@varin/application-client';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { stat } from 'node:fs/promises';
 import type { KernelClient } from './kernel-client.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { LaunchIntent, RunStartReceipt } from './protocol.generated.js';
 import type { ExistingHostCredentialOwner } from './credential-owner.js';
-import { canonicalizePathIdentity, isPathWithinRoot, normalizePathIdentity } from '../workspace/path-safety.js';
+import { canonicalizePathIdentity, normalizePathIdentity } from '../workspace/path-safety.js';
 
 /** The original materialized execution directory. Looking it up never creates a replacement. */
 export async function originalMaterializationLocation(root:string,workspaceId:string,environmentRunId:string) {
+  if (!workspaceId || !environmentRunId) throw new SourceAdmissionError('source_changed');
   const storageRoot=await canonicalizePathIdentity(root);
   const key=createHash('sha256').update(JSON.stringify([workspaceId,environmentRunId])).digest('hex');
   const relativeTarget=`managed/runs/${key}`;
   return {storageRoot,key,relativeTarget,targetPath:path.resolve(storageRoot,relativeTarget)};
+}
+
+/** The managed key must still name its original directory, not an alias to another working copy. */
+export async function admitMaterializedRoot(targetPath: string, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
+  let root: string;
+  try {
+    root = await canonicalizePathIdentity(targetPath);
+    if (!(await stat(root)).isDirectory()) throw new SourceAdmissionError('source_environment_unavailable');
+  } catch (error) {
+    if (error instanceof SourceAdmissionError) throw error;
+    throw new SourceAdmissionError('source_environment_unavailable', { cause: error });
+  }
+  if (normalizePathIdentity(root) !== normalizePathIdentity(targetPath)) throw new SourceAdmissionError('source_changed');
+  signal?.throwIfAborted();
+  return root;
 }
 
 /** Explicit Host-selected source. Live identity is revalidated through Documents before binding. */
@@ -65,7 +84,7 @@ export async function startRunFromSource(
       || source.branch_id !== (selection.branchId ?? null) || source.revision !== (selection.revision ?? null)
       || source.mode !== selection.mode
       || source.live_root?.hostId !== selection.liveRoot?.hostId || source.live_root?.canonicalRoot !== selection.liveRoot?.canonicalRoot || source.live_root?.rootId !== selection.liveRoot?.rootId
-      || (source.environment_run_id ?? undefined) !== selection.environmentRunId) throw new Error('Rebind cannot change its durable source selection');
+      || (source.environment_run_id ?? undefined) !== selection.environmentRunId) throw new SourceAdmissionError('source_changed');
     const selectedNames = [...tools].sort();
     if (JSON.stringify(selectedNames) !== JSON.stringify(sourceToolSchemas(saved.selection).map(tool => tool.name).sort())) throw new Error('Rebind cannot change its durable tools');
   }
@@ -110,7 +129,7 @@ export async function admitRunSourceAuthority(
     || (sourceSelection.environment_run_id ?? undefined) !== selection.environmentRunId
     || sourceSelection.live_root?.hostId !== selection.liveRoot?.hostId
     || sourceSelection.live_root?.rootId !== selection.liveRoot?.rootId
-    || sourceSelection.live_root?.canonicalRoot !== selection.liveRoot?.canonicalRoot) throw new Error('Source authority must match the original durable Run source');
+    || sourceSelection.live_root?.canonicalRoot !== selection.liveRoot?.canonicalRoot) throw new SourceAdmissionError('source_changed');
   const tools = [...new Set(selection.tools)];
   if (JSON.stringify([...tools].sort()) !== JSON.stringify(sourceToolSchemas(saved.selection).map(tool => tool.name).sort())) throw new Error('Source authority cannot change the admitted tools');
   if (selection.mode === 'live_root') {
@@ -136,6 +155,7 @@ export async function admitRunSourceAuthority(
     const operation = await runtime.operation(options.operationId, signal);
     if (operation.run_id !== run.id || (operation.lifetime !== 'thread' && !(operation.lifetime === 'environment' && operation.managed_process?.purpose.kind === 'script_environment')) || operation.execution_owner?.kind !== 'external') throw new Error('Independent source Operation differs from its original Thread/Run owner');
   }
+  if (selection.mode !== 'live_root') await runtime.admitSourceRegistration(selection, signal);
   // Do not use old grants from the durable selection. Each Host lifetime issues its own permit.
   const grant = await kernel.issueGrant({
     grantId: `source:${randomUUID()}`,
@@ -154,9 +174,9 @@ export async function admitRunSourceAuthority(
   try {
     let rootId: string | undefined;
     let executionCwd: string | undefined;
-    const source = selection.mode === 'live_root' ? undefined : await actor.readBranch({ branchId: selection.branchId, revision: selection.revision, includeEntries: false }, signal);
+    const source = selection.mode === 'live_root' ? undefined : await actor.readBranch({ branchId: selection.branchId, revision: selection.revision, includeEntries: false }, signal).catch(error => { throw sourceReadError(error); });
     if (source && (source.workspaceId !== selection.workspaceId || source.branchId !== selection.branchId
-      || source.view !== 'revision' || source.revision !== selection.revision)) throw new Error('Launch source returned a different fixed revision');
+      || source.view !== 'revision' || source.revision !== selection.revision)) throw new SourceAdmissionError('source_changed');
     if (!resultOnly && selection.mode === 'live_root') {
       // Fresh authority is mandatory even when the durable root identity is unchanged.
       const registered = await actor.fileRootRegister({ workspaceId: selection.workspaceId,
@@ -182,8 +202,7 @@ export async function admitRunSourceAuthority(
       }, signal);
       if (result.status !== 'materialized') throw new Error('Source materialization requires reconciliation');
       }
-      const canonicalRoot = await canonicalizePathIdentity(targetPath);
-      if (!isPathWithinRoot(canonicalRoot, path.join(storageRoot, 'managed', 'runs'))) throw new Error('Materialization escaped its managed directory');
+      const canonicalRoot = await admitMaterializedRoot(targetPath, signal);
       const registered = await actor.fileRootRegister({ workspaceId: selection.workspaceId, executionWorkspaceId: selection.executionWorkspaceId, canonicalRoot }, signal);
       if (typeof registered.rootId !== 'string') throw new Error('Execution root registration failed');
       rootId = registered.rootId;
@@ -198,6 +217,7 @@ export async function admitRunSourceAuthority(
       ...(selection.mode === 'fixed_branch' ? { fileSource: fixed }
         : selection.mode === 'materialized' ? { rootId, materializedSource: fixed } : { rootId, liveRoot: selection.liveRoot }),
     };
+    if (selection.mode !== 'live_root') await runtime.admitSourceRegistration(selection, signal);
     return { grant, client: actor, rootId, canonicalRoot: executionCwd, toolBinding,
       release };
   } catch (error) {

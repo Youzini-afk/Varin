@@ -1293,6 +1293,8 @@ export interface SubmitLaunch {
   childDispatch?: ChildDispatchCatalog;
 }
 
+export type SourceFailureCode = 'source_unavailable' | 'source_registration_missing' | 'source_authority_denied' | 'source_environment_unavailable' | 'source_changed';
+
 export interface LaunchFailedParams {
   runId: string;
   code: string;
@@ -1320,7 +1322,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 12; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 13; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 

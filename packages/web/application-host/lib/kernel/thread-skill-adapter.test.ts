@@ -18,7 +18,7 @@ const identity = { runtime: 'agent' as const, threadId: 'thread:skills', branchI
 const model = { providerId: 'fixture', modelId: 'fixture' };
 const rawText = '/skill:review  first\n second  ';
 const images = [{ mimeType: 'image/png', data: Buffer.from('original image bytes').toString('base64') }];
-const attachments = [{ media_type: images[0]!.mimeType, content_ref: `data:image/png;base64,${images[0]!.data}`, source: 'user-upload' }];
+const attachments = [{ media_type: images[0]!.mimeType, data_base64: images[0]!.data }];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 
 /** Real Host selection/admission; only the existing Rust transport and launch boundary are stubbed. */
@@ -64,7 +64,7 @@ async function fixture() {
   };
   const unexpectedRead = vi.fn(async () => { throw new Error('Input preparation cannot reopen resources'); });
   const scope = createThreadResourceScope({ agentDir: root, workingStates: { withBranchStore: unexpectedRead },
-    documents: { inspectWorkspace: unexpectedRead, readSnapshot: unexpectedRead }, configuration: unexpectedRead,
+    documents: { admitWorkspaceRegistration: async () => ({ workspaceId: 'workspace', canonicalPath: root, hostId: 'test', kind: 'directory' }), inspectWorkspace: unexpectedRead, readSnapshot: unexpectedRead }, configuration: unexpectedRead,
     validateLiveSource: unexpectedRead, withSourceRead: unexpectedRead, projectTrusted: () => false });
   const prepareSkill = vi.fn(createThreadSkillInputPreparer(scope));
   const prepareContext = Object.assign(vi.fn<(...args: Parameters<ContextPreparer>) => ReturnType<ContextPreparer>>(async () => initial(a)), {
@@ -140,16 +140,16 @@ describe('ThreadAdapter explicit skill input composition', () => {
     expect(f.prepareSkill).not.toHaveBeenCalled();
     expect(f.runtime.context).not.toHaveBeenCalled();
     expect(f.runtime.editInput.mock.calls[0]?.[0]).toEqual({ inputId: f.queued.id, expectedRevision: 1, content: { text: rawText,
-      attachments: [{ media_type: 'image/jpeg', content_ref: `data:image/jpeg;base64,${replacementImages[0]!.data}`, source: 'user-upload' }] } });
+      attachments: [{ media_type: 'image/jpeg', data_base64: replacementImages[0]!.data }] } });
     // Even whitespace-only raw command changes are a new explicit selection; parsed args equivalence is irrelevant.
     await f.adapter.editInput(f.queued.id, 1, `${rawText} `);
     expect(f.prepareSkill).toHaveBeenCalledOnce();
     expect(f.runtime.editInput.mock.calls[1]?.[0]).toMatchObject({ inputId: f.queued.id, expectedRevision: 1,
-      content: { text: `${rawText} `, attachments }, inputPreparation: { expectedContextCheckpoint: f.checkpoint(f.b, 2).id,
+      content: { text: `${rawText} ` }, inputPreparation: { expectedContextCheckpoint: f.checkpoint(f.b, 2).id,
         skill: { body: 'REFRESHED B', snapshotId: f.b.snapshot.id } } });
     await f.adapter.editInput(f.queued.id, 1, 'plain replacement', []);
     expect(f.prepareSkill).toHaveBeenCalledOnce();
-    expect(f.runtime.editInput.mock.calls[2]?.[0]).toEqual({ inputId: f.queued.id, expectedRevision: 1, content: { text: 'plain replacement' } });
+    expect(f.runtime.editInput.mock.calls[2]?.[0]).toEqual({ inputId: f.queued.id, expectedRevision: 1, content: { text: 'plain replacement', attachments: [] } });
     expect(f.unexpectedRead).not.toHaveBeenCalled();
   });
 

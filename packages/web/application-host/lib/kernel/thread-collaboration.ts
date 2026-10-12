@@ -1,3 +1,4 @@
+import { sourceFailureCode } from './source-admission-error.js';
 import { parseExplicitSkillCommand } from '../agent-resources/activation.js';
 import { ResourceScopeError } from './thread-resource-scope.js';
 import type { ThreadSkillInputPreparer } from './thread-skill-input.js';
@@ -9,7 +10,7 @@ import type { LiveSourceResolver } from './live-source.js';
 import { captureStableSourceBaseline, type StableSourcePreparationOwners } from '../harness/working-state/source-preparation.js';
 import { waitWithSignal } from '../cancellation.js';
 import type { ThreadIdentity, ThreadSource } from '@varin/application-client';
-import type { WorkspaceWorkingStateRootAccess } from '../harness/working-state/types.js';
+import type { DocumentAuthority } from '../documents/authority.js';
 import type { ContextPreparer } from './thread-context.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { DelegatedExecution, ChildSourceProvenance, InputResourcePreparation } from './protocol.generated.js';
@@ -18,11 +19,10 @@ export interface ThreadCollaborationOwners {
   kernel: KernelClient;
   storageAdapter: KernelStorageAdapter;
   resolveLiveSource: LiveSourceResolver;
-  sourceCaptureOwners: StableSourcePreparationOwners;
+  sourceCaptureOwners: StableSourcePreparationOwners & { documents: Pick<DocumentAuthority, 'admitWorkspaceRegistration'> };
   runtime: AgentRuntimeClient;
   continueRun(runId: string, signal: AbortSignal): Promise<void>;
   recoverLaunches(signal: AbortSignal): Promise<void>;
-  workingStates: WorkspaceWorkingStateRootAccess;
   prepareContext: ContextPreparer;
   prepareSkillInput?: ThreadSkillInputPreparer;
   reconcileDomainReceipts?(signal: AbortSignal): Promise<void>;
@@ -99,12 +99,12 @@ export class ThreadCollaboration {
         for (const source of unaccepted) {
           if (this.cleaningSources.has(source.operation_id)) continue;
           this.cleaningSources.add(source.operation_id);
-          void this.owners.workingStates.withBranchStore(source.source.workspace_id, 'child-orphan-release', async store => {
+          void this.withSourceStore(source.source, source.parent_thread_id, epoch.signal, async store => {
             if (!store.releaseBranchHandoffPin) throw new Error('Durable source pin release is unavailable');
             await store.releaseBranchHandoffPin(source.source.branch_id!, source.pin_id);
             epoch.signal.throwIfAborted();
             await this.owners.runtime.releaseUnacceptedChildSource(source.operation_id, epoch.signal);
-          }, 'shared', { threadId: source.parent_thread_id }).catch(error => {
+          }).catch(error => {
             if (!epoch.signal.aborted) this.owners.onError(source.operation_id, error);
           }).finally(() => this.cleaningSources.delete(source.operation_id));
         }
@@ -172,6 +172,26 @@ export class ThreadCollaboration {
       }
     } while (events.length === 256);
   }
+  /** Catalog-selected branch work never acquires a physical project root or tool capability. */
+  private async withSourceStore<T>(source: { workspace_id: string; execution_workspace_id: string }, threadId: string,
+    signal: AbortSignal, consume: (store: KernelWorkingStateRootStore) => Promise<T>): Promise<T> {
+    signal.throwIfAborted();
+    const { kernel, storageAdapter } = this.owners;
+    const grant = await kernel.issueGrant({ grantId: `child-branch:${randomUUID()}`, threadId,
+      owningWorkspace: source.workspace_id, executionWorkspace: source.execution_workspace_id,
+      capabilities: ['storage.read', 'storage.write', 'storage.maintenance'], pathScopes: [''] }, signal);
+    try {
+      const context = await storageAdapter.contextFromBranchGrant({ grant, owningWorkspaceId: source.workspace_id,
+        executionWorkspaceId: source.execution_workspace_id });
+      signal.throwIfAborted();
+      return await consume(new KernelWorkingStateRootStore(context));
+    } finally { await kernel.revokeGrant(grant.grantId); }
+  }
+  private async admitSourceRegistrations(source: { workspace_id: string; execution_workspace_id: string }, signal: AbortSignal): Promise<void> {
+    const documents = this.owners.sourceCaptureOwners.documents;
+    await documents.admitWorkspaceRegistration(source.workspace_id, signal);
+    if (source.execution_workspace_id !== source.workspace_id) await documents.admitWorkspaceRegistration(source.execution_workspace_id, signal);
+  }
   private childSource(child: DelegatedExecution): ThreadSource | null {
     if (child.source?.kind === 'absent') return null;
     if (child.source?.kind !== 'ready') throw new Error('Child source is not ready');
@@ -189,6 +209,7 @@ export class ThreadCollaboration {
     const { kernel, storageAdapter, runtime, sourceCaptureOwners } = this.owners;
     const handoff = child.source.handoff;
     const workspace = handoff.source.workspace_id;
+    await this.admitSourceRegistrations(handoff.source, signal);
     const grant = await kernel.claimChildSource({ handoffOperationId: handoff.operation_id, grantId: `child-source:${randomUUID()}`,
       childThreadId: child.child_thread_id, childBranchId: child.child_branch_id }, signal);
     try {
@@ -225,6 +246,7 @@ export class ThreadCollaboration {
       signal.throwIfAborted();
       const source = { mode: child.code_result.kind === 'no_changes' ? 'fixed_branch' as const : 'materialized' as const,
         liveRoot: null, workspaceId: workspace, executionWorkspaceId: handoff.source.execution_workspace_id, branchId: sourceBranch, revision: 0 };
+      await this.admitSourceRegistrations(handoff.source, signal);
       return await runtime.readyChildSource({ executionId: child.execution_id, source,
         pin: { pin_id: pin.pinId, root: pin.root, source: { mode: 'fixed_branch', live_root: null,
           workspace_id: workspace, execution_workspace_id: handoff.source.execution_workspace_id, branch_id: sourceBranch, revision: 0 } }, provenance }, signal);
@@ -234,7 +256,8 @@ export class ThreadCollaboration {
     const basis = child.source_basis;
     if (!basis || basis.source.branch_id === null || basis.source.revision === null) throw new Error('Continuation has no exact immutable source');
     const workspace = basis.source.workspace_id;
-    return this.owners.workingStates.withBranchStore(workspace, 'child-continuation-source', async store => {
+    await this.admitSourceRegistrations(basis.source, signal);
+    return this.withSourceStore(basis.source, child.child_thread_id, signal, async store => {
       if (!store.pinBranchHandoff) throw new Error('Durable source pin is unavailable');
       const pin = await store.pinBranch(basis.source.branch_id!, { revision: basis.source.revision!, signal });
       try {
@@ -246,6 +269,7 @@ export class ThreadCollaboration {
         if (branch.baseRoot !== basis.root) throw new Error('Continuation branch has a different fixed baseline');
         const retained = await store.pinBranchHandoff(branchId, `child-source-pin:${child.execution_id}`, { revision: 0, signal });
         signal.throwIfAborted();
+        await this.admitSourceRegistrations(basis.source, signal);
         return this.owners.runtime.readyChildSource({ executionId: child.execution_id,
           source: { mode: child.selected_profile.work_mode === 'read_only' ? 'fixed_branch' : 'materialized', liveRoot: null,
             workspaceId: workspace, executionWorkspaceId: basis.source.execution_workspace_id, branchId, revision: 0 },
@@ -253,7 +277,7 @@ export class ThreadCollaboration {
             workspace_id: workspace, execution_workspace_id: basis.source.execution_workspace_id, branch_id: branchId, revision: 0 } },
           provenance: basis.provenance }, signal);
       } finally { await pin.release(); }
-    }, 'shared', { threadId: child.child_thread_id });
+    });
   }
   private async settle(child: DelegatedExecution, signal: AbortSignal): Promise<DelegatedExecution> {
     if (!child.receipt || child.source?.kind !== 'ready' || child.source.selection.mode !== 'materialized') return child;
@@ -308,7 +332,7 @@ export class ThreadCollaboration {
     }
     if (child.trigger.kind !== 'dispatch') {
       if (!child.receipt && child.source_basis) {
-        await this.owners.workingStates.withBranchStore(child.source_basis.source.workspace_id, 'child-unused-continuation-source', async store => {
+        await this.withSourceStore(child.source_basis.source, child.child_thread_id, signal, async store => {
           if (!store.releaseBranchHandoffPin) throw new Error('Durable source pin release is unavailable');
           const branchId = `child-source:${child.execution_id}`;
           const branch = await store.getBranchRoot(branchId);
@@ -317,7 +341,7 @@ export class ThreadCollaboration {
             await store.releaseBranchHandoffPin(branchId, `child-source-pin:${child.execution_id}`);
             await store.deleteBranch(branchId);
           }
-        }, 'shared', { threadId: child.child_thread_id });
+        });
       }
       signal.throwIfAborted();
       await runtime.releaseChildResources(child.execution_id, signal);
@@ -381,7 +405,7 @@ export class ThreadCollaboration {
       if (!signal.aborted) {
         const current = await runtime.childExecution(child.execution_id);
         // An admitted Run's unknown effects remain recoverable; preparation failure cannot erase them.
-        if (!current.receipt && !current.report) child = await runtime.failChild(child.execution_id, 'preparation_failed');
+        if (!current.receipt && !current.report) child = await runtime.failChild(child.execution_id, sourceFailureCode(error) ?? 'preparation_failed');
       }
       throw error;
     } finally {

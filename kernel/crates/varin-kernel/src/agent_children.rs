@@ -108,13 +108,7 @@ pub(super) fn execute(
     ) {
         let (execution_id, failure) = if method == "runtime.child.fail" {
             let p: ChildFailParams = serde_json::from_value(params)?;
-            if ![
-                "preparation_failed",
-                "source_unavailable",
-                "credentials_unavailable",
-                "binding_changed",
-            ]
-            .contains(&p.code.as_str())
+            if !varin_runtime::catalog::launches::valid_preparation_failure(&p.code)
             {
                 return Err(KernelError::Protocol(
                     "unknown child preparation failure".into(),

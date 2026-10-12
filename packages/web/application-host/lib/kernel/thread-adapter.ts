@@ -1,3 +1,4 @@
+import { sourceFailureCode } from './source-admission-error.js';
 import type { McpInteractionListParams, McpInteractionReadParams, McpInteractionRespondParams, McpSamplingOutputReviewParams } from '@varin/protocol';
 import type { MediaReadParams, MediaReadChunk } from './protocol.generated.js';
 import type { MessageSendParams, MessageListParams } from '@varin/protocol';
@@ -39,7 +40,7 @@ export class ThreadPreAdmissionError extends Error {
 /** Projection and admission only: Rust owns all conversation, queue and execution facts. */
 export class ThreadAdapter {
   constructor(readonly runtime: AgentRuntimeClient, private readonly models: ThreadModelAuthority,
-    private readonly admitSource: (source: ThreadSource, identity: ThreadIdentity, runId?: string) => Promise<void>,
+    private readonly admitSource: (source: ThreadSource, identity: ThreadIdentity, runId?: string, signal?: AbortSignal) => Promise<void>,
     private readonly onLaunchError: (runId: string, error: unknown) => void,
     private readonly prepareWorkspace?: (input: ThreadPrepareSource) => Promise<ThreadPreparedSource>,
     private readonly prepareContext?: ContextPreparer, private readonly plans?: PlanService,
@@ -695,8 +696,8 @@ export class ThreadAdapter {
 
   private async recordLaunchFailure(runId: string, error: unknown): Promise<void> {
     const errorCode = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : '';
-    const code = ['credential-scope-changed', 'model-configuration-changed'].includes(errorCode) ? 'binding_changed'
-      : errorCode.startsWith('credential-') ? 'credentials_unavailable' : 'preparation_failed';
+    const code = sourceFailureCode(error) ?? (['credential-scope-changed', 'model-configuration-changed'].includes(errorCode) ? 'binding_changed'
+      : errorCode.startsWith('credential-') ? 'credentials_unavailable' : 'preparation_failed');
     try { await this.runtime.failLaunch(runId, code); }
     catch (recordError) { this.onLaunchError(runId, recordError); }
     this.onLaunchError(runId, error);
@@ -764,7 +765,7 @@ export class ThreadAdapter {
       const source = launch.selection.source;
       if (source && source.mode !== 'live_root' && source.branch_id !== null && source.revision !== null) {
         const admission = this.admitSource({ mode: source.mode, workspaceId: source.workspace_id,
-          executionWorkspaceId: source.execution_workspace_id, branchId: source.branch_id, revision: source.revision, tools: [] }, identity, run.id);
+          executionWorkspaceId: source.execution_workspace_id, branchId: source.branch_id, revision: source.revision, tools: [] }, identity, run.id, signal);
         await waitWithSignal(admission, signal);
       }
       // live_root is validated by rebindLaunch's existing LiveSource owner.

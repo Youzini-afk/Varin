@@ -62,7 +62,7 @@ function fixture(mode: 'live_root' | 'fixed_branch', hold?: 'file.capture' | 'st
     cancelRequest(id, discard) { cancellations.push({ id, discard }); }, async close() {},
   };
   const callers: ExperimentCaller[] = [];
-  const documents = createDocumentSources({ kernel: client, runtime: new AgentRuntimeClient(client),
+  const documents = createDocumentSources({ kernel: client, runtime: new AgentRuntimeClient(client, undefined, undefined, undefined, undefined, undefined, async id => { expect(['workspace', 'execution']).toContain(id); }),
     resolveLiveSource: async selected => { expect(selected.liveRoot).toEqual(source.live_root); },
     experiments: { readArtifact: async caller => { callers.push(caller); return { name: 'plot.pdf',
       chunks: (async function* () { yield bytes; })() }; } },

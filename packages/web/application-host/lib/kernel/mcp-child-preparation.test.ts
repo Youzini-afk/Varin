@@ -89,7 +89,7 @@ else return;process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,res
       kernel,
       agentDir: root,
       hostId: 'host',
-      inspectWorkspace: async () => ({ root: parentCwd }),
+      admitWorkspaceRegistration: async () => ({ canonicalPath: parentCwd }),
       projectTrusted: () => false,
       currentPolicy: policy,
     });

@@ -1,3 +1,4 @@
+import { DocumentWorkspaceUnregisteredError } from '../documents/errors.js';
 import { createHash } from 'node:crypto';
 import { expect, it, vi } from 'vitest';
 import { KernelClient } from './kernel-client.js';
@@ -50,7 +51,7 @@ async function fixture(input: { bytes?: Buffer; stalled?: boolean; corruptOffset
   const readSnapshot = vi.fn(async () => { throw new Error('Fixed source must not read Documents disk or draft'); });
   const validateLiveSource = vi.fn(async () => { throw new Error('Fixed source must not validate a live directory'); });
   const sources = createRetrievalSourceOwner({ kernel, documents: { readSnapshot,
-    listWorkspaceRegistrations: async () => input.missingRegistration ? [] : [{ workspaceId: 'workspace', canonicalPath: '/removed/original-project', hostId: 'source-host', kind: 'directory' }] }, validateLiveSource });
+    admitWorkspaceRegistration: async workspaceId => { if (input.missingRegistration) throw new DocumentWorkspaceUnregisteredError(); return { workspaceId, canonicalPath: '/removed/original-project', hostId: 'source-host', kind: 'directory' }; } }, validateLiveSource });
   return { sources, query, bytes, frames, readSnapshot, validateLiveSource, cancelled: () => cancelled, stop: () => { stopped = true; } };
 }
 
@@ -73,7 +74,7 @@ it('reads the exact original fixed source through all native pages with existing
 it('does not accept missing source registration, a foreign grant or a changed byte continuation as empty source', async () => {
   const f = await fixture({ corruptOffset: true });
   const missing = await fixture({ missingRegistration: true });
-  await expect(missing.sources.routingWorkspace(missing.query, new AbortController().signal)).rejects.toThrow(/configuration is unavailable/);
+  await expect(missing.sources.routingWorkspace(missing.query, new AbortController().signal)).rejects.toThrow(/not registered/);
   await expect(f.sources.routingWorkspace({ ...f.query, source: { ...f.query.source, workspace_id: 'unknown' } }, new AbortController().signal)).rejects.toThrow(/grant/);
   await expect(f.sources.read({ ...f.query, grantId: 'another-grant' }, 'allowed/source.ts', new AbortController().signal)).rejects.toThrow(/grant/);
   await expect(f.sources.read(f.query, 'allowed/source.ts', new AbortController().signal)).rejects.toThrow(/incomplete pages/);

@@ -13,7 +13,8 @@ import { ToolBridge } from './tool-bridge.js';
 import type { AgentRuntimeStreamEvent } from '@varin/protocol';
 
 export const writeMaterialFixtureFrame = (value: unknown) => process.stdout.write(`${JSON.stringify(value)}\n`);
-export function createMaterialReviewFixture(verifyGrant: (params: Record<string, unknown>) => void) {
+export function createMaterialReviewFixture(verifyGrant: (params: Record<string, unknown>) => void,
+  sourceRegistration?: ConstructorParameters<typeof AgentRuntimeClient>[6]) {
   const write = writeMaterialFixtureFrame;
   const pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
   const issued = new Set<KernelGrantHandle>();
@@ -76,7 +77,7 @@ export function createMaterialReviewFixture(verifyGrant: (params: Record<string,
     const method = KernelClient.prototype[name];
     Object.defineProperty(transport, name, { value: (...args: unknown[]) => Reflect.apply(method, kernel, args) });
   }
-  const runtime = new AgentRuntimeClient(kernel);
+  const runtime = new AgentRuntimeClient(kernel, undefined, undefined, undefined, undefined, undefined, sourceRegistration);
   const bridge = new ToolBridge(() => epoch, async frame => { write(frame); }, () => write({ kind: 'fixture-failed', error: 'original tool bridge failed' }));
   return { kernel, runtime, bridge, request,
     initialize(frame: Record<string, unknown>) { epoch = String(frame.epoch); storageRoot = String(frame.storageRoot); for (const listener of ready) listener(); },

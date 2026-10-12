@@ -16,7 +16,7 @@ export function createChildMcpPreparer(owners: {
   kernel: KernelClient;
   agentDir: string;
   hostId: string;
-  inspectWorkspace(id: string): Promise<{ root: string }>;
+  admitWorkspaceRegistration(id: string, signal?: AbortSignal): Promise<{ canonicalPath: string }>;
   projectTrusted(cwd: string): boolean;
   currentPolicy(cwd: string, trusted: boolean): Promise<PermissionPolicy>;
 }): (input: McpPreparation, signal?: AbortSignal) => Promise<McpToolLease> {
@@ -35,12 +35,12 @@ export function createChildMcpPreparer(owners: {
       );
     const workspace =
       needsWorkspace && input.source
-        ? await owners.inspectWorkspace(input.source.workspaceId)
+        ? await owners.admitWorkspaceRegistration(input.source.workspaceId, signal)
         : undefined;
     if (
       configuration.agent_dir !== owners.agentDir ||
       (configuration.config_cwd !== owners.agentDir &&
-        configuration.config_cwd !== workspace?.root)
+        configuration.config_cwd !== workspace?.canonicalPath)
     ) {
       throw new Error(
         'Child MCP configuration source is unavailable for its actual execution view',

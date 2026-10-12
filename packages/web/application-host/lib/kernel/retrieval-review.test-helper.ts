@@ -45,7 +45,7 @@ export async function retrievalFixture(reply: (body: Record<string, unknown>, re
     return { workspaceId: identity.workspaceId, executionWorkspaceId: identity.workspaceId, canonicalRoot: (await documents.authority.inspectWorkspace(identity.workspaceId)).root };
   } });
   const liveSources = createLiveSourceOwner({ documents: documents.authority, kernel });
-  const runtime = new AgentRuntimeClient(kernel, undefined, undefined, undefined, liveSources.validate);
+  const runtime = new AgentRuntimeClient(kernel, undefined, undefined, undefined, liveSources.validate, undefined, (id, signal) => documents.authority.admitWorkspaceRegistration(id, signal));
   const servers: Server[] = [];
   const listen = async (server: Server) => {
     servers.push(server); server.listen(0, '127.0.0.1'); await once(server, 'listening');
