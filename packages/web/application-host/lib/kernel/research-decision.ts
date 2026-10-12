@@ -55,8 +55,9 @@ export function createResearchDecisionRuntime(options: {
           },
           fastDecision: async request => {
             if (!lease || !isDeepStrictEqual(lease.binding, request.settings)) throw new Error('Original decision binding changed');
-            return lease.execute(invocation, { purpose: request.purpose, goal: request.goal, materials: request.materials,
-              questions: request.questions, ...(lease.binding.endpoint ? { endpoint: lease.binding.endpoint } : {}) }, request.signal, materials.assertReadable);
+            const retained = lease;
+            return retained.run(invocation, request.signal, session => session.decide({ purpose: request.purpose, goal: request.goal, materials: request.materials,
+              questions: request.questions, ...(retained.binding.endpoint ? { endpoint: retained.binding.endpoint } : {}) }, materials.assertReadable));
           },
         });
         return { executor_stopped: true, completion: { kind: 'result', effect: 'none',

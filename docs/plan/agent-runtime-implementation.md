@@ -19,6 +19,13 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-12 增量：原渐进检索 fast-decision
+
+- Native live_root code_retrieval 复用原 ExploreQueryRun/fast-decision loop，在 finish 前判断实际材料和原 action、执行 followup 并接后续批次。原 selector、purpose/default/Off、Documents/grant 与 source owner 保持，未造第二 planner 或权限目录。
+- classifier 同一 query session 延续所有真实 HTTP ordinal，research_decide 也迁入该唯一接口。逐批用量只投影该批原 receipt，未知维度不补零；原 Catalog/Goal 继续唯一计费，Catalog **57**、wire **10** 无变化。
+- 失败批不应用答案/动作，前批成功选择仍保留；实际 source、配置/凭据撤权和 Stop 均抑制新工作，HTTP 真正排空后才结算。材料只来自原签发 view，附送的未询问路径不获权限。
+- 实际来源/action/Storage/Goal/原历史/GC重开和公开取消、独立审查及可复跑边界见[本片验收](../reviews/runtime-progressive-retrieval-2026-10-12.md)。Native Explore LLM、固定/物化/远端检索、其余用途/组合和外层验收仍分别推进；用户负责最终默认切换与全面迁移。
+
 ## 2026-10-12 增量：live-root 检索的原 rerank
 
 - 原 `code_retrieval` model stage 接 dedicated http-rerank，实际 Documents/Storage/grant、版本/行段和 Rust 最终正文重建保持。原 codeRetrieval 选择器与 rerank 连接唯一，extension plan 不再兼任模型设置；显式尚不支持的用途有真实投影。
@@ -641,13 +648,13 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 
 ## 完整设计对照与剩余工程范围
 
-2026-10-12 按两份设计、当前源码和本文件最新已发布增量重新核对。此表替代早期仍把 Goal、策略子任务、MCP Tasks、Computer 或自动容量压缩列为未实现的中间对照；各历史阶段的原始验证记录仍保留。decision 已完成 TypeSafe/Cloudflare/llama.cpp 与 research_decide 有限片；dedicated rerank 已接 native live_root code_retrieval，其他检索模型/材料用途及协议特定已知计量尚未完成。实现、真实产品组合与外部平台验证分别判断，不按提交数、测试数或条目数估计完成比例。
+2026-10-12 按两份设计、当前源码和本文件最新已发布增量重新核对。此表替代早期仍把 Goal、策略子任务、MCP Tasks、Computer 或自动容量压缩列为未实现的中间对照；各历史阶段的原始验证记录仍保留。decision 已完成 TypeSafe/Cloudflare/llama.cpp 与 research_decide 有限片；dedicated rerank 与原渐进 fast-decision 已接 native live_root code_retrieval，Explore LLM/材料用途及协议特定已知计量尚未完成。实现、真实产品组合与外部平台验证分别判断，不按提交数、测试数或条目数估计完成比例。
 
 以下顺序是 decision/rerank 后的工程优先级；可独立交付的领域可以并行。默认 runtime 切换、Pi 删除与全面用户资产迁移由用户验收后执行，我们负责迁移前能力、验收入口和交接清单。
 
 | 设计要求 / 剩余类别 | 已有实际能力，不再作为从零缺口 | 仍需实现或闭合的实际路径 | 验收重点 |
 | --- | --- | --- | --- |
-| 总设 §15–17：来源、语言与检索 | 固定/物化/live_root 来源、隔离可写 child 与逐项结果集成；live_root 定义/引用/诊断、可组合关键词/结构/显式语义及 dedicated rerank；原 immutable reader、撤权与 embedding 账本 | fixed/materialized 的完整工程依赖闭包；其余 LSP 查询与跨文件计算版本证据；远端文件/语言/检索同源映射；其余检索 decision/LLM 与材料 rerank 组合消费者 | 固定视图不能悄悄读 live 配置/库；同名远端路径不串源；旧 reader/配置切代与取消恢复；正常可选缺失不吞选定实现失败 |
+| 总设 §15–17：来源、语言与检索 | 固定/物化/live_root 来源、隔离可写 child 与逐项结果集成；live_root 定义/引用/诊断、可组合关键词/结构/显式语义、dedicated rerank 与原渐进 fast-decision；原 immutable reader、撤权与 embedding 账本 | fixed/materialized 的完整工程依赖闭包；其余 LSP 查询与跨文件计算版本证据；远端文件/语言/检索同源映射；Explore LLM 与材料 rerank 组合消费者 | 固定视图不能悄悄读 live 配置/库；同名远端路径不串源；旧 reader/配置切代与取消恢复；正常可选缺失不吞选定实现失败 |
 | 总设 §12–13、§18、§24：推理用途、记忆与 Bot | 多 API 家族原生适配及原 credential owner；规划模型、embedding、TypeSafe/Cloudflare/llama.cpp decision 与真实 research_decide；自动容量水位、分段摘要、普通 notes/计划和稳定 memory checkpoint；Goal/预算/暂停/各种持久触发 | 其他检索/材料 rerank 消费者、协议特定已知计量；其余建议/评估消费者与独立 image 用途；实际模型配置覆盖和服务器工作续接；可替换上下文预算策略、provider 容量反馈；完整自动记忆与 Bot 独立知识/身份/睡眠恢复/长期任务 | 每次实际外发按用途、原凭据、来源和 Goal 受理；未知 usage 不变成零；不重放潜在收费请求；原记忆 revision 和祖先压缩边界保持 |
 | 扩设 §4–9：完整能力组合与作者接口 | Provider/Transform/Decision/Observer 已有真实切片；ToolGraph、直接 child、Deliver/Pause、运行中策略换绑；SDK tools.list/describe/invoke、普通工具/嵌套调用、候选更新与 owner 独立准备；已有 typed workbench slot 声明 | 同一合同的完整 service/method/event/UI slot/props/来源/就绪状态精确查询；Agent 产包→既有授权候选→工作台挂载/释放整链；更广领域 Provider/Transform、父子作用域共享键与局部复用、多变换顺序/冲突、独占资源交接 | 不另养能力名单或第二安装器；失败候选保留旧实例；旧调用保留真实绑定；关闭 UI 不取消后台业务；仅依赖自己的工作等待准备 |
 | 总设 §14–16、§21、§24：文件与产品工作流 | 原文件工具/CAS/捕获、child 报告与 WorkingResult、family 消息/读取/Wait、历史引用与分支、Storage 与 Catalog GC 锁外准备 | 未保存编辑器草稿、Documents/Git/overview 与工作源的关联；历史/磁盘组合恢复；完整 IDE/Research/Bot 模式、通知等产品消费者接同一身份/revision/cursor | 草稿不是聊天回滚副作用；重开保留真实副本与效果；报告和代码集成各有事实；各视图不能有第二份状态权威 |
@@ -706,12 +713,12 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 | 能力 | 当前入口/权威 | 目标交付 | 原生实现状态 |
 | --- | --- | --- | --- |
 | 会话、分支、运行中输入 | `packages/pi-host/src/session-host.ts`、`packages/runtime-broker` | ConversationStore + RunCoordinator；队列编辑、steering、停止、重连、历史回读 | 局部实现：持久队列、编辑/取消、边界输入/中断/nextRun；显式原生界面、固定 head 分页与对话分支已接入；默认路由迁移与完整恢复未完成 |
-| 模型、认证、推理用途 | Pi SDK、Host `connections`/`pi-config`/`small-model` | 各实际配置 transport、OAuth/云身份、模型覆盖、reasoning/opaque、多模态、usage；chat与embedding/rerank等各自合同 | 局部实现：native query/index embedding 与 TypeSafe/Cloudflare/llama.cpp decision 复用真实配置/凭据 owner、原transport和持久dispatch/usage事实，dedicated rerank 已接 live_root 检索；其他用途/已知 rerank 计量及完整认证/模型覆盖未完成 |
+| 模型、认证、推理用途 | Pi SDK、Host `connections`/`pi-config`/`small-model` | 各实际配置 transport、OAuth/云身份、模型覆盖、reasoning/opaque、多模态、usage；chat与embedding/rerank等各自合同 | 局部实现：native query/index embedding 与 TypeSafe/Cloudflare/llama.cpp decision 复用真实配置/凭据 owner、原transport和持久dispatch/usage事实，dedicated rerank 与原渐进 fast-decision 已接 live_root 检索；其他用途/已知 rerank 计量及完整认证/模型覆盖未完成 |
 | 上下文、记忆checkpoint、压缩 | Pi harness/session history、Host `memory` | 原文保留；来源角色；冻结快照；祖先范围压缩；交付去重；即时记忆写入与稳定system快照 | 原生 checkpoint、自动容量水位与分段摘要 Run 已实现；可替换预算策略、provider 容量反馈与完整自动记忆产品流程仍待 |
 | 文件、草稿、恢复 | Rust `storage`；Host `documents`/`recovery`；UI Document Registry | 复用内容对象/条件写入/恢复；明确草稿owner；分支与磁盘效果区分；组合恢复可核对 | 原生文件工具、固定/可写来源、结果保留与逐项集成已有闭环；完整草稿与历史/磁盘组合恢复的产品接线仍需完成 |
 | 工作分支、基线与dispatch | Host `harness/thread-services.ts`、`thread-runtime.ts`、`kernel/storage-adapter.ts` | 持久受理立即回执；准备独立作业；批量capture；真实一致性标记；无变更报告与代码集成分开 | 固定与可写 child 持久受理、原来源准备、递归取消、报告/WorkingResult 与逐项集成已接；更广捕获与恢复产品组合仍待 |
 | Shell、PTY、输出、进程树 | Rust `process` guardian；Host `kernel/process-service.ts`/`terminal` | 保留真实进程回执；推送I/O与stdin确认；控制独立；取消观察不同于终止进程 | 原生 spawn/持久观察/停止、PTY input/resize 回执、原进程终端与恢复已接；平台和产品完整验收仍待 |
-| LSP、结构/关键词/语义检索 | Host `lsp`/`search`/`structure`/`knowledge`；Rust `compute` | 按environment/project/config/view共享服务；来源修订明确；独立准备；不等待无关索引 | 局部实现：live_root 定义/引用/诊断及可组合关键词/结构/显式语义已接原 owner 与原生历史；真实reader切代、撤权和推理账本已验收。dedicated rerank 另已接原逐 HTTP 回执。fixed/materialized 闭包、其余 LSP/模型消费者与远端仍未完成 |
+| LSP、结构/关键词/语义检索 | Host `lsp`/`search`/`structure`/`knowledge`；Rust `compute` | 按environment/project/config/view共享服务；来源修订明确；独立准备；不等待无关索引 | 局部实现：live_root 定义/引用/诊断及可组合关键词/结构/显式语义已接原 owner 与原生历史；真实reader切代、撤权和推理账本已验收。dedicated rerank 与渐进 fast-decision 已接原逐 HTTP 回执。fixed/materialized 闭包、其余 LSP/模型消费者与远端仍未完成 |
 | 任务协作、消息、wait | Host `harness` registry/services | 单一Thread/Run事实；有来源消息；Wait持久化与游标；结果恰当去重；旧世代不污染新执行 | 真实 family 发现/互读、inform/request/reply、关联 Wait/期限、多观察屏障、child 独立新 Run 已接；完整 Host 与平台验收仍待 |
 | 计划、普通记忆、Bot知识 | Host `memory`/`knowledge`；普通Agent notes为Rust typed record | 保留各领域owner、权限和revision；不把所有知识塞入泛化状态库 | 普通 notes、真实自身计划、root/child 两调用来源、CAS 和原回执恢复已接；Bot 知识与完整自动记忆流程仍待 |
 | Goal、自动接续、辅助模型 | Host `bots`/`pi-session-automation`/`run` | 显式Goal授权、暂停/预算/用量；等待不覆盖手动暂停；辅助请求独立身份 | 显式 Goal、原用量/预算、暂停、依赖、root/child 自动接续及独立规划模型已接；其他辅助用途与完整产品验收仍待 |

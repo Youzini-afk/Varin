@@ -84,12 +84,12 @@ it('an in-flight Run retains its selected model handle/generation while a failed
   const gate = deferred(); let oldEntered = 0, oldCalls = 0, newCalls = 0;
   const oldModel = vi.fn(async () => { oldEntered++; await gate.promise; oldCalls++; return { indices: [0], status: 'ready' as const }; });
   const newModel = vi.fn(async () => { newCalls++; return { indices: [0], status: 'ready' as const }; });
-  const pipelines = createRetrievalPipelineOwner({ configurationId: 'old-config', model: { providerId: 'selected-old', configurationId: 'old-model-config', status: 'ready', implementation: oldModel } });
+  const pipelines = createRetrievalPipelineOwner({ configurationId: 'old-config', model: { providerId: 'selected-old', configurationId: 'old-model-config', status: 'ready', implementation: { kind: 'snippets', select: oldModel } } });
   const results = install(f, pipelines); const oldPlan = pipelines.capture().plan;
   const oldRun = await f.admit('old-retrieval-generation', ['code_retrieval']);
   try {
     await oldRun.start(); await expect.poll(() => oldEntered, { timeout: 10_000 }).toBe(1);
-    const published = await pipelines.replace(async () => ({ configurationId: 'new-config', model: { providerId: 'selected-new', configurationId: 'new-model-config', status: 'ready', implementation: newModel } }));
+    const published = await pipelines.replace(async () => ({ configurationId: 'new-config', model: { providerId: 'selected-new', configurationId: 'new-model-config', status: 'ready', implementation: { kind: 'snippets', select: newModel } } }));
     await expect(pipelines.replace(async () => { throw new Error('candidate failed to prepare'); })).rejects.toThrow('candidate failed to prepare');
     expect(pipelines.capture().plan).toBe(published);
     const newRun = await f.admit('new-retrieval-generation', ['code_retrieval']); await newRun.start();
@@ -142,7 +142,7 @@ it('selected semantic candidates use real chunk hashes, admit source before mode
   install(f, createRetrievalPipelineOwner({ configurationId: 'explicit-semantic',
     semantic: { providerId: 'published-index-fixture', configurationId: 'published-1', status: 'ready', implementation: { search: async () => ({ status: 'ready', coverage: 'complete', lifecycle: 'ready',
       hits: [hit('allowed/semantic.ts', semanticText, 1), hit('private/secret.ts', 'PRIVATE_INDEX_BODY', 2), hit('../outside.ts', 'OUTSIDE_INDEX_BODY', 3)] }) } },
-    model: { providerId: 'selected-model-fixture', configurationId: 'selection-1', status: 'ready', implementation: async input => { selectedBodies.push(JSON.stringify(input.snippets)); return { indices: input.snippets.map((_item, index) => index), status: 'ready' as const }; } },
+    model: { providerId: 'selected-model-fixture', configurationId: 'selection-1', status: 'ready', implementation: { kind: 'snippets', select: async input => { selectedBodies.push(JSON.stringify(input.snippets)); return { indices: input.snippets.map((_item, index) => index), status: 'ready' as const }; } } },
   }));
   const run = await f.admit('semantic-source-authority', ['code_retrieval'], ['allowed']); await run.start();
   await expect.poll(async () => (await f.runtime.run(run.receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
@@ -172,7 +172,7 @@ it('large structured units retain the actual distant hit instead of refilling om
 it('a selected model failure keeps verified source order and reports partial without invoking a fallback model', async () => {
   const f = await fixture(once); await f.write('module.ts', sourceText);
   const selected = vi.fn(async () => { throw new Error('selected model unavailable'); });
-  const results = install(f, createRetrievalPipelineOwner({ configurationId: 'failing-selected-model', model: { providerId: 'explicit-model', configurationId: 'failed-generation', status: 'ready', implementation: selected } }));
+  const results = install(f, createRetrievalPipelineOwner({ configurationId: 'failing-selected-model', model: { providerId: 'explicit-model', configurationId: 'failed-generation', status: 'ready', implementation: { kind: 'snippets', select: selected } } }));
   const run = await f.admit('failed-selected-model', ['code_retrieval']); await run.start();
   await expect.poll(async () => (await f.runtime.run(run.receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
   expect(selected).toHaveBeenCalledTimes(1); expect(f.requests).toHaveLength(2);

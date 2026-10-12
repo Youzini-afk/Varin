@@ -3,6 +3,8 @@ import { isDeepStrictEqual } from 'node:util';
 import { createHash } from 'node:crypto';
 import { parseHarnessModelSlots, resolveHarnessModelSlot, parseHarnessRerankSettings, resolveHarnessCodeRetrievalSettings,
   type HarnessExploreDecisionMode } from '@varin/protocol';
+import { runExploreFastDecisionLoop } from '../harness/explore-fast-decision.js';
+import { ResearchDecisionFailure } from '../harness/research-decide.js';
 import type { SemanticInference } from '../knowledge/semantic/runtime-inference.js';
 import type { RetrievalModelLease } from './retrieval-composition.js';
 import type { KernelClient } from './kernel-client.js';
@@ -41,7 +43,7 @@ export function createRetrievalModelStage(options: {
       mode = resolveHarnessCodeRetrievalSettings(harness.codeRetrieval).decision;
     } catch { return unavailable('settings', 'unavailable', ['invalid']); }
     if (mode === 'source') return unavailable('none', 'disabled', [mode]);
-    if (mode === 'llm' || mode === 'fast-decision') return unavailable(mode, 'unsupported', [mode]);
+    if (mode === 'llm') return unavailable(mode, 'unsupported', [mode]);
     if (mode === 'auto') {
       // The original Explore slot has precedence over classifier and rerank. Resolve only
       // this role so unrelated malformed model candidates cannot select or block this duty.
@@ -51,12 +53,59 @@ export function createRetrievalModelStage(options: {
         const explore = resolveHarnessModelSlot('explore', parseHarnessModelSlots(raw === undefined ? undefined : { explore: raw }), null);
         if (explore) return unavailable(explore.providerId, 'unsupported', [mode, 'explore', explore]);
       } catch { return unavailable('llm', 'unavailable', [mode, 'invalid-explore-slot']); }
-      // Preserve the original selection precedence. An unimplemented selected decision
-      // consumer is not permission to silently send the same candidates to another model.
+    }
+    const invocation = { operationId: toolOperationId(origin(query), query.invocation.toolCallId), executorOwner: query.inferenceOwner };
+    const verifySelection = async () => {
+      assertAvailable();
+      const verified = await options.readGlobalSettings();
+      const current = object(verified) && object(verified.harness) ? verified.harness : {};
+      if (!isDeepStrictEqual(current.codeRetrieval, harness.codeRetrieval)
+        || mode === 'auto' && (!isDeepStrictEqual(current.fastDecision, harness.fastDecision)
+          || !isDeepStrictEqual(object(current.models) ? current.models.explore : current.models,
+            object(harness.models) ? harness.models.explore : harness.models))) {
+        throw new Error('Retrieval model selection changed during preparation');
+      }
+      if (invocation.executorOwner.kind !== 'external') throw new Error('Original inference delegation is unavailable');
+    };
+    if (mode === 'auto' || mode === 'fast-decision') {
       const decision = await options.inference.captureDecision('explore');
       if (decision.status === 'ready') {
-        decision.lease.release();
-        return unavailable('fast-decision', 'unsupported', [mode, decision.lease.binding]);
+        const lease = decision.lease;
+        try {
+          await verifySelection();
+          const validate = async (active: AbortSignal = signal) => { await validateAvailable(active); await lease.assertAvailable(active); };
+          await validate(signal);
+          return {
+            stage: { providerId: lease.binding.providerId, configurationId: identity([mode, lease.binding]), status: 'ready',
+              implementation: { kind: 'progressive', select: async ({ run, validateMaterials }, active) => {
+                await validate(active);
+                return lease.run(invocation, active, session => runExploreFastDecisionLoop({
+                  run, binding: lease.binding, signal: active, deadlineAt: run.deadlineAt,
+                  closing: { promise: new Promise<void>(() => {}), requested: () => false },
+                  call: async batch => {
+                    try {
+                      return await session.decide({ purpose: 'explore', goal: batch.goal,
+                        materials: batch.materials, questions: batch.questions,
+                        ...(lease.binding.endpoint ? { endpoint: lease.binding.endpoint } : {}) }, async () => {
+                        await validate(active); await validateMaterials(batch.materials); await validate(active);
+                      });
+                    } catch (error) {
+                      if (!(error instanceof ResearchDecisionFailure) || !error.result) throw error;
+                      // Preserve accounted partial facts, but a failed batch never selects
+                      // material or launches actions. Earlier successful rounds stay intact.
+                      return { ...error.result, failure: { status: error.cancelled ? 'cancelled' : 'failed', note: error.message } };
+                    }
+                  },
+                }));
+              } },
+            },
+            assertAvailable, validateAvailable: validate,
+            release() { if (released) return; released = true; lease.release(); },
+          };
+        } catch (error) { lease.release(); throw error; }
+      }
+      if (mode === 'fast-decision' || !['disabled', 'unconfigured'].includes(decision.status)) {
+        return unavailable('fast-decision', decision.status === 'disabled' ? 'disabled' : 'unavailable', [mode, decision.status]);
       }
     }
     let configured;
@@ -68,22 +117,12 @@ export function createRetrievalModelStage(options: {
     if (selected.status !== 'ready') return unavailable(configured.providerId, selected.status === 'unconfigured' && mode === 'auto' ? 'disabled' : 'unavailable', [mode, configured, selected.status]);
     const lease = selected.lease;
     try {
-      assertAvailable();
-      const verified = await options.readGlobalSettings();
-      const current = object(verified) && object(verified.harness) ? verified.harness : {};
-      if (!isDeepStrictEqual(current.codeRetrieval, harness.codeRetrieval)
-        || mode === 'auto' && (!isDeepStrictEqual(current.fastDecision, harness.fastDecision)
-          || !isDeepStrictEqual(object(current.models) ? current.models.explore : current.models,
-            object(harness.models) ? harness.models.explore : harness.models))) {
-        throw new Error('Retrieval model selection changed during preparation');
-      }
-      const invocation = { operationId: toolOperationId(origin(query), query.invocation.toolCallId), executorOwner: query.inferenceOwner };
-      if (invocation.executorOwner.kind !== 'external') throw new Error('Original inference delegation is unavailable');
+      await verifySelection();
       const validate = async (active: AbortSignal = signal) => { await validateAvailable(active); await lease.assertAvailable(active); };
       await validate(signal);
       return {
         stage: { providerId: lease.binding.providerId, configurationId: identity([mode, lease.binding]), status: 'ready',
-          implementation: async (input, active) => {
+          implementation: { kind: 'snippets', select: async (input, active) => {
             await validate(active);
             // Keep exact spans and revisions. The inherited user budget uses the original
             // character estimate; it is a selection budget, not provider usage accounting.
@@ -110,7 +149,7 @@ export function createRetrievalModelStage(options: {
             const ranked = new Set(ordered);
             return { indices: [...ordered, ...original.filter(index => !ranked.has(index))],
               status: ranked.size === original.length ? 'ready' : 'partial' };
-          } },
+          } } },
         assertAvailable, validateAvailable: validate,
         release() { if (released) return; released = true; lease.release(); },
       };

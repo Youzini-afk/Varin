@@ -75,7 +75,7 @@ impl Review {
         let storage_root = root.join("storage");
         let mut f = Fixture {
             host: Host::with_script(
-                "packages/web/application-host/lib/kernel/retrieval-rerank-host.test-helper.ts",
+                "packages/web/application-host/lib/kernel/retrieval-inference-host.test-helper.ts",
             ),
             runtime,
             storage: Mutex::new(Storage::open(&storage_root, HOST).unwrap()),
@@ -412,49 +412,198 @@ fn original_rerank_source_selection_partial_scores_and_receipts_survive_reopen()
 #[test]
 #[ignore = "requires original Host inference; independent cheap read cancel and actual body drain over stdio"]
 fn cancelled_cheap_query_preserves_independent_inference_until_real_body_stop() {
-    let mut review = Review::new("stop-body");
-    let counts = review.execute(true);
-    assert_eq!(counts["requests"], 1);
-    assert_eq!(counts["drained"], true);
-    let owner = review.f.runtime.catalog();
-    let db = owner.lock().unwrap();
-    let usage = db
-        .capture_goal("rerank-goal")
-        .unwrap()
-        .load()
-        .unwrap()
-        .usage;
-    assert_eq!(usage.pending_inferences, 0);
-    assert_eq!(usage.missing_inferences, 1);
-    let operations = db
-        .events_after(0, 10000)
-        .unwrap()
-        .into_iter()
-        .filter(|event| event.kind == "inference.admitted")
-        .collect::<Vec<_>>();
-    assert_eq!(operations.len(), 1);
-    let op = db
-        .capture_operation_read(db.operation(&operations[0].subject).unwrap())
-        .load()
-        .unwrap();
-    assert_eq!(op.phase, OperationPhase::Terminal);
-    assert_eq!(
-        op.result.as_ref().unwrap().control().unwrap()["receipt"]["localExecutorStopped"],
-        true
-    );
-    assert!(!db.execution_history("branch:parent").unwrap().iter().any(
-        |item| match &item.content {
-            Content::ToolResult { result } => match &result.completion {
-                ToolCompletion::Result { content, .. } =>
-                    content.data.to_string().contains("SOURCE_"),
-                _ => false,
-            },
-            _ => false,
+    for mode in ["stop-body", "decision-stop"] {
+        let mut review = Review::new(mode);
+        let counts = review.execute(true);
+        assert_eq!(counts["requests"], 1);
+        assert_eq!(counts["drained"], true);
+        let owner = review.f.runtime.catalog();
+        let db = owner.lock().unwrap();
+        let usage = db
+            .capture_goal("rerank-goal")
+            .unwrap()
+            .load()
+            .unwrap()
+            .usage;
+        assert_eq!(usage.pending_inferences, 0);
+        assert_eq!(usage.missing_inferences, 1);
+        let operations = db
+            .events_after(0, 10000)
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == "inference.admitted")
+            .collect::<Vec<_>>();
+        assert_eq!(operations.len(), 1);
+        let op = db
+            .capture_operation_read(db.operation(&operations[0].subject).unwrap())
+            .load()
+            .unwrap();
+        assert_eq!(op.phase, OperationPhase::Terminal);
+        assert_eq!(
+            op.result.as_ref().unwrap().control().unwrap()["receipt"]["localExecutorStopped"],
+            true
+        );
+        assert!(
+            !db.execution_history("branch:parent")
+                .unwrap()
+                .iter()
+                .any(|item| match &item.content {
+                    Content::ToolResult { result } => match &result.completion {
+                        ToolCompletion::Result { content, .. } => content.data["snippets"]
+                            .as_array()
+                            .is_some_and(|snippets| !snippets.is_empty()),
+                        _ => false,
+                    },
+                    _ => false,
+                })
+        );
+        drop(db);
+        drop(owner);
+        let root = review.root.clone();
+        drop(review);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+#[ignore = "requires original progressive query, classifier and Catalog/Goal owners over stdio"]
+fn progressive_decision_keeps_one_query_owner_across_real_actions_and_paid_batches() {
+    for mode in ["decision-known", "decision-unknown", "decision-partial"] {
+        let mut review = Review::new(mode);
+        let counts = review.execute(false);
+        let requests = counts["requests"].as_u64().unwrap();
+        if mode == "decision-unknown" {
+            assert_eq!(requests, 1);
+        } else {
+            assert!(
+                requests >= 2,
+                "the original action must lead to another actual classifier batch: {counts}"
+            );
         }
-    ));
-    drop(db);
-    drop(owner);
-    let root = review.root.clone();
-    drop(review);
-    std::fs::remove_dir_all(root).unwrap();
+        let bodies = counts["bodies"].as_array().unwrap();
+        assert!(
+            bodies[0]["questions"]
+                .as_object()
+                .unwrap()
+                .contains_key("a:symbol:hiddenHelper"),
+            "the actual read seed issued this action: {counts}"
+        );
+        if requests >= 2 {
+            assert!(
+                bodies.iter().skip(1).any(|body| body["state"]["materials"]
+                    .to_string()
+                    .contains("DISCOVERED_HELPER")),
+                "followup must read actual new source before a later material batch: mode={mode}, counts={counts}"
+            );
+        }
+        let owner = review.f.runtime.catalog();
+        let db = owner.lock().unwrap();
+        let history = db.execution_history("branch:parent").unwrap();
+        let result = history
+            .iter()
+            .find_map(|item| match &item.content {
+                Content::ToolResult { result } if result.call_id == "retrieve" => {
+                    match &result.completion {
+                        ToolCompletion::Result { content, .. } => Some(&content.data),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert!(!result.to_string().contains("FORBIDDEN_SOURCE"));
+        assert!(
+            result.to_string().contains("allowed/seed.ts"),
+            "successful earlier selection is retained: {result}"
+        );
+        if mode == "decision-known" {
+            assert!(result.to_string().contains("DISCOVERED_HELPER"));
+        } else {
+            assert_eq!(result["status"], "partial");
+        }
+        let usage = db
+            .capture_goal("rerank-goal")
+            .unwrap()
+            .load()
+            .unwrap()
+            .usage;
+        assert_eq!(usage.pending_inferences, 0);
+        if mode == "decision-unknown" {
+            // Actual partial metering retains the known dimension; it is not a
+            // wholly missing receipt. The original Goal fences the unknown output.
+            assert_eq!(usage.missing_inferences, 0);
+            assert_eq!(usage.actual.input_tokens.known, 7);
+            assert_eq!(usage.actual.output_tokens.unknown_receipts, 1);
+        } else {
+            assert_eq!(usage.missing_inferences, 0);
+            assert_eq!(
+                usage.actual.input_tokens.known,
+                7 * requests * (requests + 1) / 2
+            );
+            assert_eq!(
+                usage.actual.output_tokens.known,
+                requests * (requests + 1) / 2
+            );
+        }
+        let operations = db
+            .events_after(0, 10000)
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == "inference.admitted")
+            .map(|event| {
+                db.capture_operation_read(db.operation(&event.subject).unwrap())
+                    .load()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert!(!operations.is_empty());
+        let parent = operations[0].intent["parentOperationId"].clone();
+        let execution_owner = operations[0].execution_owner.clone();
+        let mut started = 0;
+        for (index, op) in operations.iter().enumerate() {
+            assert_eq!(op.intent["parentOperationId"], parent);
+            assert_eq!(op.execution_owner, execution_owner);
+            assert_eq!(op.intent["ordinal"], (index + 1) as u64);
+            assert_eq!(op.intent["binding"]["purpose"], "explore");
+            let state = op.result.as_ref().unwrap().control().unwrap();
+            if state["receipt"]["requestStarted"] == true {
+                started += 1;
+            }
+            assert_eq!(op.phase, OperationPhase::Terminal);
+            assert!(op.handed_off);
+        }
+        assert_eq!(started, requests);
+        drop(db);
+        let collection = owner
+            .lock()
+            .unwrap()
+            .prepare_content_collection(Default::default());
+        assert_eq!(
+            collection.run().status,
+            varin_runtime::ContentCollectionStatus::Completed
+        );
+        let root = review.root.clone();
+        drop(owner);
+        drop(review);
+        let db = Catalog::open(root.join("catalog")).unwrap();
+        assert_eq!(db.execution_history("branch:parent").unwrap(), history);
+        assert_eq!(
+            db.capture_goal("rerank-goal")
+                .unwrap()
+                .load()
+                .unwrap()
+                .usage,
+            usage
+        );
+        for op in operations {
+            assert_eq!(
+                db.capture_operation_read(db.operation(&op.id).unwrap())
+                    .load()
+                    .unwrap(),
+                op
+            );
+        }
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

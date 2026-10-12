@@ -304,8 +304,8 @@ Global singleton that owns:
 The Pi adapter resolves embedding, reranking and fast decisions through its original provider capabilities.
 Native embedding and TypeSafe/Cloudflare/llama.cpp decisions use the existing Host inference/credential owner
 directly; native decision/rerank HTTP/Goal facts belong to Catalog. Native live-root code retrieval
-now uses the dedicated rerank binding. Other model-stage purposes and classifier APIs still require
-their own native integration.
+uses dedicated rerank or the original progressive fast-decision loop. Explore LLM and other model-stage
+purposes still require their own native integration.
 Their connection/credential defaults and model declarations are independent of the native chat API;
 the Host receives only frozen, credential-free bindings. User/operator metadata can override the
 operation's address, path and credential owner; project configuration cannot redirect background
@@ -947,6 +947,14 @@ without any model, source retrieval and deterministic packing still run. Explici
 `rerank`, `source`, and purpose `off` keep their meanings. A failed provider does not start a cascade
 of replacement paid requests. Embedding contributes an independent source. Rerank settings and the
 fast-decision configuration identity stay fixed for this query.
+
+Native `live_root code_retrieval` now runs this same fast-decision loop against its actual query
+before finish. It uses one original Host inference session across batches and SDK requests; the existing
+`research_decide` consumer shares that session contract. Source-issued material/action identities and
+original Documents/grant checks remain with the query owner. The loop reports known usage dimensions
+only, and an accounted failed batch stops before selection/followup while retaining earlier successful
+selection. Native Explore LLM is still explicitly unsupported, including an enabled Explore slot in auto;
+the Pi LLM planner/selection behavior above is not yet a native implementation claim.
 
 `query.views({seen,inputBytes})` returns ready ranges, current sequence, pending work and actions;
 it does not await all sources or structure. `query.wait({afterSequence})` registers a cancellable,

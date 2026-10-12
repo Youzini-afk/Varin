@@ -435,7 +435,8 @@ before sweeping and preserves unknown files; it never deletes history or invokes
 
 `catalog_inference.rs` owns purpose-specific decision/rerank HTTP work under an already admitted tool.
 One parent/ordinal identifies one actual request, with the original external executor, frozen binding
-and Goal. Required `requestKind` distinguishes `preparation` from `model_compute`; both retain the
+and Goal. Progressive retrieval retains that same query session across classifier batches and SDK
+requests; ordinals do not reset and each HTTP contribution is counted once. Required `requestKind` distinguishes `preparation` from `model_compute`; both retain the
 original control, permission and dispatch fences. Only actual model computation registers/refines
 Goal usage. Tokenization/template requests are not missing-usage charges or invented zero-token
 computations. Body preparation uses ContentStore publications outside the Catalog lock. Model

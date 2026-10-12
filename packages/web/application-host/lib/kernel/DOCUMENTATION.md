@@ -787,15 +787,14 @@ uses its own explicit backend/published-reader acquisition through the existing 
 than the Pi wrapper that resolves a mutable backend at search time. Query bindings retain actual owner
 references, not a frozen wrapper around whichever backend/index happens to be current later.
 
-### Dedicated rerank in native live-root retrieval
+### Model stages in native live-root retrieval
 
 `retrieval-model.ts` consumes the existing global `harness.codeRetrieval.decision` selector and
 `harness.rerank` connection. The extension plan still selects structural/semantic composition; it
 is not a second model selector. `source` dispatches nothing, an explicit unavailable reranker stays
 unavailable, and `auto` respects an explicitly enabled Explore model slot before fast-decision rather than silently
-choosing a different paid model. Native fast-decision/LLM retrieval consumers are still explicitly
-unsupported in this slice; an absent or disabled Explore slot continues through the existing native
-choices. Slot parsing/resolution comes from the shared configuration contract, not another model list.
+choosing a different paid model. Native Explore LLM remains explicitly unsupported; an absent or disabled Explore slot continues
+through the original fast-decision binding and then the existing rerank choice. Slot parsing/resolution comes from the shared configuration contract, not another model list.
 A query pins its actual credential/configuration binding through the original Host credential owner.
 Deleting the original rerank selection is explicit Off and retires retained leases; normal/invalid
 replacement candidates leave accepted bindings intact. A nonempty request with no scored documents
@@ -814,7 +813,21 @@ stably ahead of unscored or over-budget candidates, whose original order remains
 status. This generic protocol does not define input/output token dimensions: raw usage/meta are
 retained, but total tokens are not relabeled as input and output is not invented as zero. Actual
 requests therefore retain missing usage under the original Goal barrier. Protocol-specific known
-metering and material/Explore model-purpose consumers remain follow-on work.
+metering and material/Explore LLM consumers remain follow-on work.
+
+`fast-decision` uses the original `ExploreQueryRun` and `runExploreFastDecisionLoop` before
+query finish. It judges source-issued views and action candidates, applies successful selections and
+executes original followups while sources progress. The query owner checks issued material identities,
+Documents bytes/revisions, source binding and original grant before each HTTP and delivery; the model
+cannot introduce paths or commands. Quiet frontier, cancellation or the original deadline ends the loop,
+not a fixed round limit. A failed batch contributes its observed usage/missing facts but no selection or
+actions; earlier successful selections remain. Missing/false/zero answers never grant an action.
+
+`DecisionInferenceLease.run` keeps one original inference session across every classifier batch and SDK
+request, so ordinals do not restart and earlier usage is not counted again. `research_decide` uses the
+same session interface. Loop summaries omit an unknown token dimension instead of filling it with zero;
+Catalog still owns each actual HTTP charge and its unknown-usage barrier. Purpose Off and credential
+revocation suppress new work/delivery while preserving the original receipt and actual body-drain facts.
 
 ### Model item identity and committed-history recovery
 

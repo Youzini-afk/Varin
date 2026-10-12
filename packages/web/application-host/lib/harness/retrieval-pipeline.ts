@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import type { ExploreDeps } from './explore.js';
+import type { ExploreFastDecisionDetails, FastDecisionMaterial } from '@varin/protocol';
+import type { ExploreDeps, ExploreQueryRun } from './explore.js';
 import type { SemanticInferenceReceipt } from '../knowledge/semantic/runtime-inference.js';
 
 export type RetrievalStageKind = 'keyword' | 'structure' | 'semantic' | 'model';
@@ -39,12 +40,20 @@ export interface RetrievalStageBinding<T> {
   status: PipelineStage['status'];
   implementation?: T;
 }
+/** Execution form of the already selected model, not another configuration selector. */
+export type RetrievalModel = {
+  kind: 'snippets';
+  select(input: { question: string; snippets: readonly RetrievalSnippet[] }, signal: AbortSignal): Promise<{ indices: readonly number[]; status: 'ready' | 'partial' | 'empty' }>;
+} | {
+  kind: 'progressive';
+  select(input: { run: ExploreQueryRun; validateMaterials(materials: readonly FastDecisionMaterial[]): Promise<void> }, signal: AbortSignal): Promise<ExploreFastDecisionDetails>;
+};
 export interface RetrievalPipelineConfiguration {
   configurationId: string;
   structure?: RetrievalStageBinding<NonNullable<ExploreDeps['structure']>>;
   semantic?: RetrievalStageBinding<NonNullable<ExploreDeps['semantic']>>;
-  /** Explicitly selected model may select/reorder only already-authorized snippets. No implicit model. */
-  model?: RetrievalStageBinding<(input: { question: string; snippets: readonly RetrievalSnippet[] }, signal: AbortSignal) => Promise<{ indices: readonly number[]; status: 'ready' | 'partial' | 'empty' }>>;
+  /** Models consume admitted source or drive original query-issued read actions. */
+  model?: RetrievalStageBinding<RetrievalModel>;
 }
 export interface BoundRetrievalPipeline {
   readonly plan: PipelinePlan;
@@ -77,7 +86,10 @@ function bind(configuration: RetrievalPipelineConfiguration, generation: number)
       } else if (kind === 'semantic') {
         const source = configuration.semantic!.implementation!;
         Object.assign(implementations, { semantic: Object.freeze({ search: source.search.bind(source) }) });
-      } else Object.assign(implementations, { model: configuration.model!.implementation! });
+      } else {
+        const model = configuration.model!.implementation!;
+        Object.assign(implementations, { model: Object.freeze({ kind: model.kind, select: model.select.bind(model) }) });
+      }
     }
   }
   const id = createHash('sha256').update(JSON.stringify([configuration.configurationId, generation, stages])).digest('hex');

@@ -3059,5 +3059,5 @@ mod scholarly_discovery_review;
 #[path = "background_decision_review.rs"]
 mod background_decision_review;
 #[cfg(test)]
-#[path = "retrieval_rerank_review.rs"]
-mod retrieval_rerank_review;
+#[path = "retrieval_inference_review.rs"]
+mod retrieval_inference_review;
