@@ -149,6 +149,8 @@ export interface VarinExtensionManifest {
   requires?: {
     services?: VarinExtensionServiceRequirement[];
   };
+  /** Explicit candidate-update group. Selected startup/recovery remains independent of windows. */
+  updateReadiness?: { surfaceEntrypoints: string[] };
   schemaVersion: typeof VARIN_EXTENSION_MANIFEST_SCHEMA_VERSION;
   storage?: {
     schemaVersion: number;
@@ -334,6 +336,26 @@ export interface VarinExtensionCandidateSelectionRequest {
   extensionId: string;
 }
 
+/** A preparation identity from the original Host instance; never a window liveness claim. */
+export interface VarinExtensionHostPreparationIdentity {
+  id: string;
+  hostId: string;
+  desiredRevision: number;
+  generation: number;
+}
+
+/** Trusted Surface-host evidence scoped to its live local preparation transaction. */
+export interface VarinExtensionSurfaceReadiness {
+  hostPreparation: VarinExtensionHostPreparationIdentity;
+  realmId: string;
+  surface: VarinApplicationSurface;
+  members: Array<{ entrypointId: string; generation: number }>;
+}
+
+export interface VarinExtensionCandidatePublicationRequest extends VarinExtensionCandidateSelectionRequest {
+  surfaceReadiness?: VarinExtensionSurfaceReadiness;
+}
+
 export interface VarinExtensionCandidateCapabilityReviewRequest {
   candidateIntegrity: string;
   decisions: VarinExtensionCapabilityDecision[];
@@ -410,6 +432,7 @@ export interface VarinExtensionServiceSelectionRequest {
 }
 
 export interface VarinExtensionCandidatePreparationResult {
+  hostPreparation?: VarinExtensionHostPreparationIdentity;
   extensionId: string;
   integrity: string;
   providers: VarinExtensionServiceProviderSnapshot[];

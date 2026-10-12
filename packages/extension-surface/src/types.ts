@@ -65,6 +65,8 @@ export interface SurfaceActivationOptions {
   externalServices?: readonly SurfaceExternalService[];
   grantedCapabilities?: Iterable<string>;
   owner: SurfaceOwnerIdentity;
+  /** Cancels this local preparation; an already committed external publication remains committed. */
+  signal?: AbortSignal;
   requirements?: VarinExtensionServiceRequirement[];
   /** Provider IDs already resolved by the owning Host/profile for selected bindings. */
   serviceSelections?: Readonly<Record<string, string>>;
@@ -173,10 +175,14 @@ export interface SurfaceContributionPreview {
   affectedExtensionIds: readonly string[];
   owners: readonly SurfaceOwnerIdentity[];
   visibleContributions: readonly SurfaceContribution[];
+  /** Lifetime of the proposed owners while a connected consumer prepares its real mounts. */
+  signal?: AbortSignal;
 }
 
 /** A connected consumer stages real mounts before the owning Surface generation is published. */
 export interface SurfaceContributionLease {
+  /** Invalidated by the connected consumer closing or replacing this prepared binding. */
+  readonly signal?: AbortSignal;
   validate(): void;
   /** Synchronously publish staged mounts; return cleanup for retired mounts. Must not throw. */
   commit(): SurfaceDisposer | void;

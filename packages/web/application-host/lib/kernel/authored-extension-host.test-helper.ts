@@ -27,6 +27,7 @@ import type { LaunchSource, KernelHandshakeResult, LiveExtensionToolBinding } fr
 const write = (frame: unknown) => process.stdout.write(`${JSON.stringify(frame)}\n`);
 const pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void; method: string }>();
 let sequence = 0, root = '', workspace = '', runId = '';
+let grouped = false, initialIntegrity = '';
 let kernel: KernelClient, runtime: AgentRuntimeClient, extensions: ApplicationExtensionRuntime;
 let documents: ReturnType<typeof createDocumentAuthority>;
 let selectedSource: LaunchSource;
@@ -97,6 +98,7 @@ function route(method: string, url: string, body: unknown): Promise<Record<strin
 }
 
 async function initialize(frame: Record<string, unknown>) {
+  grouped = frame.grouped === true;
   root = String(frame.root); runId = String(frame.runId); workspace = join(root, 'workspace');
   await mkdir(workspace, { recursive: true });
   const storageRoot = String(frame.storageRoot);
@@ -140,6 +142,10 @@ async function initialize(frame: Record<string, unknown>) {
   const files = await Promise.all((await readdir(example)).filter(name => !name.startsWith('.')).sort().map(async name => ({
     path: `package/${name}`, content: await readFile(join(example, name), 'utf8'),
   })));
+  if (grouped) {
+    const manifest = files.find(file => file.path === 'package/varin.extension.json'); assert(manifest);
+    manifest.content = JSON.stringify({ ...JSON.parse(manifest.content), updateReadiness: { surfaceEntrypoints: ['panel'] } });
+  }
   write({ kind: 'fixture-ready', source: selectedSource, files });
 }
 
@@ -156,9 +162,13 @@ async function handle(frame: Record<string, unknown>) {
   }
   if (frame.kind === 'fixture-user-enable') {
     const before = await extensions.catalog.snapshot(), entry = before.extensions.find(value => value.manifest.id === id);
-    assert(entry); assert.equal(entry.desired.enabled, false); assert.equal(entry.capabilityGrants.length, 0);
+    assert(entry); initialIntegrity = entry.integrity!; assert.equal(entry.desired.enabled, false); assert.equal(entry.capabilityGrants.length, 0);
     assert(!extensions.services.getSnapshot().providers.some(provider => provider.extensionId === id));
     await route('PATCH', `/api/varin/extensions/v1/extensions/${id}/enabled`, { enabled: true, expectedRevision: before.revision });
+    const selectedService = await extensions.prepareService({ serviceId: 'example.agent-authored-panel.count', version: 1, method: 'execute', args: [] });
+    originalService = selectedService.pin();
+    assert(extensions.services.getSnapshot().providers.some(provider => provider.extensionId === id && provider.status === 'active'),
+      'A selected initial version does not acquire a permanent Surface-presence gate');
     const consumer: { createAuthoredPanelConsumer(host: SurfaceExtensionHost): Promise<PanelConsumer> } = await import(
       pathToFileURL(resolve('packages/ui/src/lib/extensions/authored-surface-consumer.test-support.ts')).href);
     panel = await consumer.createAuthoredPanelConsumer({
@@ -166,9 +176,9 @@ async function handle(frame: Record<string, unknown>) {
       catalog: async () => ({ supported: true, status: 'ready', snapshot: await extensions.catalog.snapshot() }),
       hostState: () => extensions.state(),
       invokeService: request => extensions.invokeService(request),
-      prepareCandidate: (extensionId, integrity) => extensions.prepareCandidate(extensionId, integrity),
+      prepareCandidate: (extensionId, integrity, signal) => extensions.prepareCandidate(extensionId, integrity, signal),
       requestCandidateApplication: request => extensions.requestCandidateApplication(request),
-      selectCandidate: request => extensions.selectCandidate(request),
+      selectCandidate: (request, signal) => extensions.selectCandidate(request, signal),
       discardPreparedCandidate: (extensionId, integrity) => extensions.discardPreparedCandidate(extensionId, integrity),
       readAsset: request => extensions.packages.readAsset(request),
       readManagedEntrypoint: request => extensions.packages.readManagedEntrypoint(request),
@@ -180,8 +190,6 @@ async function handle(frame: Record<string, unknown>) {
     assert(section, 'The generated package must reach its real Workbench mount');
     assert(panel.styles.some(style => style.committed && !style.disposed));
     firstSection = section; firstStyles = panel.styles.filter(style => style.committed && !style.disposed);
-    const selectedService = await extensions.prepareService({ serviceId: 'example.agent-authored-panel.count', version: 1, method: 'execute', args: [] });
-    originalService = selectedService.pin();
     write({ kind: 'fixture-enabled', catalogRevision: (await extensions.catalog.snapshot()).revision }); return;
   }
   if (frame.kind === 'fixture-await-tool') {
@@ -200,13 +208,17 @@ async function handle(frame: Record<string, unknown>) {
     assert(panel); assert(firstSection);
     const snapshot = await extensions.catalog.snapshot();
     const entry = snapshot.extensions.find(value => value.manifest.id === id);
-    assert.equal(entry?.integrity, frame.integrity);
+    if (grouped && frame.label === 'broken') {
+      assert.equal(entry?.integrity, initialIntegrity, 'Failed required Surface preparation cannot select a newer Host');
+      assert.equal(entry?.candidate?.integrity, frame.integrity);
+      assert.equal(entry?.candidate?.applyRequested, true);
+    } else if (!grouped) assert.equal(entry?.integrity, frame.integrity);
     assert.equal(entry?.manifest.version, '1.0.0', 'Same-semver revisions use actual artifact identity');
     const surfaceDeadline = Date.now() + 30_000;
     for (;;) {
       const state = panel.loader.getSnapshot();
       const settled = frame.label === 'broken'
-        ? state.diagnostics.some(item => item.code === 'module_activation_failed' && item.integrity === frame.integrity)
+        ? state.diagnostics.some(item => item.code === (grouped ? 'candidate_module_activation_failed' : 'module_activation_failed') && item.integrity === frame.integrity)
         : state.active.some(item => item.integrity === frame.integrity);
       if (settled) break;
       assert(Date.now() < surfaceDeadline, 'Actual Surface watch did not consume the selected artifact');
@@ -216,7 +228,7 @@ async function handle(frame: Record<string, unknown>) {
       assert.equal(sectionOf(panel), firstSection, 'A failed real mount keeps its visible original owner');
       assert.equal(firstSection.dataset.closed, undefined);
       assert(firstStyles.every(style => style.committed && !style.disposed));
-      assert(panel.loader.getSnapshot().diagnostics.some(item => item.code === 'module_activation_failed'));
+      assert(panel.loader.getSnapshot().diagnostics.some(item => item.code === (grouped ? 'candidate_module_activation_failed' : 'module_activation_failed')));
     } else {
       const current = sectionOf(panel);
       assert(current); assert.notEqual(current, firstSection);
@@ -227,6 +239,12 @@ async function handle(frame: Record<string, unknown>) {
     assert(extensions.services.getSnapshot().providers.some(provider => provider.extensionId === id && provider.status === 'active'));
     assert(originalService); originalService.assertAvailable();
     assert.deepEqual(await originalService.invoke('execute', [{ text: 'hello 源 world' }]), { words: 3, characters: 13 });
+    if (grouped && frame.label === 'broken') {
+      assert.equal((await extensions.catalog.snapshot()).extensions.find(value => value.manifest.id === id)?.integrity, initialIntegrity);
+      assert(!readyArtifacts.has(String(frame.integrity)), 'A failed required member cannot publish the new Run directory');
+      write({ kind: 'fixture-update-checked', label: frame.label }); return;
+    }
+    assert.equal((await extensions.catalog.snapshot()).extensions.find(value => value.manifest.id === id)?.integrity, frame.integrity);
     const directoryDeadline = Date.now() + 30_000;
     while (!readyArtifacts.has(String(frame.integrity))) {
       assert(Date.now() < directoryDeadline, 'Updated artifact did not reach original tools.ready');

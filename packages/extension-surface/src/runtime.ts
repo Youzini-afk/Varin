@@ -273,6 +273,7 @@ export class SurfaceExtensionRuntime {
   readonly #activeOwners = new Map<string, ActiveOwner>();
   readonly #actual = new Map<string, SurfaceActualState>();
   readonly #latestRequests = new Map<string, RequestVersion>();
+  readonly #preparationControllers = new Map<string, AbortController>();
   readonly #listeners = new Set<() => void>();
   readonly #layoutReferences = new Map<string, SurfaceLayoutReference>();
   readonly #ownerQueues = new Map<string, Promise<void>>();
@@ -318,7 +319,7 @@ export class SurfaceExtensionRuntime {
   activateWithCommit(
     options: SurfaceActivationOptions,
     activation: SurfaceActivation,
-    commit: () => void | Promise<void>,
+    commit: (signal: AbortSignal) => void | Promise<void>,
   ): Promise<SurfaceOwnerHandle> {
     return this.activateBatchWithCommit([{ activation, options }], commit)
       .then((handles) => handles[0] as SurfaceOwnerHandle);
@@ -331,11 +332,12 @@ export class SurfaceExtensionRuntime {
 
   activateBatchWithCommit(
     requests: readonly { activation: SurfaceActivation; options: SurfaceActivationOptions }[],
-    commit: () => void | Promise<void>,
+    commit: (signal: AbortSignal) => void | Promise<void>,
   ): Promise<SurfaceOwnerHandle[]> {
     if (requests.length === 0) return Promise.resolve([]);
     const extensionId = requests[0]?.options.owner.extensionId as string;
     const keys = new Set<string>();
+    const preparationController = new AbortController();
     for (const request of requests) {
       validateOwner(request.options.owner);
       if (request.options.owner.extensionId !== extensionId) {
@@ -345,7 +347,12 @@ export class SurfaceExtensionRuntime {
       if (keys.has(key)) throw new Error(`Duplicate Surface owner in activation batch: ${request.options.owner.entrypointId}`);
       keys.add(key);
       this.#markLatest(key, request.options.owner);
+      this.#preparationControllers.set(key, preparationController);
     }
+    const preparationSignal = AbortSignal.any([
+      preparationController.signal,
+      ...requests.flatMap((request) => request.options.signal ? [request.options.signal] : []),
+    ]);
     return this.#enqueue(extensionId, async () => {
       const previous = new Map<string, ActiveOwner | undefined>();
       const candidates = new Map<string, ActiveOwner>();
@@ -388,7 +395,7 @@ export class SurfaceExtensionRuntime {
           const preparedLocalBindings = this.#localBindingSignature({ externalServices, requirements, serviceSelections });
           const contextLease = this.#createContextWriter(owner, scope);
           const context: SurfaceActivationContext = {
-            signal: scope.signal,
+            signal: AbortSignal.any([scope.signal, preparationSignal]),
             contribute: (descriptor, implementation) => {
               const normalized = normalizeContribution(owner, descriptor);
               const compatibility = checkVarinContributionCompatibility(
@@ -464,8 +471,12 @@ export class SurfaceExtensionRuntime {
           commit: [...candidates.values()].flatMap((candidate) => candidate.contextLease ? [candidate.contextLease] : []),
           dispose: [],
         };
-        const preview = this.#previewContributions(extensionId, [...candidates.values()].map((candidate) => candidate.owner),
-          projectedOwners, contextChanges);
+        preparationSignal.throwIfAborted();
+        const preview = {
+          ...this.#previewContributions(extensionId, [...candidates.values()].map((candidate) => candidate.owner),
+            projectedOwners, contextChanges),
+          signal: preparationSignal,
+        };
         // Mount preparation is owner-local and runs before reserving any publication keys.
         for (const consumer of this.#contributionConsumers) {
           const lease = await consumer(preview);
@@ -487,7 +498,13 @@ export class SurfaceExtensionRuntime {
             throw new SurfaceActivationStaleError("Surface contribution selection changed during preparation");
           }
           for (const lease of leases) lease.validate();
-          await commit();
+          const commitSignal = AbortSignal.any([
+            preparationSignal,
+            ...[...candidates.values()].map((candidate) => candidate.scope.signal),
+            ...leases.flatMap((lease) => lease.signal ? [lease.signal] : []),
+          ]);
+          commitSignal.throwIfAborted();
+          await commit(commitSignal);
           // The external commit is the transaction boundary. A newer queued lifecycle request may
           // arrive while it is in flight; publish this committed generation first, then let that
           // queued request replace or deactivate it without turning a successful catalog commit
@@ -567,6 +584,10 @@ export class SurfaceExtensionRuntime {
         }
         this.#publish();
         throw error;
+      }
+    }).finally(() => {
+      for (const key of keys) {
+        if (this.#preparationControllers.get(key) === preparationController) this.#preparationControllers.delete(key);
       }
     });
   }
@@ -908,6 +929,9 @@ export class SurfaceExtensionRuntime {
     const previous = this.#latestRequests.get(key);
     if (previous && compareRequest(request, previous) < 0) {
       throw new SurfaceActivationStaleError("Surface lifecycle request is older than the current desired generation");
+    }
+    if (previous && compareRequest(request, previous) > 0) {
+      this.#preparationControllers.get(key)?.abort(new SurfaceActivationStaleError("Surface owner preparation was superseded"));
     }
     this.#latestRequests.set(key, { desiredRevision: request.desiredRevision, generation: request.generation });
   }

@@ -13,6 +13,8 @@ import type {
   VarinExtensionStaticContribution,
 } from "@varin/extension-contract";
 import { SurfaceCapabilityRegistry, SurfaceExtensionRuntime } from "@varin/extension-surface";
+import { createWorkbenchCompositionHost } from "../../ui/src/lib/extensions/workbench-composition-host.js";
+import { createAuthoredPanelTestContainer } from "../../ui/src/lib/extensions/authored-surface-consumer.test-support.js";
 import {
   browserIsolatedSurfaceRealmFactory,
   evaluateManagedSurfaceModule,
@@ -1927,4 +1929,263 @@ test("the exact candidate promoted by the Host during prepare is consumed withou
   assert.equal(selects, 0);
   assert.equal((runtime.getSnapshot().visibleContributions[0]?.implementation as { version: string }).version, nextIntegrity);
   await loader.stop();
+});
+
+const groupedManifest = (): VarinExtensionManifest => ({
+  ...manifest("1.0.0"),
+  entrypoints: {
+    host: { file: "host.js", mode: "brokered" },
+    surfaces: [
+      { id: "main", file: "main.js", mode: "managed", supports: ["web"], activation: ["contribution-visible"] },
+      { id: "secondary", file: "secondary.js", mode: "managed", supports: ["web"], activation: ["command"] },
+      { id: "declaration", mode: "declarative", supports: ["web"] },
+      { id: "optional", file: "optional.js", mode: "managed", supports: ["web"] },
+    ],
+  },
+  contributions: ["main", "secondary", "declaration"].map((entrypoint) => ({
+    id: `dev.example.managed.${entrypoint}`, entrypoint, contractVersion: 1,
+    kind: "page", supports: ["web"], data: {},
+  })),
+  updateReadiness: { surfaceEntrypoints: ["main", "secondary", "declaration"] },
+});
+
+const groupedLoaderHarness = () => {
+  const oldIntegrity = integrityFor("group-old");
+  const candidateIntegrity = integrityFor("group-candidate");
+  const definition = groupedManifest();
+  let current = snapshot(1, { ...catalogEntry("1.0.0", oldIntegrity), manifest: definition });
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  const reads: string[] = [];
+  const selections: import("@varin/extension-contract").VarinExtensionCandidatePublicationRequest[] = [];
+  const preparation = { id: "9aa863a0-f00f-4cf1-a6ea-325881a7f141", hostId, desiredRevision: 1, generation: 2 };
+  let onSelect: ((signal: AbortSignal, commit: () => VarinExtensionCatalogSnapshot) => Promise<VarinExtensionCatalogSnapshot>) | undefined;
+  let discards = 0;
+  const mountErrors = new Map<string, (error: unknown) => void>();
+  const loader = new SurfaceExtensionLoader({
+    surface: "web", realmId, surfaceRuntime: runtime,
+    evaluateModule: (source) => ({ activate: (context) => {
+      const [id, integrity] = source.split(":");
+      if (id === "optional" && integrity === candidateIntegrity) throw new Error("optional module failed");
+      context.contribute({ id: `dev.example.managed.${id}`, kind: "page", contractVersion: 1, supports: ["web"], data: {} }, {
+        integrity, mount: (container: HTMLElement, context: { reportError(error: unknown): void }) => {
+          mountErrors.set(id!, context.reportError);
+          container.textContent = integrity ?? "";
+          return () => { container.textContent = ""; };
+        },
+      });
+    } }),
+    host: {
+      activateExtension: async () => undefined,
+      catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
+      discardPreparedCandidate: async () => { discards += 1; },
+      hostState: async () => hostState(current),
+      invokeService: async () => { throw new Error("No service call"); },
+      prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [], hostPreparation: preparation }),
+      requestCandidateApplication: async () => current,
+      readAsset: async () => { throw new Error("No asset call"); },
+      readManagedEntrypoint: async (request) => {
+        reads.push(`${request.entrypointId}:${request.integrity}`);
+        return { artifactIntegrity: request.integrity, entrypointId: request.entrypointId,
+          module: asset(`${request.entrypointId}:${request.integrity}`, request.integrity, `runtime/surface/${request.entrypointId}/module.cjs`), styles: [] };
+      },
+      reportActualState: async () => undefined,
+      selectCandidate: async (request, signal) => {
+        selections.push(request);
+        assert.ok(signal);
+        const commit = () => {
+          const entry = current.extensions[0]!;
+          const candidate = entry.candidate!;
+          const selected = { ...entry, integrity: candidate.integrity,
+            manifest: candidate.manifest, selectedVersion: candidate.resolvedVersion };
+          delete selected.candidate;
+          current = snapshot(current.revision + 1, selected);
+          return current;
+        };
+        return onSelect ? onSelect(signal, commit) : commit();
+      },
+      waitForHostState: async () => { throw new Error("Explicit reconciliation only"); },
+    },
+  });
+  return {
+    oldIntegrity, candidateIntegrity, preparation, loader, runtime, reads, selections,
+    current: () => current,
+    discards: () => discards,
+    failMount: (id: string, error: unknown) => { mountErrors.get(id)?.(error); },
+    disable: () => {
+      const entry = current.extensions[0]!;
+      current = snapshot(current.revision + 1, { ...entry, desired: { ...entry.desired, enabled: false, revision: entry.desired.revision + 1 } });
+    },
+    selectWith: (handler: NonNullable<typeof onSelect>) => { onSelect = handler; },
+    request: (applyRequested = true) => {
+      current = snapshot(current.revision + 1, { ...current.extensions[0]!, candidate: {
+        applyRequested, capabilitiesReviewed: true, capabilityDelta: { added: [], removed: [] }, capabilityGrants: [],
+        integrity: candidateIntegrity, manifest: definition, preparedAt: new Date().toISOString(), resolvedVersion: definition.version,
+        source: { kind: "local", display: "Grouped candidate" },
+      } });
+    },
+  };
+};
+
+test("requested group prepares every lazy and declarative member, leaving optional owners independent", async () => {
+  const h = groupedLoaderHarness();
+  await h.loader.reconcile();
+  assert.deepEqual(h.reads, [`optional:${h.oldIntegrity}`]);
+  h.request(false);
+  await h.loader.reconcile();
+  assert.equal(h.selections.length, 0);
+  h.request();
+  await h.loader.reconcile();
+  assert.equal(h.current().extensions[0]?.integrity, h.candidateIntegrity, JSON.stringify(h.loader.getSnapshot().diagnostics));
+  const readiness = h.selections[0]?.surfaceReadiness;
+  assert.ok(readiness);
+  assert.deepEqual(readiness.hostPreparation, h.preparation);
+  assert.equal(readiness.realmId, realmId);
+  assert.deepEqual(readiness.members.map((member) => member.entrypointId), ["main", "secondary", "declaration"]);
+  for (const member of readiness.members) {
+    assert.equal(h.runtime.getSnapshot().actual.find((owner) => owner.entrypointId === member.entrypointId)?.generation, member.generation);
+  }
+  assert.equal(h.reads.includes(`optional:${h.candidateIntegrity}`), false);
+  assert.equal(h.runtime.getSnapshot().visibleContributions.length, 4);
+  // The normal selected-artifact pass can fail an optional module without undoing the group.
+  await h.loader.reconcile();
+  assert.equal(h.current().extensions[0]?.integrity, h.candidateIntegrity, JSON.stringify(h.loader.getSnapshot().diagnostics));
+  assert.equal((h.runtime.getSnapshot().visibleContributions.find((item) => item.descriptor.id.endsWith(".main"))?.implementation as { integrity: string }).integrity, h.candidateIntegrity);
+  assert.equal((h.runtime.getSnapshot().visibleContributions.find((item) => item.descriptor.id.endsWith(".optional"))?.implementation as { integrity: string }).integrity, h.oldIntegrity);
+  await h.loader.stop();
+});
+
+for (const action of ["close", "render failure"] as const) test(`connected ${action} reaches a queued selection before its commit and preserves old owners`, { timeout: 2_000 }, async () => {
+  const h = groupedLoaderHarness();
+  await h.loader.reconcile();
+  const container = createAuthoredPanelTestContainer();
+  const errors: unknown[] = [];
+  const composition = createWorkbenchCompositionHost({
+    shellContributionId: "test.group-shell",
+    owner: { desiredRevision: 1, entrypointId: "shell", extensionId: "test.group-shell", extensionVersion: "1.0.0", generation: 1, hostId, realmId },
+    allowedReplacementTargets: new Set(), allowedSlots: new Set(["test.group-slot"]),
+    activate: async () => undefined, resolveReplacement: () => undefined,
+    resolveSlotCandidates: (_slot, _kind, preview) => (preview?.visibleContributions ?? h.runtime.getSnapshot().visibleContributions)
+      .filter((item) => item.owner.entrypointId === "main"),
+    registerContributionConsumer: h.runtime.registerContributionConsumer,
+    subscribe: h.runtime.subscribe,
+    onError: (error) => { errors.push(error); },
+  });
+  await composition.mountSlot({ container, slot: "test.group-slot" });
+  let entered!: () => void;
+  const selecting = new Promise<void>((resolve) => { entered = resolve; });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let observedSignal: AbortSignal | undefined;
+  h.selectWith(async (signal, commit) => {
+    observedSignal = signal; entered(); await gate; signal.throwIfAborted(); return commit();
+  });
+  h.request();
+  const work = h.loader.reconcile();
+  await selecting;
+  assert.equal(container.children[0]?.textContent, h.candidateIntegrity);
+  assert.equal(container.children[0]?.hidden, true);
+  const closing = action === "close" ? composition.dispose(new Error("Window closed before Catalog commit")) : Promise.resolve();
+  if (action === "render failure") h.failMount("main", new Error("Candidate render failed before Catalog commit"));
+  assert.equal(observedSignal?.aborted, true);
+  release(); await Promise.all([work, closing]);
+  assert.equal(container.children.length, 0);
+  assert.equal(h.current().extensions[0]?.integrity, h.oldIntegrity);
+  assert.equal(h.runtime.getSnapshot().visibleContributions.filter((item) => item.owner.entrypointId === "main").length, 0);
+  assert.equal(h.loader.getSnapshot().diagnostics.some((item) => item.code === "candidate_module_activation_failed"), true);
+  assert.equal(errors.length, action === "render failure" ? 1 : 0);
+  await composition.dispose();
+  await h.loader.stop();
+});
+
+test("a response lost after Catalog publication confirms selected state despite the closed lease", async () => {
+  const h = groupedLoaderHarness();
+  await h.loader.reconcile();
+  const leaseController = new AbortController();
+  h.runtime.registerContributionConsumer(async () => ({ signal: leaseController.signal, validate() {}, commit() {}, rollback() {} }));
+  h.selectWith(async (_signal, commit) => {
+    commit();
+    leaseController.abort(new Error("Window closed after Catalog commit"));
+    throw new Error("Publication response lost");
+  });
+  h.request(); await h.loader.reconcile();
+  assert.equal(h.current().extensions[0]?.integrity, h.candidateIntegrity, JSON.stringify(h.loader.getSnapshot().diagnostics));
+  assert.equal(h.loader.getSnapshot().active.find((owner) => owner.entrypointId === "main")?.integrity, h.candidateIntegrity);
+  assert.equal(h.discards(), 0);
+  assert.equal(h.loader.getSnapshot().diagnostics.some((item) => item.code === "candidate_module_activation_failed"), false);
+  await h.loader.stop();
+});
+
+
+test("a watched disable cancels a pending publication without waiting for its owner queue", { timeout: 2_000 }, async () => {
+  const h = groupedLoaderHarness();
+  await h.loader.reconcile();
+  let entered!: () => void;
+  const selecting = new Promise<void>((resolve) => { entered = resolve; });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let observedSignal: AbortSignal | undefined;
+  h.selectWith(async (signal, commit) => {
+    observedSignal = signal; entered(); await gate; signal.throwIfAborted(); return commit();
+  });
+  h.request();
+  const applying = h.loader.reconcile();
+  await selecting;
+  h.disable();
+  const disabling = h.loader.reconcile();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(observedSignal?.aborted, true);
+  release(); await Promise.all([applying, disabling]);
+  assert.equal(h.current().extensions[0]?.integrity, h.oldIntegrity);
+  assert.equal(h.runtime.getSnapshot().visibleContributions.length, 0);
+  await h.loader.stop();
+});
+
+test("publishing an unrelated owner in the same slot preserves a prepared owner's commit lease", { timeout: 2_000 }, async () => {
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  const container = createAuthoredPanelTestContainer();
+  const errors: unknown[] = [];
+  const owner = (id: string, generation: number) => ({
+    desiredRevision: 1, entrypointId: "main", extensionId: `test.${id}`, extensionVersion: "1.0.0", generation, hostId, realmId,
+  });
+  const activate = (id: string, generation: number, commit: (signal: AbortSignal) => void | Promise<void> = () => undefined) => (
+    runtime.activateWithCommit({ owner: owner(id, generation) }, (context) => {
+      context.contribute({ id: `test.${id}.panel`, kind: "view", contractVersion: 1, supports: ["web"], data: {} }, {
+        mount: (element: HTMLElement) => {
+          element.textContent = `${id}${generation}`;
+          return () => { element.textContent = ""; };
+        },
+      });
+    }, commit)
+  );
+  await activate("a", 1);
+  await activate("b", 1);
+  const composition = createWorkbenchCompositionHost({
+    shellContributionId: "test.shared-shell", owner: owner("shell", 1),
+    allowedReplacementTargets: new Set(), allowedSlots: new Set(["test.shared-slot"]),
+    activate: async () => undefined, resolveReplacement: () => undefined,
+    resolveSlotCandidates: (_slot, _kind, preview) => [...(preview?.visibleContributions ?? runtime.getSnapshot().visibleContributions)],
+    registerContributionConsumer: runtime.registerContributionConsumer, subscribe: runtime.subscribe,
+    onError: (error) => { errors.push(error); },
+  });
+  await composition.mountSlot({ container, slot: "test.shared-slot" });
+  let entered!: () => void;
+  const selecting = new Promise<void>((resolve) => { entered = resolve; });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let bSignal: AbortSignal | undefined;
+  const bUpdate = activate("b", 2, async (signal) => {
+    bSignal = signal; entered(); await gate; signal.throwIfAborted();
+  });
+  await selecting;
+  assert.equal(container.children.some((child) => child.textContent === "b2" && child.hidden), true);
+  await activate("a", 2);
+  const abortedByUnrelatedOwner = bSignal?.aborted;
+  release();
+  const bError = await bUpdate.then(() => undefined, (error: unknown) => error);
+  const visible = container.children.filter((child) => !child.hidden).map((child) => child.textContent).sort();
+  await composition.dispose();
+  assert.equal(abortedByUnrelatedOwner, false, String(bError));
+  assert.equal(bError, undefined);
+  assert.deepEqual(visible, ["a2", "b2"]);
+  assert.deepEqual(errors, []);
 });

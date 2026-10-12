@@ -472,5 +472,14 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     schemaValid: false, // schema now rejects when on transition-scene contributions
     runtimeValid: false, // runtime rejects when on transition-scene contributions
   },
+  ...[
+    { surfaceEntrypoints: ["main"], valid: true },
+    { surfaceEntrypoints: [], valid: false },
+    { surfaceEntrypoints: ["main", "main"], valid: false },
+  ].map(({ surfaceEntrypoints, valid }) => ({
+    label: `explicit update readiness ${JSON.stringify(surfaceEntrypoints)}`,
+    manifest: { ...baseManifest(), entrypoints: { host: { mode: "brokered", file: "host.cjs" }, surfaces: [baseSurfaceEntrypoint()] }, updateReadiness: { surfaceEntrypoints } },
+    schemaValid: valid, runtimeValid: valid,
+  })),
   ...toolFixtures,
 ];

@@ -23,27 +23,29 @@ async function fixture() {
   let activations = 0;
   let forced = 0;
   let failActivation = false;
+  const crashes: Array<(error: Error) => void> = [];
   const observerErrors: unknown[] = [];
   const options = { dataDir: join(root, 'data'), varinVersion: '1.2.3', brokerScript: 'never-spawned',
     onObserverError: (error: unknown) => { observerErrors.push(error); },
-    transportFactory: () => ({ forceTerminate() { forced++; }, terminate: async () => {}, async request(method) {
+    transportFactory: ({ onCrash }) => { crashes.push(onCrash); return { forceTerminate() { forced++; }, terminate: async () => {}, async request(method, params) {
+      if (method === "migrate") return { value: (params as { input: { toSchemaVersion: number } }).input.toSchemaVersion };
       if (method === 'activate') {
         activations++; entered?.resolve(); await blocked?.promise;
         if (failActivation) { failActivation = false; throw new Error('candidate startup failed'); }
         return { provisions: [] };
       }
       return null;
-    } }),
+    } }; },
   } satisfies Parameters<typeof ApplicationExtensionRuntime.create>[0];
   let runtime = await ApplicationExtensionRuntime.create(options);
-  const write = async (body: string, capabilities: string[] = [], withSurface = false) => {
+  const write = async (body: string, capabilities: string[] = [], withSurface = false, grouped = false, storageSchemaVersion?: number) => {
     await writeFile(join(directory, 'varin.extension.json'), JSON.stringify({ id: 'example.authored', schemaVersion: 1, version: '1.0.0',
-      engines: { varin: '*' }, capabilities: { host: capabilities }, entrypoints: { host: { mode: 'brokered', file: 'host.js' },
+      engines: { varin: '*' }, ...(storageSchemaVersion ? { storage: { schemaVersion: storageSchemaVersion } } : {}), ...(grouped ? { updateReadiness: { surfaceEntrypoints: ['panel'] } } : {}), capabilities: { host: capabilities }, entrypoints: { host: { mode: 'brokered', file: 'host.js' },
         ...(withSurface ? { surfaces: [{ id: 'panel', file: 'surface.cjs', mode: 'managed', supports: ['web'] }] } : {}) } }));
     await writeFile(join(directory, 'host.js'), `export default { activate() { ${body} } };`);
     if (withSurface) await writeFile(join(directory, 'surface.cjs'), 'exports.activate = () => {};');
   };
-  return { root, directory, get runtime() { return runtime; }, write, observerErrors, activations: () => activations, forced: () => forced,
+  return { root, directory, get runtime() { return runtime; }, write, observerErrors, activations: () => activations, forced: () => forced, crashLatest: () => crashes.at(-1)!(new Error("prepared broker exited")),
     restart: async (failCandidate = false) => { await runtime.stop(); failActivation = failCandidate;
       runtime = await ApplicationExtensionRuntime.create(options); await runtime.supervisor.reconcile(); },
     block: () => { blocked = deferred(); entered = deferred(); return { release: blocked.resolve, entered: entered.promise }; },
@@ -217,5 +219,113 @@ test('captured compilation preserves package-local JSONC extends and aliases wit
     await rm(join(f.directory, 'tsconfig.json'));
     await writeFile(join(f.root, 'tsconfig.json'), JSON.stringify({ compilerOptions: { baseUrl: './capture', paths: { '@captured': ['value.ts'] } } }));
     await assert.rejects(f.runtime.packages.artifacts.prepareCaptured(f.directory, source()), /Could not resolve/);
+  } finally { await f.close(); }
+});
+
+
+test('a required Surface update commits application intent, recovers the selected Host, and publishes only with exact preparation evidence', async () => {
+  const f = await fixture();
+  try {
+    await f.write('return 1;', [], true, true);
+    const installed = await f.runtime.stageCapturedPackage(f.directory, source(), 0);
+    const enabled = await f.runtime.setEnabled(installed.extensionId, true, installed.catalogRevision);
+    assert.equal(f.activations(), 1, 'selected startup is not a permanent window dependency');
+    await f.write('return 2;', [], true, true);
+    const staged = await f.runtime.stageCapturedPackage(f.directory, source('b'), enabled.revision);
+    const result = await f.runtime.applyPackageCandidate({ extensionId: installed.extensionId,
+      candidateIntegrity: staged.artifactIntegrity, expectedRevision: staged.catalogRevision });
+    assert.equal(result.outcome, 'application_requested');
+    let current = await f.runtime.catalog.snapshot();
+    assert.equal(current.extensions[0]!.integrity, installed.artifactIntegrity);
+    assert.equal(current.extensions[0]!.actual.find(value => value.realmKind === 'host')?.status, 'active');
+    assert.ok(current.extensions[0]!.actual.some(value => value.diagnostics.some(diagnostic => diagnostic.code === 'required_surface_readiness')));
+    await f.restart(); current = await f.runtime.catalog.snapshot();
+    assert.equal(current.extensions[0]!.integrity, installed.artifactIntegrity, 'restart does not bypass the required update group');
+    assert.deepEqual(f.runtime.supervisor.activeExtensions(), [installed.extensionId]);
+    const prepared = await f.runtime.prepareCandidate(installed.extensionId, staged.artifactIntegrity);
+    const selected = await f.runtime.selectCandidate({ extensionId: installed.extensionId,
+      candidateIntegrity: staged.artifactIntegrity, expectedRevision: current.revision,
+      surfaceReadiness: { hostPreparation: prepared.hostPreparation!, realmId: 'actual-surface-transaction', surface: 'web',
+        members: [{ entrypointId: 'panel', generation: 2 }] } });
+    assert.equal(selected.extensions[0]!.integrity, staged.artifactIntegrity);
+    await f.restart();
+    assert.equal((await f.runtime.catalog.snapshot()).extensions[0]!.integrity, staged.artifactIntegrity);
+    assert.deepEqual(f.runtime.supervisor.activeExtensions(), [installed.extensionId]);
+  } finally { await f.close(); }
+});
+
+
+test('required group preparation belongs to pending application intent and staging a replacement retires only that candidate', async () => {
+  const f = await fixture();
+  try {
+    await f.write('return 1;', [], true, true);
+    const installed = await f.runtime.stageCapturedPackage(f.directory, source(), 0);
+    const enabled = await f.runtime.setEnabled(installed.extensionId, true, installed.catalogRevision);
+    await f.write('return 2;', [], true, true);
+    const staged = await f.runtime.stageCapturedPackage(f.directory, source('b'), enabled.revision);
+    const requested = await f.runtime.applyPackageCandidate({ extensionId: installed.extensionId,
+      candidateIntegrity: staged.artifactIntegrity, expectedRevision: staged.catalogRevision });
+    const prepared = await f.runtime.prepareCandidate(installed.extensionId, staged.artifactIntegrity);
+    await f.runtime.discardPreparedCandidate(installed.extensionId, staged.artifactIntegrity);
+    assert.deepEqual(await f.runtime.prepareCandidate(installed.extensionId, staged.artifactIntegrity), prepared,
+      'one Surface rollback cannot revoke preparation held by the original application intent');
+    assert.equal(f.activations(), 2);
+    await f.write('return 3;', [], true, true);
+    const replacement = await f.runtime.stageCapturedPackage(f.directory, source('c'), requested.catalogRevision);
+    assert.equal(f.forced(), 1, 'superseding the pending artifact cancels its exact prepared owner');
+    assert.equal(f.activations(), 2, 'staging neither cold-activates the new candidate nor replaces the valid selected Host');
+    assert.equal((await f.runtime.catalog.snapshot()).extensions[0]!.integrity, installed.artifactIntegrity);
+    await assert.rejects(f.runtime.prepareCandidate(installed.extensionId, staged.artifactIntegrity), /no longer current/);
+    assert.equal((await f.runtime.catalog.snapshot()).extensions[0]!.candidate!.integrity, replacement.artifactIntegrity);
+  } finally { await f.close(); }
+});
+
+
+test('a prepared broker crash cannot publish its candidate after the real preparation has returned', async () => {
+  const f = await fixture();
+  try {
+    await f.write('return 1;', [], true, true, 1);
+    const initial = await f.runtime.stageCapturedPackage(f.directory, source(), 0);
+    const enabled = await f.runtime.setEnabled(initial.extensionId, true, initial.catalogRevision);
+    await f.write('return 2;', [], true, true, 2);
+    const staged = await f.runtime.stageCapturedPackage(f.directory, source('b'), enabled.revision);
+    const requested = await f.runtime.requestCandidateApplication({ extensionId: initial.extensionId,
+      candidateIntegrity: staged.artifactIntegrity, expectedRevision: staged.catalogRevision });
+    const prepared = await f.runtime.prepareCandidate(initial.extensionId, staged.artifactIntegrity);
+    f.crashLatest();
+    await assert.rejects(f.runtime.selectCandidate({ extensionId: initial.extensionId,
+      candidateIntegrity: staged.artifactIntegrity, expectedRevision: requested.revision,
+      surfaceReadiness: { hostPreparation: prepared.hostPreparation!, realmId: 'prepared-window', surface: 'web', members: [{ entrypointId: 'panel', generation: 2 }] } }));
+    assert.equal((await f.runtime.catalog.snapshot()).extensions[0]!.integrity, initial.artifactIntegrity);
+  } finally { await f.close(); }
+});
+
+test('stopping after durable candidate selection never rolls its real storage migration back to the old artifact', async () => {
+  const f = await fixture();
+  try {
+    await f.write('return 1;', [], true, true, 1);
+    const initial = await f.runtime.stageCapturedPackage(f.directory, source(), 0);
+    const enabled = await f.runtime.setEnabled(initial.extensionId, true, initial.catalogRevision);
+    await f.write('return 2;', [], true, true, 2);
+    const staged = await f.runtime.stageCapturedPackage(f.directory, source('b'), enabled.revision);
+    const requested = await f.runtime.requestCandidateApplication({ extensionId: initial.extensionId,
+      candidateIntegrity: staged.artifactIntegrity, expectedRevision: staged.catalogRevision });
+    const prepared = await f.runtime.prepareCandidate(initial.extensionId, staged.artifactIntegrity);
+    const select = f.runtime.packages.selectCandidate.bind(f.runtime.packages);
+    f.runtime.packages.selectCandidate = async (...args) => {
+      const committed = await select(...args);
+      f.runtime.supervisor.forceTerminate(initial.extensionId);
+      return committed;
+    };
+    await assert.rejects(f.runtime.selectCandidate({ extensionId: initial.extensionId,
+      candidateIntegrity: staged.artifactIntegrity, expectedRevision: requested.revision,
+      surfaceReadiness: { hostPreparation: prepared.hostPreparation!, realmId: 'prepared-window', surface: 'web', members: [{ entrypointId: 'panel', generation: 2 }] } }));
+    assert.equal((await f.runtime.catalog.snapshot()).extensions[0]!.integrity, staged.artifactIntegrity);
+    const stored = await f.runtime.storage.read({ extensionId: initial.extensionId, key: 'state', scope: 'application' });
+    assert.equal(stored.document.schemaVersion, 2, 'the selected artifact must retain its committed migration');
+    assert.deepEqual(stored.document.data, { value: 2 });
+    await f.restart();
+    assert.equal((await f.runtime.catalog.snapshot()).extensions[0]!.integrity, staged.artifactIntegrity);
+    assert.equal((await f.runtime.storage.read({ extensionId: initial.extensionId, key: 'state', scope: 'application' })).document.schemaVersion, 2);
   } finally { await f.close(); }
 });

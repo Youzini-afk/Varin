@@ -3,7 +3,7 @@ import type { VarinWorkbenchChildMount, VarinWorkbenchCompositionHost } from '@v
 import type { SurfaceContribution, SurfaceContributionConsumer, SurfaceContributionLease, SurfaceContributionPreview } from '@varin/extension-surface';
 import { createElement, type ComponentType } from 'react';
 import { createRoot } from 'react-dom/client';
-import { startWorkbenchMountSession, type WorkbenchMountSession } from './workbench-mount';
+import { startWorkbenchMountSession, type WorkbenchMountSession } from './workbench-mount.js';
 
 interface ReplacementCandidate {
   contribution: SurfaceContribution;
@@ -32,6 +32,7 @@ interface MountedChild {
   inspectorId: string;
   key: string;
   session: WorkbenchMountSession;
+  signal: AbortSignal;
   contribution: SurfaceContribution;
   show(): void;
 }
@@ -187,15 +188,19 @@ const mountContribution = async (
   }
   let mountFailure: unknown;
   let mountFailed = false;
+  const failureController = new AbortController();
   const session = startWorkbenchMountSession({
     container: target,
     contributionId: contribution.descriptor.id,
     implementation,
     onError: (error, phase) => {
+      if (phase !== 'dispose') {
+        mountFailure = error; mountFailed = true;
+        failureController.abort(error);
+      }
       // Mount errors are reported by the serial binding's catch — don't double-report.
       // Only forward render and dispose errors here.
       if (phase !== 'mount') options.onError(error, phase);
-      if (phase !== 'dispose') { mountFailure = error; mountFailed = true; }
     },
     owner: contribution.owner,
     props: props as never,
@@ -219,6 +224,7 @@ const mountContribution = async (
   let shown = false;
   return {
     container: target, inspectorId, key: contributionKey(contribution), session, contribution,
+    signal: AbortSignal.any([session.signal, failureController.signal]),
     show: () => {
       target.hidden = false;
       if (shown) return;
@@ -249,9 +255,12 @@ const createBinding = (
   let tail = Promise.resolve();
   const pending = new Set<MountedChild>();
   const preparing = new Set<Promise<unknown>>();
+  const preparedBindings = new Set<{ controller: AbortController; validate(): void }>();
 
   const prepare = async (preview?: SurfaceContributionPreview): Promise<SurfaceContributionLease | undefined> => {
     if (disposed) return;
+    const preparationController = new AbortController();
+    const signal = AbortSignal.any([controller.signal, preparationController.signal, ...(preview?.signal ? [preview.signal] : [])]);
     const desired = resolve(preview);
     const affectedIds = preview ? new Set(preview.affectedExtensionIds) : null;
     const affected = (child: MountedChild) => !affectedIds || affectedIds.has(child.contribution.owner.extensionId);
@@ -265,7 +274,7 @@ const createBinding = (
         const retained = previous.find((child) => child.key === contributionKey(candidate.contribution));
         if (retained) next.push(retained);
         else {
-          const child = await mountContribution(options, container, candidate.contribution, candidate.props, kind, hostId, controller.signal);
+          const child = await mountContribution(options, container, candidate.contribution, candidate.props, kind, hostId, signal);
           created.push(child);
           pending.add(child);
           next.push(child);
@@ -277,14 +286,18 @@ const createBinding = (
       throw error;
     }
     const retired = previous.filter((child) => !next.includes(child));
+    const publicationSignal = AbortSignal.any([signal, ...next.map((child) => child.signal)]);
     let finished = false;
     const rollback = async () => {
       if (finished) return;
       finished = true;
+      preparedBindings.delete(binding);
       for (const child of [...created].reverse()) { pending.delete(child); await disposeMountedChild(child, 'Surface candidate rolled back'); }
     };
-    return {
+    const binding = {
+      controller: preparationController,
       validate: () => {
+        publicationSignal.throwIfAborted();
         if (disposed) throw new Error('Workbench host point closed during mount preparation');
         const actual = current.filter(affected);
         if (actual.length !== previous.length || actual.some((child, index) => child !== previous[index])) {
@@ -296,15 +309,25 @@ const createBinding = (
           throw new Error('Workbench selection changed during mount preparation');
         }
       },
+    };
+    preparedBindings.add(binding);
+    return {
+      signal: publicationSignal,
+      validate: binding.validate,
       commit: () => {
         // Closing a window while the authoritative Host commit is in flight cannot undo that commit.
         if (disposed) return rollback;
         if (finished) return;
         finished = true;
+        preparedBindings.delete(binding);
         for (const child of created) pending.delete(child);
         current = [...current.filter((child) => !affected(child)), ...next];
         const order = desired.map((candidate) => contributionKey(candidate.contribution));
         current.sort((left, right) => order.indexOf(left.key) - order.indexOf(right.key));
+        for (const other of preparedBindings) {
+          try { other.validate(); }
+          catch (error) { other.controller.abort(error); }
+        }
         for (const child of retired) child.container.hidden = true;
         for (const child of current) { child.show(); container.appendChild(child.container); }
         return async () => { for (const child of [...retired].reverse()) await disposeMountedChild(child, 'Surface owner replaced'); };
@@ -327,7 +350,13 @@ const createBinding = (
     tail = operation.catch((error) => { options.onError(error, 'mount'); });
     return propagate ? operation : tail;
   };
-  const unsubscribe = options.subscribe(() => { void schedule(false); });
+  const unsubscribe = options.subscribe(() => {
+    for (const binding of preparedBindings) {
+      try { binding.validate(); }
+      catch (error) { binding.controller.abort(error); }
+    }
+    void schedule(false);
+  });
   const unregister = options.registerContributionConsumer?.((preview) => {
     const operation = prepare(preview);
     preparing.add(operation);

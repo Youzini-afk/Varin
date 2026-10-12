@@ -14,6 +14,7 @@ import {
   type VarinExtensionCandidateCapabilityReviewRequest,
   type VarinExtensionCapabilityReviewRequest,
   type VarinExtensionCandidateSelectionRequest,
+  type VarinExtensionCandidatePublicationRequest,
   type VarinExtensionCatalogAvailability,
   type VarinExtensionManagedEntrypointRequest,
   type VarinExtensionPackageInstallRequest,
@@ -154,8 +155,8 @@ export const createWebExtensionsAPI = (): ExtensionsAPI => ({
     if (!payload || typeof payload !== 'object' || !('result' in payload)) throw new Error('Varin Host service response is malformed');
     return JSON.parse(JSON.stringify((payload as { result: unknown }).result));
   },
-  prepareCandidate: async (extensionId, candidateIntegrity) => {
-    const response = await applicationHostRequest('/api/varin/extensions/v1/candidates/prepare', { candidateIntegrity, extensionId });
+  prepareCandidate: async (extensionId, candidateIntegrity, signal) => {
+    const response = await applicationHostRequest('/api/varin/extensions/v1/candidates/prepare', { candidateIntegrity, extensionId }, signal);
     return parseVarinExtensionCandidatePreparationResult(await readJsonOrThrow(response));
   },
   requestCandidateApplication: async (request: VarinExtensionCandidateSelectionRequest) => {
@@ -197,8 +198,8 @@ export const createWebExtensionsAPI = (): ExtensionsAPI => ({
     if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Varin extension capability review response is malformed');
     return parseVarinExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
   },
-  selectCandidate: async (request: VarinExtensionCandidateSelectionRequest) => {
-    const payload = await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/candidates/select', request));
+  selectCandidate: async (request: VarinExtensionCandidatePublicationRequest, signal) => {
+    const payload = await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/candidates/select', request, signal));
     if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Varin extension candidate response is malformed');
     return parseVarinExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
   },

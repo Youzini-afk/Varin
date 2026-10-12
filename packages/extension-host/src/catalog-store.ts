@@ -628,6 +628,7 @@ export class ExtensionCatalogStore {
     extensionId: string,
     candidateIntegrity: string,
     expectedRevision: number,
+    validateBeforeCommit?: () => void,
   ): Promise<CatalogReadState> {
     return this.#mutate(expectedRevision, (document, now) => {
       const record = document.extensions[extensionId];
@@ -642,6 +643,8 @@ export class ExtensionCatalogStore {
       if (!candidate.applyRequested) {
         throw new Error(`Varin extension candidate application was not requested: ${extensionId}`);
       }
+      // Pure Host-owned readiness/owner check after the real catalog lock and CAS checks.
+      validateBeforeCommit?.();
       record.manifest = structuredClone(candidate.manifest);
       record.source = structuredClone(candidate.source);
       record.integrity = candidate.integrity;

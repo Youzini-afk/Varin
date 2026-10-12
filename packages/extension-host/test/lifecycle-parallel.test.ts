@@ -27,15 +27,17 @@ function harness(entries: ReturnType<typeof entry>[]) {
   const services = new HostServiceRegistry('test-host');
   const selectEntered = deferred();
   let selectGate: ReturnType<typeof deferred> | undefined;
+  let afterSelection: (() => void) | undefined;
+  const crashes = new Map<number, (error: Error) => void>();
   const supervisor = new BrokeredHostSupervisor({
     brokerScript: '', capabilities: {} as any, services,
     catalog: { snapshot: async () => structuredClone(snapshot), reportActualState: async () => {} } as any,
     packages: {
       resolveBrokeredHostEntrypoint: async () => ({ modulePath: '/unused', packageRoot: '/unused' }),
-      selectCandidate: async ({extensionId}: any) => { selectEntered.resolve(); await selectGate?.promise; const e = snapshot.extensions.find((x: any) => x.manifest.id === extensionId); e.integrity = e.candidate.integrity; e.manifest = e.candidate.manifest; delete e.candidate; return structuredClone(snapshot); },
+      selectCandidate: async ({extensionId}: any, validateBeforeCommit?: () => void) => { selectEntered.resolve(); await selectGate?.promise; validateBeforeCommit?.(); const e = snapshot.extensions.find((x: any) => x.manifest.id === extensionId); e.integrity = e.candidate.integrity; e.manifest = e.candidate.manifest; delete e.candidate; afterSelection?.(); return structuredClone(snapshot); },
     } as any,
     storage: { read: async () => ({ document: { schemaVersion: 1, revision: 0, data: {} } }), prepareMigration: async () => null } as any,
-    transportFactory: ({owner}) => ({
+    transportFactory: ({owner, onCrash}) => { crashes.set(owner.generation, onCrash); return {
       forceTerminate() { forced.push(owner.generation); },
       terminate: async () => { await disposal.get(owner.extensionId)?.promise; await ownerDisposal.get(owner.generation)?.promise; disposed.push(owner.generation); },
       request: async (method, _params, signal) => {
@@ -46,10 +48,10 @@ function harness(entries: ReturnType<typeof entry>[]) {
         if (gate) await Promise.race([gate.promise, new Promise<never>((_, reject) => { if (signal?.aborted) reject(signal.reason); else signal?.addEventListener('abort', () => reject(signal.reason), { once: true }); })]);
         return { provisions: entries.find(e => e.manifest.id === owner.extensionId)!.manifest.provides.services };
       },
-    }),
+    }; },
   });
   return { supervisor, services, snapshot, gates, disposal, entered, counts, callGates, callEntered, ownerDisposal, disposed, forced,
-    selectEntered, blockSelection: () => selectGate = deferred() };
+    selectEntered, crashes, afterSelection: (callback: () => void) => { afterSelection = callback; }, blockSelection: () => selectGate = deferred() };
 }
 
 test('publication returns with old model pins retained; retirement and explicit teardown wait for callbacks and transport disposal', async () => {
@@ -267,4 +269,84 @@ test('removal cleanup cannot cancel a concurrently reinstalled owner with its st
     await bounded(Promise.all([removing,reinstalling]));
     assert.ok(runtime.supervisor.activeExtensions().includes(id), 'new installed owner was cancelled by old removal snapshot');
   } finally { cleanup.resolve(); await runtime.stop(); await rm(root,{recursive:true,force:true}); }
+});
+
+
+test('explicit update group validates the original Host preparation without gating selected startup or unrelated owners', async () => {
+  const id = 'dev.test.group', selected = entry(id), h = harness([selected, entry('dev.test.independent')]);
+  const group = { surfaceEntrypoints: ['panel'] };
+  Object.assign(selected.manifest, { updateReadiness: group, entrypoints: { ...selected.manifest.entrypoints,
+    surfaces: [{ id: 'panel', mode: 'managed', file: 'panel.cjs', supports: ['web'] }] } });
+  await h.supervisor.activateExtension(id);
+  const old = h.services.bind(id, 1).pin();
+  h.snapshot.extensions[0].candidate = { integrity: 'v2', resolvedVersion: '1.0.0', capabilitiesReviewed: true,
+    capabilityGrants: [], applyRequested: true, manifest: structuredClone(selected.manifest) };
+  await assert.rejects(h.supervisor.selectCandidate(id, 'v2', 1), /compatible Surface/);
+  await bounded(h.supervisor.activateExtension('dev.test.independent'));
+  assert.equal(await old.invoke('read', []), 1);
+  const prepared = await h.supervisor.prepareCandidate(id, 'v2');
+  const readiness = { hostPreparation: prepared.hostPreparation!, realmId: 'participating-window', surface: 'web' as const,
+    members: [{ entrypointId: 'panel', generation: 7 }] };
+  for (const evidence of [
+    { ...readiness, members: [] },
+    { ...readiness, hostPreparation: { ...readiness.hostPreparation, id: 'stale' } },
+    { ...readiness, surface: 'mobile' as const },
+  ]) await assert.rejects(h.supervisor.selectCandidate(id, 'v2', 1, undefined, evidence), /does not match/);
+  assert.equal(h.snapshot.extensions[0].integrity, `${id}-v1`);
+  await h.supervisor.selectCandidate(id, 'v2', 1, undefined, readiness);
+  assert.equal(await old.invoke('read', []), 1);
+  assert.equal(await h.services.bind(id, 1).invoke('read', []), 2);
+  old.release(); await h.supervisor.shutdown();
+});
+
+test('required group withdrawal before the actual catalog commit preserves selection and can retry the shared preparation', async () => {
+  const id = 'dev.test.group-cancel', h = harness([entry(id)]);
+  await h.supervisor.activateExtension(id);
+  h.snapshot.extensions[0].candidate = { integrity: 'v2', resolvedVersion: '1.0.0', capabilitiesReviewed: true,
+    capabilityGrants: [], applyRequested: true, manifest: { ...structuredClone(h.snapshot.extensions[0].manifest),
+      updateReadiness: { surfaceEntrypoints: ['panel'] }, entrypoints: { host: { mode: 'brokered', file: 'host.cjs' },
+        surfaces: [{ id: 'panel', mode: 'managed', file: 'panel.cjs', supports: ['web'] }] } } };
+  const prepared = await h.supervisor.prepareCandidate(id, 'v2');
+  const readiness = { hostPreparation: prepared.hostPreparation!, realmId: 'window', surface: 'web' as const,
+    members: [{ entrypointId: 'panel', generation: 2 }] };
+  const gate = h.blockSelection(), controller = new AbortController();
+  const selecting = h.supervisor.selectCandidate(id, 'v2', 1, controller.signal, readiness);
+  const rejected = assert.rejects(selecting, /closed/);
+  await h.selectEntered.promise; controller.abort(new Error('Surface preparation closed')); gate.resolve(); await rejected;
+  assert.equal(h.snapshot.extensions[0].integrity, `${id}-v1`);
+  assert.equal(await h.services.bind(id, 1).invoke('read', []), 1);
+  await h.supervisor.selectCandidate(id, 'v2', 1, undefined, readiness);
+  assert.equal(h.snapshot.extensions[0].integrity, 'v2');
+  await h.supervisor.shutdown();
+});
+
+
+test('after selection a disconnected Surface cannot roll back and a crashed candidate recovers selected while retaining old pins', async () => {
+  for (const failure of ['disconnect', 'crash']) {
+    const id = 'dev.test.group-postcommit', h = harness([entry(id)]);
+    await h.supervisor.activateExtension(id);
+    const old = h.services.bind(id, 1).pin();
+    h.snapshot.extensions[0].candidate = { integrity: 'v2', resolvedVersion: '1.0.0', capabilitiesReviewed: true,
+      capabilityGrants: [], applyRequested: true, manifest: { ...structuredClone(h.snapshot.extensions[0].manifest),
+        updateReadiness: { surfaceEntrypoints: ['panel'] }, entrypoints: { host: { mode: 'brokered', file: 'host.cjs' },
+          surfaces: [{ id: 'panel', mode: 'managed', file: 'panel.cjs', supports: ['web'] }] } } };
+    const prepared = await h.supervisor.prepareCandidate(id, 'v2'), controller = new AbortController();
+    const readiness = { hostPreparation: prepared.hostPreparation!, realmId: 'window', surface: 'web' as const,
+      members: [{ entrypointId: 'panel', generation: 2 }] };
+    h.afterSelection(() => failure === 'disconnect' ? controller.abort(new Error('response connection closed'))
+      : h.crashes.get(2)!(new Error('candidate process exited after catalog commit')));
+    const selecting = h.supervisor.selectCandidate(id, 'v2', 1, controller.signal, readiness);
+    if (failure === 'disconnect') await selecting;
+    else {
+      await assert.rejects(selecting, /cancelled/);
+      assert.equal(h.services.getSnapshot().providers.some(provider => provider.status === 'active'), false);
+      await h.supervisor.activateExtension(id);
+    }
+    assert.equal(h.snapshot.extensions[0].integrity, 'v2');
+    assert.equal(h.snapshot.extensions[0].candidate, undefined);
+    assert.equal(old.revocationSignal.aborted, false, 'the old process did not crash or lose its accepted exchange');
+    assert.equal(await old.invoke('read', []), 1);
+    assert.equal(await h.services.bind(id, 1).invoke('read', []), failure === 'disconnect' ? 2 : 3);
+    old.release(); await h.supervisor.shutdown();
+  }
 });

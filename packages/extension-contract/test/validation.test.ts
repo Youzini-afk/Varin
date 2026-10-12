@@ -6,6 +6,8 @@ import {
   parseVarinExtensionCatalogAvailability,
   parseVarinExtensionCatalogDocument,
   parseVarinExtensionCandidateCapabilityReviewRequest,
+  parseVarinExtensionCandidatePublicationRequest,
+  parseVarinExtensionCandidateSelectionRequest,
   parseVarinExtensionCapabilityReviewRequest,
   parseVarinExtensionAssetPayload,
   parseVarinExtensionManagedEntrypointRequest,
@@ -329,4 +331,20 @@ test("rejects editor contributions without a resource selector", () => {
     error instanceof VarinExtensionContractError
     && error.issues.some((issue) => issue.includes("languageIds or filenames"))
   ));
+});
+
+
+test("explicit update group validates members and publication evidence is not application/discard intent", () => {
+  const grouped = { ...manifest(), updateReadiness: { surfaceEntrypoints: ["main"] } };
+  assert.deepEqual(parseVarinExtensionManifest(grouped).updateReadiness, { surfaceEntrypoints: ["main"] });
+  for (const surfaceEntrypoints of [[], ["main", "main"], ["missing"]]) {
+    assert.throws(() => parseVarinExtensionManifest({ ...grouped, updateReadiness: { surfaceEntrypoints } }), VarinExtensionContractError);
+  }
+  assert.throws(() => parseVarinExtensionManifest({ ...grouped, entrypoints: { surfaces: grouped.entrypoints.surfaces } }), VarinExtensionContractError);
+  const request = { extensionId: grouped.id, candidateIntegrity: `sha256-${"a".repeat(64)}`, expectedRevision: 1,
+    surfaceReadiness: { hostPreparation: { id: "11111111-1111-4111-8111-111111111111", hostId: "22222222-2222-4222-8222-222222222222", desiredRevision: 1, generation: 2 },
+      realmId: "real-window", surface: "web", members: [{ entrypointId: "main", generation: 2 }] } };
+  assert.deepEqual(parseVarinExtensionCandidatePublicationRequest(request), request);
+  assert.throws(() => parseVarinExtensionCandidateSelectionRequest(request), /invalid/);
+  assert.throws(() => parseVarinExtensionCandidatePublicationRequest({ ...request, surfaceReadiness: { ...request.surfaceReadiness, members: [...request.surfaceReadiness.members, ...request.surfaceReadiness.members] } }), VarinExtensionContractError);
 });

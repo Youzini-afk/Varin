@@ -139,10 +139,11 @@ export class ApplicationExtensionCatalog {
     extensionId: string,
     candidateIntegrity: string,
     expectedRevision: number,
+    validateBeforeCommit?: () => void,
   ): Promise<VarinExtensionCatalogSnapshot> {
     const [identity, read] = await Promise.all([
       this.store.getHostIdentity(),
-      this.store.selectCandidate(extensionId, candidateIntegrity, expectedRevision),
+      this.store.selectCandidate(extensionId, candidateIntegrity, expectedRevision, validateBeforeCommit),
     ]);
     return this.#publicSnapshot(identity.hostId, read);
   }
