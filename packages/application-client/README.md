@@ -142,6 +142,14 @@ is the original `FetchResult`, including distinguishable material, parser and im
 hash verifies source equality; it never grants access. Endpoint/identity changes cancel or reject old
 reads, without cancelling a Run or changing the tool's frozen configuration.
 
+`ThreadsAPI.materials.readArtifact(selection, request, signal?)` uses an explicit retained research
+`sourceRunId` alongside the same Thread/branch identity. Its artifact reference is the original
+`attemptId` and `artifactId`; the authenticated `/api/threads/materials/read-artifact` route delegates
+nested document validation to the material owner. The Host resolves the original research source and
+artifact authority. A successful PDF ingestion supplies the retained snapshot for subsequent `read`
+calls, whose contract remains snapshot-only. Neither route accepts renderer-granted filesystem,
+workspace or content-hash authority. Cancelling this observation never cancels or collects the attempt.
+
 `ThreadsAPI.research` projects the original experiment, source and resource owners for an actual
 Agent `ThreadIdentity`. `scopes` lists retained source Runs, including earlier branches; callers
 select an explicit `sourceRunId` for every domain request. `canSubmit` is separate from historical

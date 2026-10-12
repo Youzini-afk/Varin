@@ -5,6 +5,7 @@ import { PdfMaterialReader, type PdfMaterialDraft, type PdfMaterialReaderPort } 
 import { MaterialLinkContext } from '@/components/materials/MaterialLinkContext';
 import { formatPdfMaterialCitationUrl, parsePdfMaterialCitationUrl, type PdfMaterialCitation } from '@/lib/pi-runtime/pdfMaterialCitation';
 import { Button } from '@/components/ui/button';
+import { ThreadMaterialDraftContext } from './ThreadMaterialDraftContext';
 
 const record = (value: unknown): Record<string, unknown> | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 type Material = PdfMaterialCitation & { title: string };
@@ -41,7 +42,7 @@ export function ThreadMaterialLinks({ data }: { data: unknown }) {
 
 /** The enclosing Thread supplies identity; global Pi events cannot select or retarget it. */
 export function ThreadMaterials({ api, identity, onAddRegion, children }: {
-  api: ThreadMaterialsAPI; identity: ThreadIdentity; onAddRegion?: (region: PdfMaterialDraft) => void; children: React.ReactNode;
+  api: Pick<ThreadMaterialsAPI, 'read'>; identity: ThreadIdentity; onAddRegion?: (region: PdfMaterialDraft) => void; children: React.ReactNode;
 }) {
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const owner = React.useMemo(() => ({ api, identity: { runtime: 'agent' as const, threadId: identity.threadId, branchId: identity.branchId }, host, active: true }), [api, identity.threadId, identity.branchId, host]);
@@ -77,9 +78,11 @@ export function ThreadMaterials({ api, identity, onAddRegion, children }: {
   }), [api, host, identity.threadId, identity.branchId, owner, canAddRegion]);
   const material = selected?.owner === owner && owner.active ? selected.material : null;
   return <MaterialLinkContext.Provider value={open}>
+    <ThreadMaterialDraftContext.Provider value={reader.addRegion ?? null}>
     {children}
     {material && <PdfMaterialReader key={reader.key} reader={reader} title={material.title} snapshotId={material.snapshotId}
       sourceHash={material.sourceHash} initialPage={material.page} initialRegion={material.region} analysisId={material.analysisId}
       onOpenChange={value => { if (!value) setSelected(null); }} />}
+    </ThreadMaterialDraftContext.Provider>
   </MaterialLinkContext.Provider>;
 }

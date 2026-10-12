@@ -1,5 +1,6 @@
 import { readHostSettingsSnapshot } from '@varin/pi-host/settings-authority';
 import { createWebRuntime, WEB_CAPABILITY } from './lib/kernel/web-runtime.js';
+import { createDocumentSources } from './lib/kernel/document-sources.js';
 import { createMaterialStorageAccess } from './lib/kernel/material-storage.js';
 import { createScriptRuntime, SCRIPT_CAPABILITY } from './lib/kernel/script-runtime.js';
 import { createNestedToolOwner, VARIN_RUNTIME_TOOLS_CAPABILITY } from './lib/kernel/nested-tool-owner.js';
@@ -3034,6 +3035,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return readMcpHostPermissionPolicy(mcpAgentDir,cwd,Boolean(workspace)&&mcpHostProjectTrusted(mcpAgentDir,cwd));
   }}));
   webRuntimeOwner.current = createWebRuntime({ runtime: agentRuntime, webFetch: webFetchService, documentReader, materials: webMaterials,
+    documentSources: createDocumentSources({ kernel: kernelClient, runtime: agentRuntime,
+      resolveLiveSource: liveSources.validate, experiments: experimentService }),
     fetch: egressRuntime.fetch as typeof globalThis.fetch, readAuth: readPiAuthFile,
     settings: async source => {
       const root = source ? (await documentsAuthority.inspectWorkspace(source.workspace_id)).root : undefined;

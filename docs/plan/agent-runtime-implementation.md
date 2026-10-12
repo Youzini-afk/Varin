@@ -19,6 +19,14 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-12 增量：本地与实验 PDF 原来源
+
+- 普通 `document_read` 直接复用原 Run source grant/Storage：fixed 精确分支版本、live 原 Documents 注册、materialized 当前工作副本；不要求另选 file/experiment 工具，不伪造来源。原临时 capture owner、分页读取与授权释放按实际排空。
+- 实验产物沿原 Catalog research scope 与 ExperimentService 读取，材料归实际 reader Thread。公开 `readArtifact` 带原 sourceRunId，Research ArtifactRow 首次导入后复用 snapshot/共享 PDF reader；框选回到现有本 Thread 草稿。原研究 source-less 限制仍明确报错，未开放公共任意路径读取。
+- 独审实际复现并修复大 PDF 在材料库重读时超过单帧，以及 Research PDF 缺失选区入草稿动作。原材料 owner 分页同 immutable record proof，无总长上限或第二数据权威；原草稿 callback 保 Thread/Host/source Run fence。
+- 本片证据与边界见[PDF 原来源验收](../reviews/runtime-pdf-sources-2026-10-12.md)。模型/策略、三个来源、原实验产物/public reader/GC/重开与取消分别验证；完整产品 IPC、外部计算产物生产、全部 family/nested 组合与 OCR/字体质量未由本片建立。
+- 接续材料集合/分享、学术/decision 与其余环境/Bot、来源/检索/上下文/provider 能力；两设计整体未完，用户仍负责最终默认切换/Pi 删除与资产迁移。
+
 ## 2026-10-12 增量：原 Web 工具与固定 PDF 材料
 
 - 普通 builtin 单声明接入 `websearch`、`webfetch`、`document_read`，复用原搜索/egress/HTML/PDF/材料与 Rust Storage owner。实际 Thread/family 生成无源逻辑 scope；窄 grant 与 record 仍归真实 Thread，家系/可猜 snapshot 不自动授跨 Thread 读取。接受时冻结配置、派发时取原凭据，公共读取重核当前策略。

@@ -5,7 +5,7 @@ import { createResearchArtifactObserver } from './research-artifact-followups.js
 import { isDeepStrictEqual } from 'node:util';
 import { parseVarinToolJson } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
-import type { ThreadIdentity, ThreadResearchAPI, ThreadResearchSelection } from '@varin/application-client';
+import type { ThreadResearchAPI, ThreadResearchSelection } from '@varin/application-client';
 import type { ExperimentSubmitParams, ExperimentListParams, ExperimentLogsParams, ExperimentArtifactReadParams, SourceListParams, SourceRegisterParams } from '@varin/protocol';
 import type { KernelClient } from './kernel-client.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
@@ -15,7 +15,8 @@ import type { SourceService } from '../harness/sources.js';
 import type { ResourceService } from '../harness/resources.js';
 import type { ExperimentCaller, ResearchOwner } from '../harness/research-identity.js';
 import { HarnessServiceError } from '../harness/service-error.js';
-import { requireToolInvocation, runToolDomainCall, type ToolInvocationAuthority } from './tool-invocation.js';
+import { requireToolInvocation, runToolDomainCall } from './tool-invocation.js';
+import { createResearchAccess, researchCaller as caller } from './research-access.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
 import { decodeResearchParams, type ResearchMethod } from './research-params.js';
 export { createResearchSourceAuthority } from './research-source.js';
@@ -43,25 +44,13 @@ export function createResearchRuntime(options: {
   const ensure = () => { if (disposed)
     throw new HarnessServiceError('unavailable', 'Research runtime is detached'); };
   const request = <T, M extends Extract<KernelMethod, `runtime.${string}`>>(method: M, params: KernelMethodParams[M], signal?: AbortSignal): Promise<T> => kernel.agentRuntimeRequest<T, M>(method, params, signal);
-  const scopes = async (identity: ThreadIdentity, sourceRunId?: string, operationId?: string, signal?: AbortSignal) => {
-    if (identity.runtime !== 'agent')
-      throw new HarnessServiceError('denied', 'A real native Thread identity is required');
-    return request<ResearchScope[], 'runtime.research.scopes'>('runtime.research.scopes', { threadId: identity.threadId, branchId: identity.branchId, ...(sourceRunId ? { sourceRunId } : {}), ...(operationId ? { operationId } : {}) }, signal);
-  };
-  const caller = (scope: ResearchScope, owner?: ResearchOwner): ExperimentCaller => ({ workspaceId: scope.source.workspace_id, executionWorkspaceId: scope.source.execution_workspace_id,
-    owner: owner ?? { runtime: 'agent', actor: { kind: 'reader' }, rootThreadId: scope.rootThreadId, threadId: scope.threadId, branchId: scope.branchId, runId: scope.sourceRunId, source: scope.source },
-    threadId: scope.threadId, runId: scope.sourceRunId, workspaceScope: [""],
-    access: { kind: 'family', readThreadIds: scope.readThreadIds, controlThreadIds: scope.controlThreadIds } });
+  const access = createResearchAccess(kernel, runtime);
+  const { scopes, toolScope } = access;
   const selected = async (selection: ThreadResearchSelection, signal?: AbortSignal) => {
     ensure();
-    signal?.throwIfAborted();
-    const scope = (await scopes(selection, selection.sourceRunId, undefined, signal))[0];
-    if (!scope)
-      throw new HarnessServiceError('unavailable', 'Original research source is unavailable');
-    return scope;
+    return access.selected(selection, signal);
   };
   const binding = (receipt: Receipt): HostJobBinding => ({ operationId: receipt.owner.operationId, executionOwner: receipt.owner.executionOwner, domain: DOMAIN, domainVersion: DOMAIN_VERSION, subject: { kind: 'workspace', workspaceId: receipt.caller.workspaceId, subjectId: receipt.attempt.attemptId } });
-  const inspect = (operationId: string) => request<Operation, 'runtime.operation.inspect'>('runtime.operation.inspect', { operationId });
   const handoff = async (receipt: Receipt, known?: HostJobPending): Promise<HostJobPending> => {
     let op = known?.accepted ? known : await request<HostJobPending, 'runtime.host_job.accept'>('runtime.host_job.accept', { binding: binding(receipt), content: { data: receipt.accepted, parts: [] } });
     if (receipt.attempt.cancelRequested && !op.cancelRequested) {
@@ -219,27 +208,6 @@ export function createResearchRuntime(options: {
         }
       })());
     },
-  };
-  const toolScope = async (authority: ToolInvocationAuthority) => {
-    const run = await runtime.run(authority.runId);
-    const scope = (await scopes({ runtime: 'agent', threadId: authority.threadId, branchId: run.branch_id }, authority.runId, authority.operationId))[0];
-    if (!scope || !isDeepStrictEqual(scope.source, authority.source))
-      throw new Error('Original research source differs from the admitted invocation');
-    const op = await inspect(authority.operationId);
-    if (!op.execution_owner)
-      throw new Error('Original tool execution owner missing');
-    const intent = op.intent as {
-      call: {
-        call_id: string;
-        schema_version: string;
-      };
-      contract: {
-        completion: string;
-        lifetime: string;
-      };
-    };
-    const owner: ResearchOwner = { runtime: 'agent', actor: { kind: 'tool', origin: authority.origin, callId: intent.call.call_id, toolName: authority.toolName, schemaVersion: intent.call.schema_version }, rootThreadId: scope.rootThreadId, threadId: scope.threadId, branchId: scope.branchId, runId: scope.sourceRunId, operationId: op.id, executionOwner: op.execution_owner, source: scope.source };
-    return { scope, owner, op, contract: intent.contract };
   };
   const capability: HostCapabilityHandler = async (method, input, context) => {
     ensure();

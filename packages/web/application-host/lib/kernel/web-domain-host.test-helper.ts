@@ -9,82 +9,25 @@ import { ApplicationExtensionRuntime } from '@varin/extension-host';
 import { WEB_CAPABILITY, VARIN_BUILTIN_WEB_EXTENSION_ID } from '@varin/extension-builtins';
 import { createThreadsHttpAPI, type ThreadIdentity } from '@varin/application-client';
 import type { Express, Request, RequestHandler, Response as ExpressResponse } from 'express';
-import { AgentRuntimeClient } from './agent-runtime-client.js';
-import { KernelClient, KernelScopedClient, type KernelGrantHandle } from './kernel-client.js';
 import { KernelStorageAdapter } from './storage-adapter.js';
 import { createMaterialStorageAccess, threadMaterialScope } from './material-storage.js';
 import { createWebRuntime } from './web-runtime.js';
 import { createExtensionTools, type ExtensionToolScope } from './extension-tool-owner.js';
-import { ToolBridge } from './tool-bridge.js';
 import { ThreadAdapter } from './thread-adapter.js';
-import { permissionService } from './permission-service.js';
 import { registerThreadRoutes } from './thread-routes.js';
 import { createEgressRuntime } from '../harness/egress.js';
 import { checkSsrf, isSameHost } from '../harness/ssrf-policy.js';
 import { createWebFetch } from '../harness/web-fetch.js';
 import { createWebMaterialStore } from '../harness/web-materials.js';
 import { createDocumentReader } from '../harness/document-reading.js';
+import { createMaterialReviewFixture, writeMaterialFixtureFrame as write } from './material-review-fixture.test-helper.js';
 import { makePdf } from '../harness/pdf-test-fixture.js';
 
-const write = (value: unknown) => process.stdout.write(`${JSON.stringify(value)}\n`);
-const pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
-const issued = new Set<KernelGrantHandle>();
-let sequence = 0, epoch = '', storageRoot = '';
-function request<T>(method: string, params: unknown, grant?: KernelGrantHandle): Promise<T> {
-  const id = `web-review:${++sequence}`;
-  const response = new Promise<T>((resolve, reject) => {
-    pending.set(id, { resolve: value => resolve(value as T), reject });
-    write({ kind: 'fixture-request', id, method, params, ...(grant ? { grantId: grant.grantId } : {}) });
-  });
-  if (method === 'runtime.permission.open') {
-    // The controlled user approves this exact original pending call. Nothing
-    // changes the production policy gate or grants subsequent invocations.
-    const value = params as { operationId: string; permissionId: string };
-    void response.then(() => permissionService(kernel).decide(value.operationId, value.permissionId, 'allow_once'))
-      .catch(error => write({ kind: 'fixture-failed', error: String(error) }));
-  }
-  return response;
-}
-const transport = {
-  get kernelEpoch() { return epoch; },
-  get handshake() { return { storageRoot, hostId: 'web-domain-host' }; },
-  subscribeReady() { return () => {}; }, subscribeExit() { return () => {}; },
-  onAgentRuntimeEvent() { return () => {}; }, onToolReleased() { return () => {}; },
-  cancelRunPreparation() {}, unregisterCredentialOwner() {}, releaseRunPolicyOwners() {},
-  unregisterToolOwners(runId: string) { bridge.unregister(runId); },
-  agentRuntimeRequest: (method: string, params: unknown) => request(method, params),
-  requestRaw: (method: string, params: unknown, options: { grant?: KernelGrantHandle } = {}) => request(method, params, options.grant),
-  assertGrant(grant: KernelGrantHandle) { assert(issued.has(grant)); assert.equal(grant.kernelEpoch, epoch); return grant; },
-  assertGrantForScope(grant: KernelGrantHandle) { return this.assertGrant(grant); },
-  scoped(grant: KernelGrantHandle) { return new KernelScopedClient(kernel, grant); },
-  async issueGrant(params: Record<string, unknown>) {
-    assert.deepEqual(params.capabilities, params.capabilities && (params.capabilities as string[]).filter(value => value === 'storage.read' || value === 'storage.write'));
-    assert.equal(params.sessionId, undefined); assert.equal(params.runId, undefined);
-    const raw = await request<Record<string, unknown>>('authority.grant.issue', {
-      sessionId: null, threadId: null, runId: null, owningWorkspace: null, executionWorkspace: null,
-      storageIdentity: storageRoot, ...params, hostGeneration: 'web-domain-generation',
-    });
-    const grant: KernelGrantHandle = Object.freeze({ grantId: String(raw.grant_id), kernelEpoch: String(raw.kernel_epoch), hostGeneration: String(raw.host_generation),
-      authorityInstanceId: null, workerId: null, workerGeneration: null, sessionId: null,
-      threadId: raw.thread_id as string | null, runId: raw.run_id as string | null, operationId: raw.operation_id as string | null,
-      owningWorkspace: raw.owning_workspace as string | null, executionWorkspace: raw.execution_workspace as string | null,
-      capabilities: raw.capabilities as string[], pathScopes: raw.path_scopes as string[], storageIdentity: String(raw.storage_identity) });
-    issued.add(grant); return grant;
-  },
-  revokeGrant: (grantId: string) => request('authority.grant.revoke', { grantId }),
-  // Reuse the actual KernelClient chunking and record methods, substituting only request delivery.
-  putBlob(...args: Parameters<KernelClient['putBlob']>) { return KernelClient.prototype.putBlob.call(kernel, ...args); },
-  getBlob(...args: Parameters<KernelClient['getBlob']>) { return KernelClient.prototype.getBlob.call(kernel, ...args); },
-  getOperation(...args: Parameters<KernelClient['getOperation']>) { return KernelClient.prototype.getOperation.call(kernel, ...args); },
-  releaseBlob(...args: Parameters<KernelClient['releaseBlob']>) { return KernelClient.prototype.releaseBlob.call(kernel, ...args); },
-  getRecord(...args: Parameters<KernelClient['getRecord']>) { return KernelClient.prototype.getRecord.call(kernel, ...args); },
-  listRecords(...args: Parameters<KernelClient['listRecords']>) { return KernelClient.prototype.listRecords.call(kernel, ...args); },
-  putRecord(...args: Parameters<KernelClient['putRecord']>) { return KernelClient.prototype.putRecord.call(kernel, ...args); },
-  releaseRecord(...args: Parameters<KernelClient['releaseRecord']>) { return KernelClient.prototype.releaseRecord.call(kernel, ...args); },
-};
-const kernel = transport as unknown as KernelClient;
-const runtime = new AgentRuntimeClient(kernel);
-const bridge = new ToolBridge(() => epoch, async frame => { write(frame); }, () => write({ kind: 'fixture-failed', error: 'original tool bridge failed' }));
+const fixture = createMaterialReviewFixture(params => {
+  assert.deepEqual(params.capabilities, params.capabilities && (params.capabilities as string[]).filter(value => value === 'storage.read' || value === 'storage.write'));
+  assert.equal(params.sessionId, undefined); assert.equal(params.runId, undefined);
+});
+const { kernel, runtime, bridge } = fixture;
 let extensions: ApplicationExtensionRuntime;
 let selected: ExtensionToolScope | undefined;
 let materials: ReturnType<typeof createWebMaterialStore>;
@@ -110,7 +53,8 @@ const egress = createEgressRuntime({ env: {}, systemFetch: outbound,
   resolveAll: async () => [{ address: '93.184.216.34', family: 4 }] });
 
 async function initialize(frame: Record<string, unknown>) {
-  epoch = String(frame.epoch); storageRoot = String(frame.storageRoot);
+  fixture.initialize(frame);
+  const storageRoot = String(frame.storageRoot);
   const root = String(frame.root), threadId = String(frame.threadId), runId = String(frame.runId);
   storage = new KernelStorageAdapter({ client: kernel, hostId: 'web-domain-host', storageRoot,
     resolveWorkspaceRoot: async () => { throw new Error('Web-only work attempted to acquire a physical file root'); } });
@@ -193,17 +137,12 @@ async function publicRead(frame: Record<string, unknown>) {
 
 async function receive(frame: Record<string, unknown>) {
   if (frame.kind === 'fixture-initialize') return initialize(frame);
-  if (frame.kind === 'fixture-response') {
-    const waiting = pending.get(String(frame.id)); assert(waiting); pending.delete(String(frame.id));
-    if (frame.ok) waiting.resolve(frame.result); else waiting.reject(new Error(String(frame.error)));
-    return;
-  }
+  if (fixture.receive(frame)) return;
   if (frame.kind === 'fixture-public') return publicRead(frame);
   if (frame.kind === 'fixture-finish') {
     selected?.close(); await bridge.close(); await extensions.stop(); await storage.dispose(); await egress.close();
     write({ kind: 'fixture-finished', articleFetches, pdfFetches, searches }); return;
   }
-  if (bridge.consume(frame)) return;
   throw new Error(`Unexpected Web fixture frame ${JSON.stringify(frame)}`);
 }
 createInterface({ input: process.stdin }).on('line', line => {

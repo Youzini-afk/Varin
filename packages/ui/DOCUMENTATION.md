@@ -463,6 +463,18 @@ uses fixed-material reads, validates page source hashes and adds selected region
 Only the Host decides material authority and reading policy; the renderer retains loading and failure
 states rather than interpreting missing bytes as an empty successful document.
 
+The real research `ArtifactRow` also opens this shared reader. `ThreadConversation` supplies its
+materials port to `ThreadResearch`; the selected source Run and exact Thread/branch remain attached
+to the native facts owner. `ThreadArtifactPdfReader` sends the first artifact overview to
+`materials.readArtifact`, then uses only the returned snapshot through `materials.read`. It never
+downloads a raw artifact as a PDF substitute. Source Run/Thread/branch/API/Host changes, unavailable
+artifact metadata and dismissal retire the old observation and discard late responses. Missing,
+pending, failed and inaccessible artifact states remain visible, and request failures retain their
+original safe error code. Region questions reuse the enclosing `ThreadMaterials` guarded composer
+callback through `ThreadMaterialDraftContext`; the artifact reader also verifies its original source
+Run before adding the image and citation. There is no separate research draft or Pi draft path. Pi
+artifacts keep their actual session adapter and the same reader core.
+
 ## Typed Thread media
 
 The Agent runtime history consumes original user-input attachments as StoredMedia and other history as

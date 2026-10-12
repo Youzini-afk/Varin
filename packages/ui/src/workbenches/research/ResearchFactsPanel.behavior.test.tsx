@@ -3,7 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runtimeFetch } from '@varin/application-client';
-import type { ThreadIdentity, ThreadResearchAPI, ThreadResearchScope, ThreadResearchSelection } from '@varin/application-client';
+import type { ThreadIdentity, ThreadMaterialsAPI, ThreadResearchAPI, ThreadResearchScope, ThreadResearchSelection } from '@varin/application-client';
 import type { ExperimentAttemptView } from '@varin/protocol';
 import { ThreadResearch } from '@/components/thread/ThreadResearch';
 import { loadResearchArtifact } from './researchFacts';
@@ -29,6 +29,8 @@ vi.mock('@/lib/varinEvents', () => ({
     return () => { mocks.listeners.delete(listener); };
   },
 }));
+
+const materials: ThreadMaterialsAPI = { read: vi.fn(), readArtifact: vi.fn() };
 
 const attempt = {
   attemptId: 'attempt-1',
@@ -146,7 +148,7 @@ describe('ResearchFactsPanel', () => {
         return { attempt: receipt, spec: null, text: 'accepted' };
       }), get: vi.fn(), logs: vi.fn(), artifact: vi.fn(), cancel: vi.fn(), collect: vi.fn(),
     } satisfies ThreadResearchAPI;
-    await act(async () => root.render(<ThreadResearch api={api} identity={identity} sourceRunId="old-source" />));
+    await act(async () => root.render(<ThreadResearch api={api} materials={materials} identity={identity} sourceRunId="old-source" />));
     expect(container.textContent).toContain('attempt-1');
     const rerun = () => [...container.querySelectorAll('button')].find(button => button.textContent === 'research-facts.rerun')!;
     await act(async () => rerun().click());
@@ -157,7 +159,7 @@ describe('ResearchFactsPanel', () => {
     expect(api.submit.mock.calls[0]![0]).toEqual({ ...identity, sourceRunId: 'old-source' });
     expect(container.textContent).toContain('attempt:rerun');
     // A successor Run changed its source. The displayed historical research scope remains selected.
-    await act(async () => root.render(<ThreadResearch api={api} identity={identity} sourceRunId="new-source" />));
+    await act(async () => root.render(<ThreadResearch api={api} materials={materials} identity={identity} sourceRunId="new-source" />));
     expect(api.list.mock.calls.at(-1)?.[0].sourceRunId).toBe('old-source');
     expect(container.querySelectorAll('option')).toHaveLength(2);
     expect(vi.mocked(runtimeFetch)).not.toHaveBeenCalled();
@@ -179,11 +181,11 @@ describe('ResearchFactsPanel', () => {
         eof: request.offset === 2, bytesBase64: request.offset === 2 ? 'AP8=' : 'QUI=', text: null })),
       get: vi.fn(), logs: vi.fn(), cancel: vi.fn(), collect: vi.fn(), submit: vi.fn(),
     } satisfies ThreadResearchAPI;
-    await act(async () => root.render(<ThreadResearch api={api} identity={identity} sourceRunId={selection.sourceRunId} />));
+    await act(async () => root.render(<ThreadResearch api={api} materials={materials} identity={identity} sourceRunId={selection.sourceRunId} />));
     expect(container.textContent).toContain('attempt-1');
     expect([...container.querySelectorAll('button')].some(button => button.textContent === 'research-facts.cancel')).toBe(false);
     expect([...container.querySelectorAll('button')].some(button => button.textContent === 'research-facts.rerun')).toBe(false);
-    const blob = await loadResearchArtifact({ api, selection, canSubmit: false }, 'attempt-1', 'artifact:binary');
+    const blob = await loadResearchArtifact({ api, materials, selection, canSubmit: false }, 'attempt-1', 'artifact:binary');
     expect([...new Uint8Array(await blob.arrayBuffer())]).toEqual([65, 66, 0, 255]);
     expect(api.artifact.mock.calls.map(([, request]) => request.offset)).toEqual([0, 2]);
     expect(vi.mocked(runtimeFetch)).not.toHaveBeenCalled();

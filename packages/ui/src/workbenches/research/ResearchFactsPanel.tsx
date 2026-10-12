@@ -3,6 +3,7 @@ import type { ExperimentArtifactView, ExperimentAttemptView, ResourceGpuView, Re
 import { Icon } from '@/components/icon/Icon';
 import { useHarnessThreadState } from '@/components/pi-session/HarnessThreadStateContext';
 import { PdfMaterialReader } from '@/components/pi-session/PdfMaterialReader';
+import { ThreadArtifactPdfReader } from '@/components/thread/ThreadArtifactPdfReader';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { useI18n } from '@/lib/i18n';
 import {
@@ -225,7 +226,8 @@ const ArtifactRow: React.FC<{
   const { t } = useI18n();
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [readerOpen, setReaderOpen] = React.useState(false);
+  const [readerSelection, setReaderSelection] = React.useState<{ owner: ResearchFactsOwner; attemptId: string; artifactId: string } | null>(null);
+  const readerOpen = readerSelection?.owner === owner && readerSelection.attemptId === attemptId && readerSelection.artifactId === artifact.artifactId;
   const downloadRequest = React.useRef<AbortController | null>(null);
   React.useEffect(() => () => { downloadRequest.current?.abort(); }, [owner, attemptId, artifact.artifactId]);
   const remote = artifact.remote;
@@ -267,8 +269,8 @@ const ArtifactRow: React.FC<{
             {t('research-facts.remoteArtifact')}: {remote.machineId} · {remote.outputId} · {remote.path}
           </span>
         ) : null}
-        {isPdf && downloadable && typeof owner === 'string' ? (
-          <button type="button" className="shrink-0 text-primary hover:underline" onClick={() => setReaderOpen(true)}>
+        {isPdf && downloadable ? (
+          <button type="button" className="shrink-0 text-primary hover:underline" onClick={() => setReaderSelection({ owner, attemptId, artifactId: artifact.artifactId })}>
             {t('harness.pdf.openReader')}
           </button>
         ) : null}
@@ -288,11 +290,15 @@ const ArtifactRow: React.FC<{
         {artifact.error ? <span className="text-muted-foreground">{artifact.error}</span> : null}
         {error ? <span role="alert" className="text-muted-foreground">{error}</span> : null}
       </li>
-      {isPdf && typeof owner === 'string' ? (
-        <PdfMaterialReader
-          open={readerOpen}
-          onOpenChange={setReaderOpen}
+      {isPdf && downloadable && readerOpen ? (
+        typeof owner === 'string' ? <PdfMaterialReader
+          onOpenChange={open => { if (!open) setReaderSelection(null); }}
           sessionId={owner}
+          title={artifact.name}
+          artifact={{ attemptId, artifactId: artifact.artifactId }}
+        /> : <ThreadArtifactPdfReader
+          onOpenChange={open => { if (!open) setReaderSelection(null); }}
+          owner={owner}
           title={artifact.name}
           artifact={{ attemptId, artifactId: artifact.artifactId }}
         />

@@ -300,6 +300,32 @@ export const createWebMaterialStore = (
         }
         const reference = record.references.find((item) => item.slot === "body" && item.objectHash === ref.contentHash);
         if (!reference) throw new WebSnapshotReadError("corrupt", `Web snapshot body reference is missing: ${snapshotId}`);
+        const readBlob = async (hash: string, slot: "body" | "source", byteLength: number,
+          offset = 0, length = byteLength): Promise<Buffer> => {
+          if (!Number.isSafeInteger(byteLength) || byteLength < 0) {
+            throw new WebSnapshotReadError("corrupt", `Web snapshot ${slot} length is invalid: ${snapshotId}`);
+          }
+          const chunks: Buffer[] = [];
+          let cursor = offset;
+          do {
+            options.signal?.throwIfAborted();
+            // A page is transfer granularity, never a document-size limit. Every
+            // read keeps the same original record proof; Rust owns hash validation
+            // and its getBlob promise settles only when the actual worker stops.
+            const pageLength = Math.min(256 * 1024, offset + length - cursor);
+            const page = await context.client!.getBlob(hash, { recordId: record.recordId, slot }, {
+              offset: cursor, length: pageLength, ...(options.signal ? { signal: options.signal } : {}),
+            });
+            options.signal?.throwIfAborted();
+            const bytes = Buffer.from(page.bytesBase64, "base64");
+            if (page.byteLength !== byteLength || bytes.byteLength !== pageLength) {
+              throw new WebSnapshotReadError("corrupt", `Web snapshot ${slot} is incomplete: ${snapshotId}`);
+            }
+            chunks.push(bytes);
+            cursor += pageLength;
+          } while (cursor < offset + length);
+          return Buffer.concat(chunks, length);
+        };
         const offset = range?.offset ?? 0;
         const length = Math.min(range?.length ?? ref.byteLength, ref.byteLength - offset);
         let body: Buffer;
@@ -307,14 +333,7 @@ export const createWebMaterialStore = (
           // Rust verifies the immutable object's full hash before range reads. The
           // first verification can read the whole object; only returned bytes are
           // bounded by this range. Keep that verification with its existing owner.
-          const value = await context.client.getBlob(ref.contentHash, { recordId: record.recordId, slot: "body" }, {
-            ...(range ? { offset, length } : {}),
-            ...(options.signal ? { signal: options.signal } : {}),
-          });
-          if (value.byteLength !== ref.byteLength) {
-            throw new WebSnapshotReadError("corrupt", `Web snapshot body length does not match its metadata: ${snapshotId}`);
-          }
-          body = Buffer.from(value.bytesBase64, "base64");
+          body = await readBlob(ref.contentHash, "body", ref.byteLength, offset, length);
         } else {
           // The non-native store remains a fixture seam, not a production fallback.
           const fullBody = await store.getObject(ref.contentHash);
@@ -331,10 +350,7 @@ export const createWebMaterialStore = (
             item.slot === "source" && item.objectHash === ref.document?.source?.contentHash);
           if (!sourceReference) throw new WebSnapshotReadError("corrupt", `Web snapshot source reference is missing: ${snapshotId}`);
           const sourceBytes = context.client
-            ? await context.client.getBlob(ref.document.source.contentHash, { recordId: record.recordId, slot: "source" }, {
-                ...(options.signal ? { signal: options.signal } : {}),
-              })
-              .then((value) => Buffer.from(value.bytesBase64, "base64"))
+            ? await readBlob(ref.document.source.contentHash, "source", ref.document.source.byteLength)
             : await store.getObject(ref.document.source.contentHash);
           if (!sourceBytes || sourceBytes.byteLength !== ref.document.source.byteLength
             || (!context.client && hashBytes(sourceBytes) !== ref.document.source.contentHash)) {
@@ -356,7 +372,9 @@ export const createWebMaterialStore = (
     analysisId: string,
     authority: WebSnapshotReadAuthority,
     sourceSnapshotId?: string,
+    signal?: AbortSignal,
   ): Promise<WebSnapshotContent | null> => {
+    signal?.throwIfAborted();
     const candidates = await kernelContext(
       access(authority),
       workspaceId,
@@ -374,7 +392,7 @@ export const createWebMaterialStore = (
         .map((ref) => ref.snapshotId),
     );
     for (const snapshotId of candidates) {
-      const found = await read(workspaceId, snapshotId, authority);
+      const found = await read(workspaceId, snapshotId, authority, signal ? { signal } : {});
       if (found) return found;
     }
     return null;
@@ -387,7 +405,9 @@ export const createWebMaterialStore = (
     toolVersions: NonNullable<NonNullable<WebSnapshotRef["document"]>["analysis"]>["toolVersions"],
     authority: WebSnapshotReadAuthority,
     sourceSnapshotId: string,
+    signal?: AbortSignal,
   ): Promise<WebSnapshotContent | null> => {
+    signal?.throwIfAborted();
     const candidates = await kernelContext(access(authority), workspaceId, "web-snapshot-find-analysis-config",
       async (_store, context) => (await context.records.list({ recordType: WEB_SNAPSHOT_RECORD_TYPE }))
         .filter((record) => record.state !== "released" && (
@@ -404,7 +424,7 @@ export const createWebMaterialStore = (
           && ref.document.analysis.toolVersions?.tesseract === toolVersions?.tesseract)
         .map((ref) => ref.snapshotId));
     for (const snapshotId of candidates) {
-      const found = await read(workspaceId, snapshotId, authority);
+      const found = await read(workspaceId, snapshotId, authority, signal ? { signal } : {});
       if (found) return found;
     }
     return null;

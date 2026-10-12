@@ -296,7 +296,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       {api.family && <ThreadFamily api={api.family} mediaRead={api.mediaRead} identity={identity} />}
       {api.messages && <ThreadMessages api={api.messages} family={api.family} identity={identity} eventCursor={snapshot?.eventCursor} cancelObservation={pending ? undefined : operationId => act(() => api.cancelOperation(operationId), true)} />}
       {api.plan && <ThreadPlan api={api.plan} identity={identity} contextRevision={snapshot?.context.checkpoint?.revision} />}
-      {api.research && <ThreadResearch key={`${host}:${identity.threadId}:${identity.branchId}`} api={api.research} identity={identity} sourceRunId={run?.id} />}
+      {api.research && <ThreadResearch key={`research:${host}:${identity.threadId}:${identity.branchId}`} api={api.research} materials={api.materials} identity={identity} sourceRunId={run?.id} />}
       {visibleHistory.map(item => <article key={item.id} className="mx-auto max-w-3xl">
         <div className="mb-1 text-xs text-muted-foreground">{item.source}</div>
         <ThreadContent api={api} identity={identity} holder={{ kind: 'history', itemId: item.id }} parts={historyParts(item.content, item.source)} messageId={item.id} />
