@@ -20,6 +20,10 @@ function harness(entries: ReturnType<typeof entry>[]) {
   const disposal = new Map<string, ReturnType<typeof deferred>>();
   const entered = new Map<string, ReturnType<typeof deferred>>();
   const counts = new Map<string, number>();
+  const callGates = new Map<number, ReturnType<typeof deferred>>();
+  const callEntered = new Map<number, ReturnType<typeof deferred>>();
+  const ownerDisposal = new Map<number, ReturnType<typeof deferred>>();
+  const disposed: number[] = [], forced: number[] = [];
   const services = new HostServiceRegistry('test-host');
   const selectEntered = deferred();
   let selectGate: ReturnType<typeof deferred> | undefined;
@@ -32,10 +36,10 @@ function harness(entries: ReturnType<typeof entry>[]) {
     } as any,
     storage: { read: async () => ({ document: { schemaVersion: 1, revision: 0, data: {} } }), prepareMigration: async () => null } as any,
     transportFactory: ({owner}) => ({
-      forceTerminate() {},
-      terminate: async () => { await disposal.get(owner.extensionId)?.promise; },
+      forceTerminate() { forced.push(owner.generation); },
+      terminate: async () => { await disposal.get(owner.extensionId)?.promise; await ownerDisposal.get(owner.generation)?.promise; disposed.push(owner.generation); },
       request: async (method, _params, signal) => {
-        if (method !== 'activate') return owner.extensionId;
+        if (method !== 'activate') { callEntered.get(owner.generation)?.resolve(); await callGates.get(owner.generation)?.promise; return owner.generation; }
         counts.set(owner.extensionId, (counts.get(owner.extensionId) ?? 0) + 1);
         entered.get(owner.extensionId)?.resolve();
         const gate = gates.get(owner.extensionId);
@@ -44,8 +48,66 @@ function harness(entries: ReturnType<typeof entry>[]) {
       },
     }),
   });
-  return { supervisor, services, snapshot, gates, disposal, entered, counts, selectEntered, blockSelection: () => selectGate = deferred() };
+  return { supervisor, services, snapshot, gates, disposal, entered, counts, callGates, callEntered, ownerDisposal, disposed, forced,
+    selectEntered, blockSelection: () => selectGate = deferred() };
 }
+
+test('publication returns with old model pins retained; retirement and explicit teardown wait for callbacks and transport disposal', async () => {
+  for (const path of ['candidate', 'selected']) for (const teardown of ['release', 'disable', 'shutdown']) {
+    const id = 'dev.test.retirement', h = harness([entry(id)]);
+    await h.supervisor.activateExtension(id);
+    const old = h.services.bind(id, 1).pin();
+    const selected = h.snapshot.extensions[0];
+    if (path === 'candidate') {
+      selected.candidate = { integrity: 'v2', resolvedVersion: '1.0.0', capabilitiesReviewed: true,
+        capabilityGrants: [], manifest: structuredClone(selected.manifest) };
+      await bounded(h.supervisor.selectCandidate(id, 'v2', 1));
+    } else {
+      selected.integrity = 'v2';
+      await bounded(h.supervisor.activateExtension(id));
+    }
+    let current = h.services.bind(id, 1).pin(), generation = 2;
+    assert.equal(await old.invoke('read', []), 1);
+    assert.equal(await current.invoke('read', []), 2);
+    assert.equal(h.disposed.length, 0);
+    if (teardown === 'release') {
+      current.release();
+      if (path === 'candidate') {
+        selected.candidate = { integrity: 'v3', resolvedVersion: '1.0.0', capabilitiesReviewed: true,
+          capabilityGrants: [], manifest: structuredClone(selected.manifest) };
+        await bounded(h.supervisor.selectCandidate(id, 'v3', 1));
+      } else {
+        selected.integrity = 'v3'; await bounded(h.supervisor.activateExtension(id));
+      }
+      generation = 3; current = h.services.bind(id, 1).pin();
+      await bounded((async () => { while (!h.disposed.includes(2)) await tick(); })());
+      assert.equal(h.disposed.includes(1), false, 'A remains owned by its original pin');
+      assert.equal(await old.invoke('read', []), 1);
+    }
+
+    const callback = deferred(), entered = deferred(), disposal = deferred();
+    h.callGates.set(1, callback); h.callEntered.set(1, entered); h.ownerDisposal.set(1, disposal);
+    const pending = old.invoke('hold', []); await entered.promise;
+    old.release(); await tick();
+    assert.equal(h.disposed.includes(1), false, 'releasing the model pin did not end its real callback');
+    let ended = false;
+    const stopping = teardown === 'release' ? undefined
+      : (teardown === 'disable' ? h.supervisor.deactivateExtension(id) : h.supervisor.shutdown()).then(() => { ended = true; });
+    await tick();
+    if (stopping) { assert.equal(ended, false); assert.ok(h.forced.includes(1)); assert.equal(current.revocationSignal.aborted, true); }
+    callback.resolve(); assert.equal(await pending, 1); await tick();
+    assert.equal(h.disposed.includes(1), false, 'callback completion did not finish blocked transport cleanup');
+    if (stopping) assert.equal(ended, false);
+    disposal.resolve();
+    if (stopping) await bounded(stopping);
+    else {
+      await bounded((async () => { while (!h.disposed.includes(1)) await tick(); })());
+      assert.equal(await current.invoke('read', []), generation); current.release();
+    }
+    await h.supervisor.shutdown();
+    assert.deepEqual(h.disposed.sort(), generation === 3 ? [1, 2, 3] : [1, 2]); assert.deepEqual(h.services.getSnapshot().providers, []);
+  }
+});
 
 test('independent activation and disposal do not wait for a blocked owner', async () => {
   const h = harness([entry('dev.test.a'), entry('dev.test.b')]);
@@ -88,6 +150,27 @@ test('shutdown during candidate catalog commit cannot publish the aborted genera
   const stopping = h.supervisor.shutdown(); gate.resolve();
   await Promise.allSettled([selecting, stopping]);
   assert.equal(published, false, 'aborted candidate was published after shutdown began');
+});
+
+test('optional prepared cleanup and a cancelled second selector cannot revoke an independent selection in commit', async () => {
+  const id = 'dev.test.shared-selection', h = harness([entry(id)]);
+  await h.supervisor.activateExtension(id);
+  h.snapshot.extensions[0].candidate = { integrity: 'v2', resolvedVersion: '1.0.0', capabilitiesReviewed: true,
+    capabilityGrants: [], manifest: structuredClone(h.snapshot.extensions[0].manifest) };
+  const gate = h.blockSelection(), controller = new AbortController();
+  const selecting = h.supervisor.selectCandidate(id, 'v2', 1);
+  await h.selectEntered.promise;
+  const other = h.supervisor.selectCandidate(id, 'v2', 1, controller.signal);
+  const cancelled = assert.rejects(other);
+  await tick(); controller.abort();
+  const cleanup = h.supervisor.discardPreparedCandidate(id, 'v2');
+  await tick(); assert.equal(h.forced.includes(2), false);
+  gate.resolve();
+  const selected = await bounded(selecting); await bounded(Promise.all([cancelled, cleanup]));
+  assert.equal(selected.extensions[0]!.integrity, 'v2');
+  assert.equal(await h.services.bind(id, 1).invoke('read', []), 2);
+  assert.equal(h.forced.includes(2), false);
+  await h.supervisor.shutdown();
 });
 
 const owner = (id: string, generation = 1) => ({ extensionId: id, entrypointId: 'host', generation, extensionVersion: `${generation}.0.0` });

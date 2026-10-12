@@ -1,6 +1,10 @@
 //! Agent control is independent of the file/process Storage execution queue.
 //! Only the authenticated parent Host may use this management channel. It is not a tool grant.
 #[cfg(test)]
+#[path = "authored_extension_review.rs"]
+mod authored_extension_review;
+
+#[cfg(test)]
 #[path = "runtime_contract_review.rs"]
 mod runtime_contract_review;
 use crate::error::{response_error, KernelError};

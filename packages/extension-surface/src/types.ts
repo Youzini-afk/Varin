@@ -117,23 +117,25 @@ export interface SurfaceExtensionRuntimeOptions {
  * The Surface runtime calls this during visibility projection. Also
  * creates owner-scoped writers that namespace keys and fence by generation.
  */
-export interface SurfaceContextProvider {
+export interface SurfaceContextChanges {
+  commit: readonly SurfaceContextWriterLease[];
+  dispose: readonly SurfaceContextWriterLease[];
+}
+
+export interface SurfaceReadonlyContextProvider {
   getContext(): ReadonlyMap<string, VarinContextValue>;
   subscribe(keys: readonly string[], listener: () => void): () => void;
-  /**
-   * Create an owner-scoped context writer lease. Writes remain private to the
-   * candidate until the Surface activation transaction commits. `commit()`
-   * must synchronously publish the complete candidate layer, fence the prior
-   * generation for the same owner, and not expose an intermediate layer.
-   */
-  createWriter(owner: SurfaceOwnerIdentity): SurfaceContextWriterLease;
-  /**
-   * Optionally batch several owner-lease commits into one context-store
-   * notification boundary. The operation itself is synchronous and contains
-   * only leases created by this provider.
-   */
   batch?(operation: () => void): void;
 }
+
+/** Read-only providers need no writer; owned writers always supply their original store's preview. */
+export type SurfaceContextProvider = SurfaceReadonlyContextProvider & (
+  | { createWriter?: never; previewContext?: never }
+  | {
+      createWriter(owner: SurfaceOwnerIdentity): SurfaceContextWriterLease;
+      previewContext(changes: SurfaceContextChanges): ReadonlyMap<string, VarinContextValue>;
+    }
+);
 
 export interface SurfaceContextWriterLease {
   /** Publish the staged owner layer. Calling this more than once is a no-op. */
@@ -163,3 +165,24 @@ export interface SurfaceContextWriter {
    */
   delete(key: string): boolean;
 }
+
+/** A private candidate projection for connected Surface consumers, never an authoritative catalog. */
+export interface SurfaceContributionPreview {
+  extensionId: string;
+  /** Owner updates plus actual visibility changes caused by declared when/context dependencies. */
+  affectedExtensionIds: readonly string[];
+  owners: readonly SurfaceOwnerIdentity[];
+  visibleContributions: readonly SurfaceContribution[];
+}
+
+/** A connected consumer stages real mounts before the owning Surface generation is published. */
+export interface SurfaceContributionLease {
+  validate(): void;
+  /** Synchronously publish staged mounts; return cleanup for retired mounts. Must not throw. */
+  commit(): SurfaceDisposer | void;
+  rollback(): void | Promise<void>;
+}
+
+export type SurfaceContributionConsumer = (
+  preview: SurfaceContributionPreview,
+) => Promise<SurfaceContributionLease | undefined>;

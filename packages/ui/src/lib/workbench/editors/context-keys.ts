@@ -102,9 +102,12 @@ const activeOwnerLayers = new Map<string, OwnerContextLayer>();
 const ownerLayers = new Set<OwnerContextLayer>();
 let nextCommitOrder = 0;
 
-const winningOwnerValue = (key: string): WorkbenchContextValue | undefined => {
+const winningOwnerValue = (
+  key: string,
+  layers: Iterable<OwnerContextLayer> = activeOwnerLayers.values(),
+): WorkbenchContextValue | undefined => {
   let winner: OwnerContextLayer | undefined;
-  for (const layer of activeOwnerLayers.values()) {
+  for (const layer of layers) {
     if (layer.disposed || !layer.values.has(key)) continue;
     if (!winner || layer.commitOrder > winner.commitOrder) winner = layer;
   }
@@ -126,10 +129,55 @@ const recomputeEffectiveKey = (key: string): void => {
   notifyContextKey(key);
 };
 
-const previousLiveLayer = (layer: OwnerContextLayer | undefined): OwnerContextLayer | undefined => {
+const previousLiveLayer = (
+  layer: OwnerContextLayer | undefined,
+  removed: ReadonlySet<OwnerContextLayer> = new Set(),
+): OwnerContextLayer | undefined => {
   let candidate = layer;
-  while (candidate?.disposed) candidate = candidate.previousActive;
+  while (candidate && (candidate.disposed || removed.has(candidate))) candidate = candidate.previousActive;
   return candidate;
+};
+
+export interface WorkbenchContextWriterLease {
+  commit(): void;
+  dispose(): void;
+  writer: { set(key: string, value: WorkbenchContextValue): boolean; delete(key: string): boolean };
+}
+
+// Identity lookup for leases owned by this context store; values remain in the original layers.
+const writerLayers = new WeakMap<WorkbenchContextWriterLease, OwnerContextLayer>();
+
+/** Project the same winner policy without changing keys, commit order, layers, or notifications. */
+export const previewWorkbenchContextKeyUpdates = (changes: {
+  commit: readonly WorkbenchContextWriterLease[];
+  dispose: readonly WorkbenchContextWriterLease[];
+}): ReadonlyMap<string, WorkbenchContextValue> => {
+  const layerFor = (lease: WorkbenchContextWriterLease): OwnerContextLayer => {
+    const layer = writerLayers.get(lease);
+    if (!layer) throw new Error('Context preview lease does not belong to this Workbench context store');
+    return layer;
+  };
+  const removed = new Set(changes.dispose.map(layerFor));
+  const projected = new Map(activeOwnerLayers);
+  for (const [key, layer] of projected) {
+    if (!removed.has(layer)) continue;
+    const previous = previousLiveLayer(layer.previousActive, removed);
+    if (previous) projected.set(key, previous);
+    else projected.delete(key);
+  }
+  let order = nextCommitOrder;
+  for (const lease of changes.commit) {
+    const layer = layerFor(lease);
+    if (layer.disposed || layer.committed || removed.has(layer)) continue;
+    projected.set(layer.scopeKey, { ...layer, commitOrder: ++order });
+  }
+  const result = new Map(baseKeys);
+  const affected = new Set([...projected.values()].flatMap((layer) => [...layer.values.keys()]));
+  for (const key of affected) {
+    const value = winningOwnerValue(key, projected.values());
+    if (value !== undefined) result.set(key, value);
+  }
+  return result;
 };
 
 /**
@@ -183,7 +231,7 @@ export const createOwnerScopedContextWriter = (
   const commit = (): void => {
     if (layer.disposed || layer.committed) return;
     const previous = activeOwnerLayers.get(scopeKey);
-    layer.previousActive = previous;
+    if (previous) layer.previousActive = previous;
     layer.committed = true;
     layer.commitOrder = ++nextCommitOrder;
     activeOwnerLayers.set(scopeKey, layer);
@@ -209,5 +257,7 @@ export const createOwnerScopedContextWriter = (
     layer.values.clear();
   };
 
-  return { commit, writer, dispose };
+  const lease = { commit, writer, dispose };
+  writerLayers.set(lease, layer);
+  return lease;
 };

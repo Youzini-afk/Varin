@@ -1,3 +1,4 @@
+import { parseVarinExtensionSourceViewProvenance } from "./package-authoring.js";
 import { parseVarinExtensionServiceContract } from './runtime-contracts.js';
 import {
   VARIN_EXTENSION_CATALOG_SCHEMA_VERSION,
@@ -110,7 +111,7 @@ const CONTRIBUTION_KINDS = new Set<VarinExtensionContributionKind>([
   "tool-renderer",
   "view",
 ]);
-const SOURCE_KINDS = new Set(["builtin", "git", "local", "npm"]);
+const SOURCE_KINDS = new Set(["builtin", "git", "local", "npm", "source_view"]);
 const ACTUAL_STATUSES = new Set<VarinExtensionActualStatus>([
   "active",
   "activating",
@@ -641,6 +642,15 @@ export function assertVarinExtensionManifestCompatibility(
   }
 }
 
+function sourceProvenance(value: Record<string, unknown>, path: string, issues: string[]) {
+  if (value.kind !== "source_view") {
+    if (value.provenance !== undefined) issues.push(`${path}.provenance requires a source_view`);
+    return {};
+  }
+  try { return { provenance: parseVarinExtensionSourceViewProvenance(value.provenance) }; }
+  catch (error) { issues.push(`${path}.provenance: ${error instanceof Error ? error.message : String(error)}`); return {}; }
+}
+
 function parseSource(value: unknown, path: string, issues: string[]): VarinExtensionPackageSource {
   if (!isRecord(value)) {
     issues.push(`${path} must be an object`);
@@ -653,6 +663,7 @@ function parseSource(value: unknown, path: string, issues: string[]): VarinExten
   if (!display) issues.push(`${path}.display must be a non-empty string`);
   if (!specifier) issues.push(`${path}.specifier must be a non-empty string`);
   return {
+    ...sourceProvenance(value, path, issues),
     kind: SOURCE_KINDS.has(kind ?? "") ? kind as VarinExtensionPackageSource["kind"] : "local",
     display: display ?? "Invalid source",
     specifier: specifier ?? "invalid",
@@ -1069,6 +1080,7 @@ function parsePublicCatalogEntry(value: unknown, path: string, issues: string[])
         preparedAt: timestamp(value.candidate.preparedAt, `${path}.candidate.preparedAt`, issues),
         resolvedVersion: candidateVersion,
         source: {
+          ...sourceProvenance(candidateSource, `${path}.candidate.source`, issues),
           kind: SOURCE_KINDS.has(candidateKind ?? "")
             ? candidateKind as VarinExtensionCatalogEntry["source"]["kind"]
             : "local",
@@ -1080,6 +1092,7 @@ function parsePublicCatalogEntry(value: unknown, path: string, issues: string[])
   return {
     manifest,
     source: {
+      ...sourceProvenance(source, `${path}.source`, issues),
       kind: SOURCE_KINDS.has(sourceKind ?? "") ? sourceKind as VarinExtensionCatalogEntry["source"]["kind"] : "local",
       display: sourceDisplay ?? "Invalid source",
     },
@@ -1351,6 +1364,7 @@ export function parseVarinExtensionPackageInstallRequest(value: unknown): VarinE
     expectedRevision: positiveRevision(value.expectedRevision, "expectedRevision", issues, true),
     source: parseSource(value.source, "source", issues),
   };
+  if (result.source.kind === "source_view") issues.push("source_view is captured by the admitted Source owner and cannot be installed from a specifier");
   throwIssues("Varin extension install request", issues);
   return result;
 }

@@ -321,6 +321,7 @@ class ModuleResourceScope {
   async #read(path: string): Promise<VarinSurfaceAsset> {
     if (this.#disposed) throw new Error("Managed Surface resource owner is inactive");
     const verified = await verifyAsset(await this.#host.readAsset({ ...this.#identity, path }), this.#artifactIntegrity);
+    if (this.#disposed) throw new Error("Managed Surface resource owner is inactive");
     return {
       bytes: verified.bytes,
       contentType: verified.payload.contentType,
@@ -517,7 +518,11 @@ export class SurfaceExtensionLoader {
   readonly #watchRetry: (attempt: number, signal: AbortSignal) => Promise<void>;
   readonly #enabledExtensions = new Set<string>();
   #hostId: string | null = null;
-  #queue: Promise<void> = Promise.resolve();
+  readonly #ownerQueues = new Map<string, Promise<void>>();
+  readonly #reconcileRequests = new Map<string, { snapshot: VarinExtensionCatalogSnapshot; state: VarinExtensionHostStateSnapshot }>();
+  readonly #reconciliations = new Map<string, Promise<void>>();
+  #lifecycleEpoch = 0;
+  #stopped = false;
   #revision = 0;
   #hostStateRevision = 0;
   #watchController: AbortController | null = null;
@@ -561,23 +566,12 @@ export class SurfaceExtensionLoader {
     return () => this.#listeners.delete(listener);
   };
 
-  reconcile(availability?: VarinExtensionCatalogAvailability): Promise<void> {
-    const operation = async () => {
-      if (!availability) {
-        const state = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
-        await this.#reconcileSnapshot(state.catalog, state);
-        return;
-      }
-      const result = availability
-        ? parseVarinExtensionCatalogAvailability(availability)
-        : parseVarinExtensionCatalogAvailability(await this.#host.catalog());
-      if (result.supported !== true || result.status !== "ready") return;
-      const state = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
-      await this.#reconcileSnapshot(result.snapshot, state);
-    };
-    const result = this.#queue.then(operation, operation);
-    this.#queue = result.then(() => undefined, () => undefined);
-    return result;
+  async reconcile(availability?: VarinExtensionCatalogAvailability): Promise<void> {
+    if (this.#stopped) return;
+    const state = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
+    if (!availability) return this.#reconcileSnapshot(state.catalog, state);
+    const result = parseVarinExtensionCatalogAvailability(availability);
+    if (result.supported === true && result.status === "ready") await this.#reconcileSnapshot(result.snapshot, state);
   }
 
   triggerActivation(
@@ -587,7 +581,6 @@ export class SurfaceExtensionLoader {
     const operation = async () => {
       const state = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
       if (!state.catalog.authoritative) return;
-      await this.#reconcileSnapshot(state.catalog, state);
       const matchedKeys: string[] = [];
       let newlyTriggered = false;
       for (const entry of state.catalog.extensions) {
@@ -605,15 +598,15 @@ export class SurfaceExtensionLoader {
           matchedKeys.push(key);
         }
       }
-      if (newlyTriggered) await this.#reconcileSnapshot(state.catalog, state);
+      if (newlyTriggered || matchedKeys.length > 0) {
+        await this.#reconcileSnapshot(state.catalog, state, target.extensionId);
+      }
       const inactive = matchedKeys.filter((key) => !this.#active.has(key));
       if (inactive.length > 0) {
         throw new Error(`Surface activation did not become active for event ${event}`);
       }
     };
-    const result = this.#queue.then(operation, operation);
-    this.#queue = result.then(() => undefined, () => undefined);
-    return result;
+    return operation();
   }
 
   applyCandidate(
@@ -622,23 +615,27 @@ export class SurfaceExtensionLoader {
     expectedRevision: number,
   ): Promise<VarinExtensionCatalogSnapshot> {
     const operation = async (): Promise<VarinExtensionCatalogSnapshot> => {
+      if (this.#stopped) throw new Error("Surface extension loader is stopped");
       const state = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
       let snapshot = state.catalog;
       if (!snapshot.authoritative) throw new Error("Cannot apply a candidate from a stale extension catalog");
-      if (snapshot.revision !== expectedRevision) {
-        throw new Error(`Extension catalog revision conflict: expected ${expectedRevision}, actual ${snapshot.revision}`);
-      }
       let entry = snapshot.extensions.find((candidate) => candidate.manifest.id === extensionId);
       if (!entry) throw new Error(`Varin extension is not installed: ${extensionId}`);
-      explicitCandidateSelection(entry, candidateIntegrity);
-      snapshot = parseVarinExtensionCatalogSnapshot(await this.#host.requestCandidateApplication({
-        candidateIntegrity,
-        expectedRevision,
-        extensionId,
-      }));
-      entry = snapshot.extensions.find((candidate) => candidate.manifest.id === extensionId);
-      if (!entry) throw new Error(`Varin extension is not installed: ${extensionId}`);
-      const selection = explicitCandidateSelection(entry, candidateIntegrity);
+      if (entry.integrity !== candidateIntegrity) {
+        if (snapshot.revision !== expectedRevision) {
+          throw new Error(`Extension catalog revision conflict: expected ${expectedRevision}, actual ${snapshot.revision}`);
+        }
+        explicitCandidateSelection(entry, candidateIntegrity);
+        snapshot = parseVarinExtensionCatalogSnapshot(await this.#host.requestCandidateApplication({
+          candidateIntegrity, expectedRevision, extensionId,
+        }));
+        entry = snapshot.extensions.find((candidate) => candidate.manifest.id === extensionId);
+        if (!entry) throw new Error(`Varin extension is not installed: ${extensionId}`);
+      }
+      const selection = entry.integrity === candidateIntegrity
+        ? publicCandidateSelection(entry) as ArtifactSelection
+        : explicitCandidateSelection(entry, candidateIntegrity);
+      this.#hostId ??= snapshot.hostId;
       const plans = compatibleActivationPlans(selection.manifest, this.#surface);
       const executablePlans = plans.executable.filter((plan) => (
         entrypointIsEager(plan.entrypoint as ExecutableSurfaceEntrypoint)
@@ -656,6 +653,7 @@ export class SurfaceExtensionLoader {
           }));
         } else if (plans.manifest || executablePlans.length > 0 || hasActiveOwners) {
           committed = await this.#activatePlans(entry, selection, plans, executablePlans, executablePlans, snapshot);
+          if (!committed && selection.slot === "selected") committed = snapshot;
         } else {
           await this.#host.prepareCandidate(extensionId, candidateIntegrity);
           committed = parseVarinExtensionCatalogSnapshot(await this.#host.selectCandidate({
@@ -701,17 +699,24 @@ export class SurfaceExtensionLoader {
         throw error;
       }
     };
-    const result = this.#queue.then(operation, operation);
-    this.#queue = result.then(() => undefined, () => undefined);
-    return result;
+    return this.#enqueueOwner(extensionId, operation);
   }
 
   async start(): Promise<void> {
     if (this.#watchController) return;
+    this.#stopped = false;
     const controller = new AbortController();
     this.#watchController = controller;
+    const initial = this.reconcile();
+    void this.#watch(controller).catch((error) => {
+      if (!controller.signal.aborted) {
+        this.#diagnose("varin.extensions", "host_state_watch_failed", error instanceof Error ? error.message : String(error));
+        this.#publish();
+      }
+      if (this.#watchController === controller) this.#watchController = null;
+    });
     try {
-      await this.reconcile();
+      await initial;
     } catch (error) {
       this.#diagnose(
         "varin.extensions",
@@ -720,52 +725,85 @@ export class SurfaceExtensionLoader {
       );
       this.#publish();
     }
-    void this.#watch(controller).catch((error) => {
-      if (!controller.signal.aborted) {
-        this.#diagnose("varin.extensions", "host_state_watch_failed", error instanceof Error ? error.message : String(error));
-        this.#publish();
-      }
-      if (this.#watchController === controller) this.#watchController = null;
-    });
+
   }
 
   async stop(): Promise<void> {
+    this.#stopped = true;
+    this.#lifecycleEpoch += 1;
+    this.#reconcileRequests.clear();
     this.#watchController?.abort("Surface extension loader stopped");
     this.#watchController = null;
+    await Promise.all([...this.#ownerQueues.keys()].map((extensionId) => this.#enqueueOwner(extensionId, async () => {
+      await Promise.all([...this.#active.values()].filter((active) => active.owner.extensionId === extensionId)
+        .map((active) => this.#deactivate(active, active.owner.desiredRevision)));
+    })));
     await this.deactivateAll();
   }
 
   async deactivateAll(): Promise<void> {
-    const active = [...this.#active.values()];
-    for (const entry of active) await this.#deactivate(entry, entry.owner.desiredRevision);
+    this.#lifecycleEpoch += 1;
+    await Promise.all([...this.#active.values()].map((entry) => this.#deactivate(entry, entry.owner.desiredRevision)));
     this.#publish();
   }
 
   async #reconcileSnapshot(
     snapshotValue: VarinExtensionCatalogSnapshot,
     hostState: VarinExtensionHostStateSnapshot,
+    onlyExtensionId?: string,
   ): Promise<void> {
-    let snapshot = parseVarinExtensionCatalogSnapshot(snapshotValue);
-    if (!snapshot.authoritative) return;
+    const snapshot = parseVarinExtensionCatalogSnapshot(snapshotValue);
+    if (!snapshot.authoritative || this.#stopped) return;
+    if (snapshot.hostId === this.#hostId && (snapshot.revision < this.#revision || hostState.revision < this.#hostStateRevision)) return;
     if (this.#hostId && this.#hostId !== snapshot.hostId) {
-      await this.deactivateAll();
+      this.#lifecycleEpoch += 1;
       this.#triggered.clear();
       this.#enabledExtensions.clear();
     }
     this.#hostId = snapshot.hostId;
     this.#hostStateRevision = hostState.revision;
     this.#revision = snapshot.revision;
-    const nextEnabledExtensions = new Set(snapshot.extensions
-      .filter((entry) => entry.source.kind !== "builtin" && entry.desired.enabled)
+    const enabled = new Set(snapshot.extensions.filter((entry) => entry.source.kind !== "builtin" && entry.desired.enabled)
       .map((entry) => entry.manifest.id));
-    for (const extensionId of this.#enabledExtensions) {
-      if (!nextEnabledExtensions.has(extensionId)) this.#clearTriggered(extensionId);
-    }
+    for (const id of this.#enabledExtensions) if (!enabled.has(id)) this.#clearTriggered(id);
     this.#enabledExtensions.clear();
-    for (const extensionId of nextEnabledExtensions) this.#enabledExtensions.add(extensionId);
+    for (const id of enabled) this.#enabledExtensions.add(id);
+    const ids = new Set([...snapshot.extensions.map((entry) => entry.manifest.id),
+      ...[...this.#active.values()].map((entry) => entry.owner.extensionId), ...this.#reconciliations.keys()]);
+    await Promise.all([...ids].filter((id) => !onlyExtensionId || id === onlyExtensionId).map((id) => {
+      this.#reconcileRequests.set(id, { snapshot, state: hostState });
+      const running = this.#reconciliations.get(id);
+      if (running) return running;
+      const operation = this.#enqueueOwner(id, async () => {
+        try {
+          while (!this.#stopped) {
+            const next = this.#reconcileRequests.get(id);
+            if (!next) break;
+            this.#reconcileRequests.delete(id);
+            await this.#reconcileOwnerSnapshot(next.snapshot, next.state, id);
+          }
+        } finally {
+          // Drop the coalescing handle in the same turn as the final empty check. A request
+          // arriving after completion must create a new drain rather than attach to a settled one.
+          if (this.#reconciliations.get(id) === operation) this.#reconciliations.delete(id);
+        }
+      });
+      this.#reconciliations.set(id, operation);
+      return operation;
+    }));
+    this.#publish();
+  }
+
+  async #reconcileOwnerSnapshot(
+    snapshot: VarinExtensionCatalogSnapshot,
+    hostState: VarinExtensionHostStateSnapshot,
+    extensionId: string,
+  ): Promise<void> {
+    if (snapshot.hostId !== this.#hostId || this.#stopped) return;
+    const entries = snapshot.extensions.filter((entry) => entry.manifest.id === extensionId);
     const desiredKeys = new Set<string>();
 
-    for (const entry of snapshot.extensions) {
+    for (const entry of entries) {
       if (entry.source.kind === "builtin") continue;
       const selected = publicCandidateSelection(entry);
       if (!entry.desired.enabled || !selected) continue;
@@ -795,13 +833,14 @@ export class SurfaceExtensionLoader {
       }
     }
     for (const [key, active] of [...this.#active]) {
+      if (active.owner.extensionId !== extensionId) continue;
       const entry = snapshot.extensions.find((candidate) => candidate.manifest.id === active.owner.extensionId);
-      if (!entry || !entry.desired.enabled || !desiredKeys.has(key)) {
+      if (!entry || !entry.desired.enabled || (!desiredKeys.has(key) && entry.integrity === active.artifactIntegrity) || active.owner.hostId !== snapshot.hostId) {
         await this.#deactivate(active, entry?.desired.revision ?? active.owner.desiredRevision + 1);
       }
     }
 
-    for (const entry of snapshot.extensions) {
+    for (const entry of entries) {
       if (entry.source.kind === "builtin") continue;
       if (!entry.desired.enabled) continue;
       const selected = publicCandidateSelection(entry);
@@ -840,7 +879,9 @@ export class SurfaceExtensionLoader {
         && (currentEntrypoints.length > 0 || executablePlans.length > 0)
         && !this.#requirementsSatisfied(selected, hostState)) {
         if (currentEntrypoints.length > 0) {
-          for (const active of currentEntrypoints) await this.#deactivate(active, entry.desired.revision);
+          for (const active of currentEntrypoints) {
+            if (active.artifactIntegrity === selected.integrity) await this.#deactivate(active, entry.desired.revision);
+          }
         }
         this.#diagnose(entry.manifest.id, "required_service_withdrawn", "A required extension service is no longer available");
         continue;
@@ -884,7 +925,7 @@ export class SurfaceExtensionLoader {
           snapshot,
         );
         if (selection) {
-          snapshot = selection;
+          this.#revision = Math.max(this.#revision, selection.revision);
           const retained = new Set(desiredPlans.map((plan) => keyFor(entry.manifest.id, plan.entrypointId)));
           for (const [key, active] of [...this.#active]) {
             if (active.owner.extensionId === entry.manifest.id && !retained.has(key)) {
@@ -906,7 +947,7 @@ export class SurfaceExtensionLoader {
         );
       }
     }
-    this.#revision = snapshot.revision;
+    this.#revision = Math.max(this.#revision, snapshot.revision);
     this.#publish();
   }
 
@@ -918,6 +959,7 @@ export class SurfaceExtensionLoader {
     executablePlansToActivate: SurfaceActivationPlan[],
     snapshot: VarinExtensionCatalogSnapshot,
   ): Promise<VarinExtensionCatalogSnapshot | null> {
+    const lifecycleEpoch = this.#lifecycleEpoch;
     const executableEntrypointIds = new Set(desiredExecutablePlans.map((plan) => plan.entrypointId));
     const plans = [
       ...(compatible.manifest
@@ -946,6 +988,10 @@ export class SurfaceExtensionLoader {
         await this.#host.activateExtension(entry.manifest.id);
       }
       const currentHostState = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
+      const currentEntry = currentHostState.catalog.extensions.find((candidate) => candidate.manifest.id === entry.manifest.id);
+      if (selection.slot === "candidate" && currentEntry?.integrity === selection.integrity) {
+        selection = { ...selection, slot: "selected" };
+      }
       const externalProviders = this.#resolveExternalProviders(selection, currentHostState, prepared);
       const serviceSelections = this.#resolvedServiceSelections(selection, currentHostState, externalProviders);
       const hostExternalServices = this.#externalServices(externalProviders);
@@ -1175,6 +1221,9 @@ export class SurfaceExtensionLoader {
 
       let committedSnapshot: VarinExtensionCatalogSnapshot | null = null;
       await this.#surfaceRuntime.activateBatchWithCommit(requests, async () => {
+        if (this.#stopped || lifecycleEpoch !== this.#lifecycleEpoch || snapshot.hostId !== this.#hostId) {
+          throw new Error("Surface activation was superseded by loader close or Host change");
+        }
         if (selection.slot === "selected") {
           const latest = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
           const latestEntry = latest.catalog.extensions.find((candidate) => candidate.manifest.id === entry.manifest.id);
@@ -1188,13 +1237,23 @@ export class SurfaceExtensionLoader {
             throw new Error("Surface activation was superseded by a newer Host or desired artifact generation");
           }
         }
+        if (selection.slot === "candidate") {
+          const latest = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
+          const latestEntry = latest.catalog.extensions.find((candidate) => candidate.manifest.id === entry.manifest.id);
+          if (!latest.catalog.authoritative || latest.catalog.hostId !== snapshot.hostId
+            || !latestEntry?.desired.enabled || latestEntry.desired.revision !== entry.desired.revision) {
+            throw new Error("Surface candidate was superseded by a newer Host or desired generation");
+          }
+          committedSnapshot = latestEntry.integrity === selection.integrity ? latest.catalog
+            : parseVarinExtensionCatalogSnapshot(await this.#host.selectCandidate({
+                candidateIntegrity: selection.integrity,
+                expectedRevision: snapshot.revision,
+                extensionId: entry.manifest.id,
+              }));
+        } else {
+          committedSnapshot = currentHostState.catalog;
+        }
         for (const resource of resources) resource.commit();
-        if (selection.slot !== "candidate") return;
-        committedSnapshot = parseVarinExtensionCatalogSnapshot(await this.#host.selectCandidate({
-          candidateIntegrity: selection.integrity,
-          expectedRevision: snapshot.revision,
-          extensionId: entry.manifest.id,
-        }));
       });
       for (const active of activated) this.#active.set(keyFor(active.owner.extensionId, active.owner.entrypointId), active);
       await this.#reportActual(entry.manifest.id);
@@ -1232,10 +1291,11 @@ export class SurfaceExtensionLoader {
             revision: this.#hostStateRevision,
           }, controller.signal));
         if (controller.signal.aborted) return;
-        const operation = () => this.#reconcileSnapshot(state.catalog, state);
-        const result = this.#queue.then(operation, operation);
-        this.#queue = result.then(() => undefined, () => undefined);
-        await result;
+        void this.#reconcileSnapshot(state.catalog, state).catch((error) => {
+          if (controller.signal.aborted) return;
+          this.#diagnose("varin.extensions", "host_state_reconcile_failed", error instanceof Error ? error.message : String(error));
+          this.#publish();
+        });
         consecutiveFailures = 0;
       } catch (error) {
         if (controller.signal.aborted) return;
@@ -1474,7 +1534,7 @@ export class SurfaceExtensionLoader {
     const owner = {
       ...active.owner,
       desiredRevision,
-      generation: active.moduleGeneration + 1,
+      generation: Math.max(this.#generations.get(key) ?? 0, active.moduleGeneration) + 1,
     };
     this.#generations.set(key, Math.max(this.#generations.get(key) ?? 0, owner.generation));
     const priorNativeCleanupFailed = active.mode === "native" && this.#surfaceRuntime.getSnapshot().actual.some((state) => (
@@ -1534,6 +1594,15 @@ export class SurfaceExtensionLoader {
       timestamp: new Date().toISOString(),
       ...details,
     });
+  }
+
+  #enqueueOwner<T>(extensionId: string, operation: () => Promise<T>): Promise<T> {
+    const prior = this.#ownerQueues.get(extensionId) ?? Promise.resolve();
+    const result = prior.then(operation, operation);
+    const settled = result.then(() => undefined, () => undefined);
+    this.#ownerQueues.set(extensionId, settled);
+    void settled.then(() => { if (this.#ownerQueues.get(extensionId) === settled) this.#ownerQueues.delete(extensionId); });
+    return result;
   }
 
   #publish(): void {

@@ -153,7 +153,8 @@ export async function admitRunSourceAuthority(
   if (options.retention === 'caller') {
     if (!options.operationId) throw new Error('Independent source lifetime requires its actual Operation');
     const operation = await runtime.operation(options.operationId, signal);
-    if (operation.run_id !== run.id || (operation.lifetime !== 'thread' && !(operation.lifetime === 'environment' && operation.managed_process?.purpose.kind === 'script_environment')) || operation.execution_owner?.kind !== 'external') throw new Error('Independent source Operation differs from its original Thread/Run owner');
+    const liveCall = operation.lifetime === 'run' && operation.phase === 'running' && !operation.cancel_requested && !run.cancel_requested;
+    if (operation.run_id !== run.id || (!liveCall && operation.lifetime !== 'thread' && !(operation.lifetime === 'environment' && operation.managed_process?.purpose.kind === 'script_environment')) || operation.execution_owner?.kind !== 'external') throw new Error('Caller-retained source Operation differs from its original Thread/Run owner');
   }
   if (selection.mode !== 'live_root') await runtime.admitSourceRegistration(selection, signal);
   // Do not use old grants from the durable selection. Each Host lifetime issues its own permit.

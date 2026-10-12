@@ -8,6 +8,12 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-12 增量：Agent 产包与原 Host/Surface 消费
+
+- 普通 `extension_package` 沿原发行目录、调用授权和 Source/Storage 捕获 stage/apply；首次禁用且无 grant，更新保原能力审查与 candidate。原 ArtifactStore/Catalog/supervisor 独占字节、选择和执行事实，无第二安装器或回执权威。Catalog **58**、wire **18** 保持。
+- 冷启动真实 FileRead/FileWrite→捕获→编译→认证启用→普通工具和实际 Surface watch/mount，继续 Model/Policy 两次同版本更新、坏挂载保旧、好更新释放、旧 pin 与新请求、GC/重开。冻结请求只在合法后续边界换目录，不为了验收撤销原绑定。
+- 独审与整合闭合候选 context、捕获外编译配置、观察者篡改回执、发布等待旧 pin 环、多代无用保活及可选 UI/单调用取消共享选择；[本片证据](../reviews/runtime-authored-extensions-2026-10-12.md)分列真实整链、受控取消恢复、类型/构建及未验边界。显式 required Host+Surface 组、更广能力组合和其余两设计能力继续推进。
+
 ## 2026-10-12 增量：同一不可变扩展版本的源码读取
 
 - 原 `runtime_contract` 与公开 query API 支持按需 UTF-8 源码页，使用原 selected/candidate artifact 与文件 hash；list/describe 仍纯元数据，不激活或物化包、不跟随可变 checkout。Catalog **58**、wire **18** 保持。

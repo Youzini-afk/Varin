@@ -152,3 +152,14 @@ reaches the original inner executor. An accepted independent Job keeps its origi
 Callback success describes the callback itself: an inner error caught or omitted from output still
 has its own native Operation and receipt. Closed or restarted invocation scopes cannot issue calls
 or replay unknown effects. See the [nested-tools example](../../examples/extensions/nested-tools/README.md).
+
+To stage an authored package through an ordinary tool invocation, use
+`call.tools.invoke({ callId: 'stage-package', name: 'extension_package', arguments: {
+  action: 'stage', packagePath: 'my-extension', expectedRevision: catalogRevision
+} })`. The original invocation source supplies the files; no Host path or grant can be passed.
+First installation is disabled until the user enables it in Extensions and reviews any requested
+capabilities. `apply` takes the exact candidate identity and current catalog revision, retains the
+existing capability decisions, and never enables a new package. Its committed application request
+can survive cancellation and resume on restart. A selected artifact is distinct from actual Host or
+Surface activation. The [authored panel example](../../examples/extensions/agent-authored-panel/README.md)
+uses the same package, build, tool, view and disposal contracts as other extensions.
