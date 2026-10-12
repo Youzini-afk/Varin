@@ -126,3 +126,51 @@ unreliable broker; sending a kill signal alone does not settle pending callbacks
 capability calls retain owner-grant semantics.
 A pin's `revocationSignal` wakes waiting preparation on explicit disable/crash/revocation; ordinary
 replacement leaves it live, including a frozen pin that has not yet made its first call.
+
+Agent-authored packages use the same artifact and catalog owners. The trusted
+`stageCapturedPackage` seam accepts only a tree already captured from the original Run's SourceView;
+public installation source specifiers cannot create a `source_view`. Its first installation retains a
+real selected artifact but is always disabled, even when it requests no capabilities. Further edits
+stage the existing candidate slot and preserve enablement and capability decisions. The ordinary
+`extension_package` effect tool never enables a package or creates capability decisions.
+
+`applyPackageCandidate` consumes the exact authorized tool request, existing enablement and reviewed
+candidate, then records the ordinary `applyRequested` intent before preparing/publishing. Results
+separate `application_requested` from `selected`; neither asserts an actual Surface mount. Cancelling
+after that commit leaves the application intent durable and may resume it on restart. A started
+preparation is retained until its actual broker/build work drains. The original ToolBridge resends a
+lost receipt while the Host survives. After full Host loss, unconfirmed Operations remain Unknown;
+the catalog restores committed lifecycle state without replaying the Agent tool or recapturing a
+mutable source. Cleanup diagnostics cannot erase an already obtained mutation result.
+
+Captured package compilation uses the original esbuild context with cancellation/disposal and permits
+resolution only inside the captured dependency closure (plus Node builtins for Host code). It installs
+no dependencies. Captured compilation uses only the package-root `tsconfig.json`, when present;
+otherwise it disables ambient configuration lookup. JSONC, relative config inheritance and captured
+configuration dependencies are preserved. Every `extends` target must remain in the captured tree.
+The artifact owner derives a disposable compiler copy including dependencies and same-directory
+normalized config shadows, leaving the captured source and artifact text unchanged. Missing or external
+configuration dependencies require inclusion in the package or a prebuilt entrypoint. Copying/hashing,
+config normalization and builds happen outside catalog locks and drain before cleanup. Source provenance records
+the original view and captured-content identity; it grants no filesystem access. An exact candidate
+asset or managed-entrypoint request may finish after that same artifact has been selected; explicit
+`read/source` queries still require their current selected/candidate slot.
+Runtime notification errors are reported through `onObserverError` (the Host error log by default);
+each remaining subscriber is still notified, and observer failures cannot change a committed result.
+
+After Host publication commits, selection returns without waiting for older model/child pins to be
+released. The same supervisor retains each exact previous instance and its retirement promise:
+registry finalization waits for both those pins and real callbacks before disposing that transport.
+Each replacement takes over only its active predecessor; an older draining generation stays with
+its own retirement, so a long-lived A pin does not also retain an unused B after B→C publication.
+Candidate selection and selected-owner replacement use the same path. Normal replacement does not
+revoke an old pin. Explicit disable, force termination and shutdown cover retiring generations too;
+teardown still waits for actual callbacks and transport cleanup. Retirement failures preserve the new
+active owner and are reported through its existing diagnostics and teardown error aggregation.
+
+Prepared-candidate cleanup from an optional consumer is queued and cannot invalidate an independent
+selection of the same artifact. A caller cancellation stops that caller before publication begins,
+after the shared preparation has actually ended; it does not revoke shared preparation or another
+caller's selection. Once the publication transaction starts, its actual result wins over caller
+cancellation. Explicit candidate rejection first commits the original catalog CAS, then reconciles
+and drains the now-invalid preparation. Disable and shutdown retain global lifecycle revocation.

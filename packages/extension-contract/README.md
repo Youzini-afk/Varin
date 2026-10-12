@@ -116,3 +116,10 @@ is returned as data, not evaluated. This API does not grant arbitrary Host files
 activate an unprepared package; unavailable, stale, missing, invalid and corrupt results retain their
 distinct codes. It does not promise source access to retired accepted-Run bindings after their
 catalog slot has changed.
+
+`VarinExtensionPackageRequest` declares the ordinary `extension_package` actions: `stage` captures a
+source-relative package directory (including `.`), and `apply` names an exact reviewed candidate.
+Only `stage` requires a SourceView. `VarinExtensionPackageResult` distinguishes disabled first
+installation, staged update, committed application request and selected artifact. Execution/mount
+status remains with the original realm owners. `source_view` is trusted capture provenance in the
+catalog, never an installable discovery source or a client-supplied filesystem resolver.

@@ -25,3 +25,5 @@ export * from "./nested-tools.generated.js";
 export * from "./output.js";
 
 export * from "./runtime-source.js";
+
+export * from "./package-authoring.js";

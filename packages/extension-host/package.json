@@ -29,6 +29,7 @@
     "@varin/extension-builtins": "workspace:*",
     "@varin/extension-contract": "workspace:*",
     "esbuild": "^0.28.2",
+    "jsonc-parser": "^3.3.1",
     "tar": "^7.5.22"
   },
   "engines": {

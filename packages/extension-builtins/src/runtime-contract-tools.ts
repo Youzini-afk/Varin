@@ -1,5 +1,5 @@
 import {
-  VARIN_RUNTIME_INSPECTION_REQUEST_SCHEMA, type VarinExtensionServiceProvision,
+  VARIN_RUNTIME_INSPECTION_REQUEST_SCHEMA, VARIN_EXTENSION_PACKAGE_REQUEST_SCHEMA, type VarinExtensionServiceProvision,
 } from '@varin/extension-contract';
 
 export const VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION_ID = 'varin.builtin.runtime-contracts';
@@ -13,3 +13,12 @@ export const RUNTIME_CONTRACT_TOOL_DECLARATIONS: readonly VarinExtensionServiceP
     outputSchema: { type: 'object' },
   },
 }];
+
+export const EXTENSION_PACKAGE_TOOL_DECLARATION: VarinExtensionServiceProvision = {
+  id: 'varin.extension.package', version: 1,
+  tool: {
+    name: 'extension_package', operation: 'effect', completion: 'result',
+    description: 'Stage an extension package from packagePath inside this Run’s admitted source, or apply an exact reviewed candidate. Read the current extension catalog revision first. First installation is always disabled until the user enables it and reviews requested capabilities in Extensions. Updates preserve existing enablement and capability decisions; apply cannot grant capabilities or enable a new extension. Apply records durable intent before preparing the candidate, so cancellation after application_requested can still be resumed on restart. selected reports installed content selection; actual Host/Surface activation is reported separately. Package paths are source-relative; source capture is required only for stage. Missing build dependencies must be provided in the package or prebuilt entrypoint; none are installed automatically.',
+    inputSchema: VARIN_EXTENSION_PACKAGE_REQUEST_SCHEMA, outputSchema: { type: 'object' },
+  },
+};

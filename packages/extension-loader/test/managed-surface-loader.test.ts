@@ -1769,6 +1769,8 @@ test("Host-state watch reconnects from an authoritative snapshot after a transie
   let current = snapshot(1, enabledEntry);
   let hostStateReads = 0;
   let waits = 0;
+  let interrupt!: () => void;
+  const interruption = new Promise<void>((resolve) => { interrupt = resolve; });
   const runtime = new SurfaceExtensionRuntime({ surface: "web" });
   const withdrawn = new Promise<void>((resolve) => {
     const unsubscribe = runtime.subscribe(() => {
@@ -1798,6 +1800,7 @@ test("Host-state watch reconnects from an authoritative snapshot after a transie
       waitForHostState: async (_request, signal) => {
         waits += 1;
         if (waits === 1) {
+          await interruption;
           current = snapshot(2, {
             ...enabledEntry,
             desired: { enabled: false, revision: 2, updatedAt: "2026-08-14T00:05:00.000Z" },
@@ -1817,9 +1820,111 @@ test("Host-state watch reconnects from an authoritative snapshot after a transie
 
   await loader.start();
   assert.equal(runtime.getSnapshot().visibleContributions.length, 1);
+  interrupt();
+  // Initial activating state also has no visible contribution; observe the actual disabled owner.
+  while (!runtime.getSnapshot().actual.some((state) => state.status === "inactive")) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
   await withdrawn;
   assert.equal(hostStateReads >= 2, true);
   assert.equal(waits >= 1, true);
   assert.equal(loader.getSnapshot().diagnostics.some((item) => item.code === "host_state_watch_interrupted"), true);
+  await loader.stop();
+});
+
+test("a pending module does not block another catalog owner's activation or disable", { timeout: 2_000 }, async () => {
+  const integrity = integrityFor("parallel-loader");
+  const slow = catalogEntry("1.0.0", integrity);
+  const fast: VarinExtensionCatalogEntry = { ...catalogEntry("1.0.0", integrity), manifest: {
+    schemaVersion: 1, id: "dev.example.fast", version: "1.0.0", engines: { varin: "*" },
+    contributions: [{ id: "dev.example.fast.page", kind: "page", contractVersion: 1, supports: ["web"], data: {} }],
+  } };
+  let current = snapshot(1, slow);
+  let release!: () => void;
+  let entered!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const preparing = new Promise<void>((resolve) => { entered = resolve; });
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  const when = (predicate: () => boolean) => new Promise<void>((resolve) => {
+    const unsubscribe = runtime.subscribe(() => { if (predicate()) { unsubscribe(); resolve(); } });
+    if (predicate()) { unsubscribe(); resolve(); }
+  });
+  const loader = new SurfaceExtensionLoader({
+    surface: "web", surfaceRuntime: runtime,
+    host: {
+      activateExtension: async () => undefined,
+      catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
+      hostState: async () => hostState(current),
+      discardPreparedCandidate: async () => undefined,
+      invokeService: async () => { throw new Error("No services"); },
+      prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
+      requestCandidateApplication: async () => current,
+      readAsset: async () => { throw new Error("No assets"); },
+      readManagedEntrypoint: async (request) => {
+        entered(); await gate;
+        return { artifactIntegrity: integrity, entrypointId: request.entrypointId,
+          module: asset("module.exports={activate(){}}", integrity, "runtime/surface/main/module.cjs"), styles: [] };
+      },
+      reportActualState: async () => undefined,
+      selectCandidate: async () => current,
+      waitForHostState: async () => { throw new Error("Explicit catalog transitions"); },
+    },
+  });
+  const initial = loader.reconcile(); await preparing;
+  current = { ...current, revision: 2, extensions: [slow, fast] };
+  const activation = loader.reconcile();
+  await when(() => runtime.getSnapshot().visibleContributions.some((item) => item.owner.extensionId === fast.manifest.id));
+  current = { ...current, revision: 3, extensions: [slow, { ...fast, desired: { ...fast.desired, enabled: false, revision: 2 } }] };
+  const disable = loader.reconcile();
+  await when(() => runtime.getSnapshot().actual.some((item) => item.extensionId === fast.manifest.id && item.status === "inactive"));
+  release(); await Promise.all([initial, activation, disable]);
+  await loader.stop();
+});
+
+test("the exact candidate promoted by the Host during prepare is consumed without selecting it again", async () => {
+  const oldIntegrity = integrityFor("old-artifact");
+  const nextIntegrity = integrityFor("promoted-artifact");
+  let current = snapshot(1, catalogEntry("1.0.0", oldIntegrity));
+  let selects = 0;
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  const loader = new SurfaceExtensionLoader({
+    surface: "web", surfaceRuntime: runtime,
+    host: {
+      activateExtension: async () => undefined,
+      catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
+      hostState: async () => hostState(current),
+      discardPreparedCandidate: async () => undefined,
+      invokeService: async () => { throw new Error("No services"); },
+      prepareCandidate: async (extensionId, integrity) => {
+        const candidate = current.extensions[0]!.candidate!;
+        current = snapshot(current.revision + 1, { ...catalogEntry(candidate.resolvedVersion, candidate.integrity), manifest: candidate.manifest });
+        return { extensionId, integrity, providers: [] };
+      },
+      requestCandidateApplication: async () => current,
+      readAsset: async () => { throw new Error("No assets"); },
+      readManagedEntrypoint: async (request) => {
+        expectSelectedSlot(request.slot, request.integrity);
+        return { artifactIntegrity: request.integrity, entrypointId: request.entrypointId,
+          module: asset(`module.exports={activate(context){context.contribute({id:'dev.example.managed.page',kind:'page',contractVersion:1,supports:['web'],data:{}},{version:${JSON.stringify(request.integrity)}})}}`, request.integrity, "runtime/surface/main/module.cjs"), styles: [] };
+      },
+      reportActualState: async () => undefined,
+      selectCandidate: async () => { selects += 1; return current; },
+      waitForHostState: async () => { throw new Error("Explicit catalog transitions"); },
+    },
+  });
+  function expectSelectedSlot(slot: string, integrity: string) {
+    assert.equal(slot, "selected");
+    assert.equal(current.extensions[0]?.integrity, integrity);
+  }
+  await loader.reconcile();
+  current = snapshot(2, { ...current.extensions[0]!, candidate: {
+    applyRequested: false, capabilitiesReviewed: true, capabilityDelta: { added: [], removed: [] }, capabilityGrants: [],
+    integrity: nextIntegrity, manifest: manifest("2.0.0"), preparedAt: new Date().toISOString(), resolvedVersion: "2.0.0",
+    source: { kind: "local", display: "Promoted candidate" },
+  } });
+  const committed = await loader.applyCandidate("dev.example.managed", nextIntegrity, current.revision);
+  assert.equal(committed.extensions[0]?.integrity, nextIntegrity);
+  assert.equal(selects, 0);
+  assert.equal((runtime.getSnapshot().visibleContributions[0]?.implementation as { version: string }).version, nextIntegrity);
   await loader.stop();
 });

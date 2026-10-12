@@ -8,6 +8,7 @@ Last updated: 2026-10-12
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [Agent 产包与原扩展生命周期](runtime-authored-extensions-2026-10-12.md) | 原 Source/授权/Artifact 到 Model、Policy 与真实 Surface watch/mount；原资源归属/取消修复及有限验收 |
 | [原来源的更多只读语言查询](runtime-language-queries-2026-10-12.md) | hover、symbols、私有 call hierarchy 与实际 TypeScript 主/child/Policy、原回执/GC/重开；有限跨层验收 |
 | [固定工程语言视图与真实 child 消费（2026-10-12）](runtime-fixed-language-2026-10-12.md) | 原不可变工程/派生物化资源、共享准备与精确退出、实际 child LSP/报告、新查询重开；有限跨层验收 |
 | [物化来源的原语言服务（2026-10-12）](runtime-source-language-2026-10-12.md) | 原 Source/配置/受管进程、实际 TS 依赖与历史、精确引用排空和失败恢复；有限跨层验收 |

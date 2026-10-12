@@ -154,7 +154,11 @@ export class HostServiceRegistry {
       commit: () => {
         if (committed) return;
         this.#validateReplacement(owner, normalized);
-        previousProviders = [...this.#providers.values()].filter((provider) => ownerKey(provider.owner) === ownerKey(owner));
+        // Already-draining generations belong to their original retirement. A long-lived
+        // pin on A must not delay unpinned B's cleanup when B is subsequently replaced by C.
+        previousProviders = [...this.#providers.values()].filter((provider) => (
+          ownerKey(provider.owner) === ownerKey(owner) && provider.status === "active"
+        ));
 
         for (const provider of previousProviders) provider.status = "draining";
         nextProviders = normalized.map((provision) => this.#createProvider(owner, provision));

@@ -373,8 +373,12 @@ export class BrokeredHostSupervisor {
   readonly #storageSessions = new Map<string, Map<string, BrokerStorageSession>>();
   readonly #transportFactory: BrokeredHostTransportFactory;
   readonly #operations = new Map<string, Promise<void>>();
+  // Publication is independent of old model pins. This original owner retains the actual
+  // instance and drain promise until retirement ends (or explicit teardown collects failure).
+  readonly #retirements = new Map<string, { instance: BrokeredHostInstance; promise: Promise<void> }>();
   readonly #selectedPreparations = new Map<string, { identity: string; promise: Promise<void> }>();
   readonly #candidatePreparations = new Map<string, { identity: string; promise: Promise<VarinExtensionCandidatePreparationResult> }>();
+  readonly #candidateSelections = new Set<{ extensionId: string; integrity: string }>();
   readonly #preparations = new Map<string, AbortController>();
   readonly #preparationTargets = new Map<string, { integrity: string; slot: "candidate" | "selected"; desiredRevision: number; grantIdentity: string; version: string }>();
   // These arrays are also captured by the transport's privileged-call callback. Keep them
@@ -433,17 +437,38 @@ export class BrokeredHostSupervisor {
     return this.#prepareCandidate(extensionId, integrity);
   }
 
-  selectCandidate(extensionId: string, integrity: string, expectedRevision: number): Promise<VarinExtensionCatalogSnapshot> {
-    return this.#prepareCandidate(extensionId, integrity).then(() =>
-      this.#enqueue(extensionId, () => this.#selectCandidate(extensionId, integrity, expectedRevision)));
+  async selectCandidate(extensionId: string, integrity: string, expectedRevision: number, signal?: AbortSignal): Promise<VarinExtensionCatalogSnapshot> {
+    signal?.throwIfAborted();
+    const current = await this.#catalog.snapshot();
+    const selected = current.extensions.find(entry => entry.manifest.id === extensionId);
+    if (current.authoritative && selected?.desired.enabled && selected.integrity === integrity) return current;
+    const selection = { extensionId, integrity };
+    this.#candidateSelections.add(selection);
+    try {
+      signal?.throwIfAborted();
+      // Preparation is shared by independent Host/Surface consumers. Cancelling this
+      // waiter does not revoke that instance, and still awaits its real preparation.
+      await this.#prepareCandidate(extensionId, integrity);
+      signal?.throwIfAborted();
+      return await this.#enqueue(extensionId, () => {
+        signal?.throwIfAborted();
+        // Once publication starts, finish its actual transaction. Global lifecycle
+        // revocation still invalidates the instance; one caller's signal does not.
+        return this.#selectCandidate(extensionId, integrity, expectedRevision);
+      });
+    } finally {
+      this.#candidateSelections.delete(selection);
+    }
   }
 
   discardPreparedCandidate(extensionId: string, integrity: string): Promise<void> {
-    const preparing = this.#preparationTargets.get(extensionId);
-    if (preparing?.slot === "candidate" && preparing.integrity === integrity) this.#invalidate(extensionId);
     return this.#enqueue(extensionId, async () => {
+      // Optional consumer cleanup cannot revoke another exact selection, including
+      // the interval between shared preparation and its queued publication.
       const staged = this.#staged.get(extensionId);
       if (!staged || staged.artifactIntegrity !== integrity) return;
+      if (!staged.preparation.signal.aborted
+        && [...this.#candidateSelections].some(value => value.extensionId === extensionId && value.integrity === integrity)) return;
       this.#staged.delete(extensionId);
       await this.#disposeInstance(staged, false);
     });
@@ -466,6 +491,13 @@ export class BrokeredHostSupervisor {
     this.#invalidate(extensionId);
     this.#active.get(extensionId)?.broker.forceTerminate();
     this.#staged.get(extensionId)?.broker.forceTerminate();
+    for (const { instance } of this.#retirements.values()) {
+      if (instance.owner.extensionId !== extensionId || !this.#ownerGrants.has(ownerStorageKey(instance.owner))) continue;
+      this.#services.revokeOwner(instance.owner);
+      for (const grant of instance.grants) grant.granted = false;
+      this.#ownerGrants.delete(ownerStorageKey(instance.owner));
+      instance.broker.forceTerminate();
+    }
   }
 
   activeExtensions(): string[] {
@@ -533,7 +565,8 @@ export class BrokeredHostSupervisor {
     this.#shutdown = (async () => {
       const operations = await Promise.allSettled([...this.#operations.values()]);
       const snapshot = await this.#catalog.snapshot();
-      const owners = await Promise.allSettled([...new Set([...this.#active.keys(), ...this.#staged.keys()])]
+      const owners = await Promise.allSettled([...new Set([...this.#active.keys(), ...this.#staged.keys(),
+        ...[...this.#retirements.values()].map(({ instance }) => instance.owner.extensionId)])]
         .map((id) => this.#deactivateWithDependents(id, snapshot)));
       const failures = [...operations, ...owners].filter((result): result is PromiseRejectedResult => result.status === "rejected");
       if (failures.length) throw new AggregateError(failures.map(result => result.reason), "Some extension owners failed during shutdown");
@@ -550,7 +583,7 @@ export class BrokeredHostSupervisor {
     this.#preparations.get(extensionId)?.abort(new Error(`Host activation was cancelled: ${extensionId}`));
   }
 
-  // Only a single owner's preparation, storage transaction and retirement are serialized.
+  // Only a single owner's preparation and publication transaction are serialized.
   // Dependencies are resolved before entering this queue, so waiters share their provider's
   // completed generation without holding an owner lock while traversing the graph.
   #enqueue<T>(extensionId: string, operation: () => Promise<T>): Promise<T> {
@@ -561,6 +594,54 @@ export class BrokeredHostSupervisor {
       if (this.#operations.get(extensionId) === settled) this.#operations.delete(extensionId);
     });
     return result;
+  }
+
+  #retirePrevious(instance: BrokeredHostInstance, finalize: () => Promise<void>): void {
+    const key = ownerStorageKey(instance.owner);
+    const promise = (async () => {
+      try {
+        await finalize();
+        if (!await this.#disposeInstance(instance, false)) throw new Error("Retired Host cleanup was not confirmed");
+      } catch (error) {
+        // Keep the latest owner's status and identity; an old disposer cannot fail the new owner.
+        try {
+          const snapshot = await this.#catalog.snapshot();
+          const entry = snapshot.extensions.find(value => value.manifest.id === instance.owner.extensionId);
+          const current = entry?.actual.find(value => value.realmKind === "host" && value.entrypointId === "host");
+          if (current) await this.#reportActual(instance.owner.extensionId, { ...current, diagnostics: [...current.diagnostics, {
+            code: "host_retirement_failed", severity: "error", timestamp: new Date().toISOString(),
+            message: `Retiring generation ${instance.owner.generation}: ${error instanceof Error ? error.message : String(error)}`,
+          }] });
+        } catch (reportError) {
+          throw new AggregateError([error, reportError], "Host retirement and its diagnostic reporting failed");
+        }
+        throw error;
+      }
+    })();
+    this.#retirements.set(key, { instance, promise });
+    void promise.then(() => {
+      if (this.#retirements.get(key)?.promise === promise) this.#retirements.delete(key);
+    }, () => { /* Retain the failure and exact instance for explicit teardown/error aggregation. */ });
+  }
+
+  async #drainRetirements(extensionId: string): Promise<void> {
+    const retirements = [...this.#retirements.entries()].filter(([, value]) => value.instance.owner.extensionId === extensionId);
+    const results = await Promise.allSettled(retirements.map(([, value]) => value.promise));
+    const failures: unknown[] = [];
+    for (const [index, [key, { instance }]] of retirements.entries()) {
+      const result = results[index]!;
+      if (result.status === "rejected") {
+        failures.push(result.reason);
+        // A failed finalization may still retain an instance. Only this explicit revocation
+        // path may drop its pins, and it still waits for callbacks and real transport cleanup.
+        if (this.#ownerGrants.has(key)) {
+          try { await this.#services.drainOwner(instance.owner); await this.#disposeInstance(instance, true); }
+          catch (error) { failures.push(error); }
+        }
+      }
+      this.#retirements.delete(key);
+    }
+    if (failures.length) throw new AggregateError(failures, "Some retired Host owners failed during cleanup");
   }
 
   async #reconcileSnapshot(): Promise<void> {
@@ -598,6 +679,10 @@ export class BrokeredHostSupervisor {
     this.#assertRunning();
     const snapshot = await this.#catalog.snapshot();
     const entry = snapshot.extensions.find((candidate) => candidate.manifest.id === extensionId);
+    if (snapshot.authoritative && entry?.desired.enabled && entry.integrity === integrity) {
+      return { extensionId, integrity, providers: this.#services.getSnapshot().providers.filter(provider =>
+        provider.extensionId === extensionId && provider.status === "active" && this.getRetainedArtifactIdentity(provider) === integrity) };
+    }
     if (!entry?.candidate || entry.candidate.integrity !== integrity) throw new Error(`Host candidate is no longer current: ${extensionId}`);
     const preparing = this.#preparationTargets.get(extensionId);
     if (preparing?.slot === "candidate" && (preparing.integrity !== integrity
@@ -606,6 +691,7 @@ export class BrokeredHostSupervisor {
     }
     const epoch = this.#epochs.get(extensionId) ?? 0;
     if (!entry.candidate.capabilitiesReviewed) throw new Error(`Host candidate capability changes require review: ${extensionId}`);
+    if (!entry.desired.enabled) return { extensionId, integrity, providers: [] };
     if (entry.candidate.manifest.entrypoints?.host?.mode === "native") {
       if (this.#active.has(extensionId)) {
         this.#nativeRestartRequired.add(extensionId);
@@ -676,9 +762,15 @@ export class BrokeredHostSupervisor {
     integrity: string,
     expectedRevision: number,
   ): Promise<VarinExtensionCatalogSnapshot> {
+    const snapshot = await this.#catalog.snapshot();
+    const existing = snapshot.extensions.find(entry => entry.manifest.id === extensionId);
+    if (snapshot.authoritative && existing?.desired.enabled && existing.integrity === integrity) return snapshot;
     const staged = this.#staged.get(extensionId);
     this.#assertRunning();
-    if (!staged) return this.#packages.selectCandidate({ candidateIntegrity: integrity, expectedRevision, extensionId });
+    if (!staged) {
+      if (existing?.desired.enabled && existing.candidate?.manifest.entrypoints?.host?.mode === "brokered") throw new Error(`Host candidate is not prepared: ${extensionId}`);
+      return this.#packages.selectCandidate({ candidateIntegrity: integrity, expectedRevision, extensionId });
+    }
     if (staged.artifactIntegrity !== integrity) throw new Error(`Prepared Host candidate is stale: ${extensionId}`);
     const previous = this.#active.get(extensionId);
     const replacement = this.#services.prepareOwnerReplacement(staged.owner, staged.provisions);
@@ -715,8 +807,8 @@ export class BrokeredHostSupervisor {
       staged.owner.generation,
       "active",
     )).catch(() => undefined);
-    await replacement.finalize();
-    if (previous) await this.#disposeInstance(previous, false);
+    if (previous) this.#retirePrevious(previous, () => replacement.finalize());
+    else await replacement.finalize();
     return selected;
   }
 
@@ -754,15 +846,14 @@ export class BrokeredHostSupervisor {
       }
     }
     const owners = new Set([...this.#active.keys(), ...this.#staged.keys(), ...this.#preparations.keys(),
-      ...this.#selectedPreparations.keys(), ...this.#candidatePreparations.keys()]);
+      ...this.#selectedPreparations.keys(), ...this.#candidatePreparations.keys(),
+      ...[...this.#retirements.values()].map(({ instance }) => instance.owner.extensionId)]);
     const deactivations = [...owners].filter((extensionId) => {
       const entry = enabled.get(extensionId);
       return !entry || !entry.manifest.entrypoints?.host;
     }).map((extensionId) => this.#deactivateWithDependents(extensionId, snapshot));
     await Promise.all([...deactivations, ...[...enabled.values()].map(async (entry) => {
       if (entry.candidate?.applyRequested
-        && entry.candidate.manifest.entrypoints?.host
-        && (entry.candidate.manifest.entrypoints?.surfaces ?? []).length === 0
         && !this.#active.has(entry.manifest.id)) {
         try {
           const current = await this.#catalog.snapshot();
@@ -778,13 +869,23 @@ export class BrokeredHostSupervisor {
           const selectedEntry = selected.extensions.find((value) => value.manifest.id === entry.manifest.id);
           if (selectedEntry) await this.#ensureSelectedActive(selectedEntry, selected, []);
         } catch (error) {
+          // A persisted application request is independent of optional Surface consumers.
+          // If preparing it fails on restart, recover the still-selected previous Host.
+          const current = await this.#catalog.snapshot();
+          const selectedEntry = current.extensions.find(value => value.manifest.id === entry.manifest.id);
+          let recoveryError: unknown;
+          if (selectedEntry?.desired.enabled && selectedEntry.manifest.entrypoints?.host) {
+            try { await this.#ensureSelectedActive(selectedEntry, current, []); }
+            catch (failure) { recoveryError = failure; }
+          }
           await this.#reportActual(entry.manifest.id, diagnosticState(
             snapshot.hostId,
             entry.desired.revision,
-            0,
-            "failed",
+            this.#active.get(entry.manifest.id)?.owner.generation ?? 0,
+            this.#active.has(entry.manifest.id) ? "active" : "failed",
             "requested_candidate_activation_failed",
-            error instanceof Error ? error.message : String(error),
+            [error, recoveryError].filter(value => value !== undefined)
+              .map(value => value instanceof Error ? value.message : String(value)).join("; "),
           )).catch(() => undefined);
         }
         return;
@@ -956,8 +1057,8 @@ export class BrokeredHostSupervisor {
       }
       // Publication succeeded. A retirement/cleanup failure cannot resurrect the old owner
       // after its service registrations or storage session have already been released.
-      await replacement.finalize();
-      if (active) await this.#disposeInstance(active, false);
+      if (active) this.#retirePrevious(active, () => replacement!.finalize());
+      else await replacement.finalize();
     });
     this.#selectedPreparations.set(entry.manifest.id, { identity, promise });
     try { await promise; }
@@ -1233,7 +1334,11 @@ export class BrokeredHostSupervisor {
       if (requiresProvider) await this.#deactivateWithDependents(dependentId, snapshot, visited);
     }
     return this.#enqueue(extensionId, async () => {
-      await this.#deactivateOwner(extensionId, snapshot);
+      const results = await Promise.allSettled([
+        this.#deactivateOwner(extensionId, snapshot), this.#drainRetirements(extensionId),
+      ]);
+      const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+      if (failures.length) throw new AggregateError(failures.map(result => result.reason), "Host owner teardown failed");
       await afterDeactivate?.();
     });
   }

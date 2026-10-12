@@ -25,6 +25,8 @@ import {
   type VarinExtensionLocalSourceReloadRequest,
   type VarinExtensionLocalSourceReloadResult,
   type VarinExtensionPackageInstallRequest,
+  type VarinExtensionSourceViewProvenance,
+  type VarinExtensionPackageResult,
   type VarinExtensionRemoveRequest,
   type VarinExtensionServiceInvocationRequest,
   type VarinExtensionServiceRoutingRuleRemoveRequest,
@@ -71,6 +73,13 @@ export interface ApplicationExtensionRuntimeOptions {
   storage?: ExtensionStorageStore;
   transportFactory?: BrokeredHostTransportFactory;
   workbench?: WorkbenchProfileStore;
+  onObserverError?: (error: unknown) => void;
+}
+
+export class ExtensionPackageApplicationError extends Error {
+  constructor(readonly result: VarinExtensionPackageResult, cause: unknown) {
+    super(cause instanceof Error ? cause.message : "Extension candidate preparation failed", { cause });
+  }
 }
 
 export class ApplicationExtensionRuntime {
@@ -84,6 +93,7 @@ export class ApplicationExtensionRuntime {
   readonly supervisor: BrokeredHostSupervisor;
   readonly workbench: WorkbenchProfileStore;
   readonly #listeners = new Set<() => void>();
+  readonly #onObserverError: (error: unknown) => void;
   readonly #serviceUnsubscribe: () => void;
   #revision = 0;
   readonly #mutations = new Set<Promise<void>>();
@@ -92,6 +102,9 @@ export class ApplicationExtensionRuntime {
   #stopped = false;
 
   private constructor(options: ApplicationExtensionRuntimeOptions, hostId: string) {
+    this.#onObserverError = options.onObserverError ?? (error => {
+      console.error("[VarinExtensions] Observer failed:", error instanceof Error ? error.message : "Unknown observer failure");
+    });
     this.varinVersion = options.varinVersion;
     assertVarinApplicationVersion(this.varinVersion);
     this.catalog = options.catalog ?? new ApplicationExtensionCatalog({ dataDir: options.dataDir });
@@ -234,6 +247,55 @@ export class ApplicationExtensionRuntime {
     });
   }
 
+  stageCapturedPackage(directory: string, provenance: VarinExtensionSourceViewProvenance, expectedRevision: number,
+    signal?: AbortSignal, onMutation?: () => void): Promise<VarinExtensionPackageResult> {
+    return this.#mutate(async () => {
+      const result = await this.packages.stageCaptured(directory, provenance, expectedRevision, signal, onMutation);
+      // First installation is disabled; staging an update never executes the candidate.
+      this.#publish();
+      return result;
+    });
+  }
+
+  /** An already-authorized exact update, not permission to enable an extension or grant capabilities. */
+  applyPackageCandidate(requestValue: VarinExtensionCandidateSelectionRequest | unknown,
+    signal?: AbortSignal, onMutation?: () => void): Promise<VarinExtensionPackageResult> {
+    const request = parseVarinExtensionCandidateSelectionRequest(requestValue);
+    return this.#mutate(async () => {
+      signal?.throwIfAborted();
+      const before = await this.catalog.snapshot();
+      const entry = before.extensions.find(value => value.manifest.id === request.extensionId);
+      if (!entry?.desired.enabled) throw new Error("extension_package_enable_required");
+      if (!entry.candidate || entry.candidate.integrity !== request.candidateIntegrity) throw new Error("extension_package_candidate_changed");
+      if (!entry.candidate.capabilitiesReviewed) throw new Error("extension_package_capability_review_required");
+      signal?.throwIfAborted();
+      onMutation?.();
+      const requested = await this.catalog.requestCandidateApplication(request.extensionId, request.candidateIntegrity, request.expectedRevision);
+      this.#publish();
+      const result = (outcome: "application_requested" | "selected", catalogRevision: number): VarinExtensionPackageResult => ({
+        outcome, extensionId: request.extensionId, artifactIntegrity: request.candidateIntegrity, catalogRevision,
+        applicationRequested: true, resumesOnRestart: true,
+      });
+      if (signal?.aborted) return result("application_requested", requested.revision);
+      try {
+        const selected = await this.supervisor.selectCandidate(request.extensionId, request.candidateIntegrity, requested.revision, signal);
+        this.#publish();
+        return result("selected", selected.revision);
+      } catch (error) {
+        // The durable application request already committed. Neither cancellation nor a
+        // failed preparation erases it; the original lifecycle owner may resume on restart.
+        let current: VarinExtensionCatalogSnapshot;
+        try { current = await this.catalog.snapshot(); }
+        catch (readError) {
+          throw new ExtensionPackageApplicationError(result("application_requested", requested.revision),
+            new AggregateError([error, readError], "Candidate preparation failed and its current catalog could not be read"));
+        }
+        if (signal?.aborted) return result("application_requested", current.revision);
+        throw new ExtensionPackageApplicationError(result("application_requested", current.revision), error);
+      }
+    });
+  }
+
   reloadLocalSource(
     requestValue: VarinExtensionLocalSourceReloadRequest | unknown,
     signal?: AbortSignal,
@@ -352,22 +414,17 @@ export class ApplicationExtensionRuntime {
   ): Promise<VarinExtensionCatalogSnapshot> {
     const request = parseVarinExtensionCandidateSelectionRequest(requestValue);
     return this.#mutateCatalog(async () => {
-      const current = await this.catalog.snapshot();
-      if (current.revision !== request.expectedRevision) {
-        return this.catalog.discardCandidate(
-          request.extensionId,
-          request.candidateIntegrity,
-          request.expectedRevision,
-        );
-      }
-      await this.supervisor.discardPreparedCandidate(request.extensionId, request.candidateIntegrity);
+      // This is an explicit catalog rejection, unlike optional Surface preparation cleanup.
+      // Establish its CAS outcome before revoking preparation; a competing selected winner
+      // must never be killed by a stale discard request.
+      const snapshot = await this.catalog.discardCandidate(
+        request.extensionId,
+        request.candidateIntegrity,
+        request.expectedRevision,
+      );
       try {
-        const snapshot = await this.catalog.discardCandidate(
-          request.extensionId,
-          request.candidateIntegrity,
-          request.expectedRevision,
-        );
         await this.supervisor.reconcile(snapshot);
+        await this.supervisor.discardPreparedCandidate(request.extensionId, request.candidateIntegrity);
         return snapshot;
       } catch (error) {
         await this.supervisor.reconcile(await this.catalog.snapshot()).catch(() => undefined);
@@ -659,6 +716,12 @@ export class ApplicationExtensionRuntime {
 
   #publish(): void {
     this.#revision += 1;
-    for (const listener of this.#listeners) listener();
+    for (const listener of this.#listeners) {
+      try { listener(); }
+      catch (error) {
+        try { this.#onObserverError(error); }
+        catch { console.error("[VarinExtensions] Observer error reporting failed"); }
+      }
+    }
   }
 }

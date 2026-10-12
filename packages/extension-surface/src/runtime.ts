@@ -6,6 +6,7 @@ import {
   evaluateVarinContextExpression,
   collectVarinContextExpressionKeys,
   type VarinApplicationSurface,
+  type VarinContextValue,
   type VarinExtensionActualState,
   type VarinExtensionDiagnostic,
   type VarinExtensionServiceProvision,
@@ -20,7 +21,12 @@ import type {
   SurfaceActivationContext,
   SurfaceActivationOptions,
   SurfaceContribution,
+  SurfaceContributionConsumer,
+  SurfaceContributionLease,
+  SurfaceDisposer,
   SurfaceContextProvider,
+  SurfaceContextChanges,
+  SurfaceContributionPreview,
   SurfaceContextWriter,
   SurfaceContextWriterLease,
   SurfaceExternalService,
@@ -39,6 +45,7 @@ interface ActiveOwner {
   externalServices: SurfaceExternalService[];
   owner: SurfaceOwnerIdentity;
   requirements: VarinExtensionServiceRequirement[];
+  preparedLocalBindings: string;
   scope: SurfaceOwnerScope;
   serviceSelections: Readonly<Record<string, string>>;
   services: SurfaceService[];
@@ -180,11 +187,10 @@ function selectVisibleContributions(
   contributions: SurfaceContribution[],
   replacementSelections: ReadonlyMap<string, string>,
   layoutReferences: ReadonlyMap<string, SurfaceLayoutReference>,
-  contextProvider?: SurfaceContextProvider,
+  context?: ReadonlyMap<string, VarinContextValue>,
 ): SurfaceContribution[] {
   const additive: SurfaceContribution[] = [];
   const replacements = new Map<string, SurfaceContribution[]>();
-  const context = contextProvider?.getContext();
   for (const contribution of contributions) {
     if (layoutReferences.get(contribution.descriptor.id)?.visible === false) continue;
     // Exclude contributions whose contract version is not compatible with
@@ -269,7 +275,9 @@ export class SurfaceExtensionRuntime {
   readonly #latestRequests = new Map<string, RequestVersion>();
   readonly #listeners = new Set<() => void>();
   readonly #layoutReferences = new Map<string, SurfaceLayoutReference>();
-  #lifecycleQueue: Promise<void> = Promise.resolve();
+  readonly #ownerQueues = new Map<string, Promise<void>>();
+  readonly #publicationReservations = new Map<string, Promise<void>>();
+  readonly #contributionConsumers = new Set<SurfaceContributionConsumer>();
   readonly #replacementSelections = new Map<string, string>();
   readonly #serviceSelections = new Map<string, string>();
   #snapshot: SurfaceRegistrySnapshot = {
@@ -291,6 +299,9 @@ export class SurfaceExtensionRuntime {
   constructor(options: SurfaceExtensionRuntimeOptions) {
     this.surface = options.surface;
     this.#contextProvider = options.contextProvider;
+    if (this.#contextProvider?.createWriter && !this.#contextProvider.previewContext) {
+      throw new Error("An owned Surface context provider requires candidate context preview");
+    }
   }
 
   getSnapshot = (): SurfaceRegistrySnapshot => this.#snapshot;
@@ -313,6 +324,11 @@ export class SurfaceExtensionRuntime {
       .then((handles) => handles[0] as SurfaceOwnerHandle);
   }
 
+  registerContributionConsumer = (consumer: SurfaceContributionConsumer): (() => void) => {
+    this.#contributionConsumers.add(consumer);
+    return () => { this.#contributionConsumers.delete(consumer); };
+  };
+
   activateBatchWithCommit(
     requests: readonly { activation: SurfaceActivation; options: SurfaceActivationOptions }[],
     commit: () => void | Promise<void>,
@@ -333,6 +349,8 @@ export class SurfaceExtensionRuntime {
     return this.#enqueue(extensionId, async () => {
       const previous = new Map<string, ActiveOwner | undefined>();
       const candidates = new Map<string, ActiveOwner>();
+      const leases: SurfaceContributionLease[] = [];
+      const retirements: SurfaceDisposer[] = [];
       for (const request of requests) {
         const key = ownerKey(request.options.owner);
         this.#assertLatest(key, request.options.owner);
@@ -367,6 +385,7 @@ export class SurfaceExtensionRuntime {
           for (const service of externalServices) {
             if (service.dispose) scope.onDispose(service.dispose);
           }
+          const preparedLocalBindings = this.#localBindingSignature({ externalServices, requirements, serviceSelections });
           const contextLease = this.#createContextWriter(owner, scope);
           const context: SurfaceActivationContext = {
             signal: scope.signal,
@@ -424,7 +443,6 @@ export class SurfaceExtensionRuntime {
             await scope.dispose(error).catch(() => undefined);
             throw error;
           }
-          this.#assertLatest(key, owner);
           candidates.set(key, {
             contributions: stagedContributions,
             contextLease,
@@ -432,25 +450,70 @@ export class SurfaceExtensionRuntime {
             externalServices,
             owner: { ...owner },
             requirements,
+            preparedLocalBindings,
             scope,
             serviceSelections,
             services: stagedServices,
           });
+          this.#assertLatest(key, owner);
         }
         this.#validateCandidates(candidates);
-        for (const request of requests) this.#assertLatest(ownerKey(request.options.owner), request.options.owner);
-        await commit();
-        // The external commit is the transaction boundary. A newer queued lifecycle request may
-        // arrive while it is in flight; publish this committed generation first, then let that
-        // queued request replace or deactivate it without turning a successful catalog commit
-        // into a partial rollback.
-        this.#withContextPublicationSuppressed(() => {
-          const publishContextLayers = () => {
-            for (const candidate of candidates.values()) {
-              try {
-                candidate.contextLease?.commit();
-              } catch (error) {
+        const projectedOwners = new Map(this.#activeOwners);
+        for (const [key, candidate] of candidates) projectedOwners.set(key, candidate);
+        const contextChanges: SurfaceContextChanges = {
+          commit: [...candidates.values()].flatMap((candidate) => candidate.contextLease ? [candidate.contextLease] : []),
+          dispose: [],
+        };
+        const preview = this.#previewContributions(extensionId, [...candidates.values()].map((candidate) => candidate.owner),
+          projectedOwners, contextChanges);
+        // Mount preparation is owner-local and runs before reserving any publication keys.
+        for (const consumer of this.#contributionConsumers) {
+          const lease = await consumer(preview);
+          if (lease) leases.push(lease);
+        }
+        const publicationKeys = this.#publicationKeys(candidates);
+        this.#reserveContextChanges(publicationKeys, contextChanges, preview);
+        await this.#reservePublication(publicationKeys, async () => {
+          this.#validateCandidates(candidates);
+          for (const request of requests) this.#assertLatest(ownerKey(request.options.owner), request.options.owner);
+          const currentProjection = new Map(this.#activeOwners);
+          for (const [key, candidate] of candidates) currentProjection.set(key, candidate);
+          const latestPreview = this.#previewContributions(extensionId, preview.owners, currentProjection, contextChanges);
+          const affectedIds = new Set([...preview.affectedExtensionIds, ...latestPreview.affectedExtensionIds]);
+          const affectedVisibility = (contributions: readonly SurfaceContribution[]) => contributions
+            .filter((item) => affectedIds.has(item.owner.extensionId))
+            .map((item) => `${item.descriptor.id}\0${item.owner.entrypointId}\0${item.owner.generation}`).join("\n");
+          if (affectedVisibility(preview.visibleContributions) !== affectedVisibility(latestPreview.visibleContributions)) {
+            throw new SurfaceActivationStaleError("Surface contribution selection changed during preparation");
+          }
+          for (const lease of leases) lease.validate();
+          await commit();
+          // The external commit is the transaction boundary. A newer queued lifecycle request may
+          // arrive while it is in flight; publish this committed generation first, then let that
+          // queued request replace or deactivate it without turning a successful catalog commit
+          // into a partial rollback.
+          this.#withContextPublicationSuppressed(() => {
+            const publishContextLayers = () => {
+              for (const candidate of candidates.values()) {
+                try {
+                  candidate.contextLease?.commit();
+                } catch (error) {
+                  try { candidate.contextLease?.dispose(); } catch { /* Failure remains attributed below. */ }
+                  candidate.diagnostics.push(diagnostic(
+                    candidate.owner,
+                    "context_commit_failed",
+                    error instanceof Error ? error.message : String(error),
+                  ));
+                }
+              }
+            };
+            try {
+              if (this.#contextProvider?.batch) this.#contextProvider.batch(publishContextLayers);
+              else publishContextLayers();
+            } catch (error) {
+              for (const candidate of candidates.values()) {
                 try { candidate.contextLease?.dispose(); } catch { /* Failure remains attributed below. */ }
+                if (candidate.diagnostics.some((item) => item.code === "context_commit_failed")) continue;
                 candidate.diagnostics.push(diagnostic(
                   candidate.owner,
                   "context_commit_failed",
@@ -458,27 +521,26 @@ export class SurfaceExtensionRuntime {
                 ));
               }
             }
-          };
-          try {
-            if (this.#contextProvider?.batch) this.#contextProvider.batch(publishContextLayers);
-            else publishContextLayers();
-          } catch (error) {
-            for (const candidate of candidates.values()) {
-              try { candidate.contextLease?.dispose(); } catch { /* Failure remains attributed below. */ }
-              if (candidate.diagnostics.some((item) => item.code === "context_commit_failed")) continue;
-              candidate.diagnostics.push(diagnostic(
-                candidate.owner,
-                "context_commit_failed",
-                error instanceof Error ? error.message : String(error),
+            for (const [key, candidate] of candidates) {
+              this.#activeOwners.set(key, candidate);
+              this.#actual.set(key, actual(candidate.owner, "active", candidate.diagnostics));
+            }
+          });
+          for (const lease of leases) {
+            try {
+              const retirement = lease.commit();
+              if (retirement) retirements.push(retirement);
+            } catch (error) {
+              for (const candidate of candidates.values()) candidate.diagnostics.push(diagnostic(
+                candidate.owner, "consumer_publication_failed", error instanceof Error ? error.message : String(error),
               ));
+              retirements.push(() => lease.rollback());
             }
           }
-          for (const [key, candidate] of candidates) {
-            this.#activeOwners.set(key, candidate);
-            this.#actual.set(key, actual(candidate.owner, "active", candidate.diagnostics));
-          }
+          this.#publish();
         });
-        this.#publish();
+        // Actual mounts finish retiring before their styles, assets, and services are released.
+        for (const retire of retirements) await Promise.resolve(retire()).catch(() => undefined);
         for (const [key, oldOwner] of previous) {
           if (!oldOwner) continue;
           await oldOwner.scope.dispose("Surface owner generation replaced").catch((error) => {
@@ -489,10 +551,11 @@ export class SurfaceExtensionRuntime {
         this.#publish();
         return requests.map((request) => this.#handle(request.options.owner));
       } catch (error) {
+        for (const lease of [...leases].reverse()) await Promise.resolve(lease.rollback()).catch(() => undefined);
         for (const candidate of candidates.values()) await candidate.scope.dispose(error).catch(() => undefined);
         for (const request of requests) {
           const key = ownerKey(request.options.owner);
-          const oldOwner = previous.get(key);
+          const oldOwner = this.#activeOwners.get(key);
           this.#actual.set(key, oldOwner
             ? actual(oldOwner.owner, "active", [
                 ...oldOwner.diagnostics,
@@ -520,7 +583,15 @@ export class SurfaceExtensionRuntime {
         this.#publish();
         return;
       }
-      await this.#deactivateTree(key, owner, new Set());
+      const changes: SurfaceContextChanges = { commit: [], dispose: active.contextLease ? [active.contextLease] : [] };
+      const projected = new Map(this.#activeOwners);
+      projected.delete(key);
+      const keys = this.#publicationKeys(new Map([[key, active]]));
+      this.#reserveContextChanges(keys, changes, this.#previewContributions(owner.extensionId, [owner], projected, changes));
+      await this.#reservePublication(keys, async () => {
+        this.#assertLatest(key, owner);
+        await this.#deactivateTree(key, owner, new Set());
+      });
     });
   }
 
@@ -618,7 +689,7 @@ export class SurfaceExtensionRuntime {
 
   #createContextWriter(owner: SurfaceOwnerIdentity, scope: SurfaceOwnerScope): SurfaceContextWriterLease | null {
     const provider = this.#contextProvider;
-    if (!provider) return null;
+    if (!provider?.createWriter) return null;
     const lease = provider.createWriter(owner);
     scope.onDispose(() => lease.dispose());
     return lease;
@@ -659,24 +730,55 @@ export class SurfaceExtensionRuntime {
     withoutProvider.delete(key);
     for (const [dependentKey, dependent] of [...withoutProvider]) {
       if (this.#requirementsSatisfied(dependent, withoutProvider)) continue;
+      const latest = this.#latestRequests.get(dependentKey);
       const dependentOwner = {
         ...dependent.owner,
-        generation: dependent.owner.generation + 1,
+        desiredRevision: Math.max(dependent.owner.desiredRevision, latest?.desiredRevision ?? 0),
+        generation: Math.max(dependent.owner.generation, latest?.generation ?? 0) + 1,
       };
+      this.#markLatest(dependentKey, dependentOwner);
       await this.#deactivateTree(dependentKey, dependentOwner, visited);
       this.#actual.set(dependentKey, actual(dependentOwner, "inactive", [
         diagnostic(dependentOwner, "required_service_withdrawn", "A required Surface service was withdrawn"),
       ]));
       withoutProvider.delete(dependentKey);
     }
-    this.#actual.set(key, actual(requestedOwner, "deactivating"));
-    this.#activeOwners.delete(key);
+    const leases: SurfaceContributionLease[] = [];
+    const diagnostics: VarinExtensionDiagnostic[] = [];
+    const contextChanges: SurfaceContextChanges = { commit: [], dispose: active.contextLease ? [active.contextLease] : [] };
+    const preview = this.#previewContributions(requestedOwner.extensionId, [requestedOwner], withoutProvider, contextChanges);
+    for (const consumer of this.#contributionConsumers) {
+      try {
+        const lease = await consumer(preview);
+        if (lease) leases.push(lease);
+      } catch (error) {
+        diagnostics.push(diagnostic(requestedOwner, "consumer_withdrawal_failed", error instanceof Error ? error.message : String(error)));
+      }
+    }
+    this.#withContextPublicationSuppressed(() => {
+      try { active.contextLease?.dispose(); }
+      catch (error) {
+        diagnostics.push(diagnostic(requestedOwner, "context_withdrawal_failed", error instanceof Error ? error.message : String(error)));
+      }
+      this.#actual.set(key, actual(requestedOwner, "deactivating"));
+      this.#activeOwners.delete(key);
+    });
+    const retirements: SurfaceDisposer[] = [];
+    for (const lease of leases) {
+      try {
+        const retire = lease.commit();
+        if (retire) retirements.push(retire);
+      } catch (error) {
+        retirements.push(() => lease.rollback());
+        diagnostics.push(diagnostic(requestedOwner, "consumer_withdrawal_failed", error instanceof Error ? error.message : String(error)));
+      }
+    }
     this.#publish();
-    let diagnostics: VarinExtensionDiagnostic[] = [];
+    for (const retire of retirements) await Promise.resolve(retire()).catch(() => undefined);
     try {
       await active.scope.dispose("Surface extension disabled");
     } catch (error) {
-      diagnostics = [diagnostic(requestedOwner, "deactivation_cleanup_failed", error instanceof Error ? error.message : String(error))];
+      diagnostics.push(diagnostic(requestedOwner, "deactivation_cleanup_failed", error instanceof Error ? error.message : String(error)));
     }
     this.#actual.set(key, actual(requestedOwner, "inactive", diagnostics));
     this.#publish();
@@ -691,6 +793,11 @@ export class SurfaceExtensionRuntime {
   }
 
   #validateCandidates(candidates: ReadonlyMap<string, ActiveOwner>): void {
+    for (const candidate of candidates.values()) {
+      if (this.#localBindingSignature(candidate) !== candidate.preparedLocalBindings) {
+        throw new SurfaceActivationStaleError("A declared Surface service provider changed during candidate preparation");
+      }
+    }
     const candidateOwners = new Map(this.#activeOwners);
     for (const [key, candidate] of candidates) candidateOwners.set(key, candidate);
     const allContributions = [...candidateOwners.values()].flatMap((owner) => owner.contributions);
@@ -819,7 +926,7 @@ export class SurfaceExtensionRuntime {
       contributions,
       this.#replacementSelections,
       this.#layoutReferences,
-      this.#contextProvider,
+      this.#contextProvider?.getContext(),
     );
     this.#snapshot = {
       actual: [...this.#actual.values()].map((state) => ({ ...state, diagnostics: [...state.diagnostics] })),
@@ -871,9 +978,103 @@ export class SurfaceExtensionRuntime {
     }
   }
 
-  #enqueue<T>(_extensionId: string, operation: () => Promise<T>): Promise<T> {
-    const result = this.#lifecycleQueue.then(operation, operation);
-    this.#lifecycleQueue = result.then(() => undefined, () => undefined);
+  #previewContext(changes: SurfaceContextChanges): ReadonlyMap<string, VarinContextValue> | undefined {
+    const provider = this.#contextProvider;
+    return provider?.previewContext ? provider.previewContext(changes) : provider?.getContext();
+  }
+
+  #previewContributions(
+    extensionId: string,
+    owners: readonly SurfaceOwnerIdentity[],
+    projectedOwners: ReadonlyMap<string, ActiveOwner>,
+    changes: SurfaceContextChanges,
+  ): SurfaceContributionPreview {
+    const visibleContributions = selectVisibleContributions(
+      [...projectedOwners.values()].flatMap((owner) => owner.contributions),
+      this.#replacementSelections, this.#layoutReferences, this.#previewContext(changes),
+    );
+    const identity = (item: SurfaceContribution) => `${ownerKey(item.owner)}\0${item.owner.generation}\0${item.descriptor.id}`;
+    const before = new Map(this.#snapshot.visibleContributions.map((item) => [identity(item), item]));
+    const after = new Map(visibleContributions.map((item) => [identity(item), item]));
+    const affected = new Set([extensionId]);
+    for (const [key, item] of before) if (!after.has(key)) affected.add(item.owner.extensionId);
+    for (const [key, item] of after) if (!before.has(key)) affected.add(item.owner.extensionId);
+    return { extensionId, affectedExtensionIds: [...affected], owners, visibleContributions };
+  }
+
+  #reserveContextChanges(keys: Set<string>, changes: SurfaceContextChanges, preview: SurfaceContributionPreview): void {
+    const current = this.#contextProvider?.getContext();
+    const projected = this.#previewContext(changes);
+    for (const key of new Set([...(current?.keys() ?? []), ...(projected?.keys() ?? [])])) {
+      if (current?.get(key) !== projected?.get(key)) keys.add(`context:${key}`);
+    }
+    const affected = new Set(preview.affectedExtensionIds);
+    for (const item of [...this.#snapshot.visibleContributions, ...preview.visibleContributions]) {
+      if (affected.has(item.owner.extensionId)) keys.add(`contribution:${item.descriptor.id}`);
+    }
+  }
+
+  #localBindingSignature(consumer: ServiceConsumer): string {
+    return JSON.stringify(consumer.requirements.map((requirement) => {
+      const resolved = this.#servicesForConsumer(consumer, requirement.id, requirement.version);
+      return [requirement.id, requirement.version, this.#matchingServices(requirement.id, requirement.version)
+        .filter((service) => resolved.some((binding) => binding.identity === service.owner.extensionId))
+        .map((service) => [ownerKey(service.owner), service.owner.desiredRevision, service.owner.generation])];
+    }));
+  }
+
+  #publicationKeys(candidates: ReadonlyMap<string, ActiveOwner>): Set<string> {
+    const keys = new Set<string>();
+    for (const [key, candidate] of candidates) {
+      keys.add(`owner:${key}`);
+      for (const owner of [this.#activeOwners.get(key), candidate]) {
+        if (!owner) continue;
+        for (const contribution of owner.contributions) {
+          keys.add(`contribution:${contribution.descriptor.id}`);
+          if (contribution.descriptor.when) {
+            for (const key of collectVarinContextExpressionKeys(contribution.descriptor.when)) keys.add(`context:${key}`);
+          }
+          for (const id of [...(contribution.descriptor.placement?.before ?? []), ...(contribution.descriptor.placement?.after ?? [])]) {
+            keys.add(`contribution:${id}`);
+          }
+          const target = contribution.descriptor.replacement?.target;
+          if (target) keys.add(`replacement:${target}`);
+        }
+        for (const service of [...owner.services.map((item) => item.descriptor), ...owner.requirements]) {
+          keys.add(`service:${service.id}@${service.version}`);
+        }
+      }
+    }
+    return keys;
+  }
+
+  async #reservePublication<T>(keys: ReadonlySet<string>, operation: () => Promise<T>): Promise<T> {
+    for (;;) {
+      const pending = [...new Set([...keys].flatMap((key) => {
+        const reservation = this.#publicationReservations.get(key);
+        return reservation ? [reservation] : [];
+      }))];
+      if (pending.length === 0) break;
+      await Promise.all(pending);
+    }
+    let release!: () => void;
+    const reservation = new Promise<void>((resolve) => { release = resolve; });
+    for (const key of keys) this.#publicationReservations.set(key, reservation);
+    try { return await operation(); }
+    finally {
+      for (const key of keys) if (this.#publicationReservations.get(key) === reservation) this.#publicationReservations.delete(key);
+      release();
+    }
+  }
+
+  #enqueue<T>(extensionId: string, operation: () => Promise<T>): Promise<T> {
+    const prior = this.#ownerQueues.get(extensionId) ?? Promise.resolve();
+    const result = prior.then(operation, operation);
+    const settled = result.then(() => undefined, () => undefined);
+    this.#ownerQueues.set(extensionId, settled);
+    void settled.then(() => {
+      if (this.#ownerQueues.get(extensionId) === settled) this.#ownerQueues.delete(extensionId);
+    });
     return result;
   }
 }

@@ -1,3 +1,4 @@
+import { createExtensionPackageOwner, VARIN_EXTENSION_PACKAGES_CAPABILITY } from "./lib/kernel/extension-package-owner.js";
 import { createRetrievalModelStage } from './lib/kernel/retrieval-model.js';
 import { mergeHarnessWebDomainPolicy } from '@varin/protocol';
 import { createResearchDecisionRuntime, RESEARCH_DECISION_CAPABILITY } from './lib/kernel/research-decision.js';
@@ -4323,6 +4324,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const unregisterResearchDecisionCapability = extensionRuntime.capabilities.register(RESEARCH_DECISION_CAPABILITY, researchDecisionOwner.current.capability);
   const unregisterResearchDiscoveryCapability = extensionRuntime.capabilities.register(RESEARCH_DISCOVERY_CAPABILITY, researchDiscoveryOwner.current.capability);
   const unregisterWebCapability = extensionRuntime.capabilities.register(WEB_CAPABILITY, webRuntimeOwner.current.capability);
+  const unregisterExtensionPackageCapability = extensionRuntime.capabilities.register(
+    VARIN_EXTENSION_PACKAGES_CAPABILITY, createExtensionPackageOwner({ extensions: extensionRuntime, kernel: kernelClient,
+      runtime: agentRuntime, storage: kernelStorageAdapter, resolveLiveSource: liveSources.validate,
+      onCleanupError: (operationId, error) => console.error("[Varin Extensions] Package source cleanup failed", operationId, errorMessage(error)) }),
+  );
   const unregisterRuntimeContractCapability = extensionRuntime.capabilities.register(
     VARIN_RUNTIME_CONTRACTS_CAPABILITY, createRuntimeContractOwner({ extensions: extensionRuntime, kernel: kernelClient }),
   );
@@ -4868,6 +4874,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       piSessionAutomation.stop();
       piSessionTitles.stop();
       unregisterRuntimeContractCapability();
+      unregisterExtensionPackageCapability();
       unregisterNestedToolCapability();
       unregisterComputerCapability();
       unregisterScriptCapability();

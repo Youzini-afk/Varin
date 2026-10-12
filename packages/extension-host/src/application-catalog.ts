@@ -230,6 +230,7 @@ export class ApplicationExtensionCatalog {
               resolvedVersion: record.candidate.resolvedVersion,
               source: {
                 display: record.candidate.source.display,
+                ...(record.candidate.source.provenance ? { provenance: structuredClone(record.candidate.source.provenance) } : {}),
                 kind: record.candidate.source.kind,
               },
             },
@@ -240,7 +241,7 @@ export class ApplicationExtensionCatalog {
           manifest: structuredClone(record.manifest),
           resolvedVersion: record.resolvedVersion,
           selectedVersion: record.selectedVersion,
-          source: { display: record.source.display, kind: record.source.kind },
+          source: { display: record.source.display, kind: record.source.kind, ...(record.source.provenance ? { provenance: structuredClone(record.source.provenance) } : {}) },
           updatedAt: record.updatedAt,
           ...(record.integrity ? { integrity: record.integrity } : {}),
         };
