@@ -13,7 +13,7 @@ import {
 } from '@varin/protocol';
 import type { DocumentReader, DocumentReaderContext } from '../harness/document-reading.js';
 import { readDocumentMaterial } from '../harness/material-read-service.js';
-import { resolveHarnessWebBinding, type HarnessWebBinding } from '../harness/harness-web-settings.js';
+import { resolveHarnessWebBinding, resolveHarnessMaterialWebPolicy, type HarnessWebBinding } from '../harness/harness-web-settings.js';
 import { HarnessServiceError } from '../harness/service-error.js';
 import type { createWebFetch } from '../harness/web-fetch.js';
 import type { ThreadMaterialAuthority, WebMaterialStore } from '../harness/web-materials.js';
@@ -239,5 +239,36 @@ export function createWebRuntime(options: WebRuntimeOptions) {
     };
   };
   const snapshotCapability = createMaterialToolOwner(options.materials, async (invocation, signal) => (await invocationScope(invocation, signal)).authority);
-  return { user, capability, prepareConfiguration, snapshotCapability };
+  const decisionMaterials = async (invocation: ToolInvocationAuthority, signal: AbortSignal) => {
+    const owner = await invocationScope(invocation, signal);
+    const retained = new Map<string, string>();
+    return { authority: owner.authority,
+      readCandidateText: async (request: { snapshotId: string; startLine?: number; endLine?: number }, authority: import('../harness/web-materials.js').WebSnapshotReadAuthority, readSignal: AbortSignal) => {
+        if (!isDeepStrictEqual(authority, owner.authority)) throw new HarnessServiceError('forbidden', 'Original decision material authority changed');
+        const domainPolicy = resolveHarnessMaterialWebPolicy(await options.settings(invocation.source));
+        const result = await options.webFetch.fetch({ snapshotId: request.snapshotId, view: 'text',
+          ...(request.startLine === undefined ? {} : { position: { kind: 'lines' as const, startLine: request.startLine, ...(request.endLine === undefined ? {} : { endLine: request.endLine }) } }) }, { workspaceId: owner.workspaceId, authority: owner.authority, signal: readSignal, domainPolicy, issueReceipt: false });
+        if (result.status === 'ok' && result.snapshot) {
+          retained.set(result.snapshot.snapshotId, result.snapshot.contentHash);
+          if (result.snapshot.snapshotId !== request.snapshotId) {
+            const original = await options.materials.read(owner.workspaceId, request.snapshotId, owner.authority, {
+              byteRange: { offset: 0, length: 0 }, signal: readSignal,
+            });
+            if (!original) throw new HarnessServiceError('forbidden', 'The original decision candidate is no longer readable');
+            retained.set(request.snapshotId, original.ref.contentHash);
+          }
+        }
+        return result;
+      },
+      assertReadable: async () => {
+        for (const [snapshotId, contentHash] of retained) {
+          const result = await options.materials.read(owner.workspaceId, snapshotId, owner.authority, {
+            byteRange: { offset: 0, length: 0 }, expectedContentHash: contentHash, signal,
+          });
+          if (!result) throw new HarnessServiceError('forbidden', 'A decision material is no longer readable under this Thread authority');
+        }
+      },
+    };
+  };
+  return { user, capability, prepareConfiguration, snapshotCapability, decisionMaterials };
 }

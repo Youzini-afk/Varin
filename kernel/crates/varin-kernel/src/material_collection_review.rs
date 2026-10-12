@@ -215,7 +215,7 @@ pub(super) fn binding(runtime: &Arc<RunSupervisor>, run: &str) -> RequestBinding
             .unwrap()
             .unwrap()
             .dispatch_context_ref,
-        goal: None,
+        goal: db.goal_binding(run).unwrap(),
         resource_activations: vec![],
         resource_checkpoint_id: None,
         connection_identity: launch.connection_identity,

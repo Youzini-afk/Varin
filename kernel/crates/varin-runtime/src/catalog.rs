@@ -38,7 +38,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 54;
+pub(crate) const FORMAT: i64 = 55;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -1468,7 +1468,12 @@ impl Catalog {
                 put(&tx, "operations", &op.id, &op)?;
                 continue;
             }
-            if mcp_interactions::sampling::recover(&tx, &mut op)? { continue; }
+            if mcp_interactions::sampling::recover(&tx, &mut op)? {
+                continue;
+            }
+            if inference::recover(&tx, &mut op)? {
+                continue;
+            }
             if let Some(intent) = policy::graph_metadata(&op)? {
                 policy_body::PolicyGraphProgress::read(&op, &intent)?;
                 // The graph owns orchestration only. Each durable node retains its own invocation/dispatch evidence; only trusted light reads can replay.
@@ -1762,6 +1767,7 @@ pub(super) fn request_cancel_run_in(tx: &Transaction<'_>, id: &str) -> Result<Ru
     let mut run: Run = record(tx, "runs", id)?;
     mcp_resources::cancel_run(tx, id, false)?;
     mcp_interactions::cancel_run(tx, id, false)?;
+    inference::cancel_children(tx, None, Some(id))?;
     if run.state.terminal() || run.cancel_requested {
         return Ok(run);
     }
@@ -1784,6 +1790,7 @@ pub(super) fn request_cancel_run_in(tx: &Transaction<'_>, id: &str) -> Result<Ru
 pub(super) fn request_cancel_operation_in(tx: &Transaction<'_>, key: &str) -> Result<Operation> {
     let mut op: Operation = record(tx, "operations", key)?;
     mcp_interactions::cancel_operation(tx, key)?;
+    inference::cancel_children(tx, Some(key), None)?;
     if matches!(
         policy_body::PolicyActionMetadata::from_operation(&op)?,
         Some(policy_body::PolicyActionMetadata::PolicyPauseV1 { .. })
@@ -1855,3 +1862,6 @@ pub mod mcp_resources;
 
 #[path = "catalog_mcp_interactions.rs"]
 pub mod mcp_interactions;
+
+#[path = "catalog_inference.rs"]
+pub mod inference;

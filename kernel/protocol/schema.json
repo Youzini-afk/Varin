@@ -339,6 +339,8 @@
   }
 ],
   "runtimeExports": [
+"InferenceReceiptPendingParams",
+"InferenceBinding","InferenceUsage","InferenceReceipt","InferenceAdmitParams","InferenceOwnerParams","InferenceSettleParams","InferenceStatus","InferenceProblem",
     "McpInteractionPending",
     "McpInteractionPresentation",
     "McpSamplingGenerateParams",
@@ -915,7 +917,7 @@
   "framing": "private-control-json-and-data-streams",
   "maxFrameBytes": 16777216,
   "requestWindow": 2,
-  "controlMethods": [
+  "controlMethods": ["runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status",
     "runtime.mcp.interaction.inspect",
     "runtime.mcp.interaction.pending",
     "runtime.mcp.interaction.response.begin",
@@ -923,7 +925,7 @@
     "runtime.mcp.interaction.close",
     "runtime.mcp.interaction.complete",
     "runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"],
-  "controlResponseMethods": [
+  "controlResponseMethods": ["runtime.inference.receipt_pending","runtime.inference.admit","runtime.inference.dispatch","runtime.inference.status","runtime.inference.settle",
     "runtime.mcp.interaction.inspect",
     "runtime.mcp.interaction.pending",
     "runtime.mcp.interaction.response.begin",
@@ -933,7 +935,7 @@
     "runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"],
   "deferredResponseMethods": ["process.write", "process.resize", "runtime.tools.invoke"],
   "inputOrderParams": {"runtime.thread.create": "branchId", "runtime.branch.fork": "branchId", "runtime.input.submit": "branchId", "runtime.input.enqueue": "branchId", "runtime.input.edit": "inputId"},
-  "runtimeDataMethods": [
+  "runtimeDataMethods": ["runtime.inference.admit","runtime.inference.settle",
     "runtime.mcp.sampling.review_output",
     "runtime.mcp.sampling.review_request",
     "runtime.mcp.sampling.generate",
@@ -947,6 +949,11 @@
   "response": {"v": 1, "kind": "response", "id": "request-id", "ok": true, "result": {}},
   "requestUnion": true,
   "methodParams": {
+"runtime.inference.receipt_pending":"InferenceReceiptPendingParams",
+"runtime.inference.admit":"InferenceAdmitParams",
+"runtime.inference.dispatch":"InferenceOwnerParams",
+"runtime.inference.status":"InferenceOwnerParams",
+"runtime.inference.settle":"InferenceSettleParams",
     "runtime.mcp.interaction.inspect": "McpInteractionReadParams",
     "runtime.mcp.sampling.review_output": "McpSamplingOutputReviewParams",
     "runtime.mcp.sampling.review_request": "McpSamplingRequestReviewParams",
@@ -1238,6 +1245,15 @@
     "runtime.mcp.resource.release_source": "RunParams"
   },
   "dto": {
+"InferenceReceiptPendingParams":{"fields":{"operationId":{"type":"string"},"executionOwner":{"type":"ExecutorOwner"},"requestStarted":{"type":"boolean"}},"rustType":"varin_runtime::catalog::inference::InferenceReceiptPendingParams"},
+"InferenceBinding":{"fields":{"purpose":{"type":"string"},"providerId":{"type":"string"},"modelId":{"type":"string"},"api":{"type":"string"},"endpoint":{"type":"string"},"configurationId":{"type":"string"},"credentialScope":{"type":"CredentialScope"}},"rustType":"varin_runtime::catalog::inference::InferenceBinding"},
+"InferenceUsage":{"fields":{"measurement":{"type":"\"missing\" | \"estimated\" | \"actual\""},"inputTokens":{"type":"number | null"},"outputTokens":{"type":"number | null"}},"rustType":"varin_runtime::catalog::inference::InferenceUsage"},
+"InferenceReceipt":{"fields":{"requestStarted":{"type":"boolean | null"},"providerCompleted":{"type":"boolean"},"localExecutorStopped":{"type":"boolean"},"usage":{"type":"InferenceUsage"},"httpStatus":{"type":"number | null"},"problem":{"type":"InferenceProblem | null"}},"rustType":"varin_runtime::catalog::inference::InferenceReceipt"},
+"InferenceAdmitParams":{"fields":{"parentOperationId":{"type":"string"},"executionOwner":{"type":"ExecutorOwner"},"ordinal":{"type":"number"},"binding":{"type":"InferenceBinding"},"request":{"type":"unknown"}},"rustType":"varin_runtime::catalog::inference::InferenceAdmitParams"},
+"InferenceOwnerParams":{"fields":{"operationId":{"type":"string"},"executionOwner":{"type":"ExecutorOwner"}},"rustType":"varin_runtime::catalog::inference::InferenceOwnerParams"},
+"InferenceSettleParams":{"fields":{"operationId":{"type":"string"},"executionOwner":{"type":"ExecutorOwner"},"receipt":{"type":"InferenceReceipt"},"response":{"type":"unknown"}},"rustType":"varin_runtime::catalog::inference::InferenceSettleParams"},
+"InferenceStatus":{"fields":{"operationId":{"type":"string"},"phase":{"type":"OperationPhase"},"outcome":{"type":"Outcome | null"},"live":{"type":"boolean"},"cancelRequested":{"type":"boolean"},"dispatched":{"type":"boolean"},"recovered":{"type":"boolean"},"receiptPending":{"type":"boolean"},"receipt":{"type":"InferenceReceipt | null"}},"rustType":"varin_runtime::catalog::inference::InferenceStatus"},
+"InferenceProblem":{"raw":"export type InferenceProblem = 'cancelled' | 'transport_failed' | 'http_rejected' | 'invalid_response' | 'owner_interrupted' | 'not_dispatched' | 'receipt_pending';","rustType":"varin_runtime::catalog::inference::InferenceProblem"},
     "McpInteractionPending": {"extends": ["McpInteractionRecord"], "fields": {"generation": {"type": "McpSamplingGeneration", "optional": true}}},
     "McpInteractionPresentation": {"raw": "export type McpInteractionPresentation = McpElicitationPresentation | { mode: 'sampling'; message: string };", "rustType": "serde_json::Value"},
     "McpSamplingGenerateParams": {"fields": {"operationId": {"type": "string"}, "interactionId": {"type": "string"}, "expectedRevision": {"type": "number"}, "editedRequest": {"type": "Record<string, unknown>"}, "configuration": {"type": "ModelSessionConfiguration"}, "credentialScope": {"type": "CredentialScope", "optional": true}}, "rustType": "varin_runtime::mcp_sampling::McpSamplingGenerateParams"},
@@ -2449,6 +2465,11 @@
     "OperationInspectParams": {"fields": {"operationId": {"type": "string"}, "allowMissing": {"type": "boolean", "optional": true}}}
   },
   "methods": {
+"runtime.inference.receipt_pending":"Original drained inference receipt publication barrier",
+"runtime.inference.admit":"Original tool-owned inference admit",
+"runtime.inference.dispatch":"Original tool-owned inference dispatch",
+"runtime.inference.status":"Original tool-owned inference status",
+"runtime.inference.settle":"Original tool-owned inference settle",
     "runtime.mcp.interaction.inspect": "Original MCP interaction control facts",
     "runtime.mcp.sampling.review_output": "Review original MCP sampling output",
     "runtime.mcp.sampling.review_request": "Review original MCP sampling request",

@@ -7,6 +7,7 @@ import { credentialValueResolver } from './credential-value-resolver.js';
  * Uses the existing AuthStorage transaction; never creates a second secret file or token hash.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { isDeepStrictEqual } from 'node:util';
 import { randomUUID, createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import * as fs from 'node:fs/promises';
@@ -28,6 +29,11 @@ export interface HostEmbeddingProviderBinding {
   assertAvailable(): Promise<void>;
   currentScope(): Promise<HostCredentialScope>;
   getAuth(): Promise<AuthResult | undefined>;
+}
+export interface HostDecisionProviderBinding extends HostEmbeddingProviderBinding {
+  api: string;
+  /** Private resolved model, never serialized into Catalog or public metadata. */
+  nativeModel?: import("@earendil-works/pi-ai").ClassifierModel<import("@earendil-works/pi-ai").ClassifierApi>;
 }
 export interface HostSelectedModel {
   providerId: string; modelId: string; name: string; api: string; baseUrl: string;
@@ -495,7 +501,8 @@ export class HostCredentialAuthority implements CredentialStore {
     const source = JSON.stringify({ binding, configured: sources.sources,
       key: before?.type === 'oauth' ? undefined : auth.auth.apiKey,
       headers: [...identityHeaders].sort(([a], [b]) => a.localeCompare(b)) });
-    let current = this.#inferenceCredentialBindings.get(credentialRef);
+    const ownerKey = JSON.stringify(['provider', credentialRef]);
+    let current = this.#inferenceCredentialBindings.get(ownerKey);
     if (!current || current.source !== source) {
       const expressions = [expression, ...configured.flatMap(entry => entry.headers && typeof entry.headers === 'object'
         ? Object.values(entry.headers) : [])].filter((value): value is string => typeof value === 'string');
@@ -511,7 +518,7 @@ export class HostCredentialAuthority implements CredentialStore {
       const account = !dynamic && stable && current?.scope.account !== stable ? stable : randomUUID();
       current = { source, scope: { reference: `provider:${credentialRef}`, authority: `${this.authorityId}:inference`,
         account, generation: binding?.generation ?? 1 } };
-      this.#inferenceCredentialBindings.set(credentialRef, current);
+      this.#inferenceCredentialBindings.set(ownerKey, current);
     }
     // Capability routing, not a chat/OAuth endpoint override, owns the dedicated embedding URL.
     return { configuration, scope: { ...current.scope }, auth: { ...auth, auth: {
@@ -519,71 +526,131 @@ export class HostCredentialAuthority implements CredentialStore {
     } } };
   }
   /** Resolve a purpose-specific, project-free capability without making an embedding request. */
-  async resolveEmbeddingBinding(providerId: string, modelId: string): Promise<HostEmbeddingProviderBinding> {
+  resolveEmbeddingBinding(providerId: string, modelId: string): Promise<HostEmbeddingProviderBinding> {
+    return this.#resolveInferenceBinding(providerId, modelId, 'embedding');
+  }
+  resolveDecisionBinding(providerId: string, modelId: string, endpoint?: string): Promise<HostDecisionProviderBinding> {
+    return this.#resolveInferenceBinding(providerId, modelId, 'decision', endpoint);
+  }
+  async #resolveInferenceBinding(providerId: string, modelId: string, kind: 'embedding' | 'decision', endpointOverride?: string): Promise<HostDecisionProviderBinding> {
     const providers = this.#inferenceOwner();
     const cwd = this.#modelsPath ? dirname(this.#modelsPath) : getAgentDir();
     const resolveProvider = async () => {
       const runtime = await providers.inferenceRuntime(cwd);
       const provider = runtime.getProvider(providerId);
-      const model = runtime.getModel(providerId, modelId);
+      const model = kind === 'decision' ? runtime.getModelOfType('classifier', providerId, modelId) : runtime.getModel(providerId, modelId);
       let editable: Awaited<ReturnType<ProviderConfigurationManager['effectiveConfig']>> | undefined;
       try { editable = await providers.effectiveConfig(cwd, providerId, false); }
       catch (error) { if (!(error && typeof error === 'object' && 'code' in error && error.code === 'provider_config_not_found')) throw error; }
-      const capability = (await providers.effectiveCapabilities(cwd, providerId, false))?.embedding;
+      const capability = (await providers.effectiveCapabilities(cwd, providerId, false))?.[kind];
       if (capability?.enabled === false) {
-        this.#inferenceRevocations.set(providerId, (this.#inferenceRevocations.get(providerId) ?? 0) + 1);
-        throw publicFailure('embedding-provider-disabled');
+        this.#inferenceRevocations.set(`${kind}:${providerId}`, (this.#inferenceRevocations.get(`${kind}:${providerId}`) ?? 0) + 1);
+        throw publicFailure(`${kind}-provider-disabled`);
       }
-      if (!provider && !editable) throw publicFailure('embedding-provider-unavailable');
-      if (capability && capability.protocol !== 'openai-compatible') throw publicFailure('embedding-protocol-invalid');
+      if (!provider && !editable) throw publicFailure(`${kind}-provider-unavailable`);
+      if (capability && capability.protocol !== (kind === 'embedding' ? 'openai-compatible' : 'pi-classifier')) throw publicFailure(`${kind}-protocol-invalid`);
       const capabilityModel = capability?.models?.find(entry => entry.id === modelId);
-      const baseUrl = capabilityModel?.baseUrl ?? capability?.baseUrl ?? (capability ? undefined : model?.baseUrl) ?? editable?.baseUrl ?? provider?.baseUrl;
-      if (!baseUrl) throw publicFailure('embedding-endpoint-unavailable');
-      const endpoint = capability?.endpoint;
-      let url: URL;
-      try { url = new URL(embeddingRequestUrl(baseUrl, endpoint)); } catch { throw publicFailure('embedding-endpoint-invalid'); }
-      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash) throw publicFailure('embedding-endpoint-invalid');
-      for (const name of url.searchParams.keys()) {
-        if (/^(key|api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|password|secret|signature|sig)$/i.test(name)) throw publicFailure('embedding-endpoint-invalid');
+      const baseUrl = capabilityModel?.baseUrl ?? capability?.baseUrl ?? (capability && kind !== 'decision' ? undefined : model?.baseUrl) ?? editable?.baseUrl ?? provider?.baseUrl;
+      if (!baseUrl) throw publicFailure(`${kind}-endpoint-unavailable`);
+      const endpoint = endpointOverride ?? capability?.endpoint;
+      const api = kind === 'decision' ? capabilityModel?.api ?? model?.api ?? 'typesafe-system-one' : 'openai-compatible';
+      if (kind === 'decision' && !['typesafe-system-one', 'cloudflare-workers-ai-system-one'].includes(api)) {
+        throw publicFailure('decision-api-unavailable');
       }
-      return { baseUrl, ...(endpoint ? { endpoint } : {}), requestUrl: url.toString(),
+      let url: URL;
+      try { url = new URL(kind === 'embedding' ? embeddingRequestUrl(baseUrl, endpoint)
+        : `${baseUrl.replace(/\/+$/u, '')}${endpoint ?? (api === 'typesafe-system-one' ? '/systemone' : '/run')}`); } catch { throw publicFailure(`${kind}-endpoint-invalid`); }
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash) throw publicFailure(`${kind}-endpoint-invalid`);
+      for (const name of url.searchParams.keys()) {
+        if (/^(key|api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|password|secret|signature|sig)$/i.test(name)) throw publicFailure(`${kind}-endpoint-invalid`);
+      }
+      const headerSources = kind === 'decision' ? await providers.inferenceCredentialSources(cwd, providerId, modelId) : undefined;
+      const modelHeaders = headerSources?.sources.flatMap(entry => (entry as { modelHeaders?: unknown[] }).modelHeaders ?? []).filter(value => value !== undefined) ?? [];
+      const modelHeaderRevision = modelHeaders.length ? headerSources?.revision : undefined;
+      return { api, baseUrl, ...(endpoint ? { endpoint } : {}), requestUrl: url.toString(),
+        modelHeaders, ...(modelHeaderRevision === undefined ? {} : { modelHeaderRevision }),
+        ...(kind === 'decision' && model?.type === 'classifier' ? { nativeModel: model } : {}),
         credentialRef: capability?.credentialRef ?? providerId, configured: Boolean(editable) };
     };
     const selected = await resolveProvider();
-    const revocationGeneration = this.#inferenceRevocations.get(providerId) ?? 0;
+    const revocationGeneration = this.#inferenceRevocations.get(`${kind}:${providerId}`) ?? 0;
     const initial = await this.#inferenceCredentialState(selected.credentialRef);
     // Capture a coherent route/credential candidate. A concurrent settings replacement must
     // not pair the old endpoint with credentials first observed under a different connection.
     const verified = await resolveProvider();
-    if (JSON.stringify(verified) !== JSON.stringify(selected)) throw publicFailure('embedding-selection-changed');
+    if (JSON.stringify(verified) !== JSON.stringify(selected)) throw publicFailure(`${kind}-selection-changed`);
     const expected = JSON.stringify(initial.scope);
+    // Model headers can carry account credentials too. Their original source file revision
+    // identifies the private binding without hashing or serializing any header value.
+    const resolveModelHeaders = async () => {
+      const resolver = await credentialValueResolver();
+      const values = new Headers(selected.nativeModel?.headers);
+      for (const source of selected.modelHeaders) {
+        if (!source || typeof source !== 'object' || Array.isArray(source)) throw publicFailure('configured-header-invalid');
+        for (const [name, expression] of Object.entries(source)) {
+          if (typeof expression !== 'string') throw publicFailure('configured-header-invalid');
+          const value = resolver.resolveConfigValueUncached(expression);
+          if (value === undefined) throw publicFailure('credential-source-resolution-failed');
+          values.set(name, value);
+        }
+      }
+      return Object.fromEntries(values);
+    };
+    const modelHeaders = await resolveModelHeaders();
+    let scope = initial.scope;
+    let modelOwnerKey: string | undefined;
+    if (selected.modelHeaders.length || Object.keys(modelHeaders).length) {
+      const ownerKey = JSON.stringify(['decision', selected.credentialRef, providerId, modelId]);
+      modelOwnerKey = ownerKey;
+      const source = JSON.stringify({ owner: initial.scope, expressions: selected.modelHeaders, values: modelHeaders });
+      let current = this.#inferenceCredentialBindings.get(ownerKey);
+      if (!current || current.source !== source) {
+        const resolver = await credentialValueResolver();
+        const expressions = selected.modelHeaders.flatMap(value => Object.values(value as Record<string, unknown>));
+        const dynamic = expressions.some(value => typeof value === 'string'
+          && (resolver.isCommandConfigValue(value) || resolver.getConfigValueEnvVarNames(value).length > 0));
+        const stable = `${initial.scope.account}:model:${createHash('sha256').update(JSON.stringify({ providerId, modelId, revision: selected.modelHeaderRevision })).digest('hex')}`;
+        current = { source, scope: { ...initial.scope, account: !dynamic && current?.scope.account !== stable ? stable : randomUUID() } };
+        this.#inferenceCredentialBindings.set(ownerKey, current);
+      }
+      scope = current.scope;
+    }
     let revoked: string | undefined;
     const assertAvailable = async () => {
       if (revoked) throw publicFailure(revoked);
-      if ((this.#inferenceRevocations.get(providerId) ?? 0) !== revocationGeneration) throw publicFailure('embedding-provider-disabled');
+      if ((this.#inferenceRevocations.get(`${kind}:${providerId}`) ?? 0) !== revocationGeneration) throw publicFailure(`${kind}-provider-disabled`);
       try {
         // Only availability and credential ownership are live. Model/endpoint candidate edits
         // never redirect or retire the already retained binding, even if that candidate fails.
         const sources = await providers.inferenceCredentialSources(cwd, providerId);
-        const capability = (await providers.effectiveCapabilities(cwd, providerId, false))?.embedding;
-        if (capability?.enabled === false) {
-          revoked = 'embedding-provider-disabled';
-          this.#inferenceRevocations.set(providerId, (this.#inferenceRevocations.get(providerId) ?? 0) + 1);
+        const capability = (await providers.effectiveCapabilities(cwd, providerId, false))?.[kind];
+        if (kind === 'decision') {
+          const current = await providers.inferenceCredentialSources(cwd, providerId, modelId);
+          const headers = current.sources.flatMap(entry => (entry as { modelHeaders?: unknown[] }).modelHeaders ?? []).filter(value => value !== undefined);
+          if (!isDeepStrictEqual(headers, selected.modelHeaders)) revoked = 'credential-scope-changed';
         }
-        else if (selected.configured && !sources.configured) revoked = 'embedding-provider-removed';
+        if (capability?.enabled === false) {
+          revoked = `${kind}-provider-disabled`;
+          this.#inferenceRevocations.set(`${kind}:${providerId}`, (this.#inferenceRevocations.get(`${kind}:${providerId}`) ?? 0) + 1);
+        }
+        else if (selected.configured && !sources.configured) revoked = `${kind}-provider-removed`;
         else if ((capability?.credentialRef ?? providerId) !== selected.credentialRef) revoked = 'credential-scope-changed';
       } catch (error) { if (!invalidInferenceCandidate(error)) throw error; }
+      if (!isDeepStrictEqual(await resolveModelHeaders(), modelHeaders)
+        || modelOwnerKey && !isDeepStrictEqual(this.#inferenceCredentialBindings.get(modelOwnerKey)?.scope, scope)) revoked = 'credential-scope-changed';
       if (revoked) throw publicFailure(revoked);
       if (JSON.stringify((await this.#inferenceCredentialState(selected.credentialRef, initial.configuration)).scope) !== expected) {
         revoked = 'credential-scope-changed'; throw publicFailure(revoked);
       }
     };
-    return { providerId, modelId, baseUrl: selected.baseUrl, ...(selected.endpoint ? { endpoint: selected.endpoint } : {}),
-      requestUrl: selected.requestUrl, configurationId: embeddingConfigurationId(providerId, modelId, selected.baseUrl, selected.endpoint),
-      credentialRef: selected.credentialRef, credentialScope: Object.freeze({ ...initial.scope }), assertAvailable,
-      currentScope: async () => { await assertAvailable(); return { ...initial.scope }; },
+    return { providerId, modelId, api: selected.api, ...(selected.nativeModel ? { nativeModel: selected.nativeModel } : {}), baseUrl: selected.baseUrl, ...(selected.endpoint ? { endpoint: selected.endpoint } : {}),
+      requestUrl: selected.requestUrl, configurationId: kind === 'embedding' ? embeddingConfigurationId(providerId, modelId, selected.baseUrl, selected.endpoint)
+        : createHash('sha256').update(JSON.stringify({ providerId, modelId, api: selected.api, endpoint: selected.requestUrl, credentialRef: selected.credentialRef, credentialScope: scope, modelHeaderRevision: selected.modelHeaderRevision, schema: 'decision.v1' })).digest('hex'),
+      credentialRef: selected.credentialRef, credentialScope: Object.freeze({ ...scope }), assertAvailable,
+      currentScope: async () => { await assertAvailable(); return { ...scope }; },
       getAuth: async () => { await assertAvailable(); const current = await this.#inferenceCredentialState(selected.credentialRef, initial.configuration);
-        if (JSON.stringify(current.scope) !== expected) throw publicFailure('credential-scope-changed'); return current.auth; },
+        if (JSON.stringify(current.scope) !== expected) throw publicFailure('credential-scope-changed');
+        return { ...current.auth, auth: { ...current.auth.auth, headers: { ...modelHeaders, ...current.auth.auth.headers } } }; },
     };
   }
   async selectedModel(providerId: string, modelId: string): Promise<HostSelectedModel> {

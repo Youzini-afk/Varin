@@ -239,4 +239,39 @@ describe("Varin semantics over native Pi classifiers", () => {
     }), ClassifierRequestError);
     assert.equal(calls, 0);
   });
+  for (const nested of [false, true]) it(`preserves Cloudflare ${nested ? 'Completed' : 'direct'} partial answers and missing usage fields`, async () => {
+    const nativeModel = { type: 'classifier' as const, api: 'cloudflare-workers-ai-system-one' as const,
+      provider: 'cloudflare', id: 'typesafe/jev', name: 'fixture', baseUrl: 'https://cloudflare.invalid/accounts/fake/ai',
+      contextWindow: 0, input: ['text' as const], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+    const result = await requestClassifier({ nativeModel, baseUrl: nativeModel.baseUrl, apiKey: 'fixture-only',
+      model: nativeModel.id, state: 'actual candidates', questions: [judge, score], fetchImpl: async (url, init) => {
+        assert.equal(String(url), 'https://cloudflare.invalid/accounts/fake/ai/run');
+        const wire = JSON.parse(String(init?.body));
+        assert.equal(wire.model, nativeModel.id);
+        assert.equal(wire.input.questions['s:v1'].type, 'score');
+        const output = { answers: { 's:v1': { type: 'score', score: 0 } }, usage: { input_tokens: 13 } };
+        return jsonResponse(200, { success: true, result: nested ? { state: 'Completed', result: output } : output });
+      } });
+    assert.deepEqual(result.answers, [{ id: 's:v1', kind: 'score', score: 0 }]);
+    assert.deepEqual(result.missing, ['m:v1']);
+    assert.deepEqual(result.usage, { inputTokens: 13 });
+  });
+
+  it('retains received usage for invalid answers and cancellation after the complete response', async () => {
+    for (const cancel of [false, true]) {
+      const controller = new AbortController();
+      await assert.rejects(requestClassifier({ baseUrl: 'https://typesafe.invalid', model: 'fixture', apiKey: 'fixture-only',
+        state: 'evidence', questions: [score], signal: controller.signal, fetchImpl: async () => {
+          if (cancel) controller.abort();
+          return jsonResponse(200, { ...(cancel ? { answers: { 's:v1': { type: 'score', score: 0 } } } : {}),
+            usage: { input_tokens: 19, output_tokens: 4 } });
+        } }), error => {
+        assert(error instanceof ClassifierResponseError);
+        assert.deepEqual(error.result?.usage, { inputTokens: 19, outputTokens: 4 });
+        assert.equal(error.result?.answers.length, cancel ? 1 : 0);
+        return true;
+      });
+    }
+  });
+
 });

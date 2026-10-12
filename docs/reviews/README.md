@@ -8,6 +8,7 @@ Last updated: 2026-10-12
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [独立 decision 与原推理回执（2026-10-12）](runtime-background-decisions-2026-10-12.md) | 原专用配置/材料、逐 HTTP 原 Operation/Goal、取消排空/发布失败/恢复及有限跨层验证 |
 | [原学术发现与普通工具（2026-10-12）](runtime-scholarly-discovery-2026-10-12.md) | 原 metadata owner、cursor/取消、模型/Policy/无源 child、明确材料与公开 PDF 读取；有限验收 |
 | [原材料集合与明确分享（2026-10-12）](runtime-material-collections-2026-10-12.md) | 原材料 ACL/Storage mutation、family 分享/保活、取消/丢回应对账及实际公开 reader；有限验收 |
 | [PDF 原来源（2026-10-12）](runtime-pdf-sources-2026-10-12.md) | 原 Run source/Experiment 字节到 native reader、13MiB 分页与草稿消费者；真实组合与取消证据边界 |

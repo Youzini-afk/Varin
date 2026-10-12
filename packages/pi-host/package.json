@@ -31,6 +31,10 @@
       "types": "./dist/credential-authority.d.ts",
       "import": "./dist/credential-authority.js"
     },
+    "./classifier": {
+      "types": "./dist/harness/native-classifier.d.ts",
+      "import": "./dist/harness/native-classifier.js"
+    },
     "./host": "./dist/host-bootstrap.js",
     "./tool-schema": {
       "types": "./dist/tool-schema.d.ts",
