@@ -786,6 +786,15 @@ export class AgentRuntimeClient {
   threads(signal?: AbortSignal): Promise<ThreadSummary[]> {
     return this.kernel.agentRuntimeRequest('runtime.thread.list', {}, signal);
   }
+  botScope(botId: string, signal?: AbortSignal): Promise<import('./protocol.generated.js').BotScopeView> {
+    return this.kernel.agentRuntimeRequest('runtime.bot.scope.inspect', { botId }, signal);
+  }
+  createBotThread(botId: string, threadId: string, branchId: string, signal?: AbortSignal): Promise<{threadId:string;branchId:string}> {
+    return this.kernel.agentRuntimeRequest('runtime.bot.thread.create', {botId,threadId,branchId}, signal);
+  }
+  botHistory(input: import('./protocol.generated.js').BotHistoryReadParams, signal?: AbortSignal): Promise<HistoryItem> {
+    return this.kernel.agentRuntimeRequest('runtime.bot.history.read', input, signal);
+  }
   createThread(
     threadId: string,
     branchId: string,

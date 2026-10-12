@@ -46,9 +46,9 @@ The settings page shows the current memory snapshot in the assembled preview and
 the actual model-request boundary. The latter is an in-memory observation of an attempted
 request, not evidence of provider delivery, and is lost when the worker stops.
 
-Bot ownership is determined by the Host registry, not a caller-supplied mode. Bot requests
+Bot ownership is determined by the original Host registry or Catalog Thread binding, not a caller-supplied mode. Bot requests
 never receive Agent prompt overrides or Agent notes. Bot memory continues through
-`memory-service.ts`, Bot/user knowledge stores, `recall`, and the optional organizer.
+`memory-service.ts`, Bot/user/current-conversation knowledge stores, `recall`, and the optional organizer.
 The organizer only enumerates Bots; ordinary context assembly bypasses knowledge recall.
 Plans, observations, materials, symbol indexing and other knowledge-store users remain intact.
 
@@ -80,9 +80,35 @@ billing is retained and disclosed; local drain does not claim remote cancellatio
 Successful original output is reused. Preview writes no memory; Save and undo remain the existing
 MemoryService/source-revision path. Ordinary Agent selection stays a no-model editable note.
 
-This boundary leaves the Bot's existing Pi entry, Pi source reader, recall and context checkpoint
-consumer in place. A complete native Bot front door and its main/delegated Sleep lifecycle are separate
-remaining runtime work; background inference alone is not that cutover.
+Agent Bot entries use the same memory domain. `bot-history.ts` reads original immutable HistoryItems
+through Catalog-owned Bot, Thread, branch and ancestor checks. Native source spans retain the actual
+Thread/item identity and their branch/head read witness; the witness is not a second coverage or
+deduplication key. Pi entries, events and Run reports keep their distinct typed source identities.
+Host and UI use the same text projection and UTF-16 offsets, so Markdown rendering cannot change a
+saved selection. Changed, missing and unavailable originals remain different source results.
+
+`kernel/bot-memory-owner.ts` resolves each request's actual Run and Bot binding. Bot/user/current-Thread
+scopes use their original Knowledge stores; a child does not inherit its parent's local store. Its
+selected tool contracts and actual admitted role remain authoritative. A read-only file source does
+not by itself prohibit an independently admitted note or plan mutation. Mutations keep an exact origin and intent, and their original
+MemoryService result is committed with the Knowledge write in the same transaction. A late observer
+or closed Sleep gate can still reconcile that receipt without repeating the write. New writes honor
+the gate and cancellation before dispatch; a running transaction remains owned until it settles.
+
+The shared Knowledge context algorithm retains recalled items and original work associations. Recalling
+the same row from another work item does not erase earlier provenance. Corrections and retirement are
+projected into the original native memory state and real request facts, while an already prepared
+RequestSnapshot remains immutable. Forgetting a corrected item removes its retained correction body.
+Only successful summary publication replaces the system checkpoint; preparing or finishing a candidate
+does not itself publish it. The organizer and explicit selection preview enumerate the same native
+sources rather than synthesizing Pi sessions.
+
+For Bot recall, the original ContextJob freezes a typed reference to the selected immutable memory
+projection and includes those actual facts in its summarization material. Only successful publication
+installs that reference as the checkpoint baseline. Later requests project new, corrected or retired
+rows relative to it, including changes committed while the summary was running. Recipe and checkpoint
+ContentStore manifests both retain the original referenced state. Prompt/resource refresh preserves
+the accepted baseline; no ordinary-note store or second memory revision ledger is introduced.
 
 The old Magic Prompts, prompt-template resource editor/expansion and ordinary knowledge
 catalog are removed. Product actions use `actionInstructions.ts`; native skills remain

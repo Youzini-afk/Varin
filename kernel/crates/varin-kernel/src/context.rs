@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use varin_runtime::{
     context_capacity::{
         budget_candidates, estimate_request, native_candidate, native_mode, BudgetDecision,
-        ContextPolicy,
+        ContextPolicy, PreparationTiming,
     },
     context_job::{ContextBudgetStrategy, ContextCompactionMode, ContextSummaryRecipe},
     execution::*,
@@ -76,12 +76,20 @@ impl ContextPreparation for CapacityPreparation {
         view: &RequestView,
         serialized: &Value,
         budget_protocol: Option<varin_runtime::context_capacity::RequestBudgetProtocol>,
+        preview: &dyn Fn(
+            ContextProjection,
+        )
+            -> Result<varin_runtime::context_capacity::InputEstimate, ExecutionError>,
         cancel: &CancellationToken,
     ) -> Result<ContextRequestPreparation, ExecutionError> {
-        match self
-            .inner
-            .prepare_request(epoch, view, serialized, budget_protocol, cancel)?
-        {
+        match self.inner.prepare_request(
+            epoch,
+            view,
+            serialized,
+            budget_protocol,
+            preview,
+            cancel,
+        )? {
             ContextRequestPreparation::Ready => (),
             other => return Ok(other),
         }
@@ -117,124 +125,170 @@ impl ContextPreparation for CapacityPreparation {
         let Some(capacity) = configuration.context_window_tokens else {
             return Ok(ContextRequestPreparation::Ready);
         };
-        // One short Host rendezvous reads current settings/selection. The default path carries
-        // no candidate list and executes neither extension code nor cold activation.
-        let prepared = self.bridge.query(
-            json!({"action":"prepare","runId":view.run_id,"requestId":view.request_id,
-            "expectedRevision":revision,"hasAcceptedJob":existing.is_some()}),
-            cancel,
-        )?;
-        let mut settings = policy(&prepared)?;
-        if !settings.enabled {
-            return Ok(ContextRequestPreparation::Ready);
-        }
         let estimate = match budget {
             Some((read, protocol)) => read
                 .estimate(view, serialized, protocol, cancel)
                 .map_err(failed)?,
             None => estimate_request(view, serialized),
         };
-        let existing = existing.map(|job| job.load().map_err(failed)).transpose()?;
-        let mut candidates = None;
-        let (through, recipe, mut block) = if let Some(job) = existing {
-            let recipe = job.request.summary_recipe;
-            let mode = match recipe.strategy {
-                ContextBudgetStrategy::Builtin { .. } => {
-                    match native_mode(&settings, capacity, &estimate) {
-                        Some(mode) => mode,
-                        None => return Ok(ContextRequestPreparation::Ready),
-                    }
-                }
-                ContextBudgetStrategy::Extension { .. } => recipe.mode,
-            };
-            (
-                job.request.through_id,
-                recipe,
-                mode == ContextCompactionMode::Blocking,
-            )
-        } else {
-            let mut external = None;
-            if prepared["external"]
-                .as_bool()
-                .ok_or_else(|| failed("Context strategy selection missing"))?
-            {
-                let legal = budget_candidates(view);
-                // There is no reducible original source. Do not invent a hard capacity rejection.
-                if legal.is_empty() {
-                    return Ok(ContextRequestPreparation::Ready);
-                }
-                let input = json!({"boundary":"before_model_dispatch","requestId":view.request_id,"estimate":estimate,
-                    "capacityTokens":capacity,"inputBudgetTokens":capacity.saturating_sub(settings.reserve_tokens),
-                    "settings":{"reserveTokens":settings.reserve_tokens,"keepRecentTokens":settings.keep_recent_tokens,
-                        "backgroundPreparation":settings.background_preparation,"preparationWaterline":settings.preparation_waterline},
-                    "candidates":legal});
-                let reply = self.bridge.query(
-                    json!({"action":"decide","runId":view.run_id,"input":input}),
-                    cancel,
-                )?;
-                settings = policy(&reply)?;
-                if !settings.enabled {
-                    return Ok(ContextRequestPreparation::Ready);
-                }
-                if reply["external"]
-                    .as_bool()
-                    .ok_or_else(|| failed("Context strategy selection missing"))?
-                {
-                    let decision: BudgetDecision =
-                        serde_json::from_value(reply["decision"].clone()).map_err(failed)?;
-                    match decision {
-                        BudgetDecision::Continue => return Ok(ContextRequestPreparation::Ready),
-                        BudgetDecision::Compact {
-                            through_id,
-                            mode,
-                            summary_instructions,
-                        } => {
-                            if mode == ContextCompactionMode::Manual {
-                                return Err(failed(
-                                    "Automatic decision cannot request manual compaction",
-                                ));
-                            }
-                            if mode == ContextCompactionMode::Background
-                                && !settings.background_preparation
-                            {
-                                return Err(ExecutionError::new(
-                                    "context_background_disabled",
-                                    "Selected budget requested disabled background preparation",
-                                ));
-                            }
-                            let recipe: ContextSummaryRecipe =
-                                serde_json::from_value(reply["summaryRecipe"].clone())
-                                    .map_err(failed)?;
-                            recipe.validate(true).map_err(failed)?;
-                            if !matches!(recipe.strategy, ContextBudgetStrategy::Extension { .. })
-                                || recipe.mode != mode
-                                || recipe.additional_instructions != summary_instructions
-                                || recipe.configuration_identity.as_deref()
-                                    != Some(&settings.configuration_identity)
-                            {
-                                return Err(failed("Context decision and frozen recipe differ"));
-                            }
-                            external =
-                                Some((through_id, recipe, mode == ContextCompactionMode::Blocking));
-                        }
-                    }
-                }
-                candidates = Some(legal);
+        // These are identities and local estimates, not a new measurement ledger. The Host
+        // binds them to the Thread, full launch/configuration, credential and policy selection.
+        let mut identity = serde_json::to_value(&view.binding).map_err(failed)?;
+        if let Some(identity) = identity.as_object_mut() {
+            for field in [
+                "history_range",
+                "environment_cursor",
+                "memory_checkpoint",
+                "resource_checkpoint_id",
+                "attachment_refs",
+                "resource_activations",
+                "goal",
+            ] {
+                identity.remove(field);
             }
-            if let Some(external) = external {
-                external
+        }
+        use sha2::{Digest, Sha256};
+        let identity = hex::encode(Sha256::digest(
+            serde_json::to_vec(&identity).map_err(failed)?,
+        ));
+        let prepared = self.bridge.query(json!({"action":"prepare","runId":view.run_id,"requestId":view.request_id,
+            "expectedRevision":revision,
+            "observation":{"estimatedTokens":estimate_request(view, serialized).estimated_tokens,"identity":identity}}), cancel)?;
+        let mut settings = policy(&prepared)?;
+        if !settings.enabled {
+            return Ok(ContextRequestPreparation::Ready);
+        }
+        let timing: PreparationTiming = prepared
+            .get("timing")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(failed)?
+            .unwrap_or_default();
+        let existing = existing.map(|job| job.load().map_err(failed)).transpose()?;
+        let external = prepared["external"].as_bool().unwrap_or(false)
+            || existing.as_ref().is_some_and(|job| {
+                matches!(
+                    job.request.summary_recipe.strategy,
+                    ContextBudgetStrategy::Extension { .. }
+                )
+            });
+        let legal = budget_candidates(view);
+        if legal.is_empty() {
+            return Ok(ContextRequestPreparation::Ready);
+        }
+        let (through, recipe, block) = if external {
+            // A later decision may authorize only the accepted candidate. It cannot silently
+            // replace its frozen source or instructions, nor schedule a second paid generation.
+            let offered: Vec<_> = legal
+                .iter()
+                .filter(|candidate| {
+                    existing
+                        .as_ref()
+                        .is_none_or(|job| candidate.through_id == job.request.through_id)
+                })
+                .cloned()
+                .collect();
+            let mut input = json!({"boundary":"before_model_dispatch","requestId":view.request_id,"estimate":estimate,
+                "capacityTokens":capacity,"inputBudgetTokens":capacity.saturating_sub(settings.reserve_tokens),
+                "settings":{"reserveTokens":settings.reserve_tokens,"keepRecentTokens":settings.keep_recent_tokens,
+                    "backgroundPreparation":settings.background_preparation,"preparationWaterline":settings.preparation_waterline},
+                "candidates":offered});
+            if let Some(job) = &existing {
+                let mut accepted = json!({"throughId":job.request.through_id,"mode":job.request.summary_recipe.mode});
+                if let Some(instructions) = &job.request.summary_recipe.additional_instructions {
+                    accepted["summaryInstructions"] = json!(instructions);
+                }
+                input["acceptedCandidate"] = accepted;
+            }
+            let reply = self.bridge.query(
+                json!({"action":"decide","runId":view.run_id,"input":input}),
+                cancel,
+            )?;
+            settings = policy(&reply)?;
+            if !settings.enabled {
+                return Ok(ContextRequestPreparation::Ready);
+            }
+            if reply["external"].as_bool() != Some(true) {
+                if existing.is_some() {
+                    return if estimate.estimated_tokens
+                        <= capacity.saturating_sub(settings.reserve_tokens)
+                    {
+                        Ok(ContextRequestPreparation::Ready)
+                    } else {
+                        Err(failed("Accepted context strategy is no longer selected"))
+                    };
+                }
+                return Ok(ContextRequestPreparation::Recompile);
+            }
+            let decision: BudgetDecision =
+                serde_json::from_value(reply["decision"].clone()).map_err(failed)?;
+            match decision {
+                BudgetDecision::Continue => return Ok(ContextRequestPreparation::Ready),
+                BudgetDecision::Compact {
+                    through_id,
+                    mode,
+                    summary_instructions,
+                } => {
+                    if mode == ContextCompactionMode::Manual {
+                        return Err(failed(
+                            "Automatic decision cannot request manual compaction",
+                        ));
+                    }
+                    if mode == ContextCompactionMode::Background && !settings.background_preparation
+                    {
+                        return Err(ExecutionError::new(
+                            "context_background_disabled",
+                            "Selected budget requested disabled background preparation",
+                        ));
+                    }
+                    let selected: ContextSummaryRecipe =
+                        serde_json::from_value(reply["summaryRecipe"].clone()).map_err(failed)?;
+                    selected.validate(true).map_err(failed)?;
+                    if !matches!(selected.strategy, ContextBudgetStrategy::Extension { .. })
+                        || selected.mode != mode
+                        || selected.additional_instructions != summary_instructions
+                        || selected.configuration_identity.as_deref()
+                            != Some(&settings.configuration_identity)
+                    {
+                        return Err(failed("Context decision and frozen recipe differ"));
+                    }
+                    let recipe = if let Some(job) = &existing {
+                        let original = &job.request.summary_recipe;
+                        if through_id != job.request.through_id
+                            || selected.strategy != original.strategy
+                            || summary_instructions != original.additional_instructions
+                        {
+                            return Err(failed(
+                                "Context decision does not authorize the accepted candidate",
+                            ));
+                        }
+                        original.clone()
+                    } else {
+                        selected
+                    };
+                    (through_id, recipe, mode == ContextCompactionMode::Blocking)
+                }
+            }
+        } else {
+            let Some(mode) = native_mode(&settings, capacity, &estimate, &timing) else {
+                return Ok(ContextRequestPreparation::Ready);
+            };
+            if let Some(job) = &existing {
+                (
+                    job.request.through_id.clone(),
+                    job.request.summary_recipe.clone(),
+                    mode == ContextCompactionMode::Blocking,
+                )
             } else {
-                let Some(mode) = native_mode(&settings, capacity, &estimate) else {
-                    return Ok(ContextRequestPreparation::Ready);
-                };
-                let legal = candidates.get_or_insert_with(|| budget_candidates(view));
                 let Some(candidate) = native_candidate(
                     view,
-                    legal,
+                    &legal,
                     &settings,
                     capacity,
                     configuration.max_output_tokens,
                     &estimate,
+                    &timing,
                 ) else {
                     return Ok(ContextRequestPreparation::Ready);
                 };
@@ -245,7 +299,6 @@ impl ContextPreparation for CapacityPreparation {
                 )
             }
         };
-        let legal = candidates.get_or_insert_with(|| budget_candidates(view));
         if !legal
             .iter()
             .any(|candidate| candidate.through_id == through)
@@ -257,34 +310,28 @@ impl ContextPreparation for CapacityPreparation {
         if cancel.is_cancelled() {
             return Err(failed("Context decision owner cancelled"));
         }
-        let reply = self.bridge.query(json!({"action":"compact","runId":view.run_id,"requestId":view.request_id,
-            "throughId":through,"expectedRevision":revision,"nativeBlock":native_mode(&settings, capacity, &estimate) == Some(ContextCompactionMode::Blocking),"summaryRecipe":recipe}), cancel)?;
+        let reply = self.bridge.query(
+            json!({"action":"compact","runId":view.run_id,"requestId":view.request_id,
+            "throughId":through,"expectedRevision":revision,"block":block,"summaryRecipe":recipe}),
+            cancel,
+        )?;
         if let Some(accepted) = reply.get("accepted") {
             let original_through = accepted["throughId"]
                 .as_str()
                 .ok_or_else(|| failed("Accepted context boundary missing"))?;
-            if !legal
-                .iter()
-                .any(|candidate| candidate.through_id == original_through)
-            {
-                return Err(failed(
-                    "Accepted context job is not a legal ancestor of this request",
-                ));
-            }
             let original: ContextSummaryRecipe =
                 serde_json::from_value(accepted["summaryRecipe"].clone()).map_err(failed)?;
             original.validate(true).map_err(failed)?;
-            block = match original.strategy {
-                ContextBudgetStrategy::Extension { .. } => {
-                    original.mode == ContextCompactionMode::Blocking
-                }
-                ContextBudgetStrategy::Builtin { .. } => {
-                    native_mode(&settings, capacity, &estimate)
-                        == Some(ContextCompactionMode::Blocking)
-                }
-            };
-            if accepted["block"].as_bool() != Some(block) {
-                return Err(failed("Accepted context wait mode differs"));
+            if !legal
+                .iter()
+                .any(|candidate| candidate.through_id == original_through)
+                || accepted["block"].as_bool() != Some(block)
+                || matches!(recipe.strategy, ContextBudgetStrategy::Extension { .. })
+                    && (original_through != through || original != recipe)
+            {
+                return Err(failed(
+                    "Accepted context job differs from the selected decision",
+                ));
             }
         } else if reply["status"] == "ready" {
             return Err(failed("Context job admission identity missing"));
@@ -309,6 +356,54 @@ impl ContextPreparation for CapacityPreparation {
         let job_id = reply["jobRunId"]
             .as_str()
             .ok_or_else(|| failed("Context job admission is missing"))?;
+        let publication = {
+            let catalog = self.catalog.lock().map_err(failed)?;
+            if catalog.run(job_id).map_err(failed)?.state == varin_runtime::RunState::Completed {
+                let read = catalog
+                    .prepare_context_read(
+                        &view.run_id,
+                        epoch,
+                        view.binding.history_range.leaf_id.as_deref(),
+                    )
+                    .map_err(failed)?
+                    .ok_or_else(|| failed("Context candidate has no source checkpoint"))?;
+                Some((
+                    catalog
+                        .prepare_context_job_publication(job_id)
+                        .map_err(failed)?,
+                    read,
+                ))
+            } else {
+                None
+            }
+        };
+        if let Some((publication, read)) = publication {
+            let publication = publication.load().map_err(failed)?;
+            let estimate = preview(publication.preview(read).map_err(failed)?)?;
+            if estimate.estimated_tokens > capacity.saturating_sub(settings.reserve_tokens) {
+                return Err(ExecutionError::new("context_candidate_capacity", "The complete summary and retained original tail do not fit; the original history remains active"));
+            }
+            if cancel.is_cancelled() {
+                return Err(failed("Context publication owner cancelled"));
+            }
+            let mut catalog = self.catalog.lock().map_err(failed)?;
+            let run = catalog.run(&view.run_id).map_err(failed)?;
+            if run.epoch != epoch
+                || run.cancel_requested
+                || run.state.terminal()
+                || serde_json::from_value::<ModelSessionConfiguration>(run.configuration.clone())
+                    .map_err(failed)?
+                    != configuration
+                || catalog.head(&run.branch_id).map_err(failed)?
+                    != view.binding.history_range.leaf_id
+            {
+                return Err(failed("Context publication request boundary changed"));
+            }
+            catalog
+                .publish_prepared_context_job(publication)
+                .map_err(failed)?;
+            return Ok(ContextRequestPreparation::Recompile);
+        }
         let wait = self
             .catalog
             .lock()
@@ -409,6 +504,7 @@ mod tests {
                 &view,
                 &json!({"input":"Original source"}),
                 None,
+                &|_| panic!("No candidate may be previewed"),
                 &CancellationToken::default(),
             );
             output.send(json!({"kind":"preparation-finished"})).unwrap();

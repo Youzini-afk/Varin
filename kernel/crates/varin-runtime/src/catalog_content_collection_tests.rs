@@ -300,6 +300,7 @@ fn captured_reader_keeps_replaced_memory_body_until_its_actual_read_finishes() {
         memories: vec![json!({"body":revision})],
         note_revisions: Default::default(),
         known: Default::default(),
+            bot_knowledge: None,
     };
     let old = catalog
         .content

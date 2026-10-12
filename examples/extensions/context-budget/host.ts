@@ -25,6 +25,11 @@ export default defineHostExtension({
             && estimatedTokens > inputBudgetTokens * settings.preparationWaterline ? 'background'
             : undefined;
         if (!mode) return { kind: 'continue' };
+        if (input.acceptedCandidate) {
+          const accepted = input.acceptedCandidate;
+          return { kind: 'compact', throughId: accepted.throughId, mode,
+            ...(accepted.summaryInstructions !== undefined ? { summaryInstructions: accepted.summaryInstructions } : {}) };
+        }
 
         // Core supplies legal, tool-pair-safe prefixes. Do not infer boundaries from IDs
         // or mutate their order. Equal distances favor retaining more recent history.

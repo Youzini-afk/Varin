@@ -226,6 +226,7 @@ impl BranchForkPreparation {
                         memory_checkpoint: original.proposal.memory_checkpoint,
                     };
                     let body = context::ContextCheckpoint {
+                        bot_memory_snapshot: None,
                         resource_activations: Vec::new(),
                         id: proposal.key.clone(),
                         revision: 1,
@@ -233,7 +234,7 @@ impl BranchForkPreparation {
                         personalization: original.personalization,
                         resources: original.resources,
                     };
-                    let reference = contents.content.save(&serde_json::to_value(&body)?)?;
+                    let reference = body.save(&contents.content)?;
                     Ok((context::CheckpointMetadata::from(&body), reference))
                 })
                 .transpose()?;

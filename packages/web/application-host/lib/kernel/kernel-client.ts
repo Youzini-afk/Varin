@@ -723,6 +723,12 @@ export class KernelClient {
     return this.requestRaw<{ resourceKey: string }>("file.read.check", params, { signal, grant });
   }
   setMemoryOwner(owner: MemoryToolOwner): void { this.memoryBridge.setOwner(owner); }
+  /** Original domain promises may outlive their cancellation responses and kernel epoch. */
+  async drainRunDomains(runIds: readonly string[]): Promise<void> {
+    const runs = new Set(runIds);
+    await Promise.all([this.memoryBridge.drainRuns(runs), this.planBridge.drainRuns(runs),
+      ...runIds.map(runId => this.drainRunPreparations(runId))]);
+  }
   setContextOwner(owner: ContextOwner): void { this.contextBridge.setOwner(owner); }
   setResourceOwner(owner: ResourceOwner): void { this.resourceBridge.setOwner(owner); }
   setFileObservationOwner(owner: FileObservationOwner): void { this.fileObservationBridge.setOwner(owner); }

@@ -19,7 +19,7 @@ writing Pi session files or the Host harness's existing execution records.
   inspection/list serialization runs on workers, and content collection retains every launch reference.
   Policy preparation binds the actual admitted baseline supplied by its assembly owner; the runtime
   does not hard-code a kernel policy wrapper's name.
-- Catalog 64 / wire 23 retain reconstructable Host dependency graphs in the original tool/policy
+- Catalog 65 / wire 24 retain reconstructable Host dependency graphs in the original tool/policy
   binding content. Graph validation, hashing, persistence and hydration run outside Catalog. Short
   policy metadata records exact identity and a ContentStore reference; launch, selection and delegated
   execution roots participate in the same GC publication protocol. Recovery preserves the saved
@@ -33,7 +33,7 @@ writing Pi session files or the Host harness's existing execution records.
   an unstarted generation under a new admission while preserving completed decisions and cancellation
   history. Unknown dispatched requests are observed, not automatically replayed. Knowledge/MemoryService
   remain the only memory writer; prepared proposals and source coverage are domain progress, not a second
-  inference ledger. The existing Pi Bot entry and source readers have not been migrated by this boundary.
+  inference ledger. The Host's explicit Agent Bot entry uses the same source and memory owners.
 - Private Bot Thread bindings derive children, context jobs and MemoryWork through their original
   relationships. BotService publishes its exact profile revision/activity gate; a new Catalog epoch
   remains closed until that source is revalidated. Scope suspension holds the original Runs without
@@ -41,7 +41,12 @@ writing Pi session files or the Host harness's existing execution records.
   off the control actor; local stop evidence, unknown effects and unresolved model requests remain
   distinct. Wake releases eligible holds for the existing continuation owner. Prepared requests use
   the single existing recovery path, while uncertain dispatch is never automatically replayed.
-  This is a private foundation, not a complete native Bot entry, recall or Computer lifecycle.
+  Typed source reads capture the original Bot/Thread/branch/ancestor metadata and hydrate history outside
+  the control owner. The shared Knowledge domain supplies actual Bot/user/current-Thread memory; Catalog
+  retains only scoped context projection and immutable request facts. Bot cleanup deletes its original
+  related records transactionally and rejects live foreign references rather than dropping another
+  owner's resources. Host lifecycle additionally joins domain work and exact Computer executions;
+  Catalog's worker-drained field alone is not a whole-Bot physical-stop claim.
 - `execution` drives a bound model provider and tool executor on a worker. Tool results have stable
   request/call/operation identities, real effect receipts and provider-specific original items.
   The default policy is replaceable; it does not own or mutate the catalog itself.
@@ -1253,10 +1258,24 @@ output rules always apply; additional guidance participates in the original part
 The original owner/checkpoint/model/credential identity admits one automatic job. Failed or unknown
 work is not silently rekeyed after a routing change. Simultaneously prepared candidates are checked at
 short Catalog admission; the losing Host observer reads the accepted original recipe and receipt.
-Recovery publishes completed original output without calling a current extension or resending a paid
-request. Ordinary provider replacement does not invalidate an accepted candidate; explicit withdrawal
-rejects an unfinished Decision. The continuation's ancestor/tool-pair and memory/checkpoint CAS remain
-unchanged. This is not a complete migration of the existing Pi memory workflow.
+Recovery retains completed original output without resending a paid request. A ready automatic
+candidate does not publish merely because its summary Run ended. The next request still asks the
+currently selected Budget Decision; the original recipe is evidence, not a new authorization. A
+Decision can apply the accepted source/instructions or continue, but cannot silently substitute a new
+paid job. The continuation's ancestor/tool-pair and memory/checkpoint CAS remain unchanged.
+
+Automatic preparation uses the configured initial waterline and disposable observations of actual
+summary duration and recent input growth for the same branch/configuration. Missing or recovered
+partial duration does not become a measured zero. Without explicit recent-history retention, planning
+targets roughly 60% of the complete input budget, including fixed input, summary reserve, retained
+history and anticipated growth. This is a planning default, not a hard cap or a latency guarantee.
+
+Only a request that needs the candidate, or explicit user publication, advances the checkpoint. A
+completed job can wake the existing context Wait and be reused by a later foreground Run on the same
+branch; its original inference/Goal owner is unchanged. Before automatic publication, the ordinary
+compiler and selected provider serializer preview the real summary plus the complete retained and
+new tail. Over-budget candidates remain available while the old context stays active. The runtime
+does not discard unsummarized items or automatically generate another paid summary to make them fit.
 
 ### Successful-usage request calibration
 

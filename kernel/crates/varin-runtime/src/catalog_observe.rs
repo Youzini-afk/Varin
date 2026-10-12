@@ -65,7 +65,7 @@ impl Catalog {
              WHERE b.thread_id=?1 ORDER BY c.project_id")?;
         let observer_project_ids = scopes.query_map([thread_id], |row| row.get::<_, Option<String>>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        Ok(json!({"thread_id":thread_id,"branches":branches,"observer_project_ids":observer_project_ids}))
+        Ok(json!({"thread_id":thread_id,"bot_id":self.bot_for_thread(thread_id)?,"branches":branches,"observer_project_ids":observer_project_ids}))
     }
     pub fn list_threads(&self) -> Result<Vec<Value>> {
         let ids: Vec<String> = {

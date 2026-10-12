@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 import type { PlanView, PlanMutationInput, PlanOrigin, PlanChanged, PlanForkCapture, PlanForkInput, PlanSelection } from '@varin/protocol';
 import { parseTodoPlan, renderTodoPlan } from '@varin/protocol';
 import { openKnowledgeStoreEngine } from './store-engine.js';
-import { openWorkspaceKnowledge, type KnowledgeStore } from './store.js';
+import { openWorkspaceKnowledge, KnowledgeMutationError, type KnowledgeStore } from './store.js';
 import { createPlanOwner, type PlanQuery } from '../kernel/plan-owner.js';
 import { PlanService } from '../kernel/plan-service.js';
 import { PlanBridge, type PrivatePlanResponse } from '../kernel/plan-bridge.js';
@@ -215,7 +215,7 @@ describe('plan independent owner review, real TriviumDB', () => {
     expect(changes).toEqual([{ threadId: v.threadId, branchId: v.branchId, ref: first.plan!.ref }]);
     await expect(mutatePlan(store, input(v, 'pipe-conflict', null, 'altered'))).rejects.toThrow(/intent/);
   });
-  it.each(['model_step', 'policy_action'] as const)('carries a child %s plan through its public service, private bridge and original worker receipt', async kind => {
+  it.each([['agent', 'model_step'], ['agent', 'policy_action'], ['bot', 'model_step'], ['bot', 'policy_action']] as const)('carries an admitted %s child %s plan through its public service, private bridge and original worker receipt', async (mode, kind) => {
     const f = await fixture(true); const v = view('child-branch', ['child-h1'], null, 'child');
     const parent = view('parent-branch', ['parent-h1'], null, 'parent');
     const sibling = view('sibling-branch', ['sibling-h1'], null, 'sibling');
@@ -223,7 +223,8 @@ describe('plan independent owner review, real TriviumDB', () => {
     const identity = (value: PlanView) => ({ runtime: 'agent' as const, threadId: value.threadId, branchId: value.branchId });
     // Catalog admission/history are fixtures. Public service, private bridge, owner, worker pipe and DB are real.
     const runtime = {
-      context: async (branch: string) => ({ personalization: { mode: 'agent', threadRole: branch === parent.branchId ? 'main' : 'worker', sessionId: views.get(branch)!.threadId } }),
+      thread: async () => ({ bot_id: mode === 'bot' ? 'actual-bot' : null }),
+      context: async (branch: string) => ({ personalization: { mode, threadRole: branch === parent.branchId ? 'main' : 'worker', sessionId: views.get(branch)!.threadId } }),
       childForThread: async (thread: string) => thread === v.threadId || thread === sibling.threadId ? { child_thread_id: thread } : null,
       planView: async (branch: string) => views.get(branch)!,
       planContains: async (branch: string, head: string | null, candidate: string | null) => ({
@@ -272,10 +273,13 @@ describe('plan independent owner review, real TriviumDB', () => {
   it('requires an admitted ordinary scope rather than trusting a child-like role label', async () => {
     const identity = { runtime: 'agent' as const, threadId: 'claimed-child', branchId: 'branch' };
     let basis: { mode: string; threadRole: string; sessionId: string } | undefined = { mode: 'agent', threadRole: 'worker', sessionId: identity.threadId };
-    const runtime = { context: async () => basis && ({ personalization: basis }), childForThread: async () => null } as unknown as AgentRuntimeClient;
+    let botId: string | null = null;
+    const runtime = { thread: async () => ({ bot_id: botId }), context: async () => basis && ({ personalization: basis }), childForThread: async () => null } as unknown as AgentRuntimeClient;
     const service = new PlanService(runtime, async () => { throw new Error('An unsupported scope must not open the plan owner'); });
     await expect(service.read(identity)).rejects.toMatchObject({ code: 'plan-unsupported' });
     basis = { mode: 'bot', threadRole: 'main', sessionId: identity.threadId };
+    await expect(service.read(identity)).rejects.toMatchObject({ code: 'plan-unsupported' });
+    botId = 'actual-bot'; basis = { mode: 'agent', threadRole: 'main', sessionId: identity.threadId };
     await expect(service.read(identity)).rejects.toMatchObject({ code: 'plan-unsupported' });
     basis = { mode: 'agent', threadRole: 'main', sessionId: 'foreign-thread' };
     await expect(service.read(identity)).rejects.toThrow('Context belongs to another Thread');
@@ -383,3 +387,72 @@ describe('plan independent owner review, real TriviumDB', () => {
   });
 
 });
+
+
+function heldPlanWork() {
+  let enter!: () => void; let release!: () => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const waiting = new Promise<void>(resolve => { release = resolve; });
+  return { entered, release, pause: async () => { enter(); await waiting; } };
+}
+
+it.each(['store', 'ancestry', 'selection-stale', 'transaction-unknown', 'committed'] as const)(
+  'drains the original plan %s boundary and reconciles exact stopping evidence without repeating a write', async boundary => {
+    const f = await fixture(true); const v = view('bot-branch', ['bot-head'], null, 'bot-thread');
+    const hold = heldPlanWork(); let writes = 0; let firstOpen = true;
+    const store = { ...f.store, mutatePlan: async (input: PlanMutationInput) => {
+      writes++;
+      if (boundary === 'selection-stale') { await hold.pause(); throw new KnowledgeMutationError('conflict', 'Plan selection is stale'); }
+      if (boundary === 'transaction-unknown') { await hold.pause(); throw new Error('Original transaction outcome is unavailable'); }
+      const mutation = await f.store.mutatePlan(input);
+      if (boundary === 'committed') await hold.pause();
+      return mutation;
+    } };
+    const runtime = { planContains: async () => {
+      if (boundary === 'ancestry') await hold.pause();
+      return { status: 'ready', visible: true };
+    } } as unknown as AgentRuntimeClient;
+    const owner = createPlanOwner(async () => {
+      if (boundary === 'store' && firstOpen) { firstOpen = false; await hold.pause(); }
+      return store;
+    }, runtime);
+    const query: PlanQuery = { action: 'mutate', view: v, origin: tool('policy_action'),
+      arguments: { action: 'update', expectedRef: null, items: [{ text: 'Original Bot plan', status: 'pending' }] } };
+    let epoch = 'original-epoch';
+    const responses = new Map<string, (response: PrivatePlanResponse) => void>();
+    const bridge = new PlanBridge(() => epoch, async response => { responses.get(response.id)!(response); },
+      () => { throw new Error('Unexpected plan transport failure'); });
+    bridge.setOwner(owner);
+    const request = (id: string, value: PlanQuery) => new Promise<PrivatePlanResponse>(resolve => {
+      responses.set(id, resolve);
+      bridge.consume({ v: 1, kind: 'plan-request', id, kernelEpoch: epoch, query: value });
+    });
+    const pending = request('original', query);
+    try {
+      await hold.entered;
+      let stopped = false;
+      const drain = bridge.drainRuns(new Set([query.origin.runId])).then(() => { stopped = true; });
+      expect((await pending).result.status).toBe('unknown');
+      expect(stopped).toBe(false);
+      hold.release(); await drain;
+      const recovered = (await request('recover', { ...query, action: 'receipt' })).result;
+      if (boundary === 'committed') {
+        expect(recovered).toMatchObject({ status: 'ready', mutation: { receipt: { origin: query.origin, status: 'applied' } } });
+        expect(recovered).not.toHaveProperty('executionReceipt');
+        const cancelled = new AbortController(); cancelled.abort();
+        expect(await owner({ ...query, action: 'receipt' }, cancelled.signal)).toEqual(recovered);
+      } else {
+        expect(recovered).toMatchObject({ status: 'ready', plan: null, mutation: null,
+          executionReceipt: { executorStopped: true, origin: query.origin, view: v,
+            effect: boundary === 'transaction-unknown' ? 'unknown' : 'none',
+            outcome: boundary === 'transaction-unknown' ? 'indeterminate' : 'failed' } });
+        const changed = { ...query, action: 'receipt' as const,
+          arguments: { action: 'update' as const, expectedRef: null, items: [] } };
+        expect((await request('changed-intent', changed)).result).not.toHaveProperty('executionReceipt');
+        bridge.close(); epoch = 'reopened-epoch';
+        expect((await request('reopened', { ...query, action: 'receipt' })).result).not.toHaveProperty('executionReceipt');
+      }
+      expect(writes).toBe(boundary === 'store' || boundary === 'ancestry' ? 0 : 1);
+      expect((await readPlan(f.store, v))?.content ?? null).toBe(boundary === 'committed' ? '- [ ] Original Bot plan' : null);
+    } finally { hold.release(); bridge.close(); await pending; }
+  });

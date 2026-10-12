@@ -104,6 +104,10 @@ impl Catalog {
         initial: Option<context::ContextProposal>,
         personalization: Option<personalization::PersonalizationBasis>,
     ) -> Result<SubmissionPreparation> {
+        let bot = self.bot_for_thread(&command.thread_id)?.is_some();
+        if personalization.as_ref().is_some_and(|basis| (basis.mode == "bot") != bot) {
+            return Err(RuntimeError::Invalid("personalization mode differs from the actual Bot binding".into()));
+        }
         let delegated: bool = self.db.query_row(
             "SELECT EXISTS(SELECT 1 FROM child_tasks WHERE child_thread_id=?1)",
             [&command.thread_id],
@@ -430,6 +434,7 @@ impl PreparedSubmission {
                         super::followups::normalized_source(resources.source.take(), &run_id);
                 }
                 let body = context::ContextCheckpoint {
+                    bot_memory_snapshot: active.as_ref().and_then(|active| active.bot_memory_snapshot.clone()),
                     id: proposal.key.clone(),
                     revision,
                     proposal,
@@ -451,7 +456,7 @@ impl PreparedSubmission {
                         Some(&body),
                     )?);
                 }
-                let reference = content.save(&serde_json::to_value(&body)?)?;
+                let reference = body.save(&content)?;
                 Ok(Some((context::CheckpointMetadata::from(&body), reference)))
             })
             .transpose()?

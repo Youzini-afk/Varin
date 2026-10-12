@@ -22,6 +22,7 @@ export interface ThreadCollaborationOwners {
   sourceCaptureOwners: StableSourcePreparationOwners & { documents: Pick<DocumentAuthority, 'admitWorkspaceRegistration'> };
   runtime: AgentRuntimeClient;
   continueRun(runId: string, signal: AbortSignal): Promise<void>;
+  canExecuteThread?(threadId: string): Promise<boolean>;
   recoverLaunches(signal: AbortSignal): Promise<void>;
   prepareContext: ContextPreparer;
   prepareSkillInput?: ThreadSkillInputPreparer;
@@ -32,7 +33,8 @@ export interface ThreadCollaborationOwners {
  * work; Catalog owns task identities, preparation receipts, reports and Wait delivery. */
 export class ThreadCollaboration {
   private readonly tasks = new Map<string, { controller: AbortController; work: Promise<void>; revision: number; preparing: boolean; recheck: boolean }>();
-  private readonly cleaningSources = new Set<string>();
+  private readonly cleaningSources = new Map<string, Promise<void>>();
+  private readonly retiringThreads = new Set<string>();
   private readonly removers: Array<() => void>;
   private epoch = new AbortController();
   private stopped = false;
@@ -63,6 +65,57 @@ export class ThreadCollaboration {
     this.stopped = true; this.epoch.abort();
     for (const task of this.tasks.values()) task.controller.abort();
     for (const remove of this.removers) remove();
+  }
+  async suspendThreads(threadIds: ReadonlySet<string>): Promise<void> {
+    const executions = await this.owners.runtime.childExecutions(undefined, this.epoch.signal);
+    const scoped = executions.filter(child => threadIds.has(child.child_thread_id));
+    const work = scoped.flatMap(child => {
+      const active = this.tasks.get(child.execution_id);
+      if (!active) return [];
+      active.controller.abort(new DOMException('Bot work suspended', 'AbortError'));
+      return [active.work];
+    });
+    const sources = await this.owners.runtime.unacceptedChildSources(this.epoch.signal);
+    work.push(...sources.filter(source => threadIds.has(source.parent_thread_id))
+      .flatMap(source => this.cleaningSources.get(source.operation_id) ?? []));
+    await Promise.all(work);
+  }
+  /** Delete has already cancelled these original trees. Join their live owners and release
+   * the same durable handoff/source references before Catalog removes their identities. */
+  async releaseCancelledThreads(threadIds: ReadonlySet<string>): Promise<void> {
+    const signal = this.epoch.signal;
+    for (const id of threadIds) this.retiringThreads.add(id);
+    try {
+      const original = (await this.owners.runtime.childExecutions(undefined, signal))
+        .filter(child => threadIds.has(child.child_thread_id));
+      await Promise.all(original.flatMap(child => {
+        const active = this.tasks.get(child.execution_id);
+        return active ? [active.work] : [];
+      }));
+      for (const child of original) {
+        const current = await this.owners.runtime.childExecution(child.execution_id, signal);
+        if (!current.report) throw new Error(`Child ${child.execution_id} has no settled cancellation. Reconcile the original work, then retry Delete.`);
+        await this.advance(current, signal, signal);
+        const released = await this.owners.runtime.childExecution(child.execution_id, signal);
+        if (!released.resources_released || (released.receipt && ['pending', 'settling', 'candidate'].includes(released.code_result.kind))) {
+          throw new Error(`Child ${child.execution_id} still retains its original source or unpublished result. Reconcile that work, then retry Delete.`);
+        }
+      }
+      for (const source of await this.owners.runtime.unacceptedChildSources(signal)) {
+        if (!threadIds.has(source.parent_thread_id)) continue;
+        const active = this.cleaningSources.get(source.operation_id);
+        if (active) await active;
+        // Re-read the original receipt after joining; failed release stays retryable.
+        if (!(await this.owners.runtime.unacceptedChildSources(signal)).some(current => current.operation_id === source.operation_id)) continue;
+        await this.withSourceStore(source.source, source.parent_thread_id, signal, async store => {
+          if (!store.releaseBranchHandoffPin) throw new Error('Durable source pin release is unavailable');
+          await store.releaseBranchHandoffPin(source.source.branch_id!, source.pin_id);
+          await this.owners.runtime.releaseUnacceptedChildSource(source.operation_id, signal);
+        });
+      }
+    } finally {
+      for (const id of threadIds) this.retiringThreads.delete(id);
+    }
   }
   /** Registration precedes discovery. Real events drive subsequent passes; no idle polling. */
   async recover(): Promise<void> {
@@ -98,8 +151,8 @@ export class ThreadCollaboration {
         const unaccepted = await this.owners.runtime.unacceptedChildSources(epoch.signal);
         for (const source of unaccepted) {
           if (this.cleaningSources.has(source.operation_id)) continue;
-          this.cleaningSources.add(source.operation_id);
-          void this.withSourceStore(source.source, source.parent_thread_id, epoch.signal, async store => {
+          if (this.owners.canExecuteThread && !await this.owners.canExecuteThread(source.parent_thread_id)) continue;
+          const cleanup = this.withSourceStore(source.source, source.parent_thread_id, epoch.signal, async store => {
             if (!store.releaseBranchHandoffPin) throw new Error('Durable source pin release is unavailable');
             await store.releaseBranchHandoffPin(source.source.branch_id!, source.pin_id);
             epoch.signal.throwIfAborted();
@@ -107,9 +160,12 @@ export class ThreadCollaboration {
           }).catch(error => {
             if (!epoch.signal.aborted) this.owners.onError(source.operation_id, error);
           }).finally(() => this.cleaningSources.delete(source.operation_id));
+          this.cleaningSources.set(source.operation_id, cleanup);
         }
         epoch.signal.throwIfAborted();
         for (const child of executions) {
+          if (this.retiringThreads.has(child.child_thread_id)) continue;
+          if (this.owners.canExecuteThread && !await this.owners.canExecuteThread(child.child_thread_id)) continue;
           const active = this.tasks.get(child.execution_id);
           if (child.report && active?.preparing) {
             active.recheck = true; active.controller.abort();
@@ -382,7 +438,7 @@ export class ThreadCollaboration {
         if (child.trigger.kind !== 'dispatch' && (!checkpoint || !prepareContext.forSource)) throw new Error('Continuation context provenance is unavailable');
         const context = await waitWithSignal(checkpoint
           ? prepareContext.forSource!(checkpoint, source, signal)
-          : prepareContext(identity, source, { mode: 'agent', threadRole: 'worker', projectId: child.project_id, childProfile: child.selected_profile }, signal), signal);
+          : prepareContext(identity, source, { mode: (await runtime.thread(child.child_thread_id, signal)).bot_id ? 'bot' : 'agent', threadRole: 'worker', projectId: child.project_id, childProfile: child.selected_profile }, signal), signal);
         let inputPreparation: InputResourcePreparation | undefined;
         if (child.trigger.kind === 'user_continuation') {
           const input = child.input as { text?: unknown } | string;
@@ -405,7 +461,7 @@ export class ThreadCollaboration {
     } catch (error) {
       // A current definition/Goal pause can arrive after source preparation but before the
       // original submission transaction. Keep this exact pending execution for its next event.
-      if (error instanceof KernelClientError && error.code === 'activation-held') return;
+      if (error instanceof KernelClientError && (error.code === 'activation-held' || error.code === 'bot-suspended')) return;
       if (!signal.aborted) {
         const current = await runtime.childExecution(child.execution_id);
         // An admitted Run's unknown effects remain recoverable; preparation failure cannot erase them.

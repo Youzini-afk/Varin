@@ -11,9 +11,17 @@ export const entrySourceText = (entry: PiSessionEntry): string => {
   return content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
 };
 
+/** Reading witnesses deliberately do not participate in source ownership or coverage. */
+export const sourceIdentity = (span: MemorySourceSpan): readonly string[] => {
+  switch (span.kind) {
+    case 'pi-entry': return [span.kind, span.sessionId, span.id];
+    case 'event': return [span.kind, span.scopeId, span.sessionId, span.id];
+    case 'run-report': return [span.kind, span.scopeId, span.threadId, span.id];
+    case 'history-item': return [span.kind, span.threadId, span.id];
+  }
+};
 export const sameSource = (a: MemorySourceSpan, b: MemorySourceSpan): boolean =>
-  a.kind === b.kind && a.id === b.id && a.sessionId === b.sessionId
-  && a.scopeId === b.scopeId && a.threadId === b.threadId;
+  JSON.stringify(sourceIdentity(a)) === JSON.stringify(sourceIdentity(b));
 
 export const overlappingSource = (a: MemorySourceSpan, b: MemorySourceSpan): boolean =>
   sameSource(a, b) && a.revision === b.revision && a.start < b.end && b.start < a.end;
@@ -48,13 +56,18 @@ export const uncoveredSourceSpans = (span: MemorySourceSpan, covered: readonly M
 
 export const parseSourceSpans = (value: unknown): MemorySourceSpan[] => {
   if (!Array.isArray(value)) throw new Error("Invalid memory source ranges");
-  const spans = value.filter((span): span is MemorySourceSpan => !!span && typeof span === "object"
-    && ["pi-entry", "event", "run-report"].includes(span.kind)
-    && typeof span.id === "string" && typeof span.revision === "string"
-    && Number.isSafeInteger(span.start) && Number.isSafeInteger(span.end) && span.start >= 0 && span.end > span.start
-    && (span.kind !== "pi-entry" || typeof span.sessionId === "string")
-    && (span.kind !== "event" || typeof span.scopeId === "string")
-    && (span.kind !== "run-report" || typeof span.threadId === "string"));
-  if (spans.length !== value.length) throw new Error("Invalid memory source range");
-  return spans;
+  const text = (value: unknown) => typeof value === 'string' && value.length > 0;
+  return value.map((raw): MemorySourceSpan => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Invalid memory source range');
+    const span = raw as Record<string, unknown>;
+    const common = text(span.id) && text(span.revision) && Number.isSafeInteger(span.start) && Number.isSafeInteger(span.end)
+      && Number(span.start) >= 0 && Number(span.end) > Number(span.start);
+    const required = span.kind === 'pi-entry' ? ['sessionId'] : span.kind === 'event' ? ['scopeId', 'sessionId']
+      : span.kind === 'run-report' ? ['scopeId', 'threadId'] : span.kind === 'history-item' ? ['threadId', 'branchId', 'headId'] : null;
+    if (!common || !required || required.some(key => !text(span[key]))
+      || Object.keys(span).some(key => !['kind', 'id', 'revision', 'start', 'end', ...required].includes(key))) {
+      throw new Error('Invalid memory source identity or range');
+    }
+    return span as unknown as MemorySourceSpan;
+  });
 };

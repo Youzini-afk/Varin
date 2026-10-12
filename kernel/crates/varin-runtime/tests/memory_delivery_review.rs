@@ -78,6 +78,7 @@ fn memory_publication_preserves_concurrent_receipts_and_settles_after_run_comple
                 memories: vec![note(1, "OLD_CAPTURE")],
                 note_revisions: BTreeMap::from([("1".into(), 2)]),
                 known: BTreeMap::new(),
+            bot_knowledge: None,
             },
         )
         .unwrap()
@@ -262,6 +263,7 @@ fn policy_model_quoted_real_memory_facts_keep_selection_send_and_commit_separate
             memories: vec![note(1, "CHANGED_NOTE_FOR_POLICY")],
             note_revisions: BTreeMap::from([("1".into(), 2)]),
             known: BTreeMap::new(),
+            bot_knowledge: None,
         },
     )
     .unwrap();
@@ -412,6 +414,7 @@ fn memory_request_selection_is_not_delivery_and_frozen_request_evidence_survives
             memories: vec![note(1, "PENDING_NOTE_V2")],
             note_revisions: BTreeMap::from([("1".into(), 2)]),
             known: BTreeMap::new(),
+            bot_knowledge: None,
         },
     )
     .unwrap();
@@ -451,6 +454,7 @@ fn memory_request_selection_is_not_delivery_and_frozen_request_evidence_survives
             memories: vec![note(1, "PENDING_NOTE_V3")],
             note_revisions: BTreeMap::from([("1".into(), 3)]),
             known: BTreeMap::new(),
+            bot_knowledge: None,
         },
     )
     .unwrap();
@@ -606,6 +610,7 @@ fn external_tool_json_cannot_forge_memory_receipts_or_suppress_authoritative_fac
             memories: vec![note(1, "AUTHORITATIVE_CHANGED_NOTE")],
             note_revisions: BTreeMap::from([("1".into(), 2)]),
             known: BTreeMap::new(),
+            bot_knowledge: None,
         },
     )
     .unwrap();

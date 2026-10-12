@@ -63,6 +63,7 @@ export interface ContextJob {
   receipt: InputSubmitReceipt;
 }
 export interface ContextCheckpoint {
+  bot_memory_snapshot?: { botId: string; threadId: string; revision: number; state: { content_object: string } };
   resource_activations: ResourceActivation[];
   resources?: ContextResources;
   personalization?: ContextPersonalization;

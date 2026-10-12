@@ -11,6 +11,7 @@ import type { InitialContext, ContextPersonalization, ContextResources, LaunchSo
 
 interface ContextOwners {
   composition?: ContextCompositionPreparer;
+  botForThread?(threadId: string): Promise<{ id: string; name: string; instructions: string | null; revision: number } | null>;
   resources: ThreadResourceScope;
   personalization: Pick<AgentPersonalization, 'catalog'>;
   projectForWorkspace(workspaceId: string): Promise<string | undefined>;
@@ -62,7 +63,9 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
   const authority = createAgentResourceAuthority();
   const render = async (basis: ContextPersonalization, resources: ContextResources | undefined, updateMemory = false, signal?: AbortSignal): Promise<InitialContext> => {
     signal?.throwIfAborted();
-    const catalog = await owners.personalization.catalog();
+    const bot = await owners.botForThread?.(basis.sessionId) ?? null;
+    if ((basis.mode === 'bot') !== (bot !== null)) throw new Error('Context mode differs from the original Thread owner');
+    const catalog = bot ? { revision: bot.revision, prompts: {}, memories: [] } : await owners.personalization.catalog();
     const scopes: AgentMemoryScope[] = [{ kind: 'global' },
       ...(basis.projectId ? [{ kind: 'project' as const, id: basis.projectId }] : []),
       { kind: 'session', id: basis.sessionId }];
@@ -71,8 +74,8 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
       const profile = catalog.prompts[agentScopeKey(scope)];
       return profile ? [{ scope, profile }] : [];
     });
-    const configurationDigest = digest({ scopes, profiles, mode: basis.mode, threadRole: basis.threadRole });
-    const memorySnapshot = updateMemory ? { revision: catalog.revision,
+    const configurationDigest = digest({ scopes, profiles, bot, mode: basis.mode, threadRole: basis.threadRole });
+    const memorySnapshot = updateMemory && !bot ? { revision: catalog.revision,
       memories: basis.mode === 'bot' ? [] : catalog.memories.filter(note => keys.has(agentScopeKey(note.scope))) } : basis.memorySnapshot;
     const context: AgentPersonalizationContext = {
       mode: basis.mode as AgentPersonalizationContext['mode'], threadRole: basis.threadRole as AgentPersonalizationContext['threadRole'], revision: memorySnapshot.revision, sessionId: basis.sessionId,
@@ -89,9 +92,9 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
     const { runtime_identity: _profileIdentity, child_profile: _profileChild, ...personalized } = personalizeAgentSystemPrompt(original, context);
     return {
       ...(resources ? { resources } : {}),
-      effectiveSystemPrompt: renderAgentSystemPrompt({ runtime_identity: original.runtime_identity ?? '', ...personalized, ...(original.child_profile ? { child_profile: original.child_profile } : {}) }),
+      effectiveSystemPrompt: renderAgentSystemPrompt({ runtime_identity: original.runtime_identity ?? '', ...personalized, ...(original.child_profile ? { child_profile: original.child_profile } : {}), ...(bot ? { bot_profile: `You are ${bot.name}, a persistent Bot with your own work and memory. Read current facts before acting.\n${bot.instructions ?? ''}` } : {}) }),
       instructionSources: [...basis.instructionSources, `agent.personalization:profiles:${configurationDigest}`],
-      memoryCheckpoint: `agent.personalization:${memorySnapshot.revision}:${digest({ scopes, memories: context.memories })}`,
+      memoryCheckpoint: bot ? `bot.knowledge:${bot.id}:context` : `agent.personalization:${memorySnapshot.revision}:${digest({ scopes, memories: context.memories })}`,
       personalization: { ...provenance, memorySnapshot, configurationDigest,
         revision: configurationDigest === basis.configurationDigest ? basis.revision : catalog.revision, ...(composition ? { contextComposition: composition } : {}) },
     };
@@ -149,7 +152,8 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
       return replaceResources(checkpoint, resourceThreadSource(checkpoint.resources.source), options, true);
     },
     async main(identity: ThreadIdentity, source: ThreadSource | null, signal?: AbortSignal): Promise<InitialContext> {
-      return initial(identity, source, { mode: 'agent', threadRole: 'main',
+      const bot = await owners.botForThread?.(identity.threadId) ?? null;
+      return initial(identity, source, { mode: bot ? 'bot' : 'agent', threadRole: 'main',
         projectId: source ? await owners.projectForWorkspace(source.workspaceId) ?? null : null }, signal);
     },
     async compact(checkpoint: ContextCheckpoint, signal?: AbortSignal): Promise<InitialContext> {
@@ -158,7 +162,8 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
     },
     async refresh(checkpoint: ContextCheckpoint, signal?: AbortSignal): Promise<InitialContext> {
       if (!checkpoint.personalization) throw new Error('Context has no frozen personalization provenance');
-      return render(checkpoint.personalization, checkpoint.resources, false, signal);
+      const rendered = await render(checkpoint.personalization, checkpoint.resources, false, signal);
+      return checkpoint.personalization.mode === 'bot' ? { ...rendered, memoryCheckpoint: checkpoint.proposal.memory_checkpoint } : rendered;
     },
   });
 }

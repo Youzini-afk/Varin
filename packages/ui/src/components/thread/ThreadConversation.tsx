@@ -12,6 +12,8 @@ import { ThreadGoal } from './ThreadGoal';
 import { ThreadFollowups } from './ThreadFollowups';
 import { ThreadResearch } from './ThreadResearch';
 import { ThreadMemory } from './ThreadMemory';
+import { ThreadMemorySelection } from './ThreadMemorySelection';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { ThreadResources } from './ThreadResources';
 import { ThreadSkillMaterials } from './ThreadSkillMaterials';
 import { ThreadPermission } from './ThreadPermission';
@@ -23,7 +25,7 @@ import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachment
 import { fileToImageAttachment } from '@/components/chat/composer/imageAttachments';
 import { useI18n } from '@/lib/i18n';
 import React from 'react';
-import { threadSourceFailureMessage, ThreadRequestError, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
+import { threadMemorySourceText, threadSourceFailureMessage, ThreadRequestError, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadThinkingLevel, ThreadSnapshot, ThreadsAPI, ThreadHistoryPage, ThreadPreparedSource } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -147,7 +149,7 @@ const resourceErrorMessages = new Map([
   ['resource-cancelled', 'Skill or resource preparation was cancelled. Try again when ready.'],
 ]);
 
-export function ThreadConversation({ api, identity, onBranchCreated, initialWorkspacePath }: { api: ThreadsAPI; identity: ThreadIdentity; onBranchCreated?: (identity: ThreadIdentity) => void; initialWorkspacePath?: string }) {
+export function ThreadConversation({ api, identity, onBranchCreated, initialWorkspacePath, preferredModel, onWorkChanged, readOnly = false }: { onWorkChanged?: () => void; preferredModel?: ThreadModel | null; readOnly?: boolean; api: ThreadsAPI; identity: ThreadIdentity; onBranchCreated?: (identity: ThreadIdentity) => void; initialWorkspacePath?: string }) {
   const { t } = useI18n();
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const [images, setImages] = React.useState<ImageAttachment[]>([]);
@@ -171,6 +173,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const [providerId, setProviderId] = React.useState('');
   const [modelId, setModelId] = React.useState('');
   const [thinkingLevel, setThinkingLevel] = React.useState<ThreadThinkingLevel>('off');
+  const appliedModelPreference = React.useRef<string | undefined>(undefined);
   const [models, setModels] = React.useState<ThreadModelInfo[]>([]);
   const [modelError, setModelError] = React.useState<string>();
   React.useEffect(() => {
@@ -197,6 +200,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     return () => { identityGeneration.current += 1; historyGeneration.current += 1; fileReadGeneration.current += 1; view.close(); };
   }, [api, identity, host]);
   const snapshot = snapshotState?.identity.threadId === identity.threadId && snapshotState?.identity.branchId === identity.branchId ? snapshotState : undefined;
+  const workRevision = snapshot ? JSON.stringify([snapshot.activeRun?.id, snapshot.activeRun?.state,
+    snapshot.children?.map(child => [child.child_thread_id, child.state])]) : null;
+  React.useEffect(() => { if (workRevision) onWorkChanged?.(); }, [workRevision, onWorkChanged]);
   const branch = snapshot?.thread.branches.find(value => value.branch_id === identity.branchId);
   const run = snapshot?.activeRun ?? branch?.latest_run;
   const samplingConfiguration = (snapshot?.modelSelection.active?.configuration ?? run?.configuration) as
@@ -222,10 +228,19 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     : models.find(model => model.providerId === providerId && model.modelId === modelId)?.acceptsImages;
   React.useEffect(() => {
     const config = (snapshot?.modelSelection.desired?.configuration ?? run?.configuration) as { providerId?: string; model?: string; thinkingLevel?: ThreadThinkingLevel } | undefined;
-    if (config?.providerId && config.model && (active || !providerId)) { setProviderId(config.providerId); setModelId(config.model); setThinkingLevel(config.thinkingLevel ?? 'off'); }
-  }, [run?.configuration, snapshot?.modelSelection.desired, active, providerId]);
+    if (config?.providerId && config.model && (active || !providerId && preferredModel === undefined)) { setProviderId(config.providerId); setModelId(config.model); setThinkingLevel(config.thinkingLevel ?? 'off'); }
+  }, [run?.configuration, snapshot?.modelSelection.desired, active, providerId, preferredModel]);
+  React.useEffect(() => {
+    if (!snapshot || preferredModel === undefined) return;
+    const key = JSON.stringify([host, identity.threadId, identity.branchId, preferredModel]);
+    if (appliedModelPreference.current === key) return;
+    appliedModelPreference.current = key;
+    // Active work consumes the original desired-selection owner. Idle drafts may follow a
+    // changed Bot profile even when their latest Run was cancelled; later renders preserve edits.
+    if (!active) { setProviderId(preferredModel?.providerId ?? ''); setModelId(preferredModel?.modelId ?? ''); setThinkingLevel(preferredModel?.thinkingLevel ?? 'off'); }
+  }, [snapshot, active, host, identity.threadId, identity.branchId, preferredModel]);
   const act = async (work: () => Promise<unknown>, interrupt = false) => {
-    if (pendingAction.current && !interrupt) return;
+    if (readOnly || pendingAction.current && !interrupt) return;
     const action = {}; pendingAction.current = action;
     const generation = identityGeneration.current;
     const current = () => generation === identityGeneration.current && host === getRuntimeEndpointGeneration() && pendingAction.current === action;
@@ -308,9 +323,11 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   };
   const visibleHistory = historyView?.items ?? snapshot?.history ?? [];
   const previousHistory = historyView ? historyView.previous : snapshot?.historyPage.previous;
+  const memorySelection = getRegisteredRuntimeAPIs()?.bots?.selection;
+  const memoryHead = historyView?.head ?? snapshot?.historyPage.head;
   const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, text, images, providerId, modelId, thinkingLevel, inputMode, preparedSource?.source]);
   const sourceCannotBeApplied = active && Boolean(preparedSource) && pendingInput.current?.fingerprint !== submissionFingerprint();
-  return <ThreadMaterials api={api.materials} identity={identity} onAddRegion={acceptsImages === false ? undefined : region => {
+  return <ThreadMaterials api={api.materials} identity={identity} onAddRegion={readOnly || acceptsImages === false ? undefined : region => {
     if (pendingAction.current) throw new Error('Wait for the current message before adding a PDF selection.');
     setText(current => [current.trimEnd(), buildPdfMaterialCitationMarkdown(region.title, region)].filter(Boolean).join('\n\n'));
     setImages(current => [...current, region.image]);
@@ -323,22 +340,24 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         {historyView && <Button variant="outline" size="sm" onClick={returnToLatest}>{historyView.head !== snapshot?.historyPage.head ? 'Show latest messages' : 'Return to latest view'}</Button>}
         {historyView && <span className="text-xs text-muted-foreground">Viewing saved history</span>}
       </div>
-      {snapshot && <ThreadGoal api={api.goals} identity={identity} goals={snapshot.goals} sourceRunId={run?.id} refresh={async () => { await projection.current?.refresh(); }} />}
+      {!readOnly && snapshot && <ThreadGoal api={api.goals} identity={identity} goals={snapshot.goals} sourceRunId={run?.id} refresh={async () => { await projection.current?.refresh(); }} />}
       {launch && <ThreadChildProfiles launch={launch.selection} />}
       {api.family && <ThreadFamily api={api.family} mediaRead={api.mediaRead} identity={identity} />}
-      {api.messages && <ThreadMessages api={api.messages} family={api.family} identity={identity} eventCursor={snapshot?.eventCursor} cancelObservation={pending ? undefined : operationId => act(() => api.cancelOperation(operationId), true)} />}
-      {api.plan && <ThreadPlan api={api.plan} identity={identity} contextRevision={snapshot?.context.checkpoint?.revision} />}
-      {api.research && <ThreadResearch key={`research:${host}:${identity.threadId}:${identity.branchId}`} api={api.research} materials={api.materials} identity={identity} sourceRunId={run?.id} />}
+      {!readOnly && api.messages && <ThreadMessages api={api.messages} family={api.family} identity={identity} eventCursor={snapshot?.eventCursor} cancelObservation={pending ? undefined : operationId => act(() => api.cancelOperation(operationId), true)} />}
+      {!readOnly && api.plan && <ThreadPlan api={api.plan} identity={identity} contextRevision={snapshot?.context.checkpoint?.revision} />}
+      {!readOnly && api.research && <ThreadResearch key={`research:${host}:${identity.threadId}:${identity.branchId}`} api={api.research} materials={api.materials} identity={identity} sourceRunId={run?.id} />}
       {visibleHistory.map(item => <article key={item.id} className="mx-auto max-w-3xl">
         <div className="mb-1 text-xs text-muted-foreground">{item.source}</div>
         <ThreadContent api={api} identity={identity} holder={{ kind: 'history', itemId: item.id }} parts={historyParts(item.content, item.source)} messageId={item.id} />
         <ThreadSkillMaterials content={item.content} />
+        {!readOnly && snapshot?.thread.bot_id && memorySelection && memoryHead && threadMemorySourceText(item) && <ThreadMemorySelection
+          api={memorySelection} identity={{ ...identity, headId: memoryHead }} itemId={item.id} text={threadMemorySourceText(item)} />}
         <details className="mt-2 text-xs text-muted-foreground">
           <summary className="cursor-pointer">Summarize through this message</summary>
           <p className="py-2">Generate a continuation summary with the selected model. Original messages stay available. Apply the completed summary below when ready.</p>
-          <Button variant="ghost" size="sm" disabled={pending || !snapshot || !providerId || !modelId} onClick={() => void compactThrough(item.id)}>Generate context summary</Button>
+          <Button variant="ghost" size="sm" disabled={readOnly || pending || !snapshot || !providerId || !modelId} onClick={() => void compactThrough(item.id)}>Generate context summary</Button>
         </details>
-        {onBranchCreated && <details className="mt-2 text-xs text-muted-foreground">
+        {!readOnly && onBranchCreated && <details className="mt-2 text-xs text-muted-foreground">
           <summary className="cursor-pointer">Branch from this message</summary>
           <p className="py-2">Keeps conversation through this message. Choose a model for the new branch. Running work, workspace tools and context summaries stay on the original branch.</p>
           <Button variant="ghost" size="sm" disabled={pending} onClick={() => void forkFrom(item.id)}>Branch conversation only</Button>
@@ -363,24 +382,24 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         {child.report && <><div className="text-xs text-muted-foreground">Report · {child.report.outcome}</div><MarkdownRenderer messageId={`child:${child.operation_id}`} content={child.report.detail ?? "Report stored in child history."} /></>}
         {child.report?.history_ids.map(itemId => <ThreadChildReport key={itemId} api={api} identity={identity} operationId={child.operation_id} itemId={itemId} />)}
         <ChildExecutions key={`${host}:${identity.threadId}:${identity.branchId}:${child.operation_id}`} api={api} identity={identity} operationId={child.operation_id} />
-        {api.collaboration && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelChild(identity, child.operation_id))}>Stop child subtree</Button>}
+        {!readOnly && api.collaboration && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelChild(identity, child.operation_id))}>Stop child subtree</Button>}
       </div>)}
-      {api.collaboration && <Button variant="outline" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelTree(identity))}>Stop task and children</Button>}
-      {snapshot && <ThreadFollowups key={`${host}:${identity.threadId}:${identity.branchId}`} api={api.followups} family={api.family} mediaRead={api.mediaRead} research={api.research} identity={identity}
+      {!readOnly && api.collaboration && <Button variant="outline" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelTree(identity))}>Stop task and children</Button>}
+      {!readOnly && snapshot && <ThreadFollowups key={`${host}:${identity.threadId}:${identity.branchId}`} api={api.followups} family={api.family} mediaRead={api.mediaRead} research={api.research} identity={identity}
         run={run ?? undefined} operations={snapshot.operations} followups={snapshot.followups} pending={pending} act={act}
         cancelObservation={operationId => act(() => api.cancelOperation(operationId))} />}
-      {snapshot && <ThreadMcpInteractions key={`mcp:${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} eventCursor={snapshot.eventCursor}
+      {!readOnly && snapshot && <ThreadMcpInteractions key={`mcp:${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} eventCursor={snapshot.eventCursor}
         models={models} selectedModel={samplingModel} modelError={modelError} />}
       {snapshot?.operations.filter(operation => operation.id !== pause?.action_id).map(operation => <div key={operation.id} className="mx-auto max-w-3xl rounded border p-2 text-sm">
-        <ThreadPermission operation={operation} enabled={!pending && operation.run_id === run?.id && !run?.cancel_requested} onDecide={(permissionId, decision) => act(() => api.decidePermission({ ...identity, operationId: operation.id, permissionId, decision }))} />
-        {operation.executor === 'ask_user' && <ThreadQuestion operation={operation} enabled={!pending && run?.state === 'waiting' && run.waiting_on === operation.waiting_on} onAnswer={answer => act(() => api.answerQuestion({ ...identity, operationId: operation.id, answer }))} />}
+        <ThreadPermission operation={operation} enabled={!readOnly && !pending && operation.run_id === run?.id && !run?.cancel_requested} onDecide={(permissionId, decision) => act(() => api.decidePermission({ ...identity, operationId: operation.id, permissionId, decision }))} />
+        {operation.executor === 'ask_user' && <ThreadQuestion operation={operation} enabled={!readOnly && !pending && run?.state === 'waiting' && run.waiting_on === operation.waiting_on} onAnswer={answer => act(() => api.answerQuestion({ ...identity, operationId: operation.id, answer }))} />}
         <div>Background operation · {operation.phase} · {operation.outcome ?? 'In progress'} · effect: {operation.effect}</div>
         <InferenceStatus operation={operation} />
         <McpTaskStatus operation={operation} />
         <McpResourceStatus operation={operation} />
         {operation.host_job?.mcpTaskResult && <details><summary>Remote task result</summary><ThreadOutput api={api} identity={identity}
           holder={{ kind: 'operation', operationId: operation.id, output: 'mcp_task_result' }} output={operation.host_job.mcpTaskResult} messageId={`${operation.id}:mcp-task-result`} /></details>}
-        {api.processes && operation.executor === 'process_spawn' && operation.call_completion?.kind === 'job_accepted'
+        {!readOnly && api.processes && operation.executor === 'process_spawn' && operation.call_completion?.kind === 'job_accepted'
           && (operation.intent as { call?: { arguments?: { mode?: string } } } | null)?.call?.arguments?.mode === 'pty'
           && <Button variant="outline" size="sm" disabled={pending} onClick={() => void act(() => openProcessTerminal(operation.id))}>Open process terminal</Button>}
         {operation.external_receipt && <div className="text-xs text-muted-foreground">{operation.external_receipt.executor} · {operation.external_receipt.outcome}</div>}
@@ -391,19 +410,19 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           holder={{ kind: 'operation', operationId: operation.id, output: 'result' }} output={operation.result.output} messageId={`${operation.id}:result`} /></details>}
         {operation.external_receipt && <details><summary>External receipt output</summary><ThreadOutput api={api} identity={identity}
           holder={{ kind: 'operation', operationId: operation.id, output: 'external_receipt' }} output={operation.external_receipt.result} messageId={`${operation.id}:external-receipt`} /></details>}
-        {canCancelOperation(operation, run?.waiting_on) && <Button variant="ghost" size="sm" onClick={() => void act(() => api.cancelOperation(operation.id), true)}>{operationCancelLabel(operation)}</Button>}
+        {!readOnly && canCancelOperation(operation, run?.waiting_on) && <Button variant="ghost" size="sm" onClick={() => void act(() => api.cancelOperation(operation.id), true)}>{operationCancelLabel(operation)}</Button>}
       </div>)}
-      {snapshot?.inputs.filter(input => input.state === 'queued').map(input => <ThreadQueuedInput key={`${host}:${identity.threadId}:${identity.branchId}:${input.id}:${input.revision}`}
+      {!readOnly && snapshot?.inputs.filter(input => input.state === 'queued').map(input => <ThreadQueuedInput key={`${host}:${identity.threadId}:${identity.branchId}:${input.id}:${input.revision}`}
         api={api} identity={identity} input={input} pending={pending}
         onSave={(text, images) => act(() => images === undefined ? api.editInput(input.id, input.revision, text) : api.editInput(input.id, input.revision, text, images))}
         onCancel={() => act(() => api.cancelInput(input.id, input.revision), true)} />)}
     </div>
-    {snapshot?.context.checkpoint?.personalization && <ThreadMemory key={identity.threadId} identity={identity} basis={snapshot.context.checkpoint.personalization} />}
-    {snapshot?.context.checkpoint && <ThreadResources checkpoint={snapshot.context.checkpoint} pending={pending}
+    {snapshot && <ThreadMemory key={identity.threadId} identity={identity} botId={snapshot.thread.bot_id} basis={snapshot.context.checkpoint?.personalization} />}
+    {!readOnly && snapshot?.context.checkpoint && <ThreadResources checkpoint={snapshot.context.checkpoint} pending={pending}
       onAddSkill={addSkill}
       onRefresh={() => void act(() => api.resources.refresh({ ...identity, expectedRevision: snapshot.context.checkpoint!.revision }))} />}
     {delegated && <div className="mx-auto w-full max-w-3xl px-4"><ThreadExecutions key={`${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} executions={snapshot?.delegatedExecutions ?? []} /></div>}
-    {!delegated && <ThreadSourcePicker key={identity.branchId} api={api} identity={identity} initialPath={initialWorkspacePath}
+    {!readOnly && !delegated && <ThreadSourcePicker key={identity.branchId} api={api} identity={identity} initialPath={initialWorkspacePath}
       active={active || pending} launch={snapshot?.launch ?? null} prepared={preparedSource} onPrepared={setPreparedSource} onPreparingChange={setPreparingSource} />}
     {snapshot && <details className="mx-auto max-h-64 w-full max-w-3xl shrink-0 overflow-y-auto px-4 text-xs text-muted-foreground">
       <summary className="cursor-pointer">Context summaries · checkpoint {snapshot.context.checkpoint?.revision ?? 0} · {snapshot.context.jobs.length} jobs</summary>
@@ -416,17 +435,18 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         const terminal = ['completed', 'cancelled', 'failed'].includes(jobRun.state);
         return <div key={jobRun.id} className="my-2 rounded border p-2">
           <p>Summary through {job.request.through_id.slice(-8)} · {published ? 'Applied' : jobRun.state}{!published && superseded ? ' · Checkpoint has changed' : ''}</p>
-          {jobRun.state === 'completed' && !published && !superseded && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.publishContext(identity, jobRun.id))}>Apply context summary</Button>}
-          {!terminal && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.cancelContext(identity, jobRun.id))}>Cancel summary</Button>}
-          {!terminal && ['accepted', 'preparing', 'runnable', 'waiting', 'recovering'].includes(jobRun.state) && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.resumeContext(identity, jobRun.id))}>Resume summary preparation</Button>}
+          {!readOnly && jobRun.state === 'completed' && !published && !superseded && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.publishContext(identity, jobRun.id))}>Apply context summary</Button>}
+          {!readOnly && !terminal && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.cancelContext(identity, jobRun.id))}>Cancel summary</Button>}
+          {!readOnly && !terminal && ['accepted', 'preparing', 'runnable', 'waiting', 'recovering'].includes(jobRun.state) && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.resumeContext(identity, jobRun.id))}>Resume summary preparation</Button>}
         </div>;
       })}
     </details>}
-    {hasComputer && <section className="mx-auto w-full max-w-3xl px-4" aria-label={t('computer.automation.title')}>
+    {!readOnly && hasComputer && <section className="mx-auto w-full max-w-3xl px-4" aria-label={t('computer.automation.title')}>
       <h3 className="typography-meta">{t('computer.automation.title')}</h3>
       <ComputerAutomationSection view={computer} directory={initialWorkspacePath ?? ''} />
     </section>}
-    <form className="mx-auto w-full max-w-3xl space-y-2 p-4" onSubmit={event => {
+    {readOnly && error && <p role="alert" className="px-4 text-sm text-destructive">{error}</p>}
+    {!readOnly && <form className="mx-auto w-full max-w-3xl space-y-2 p-4" onSubmit={event => {
       event.preventDefault();
       if (preparingSource || sourceCannotBeApplied) return;
       const generation = identityGeneration.current;
@@ -495,6 +515,6 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         {active && run && policyUpdate && policyUpdatePending && <Button type="button" variant="ghost" disabled={pending || run.cancel_requested} onClick={() => void act(() => api.cancelPolicyUpdate(identity, run.id, policyUpdate.selection_id))}>Cancel strategy update</Button>}
         {run && launch?.startable && launch.requires_rebind && !pause && <Button type="button" variant="ghost" disabled={pending} onClick={() => void act(() => api.retryPreparation(run.id))}>Retry preparation</Button>}
       </div>
-    </form>
+    </form>}
   </section></ThreadMaterials>;
 }

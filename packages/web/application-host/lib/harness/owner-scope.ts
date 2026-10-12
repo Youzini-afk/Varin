@@ -9,6 +9,10 @@ import { createHash } from "node:crypto";
  * to act as its entry chat.
  */
 export const SESSION_SCOPE_PREFIX = "session:";
+export const THREAD_SCOPE_PREFIX = "thread:";
+export const threadScopeId = (threadId: string): string => `${THREAD_SCOPE_PREFIX}${threadId}`;
+export const isThreadScopeId = (value: unknown): value is string => typeof value === 'string' && value.startsWith(THREAD_SCOPE_PREFIX);
+export const threadIdFromScopeId = (scopeId: string): string => scopeId.slice(THREAD_SCOPE_PREFIX.length);
 export const BOT_SCOPE_PREFIX = "bot:";
 
 export const sessionScopeId = (sessionId: string): string => `${SESSION_SCOPE_PREFIX}${sessionId}`;
@@ -33,6 +37,7 @@ export const botIdFromScopeId = (scopeId: string): string => scopeId.slice(BOT_S
  * reaches a filesystem path.
  */
 export const knowledgeStoreKeyForScope = (scopeId: string): string => {
+  if (isThreadScopeId(scopeId)) return `thread-${createHash('sha256').update(threadIdFromScopeId(scopeId)).digest('hex').slice(0, 32)}`;
   if (isSessionScopeId(scopeId)) {
     return `session-${createHash("sha256").update(sessionIdFromScopeId(scopeId)).digest("hex").slice(0, 32)}`;
   }
@@ -54,5 +59,5 @@ export const isBotStoreKey = (value: unknown): value is string => (
 
 /** The KnowledgeScope an owning scope id addresses: bot:/session: prefixes, `user`, else a workspace. */
 export const scopeOfScopeId = (scopeId: string): "workspace" | "user" | "session" | "bot" => (
-  isBotScopeId(scopeId) ? "bot" : isSessionScopeId(scopeId) ? "session" : scopeId === "user" ? "user" : "workspace"
+  isBotScopeId(scopeId) ? "bot" : (isSessionScopeId(scopeId) || isThreadScopeId(scopeId)) ? "session" : scopeId === "user" ? "user" : "workspace"
 );

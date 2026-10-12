@@ -9,7 +9,7 @@ import { AgentPersonalizationError, type AgentPersonalization } from './agent-pe
 export interface SelectionMemoryRequest {
   requestKey: string;
   retryOf?: string;
-  sessionId: string;
+  conversation: { runtime: 'pi'; sessionId: string } | { runtime: 'agent'; threadId: string; branchId: string; headId: string };
   sources: MemorySourceSpan[];
 }
 type RetryDisposition = 'observe' | 'new_attempt' | 'none';
@@ -88,7 +88,7 @@ export function registerSelectionMemoryRoutes(app: Express, deps: {
       })) });
       admitted = true;
       const text = await deps.narrate(scopeId ?? 'user', SELECTION_MEMORY_SYSTEM, prompt, controller.signal, {
-        requestKey, ...(req.body.retryOf === undefined ? {} : { retryOf: req.body.retryOf }), sessionId,
+        requestKey, ...(req.body.retryOf === undefined ? {} : { retryOf: req.body.retryOf }), conversation: { runtime: "pi", sessionId },
         sources: passages.map(({ span }) => ({ ...span, sessionId })),
       });
       controller.signal.throwIfAborted();

@@ -206,3 +206,56 @@ pub(super) fn current_history_owner(database: &std::path::Path, epoch: u64) -> R
     }
     Ok(db)
 }
+
+/// A typed Bot provenance read; the branch is a visibility witness, not source identity.
+pub struct BotHistoryRead {
+    database: std::path::PathBuf,
+    epoch: u64,
+    content: crate::content::ContentStore,
+    bot_id: String,
+    thread_id: String,
+    branch_id: String,
+    head_id: String,
+    item_id: String,
+    _publication: crate::content::ContentPublication,
+}
+impl Catalog {
+    pub fn capture_bot_history(&self, bot_id: &str, thread_id: &str, branch_id: &str, head_id: &str, item_id: &str) -> Result<BotHistoryRead> {
+        if self.bot_for_thread(thread_id)?.as_deref() != Some(bot_id) || self.branch_thread_id(branch_id)? != thread_id {
+            return Err(RuntimeError::Conflict("History source is outside this Bot".into()));
+        }
+        Ok(BotHistoryRead { database: self.database_path.clone(), epoch: self.epoch, content: self.content.clone(),
+            bot_id: bot_id.into(), thread_id: thread_id.into(), branch_id: branch_id.into(), head_id: head_id.into(), item_id: item_id.into(),
+            _publication: self.content.begin_publication() })
+    }
+}
+impl BotHistoryRead {
+    pub fn load(self, cancelled: &dyn Fn() -> bool) -> Result<HistoryItem> {
+        let db = current_history_owner(&self.database, self.epoch)?;
+        db.execute_batch("BEGIN")?;
+        if super::bot::thread_bot(&db, &self.thread_id)?.as_deref() != Some(&self.bot_id) {
+            return Err(RuntimeError::Conflict("History source Bot changed".into()));
+        }
+        let (thread, mut cursor): (String, Option<String>) = db.query_row("SELECT thread_id,head FROM branches WHERE id=?1", [&self.branch_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        if thread != self.thread_id { return Err(RuntimeError::Conflict("History witness belongs to another Thread".into())); }
+        let mut witnessed = false;
+        let item = loop {
+            if cancelled() { return Err(RuntimeError::DispatchCancelled); }
+            let key = cursor.ok_or_else(|| RuntimeError::Conflict("History item is not an ancestor of the selected head".into()))?;
+            let item: HistoryItem = record(&db, "history", &key)?;
+            if key == self.head_id { witnessed = true; }
+            if witnessed && key == self.item_id {
+                if item.thread_id != self.thread_id { return Err(RuntimeError::Conflict("History item owner changed".into())); }
+                break item;
+            }
+            cursor = item.parent;
+        };
+        let result = self.content.hydrate_history(item)?;
+        if cancelled() { return Err(RuntimeError::DispatchCancelled); }
+        let current = current_history_owner(&self.database, self.epoch)?;
+        if super::bot::thread_bot(&current, &self.thread_id)?.as_deref() != Some(&self.bot_id) {
+            return Err(RuntimeError::Conflict("History source Bot changed".into()));
+        }
+        Ok(result)
+    }
+}

@@ -1,7 +1,7 @@
 //! Ordinary Thread plans. Catalog supplies frozen identity; KnowledgeStore owns bodies and receipts.
 use super::plan_bridge::PlanBridge;
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use varin_runtime::execution::*;
 use varin_runtime::{Catalog, Effect, Lifetime, Outcome};
@@ -81,7 +81,12 @@ pub(crate) fn eligible(catalog: &Catalog, run_id: &str) -> Result<bool, Executio
     }
     let basis = catalog.run_context_scope(run_id).map_err(error)?;
     let Some(basis) = basis else { return Ok(false) };
-    if basis.mode != "agent" || basis.session_id != run.thread_id {
+    let bot = catalog
+        .bot_for_thread(&run.thread_id)
+        .map_err(error)?
+        .is_some();
+    let mode = if bot { "bot" } else { "agent" };
+    if basis.mode != mode || basis.session_id != run.thread_id {
         return Ok(false);
     }
     // A display role cannot manufacture child admission. Historical/cancelled child
@@ -213,6 +218,24 @@ fn mutation_result(query: &Value, value: &Value) -> Option<(Outcome, Effect)> {
             Some((Outcome::Succeeded, Effect::Confirmed))
         }
         Some("conflict") => Some((Outcome::Failed, Effect::None)),
+        _ => None,
+    }
+}
+/// Stopped is separate from effect. Only the same original Host execution can
+/// prove it never called the writer; missing durable receipts alone prove nothing.
+fn stopped_result(query: &Value, value: &Value) -> Option<(Outcome, Effect)> {
+    let receipt = &value["executionReceipt"];
+    if value["status"] != "ready"
+        || !value["mutation"].is_null()
+        || receipt["executorStopped"] != true
+        || receipt["origin"] != query["origin"]
+        || receipt["view"] != query["view"]
+    {
+        return None;
+    }
+    match (receipt["outcome"].as_str(), receipt["effect"].as_str()) {
+        (Some("failed"), Some("none")) => Some((Outcome::Failed, Effect::None)),
+        (Some("indeterminate"), Some("unknown")) => Some((Outcome::Indeterminate, Effect::Unknown)),
         _ => None,
     }
 }
@@ -428,7 +451,9 @@ pub(crate) fn reconcile(
                         true,
                     )?;
                     let response = bridge.query(query.clone(), &CancellationToken::default())?;
-                    let Some((outcome, effect)) = mutation_result(&query, &response) else {
+                    let mutation = mutation_result(&query, &response);
+                    let stopped = stopped_result(&query, &response);
+                    let Some((outcome, effect)) = mutation.or(stopped) else {
                         unresolved.push(operation.id);
                         continue;
                     };
@@ -449,10 +474,14 @@ pub(crate) fn reconcile(
                             effect,
                             result: response.into(),
                         },
-                        outcome != Outcome::Indeterminate,
+                        mutation.is_some() || stopped.is_some(),
                     )
                     .map_err(error)?;
-                    reconciled.push(operation.id);
+                    if effect == Effect::Unknown {
+                        unresolved.push(operation.id);
+                    } else {
+                        reconciled.push(operation.id);
+                    }
                 }
                 Ok(json!({"reconciled":reconciled,"unresolved":unresolved}))
             })();

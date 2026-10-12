@@ -15,7 +15,7 @@ export const SELECTION_MEMORY_SYSTEM = [
 
 export function validateMemoryPassages(value: unknown, entries: readonly PiSessionEntry[], requireRevision = false) {
   if (!Array.isArray(value) || value.length === 0) throw new KnowledgeMutationError('invalid', 'Select source text to extract a memory');
-  return value.map((raw): { passage: ChatMemoryPassage; span: MemorySourceSpan; role: string } => {
+  return value.map((raw): { passage: ChatMemoryPassage; span: Omit<Extract<MemorySourceSpan, { kind: 'pi-entry' }>, 'sessionId'>; role: string } => {
     const passage = raw as Partial<ChatMemoryPassage> | null;
     if (!passage || typeof passage.entryId !== 'string' || !Number.isSafeInteger(passage.start)
       || passage.start! < 0 || typeof passage.text !== 'string' || !passage.text.trim()
@@ -38,14 +38,14 @@ export function validateMemoryPassages(value: unknown, entries: readonly PiSessi
   });
 }
 
-export function parseSelectionMemories(text: string, passages: ReturnType<typeof validateMemoryPassages>): ChatMemoryDraft[] {
+export function parseSelectionMemories<T extends { start: number; text: string; revision?: string }>(text: string, passages: readonly { passage: T; role: string }[]): Array<Omit<ChatMemoryDraft, 'sources'> & { sources: T[] }> {
   let envelope: unknown;
   try { envelope = JSON.parse(text.trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/u, '$1')); }
   catch { throw new Error('Memory extraction returned invalid JSON'); }
   if (!envelope || typeof envelope !== 'object' || !('memories' in envelope) || !Array.isArray(envelope.memories)) {
     throw new Error('Memory extraction returned no valid memories list');
   }
-  return envelope.memories.map((item): ChatMemoryDraft => {
+  return envelope.memories.map((item): Omit<ChatMemoryDraft, 'sources'> & { sources: T[] } => {
     if (!item || typeof item.content !== 'string' || !item.content.trim() || typeof item.trigger !== 'string'
       || !MEMORY_NATURES.includes(item.nature) || typeof item.source !== 'string' || !/^s\d+$/u.test(item.source)
       || typeof item.quote !== 'string' || !item.quote.trim()) throw new Error('Memory extraction returned an invalid memory');

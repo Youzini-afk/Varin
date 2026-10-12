@@ -135,11 +135,11 @@ export class ThreadAdapter {
     try { await work; }
     finally { if (this.contextRefreshes.get(identity.branchId) === work) this.contextRefreshes.delete(identity.branchId); }
   }
-  async refreshPersonalization(): Promise<void> {
+  async refreshPersonalization(identities?: readonly ThreadIdentity[]): Promise<void> {
     if (!this.prepareContext?.refresh) return;
-    const threads = await this.runtime.threads();
-    const results = await Promise.allSettled(threads.filter(thread => thread.thread_id.startsWith('thread:'))
-      .flatMap(thread => thread.branches.map(branch => this.refreshContext({ runtime: 'agent', threadId: thread.thread_id, branchId: branch.branch_id }))));
+    const selected = identities ?? (await this.runtime.threads()).filter(thread => thread.thread_id.startsWith('thread:'))
+      .flatMap(thread => thread.branches.map(branch => ({ runtime: 'agent' as const, threadId: thread.thread_id, branchId: branch.branch_id })));
+    const results = await Promise.allSettled(selected.map(identity => this.refreshContext(identity)));
     if (results.some(result => result.status === 'rejected')) throw new Error('Personalization refresh requires attention');
   }
 

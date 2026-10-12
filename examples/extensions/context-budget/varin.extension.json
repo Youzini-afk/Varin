@@ -176,6 +176,30 @@
                           "retainedEstimatedTokens"
                         ]
                       }
+                    },
+                    "acceptedCandidate": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "throughId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "\\S"
+                        },
+                        "mode": {
+                          "enum": [
+                            "background",
+                            "blocking"
+                          ]
+                        },
+                        "summaryInstructions": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "throughId",
+                        "mode"
+                      ]
                     }
                   },
                   "required": [

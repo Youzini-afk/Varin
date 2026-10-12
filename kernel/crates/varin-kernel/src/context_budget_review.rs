@@ -84,6 +84,40 @@ impl ModelProvider for ControlledModel {
         Ok(FinishReason::Stop)
     }
 }
+/// Surface the original boundary failure rather than timing out with no diagnostic.
+struct ObservedContext(Arc<dyn ContextPreparation>);
+impl ContextPreparation for ObservedContext {
+    fn prepare_binding(
+        &self,
+        run: &str,
+        epoch: u64,
+        binding: &mut RequestBinding,
+        cancel: &CancellationToken,
+    ) -> Result<Vec<ConversationItem>, ExecutionError> {
+        self.0.prepare_binding(run, epoch, binding, cancel)
+    }
+    fn prepare(
+        &self,
+        run: &str,
+        epoch: u64,
+        cancel: &CancellationToken,
+    ) -> Result<(), ExecutionError> {
+        self.0.prepare(run, epoch, cancel)
+    }
+    fn prepare_request(
+        &self,
+        epoch: u64,
+        view: &RequestView,
+        serialized: &Value,
+        protocol: Option<varin_runtime::context_capacity::RequestBudgetProtocol>,
+        preview: &dyn Fn(ContextProjection) -> Result<varin_runtime::context_capacity::InputEstimate, ExecutionError>,
+        cancel: &CancellationToken,
+    ) -> Result<ContextRequestPreparation, ExecutionError> {
+        self.0
+            .prepare_request(epoch, view, serialized, protocol, preview, cancel)
+            .inspect_err(|error| eprintln!("Context budget boundary failed: {}", error.code))
+    }
+}
 struct Review {
     fixture: Fixture,
     assembly: RunAssembly,
@@ -248,6 +282,7 @@ impl Review {
                         let prepared=RunPreparation::new(p,&run)?;
                         let PreparedLaunch::Start(mut start)=assembly.prepare(prepared,None,||false)? else { panic!("Run expected") };
                         start.provider=Arc::new(ControlledModel { serializer:start.provider.clone(), actual_input_tokens, sends:sends.clone() });
+                        start.context_preparation=Arc::new(ObservedContext(start.context_preparation));
                         if let Some(parts)=owner.lock().unwrap().context_job_parts(&run.id).map_err(domain)? {
                             start=varin_runtime::context_job::configure_compaction_start(start,parts);
                         }
@@ -485,11 +520,11 @@ fn selected_budget_freezes_summary_and_recovers_original_publication_without_pai
         .host
         .send(json!({"kind":"fixture-finish"}));
     let final_state = recovered.receive("fixture-finished");
-    assert_eq!(
-        final_state["observations"],
-        json!([]),
-        "Accepted summary must not re-run the changed Decision"
-    );
+    let decisions = final_state["observations"].as_array().unwrap();
+    assert_eq!(decisions.len(), 2, "Recompiled request checks its current decision before and after publication");
+    assert_eq!(decisions[0]["input"]["acceptedCandidate"]["throughId"], held["job"]["request"]["through_id"]);
+    assert_eq!(decisions[0]["value"]["decision"]["mode"], "blocking");
+    assert_eq!(decisions[1]["value"]["decision"]["kind"], "continue");
     assert_eq!(final_state["jobs"].as_array().unwrap().len(), 1);
     assert_eq!(
         final_state["jobs"][0]["request"]["summary_recipe"],

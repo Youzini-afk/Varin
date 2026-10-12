@@ -6,21 +6,33 @@ import type { ContextPreparer } from './thread-context.js';
 export interface MemoryQuery {
   action: 'synchronize' | 'tool' | 'receipt';
   runId: string;
-  scope: { mode: 'agent' | 'bot'; sessionId: string; projectId: string | null };
+  scope: { mode: 'agent' | 'bot'; sessionId: string; projectId: string | null; botId?: string | null; branchId?: string; threadRole?: string };
+  previousState?: unknown;
   origin?: string;
-  arguments?: { action: 'read' | 'search' | 'save' | 'delete'; scope?: 'global' | 'project' | 'currentThread'; id?: number; content?: string; query?: string; revision?: number };
+  arguments?: {
+    action: 'read' | 'search' | 'save' | 'delete' | 'get' | 'recall' | 'remember' | 'correct' | 'forget';
+    scope?: 'global' | 'project' | 'currentThread' | 'bot' | 'user' | 'session';
+    id?: number; content?: string; query?: string; revision?: number; k?: number;
+    trigger?: string; nature?: string; sourceText?: string; sourceItemId?: string; includeSource?: boolean;
+    expected?: import('../knowledge/store.js').KnowledgeExpectedRevision;
+  };
   checkpoint?: ContextCheckpoint;
 }
-export type MemoryResult = { status: 'ready'; [key: string]: unknown } | { status: 'rejected' | 'unknown'; message: string };
+export type MemoryResult = { status: 'ready'; [key: string]: unknown } | { status: 'rejected' | 'unknown'; message: string; mutationNotStarted?: true };
 export type MemoryToolOwner = (query: MemoryQuery, signal: AbortSignal) => Promise<MemoryResult>;
 /** Called only by the private bridge with Rust-resolved admission identity. */
-export function createMemoryOwner(options: { personalization: AgentPersonalization; prepareContext: ContextPreparer }): MemoryToolOwner {
+export function createMemoryOwner(options: { personalization: AgentPersonalization; prepareContext: ContextPreparer; bot?: MemoryToolOwner }): MemoryToolOwner {
   return async (query, signal) => {
     try {
-      signal.throwIfAborted();
+      if (query.scope.botId) {
+        if (!options.bot) throw new AgentPersonalizationError('Bot memory owner is unavailable');
+        return options.bot(query, signal);
+      }
+      if (query.action !== 'receipt') signal.throwIfAborted();
       const admitted = query.scope;
       if (!admitted || !['agent', 'bot'].includes(admitted.mode) || !admitted.sessionId
         || (admitted.projectId !== null && (typeof admitted.projectId !== 'string' || !admitted.projectId))) throw new AgentPersonalizationError('Invalid admitted memory scope');
+      if (admitted.mode === 'bot') throw new AgentPersonalizationError('Bot memory requires its original Catalog binding');
       const allowed = (scope: AgentMemoryScope) => scope.kind === 'global' || (scope.kind === 'session' && scope.id === admitted.sessionId)
         || (scope.kind === 'project' && scope.id === admitted.projectId);
       if (query.action === 'synchronize') {
@@ -32,11 +44,11 @@ export function createMemoryOwner(options: { personalization: AgentPersonalizati
         const state = await options.personalization.runtimeState();
         signal.throwIfAborted();
         return { status: 'ready', context, state: { revision: state.catalog.revision,
-          memories: admitted.mode === 'bot' ? [] : state.catalog.memories.filter(note => allowed(note.scope)),
-          noteRevisions: admitted.mode === 'bot' ? {} : state.noteRevisions } };
+          memories: state.catalog.memories.filter(note => allowed(note.scope)),
+          noteRevisions: state.noteRevisions } };
       }
       if (admitted.mode !== 'agent') throw new AgentPersonalizationError('Bot memory has its own owner');
-      const args = query.arguments;
+      const args = query.arguments as { action: 'read' | 'search' | 'save' | 'delete'; scope?: 'global' | 'project' | 'currentThread'; id?: number; content?: string; query?: string; revision?: number } | undefined;
       if (!args) throw new AgentPersonalizationError('Memory arguments are required');
       const scope: AgentMemoryScope = args.scope === 'global' ? { kind: 'global' }
         : args.scope === 'project' ? admitted.projectId ? { kind: 'project', id: admitted.projectId }

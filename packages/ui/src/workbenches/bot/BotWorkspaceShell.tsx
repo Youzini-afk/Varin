@@ -7,9 +7,10 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { archiveBot, changeBotState, createBot, ensureBotEntry, listBots, listBotWork, updateBot, type BotSummary, type BotWorkItem } from '@/lib/bots';
+import { archiveBot, changeBotState, createBot, ensureBotEntry, listBots, listBotWork, updateBot, useBotNavigation, openBotConversation, botWorkId, botWorkTitle, botWorkEntry, sameBotEntry, type BotModelSelection, type BotSummary, type BotWorkItem } from '@/lib/bots';
 import { useWorkbenchProfileId } from '@/lib/workbench/profile-context';
-import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
+import { ThreadConversation } from '@/components/thread/ThreadConversation';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
@@ -38,6 +39,8 @@ export const BotWorkspaceShell: React.FC<Record<string, unknown>> = () => {
 const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
+  const { threads } = useRuntimeAPIs();
+  const navigation = useBotNavigation();
   const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
   const settingsOpen = useUIStore((state) => state.isSettingsDialogOpen);
   const [bots, setBots] = React.useState<BotSummary[] | null>(null);
@@ -50,10 +53,14 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const [actionBusy, setActionBusy] = React.useState<string | null>(null);
   const [nameDialog, setNameDialog] = React.useState<{ mode: 'create' } | { mode: 'rename'; bot: BotSummary } | null>(null);
   const [nameDraft, setNameDraft] = React.useState('');
+  const [createRuntime, setCreateRuntime] = React.useState<'pi' | 'agent'>('pi');
   const [deleting, setDeleting] = React.useState<BotSummary | null>(null);
   const [revision, refresh] = React.useReducer((value: number) => value + 1, 0);
   const opening = React.useRef<AbortController | null>(null);
   const selected = bots?.find((bot) => bot.id === selectedId);
+  const profileModelKey = JSON.stringify(selected?.model ?? null);
+  const selectedRoot = selected?.entry.runtime === 'agent' && navigation.botId === selected.id && sameBotEntry(navigation.entry, selected.entry) ? selected.id : null;
+  const [entryModel, setEntryModel] = React.useState<{ botId: string; profileModelKey: string; model: BotModelSelection | null }>();
   const readOnly = Boolean(selected?.archived || selected?.deletion || (selected?.activity && selected.activity.state !== 'awake'));
   const visibleBots = bots?.filter((bot) => bot.archived === showArchived);
   const botsRef = React.useRef(bots);
@@ -61,7 +68,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const alive = React.useRef(true);
   const work = workResult?.botId === selectedId ? workResult.items : null;
   const entryStreaming = usePiSessionStore((state) => (
-    selected?.entrySessionId ? state.records[selected.entrySessionId]?.snapshot?.isStreaming === true : false
+    selected?.entry.runtime === 'pi' && selected.entry.sessionId ? state.records[selected.entry.sessionId]?.snapshot?.isStreaming === true : false
   ));
 
   React.useEffect(() => { alive.current = true; return () => { alive.current = false; opening.current?.abort(); }; }, []);
@@ -77,8 +84,9 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       const active = list.filter((bot) => bot.archived === showArchived);
       setBots(list);
       setError(null);
-      setSelectedId((previous) => active.find((bot) => bot.id === previous)?.id
-        ?? active.find((bot) => bot.entrySessionId === usePiSessionStore.getState().currentSessionId)?.id
+      setSelectedId((previous) => active.find((bot) => bot.id === useBotNavigation.getState().botId)?.id
+        ?? active.find((bot) => bot.id === previous)?.id
+        ?? active.find((bot) => bot.entry.runtime === 'pi' && bot.entry.sessionId === usePiSessionStore.getState().currentSessionId)?.id
         ?? active[0]?.id ?? null);
     }).catch((cause: unknown) => {
       if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
@@ -96,13 +104,14 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     try {
       const known = botsRef.current?.find((bot) => bot.id === botId);
       if (known?.deletion) return;
-      if (known && (known.archived || (known.activity && known.activity.state !== 'awake')) && !known.entrySessionId) return;
-      const { bot, sessionId } = known?.archived && known.entrySessionId
-        ? { bot: known, sessionId: known.entrySessionId }
+      const inactive = known && (known.archived || (known.activity && known.activity.state !== 'awake'));
+      if (inactive && known.entry.runtime === 'pi' && !known.entry.sessionId) return;
+      const { bot, entry, model } = inactive && (known.entry.runtime === 'agent' || known.entry.sessionId)
+        ? { bot: known, model: known.model, entry: known.entry.runtime === 'agent' ? known.entry : { runtime: 'pi' as const, sessionId: known.entry.sessionId! } }
         : await ensureBotEntry(botId, controller.signal);
       if (controller.signal.aborted || usePiSessionStore.getState().runtimeKey !== runtimeKey) return;
       setBots((list) => list?.map((item) => item.id === bot.id ? bot : item) ?? [bot]);
-      await openPiSessionFromNavigation({ sessionId, directory: bot.homeDir });
+      await openBotConversation(bot.id, entry, bot.homeDir, model);
     } catch (cause) {
       if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -112,7 +121,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
 
   React.useEffect(() => {
     if (!committed || !selectedId) return;
-    void openEntry(selectedId);
+    if (useBotNavigation.getState().botId !== selectedId || !useBotNavigation.getState().entry) void openEntry(selectedId);
     return () => opening.current?.abort();
   }, [committed, selectedId, openEntry, readOnly]);
 
@@ -127,9 +136,25 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     return () => controller.abort();
   }, [committed, selectedId, settingsOpen, revision, entryStreaming]);
 
+  React.useEffect(() => {
+    if (navigation.botId && bots?.some(bot => bot.id === navigation.botId && bot.archived === showArchived)) setSelectedId(navigation.botId);
+  }, [navigation.botId, bots, showArchived]);
+
+  React.useEffect(() => {
+    if (!committed || !selectedRoot || readOnly) return;
+    const controller = new AbortController();
+    void ensureBotEntry(selectedRoot, controller.signal).then(({ entry, model }) => {
+      if (!controller.signal.aborted && sameBotEntry(entry, useBotNavigation.getState().entry)) setEntryModel({ botId: selectedRoot, profileModelKey, model });
+    }).catch((cause: unknown) => {
+      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
+    });
+    return () => controller.abort();
+  }, [committed, selectedRoot, profileModelKey, readOnly]);
+
   const openCreateDialog = () => {
     setError(null);
     setNameDraft('');
+    setCreateRuntime('pi');
     setNameDialog({ mode: 'create' });
   };
 
@@ -149,12 +174,12 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     setError(null);
     try {
       const bot = dialog.mode === 'create'
-        ? await createBot({ name: trimmed })
+        ? await createBot({ name: trimmed, runtime: createRuntime })
         : await updateBot(dialog.bot.id, { name: trimmed });
       setBots((list) => dialog.mode === 'create'
         ? [...(list ?? []), bot]
         : list?.map((item) => item.id === bot.id ? bot : item) ?? [bot]);
-      if (dialog.mode === 'create') { setShowArchived(false); setSelectedId(bot.id); }
+      if (dialog.mode === 'create') { useBotNavigation.setState({ botId: null, entry: null }); setShowArchived(false); setSelectedId(bot.id); }
       setNameDialog(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -186,11 +211,12 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const selectBot = (botId: string) => {
     useUIStore.getState().setSessionSwitcherOpen(false);
     if (botId === selectedId) void openEntry(botId);
-    else setSelectedId(botId);
+    else { useBotNavigation.setState({ botId: null, entry: null }); setSelectedId(botId); }
   };
-  const ownsConversation = Boolean(currentSessionId && (
-    currentSessionId === selected?.entrySessionId || work?.some((item) => item.sessionId === currentSessionId)
-  ));
+  const selectedEntry = navigation.botId === selectedId ? navigation.entry : null;
+  const ownsConversation = Boolean(selectedEntry && (selectedEntry.runtime === 'agent'
+    ? selected?.entry.runtime === 'agent' && (selectedEntry.threadId === selected.entry.threadId || work?.some(item => sameBotEntry(botWorkEntry(item), selectedEntry)))
+    : currentSessionId === selectedEntry.sessionId && (selected?.entry.runtime === 'pi' && currentSessionId === selected.entry.sessionId || work?.some(item => item.runtime === 'pi' && item.sessionId === currentSessionId))));
   const rowClass = 'flex w-full items-center gap-2 rounded-md px-2 py-2 text-left typography-ui-label transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 
   const navigator = () => (
@@ -218,15 +244,15 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
           <div className="px-2 pb-1 pt-6 typography-meta text-muted-foreground">{t('settings.bots.section.work')}</div>
           {!work && !error ? <p role="status" className="px-2 py-2 typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
           {work?.length === 0 ? <p className="px-2 py-2 typography-meta text-muted-foreground">{t('settings.bots.work.empty')}</p> : null}
-          {work?.map((item) => <button key={item.thread.id} type="button" disabled={!item.sessionId || busy}
-            aria-current={item.sessionId === currentSessionId ? 'page' : undefined}
+          {work?.map((item) => <button key={botWorkId(item)} type="button" disabled={!botWorkEntry(item) || busy}
+            aria-current={sameBotEntry(botWorkEntry(item), selectedEntry) ? 'page' : undefined}
             onClick={() => {
-              if (!item.sessionId) return;
+              const entry = botWorkEntry(item); if (!entry) return;
               useUIStore.getState().setSessionSwitcherOpen(false);
-              void openPiSessionFromNavigation({ sessionId: item.sessionId }).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)));
+              void openBotConversation(selected.id, entry).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)));
             }}
-            className={cn(rowClass, 'disabled:opacity-50', item.sessionId === currentSessionId ? 'bg-interactive-selection text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
-            <Icon name="chat-3" className="size-4 shrink-0" /><span className="truncate">{item.thread.brief || item.thread.id}</span>
+            className={cn(rowClass, 'disabled:opacity-50', sameBotEntry(botWorkEntry(item), selectedEntry) ? 'bg-interactive-selection text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
+            <Icon name="chat-3" className="size-4 shrink-0" /><span className="truncate">{botWorkTitle(item)}</span>
           </button>)}
         </> : null}
       </div>
@@ -250,7 +276,12 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       <span className="flex-1 text-destructive">{error}</span>
       <Button variant="ghost" size="sm" onClick={() => { refresh(); if (selectedId) void openEntry(selectedId); }}>{t('research-workbench.retry')}</Button>
     </div> : null}
-    {ownsConversation && !busy ? <div className="min-h-0 flex-1"><ChatView active={active} readOnly={readOnly} autoOpenDraft={false} /></div> : (
+    {ownsConversation && !busy ? <div className="min-h-0 flex-1">{selectedEntry?.runtime === 'agent' ? threads
+      ? <ThreadConversation key={`${selectedEntry.threadId}:${selectedEntry.branchId}`} api={threads} identity={selectedEntry} onWorkChanged={refresh}
+        preferredModel={selectedRoot ? entryModel?.botId === selectedRoot && entryModel.profileModelKey === profileModelKey ? entryModel.model : null : undefined} readOnly={readOnly}
+          onBranchCreated={entry => { if (selected) void openBotConversation(selected.id, entry); refresh(); }} />
+      : <p role="alert">Agent runtime unavailable</p>
+      : <ChatView active={active} readOnly={readOnly} autoOpenDraft={false} />}</div> : (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
         <Icon name="robot" className="size-9 text-muted-foreground" />
         <h1 className="typography-title">Varin bot</h1>
@@ -258,13 +289,15 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
         {visibleBots?.length === 0 ? <>
           <p className="typography-body text-muted-foreground">{t(showArchived ? 'settings.bots.archivedEmpty' : 'settings.bots.empty')}</p>
           {!showArchived ? <Button disabled={busy || actionBusy !== null} onClick={openCreateDialog}>{t('settings.bots.create')}</Button> : null}
-        </> : selected && !selected.deletion && !busy && (!readOnly || selected.entrySessionId) ? <Button onClick={() => { void openEntry(selected.id); }}>{t('settings.bots.openEntry')}</Button> : null}
+        </> : selected && !selected.deletion && !busy && (!readOnly || selected.entry.runtime === 'agent' || selected.entry.sessionId) ? <Button onClick={() => { void openEntry(selected.id); }}>{t('settings.bots.openEntry')}</Button> : null}
       </div>
     )}
     <BotNameDialog
       open={nameDialog !== null}
       title={nameDialog?.mode === 'rename' ? t('settings.bots.rename') : t('settings.bots.create')}
       name={nameDraft}
+      runtime={createRuntime}
+      onRuntimeChange={nameDialog?.mode === 'create' ? setCreateRuntime : undefined}
       busy={actionBusy !== null}
       error={error}
       onNameChange={setNameDraft}

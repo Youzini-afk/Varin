@@ -3661,7 +3661,14 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       return { control: controlState(desktopId), released: receipt.released && !lane.inputReleaseUnconfirmed && !lane.physicalControl };
     },
     async finishExecution(execution) {
-      await automation.finishRun(execution);
+      // Stop current accepted work immediately, even while the catalog restores
+      // earlier physical owners. Both calls join the same original release.
+      const stopped = await Promise.allSettled([
+        automation.finishRun(execution),
+        restoreRuntimeRecords().then(() => automation.finishRun(execution)),
+      ]);
+      const failure = stopped.find(result => result.status === 'rejected');
+      if (failure?.status === 'rejected') throw failure.reason;
       const matches = (actor: ComputerActor | undefined) => actor && (sameComputerExecution(actor.execution, execution) || Boolean(actor.execution.work.runtime === 'pi' && actor.rootExecution && sameComputerExecution(actor.rootExecution, execution)));
       for (const [id, lane] of lanes) {
         if (lane.interrupted?.actor.execution.work.runtime === 'pi' && matches(lane.interrupted.actor)) {

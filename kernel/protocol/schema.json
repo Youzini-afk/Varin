@@ -784,7 +784,7 @@
     "MediaReadParams",
     "MediaReadChunk"
   ],
-  "protocolVersion": 23,
+  "protocolVersion": 24,
   "runtimeStructs": {"ContentCollectionReport":{"fields":{"status":{"type":"ContentCollectionStatus"},"phase":{"type":"ContentCollectionPhase"},"removedObjects":{"type":"number"},"removedBytes":{"type":"number"},"removedStagingFiles":{"type":"number"},"reason":{"type":"string | null"}}},"ModelSessionConfiguration":{"fields":{"providerId":{"type":"string","optional":true},"providerFamily":{"type":"string"},"model":{"type":"string"},"endpoint":{"type":"string"},"credentialEnvironment":{"type":"string | null"},"allowAnonymous":{"type":"boolean"},"acceptsImages":{"type":"boolean","optional":true},"configurationGeneration":{"type":"number"},"maxOutputTokens":{"type":"number | null"},"azureDeployment":{"type":"string | null","optional":true},"azureApiVersion":{"type":"string | null","optional":true},"legacyMaxTokens":{"type":"boolean","optional":true},"includeStreamUsage":{"type":"boolean","optional":true},"reasoningEffort":{"type":"string | null","optional":true},"anthropicOauth":{"type":"boolean","optional":true},"adapterId":{"type":"string","optional":true},"adapterVersion":{"type":"string","optional":true},"contextWindowTokens":{"type":"number","optional":true},"thinkingLevel":{"type":"string","optional":true},"modelOptions":{"type":"unknown","optional":true}}},"KernelWorkingResultCandidate":{"fields":{"publicationId":{"type":"string"},"candidateOperationId":{"type":"string"},"workspaceId":{"type":"string"},"branchId":{"type":"string"},"root":{"type":"string"},"baseRoot":{"type":"string"},"writeRevision":{"type":"number"},"pinId":{"type":"string"},"basePinId":{"type":"string"}}}},
   "runtimeEnums": {
     "McpInteractionMode": ["Form", "Url", "Sampling"],
@@ -928,7 +928,7 @@
   "framing": "private-control-json-and-data-streams",
   "maxFrameBytes": 16777216,
   "requestWindow": 2,
-  "controlMethods": ["runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status",
+  "controlMethods": ["runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status",
     "runtime.mcp.interaction.inspect",
     "runtime.mcp.interaction.pending",
     "runtime.mcp.interaction.response.begin",
@@ -936,7 +936,7 @@
     "runtime.mcp.interaction.close",
     "runtime.mcp.interaction.complete",
     "runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.source.tools","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"],
-  "controlResponseMethods": ["runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.generate","runtime.inference.receipt_pending","runtime.inference.admit","runtime.inference.dispatch","runtime.inference.status","runtime.inference.settle",
+  "controlResponseMethods": ["runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.generate","runtime.inference.receipt_pending","runtime.inference.admit","runtime.inference.dispatch","runtime.inference.status","runtime.inference.settle",
     "runtime.mcp.interaction.inspect",
     "runtime.mcp.interaction.pending",
     "runtime.mcp.interaction.response.begin",
@@ -960,7 +960,7 @@
   "response": {"v": 1, "kind": "response", "id": "request-id", "ok": true, "result": {}},
   "requestUnion": true,
   "methodParams": {
-"runtime.bot.gate.publish":"BotExecutionGate","runtime.bot.thread.create":"BotThreadCreateParams","runtime.bot.scope.suspend":"BotScopeSuspension","runtime.bot.scope.status":"BotScopeSuspension","runtime.bot.scope.resume":"BotScopeSuspension",
+"runtime.bot.scope.remove":"BotScopeSuspension","runtime.bot.scope.inspect":"BotScopeParams","runtime.bot.history.read":"BotHistoryReadParams","runtime.bot.gate.publish":"BotExecutionGate","runtime.bot.thread.create":"BotThreadCreateParams","runtime.bot.scope.suspend":"BotScopeSuspension","runtime.bot.scope.status":"BotScopeSuspension","runtime.bot.scope.resume":"BotScopeSuspension",
 
 "runtime.memory_work.admit":"MemoryWorkAdmit",
 "runtime.memory_work.read":"MemoryWorkReadParams",
@@ -1270,7 +1270,7 @@
     "runtime.mcp.resource.release_source": "RunParams"
   },
   "dto": {
-"BotExecutionGate":{"fields":{"botId":{"type":"string"},"profileRevision":{"type":"number"},"activityOperationId":{"type":"string | null"},"permitted":{"type":"boolean"}},"rustType":"varin_runtime::catalog::bot::BotGate"},"BotScopeSuspension":{"fields":{"botId":{"type":"string"},"profileRevision":{"type":"number"},"activityOperationId":{"type":"string"}},"rustType":"varin_runtime::catalog::bot::BotSuspension"},"BotThreadCreateParams":{"fields":{"botId":{"type":"string"},"threadId":{"type":"string"},"branchId":{"type":"string"}}},"BotKernelScopeStatus":{"fields":{"suspension":{"type":"BotScopeSuspension"},"kernelEpoch":{"type":"number"},"sourceProfileRevision":{"type":"number | null"},"currentKernelWorkersDrained":{"type":"boolean"},"unprovenOperationStopIds":{"type":"string[]"},"unknownEffectOperationIds":{"type":"string[]"},"unresolvedModelRequestIds":{"type":"string[]"}},"rustType":"varin_runtime::catalog::bot::BotKernelScopeStatus"},"BotScopeResume":{"fields":{"resumedRunIds":{"type":"string[]"},"blockedRunIds":{"type":"string[]"}},"rustType":"varin_runtime::catalog::bot::BotScopeResume"},
+"BotScopeParams":{"fields":{"botId":{"type":"string"}}},"BotHistoryReadParams":{"fields":{"botId":{"type":"string"},"threadId":{"type":"string"},"branchId":{"type":"string"},"headId":{"type":"string"},"itemId":{"type":"string"}}},"BotScopeRun":{"fields":{"threadId":{"type":"string"},"branchId":{"type":"string"},"runId":{"type":"string"},"state":{"type":"RunState"},"cancelRequested":{"type":"boolean"}}},"BotScopeView":{"fields":{"botId":{"type":"string"},"threads":{"type":"ThreadSummary[]"},"runs":{"type":"BotScopeRun[]"}}},"BotExecutionGate":{"fields":{"botId":{"type":"string"},"profileRevision":{"type":"number"},"activityOperationId":{"type":"string | null"},"permitted":{"type":"boolean"}},"rustType":"varin_runtime::catalog::bot::BotGate"},"BotScopeSuspension":{"fields":{"botId":{"type":"string"},"profileRevision":{"type":"number"},"activityOperationId":{"type":"string"}},"rustType":"varin_runtime::catalog::bot::BotSuspension"},"BotThreadCreateParams":{"fields":{"botId":{"type":"string"},"threadId":{"type":"string"},"branchId":{"type":"string"}}},"BotKernelScopeStatus":{"fields":{"suspension":{"type":"BotScopeSuspension"},"kernelEpoch":{"type":"number"},"sourceProfileRevision":{"type":"number | null"},"currentKernelWorkersDrained":{"type":"boolean"},"unprovenOperationStopIds":{"type":"string[]"},"unknownEffectOperationIds":{"type":"string[]"},"unresolvedModelRequestIds":{"type":"string[]"}},"rustType":"varin_runtime::catalog::bot::BotKernelScopeStatus"},"BotScopeResume":{"fields":{"resumedRunIds":{"type":"string[]"},"blockedRunIds":{"type":"string[]"}},"rustType":"varin_runtime::catalog::bot::BotScopeResume"},
 
 "MemoryWorkMode":{"raw":"export type MemoryWorkMode = 'automatic' | 'selection';","rustType":"varin_runtime::catalog::memory_work::MemoryWorkMode"},
 "MemoryWorkAction":{"raw":"export type MemoryWorkAction = {kind:'claim'} | {kind:'resume'} | {kind:'decision';keep:number[]} | {kind:'finish'} | {kind:'reject'};","rustType":"varin_runtime::catalog::memory_work::MemoryWorkAction"},
@@ -1677,7 +1677,7 @@
     "ThreadParams": {"fields":{"threadId":{"type":"string"}}},
     "ThreadOperationsParams": {"fields":{"threadId":{"type":"string"},"branchId":{"type":"string","optional":true}}},
     "ThreadBranch": {"fields":{"branch_id":{"type":"string"},"head":{"type":"string | null"},"active_run_id":{"type":"string | null"},"latest_run":{"type":"Run | null"}}},
-    "ThreadSummary": {"fields":{"thread_id":{"type":"string"},"branches":{"type":"ThreadBranch[]"},"observer_project_ids":{"type":"Array<string | null>"}}},
+    "ThreadSummary": {"fields":{"bot_id":{"type":"string | null"},"thread_id":{"type":"string"},"branches":{"type":"ThreadBranch[]"},"observer_project_ids":{"type":"Array<string | null>"}}},
     "AgentRuntimeStreamEvent": {"raw":"export type AgentRuntimeStreamEvent = {v: $protocolVersion; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});"},
     "SourceMode": {"raw":"export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';"},
     "LiveRoot": {"fields":{"hostId":{"type":"string"},"canonicalRoot":{"type":"string"},"rootId":{"type":"string"}}},
@@ -2521,7 +2521,7 @@
     "OperationInspectParams": {"fields": {"operationId": {"type": "string"}, "allowMissing": {"type": "boolean", "optional": true}}}
   },
   "methods": {
-"runtime.bot.gate.publish":"Private BotService execution projection","runtime.bot.thread.create":"Private BotService execution projection","runtime.bot.scope.suspend":"Private BotService execution projection","runtime.bot.scope.status":"Private BotService execution projection","runtime.bot.scope.resume":"Private BotService execution projection",
+"runtime.bot.scope.remove":"Private BotService deletion owner","runtime.bot.scope.inspect":"Private BotService execution projection","runtime.bot.history.read":"Private Bot provenance read","runtime.bot.gate.publish":"Private BotService execution projection","runtime.bot.thread.create":"Private BotService execution projection","runtime.bot.scope.suspend":"Private BotService execution projection","runtime.bot.scope.status":"Private BotService execution projection","runtime.bot.scope.resume":"Private BotService execution projection",
 
 "runtime.memory_work.admit":"Private original Bot memory work admit",
 "runtime.memory_work.read":"Private original Bot memory work read",

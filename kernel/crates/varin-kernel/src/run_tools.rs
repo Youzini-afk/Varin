@@ -161,8 +161,9 @@ pub(crate) fn builtin_schemas(
     enabled: &std::collections::BTreeSet<crate::tools::ToolKind>,
     plan_eligible: bool,
     include_goal: bool,
+    bot: bool,
 ) -> Vec<ToolSchema> {
-    builtin_definitions(enabled, plan_eligible, include_goal)
+    builtin_definitions(enabled, plan_eligible, include_goal, bot)
         .into_iter()
         .map(|definition| definition.schema)
         .collect()
@@ -171,6 +172,7 @@ pub(crate) fn builtin_definitions(
     enabled: &std::collections::BTreeSet<crate::tools::ToolKind>,
     plan_eligible: bool,
     include_goal: bool,
+    bot: bool,
 ) -> Vec<BuiltinSchema> {
     let mut tools = crate::process_wait::builtin_schemas(
         crate::tools::KernelToolExecutor::selected_builtin_schemas(enabled),
@@ -181,7 +183,7 @@ pub(crate) fn builtin_definitions(
     tools.extend([
         crate::message_tools::builtin_schema(),
         crate::followup_tools::builtin_schema(),
-        crate::memory::builtin_schema(),
+        crate::memory::builtin_schema(bot),
         crate::agent_resources::builtin_schema(),
     ]);
     if plan_eligible {

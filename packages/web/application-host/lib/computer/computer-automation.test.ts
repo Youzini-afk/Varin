@@ -1,20 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ComputerActor } from '@varin/protocol';
 import { createComputerAutomation } from './computer-automation.js';
+import { decodeComputerRuntime } from './computer-records.js';
 
 const work = (sessionId: string) => ({ runtime: 'pi' as const, sessionId });
 const actor = (sessionId: string, readOnly = false, rootSessionId = 'main'): ComputerActor => ({
   execution: { work: work(sessionId), runId: `${sessionId}:run` }, rootWork: work(rootSessionId),
   rootExecution: { work: work(rootSessionId), runId: `${rootSessionId}:run` },
   registry: { scopeId: 'scope', threadId: sessionId }, label: sessionId, roleAccess: { kind: 'pi-role', readOnly } });
-function fixture() {
+function fixture(extra: Pick<Parameters<typeof createComputerAutomation>[0], 'pendingReleases' | 'cancelWork'> = {}) {
   const actors = new Map(['main', 'worker', 'lookup'].map(id => [id, actor(id, id === 'lookup')]));
   const release = vi.fn(async () => ({ released: true }));
   const notify = vi.fn(async () => {}), revoke = vi.fn(async () => {});
   const resolveActor = vi.fn(async (ref: import('@varin/protocol').ComputerWorkRef) => actors.get(ref.runtime === 'pi' ? ref.sessionId : '') ?? null);
   const coordinator = createComputerAutomation({ resolveActor,
     resolveScope: async ref => { const a = actors.get(ref.runtime === 'pi' ? ref.sessionId : '')!; return { work: ref, rootWork: a.rootWork, currentExecution: a.execution, currentRootExecution: a.rootExecution }; }, release,
-    controlAvailable: () => true, notify, revokeSession: revoke, bindDesktop: async () => {}, onChange: () => {} });
+    controlAvailable: () => true, notify, revokeSession: revoke, bindDesktop: async () => {}, onChange: () => {}, ...extra });
   return { actors, release, notify, revoke, coordinator, resolveActor };
 }
 describe('Computer Use execution and physical desktop ownership', () => {
@@ -100,6 +101,59 @@ describe('Computer Use execution and physical desktop ownership', () => {
     expect((await c.stop(actor('main').execution)).status).toBe('cancel-unconfirmed');
     expect((await c.stop(actor('main').execution)).status).toBe('enabled');
     expect(release).toHaveBeenCalledTimes(2);
+  });
+  it('joins concurrent finishes to the same release and preserves another work on the shared desktop', async () => {
+    const { coordinator: c, actors, release } = fixture();
+    actors.set('other', actor('other', false, 'other'));
+    let finish!: (value: { released: boolean }) => void;
+    const pending = new Promise<{ released: boolean }>(resolve => { finish = resolve; });
+    release.mockImplementationOnce(async () => pending);
+    await c.authorize(work('main'), 'control', 'shared', async () => {});
+    await c.authorize(work('other'), 'observe', 'shared', async () => {});
+    const first = c.finishRun(actor('main').execution);
+    const firstRejected = expect(first).rejects.toThrow('resource release was not confirmed');
+    await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(1));
+    let secondSettled = false;
+    const second = c.finishRun(actor('main').execution);
+    void second.then(() => { secondSettled = true; }, () => { secondSettled = true; });
+    const secondRejected = expect(second).rejects.toThrow('resource release was not confirmed');
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(secondSettled).toBe(false);
+    expect((await c.snapshot(work('main'))).status).toBe('cancelling');
+    expect((await c.snapshot(work('other'))).leases).toHaveLength(1);
+    finish({ released: false });
+    await Promise.all([firstRejected, secondRejected]);
+    expect(release).toHaveBeenCalledTimes(1);
+    expect((await c.snapshot(work('main'))).status).toBe('cancel-unconfirmed');
+    await c.finishRun(actor('main').execution);
+    expect(release).toHaveBeenCalledTimes(2);
+    expect(await c.snapshot(work('main'))).toMatchObject({ active: false, status: 'enabled', cleanups: [] });
+    expect((await c.snapshot(work('other'))).leases).toHaveLength(1);
+  });
+  it('finishes a restored physical marker only after its original owner confirms release', async () => {
+    const original = actor('main');
+    const restored = decodeComputerRuntime({ runtimeVersion: 4, physicalControl: {
+      owner: { hostId: 'original-host', controlEpoch: 'previous-epoch', inputOwnerId: 'original-input-writer' },
+      holder: { kind: 'assignment', assignmentId: 'original-assignment', actor: original },
+      since: '2026-10-12T00:00:00Z',
+    } });
+    if (restored.physicalControl?.holder.kind !== 'assignment') throw new Error('Wrong restored marker');
+    const saved = restored.physicalControl.holder.actor;
+    let pending = true;
+    const cleanup = vi.fn(async () => { pending = false; });
+    cleanup.mockRejectedValueOnce(new Error('The original input owner has not confirmed release'));
+    const { coordinator: c, resolveActor, release } = fixture({
+      pendingReleases: () => pending ? [{ actor: saved, desktopId: 'shared' }] : [], cancelWork: cleanup,
+    });
+    resolveActor.mockResolvedValue(null);
+    expect(c.acceptedExecutions()).toEqual([original.execution]);
+    await expect(c.finishRun(original.execution)).rejects.toThrow('resource release was not confirmed');
+    expect(cleanup).toHaveBeenCalledExactlyOnceWith(original, ['shared'], expect.any(String));
+    expect(release).not.toHaveBeenCalled();
+    expect(await c.snapshot(work('main'))).toMatchObject({ active: true, status: 'cancel-unconfirmed' });
+    await c.finishRun(original.execution);
+    expect(cleanup).toHaveBeenCalledTimes(2);
+    expect(await c.snapshot(work('main'))).toMatchObject({ active: false, status: 'enabled', cleanups: [] });
   });
   it('coordinates physical desktops across Host origins and revokes opaque assignments on takeover', async () => {
     const { coordinator: c } = fixture();

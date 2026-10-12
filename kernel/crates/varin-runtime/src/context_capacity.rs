@@ -12,6 +12,7 @@ pub struct ContextPolicy {
     pub enabled: bool,
     pub reserve_tokens: u64,
     pub keep_recent_tokens: u64,
+    pub explicit_keep_recent_tokens: Option<u64>,
     pub background_preparation: bool,
     pub preparation_waterline: f64,
 }
@@ -282,10 +283,38 @@ pub fn budget_candidates(view: &RequestView) -> Vec<BudgetCandidate> {
     }
     candidates
 }
+/// Recent same-configuration observations. Missing duration/rate stays missing, not zero.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PreparationTiming {
+    pub duration_ms: Option<f64>,
+    pub tokens_per_ms: Option<f64>,
+    pub pending_tokens: u64,
+}
+impl PreparationTiming {
+    pub fn expected_growth(&self) -> Option<u64> {
+        let (duration, rate) = (self.duration_ms?, self.tokens_per_ms?);
+        (duration.is_finite() && duration > 0.0 && rate.is_finite() && rate >= 0.0)
+            .then(|| (duration * rate).ceil() as u64)
+    }
+    pub fn waterline(&self, base: f64, input_budget: u64) -> f64 {
+        let Some(growth) = self.expected_growth() else {
+            return base;
+        };
+        if input_budget == 0 {
+            return base;
+        }
+        // The known delta is already in the current estimate; it advances preparation only.
+        // Expected future growth is also reserved when planning the fixed retained tail.
+        (base - 2.0 * growth.saturating_add(self.pending_tokens) as f64 / input_budget as f64)
+            .max(base / 2.0)
+    }
+}
 pub fn native_mode(
     policy: &ContextPolicy,
     capacity: u64,
     estimate: &InputEstimate,
+    timing: &PreparationTiming,
 ) -> Option<crate::context_job::ContextCompactionMode> {
     use crate::context_job::ContextCompactionMode;
     let input_budget = capacity.saturating_sub(policy.reserve_tokens);
@@ -296,8 +325,9 @@ pub fn native_mode(
         return Some(ContextCompactionMode::Blocking);
     }
     (policy.background_preparation
-        && estimate.estimated_tokens as f64 > input_budget as f64 * policy.preparation_waterline)
-        .then_some(ContextCompactionMode::Background)
+        && estimate.estimated_tokens as f64
+            > input_budget as f64 * timing.waterline(policy.preparation_waterline, input_budget))
+    .then_some(ContextCompactionMode::Background)
 }
 pub fn native_candidate<'a>(
     view: &RequestView,
@@ -306,19 +336,50 @@ pub fn native_candidate<'a>(
     capacity: u64,
     max_output_tokens: Option<u64>,
     estimate: &InputEstimate,
+    timing: &PreparationTiming,
 ) -> Option<&'a BudgetCandidate> {
     let history_tokens = view
         .history
         .iter()
         .map(estimate_item)
         .fold(0u64, u64::saturating_add);
-    let fixed = estimate.estimated_tokens.saturating_sub(history_tokens);
-    let recent = policy.keep_recent_tokens.min(
-        capacity
-            .saturating_sub(policy.reserve_tokens)
-            .saturating_sub(fixed)
-            .saturating_sub(max_output_tokens.unwrap_or(policy.reserve_tokens)),
-    );
+    let original_start = view
+        .history
+        .iter()
+        .position(|item| {
+            matches!(
+                item.provenance,
+                crate::execution::Provenance::UserInstruction { .. }
+                    | crate::execution::Provenance::Assistant
+                    | crate::execution::Provenance::ToolData { .. }
+            )
+        })
+        .unwrap_or(view.history.len());
+    let prefix = view.history[..original_start].iter().filter(|item| !matches!(&item.provenance,
+        crate::execution::Provenance::ExternalData { source } if source.starts_with("conversation-summary:")))
+        .map(estimate_item).fold(0u64, u64::saturating_add);
+    let fixed = estimate
+        .estimated_tokens
+        .saturating_sub(history_tokens)
+        .saturating_add(prefix);
+    let input_budget = capacity.saturating_sub(policy.reserve_tokens);
+    let summary_output = max_output_tokens.unwrap_or(policy.reserve_tokens);
+    let available = input_budget
+        .saturating_sub(fixed)
+        .saturating_sub(summary_output);
+    let recent = policy
+        .explicit_keep_recent_tokens
+        .unwrap_or_else(|| {
+            // P + planned S1 + B + future N, not B alone. Current known N is already in history.
+            input_budget
+                .saturating_mul(3)
+                .saturating_div(5)
+                .saturating_sub(fixed)
+                .saturating_sub(summary_output)
+                .saturating_sub(timing.expected_growth().unwrap_or(0))
+                .max(1)
+        })
+        .min(available);
     let mut retained = 0u64;
     let mut end = view.history.len();
     while end > 0 && retained < recent {
@@ -333,4 +394,147 @@ pub fn native_candidate<'a>(
         .iter()
         .rev()
         .find(|candidate| candidate.end_index <= end)
+}
+
+#[cfg(test)]
+mod preparation_tests {
+    use super::*;
+    use crate::context_job::ContextCompactionMode;
+    use serde_json::json;
+    fn policy() -> ContextPolicy {
+        ContextPolicy {
+            configuration_identity: "settings".into(),
+            enabled: true,
+            reserve_tokens: 200,
+            keep_recent_tokens: 20000,
+            explicit_keep_recent_tokens: None,
+            background_preparation: true,
+            preparation_waterline: 0.75,
+        }
+    }
+    fn estimate(tokens: u64) -> InputEstimate {
+        InputEstimate {
+            estimated_tokens: tokens,
+            unmeasured_media: 0,
+            unmeasured_provider_items: 0,
+            method: "fixture",
+        }
+    }
+    #[test]
+    fn observed_duration_and_growth_advance_preparation_but_never_submission() {
+        let mut policy = policy();
+        let missing = PreparationTiming {
+            duration_ms: None,
+            tokens_per_ms: Some(2.0),
+            pending_tokens: 500,
+        };
+        assert_eq!(native_mode(&policy, 2000, &estimate(1000), &missing), None);
+        let measured = PreparationTiming {
+            duration_ms: Some(200.0),
+            tokens_per_ms: Some(2.0),
+            pending_tokens: 100,
+        };
+        assert_eq!(
+            native_mode(&policy, 2000, &estimate(1000), &measured),
+            Some(ContextCompactionMode::Background)
+        );
+        assert_eq!(
+            native_mode(&policy, 2000, &estimate(1800), &measured),
+            Some(ContextCompactionMode::Background)
+        );
+        assert_eq!(
+            native_mode(&policy, 2000, &estimate(1801), &measured),
+            Some(ContextCompactionMode::Blocking)
+        );
+        policy.background_preparation = false;
+        assert_eq!(native_mode(&policy, 2000, &estimate(1800), &measured), None);
+        assert_eq!(
+            native_mode(&policy, 2000, &estimate(1801), &measured),
+            Some(ContextCompactionMode::Blocking)
+        );
+    }
+    #[test]
+    fn default_retention_targets_total_input_and_reserves_projected_growth() {
+        let mut policy = policy();
+        let mut view: RequestView = serde_json::from_value(json!({"request_id":"request","run_id":"run",
+            "origin":{"kind":"conversation","step":1,"history_range":{"branch_id":"branch","ancestor_id":null,"leaf_id":null}},
+            "binding":{"resource_activations":[],"resource_checkpoint_id":null,"connection_identity":"fixture","provider_family":"fixture","model":"fixture",
+                "credential_ref":null,"configuration_generation":1,"tool_schema_generation":0,"tools":[],"instruction_sources":[],"memory_checkpoint":null,
+                "attachment_refs":[],"environment_cursor":0,"history_range":{"branch_id":"branch","ancestor_id":null,"leaf_id":null}},"history":[]})).unwrap();
+        view.history.push(crate::execution::ConversationItem {
+            id: "system".into(),
+            resource_activation: None,
+            provenance: crate::execution::Provenance::SystemInstruction {
+                source: "fixture".into(),
+            },
+            content: Content::Text {
+                text: "S".repeat(800),
+            },
+            opaque: None,
+        });
+        for n in 0..10 {
+            let id = format!("user-{n}");
+            view.history.push(crate::execution::ConversationItem {
+                id: id.clone(),
+                resource_activation: None,
+                provenance: crate::execution::Provenance::UserInstruction { input_id: id },
+                content: Content::Text {
+                    text: "T".repeat(400),
+                },
+                opaque: None,
+            });
+        }
+        let candidates = budget_candidates(&view);
+        let cold = PreparationTiming::default();
+        let candidate = native_candidate(
+            &view,
+            &candidates,
+            &policy,
+            2000,
+            Some(100),
+            &estimate(1200),
+            &cold,
+        )
+        .unwrap();
+        assert_eq!(candidate.retained_estimated_tokens, 700); // P=200, S1 reserve=100, B=700, total=1000 <= 1080.
+        let warm = PreparationTiming {
+            duration_ms: Some(200.0),
+            tokens_per_ms: Some(1.0),
+            pending_tokens: 0,
+        };
+        assert_eq!(
+            native_candidate(
+                &view,
+                &candidates,
+                &policy,
+                2000,
+                Some(100),
+                &estimate(1200),
+                &warm
+            )
+            .unwrap()
+            .retained_estimated_tokens,
+            500
+        );
+        policy.explicit_keep_recent_tokens = Some(300);
+        assert_eq!(
+            native_candidate(
+                &view,
+                &candidates,
+                &policy,
+                2000,
+                Some(100),
+                &estimate(1200),
+                &warm
+            )
+            .unwrap()
+            .retained_estimated_tokens,
+            300
+        );
+        assert_eq!(
+            view.history.len(),
+            11,
+            "Planning cannot truncate source or unsummarized tail"
+        );
+    }
 }

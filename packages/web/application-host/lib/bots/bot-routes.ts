@@ -71,6 +71,8 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, requi
   app.post("/api/harness/bots", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
     try {
+      const runtime = request.body?.runtime;
+      if (runtime !== undefined && runtime !== "pi" && runtime !== "agent") throw new HarnessServiceError("invalid-params", "runtime must be pi or agent");
       const name = request.body?.name;
       if (name !== undefined && typeof name !== "string") {
         throw new HarnessServiceError("invalid-params", "name must be a string");
@@ -81,6 +83,7 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, requi
       }
       const model = parseModel(request.body?.model);
       response.status(201).json({ bot: await bots.create({
+        ...(runtime === undefined ? {} : { runtime }),
         ...(typeof name === "string" ? { name } : {}),
         ...(typeof instructions === "string" ? { instructions } : {}),
         ...(model !== undefined && model !== null ? { model } : {}),
@@ -105,6 +108,7 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, requi
     response.setHeader("Cache-Control", "no-store");
     try {
       const body = request.body ?? {};
+      if (body.runtime !== undefined || body.entry !== undefined) throw new HarnessServiceError("invalid-params", "A Bot runtime and entry cannot be changed");
       if (body.name !== undefined && typeof body.name !== "string") throw new HarnessServiceError("invalid-params", "name must be a string");
       if (body.instructions !== undefined && body.instructions !== null && typeof body.instructions !== "string") throw new HarnessServiceError("invalid-params", "instructions must be a string or null");
       if (body.pinned !== undefined && typeof body.pinned !== "boolean") throw new HarnessServiceError("invalid-params", "pinned must be a boolean");
@@ -228,9 +232,9 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, requi
         computers.workDesktops(scopeId), computers.listArtifacts(scopeId),
       ]) : [[], []];
       response.json({ threads: work.map((item) => ({ ...item,
-        desktops: desktops.filter((desktop) => desktop.work?.some((association) => association.registry?.scopeId === scopeId && association.registry.threadId === item.thread.id)),
-        artifacts: artifacts.filter((artifact) => artifact.threadId === item.thread.id) }))
-        .filter((item) => item.thread.purpose !== 'bot-root' || item.desktops.length > 0 || item.artifacts.length > 0) });
+        desktops: desktops.filter((desktop) => desktop.work?.some((association) => association.registry?.scopeId === scopeId && association.registry.threadId === (item.runtime === 'agent' ? item.identity.threadId : item.thread.id))),
+        artifacts: artifacts.filter((artifact) => artifact.threadId === (item.runtime === 'agent' ? item.identity.threadId : item.thread.id)) }))
+        .filter((item) => (item.runtime === 'agent' ? item.purpose : item.thread.purpose) !== 'bot-root' || item.desktops.length > 0 || item.artifacts.length > 0) });
     } catch (error) {
       sendError(response, error, "Unable to list bot work");
     }

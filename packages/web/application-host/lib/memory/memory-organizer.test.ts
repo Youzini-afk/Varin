@@ -276,8 +276,8 @@ describe("memory organizer (BC2)", () => {
     const entry: PiSessionEntry = { type: "message", id: "entry-1", parentId: null,
       timestamp: new Date(0).toISOString(), message: { role: "user", content: source, timestamp: 0 } };
     scopeForSession = sessionId => sessionId === "s1" ? "bot:ws-1" : null;
-    const selection: MemorySelectionRequest = { requestKey: "selection-1", sessionId: "s1", sources: [{
-      kind: "pi-entry", id: entry.id, revision: sourceRevision(source), start: 0, end: source.length,
+    const selection: MemorySelectionRequest = { requestKey: "selection-1", conversation: { runtime: "pi", sessionId: "s1" }, sources: [{
+      kind: "pi-entry", sessionId: "s1", id: entry.id, revision: sourceRevision(source), start: 0, end: source.length,
     }] };
     const prompt = JSON.stringify({ passages: [{ role: "user", text: source }] });
     const org = organizer(memory(), { readEntries: async () => [entry] });

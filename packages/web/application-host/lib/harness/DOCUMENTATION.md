@@ -137,12 +137,18 @@ writers still block capture, and writer, mutation, epoch and filesystem-watch ch
 
 ### Bot sleep and wake
 
-The native runtime currently has a private Bot Thread/gate/suspension foundation. BotService remains
-the identity/activity owner and publishes its original record revision to Catalog. A kernel epoch
-change invalidates the cached scoped grant and requires fresh gate publication. Host Run preparation
-keeps its original registration until the underlying promise settles, even if the caller has already
-received cancellation. Native scope status only proves the named Rust workers drained; native Bot
-entry/source/recall, full domain-writer and Computer lifecycle integration are still pending.
+BotService owns a tagged entry: an existing Pi session or an Agent Thread/branch. Explicit Agent
+creation allocates that identity with the profile; opening it idempotently admits the original Catalog
+binding. The default remains Pi. Updating a profile does not switch its runtime or import another
+entry's assets. The Host resolves the selected runtime's model configuration and returns the actual
+default with the entry rather than asking the renderer to choose the first model in a directory.
+
+BotService remains the identity/activity owner and publishes its original record revision to Catalog.
+A kernel epoch change invalidates the cached scoped grant and requires fresh gate publication.
+Children, context jobs and memory inference inherit the Bot through their original Catalog relations.
+Host Run preparation and domain calls keep their original registration until the underlying promise
+settles, even if the caller has already received cancellation. Native scope status separately reports
+Rust worker drain, unproven executor stops, unknown effects and unresolved model receipts.
 
 `bots/bot-service.ts` stores sleep intent, interrupted Run identities, confirmed stop/resume steps,
 remote machine progress and errors in the kernel-owned Bot profile. API calls return after intent
@@ -161,6 +167,19 @@ and experiment attempts, retaining worktrees, transcripts and completed results.
 carry Host-derived owner scopes. The target persists its scope admission gate and confirms process-tree
 termination through Rust before reporting success. Coordinator-side target receipts survive restart;
 an unreachable target is an incomplete stop, never proof of termination.
+
+Agent Sleep preserves the original Run's prepared work, waits, user pauses and completed results.
+Wake releases eligible holds and uses the existing continuation owner, whose launch checks still
+apply; it does not replay uncertain dispatch. Before reporting asleep, the lifecycle also joins Host
+preparation, domain mutations and scripts, then releases Computer control for each original execution,
+including historical Runs. Concurrent observers join the same physical release. A restored physical
+control marker must be cleared by its original driver's stop evidence. Failure keeps Sleep incomplete
+and retryable. Sharing a desktop prevents whole-machine shutdown, not release of this Bot's own input.
+
+Deletion first completes this same stop operation. Catalog removes only the Bot's original related
+work graph in one transaction; a live foreign reference or retained environment is an actionable
+failure. Cleanup of the original Bot and current-Thread knowledge stores is retryable from retained
+sleep work references. Workspace files, Git results, other owners' work and Pi assets are not swept.
 
 VM shutdown follows confirmed work termination. It applies only to associated managed VMs without
 other recorded work owners or human desktop control, and excludes the coordinator's own guest.

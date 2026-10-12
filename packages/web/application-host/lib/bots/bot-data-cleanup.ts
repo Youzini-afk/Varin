@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { BotSummary } from '@varin/application-client';
 import type { ThreadRegistry } from '../harness/thread-registry.js';
 import type { ThreadRuntime } from '../harness/thread-runtime.js';
-import { botScopeId, knowledgeStoreKeyForScope } from '../harness/owner-scope.js';
+import { botScopeId, threadScopeId, knowledgeStoreKeyForScope, scopeOfScopeId } from '../harness/owner-scope.js';
 import type { KernelFileResourceBackend } from '../kernel/file-resource-backend.js';
 import { knowledgeVectorScopeKey } from '../knowledge/vectors/store.js';
 import type { RecoveryIdentity } from '../recovery/journal-files.js';
@@ -15,6 +15,7 @@ export function createBotDataCleanup(options: {
   registry: Pick<ThreadRegistry, 'listWorkspaceThreadSnapshots' | 'listWorkspaceRunSessionIds'>;
   deleteThread: ThreadRuntime['deleteUser'];
   deleteSession(sessionId: string): Promise<unknown>;
+  deleteAgentScope?(bot: BotSummary): Promise<void>;
   closeMemory(scopeId: string, storeKey: string): Promise<void>;
   releaseRemoteScope(scopeId: string): Promise<void>;
   files: Pick<KernelFileResourceBackend, 'remove'>;
@@ -27,10 +28,14 @@ export function createBotDataCleanup(options: {
       throw new Error('Invalid Bot data directory');
     }
     const scopeId = botScopeId(bot.id);
-    const snapshots = await options.registry.listWorkspaceThreadSnapshots(scopeId);
+    if (bot.entry.runtime === 'agent') {
+      if (!options.deleteAgentScope) throw new Error('Agent Bot deletion owner is unavailable');
+      await options.deleteAgentScope(bot);
+    }
+    const snapshots = bot.entry.runtime === 'agent' ? [] : await options.registry.listWorkspaceThreadSnapshots(scopeId);
     const sessions = new Set([
-      ...(bot.entrySessionId ? [bot.entrySessionId] : []),
-      ...bot.activity.work.flatMap((item) => item.sessionId ? [item.sessionId] : []),
+      ...(bot.entry.runtime === "pi" && bot.entry.sessionId ? [bot.entry.sessionId] : []),
+      ...bot.activity.work.flatMap((item) => item.runtime === "pi" && item.sessionId ? [item.sessionId] : []),
       ...await options.registry.listWorkspaceRunSessionIds(scopeId),
     ]);
     const ids = new Set(snapshots.map(({ thread }) => thread.id));
@@ -46,8 +51,6 @@ export function createBotDataCleanup(options: {
     // Native Pi deletion owns transcripts and closes their follow-ups. Never unlink JSONL here.
     for (const sessionId of sessions) await options.deleteSession(sessionId);
     await options.releaseRemoteScope(scopeId);
-    const storeKey = knowledgeStoreKeyForScope(scopeId);
-    await options.closeMemory(scopeId, storeKey);
     const identity: RecoveryIdentity = {
       authorityId: scopeId, workspaceId: scopeId, canonicalRoot: options.dataDir, filesystemProfile: 'host-data',
     };
@@ -55,12 +58,15 @@ export function createBotDataCleanup(options: {
     let names: string[];
     try { names = await readdir(path.join(options.dataDir, knowledgeDir)); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; names = []; }
-    // Trivium uses several generation/sidecar extensions; the opaque store key owns this prefix.
-    for (const name of names.filter((name) => name.startsWith(`${storeKey}.`))) {
-      await options.files.remove(identity, path.join(knowledgeDir, name), { force: true });
+    // Sleep's original Run refs survive Catalog cleanup and retain local-store cleanup on retry.
+    const stores = new Set([scopeId, ...bot.activity.work.flatMap(work => work.runtime === 'agent' ? [threadScopeId(work.threadId)] : [])]);
+    for (const ownedScope of stores) {
+      const storeKey = knowledgeStoreKeyForScope(ownedScope);
+      await options.closeMemory(ownedScope, storeKey);
+      for (const name of names.filter(name => name.startsWith(`${storeKey}.`))) await options.files.remove(identity, path.join(knowledgeDir, name), { force: true });
+      const vectorScope = knowledgeVectorScopeKey(scopeOfScopeId(ownedScope), ownedScope);
+      await options.files.remove(identity, path.join(knowledgeDir, 'semantic', vectorScope.scopeKind, vectorScope.scopeId), { recursive: true, force: true });
     }
-    const vectorScope = knowledgeVectorScopeKey('bot', scopeId);
-    await options.files.remove(identity, path.join(knowledgeDir, 'semantic', vectorScope.scopeKind, vectorScope.scopeId), { recursive: true, force: true });
     await options.files.remove(identity, path.join('bots', bot.id), { recursive: true, force: true });
   };
 }

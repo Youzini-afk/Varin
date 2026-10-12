@@ -57,6 +57,8 @@ import {
   type KnowledgeSupersedeChain,
   type KnowledgeCreateIfAbsentResult,
   KnowledgeMutationError,
+  type KnowledgeMutationOrigin,
+  type KnowledgeMutationReceipt,
   type OrganizerProgress,
   type OrganizerProgressStatus,
   type OrganizerPreparedProposal,
@@ -825,6 +827,35 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       commit: operations => { db.commitTransaction(operations); persistence.commit(); },
       afterCommit: change => persistence.afterCommit(() => deps.onPlanChanged?.(change)),
     });
+    const mutationReceipt = (origin: KnowledgeMutationOrigin): KnowledgeMutationReceipt | null => {
+      if (!origin.id || !origin.intent) throw new KnowledgeMutationError('invalid', 'Memory mutation origin and exact intent are required');
+      const rows = lookup({ type: 'knowledge_mutation', dedupeKey: origin.id });
+      if (rows.length > 1) throw new KnowledgeMutationError('invalid', 'Memory mutation has conflicting receipts');
+      if (!rows.length) return null;
+      const receipt = rows[0]!.payload['receipt'] as KnowledgeMutationReceipt;
+      if (!receipt || receipt.origin.id !== origin.id || receipt.origin.intent !== origin.intent) {
+        throw new KnowledgeMutationError('conflict', 'Memory mutation origin was reused with a different intent');
+      }
+      return receipt;
+    };
+    // Explicit IDs let the domain change, relation and exact result receipt share one native
+    // transaction. Knowledge rows and their receipts are retained, so live identities cannot recur.
+    const nextKnowledgeId = (): number => {
+      let next = 1;
+      for (const id of db.allNodeIds()) next = Math.max(next, id + 1);
+      if (!Number.isSafeInteger(next)) throw new KnowledgeMutationError('invalid', 'Knowledge identity space exhausted');
+      return next;
+    };
+    const commitKnowledge = (operations: TransactionOperation[], changes: Knowledge[], origin?: KnowledgeMutationOrigin,
+      action?: KnowledgeMutationReceipt['action'], result: KnowledgeMutationReceipt['result'] = null): void => {
+      if (origin) operations.push({ type: 'insert', vector: placeholderVec, payload: {
+        type: 'knowledge_mutation', dedupeKey: origin.id, receipt: { origin, action, result, changes },
+      } });
+      if (!operations.length) return;
+      db.commitTransaction(operations);
+      persistence.commit();
+      if (changes.length) { bumpKnowledgeEpoch(); notifyKnowledge(changes.map(item => item.id)); }
+    };
     const store: KnowledgeStore = {
       ...conversationPlans,
       dim,
@@ -1135,21 +1166,22 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
         });
       },
 
-      async createKnowledgeIfAbsent(k: KnowledgeInput, options?: { expectedRevision?: string; explicit?: boolean }): Promise<KnowledgeCreateIfAbsentResult> {
+      async readKnowledgeMutation(origin) { return enqueueWrite(() => mutationReceipt(origin)); },
+      async createKnowledgeIfAbsent(k, options) {
         return enqueueWrite(() => {
+          const prior = options?.origin && mutationReceipt(options.origin);
+          if (prior) {
+            if (prior.action !== 'remember') throw new KnowledgeMutationError('conflict', 'Memory mutation action changed');
+            return prior.result as KnowledgeCreateIfAbsentResult;
+          }
           if (options?.expectedRevision !== undefined
             && (knowledgeRevision() !== options.expectedRevision || knowledgeMutationEpoch !== knowledgeEpoch)) {
-            throw new KnowledgeMutationError("conflict", "Memory changed while the proposal was being prepared");
+            throw new KnowledgeMutationError('conflict', 'Memory changed while the proposal was being prepared');
           }
-          if (recallScope === "user" && k.scope !== "user") {
-            throw new KnowledgeMutationError("invalid", "User knowledge store rejects non-user scope writes");
-          }
+          if (recallScope === 'user' && k.scope !== 'user') throw new KnowledgeMutationError('invalid', 'User knowledge store rejects non-user scope writes');
           const identity = normalizeKnowledgeContent(k.content);
-          if (!identity) throw new KnowledgeMutationError("invalid", "Knowledge content is required");
-          const explicitRemember = options?.explicit === true && k.status === "accepted";
-          // This lookup intentionally stays inside the single writer queue. It
-          // covers every status and retired row so concurrent model proposals
-          // cannot insert two identities or resurrect dismissed history.
+          if (!identity) throw new KnowledgeMutationError('invalid', 'Knowledge content is required');
+          const explicitRemember = options?.explicit === true && k.status === 'accepted';
           const duplicate = lookup({ type: "knowledge", scope: k.scope }).filter(({ payload }) => (
             payload["type"] === "knowledge"
             && payload["scope"] === k.scope
@@ -1170,41 +1202,31 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
                 })()))
           ))[0];
           if (duplicate) {
-            // A repeated explicit statement can bring new original evidence.
-            // Keep all of it so forgetting also suppresses the new source.
+            let payload = duplicate.payload;
             if (explicitRemember && k.source?.spans?.length) {
-              const previous = knowledgeSourceFromPayload(duplicate.payload["source"]);
-              const source = { ...previous, ...k.source, spans: mergeSourceSpans([...(previous?.spans ?? []), ...k.source.spans]) };
-              db.patchPayload(duplicate.id, { $set: { source } });
-              duplicate.payload = { ...duplicate.payload, source };
-              persistence.commit();
-              bumpKnowledgeEpoch();
-              notifyKnowledge([duplicate.id]);
+              const previous = knowledgeSourceFromPayload(payload['source']);
+              payload = { ...payload, source: { ...previous, ...k.source,
+                spans: mergeSourceSpans([...(previous?.spans ?? []), ...k.source.spans]) } };
             }
-            if (explicitRemember && duplicate.payload["status"] === "suggested") {
-              const source = knowledgeSourceFromPayload(duplicate.payload["source"]) ?? k.source;
-              db.patchPayload(duplicate.id, { $set: {
-                status: "accepted", ...(k.nature ? { nature: k.nature } : {}), ...(source ? { source } : {}),
-              } });
-              duplicate.payload = { ...duplicate.payload, status: "accepted", ...(k.nature ? { nature: k.nature } : {}), ...(source ? { source } : {}) };
-              persistence.commit();
-              bumpKnowledgeEpoch();
-              notifyKnowledge([duplicate.id]);
-            }
-            const knowledge = knowledgeFromPayload(duplicate.id, duplicate.payload);
-            if (!knowledge) throw new KnowledgeMutationError("invalid", `Invalid knowledge row: ${duplicate.id}`);
-            return { created: false, duplicate: true, knowledge };
+            if (explicitRemember && payload['status'] === 'suggested') payload = { ...payload, status: 'accepted',
+              ...(k.nature ? { nature: k.nature } : {}), ...(k.source ? { source: payload['source'] ?? k.source } : {}) };
+            const knowledge = knowledgeFromPayload(duplicate.id, payload);
+            if (!knowledge) throw new KnowledgeMutationError('invalid', 'Invalid duplicate memory');
+            const result = { created: false, duplicate: true, knowledge };
+            const changed = payload !== duplicate.payload;
+            commitKnowledge(changed ? [{ type: 'updatePayload', id: duplicate.id, payload }] : [],
+              changed ? [knowledge] : [], options?.origin, 'remember', result);
+            return result;
           }
           assertSupplementsTarget(k.supplements, k.scope);
           const payload = knowledgeInsertPayload(k, Date.now());
-          const id = db.insert(placeholderVec, payload);
-          linkSupplements(id, k.supplements);
-          persistence.commit();
-          bumpKnowledgeEpoch();
-          notifyKnowledge([id]);
-          const knowledge = knowledgeFromPayload(id, payload);
-          if (!knowledge) throw new KnowledgeMutationError("invalid", `Invalid knowledge row: ${id}`);
-          return { created: true, duplicate: false, knowledge };
+          const id = nextKnowledgeId();
+          const knowledge = knowledgeFromPayload(id, payload)!;
+          const result = { created: true, duplicate: false, knowledge };
+          commitKnowledge([{ type: 'insertWithId', id, vector: placeholderVec, payload },
+            ...(k.supplements === undefined ? [] : [{ type: 'link' as const, src: id, dst: k.supplements, label: 'supplements', weight: 1 }])],
+            [knowledge], options?.origin, 'remember', result);
+          return result;
         });
       },
 
@@ -1286,8 +1308,13 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
         });
       },
 
-      async supersedeKnowledge(id, input, expectedScope, expected): Promise<{ id: NodeId; previous: Knowledge }> {
+      async supersedeKnowledge(id, input, expectedScope, expected, origin): Promise<{ id: NodeId; previous: Knowledge }> {
         return enqueueWrite(() => {
+          const prior = origin && mutationReceipt(origin);
+          if (prior) {
+            if (prior.action !== 'correct') throw new KnowledgeMutationError('conflict', 'Memory mutation action changed');
+            return prior.result as { id: NodeId; previous: Knowledge };
+          }
           const payload = db.getPayload(id) as Record<string, unknown> | null;
           if (!payload || payload["type"] !== "knowledge") {
             throw new KnowledgeMutationError("not-found", `Knowledge not found: ${id}`);
@@ -1318,21 +1345,24 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
             ...(inheritedNature ? { nature: inheritedNature } : {}),
             ...(inheritedSource ? { source: inheritedSource } : {}),
           }, now);
-          const nextId = db.insert(placeholderVec, nextPayload);
-          db.patchPayload(id, { $set: { invalidAt: now } });
-          db.link(nextId, id, "supersedes", 1);
-          // A correction keeps the predecessor's supplements relation unless
-          // the caller restates one.
-          linkSupplements(nextId, input.supplements ?? previous.supplements);
-          persistence.commit();
-          bumpKnowledgeEpoch();
-          notifyKnowledge([nextId, id]);
+          const nextId = nextKnowledgeId();
+          const retired = { ...payload, invalidAt: now };
+          const supplements = input.supplements ?? previous.supplements;
+          commitKnowledge([{ type: 'insertWithId', id: nextId, vector: placeholderVec, payload: nextPayload },
+            { type: 'updatePayload', id, payload: retired }, { type: 'link', src: nextId, dst: id, label: 'supersedes', weight: 1 },
+            ...(supplements === undefined ? [] : [{ type: 'link' as const, src: nextId, dst: supplements, label: 'supplements', weight: 1 }])],
+            [knowledgeFromPayload(nextId, nextPayload)!, knowledgeFromPayload(id, retired)!], origin, 'correct', { id: nextId, previous });
           return { id: nextId, previous };
         });
       },
 
-      async retireKnowledge(id, expectedScope, expected): Promise<void> {
+      async retireKnowledge(id, expectedScope, expected, origin): Promise<void> {
         return enqueueWrite(() => {
+          const prior = origin && mutationReceipt(origin);
+          if (prior) {
+            if (prior.action !== 'forget') throw new KnowledgeMutationError('conflict', 'Memory mutation action changed');
+            return;
+          }
           const payload = db.getPayload(id) as Record<string, unknown> | null;
           if (!payload || payload["type"] !== "knowledge") {
             throw new KnowledgeMutationError("not-found", `Knowledge not found: ${id}`);
@@ -1348,11 +1378,9 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
               throw new KnowledgeMutationError("conflict", `Knowledge ${id} changed after it was opened`);
             }
           }
-          if (payload["invalidAt"] !== undefined) return;
-          db.patchPayload(id, { $set: { invalidAt: Date.now() } });
-          persistence.commit();
-          bumpKnowledgeEpoch();
-          notifyKnowledge([id]);
+          const retired = payload['invalidAt'] !== undefined ? payload : { ...payload, invalidAt: Date.now() };
+          commitKnowledge(retired === payload ? [] : [{ type: 'updatePayload', id, payload: retired }],
+            retired === payload ? [] : [knowledgeFromPayload(id, retired)!], origin, 'forget');
         });
       },
 

@@ -25,6 +25,55 @@ fn fixture(selected: Vec<String>) -> Fixture {
         selected,
     )
 }
+/// Reuse original delegation admission; only the selected Bot identity and role differ.
+fn bot_plan_fixture() -> Fixture {
+    let mut f = dispatch::Fixture::new_parent_scoped(
+        0,
+        crate::plan::schema(),
+        crate::collaboration::schemas(Vec::new())
+            .into_iter()
+            .find(|tool| tool.name == "dispatch")
+            .unwrap(),
+        false,
+        false,
+        false,
+        |input, _| {
+            input.tools = Some(vec!["todo".into()]);
+        },
+        None,
+        Some("plan-bot"),
+    );
+    f.launch.tools.retain(|tool| tool.name == "todo");
+    f.launch.policy = crate::observations::default_policy_identity();
+    let child = f.accept();
+    let mut source = child.source.pin().unwrap().source.clone();
+    source.branch_id = Some(format!("child-source:{}", child.operation_id));
+    source.revision = Some(0);
+    let proposal = varin_runtime::catalog::context::ContextProposal {
+        key: "bot-plan-context".into(),
+        branch_id: child.child_branch_id.clone(),
+        through_id: None,
+        expected_revision: 0,
+        summary: String::new(),
+        effective_system_prompt: "Bot plan child".into(),
+        instruction_sources: vec![],
+        memory_checkpoint: None,
+    };
+    let basis = serde_json::from_value(json!({"mode":"bot","threadRole":"worker",
+        "revision":0,"configurationDigest":"bot-plan-child","memorySnapshot":{"revision":0,"memories":[]},
+        "sessionId":child.child_thread_id,"projectId":child.project_id,
+        "originalSections":[{"name":"preamble","content":"Bot plan child"}],"instructionSources":[]})).unwrap();
+    let child =
+        f.db.prepare_child(&child.operation_id, source.clone(), proposal, basis)
+            .unwrap();
+    let run = f.db.run(&child.receipt.as_ref().unwrap().run_id).unwrap();
+    let original = f.db.launch_intent(&run.id).unwrap().unwrap().selection;
+    let params = json!({"runId":run.id,"credentialScope":original.credential_scope,
+        "toolBinding":{"grantId":"child-source-grant","runId":run.id,"threadId":run.thread_id,
+            "workspaceId":source.workspace_id,"executionWorkspaceId":source.execution_workspace_id,
+            "sourceMode":"fixed_branch","fileSource":{"branchId":source.branch_id,"revision":source.revision},"enabledTools":[]}});
+    Fixture::from_catalog(f.root, child, run, original, params, f.db)
+}
 struct ModelCalls {
     calls: Vec<ToolCall>,
     next: AtomicUsize,
@@ -70,6 +119,7 @@ struct OwnerReplies {
     queries: Vec<Value>,
     host_calls: Vec<Value>,
     deny_host: bool,
+    unconfirmed_plan: bool,
     report_output: Option<Value>,
 }
 impl OwnerReplies {
@@ -101,12 +151,16 @@ impl OwnerReplies {
         if kind == "memory-request" && q["action"] == "synchronize" {
             assert_eq!(q["scope"]["sessionId"], f.run.thread_id);
             let checkpoint = &q["checkpoint"];
-            let result = json!({"status":"ready","context":{"resources":checkpoint["resources"],
+            let mut result = json!({"status":"ready","context":{"resources":checkpoint["resources"],
                 "effectiveSystemPrompt":checkpoint["proposal"]["effective_system_prompt"],
                 "instructionSources":checkpoint["proposal"]["instruction_sources"],
                 "memoryCheckpoint":checkpoint["proposal"]["memory_checkpoint"],"personalization":checkpoint["personalization"]},
                 "state":{"revision":self.revision,"memories":self.note.iter().collect::<Vec<_>>(),
                     "noteRevisions":if self.revision == 0 {json!({})} else {json!({"1":self.revision})},"known":{}}});
+            if q["scope"]["mode"] == "bot" {
+                result["state"]["botKnowledge"] = json!({"botId":q["scope"]["botId"],
+                    "threadId":f.run.thread_id,"items":[],"invalidations":[],"corrections":[]});
+            }
             f.assembly.memory.receive(json!({"v":1,"kind":"memory-response","id":frame["id"],"kernelEpoch":EPOCH,"result":result}));
             return true;
         }
@@ -117,6 +171,8 @@ impl OwnerReplies {
                 .get(&key)
                 .expect("only original receipt lookup")
                 .clone()
+        } else if kind == "plan-request" && q["action"] == "mutate" && self.unconfirmed_plan {
+            json!({"status":"unknown"})
         } else if kind == "memory-request" {
             assert_eq!(q["runId"], f.run.id);
             assert_eq!(q["scope"]["sessionId"], f.run.thread_id);
@@ -341,12 +397,11 @@ fn selected_child_memory_and_plan_execute_through_both_origins_and_keep_report_s
         );
         for foreign in ["thread:parent", "thread:sibling"] {
             let receipt = json!({"revision":2,"changes":[{"id":2,"scope":{"kind":"session","id":foreign},"note":null}]});
-            assert!(
-                db.prepare_memory_receipt(&f.run.id, receipt)
-                    .unwrap()
-                    .load()
-                    .is_err()
-            );
+            assert!(db
+                .prepare_memory_receipt(&f.run.id, receipt)
+                .unwrap()
+                .load()
+                .is_err());
         }
         for query in owner.queries.iter().filter(|q| q["action"] == "mutate") {
             let op = db
@@ -495,12 +550,10 @@ fn available_but_unselected_child_helpers_do_not_enter_assembly() {
         resource_activations: vec![],
     };
     for call in calls().into_iter().take(4) {
-        assert!(
-            start
-                .tools
-                .prepare(&call, &frozen, &CancellationToken::default())
-                .is_err()
-        );
+        assert!(start
+            .tools
+            .prepare(&call, &frozen, &CancellationToken::default())
+            .is_err());
     }
     assert!(
         crate::plan::eligible(&f.catalog().lock().unwrap(), &f.run.id).unwrap(),
@@ -540,13 +593,12 @@ fn cancelled_child_reopen_reconciles_original_note_and_plan_receipts_without_rep
             .unwrap()
             .load()
             .unwrap();
-        assert!(
-            f.catalog()
-                .lock()
-                .unwrap()
-                .publish_memory_state(prepared)
-                .unwrap()
-        );
+        assert!(f
+            .catalog()
+            .lock()
+            .unwrap()
+            .publish_memory_state(prepared)
+            .unwrap());
         f.assembly.runtime.cancel(&f.run.id).unwrap();
         let f = f.reopen();
         let (tx, done) = mpsc::sync_channel(2);
@@ -622,23 +674,36 @@ fn cancelled_child_reopen_reconciles_original_note_and_plan_receipts_without_rep
 
 #[test]
 fn plan_scope_rejects_role_only_bot_foreign_and_missing_admissions() {
-    use varin_runtime::{SubmitInput, catalog::context::ContextProposal};
+    use varin_runtime::{catalog::context::ContextProposal, SubmitInput};
     let root = std::env::temp_dir().join(format!("varin-plan-scope-{}", uuid::Uuid::new_v4()));
     let mut db = Catalog::open(&root).unwrap();
-    for (index, (mode, role, session, context, expected)) in [
-        ("agent", "main", "actual", true, true),
-        ("agent", "worker", "actual", true, false),
-        ("agent", "read-only", "actual", true, false),
-        ("bot", "main", "actual", true, false),
-        ("agent", "main", "foreign", true, false),
-        ("agent", "main", "actual", false, false),
+    for (index, (mode, role, session, context, bot, expected)) in [
+        ("agent", "main", "actual", true, false, true),
+        ("agent", "worker", "actual", true, false, false),
+        ("agent", "read-only", "actual", true, false, false),
+        ("bot", "main", "actual", true, false, false),
+        ("bot", "main", "actual", true, true, true),
+        ("agent", "main", "actual", true, true, false),
+        ("agent", "main", "foreign", true, false, false),
+        ("agent", "main", "actual", false, false, false),
     ]
     .into_iter()
     .enumerate()
     {
         let thread = format!("thread-{index}");
         let branch = format!("branch-{index}");
-        db.create_thread(&thread, &branch).unwrap();
+        if bot {
+            db.publish_bot_gate(varin_runtime::catalog::bot::BotGate {
+                bot_id: "plan-bot".into(),
+                profile_revision: 1,
+                activity_operation_id: None,
+                permitted: true,
+            })
+            .unwrap();
+            db.create_bot_thread(&thread, &branch, "plan-bot").unwrap();
+        } else {
+            db.create_thread(&thread, &branch).unwrap();
+        }
         let basis=serde_json::from_value(json!({"mode":mode,"threadRole":role,"revision":0,
             "configurationDigest":"scope-test","memorySnapshot":{"revision":0,"memories":[]},
             "sessionId":if session=="actual"{&thread}else{session},"projectId":null,
@@ -666,10 +731,10 @@ fn plan_scope_rejects_role_only_bot_foreign_and_missing_admissions() {
             }),
             context.then_some(basis),
         );
-        if session == "foreign" {
+        if session == "foreign" || (mode == "bot") != bot {
             assert!(
                 receipt.is_err(),
-                "foreign identity is rejected before scope publication"
+                "foreign identity or false Bot mode is rejected before scope publication"
             );
             continue;
         }
@@ -692,3 +757,133 @@ mod message_review;
 
 #[path = "source_free_child_review.rs"]
 mod source_free_review;
+
+#[test]
+fn bot_child_plan_keeps_actual_identity_and_source_permissions_for_both_origins() {
+    for model in [false, true] {
+        let f = bot_plan_fixture();
+        let mut owner = OwnerReplies::default();
+        execute(
+            &f,
+            model,
+            calls().into_iter().skip(2).collect(),
+            &mut owner,
+            false,
+        );
+        assert_eq!(owner.plan_ref.as_deref(), Some("child-plan-2"));
+        assert_eq!(owner.queries.len(), 5);
+        assert!(
+            matches!(
+                f.child.code_result,
+                varin_runtime::catalog::collaboration::ChildCodeResult::NoChanges
+            ),
+            "read-only file source does not forbid the original selected Plan capability"
+        );
+        let catalog = f.catalog();
+        let db = catalog.lock().unwrap();
+        assert_eq!(
+            db.bot_for_thread(&f.run.thread_id).unwrap().as_deref(),
+            Some("plan-bot")
+        );
+        assert_eq!(
+            db.run_context_scope(&f.run.id).unwrap().unwrap().mode,
+            "bot"
+        );
+        for q in owner.queries.iter().filter(|q| q["action"] == "mutate") {
+            let operation = db
+                .operation(q["origin"]["operationId"].as_str().unwrap())
+                .unwrap();
+            assert_eq!(operation.intent["origin"], q["origin"]["toolOrigin"]);
+            assert_eq!(
+                operation.intent["origin"]["kind"],
+                if model { "model_step" } else { "policy_action" }
+            );
+            assert_eq!(
+                operation.effect,
+                if q["arguments"]["items"].as_array().unwrap().is_empty() {
+                    Effect::None
+                } else {
+                    Effect::Confirmed
+                }
+            );
+        }
+        drop(db);
+        drop(catalog);
+        f.finish();
+    }
+}
+
+#[test]
+fn bot_plan_reconcile_separates_stopped_executor_from_unknown_effect() {
+    for effect in ["none", "unknown"] {
+        let f = bot_plan_fixture();
+        let mut owner = OwnerReplies {
+            unconfirmed_plan: true,
+            ..Default::default()
+        };
+        execute(&f, false, vec![calls()[3].clone()], &mut owner, true);
+        assert!(owner.plan_ref.is_none());
+        let original = owner.queries[0].clone();
+        let operation_id = original["origin"]["operationId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        owner.receipts.insert(serde_json::to_string(&original["origin"]).unwrap(), json!({"status":"ready","plan":null,"mutation":null,
+            "executionReceipt":{"origin":original["origin"],"view":original["view"],"executorStopped":true,
+                "outcome":if effect == "none" {"failed"} else {"indeterminate"},"effect":effect}}));
+        let (tx, done) = mpsc::sync_channel(1);
+        crate::plan::reconcile(
+            f.assembly.runtime.clone(),
+            f.assembly.plan.clone(),
+            f.run.id.clone(),
+            "plan-stopped-reconcile".into(),
+            tx.into(),
+            Arc::new(|_| {}),
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let response = loop {
+            assert!(
+                Instant::now() < deadline,
+                "plan stopping reconciliation stalled"
+            );
+            if let Ok(response) = done.try_recv() {
+                break response;
+            }
+            if let Ok(frame) = f.frames.recv_timeout(Duration::from_millis(20)) {
+                assert!(
+                    owner.frame(&f, &frame, false) || f.ordinary_frame(&frame),
+                    "{frame}"
+                );
+            }
+        };
+        assert_eq!(
+            response["result"][if effect == "none" {
+                "reconciled"
+            } else {
+                "unresolved"
+            }],
+            json!([operation_id])
+        );
+        let catalog = f.catalog();
+        let db = catalog.lock().unwrap();
+        let operation = db.operation(&operation_id).unwrap();
+        assert_eq!(
+            operation.effect,
+            if effect == "none" {
+                Effect::None
+            } else {
+                Effect::Unknown
+            }
+        );
+        assert!(operation.external_receipt.unwrap().executor_stopped);
+        assert_eq!(
+            owner.queries.len(),
+            2,
+            "only the original receipt is queried"
+        );
+        drop(db);
+        drop(catalog);
+        f.finish();
+    }
+}

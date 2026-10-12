@@ -165,4 +165,20 @@ describe("memory service (BC1)", () => {
     expect(result.item.status).toBe("suggested");
     expect(result.item.nature).toBe("judgment");
   });
+  it('replays each exact Knowledge mutation receipt after later correction or forgetting without new rows', async () => {
+    const svc = service();
+    const origin = { id: 'run:r:operation:remember', intent: 'remember exact statement' };
+    const original = await svc.remember(botOwner, { content: 'Deploy Thursday' }, origin);
+    const expected = { content: original.item.content, trigger: original.item.trigger, status: original.item.status, invalidAt: null };
+    const correctionOrigin = { id: 'run:r:operation:correct', intent: 'replace original Thursday row with Friday' };
+    const correction = await svc.correct(botOwner, original.item.id, { content: 'Deploy Friday', expected }, correctionOrigin);
+    await svc.forget(botOwner, correction.id, undefined, { id: 'run:r:operation:forget', intent: 'forget Friday' });
+    expect(await svc.remember(botOwner, { content: 'Deploy Thursday' }, origin)).toEqual(original);
+    expect(await svc.correct(botOwner, original.item.id, { content: 'Deploy Friday', expected }, correctionOrigin)).toEqual(correction);
+    expect((await svc.list(botOwner)).map(item => item.id).sort()).toEqual([original.item.id, correction.id].sort());
+    expect(await svc.list(botOwner, { activeOnly: true })).toEqual([]);
+    await expect(svc.remember(botOwner, { content: 'Another statement' }, { ...origin, intent: 'different intent' })).rejects.toMatchObject({ code: 'conflict' });
+    expect((await svc.mutationReceipt(botOwner, origin))?.result).toMatchObject({ knowledge: { id: original.item.id } });
+  });
+
 });

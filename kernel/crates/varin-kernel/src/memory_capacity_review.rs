@@ -288,7 +288,7 @@ fn combined(ending: Ending) {
         binding,
         client,
     ));
-    declarations.push(declaration(db.clone(), bridge.clone(), true));
+    declarations.push(declaration(db.clone(), bridge.clone(), true, false));
     let mut start = configure_context(start, db.clone(), bridge.clone());
     let (plan_output, _plan_messages) = mpsc::sync_channel(8);
     let plan_bridge = crate::plan_bridge::PlanBridge::new(plan_output);

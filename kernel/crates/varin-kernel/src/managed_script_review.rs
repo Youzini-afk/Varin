@@ -842,6 +842,7 @@ fn run_case(scenario: Scenario) {
         runtime.catalog(),
         memory.clone(),
         true,
+        false,
     )];
     if scenario == Scenario::RunEndJob {
         rpc.execute(&json!({"method":"authority.grant.issue","params":{"grantId":"independent-job-grant","owningWorkspace":"workspace","executionWorkspace":"workspace","threadId":"thread","runId":run,"capabilities":["storage.read","storage.write","process"],"pathScopes":[""]}})).unwrap();

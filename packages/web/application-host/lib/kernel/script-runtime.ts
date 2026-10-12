@@ -358,6 +358,16 @@ export function createScriptRuntime(options: {
         return node.configuration_identity;
       };
     },
+    async drainRuns(runIds: ReadonlySet<string>) {
+      const pending = await rpc<Operation[], 'runtime.managed_process.pending'>('runtime.managed_process.pending', {});
+      const ids = new Map(pending.filter(operation => runIds.has(operation.run_id)).map(operation => [operation.id, operation]));
+      for (const environment of environments.values()) if (runIds.has(environment.runId) && !ids.has(environment.id)) ids.set(environment.id, await runtime.operation(environment.id));
+      const results = await Promise.all([...ids.values()].map(operation => {
+        const environment = environments.get(operation.id);
+        return environment ? close(environment, new Error('Bot sleeping')) : recoverEnvironment(operation);
+      }));
+      if (results.some(receipt => !receipt.executor_stopped)) throw new Error('Bot script process or callback stop is unconfirmed; retry Sleep after reconciliation');
+    },
     async cancelComputer(runId: string, desktopIds?: readonly string[]) {
       await Promise.all([...environments.values()].filter(environment => environment.runId === runId && environment.cell
         && (!desktopIds || desktopIds.some(id => environment.cell!.desktops.has(id)))).map(environment => close(environment, new Error('User stopped current Computer work'))));

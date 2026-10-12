@@ -41,6 +41,7 @@ impl ContextJobAdmission {
 }
 #[derive(Serialize, serde::Deserialize)]
 struct ContextJobRecipe {
+    bot_memory_snapshot: Option<memory::BotMemorySnapshotRef>,
     resource_activations: Vec<resources::ResourceActivation>,
     request: ContextJobRequest,
     source: SummarySource,
@@ -105,7 +106,9 @@ impl Catalog {
             })
             .transpose()?
             .unwrap_or_default();
+        let memory_reference = self.memory_state_identity(&request.branch_id)?;
         Ok(ContextJobPreparation {
+            memory_reference,
             epoch: self.epoch,
             database: self
                 .db
@@ -282,7 +285,8 @@ impl Catalog {
             .context_job_metadata(job_id)?
             .ok_or_else(|| RuntimeError::NotFound(job_id.into()))?;
         if run.cancel_requested
-            || job.owner_run_id.as_deref() != Some(run_id)
+            || self.capture_context_job_for_request(run_id, revision)?.as_ref()
+                .is_none_or(|accepted| accepted.receipt.run_id != job_id)
             || job.branch_id != run.branch_id
             || job.expected_revision != revision
         {
@@ -307,23 +311,20 @@ impl Catalog {
     }
     /// Only a parked context waiter can relinquish its worker. A live model/tool is never joined.
     pub fn context_job_waiter(&self, job_id: &str) -> Result<Option<String>> {
-        let Some(parent) = self.context_job_parent(job_id)? else {
-            return Ok(None);
-        };
-        let run = self.run(&parent)?;
-        let Some(key) = run
-            .waiting_on
-            .as_deref()
-            .filter(|_| run.state == RunState::Waiting && !run.cancel_requested)
-        else {
-            return Ok(None);
-        };
-        let wait: Wait = record(&self.db, "waits", key)?;
-        Ok((!wait.cancelled
-            && wait.run_id == parent
-            && wait.subject == job_id
-            && wait.kind == "context.job_settled")
-            .then_some(parent))
+        let Some(job) = self.context_job_metadata(job_id)? else { return Ok(None); };
+        let mut statement = self.db.prepare("SELECT body FROM runs WHERE branch_id=?1 AND json_extract(body,'$.state')='waiting'")?;
+        let runs = statement.query_map([&job.branch_id], |row| row.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        for body in runs {
+            let run: Run = serde_json::from_str(&body)?;
+            if run.cancel_requested { continue; }
+            let Some(key) = run.waiting_on.as_deref() else { continue; };
+            let wait: Wait = record(&self.db, "waits", key)?;
+            if !wait.cancelled && wait.run_id == run.id && wait.subject == job_id && wait.kind == "context.job_settled" {
+                return Ok(Some(run.id));
+            }
+        }
+        Ok(None)
     }
     /// Resolve from committed facts after the old worker has parked. Failure wakes the engine
     /// to consume any pending input and report the original failed candidate without paid replay.
@@ -339,7 +340,7 @@ impl Catalog {
             .capture_active_checkpoint(&job.branch_id)?
             .map_or(0, |checkpoint| checkpoint.revision);
         let changed = current != job.expected_revision;
-        if !changed && !matches!(summary.state, RunState::Failed | RunState::Cancelled) {
+        if !changed && !matches!(summary.state, RunState::Completed | RunState::Failed | RunState::Cancelled) {
             return Ok(None);
         }
         let tx = self.db.transaction()?;
@@ -404,7 +405,7 @@ impl Catalog {
         )
         .transpose()
     }
-    /// Reuse any already admitted automatic work for this owner/checkpoint/model, regardless
+    /// Reuse already admitted automatic work for this branch/checkpoint/model/policy, regardless
     /// of later routing or selected boundaries. Failure/unknown state is not permission to retry.
     pub fn capture_context_job_for_request(
         &self,
@@ -413,16 +414,19 @@ impl Catalog {
     ) -> Result<Option<ContextJobRead>> {
         let parent = self.run(run_id)?;
         let launch = self.launch_metadata(run_id)?;
-        let mut statement = self.db.prepare("SELECT run_id FROM context_jobs WHERE owner_run_id=?1 AND expected_revision=?2 ORDER BY rowid")?;
+        let mut statement = self.db.prepare("SELECT run_id,owner_run_id FROM context_jobs WHERE branch_id=?1 AND owner_run_id IS NOT NULL AND expected_revision=?2 ORDER BY rowid")?;
         let ids = statement
-            .query_map(params![run_id, sql_number(revision)?], |row| {
-                row.get::<_, String>(0)
+            .query_map(params![parent.branch_id, sql_number(revision)?], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        for id in ids {
+        for (id, original_owner) in ids {
             let job = self.run(&id)?;
             let selected = self.launch_metadata(&id)?;
-            if job.configuration == parent.configuration
+            let original_launch = self.launch_metadata(&original_owner)?;
+            let same_policy = original_launch.as_ref().map(|value| (&value.policy_target, &value.selection.policy))
+                == launch.as_ref().map(|value| (&value.policy_target, &value.selection.policy));
+            if same_policy && job.configuration == parent.configuration
                 && selected
                     .as_ref()
                     .and_then(|value| value.selection.credential_scope.as_ref())
@@ -511,7 +515,14 @@ impl Catalog {
                 "summary completion changed during publication".into(),
             ));
         }
+        if let Some(owner) = &prepared.job.request.owner_run_id {
+            let owner = self.run(owner)?;
+            if owner.cancel_requested || owner.state == RunState::Cancelled {
+                return Err(RuntimeError::Conflict("context candidate owner was cancelled".into()));
+            }
+        }
         let tx = self.db.transaction()?;
+        require_ancestor(&tx, &prepared.job.request.branch_id, &prepared.job.request.through_id)?;
         context::publish_prepared(&tx, &prepared.checkpoint, &prepared.reference)?;
         tx.commit()?;
         Ok(prepared.checkpoint)
@@ -621,6 +632,7 @@ impl ContextJobRead {
 
 /// Owns the immutable input and content lifetime while a worker checks the fixed ancestor.
 pub struct ContextJobPreparation {
+    memory_reference: Option<Value>,
     epoch: u64,
     database: std::path::PathBuf,
     content: crate::content::ContentStore,
@@ -665,6 +677,7 @@ impl ContextJobPreparation {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
         let mut resource_activations = Vec::new();
+        let mut bot_memory_snapshot = None;
         let parts = if let Some(reference) = &self.duplicate {
             let original: ContextJobRecipe = serde_json::from_value(self.content.load(reference)?)?;
             if original.request != self.request {
@@ -673,6 +686,7 @@ impl ContextJobPreparation {
                 ));
             }
             self.source = original.source;
+            bot_memory_snapshot = original.bot_memory_snapshot;
             resource_activations = original.resource_activations;
             let mut statement=database.prepare("SELECT p.body FROM context_jobs j JOIN context_job_parts p ON p.run_id=j.run_id WHERE j.job_key=?1 ORDER BY p.part_index")?;
             let references = statement
@@ -736,7 +750,17 @@ impl ContextJobPreparation {
                 Some(&self.request.through_id),
                 self.source.through_id.as_deref(),
             )?;
-            let history = hydrate_source(&self.content, source)?;
+            let mut history = hydrate_source(&self.content, source)?;
+            if let Some(basis) = self.request.personalization.as_ref().filter(|basis| basis.mode == "bot") {
+                let reference = self.memory_reference.as_ref().ok_or_else(|| RuntimeError::Conflict("Bot summary requires synchronized Knowledge".into()))?;
+                let state: memory::MemoryState = serde_json::from_value(self.content.load(reference)?)?;
+                let knowledge = state.bot_knowledge.as_ref().ok_or_else(|| RuntimeError::Invalid("Bot summary has no original Knowledge owner".into()))?;
+                if knowledge.thread_id != basis.session_id { return Err(RuntimeError::Invalid("Bot summary Knowledge belongs to another Thread".into())); }
+                // The immutable recipe owns the exact state supplied to this summary. A later
+                // write remains a delta even if it arrives before the candidate is published.
+                history.extend(memory::project(Some(&state), Some(basis), &history, &Default::default(), None)?);
+                bot_memory_snapshot = Some(memory::BotMemorySnapshotRef { bot_id: knowledge.bot_id.clone(), thread_id: knowledge.thread_id.clone(), revision: state.revision, state: reference.clone() });
+            }
             if self.source.through_id.is_some() {
                 resource_activations = active_checkpoint
                     .as_ref()
@@ -770,11 +794,13 @@ impl ContextJobPreparation {
             .map(|part| self.content.save_items(&part))
             .collect::<Result<Vec<_>>>()?
         };
-        let recipe = self.content.save(&serde_json::to_value(ContextJobRecipe {
+        let dependencies = bot_memory_snapshot.as_ref().map(|snapshot| snapshot.dependency()).transpose()?.into_iter().collect();
+        let recipe = self.content.save_with_dependencies(&serde_json::to_value(ContextJobRecipe {
+            bot_memory_snapshot,
             resource_activations,
             request: self.request.clone(),
             source: self.source,
-        })?)?;
+        })?, dependencies)?;
         let admission = ContextJobAdmission {
             key: self.request.key.clone(),
             branch_id: self.request.branch_id.clone(),
@@ -835,6 +861,11 @@ pub struct PreparedContextCheckpoint {
     reference: Value,
     _publication: crate::content::ContentPublication,
 }
+impl PreparedContextCheckpoint {
+    pub fn preview(&self, read: context::ContextRead) -> Result<crate::execution::ContextProjection> {
+        read.with_checkpoint(&self.checkpoint, self.reference.clone())?.load()
+    }
+}
 impl ContextJobPublication {
     pub fn load(self) -> Result<PreparedContextCheckpoint> {
         let recipe = self.job.recipe()?;
@@ -858,7 +889,9 @@ impl ContextJobPublication {
             summary = crate::context_material::summary_text(&self.content, &reference)?;
         }
         let request = &job.request;
+        let memory_checkpoint = recipe.bot_memory_snapshot.as_ref().map(|snapshot| snapshot.identity()).transpose()?.or_else(|| request.memory_checkpoint.clone());
         let checkpoint = context::ContextCheckpoint {
+            bot_memory_snapshot: recipe.bot_memory_snapshot,
             resource_activations: recipe.resource_activations,
             id: request.key.clone(),
             revision: request
@@ -873,12 +906,12 @@ impl ContextJobPublication {
                 summary,
                 effective_system_prompt: request.effective_system_prompt.clone(),
                 instruction_sources: request.instruction_sources.clone(),
-                memory_checkpoint: request.memory_checkpoint.clone(),
+                memory_checkpoint,
             },
             personalization: request.personalization.clone(),
             resources,
         };
-        let reference = self.content.save(&serde_json::to_value(&checkpoint)?)?;
+        let reference = checkpoint.save(&self.content)?;
         Ok(PreparedContextCheckpoint {
             job,
             run_revision: self.run_revision,
