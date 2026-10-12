@@ -48,9 +48,11 @@ export interface WebSnapshotContent {
 }
 
 /** Native callers have a real Thread, without manufacturing a Pi session. */
+export type ThreadMaterialAuthority = { kind: "thread"; owningWorkspaceId: string; threadId: string; sessionId?: never; runId?: never };
+export type WebMaterialAuthority = RetrievalReceiptAuthority | ThreadMaterialAuthority;
 export type WebSnapshotReadAuthority =
   | Pick<RetrievalReceiptAuthority, "owningWorkspaceId" | "sessionId" | "threadId">
-  | { kind: "thread"; owningWorkspaceId: string; threadId: string; sessionId?: never };
+  | ThreadMaterialAuthority;
 
 export class WebSnapshotReadError extends Error {
   constructor(readonly code: "conflict" | "invalid-range" | "corrupt", message: string) {
@@ -81,18 +83,25 @@ export const createWebMaterialStore = (
 ) => {
   const now = deps.now ?? Date.now;
   const serializer = deps.serializer ?? createWorkspaceOpSerializer();
+  const access = (authority?: WebSnapshotReadAuthority): WorkspaceWorkingStateRootAccess => {
+    if (!authority || !("kind" in authority) || authority.kind !== "thread") return workingStates;
+    return { withBranchStore: (workspaceId, purpose, consume, mode) => {
+      if (workspaceId !== authority.owningWorkspaceId) throw new Error("Material authority changed its scope");
+      return workingStates.withBranchStore(workspaceId, purpose, consume, mode, { threadId: authority.threadId });
+    } };
+  };
 
   const put = async (
     workspaceId: string,
     draft: WebSnapshotDraft,
     body: Buffer,
-    authority?: RetrievalReceiptAuthority,
+    authority?: WebMaterialAuthority,
     options: {
       forceNew?: boolean;
       source?: { bytes: Buffer; contentType: string };
     } = {},
   ): Promise<WebSnapshotRef> => serializer.runSerialized(workspaceId, () => kernelContext(
-    workingStates,
+    access(authority),
     workspaceId,
     "web-snapshot-put",
     async (store, context) => {
@@ -202,7 +211,7 @@ export const createWebMaterialStore = (
       throw new Error("Web snapshot authority does not match its owning workspace");
     }
     const result = await kernelContext(
-      workingStates,
+      access(authority),
       workspaceId,
       "web-snapshot-get",
       async (store, context) => {
@@ -349,7 +358,7 @@ export const createWebMaterialStore = (
     sourceSnapshotId?: string,
   ): Promise<WebSnapshotContent | null> => {
     const candidates = await kernelContext(
-      workingStates,
+      access(authority),
       workspaceId,
       "web-snapshot-find-analysis",
       async (_store, context) => (await context.records.list({ recordType: WEB_SNAPSHOT_RECORD_TYPE }))
@@ -379,7 +388,7 @@ export const createWebMaterialStore = (
     authority: WebSnapshotReadAuthority,
     sourceSnapshotId: string,
   ): Promise<WebSnapshotContent | null> => {
-    const candidates = await kernelContext(workingStates, workspaceId, "web-snapshot-find-analysis-config",
+    const candidates = await kernelContext(access(authority), workspaceId, "web-snapshot-find-analysis-config",
       async (_store, context) => (await context.records.list({ recordType: WEB_SNAPSHOT_RECORD_TYPE }))
         .filter((record) => record.state !== "released" && (
           record.threadId !== undefined

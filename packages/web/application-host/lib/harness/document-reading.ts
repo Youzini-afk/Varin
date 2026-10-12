@@ -1,18 +1,18 @@
 import { createHash } from "node:crypto";
 import type {
   DocumentAnalysis, DocumentFindHit, DocumentOverview, DocumentPageImage, DocumentReadRequest,
-  FetchResult, HarnessWebDomainPolicy, RetrievalReceiptAuthority, WebDocumentRegion,
+  FetchResult, HarnessWebDomainPolicy, WebDocumentRegion,
   WebReadPosition, WebSnapshotRef, WebSnapshotStructure,
 } from "@varin/protocol";
 import { createPdfEngine, PDF_ENGINE_VERSION, type PdfEngineOptions, type PdfPageText } from "./pdf-engine.js";
-import type { WebMaterialStore, WebSnapshotContent } from "./web-materials.js";
+import type { WebMaterialStore, WebSnapshotContent, WebMaterialAuthority } from "./web-materials.js";
 
 type Ok = Extract<FetchResult, { status: "ok" }>;
 type Materials = Pick<WebMaterialStore, "put" | "read"> & Partial<Pick<WebMaterialStore, "findAnalysis" | "findAnalysisConfig">>;
 
 export interface DocumentReaderContext {
   workspaceId: string;
-  authority: RetrievalReceiptAuthority;
+  authority: WebMaterialAuthority;
   signal?: AbortSignal;
   /** Current Host policy, checked again for each HTTP(S) snapshot read. */
   domainPolicy?: HarnessWebDomainPolicy;
@@ -99,14 +99,19 @@ const joinJob = <T>(job: SharedJob<T>, signal?: AbortSignal): Promise<T> => {
     if (job.waiters === 0 && !job.done) job.controller.abort();
   };
   if (!signal) return job.promise.finally(leave);
-  if (signal.aborted) { leave(); return Promise.reject(cancelled(signal)); }
   return new Promise<T>((resolve, reject) => {
-    const abort = (): void => { leave(); reject(cancelled(signal)); };
+    const abort = (): void => {
+      leave();
+      const finish = () => reject(cancelled(signal));
+      if (job.waiters === 0 && !job.done) void job.promise.then(finish, finish);
+      else finish();
+    };
     signal.addEventListener("abort", abort, { once: true });
     job.promise.then(
-      (value) => { leave(); resolve(value); },
-      (error) => { leave(); reject(error); },
+      value => { leave(); if (signal.aborted) abort(); else resolve(value); },
+      error => { leave(); reject(signal.aborted ? cancelled(signal) : error); },
     ).finally(() => signal.removeEventListener("abort", abort));
+    if (signal.aborted) abort();
   });
 };
 
@@ -288,7 +293,7 @@ export const createDocumentReader = (deps: { materials: Materials; engineFactory
     const snapshotId = request.snapshotId?.trim();
     if (!snapshotId) return { status: "failed", url: "", reason: "snapshotId is required" };
     checkAbort(ctx.signal);
-    const found = await deps.materials.read(ctx.workspaceId, snapshotId, ctx.authority, { includeSource: true });
+    const found = await deps.materials.read(ctx.workspaceId, snapshotId, ctx.authority, { includeSource: true, ...(ctx.signal ? { signal: ctx.signal } : {}) });
     if (!found) return { status: "snapshot-missing", snapshotId };
     if (domainBlocked(found.ref.finalUrl, ctx.domainPolicy)) return { status: "blocked", url: found.ref.finalUrl, reason: "domain-blocked" };
     if (found.ref.document?.kind !== "pdf" || !found.source) return { status: "failed", url: found.ref.finalUrl, reason: "snapshot has no original PDF" };

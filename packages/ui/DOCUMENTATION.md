@@ -447,6 +447,22 @@ explicit discard. A late read or write cannot publish after a Host/runtime chang
 explicit empty selection and reset remain different requests; editing shared fields never rewrites
 an untouched tool selection. Visible demand and settings events refresh the same shared projection.
 
+## Thread PDF materials
+
+`ThreadMaterials` binds retained PDF references from Web tool results and conversation citations to
+its enclosing real Thread/branch and current API endpoint. `ThreadOutput` discovers only the explicit
+`FetchResult` or `WebSearchResult.items[].fetch` snapshot fields; it does not scan arbitrary JSON for
+hashes or inline images. Reads use `ThreadsAPI.materials`, never a fabricated Pi session or file source.
+Citations use a conversation-local handler, so a Native Thread cannot consume another conversation's
+global Pi material event. Host, Thread, API or material changes and dialog dismissal discard late reads.
+
+`components/materials/PdfMaterialReader` owns the shared page/text/structure/search/OCR/region UI.
+Its reader port supplies transport, current-owner checks and optional draft insertion. The Pi adapter
+retains the existing session routes, binary page endpoint and Pi draft behavior. The Thread adapter
+uses fixed-material reads, validates page source hashes and adds selected regions to its own composer.
+Only the Host decides material authority and reading policy; the renderer retains loading and failure
+states rather than interpreting missing bytes as an empty successful document.
+
 ## Typed Thread media
 
 The Agent runtime history consumes original user-input attachments as StoredMedia and other history as

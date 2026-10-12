@@ -115,7 +115,7 @@ export interface ExtensionToolOwnerOptions {
   kernel: KernelClient;
   currentPolicy(runId: string): Promise<PermissionPolicy>;
   /** Domain configuration is captured once by the ordinary Run preparation owner. */
-  prepareConfiguration?(run: Omit<ExtensionToolRun, 'source'>, required: readonly ExtensionToolBinding[]): Promise<ExtensionToolConfiguration>;
+  prepareConfiguration?(run: ExtensionToolRun, required: readonly ExtensionToolBinding[]): Promise<ExtensionToolConfiguration>;
   configurationIdentity?: ExtensionToolConfiguration;
 }
 export async function retainExtensionTool(

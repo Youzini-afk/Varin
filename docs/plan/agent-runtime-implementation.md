@@ -19,6 +19,14 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-12 增量：原 Web 工具与固定 PDF 材料
+
+- 普通 builtin 单声明接入 `websearch`、`webfetch`、`document_read`，复用原搜索/egress/HTML/PDF/材料与 Rust Storage owner。实际 Thread/family 生成无源逻辑 scope；窄 grant 与 record 仍归真实 Thread，家系/可猜 snapshot 不自动授跨 Thread 读取。接受时冻结配置、派发时取原凭据，公共读取重核当前策略。
+- HTTP/HTML/PDF 只共享原内容/分析；各活跃调用独立提交材料，最后 waiter 与已开始 commit 按实际排空。原材料在 Run 完成、GC、Host/Storage 重开后保留，显式 refresh 不覆旧 snapshot；PDF 图片进入同一 typed media/原 provider 编译。
+- 独审三条实际失败路径已复验修复：网页 find 静默忽略、倒置行范围假成功、免凭据默认搜索误依赖无关 auth。共享原纯文本选择器且保 position/find 原行号；无第二算法、权限名单或推测性 PDF 校验。Web 配置错误仅影响实际 Web 选择。
+- 真实 client→认证 route→原 reader 与共享 UI 贯通，无 Pi session。原生 engine/installed builtin/权限/Storage/Policy/公开读/重开整链、独立取消探针、旧 Pi/UI 与同源构建分层通过；见[有限验收与复跑](../reviews/runtime-web-materials-2026-10-12.md)。未由此片证明全部 child/nested Web 组合、真外站、产品 IPC、OCR/字体质量或平台性能。
+- 后续优先原本地/实验 PDF ingestion、材料集合/分享、学术/decision 与其余环境/Bot、来源/检索/上下文/provider 能力；完整两设计未完成，最终默认切换、Pi 删除与资产迁移仍由用户验收后负责。
+
 ## 2026-10-12 增量：原 MCP sampling 与双重用户审查
 
 - 原 authority/client 在 initialize 前只协商 basic sampling，真实 HTTP 原响应流或 accepted Task 保 Operation/endpoint/权限关联。原 Catalog **54**、wire **9**直接拒旧；原 interaction 链接真实独立 generation Operation，唯一 RunSupervisor 执行，未造 ModelStep、Run、主会话历史或第二推理服务。

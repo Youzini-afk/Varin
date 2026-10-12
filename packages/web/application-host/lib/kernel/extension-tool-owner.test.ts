@@ -90,7 +90,7 @@ it('installed SDK declaration reaches shared bridge, compiled schemas, validated
     });
     runtime.capabilities.register(
       MATERIAL_SNAPSHOT_CAPABILITY,
-      createMaterialToolOwner(opened.materials),
+      createMaterialToolOwner(opened.materials, async invocation => ({ kind: "thread", owningWorkspaceId: "ws", threadId: invocation.threadId })),
     );
     await runtime.start();
     await runtime.installOrStage({

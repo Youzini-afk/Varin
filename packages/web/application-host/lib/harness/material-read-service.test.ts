@@ -123,7 +123,7 @@ describe("material reading authority", () => {
     expect(readArtifact).not.toHaveBeenCalled();
     const imported = await service.handle(request, { ...context, requestSource: "user", authorizedPaths: [] });
     expect(imported.status).toBe("ok");
-    expect(readArtifact).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "session", rootSessionId: "session", allowedThreadIds: [] }), "attempt", "artifact", context.signal);
+    expect(readArtifact).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "session", rootSessionId: "session", access: { kind: "family", readThreadIds: [], controlThreadIds: [] } }), "attempt", "artifact", context.signal);
     expect(f.ingest).toHaveBeenCalledWith(expect.objectContaining({ sourceUrl: "experiment://attempt/artifact", title: "plot.pdf" }), expect.anything(), { view: "overview" });
   });
 });

@@ -8,7 +8,7 @@ import { ApplicationExtensionRuntime, type HostCapabilityHandler, type HostInvoc
 import { parseVarinExtensionManifest, type JsonValue } from "@varin/extension-contract";
 import { createMaterialStoreFixture } from "../harness/web-materials.test-helper.js";
 import { createMaterialCollections } from "../harness/material-collections.js";
-import { createMaterialToolOwner, MATERIAL_SNAPSHOT_CAPABILITY, type MaterialSnapshotReadResult } from "./material-tool-owner.js";
+import { createMaterialToolOwner as createOwner, MATERIAL_SNAPSHOT_CAPABILITY, type MaterialSnapshotReadResult } from "./material-tool-owner.js";
 import { withToolInvocation, type ToolInvocationAuthority } from "./tool-invocation.js";
 
 const owner = { extensionId: "example.materials", extensionVersion: "1.0.0", entrypointId: "host", generation: 1 };
@@ -37,6 +37,9 @@ const invoke = (handler: HostCapabilityHandler, input: JsonValue, options: {
     await handler("read", input, { owner, signal, invocation }) as MaterialSnapshotReadResult
   ));
 };
+
+const createMaterialToolOwner = (materials: Parameters<typeof createOwner>[0]) => createOwner(materials,
+  async invocation => ({ kind: "thread", owningWorkspaceId: "ws", threadId: invocation.threadId }));
 
 const put = (opened: ReturnType<typeof createMaterialStoreFixture>, body: string | Buffer) => opened.materials.put("ws", {
   sourceUrl: "https://example.com/material", finalUrl: "https://example.com/material", representation: "raw-text",
@@ -156,14 +159,14 @@ describe("material snapshot capability", () => {
     expect(await invoke(handler, { ...input, snapshotId: empty.snapshotId })).toMatchObject({ status: "corrupt" });
   });
 
-  it("requires an active Host scope and source, and cannot take authority from tool parameters", async () => {
+  it("requires an active Host scope, and cannot take authority from tool parameters", async () => {
     const opened = createMaterialStoreFixture();
     const ref = await put(opened, "private content");
     const handler = createMaterialToolOwner(opened.materials);
     const input = { snapshotId: ref.snapshotId, offset: 0, maxBytes: 100 };
     const signal = new AbortController().signal;
     await expect(handler("read", input, { owner, signal })).rejects.toThrow("tool_invocation_unavailable");
-    await expect(invoke(handler, input, { authority: { ...authority(), source: null } })).rejects.toThrow("source workspace");
+    expect(await invoke(handler, input, { authority: { ...authority(), source: null } })).toMatchObject({ status: "ok", text: "private content" });
     await expect(invoke(handler, { ...input, threadId: "thread" })).rejects.toThrow("Unknown material snapshot read field");
     await expect(invoke(handler, { ...input, maxBytes: 0 })).rejects.toThrow("positive safe integer");
     let stale: HostInvocationScope | undefined;

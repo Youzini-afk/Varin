@@ -2,6 +2,14 @@
 
 This package contains the browser-safe manifests for Varin's built-in extensions and the immutable Node runtimes used by brokered Host extensions.
 
+`varin.builtin.web` distributes ordinary `websearch`, `webfetch` and `document_read` tools. The single
+`WEB_TOOL_DECLARATIONS` feeds the manifest, tool schema and Host decoder; the immutable Host artifact
+uses the existing `web.materials` capability. Search, egress, fixed snapshots and PDF parsing retain
+their original Host/Storage owners. Source-less execution uses real Thread identity. Enabled-by-default
+distribution does not bypass original call permission, accepted Web settings or material authorization.
+This finite adapter supports URL/fixed-snapshot reads, not local PDF paths, experiment artifacts,
+collection/share, scholarly services or reader-model prompts. See the [Web/material owner](../web/application-host/lib/harness/DOCUMENTATION.md).
+
 `varin.builtin.computer` provides the ordinary native single-call Computer tools. Its shared
 `COMPUTER_TOOL_DECLARATIONS` supplies the product manifest, tool directory and Host argument decoder;
 the immutable `host.cjs` uses SDK `provideTool` and the reviewed `computer.use` capability. The original

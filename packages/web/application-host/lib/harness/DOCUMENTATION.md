@@ -343,15 +343,33 @@ snapshots remain unavailable; malformed metadata, missing blob references and st
 propagate as failures, including through both web and PDF readers.
 
 `../kernel/material-tool-owner.ts` adapts the same store to the call-scoped
-`materials.snapshot/read` capability. The shared tool invocation supplies the original Run launch's
-owning workspace and Thread; extension parameters cannot supply either identity, and no Pi session is
-invented. Existing material grants and persisted collections still authorize sharing. Reads return an
+`materials.snapshot/read` capability. For native calls, the shared invocation resolves the actual
+Catalog Thread/family and the logical `thread-materials:<rootThreadId>` scope; extension parameters
+cannot supply either identity. The scope is independent of a file source or Pi session. Its narrow
+Storage grants bind the actual Thread, with no synthetic Run lifetime or maintenance access. A shared
+family scope alone never authorizes another Thread's snapshots. Existing material grants and persisted
+collections remain the sharing owner; native collection/share commands are a subsequent slice. Reads return an
 immutable snapshot/hash revision and UTF-8 byte page with an exact next cursor; invalid boundaries or
 budgets smaller than the next codepoint fail explicitly. Empty bodies, unavailable snapshots, conflicts
 and corrupt data stay distinct. Storage/transport failures reject, and cancelled or retired invocations
 cannot publish late content. The production blob owner reads the requested range, but its initial full
 object hash verification is not bounded by the response byte budget. This capability performs no fetch,
 document parsing or OCR.
+
+The ordinary `varin.builtin.web` extension exposes `websearch`, `webfetch` and `document_read` through
+one declaration and the original ToolBridge. `kernel/web-runtime.ts` adapts their admitted calls into
+these owners, retaining the accepted Web/domain/render/OCR settings in the original tool binding;
+search credentials still resolve from their current owner at dispatch. A source-less Run reads user
+settings only. A selected source may add the original trusted-project settings, without a Pi AgentSession.
+Public Thread material reads recheck current domain/OCR settings under the actual Thread and branch.
+
+Shared HTTP/HTML/PDF work owns only raw content or analysis. Each caller publishes its own snapshot.
+One cancelled waiter does not stop other holders; the final waiter waits for the original producer to
+drain. A started snapshot write settles before its caller releases. A fetched HTML body survives a pin
+failure with explicit `snapshotError`, rather than claiming a usable snapshot. Known PDF pixels become
+typed media in native tool output while the complete metadata and source identity remain ordinary data.
+This slice supports URL/fixed-snapshot reads; local paths, experiment artifact ingestion, collections,
+sharing, scholarly/decision services and extra reader-model prompts still need native integration.
 
 Harness deadline/cancellation diagnostics record the request method, admission/service/response
 phase, elapsed time, service completion and pending storage method counts. They contain no tool
@@ -415,7 +433,13 @@ these strings are executable names/paths, never shell command text. If a runner 
 is unavailable, the requested operation reports that state. It does not silently claim an installation
 or substitute a different parser.
 
-The authenticated reader routes use the same material identity: POST
+The shared PDF reader core takes an explicit read port. The Pi adapter retains its session route;
+the native Thread adapter uses `ThreadsAPI.materials.read` → authenticated
+`POST /api/threads/materials/read` → the original Thread/domain/material owner. Thread/API/Host changes
+and close abort the current observation and reject late images. The current snapshot in a real tool
+result or a Thread-local citation opens this reader; it does not use a global Pi event or session store.
+
+The existing Pi authenticated reader routes use the same material identity: POST
 `/api/harness/sessions/:sessionId/materials/read` selects a view, and GET
 `/api/harness/sessions/:sessionId/materials/:snapshotId/page?page=&scale=` returns a rendered PNG.
 `varin-material://` UI references resolve to the current readable snapshot, page, optional normalized

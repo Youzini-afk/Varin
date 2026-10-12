@@ -134,6 +134,14 @@ its original complete range before parsing `OutputBody<StoredMedia>`. Media uses
 report holder and exact execution ID, including later Runs. Both report readers accept AbortSignal;
 cancelling a read does not cancel the child or alter its report.
 
+`ThreadsAPI.materials.read(identity, request, signal?)` reads a retained Web/PDF snapshot through the
+same authenticated Thread route. The request contains a fixed `snapshotId` and document view options;
+workspace, grants, source Runs, local paths and artifacts are not public selectors. The Host derives the
+current domain from the real Thread/branch and rechecks current User reading/OCR settings. The response
+is the original `FetchResult`, including distinguishable material, parser and image failures. A content
+hash verifies source equality; it never grants access. Endpoint/identity changes cancel or reject old
+reads, without cancelling a Run or changing the tool's frozen configuration.
+
 `ThreadsAPI.research` projects the original experiment, source and resource owners for an actual
 Agent `ThreadIdentity`. `scopes` lists retained source Runs, including earlier branches; callers
 select an explicit `sourceRunId` for every domain request. `canSubmit` is separate from historical

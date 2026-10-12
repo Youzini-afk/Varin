@@ -33,6 +33,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     return result;
   };
   return {
+    materials: { read: (identity, request, signal) => post('materials/read', { ...identity, request }, signal) },
     computer: {
       state: async (identity, signal) => parseComputerAutomationProjection(await post('computer/state', identity, signal)),
       stop: async (identity, request, signal) => {

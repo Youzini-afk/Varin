@@ -7,8 +7,10 @@ import {
   type HarnessWebSearchSettings,
   type SearchResultItem,
   type WebSearchItem,
+  type WebSearchRequest,
+  type WebSearchResult,
 } from "@varin/protocol";
-import type { HarnessService, HarnessServiceContext } from "./router.js";
+import type { HarnessServiceContext } from "./router.js";
 import { HarnessServiceError } from "./service-error.js";
 
 export interface SearchProvider {
@@ -618,16 +620,16 @@ const mapFetchStatus = (fetch: FetchResult): Pick<WebSearchItem, "status" | "det
   }
 };
 
-export function createWebSearchService(
-  resolveProvider: (ctx: { sessionId: string; workspaceId: string | null }) => Promise<ResolveSearchProviderResult>,
-  resolveDomainPolicy: (ctx: { sessionId: string; workspaceId: string | null }) => Promise<HarnessWebDomainPolicy> = async () => ({ block: [] }),
+export function createWebSearchService<C extends { signal: AbortSignal } = HarnessServiceContext>(
+  resolveProvider: (ctx: C) => Promise<ResolveSearchProviderResult>,
+  resolveDomainPolicy: (ctx: C) => Promise<HarnessWebDomainPolicy> = async () => ({ block: [] }),
   deps: {
     /** Host-bound fetch used for `urls` items; absent means fetch is unwired. */
-    fetchUrl?: (url: string, ctx: HarnessServiceContext) => Promise<FetchResult>;
+    fetchUrl?: (url: string, ctx: C) => Promise<FetchResult>;
   } = {},
-): HarnessService<"web.search"> {
+): { handle(params: WebSearchRequest, ctx: C): Promise<WebSearchResult> } {
   return {
-    handle: async (params, ctx: HarnessServiceContext) => {
+    handle: async (params, ctx: C) => {
       const queryItems: Array<{ kind: "query" | "objective"; query: string }> = [];
       if (params.query?.trim()) queryItems.push({ kind: "query", query: params.query.trim() });
       for (const entry of params.queries ?? []) {
