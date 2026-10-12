@@ -167,7 +167,7 @@ export function createSemanticStoreEngine(options: SemanticStoreOpenOptions & { 
   );
 
   const lookupVectorByEmbedText = (db: InstanceType<typeof TriviumDB> | null, embedText: string): number[] | undefined => {
-    if (!db) return undefined;
+    if (!db || db.nodeCount() === 0) return undefined;
     const ids = db.indexedLookup(
       { type: "block", embedKey: embedTextKey(embedText) },
       maximumLookupResults(db),
@@ -495,10 +495,26 @@ export function createSemanticStoreEngine(options: SemanticStoreOpenOptions & { 
       // files, or wait for the current background build to finish.
       return enqueue(() => publications.retain(), false);
     },
+    retainEmpty(): Promise<SemanticPublishedReader> {
+      return enqueue(() => publications.retainEmpty(refreshCheckpoint()), false);
+    },
+    listDocumentStatesPinned(token: string): Promise<SemanticDocumentState[]> {
+      return enqueue(() => publications.read(token, ({ db }) => {
+        if (!db || db.nodeCount() === 0) return [];
+        return db.indexedLookup({ type: "document" }, maximumLookupResults(db)).flatMap(id => {
+          const row = db.getPayload(id) as DocumentPayload | null;
+          return row?.type === "document" ? [{ documentId: row.documentId, revision: row.revision,
+            recipeId: row.recipeId, ...(row.sourceMetadata ? { sourceMetadata: row.sourceMetadata } : {}) }] : [];
+        });
+      }), false);
+    },
+    lookupVectorsPinned(token: string, texts: readonly string[]): Promise<Array<number[] | undefined>> {
+      return enqueue(() => publications.read(token, ({ db }) => texts.map(text => lookupVectorByEmbedText(db, text))), false);
+    },
     searchPinned(token: string, query: number[], limit: number,
       searchOptions?: readonly string[] | SemanticSearchOptions): Promise<SemanticHit[]> {
       return enqueue(() => publications.read(token, (backing, pinnedCheckpoint) => searchDatabase(
-        backing.db, () => backing.documentBlockIds ??= collectDocumentBlockIds(backing.db),
+        backing.db, () => backing.documentBlockIds ??= backing.db ? collectDocumentBlockIds(backing.db) : new Map(),
         query, limit, searchOptions, pinnedCheckpoint.generation,
       )), false);
     },

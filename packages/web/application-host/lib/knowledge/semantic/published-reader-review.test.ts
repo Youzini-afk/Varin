@@ -32,23 +32,41 @@ describe('independent immutable publication reader acceptance', () => {
   it('a cold reader acquire does not materialize or publish an empty database', async () => {
     const f = fixture(); const before = files(f.dataDir);
     expect(await f.store.retainPublished()).toBeNull();
+    const empty = await f.store.retainEmpty();
+    expect(await f.store.listDocumentStatesPinned(empty.token)).toEqual([]);
+    expect(await f.store.lookupVectorsPinned(empty.token, ['not published'])).toEqual([undefined]);
+    expect(await f.store.retainPublished()).toBeNull();
+    expect(await f.store.searchPinned(empty.token, [1, 0], 1, { extras: [{ ...chunk('fixed.ts', 'fixed text'), revision: 'fixed-r1', vector: [1, 0] }] }))
+      .toMatchObject([{ documentId: 'fixed.ts', revision: 'fixed-r1', body: 'fixed text' }]);
     expect(files(f.dataDir)).toEqual(before);
+    await f.store.releasePinned(empty.token);
+    expect(f.store.publishedReaderStats()).toEqual({ activeReaders: 0, retainedPublications: 0 });
+    await expect(f.store.listDocumentStatesPinned(empty.token)).rejects.toThrow();
   });
 
   it('pins old bytes while new publication and deletion become visible only to new readers', async () => {
     const f = fixture(); await f.publish('OLD_PUBLICATION', 1); f.store.markReady(true);
     const old = (await f.store.retainPublished())!; expect(old).not.toBeNull();
     const oldResult = await f.store.searchPinned(old.token, [1, 0], 10);
+    const oldStates = await f.store.listDocumentStatesPinned(old.token);
+    const oldVectors = await f.store.lookupVectorsPinned(old.token, ['OLD_PUBLICATION', 'NEW_PUBLICATION']);
+    expect(oldStates).toMatchObject([{ documentId: 'a.ts', revision: 'file-1' }]);
+    expect(oldVectors).toEqual([[1, 0], undefined]);
     expect(oldResult.map(hit => hit.body)).toEqual(['OLD_PUBLICATION']);
     await f.publish('NEW_PUBLICATION', 2); f.store.markReady(true);
     const next = (await f.store.retainPublished())!;
     expect(next.publicationId).not.toBe(old.publicationId);
     expect(next.ownerEpoch).toBe(old.ownerEpoch);
     expect(await f.store.searchPinned(old.token, [1, 0], 10)).toEqual(oldResult);
+    expect(await f.store.listDocumentStatesPinned(old.token)).toEqual(oldStates);
+    expect(await f.store.lookupVectorsPinned(old.token, ['OLD_PUBLICATION', 'NEW_PUBLICATION'])).toEqual(oldVectors);
     expect((await f.store.searchPinned(next.token, [1, 0], 10))[0]?.body).toBe('NEW_PUBLICATION');
     await f.store.removeDocument('a.ts', 3); f.store.markReady(true);
     const empty = (await f.store.retainPublished())!;
     expect(await f.store.searchPinned(empty.token, [1, 0], 10)).toEqual([]);
+    expect(await f.store.listDocumentStatesPinned(empty.token)).toEqual([]);
+    expect(await f.store.listDocumentStatesPinned(old.token)).toEqual(oldStates);
+    expect(await f.store.lookupVectorsPinned(old.token, ['OLD_PUBLICATION', 'NEW_PUBLICATION'])).toEqual(oldVectors);
     expect(await f.store.searchPinned(old.token, [1, 0], 10)).toEqual(oldResult);
     await f.store.releasePinned(old.token); await f.store.releasePinned(old.token);
     await expect(f.store.searchPinned(old.token, [1, 0], 10)).rejects.toThrow();

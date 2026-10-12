@@ -6,6 +6,20 @@
 
 import type { AgentInputContext } from "@varin/protocol";
 import type { SemanticQueryOverlay } from "./runtime.js";
+import type { StructureFixedCompute } from "../../structure/types.js";
+
+/** Original Run-bound source access, not a workspace registration or a corpus. */
+export interface SemanticSourceView {
+  mode: "fixed_branch" | "materialized";
+  /** Configuration namespace only; this path never supplies source bytes. */
+  configurationRoot: string;
+  listFiles(roots: readonly string[], signal: AbortSignal, options?: { respectGitignore: boolean }): Promise<{
+    files: Array<{ path: string; revision: string }>;
+    complete: boolean;
+  }>;
+  compute: StructureFixedCompute;
+  validateDocuments(documents: readonly { path: string; revision: string }[], signal: AbortSignal): Promise<void>;
+}
 
 export type SemanticQueryView = {
   overlays: SemanticQueryOverlay[];

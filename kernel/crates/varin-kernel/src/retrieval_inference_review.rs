@@ -1,12 +1,12 @@
 //! Original cheap Kernel retrieval, real Storage/compute/Documents and Host inference over stdio.
 use super::material_collection_review::binding;
-use super::web_domain_review::{EPOCH, Fixture, GENERATION, HOST, Host};
+use super::web_domain_review::{Fixture, Host, EPOCH, GENERATION, HOST};
 use super::*;
 use crate::host_tools::ToolBridge;
 use crate::storage::Storage;
 use crate::tools::{
-    KernelResourceClient, KernelToolExecutor, ResourceCall, ResourceWork, ToolBinding, ToolKind,
-    finish_resource_blob_read, prepare_resource,
+    finish_resource_blob_read, prepare_resource, KernelResourceClient, KernelToolExecutor,
+    ResourceCall, ResourceWork, ToolBinding, ToolKind,
 };
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
@@ -20,7 +20,8 @@ mod admission;
 use admission::InputAdmission;
 struct Model {
     question: String,
-    repeat: bool,
+    calls: usize,
+    semantic_only: bool,
 }
 impl ModelProvider for Model {
     fn serialize(&self, _: &RequestView) -> Result<Value, ExecutionError> {
@@ -41,8 +42,24 @@ impl ModelProvider for Model {
             },
         })
         .unwrap();
-        let retrieved = request.view.history.iter().any(|item|matches!(&item.content,Content::ToolResult{result} if result.call_id=="retrieve"));
-        if retrieved && (!self.repeat || request.view.history.iter().any(|item|matches!(&item.content,Content::ToolResult{result} if result.call_id=="retrieve-again"))) {return Ok(FinishReason::Stop);}
+        let call_ids = [
+            "retrieve",
+            "retrieve-again",
+            "retrieve-third",
+            "retrieve-fourth",
+        ];
+        let retrieved = request
+            .view
+            .history
+            .iter()
+            .filter(|item| {
+                matches!(&item.content,
+            Content::ToolResult { result } if call_ids.contains(&result.call_id.as_str()))
+            })
+            .count();
+        if retrieved >= self.calls {
+            return Ok(FinishReason::Stop);
+        }
         let schema = request
             .view
             .binding
@@ -56,15 +73,10 @@ impl ModelProvider for Model {
                 opaque: None,
                 content: Content::ToolCall {
                     call: ToolCall {
-                        call_id: if retrieved {
-                            "retrieve-again"
-                        } else {
-                            "retrieve"
-                        }
-                        .into(),
+                        call_id: call_ids[retrieved].into(),
                         name: schema.name.clone(),
                         schema_version: schema.version.clone(),
-                        arguments: json!({"question":self.question,"paths":["allowed"],"limit":3}),
+                        arguments: json!({"question":if self.semantic_only && retrieved > 0 { "nebula docking" } else { &self.question },"paths":["allowed"],"limit":3}),
                     },
                 },
             },
@@ -327,6 +339,21 @@ impl Review {
             return None;
         }
         if value["kind"] == "retrieval-response" {
+            if self.mode == "semantic-fixed-projection-stale" {
+                assert!(
+                    value["result"]["snippets"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|item| item["path"] == "allowed/c.ts"),
+                    "the Host must have returned the old c.ts candidate before the independent Rust window: {value}"
+                );
+                std::fs::write(
+                    self.physical_path.as_ref().unwrap().join("allowed/c.ts"),
+                    "export const capsule = \"CHANGED_AFTER_HOST\";\n",
+                )
+                .unwrap();
+            }
             if self.mode == "projection-stale" {
                 std::fs::write(
                     self.physical_path.as_ref().unwrap().join("allowed/c.ts"),
@@ -364,11 +391,20 @@ impl Review {
                     binding: binding(&self.f.runtime, &self.run),
                     policy_state: Value::Null,
                     provider: Arc::new(Model {
-                        repeat: matches!(
+                        calls: if self.mode == "semantic-fixed-chain" {
+                            4
+                        } else if matches!(
                             self.mode.as_str(),
                             "semantic-cache" | "semantic-credential"
-                        ),
-                        question: if self.mode.starts_with("llm-") || self.mode == "semantic-auto" {
+                        ) {
+                            2
+                        } else {
+                            1
+                        },
+                        semantic_only: self.mode.starts_with("semantic-fixed-"),
+                        question: if self.mode.starts_with("semantic-fixed-") {
+                            "quasar rendezvous".into()
+                        } else if self.mode.starts_with("llm-") || self.mode == "semantic-auto" {
                             "How does retrievalNeedle resolve its dependency?".into()
                         } else {
                             "retrievalNeedle".into()
@@ -783,3 +819,6 @@ mod child_review;
 
 #[path = "retrieval_semantic_review.rs"]
 mod semantic;
+
+#[path = "retrieval_fixed_semantic_review.rs"]
+mod fixed_semantic;

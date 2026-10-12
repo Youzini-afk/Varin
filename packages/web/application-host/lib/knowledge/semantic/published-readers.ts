@@ -8,8 +8,8 @@ import type { TriviumDB } from "triviumdb";
 import type { SemanticCheckpoint, SemanticPublishedReader, SemanticPublishedReaderStats } from "./store-contract.js";
 
 type Backing = {
-  db: TriviumDB;
-  directory: string;
+  db: TriviumDB | null;
+  directory: string | null;
   references: number;
   closed: boolean;
   documentBlockIds: Map<string, number[]> | null;
@@ -35,8 +35,8 @@ export function createSemanticPublishedReaders(options: {
     for (const backing of backings) {
       if (backing.references > 0) continue;
       try {
-        if (!backing.closed) { backing.db.close(); backing.closed = true; }
-        rmSync(backing.directory, { recursive: true, force: true });
+        if (!backing.closed) { backing.db?.close(); backing.closed = true; }
+        if (backing.directory) rmSync(backing.directory, { recursive: true, force: true });
         backings.delete(backing);
       } catch (error) { errors.push(error); }
     }
@@ -52,6 +52,12 @@ export function createSemanticPublishedReaders(options: {
     if (latest) latest.backing.references -= 1;
     latest = publication;
     cleanupRetired();
+  };
+  const retain = (publication: Publication): SemanticPublishedReader => {
+    const token = `${publication.id}:${++nextReader}`;
+    readers.set(token, publication);
+    publication.backing.references += 1;
+    return { token, ownerEpoch: epoch, publicationId: publication.id, checkpoint: { ...publication.checkpoint } };
   };
 
   return {
@@ -105,10 +111,15 @@ export function createSemanticPublishedReaders(options: {
     retain(): SemanticPublishedReader | null {
       if (closed) throw new Error("Semantic publication owner is closed");
       if (!latest) return null;
-      const token = `${latest.id}:${++nextReader}`;
-      readers.set(token, latest);
-      latest.backing.references += 1;
-      return { token, ownerEpoch: epoch, publicationId: latest.id, checkpoint: { ...latest.checkpoint } };
+      return retain(latest);
+    },
+    /** Query-owned overlay-only reader. It never installs or copies a writer generation. */
+    retainEmpty(checkpoint: SemanticCheckpoint): SemanticPublishedReader {
+      if (closed) throw new Error("Semantic publication owner is closed");
+      const backing: Backing = { db: null, directory: null, references: 0, closed: false, documentBlockIds: null };
+      backings.add(backing);
+      return retain({ id: `${epoch}:${++nextPublication}`, checkpoint: { ...checkpoint,
+        publishedDocuments: 0, coverage: "empty", lifecycle: "idle" }, backing });
     },
     read<T>(token: string, work: (backing: Backing, checkpoint: SemanticCheckpoint) => T): T {
       const publication = readers.get(token);

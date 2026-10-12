@@ -68,6 +68,8 @@ export interface SemanticQueryEmbeddingRequest extends HarnessEmbedParams {
   cachedResult?: HarnessEmbedResult;
   signal?: AbortSignal;
   guard(): Promise<void>;
+  /** Source document revisions are expensive; check once at the actual egress boundary. */
+  beforeDispatch?(signal: AbortSignal): Promise<void>;
 }
 export interface SemanticInferenceLease {
   readonly binding: HarnessResolvedEmbeddingBinding;
@@ -191,7 +193,7 @@ export function createSemanticInference(
             if (!options.requests) return fail('unavailable', 'embedding-request-owner-unavailable');
             const signal = AbortSignal.any([call.signal, controller.signal, ...(params.signal ? [params.signal] : [])]);
             const validate = async () => { await assertAvailable(signal); await params.guard?.(); signal.throwIfAborted(); };
-            if (params.purpose !== 'query' || typeof params.guard !== 'function') return fail('invalid', 'embedding-run-authorization-required');
+            if (!['query', 'document'].includes(params.purpose) || typeof params.guard !== 'function') return fail('invalid', 'embedding-run-authorization-required');
             if (params.providerId !== binding.providerId || params.modelId !== binding.modelId || params.protocol !== binding.protocol
               || params.configurationId !== binding.configurationId || params.dimensions !== binding.dimensions
               || params.maxTokens !== binding.maxTokens) return fail('invalid', 'embedding-binding-mismatch');
@@ -229,11 +231,13 @@ export function createSemanticInference(
               fetchImpl: async (url, init) => {
                 const destination = new URL(String(url)).toString();
                 if (destination !== provider.requestUrl || init?.method !== 'POST' || typeof init.body !== 'string') return fail('invalid', 'embedding-request-binding-mismatch');
-                return call.request({ binding: { requestKind: 'model_compute', purpose: 'code-retrieval-query-embedding',
+                return call.request({ binding: { requestKind: 'model_compute', purpose: params.purpose === 'document'
+                  ? 'code-retrieval-document-embedding' : 'code-retrieval-query-embedding',
                   providerId: binding.providerId, modelId: binding.modelId, api: binding.protocol, endpoint: destination,
                   configurationId: binding.configurationId, credentialScope: identity.credentialScope },
                   request: { purpose: params.purpose, wire: JSON.parse(init.body) }, destination, init, connection,
                   check: validate,
+                  ...(params.beforeDispatch ? { beforeDispatch: params.beforeDispatch } : {}),
                   observe: raw => {
                     const usage = embeddingWireUsage(raw);
                     let valid = false;

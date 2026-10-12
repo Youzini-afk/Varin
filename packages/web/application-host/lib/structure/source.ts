@@ -71,6 +71,7 @@ async function fanOutReadyFirst<Result extends { status: StructureStatus }>(
 export function createStructureSource(providers: readonly StructureProvider[]): StructureSource {
   const native = providers.find((provider) => provider.analyze && provider.units);
   return {
+    ...(native?.unitsRecipe ? { unitsRecipe: native.unitsRecipe.bind(native) } : {}),
     ...(native?.analyze ? { analyze: (request: StructureClassifyRequest) => native.analyze!(request) } : {}),
     ...(native?.analyzeFile ? { analyzeFile: (request: StructureFileRequest) => native.analyzeFile!(request) } : {}),
     ...(native?.units ? { units: (request: StructureOutlineRequest) => native.units!(request) } : {}),

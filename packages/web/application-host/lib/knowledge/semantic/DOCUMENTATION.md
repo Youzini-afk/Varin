@@ -44,6 +44,11 @@ Native embedding uses the shared OpenAI-compatible wire with zero automatic retr
 output dimension remains missing. An output-budgeted Goal therefore retains its existing unknown-use
 barrier when this provider supplies no output dimension. Query vector cache hits require the current
 source, binding and captured credential-scope fingerprint; they create no HTTP Operation or usage.
+For native fixed/materialized queries, foreground document misses use the same session with a distinct
+document-embedding purpose. `beforeDispatch` runs the full source-version fence after acknowledged
+dispatch intent and before the request-started flag/transport. Short authorization guards can repeat
+without repeatedly hashing the same file. A failed fence records the original admitted no-send fact;
+a later candidate rejection does not undo already observed HTTP usage.
 The older Pi workspace broker retains
 its existing failure/cancellation projection; this native lifecycle is not a claim that those older
 observer semantics were replaced.
@@ -99,6 +104,20 @@ observer semantics were replaced.
   optimal hardware profile. CPU settings apply after Host restart. Length grouping
   restores caller order. Quantized custom exports without `adaptiveBatching` keep
   fixed grains because their vectors may depend on batch composition.
+- Native non-live view: `source-query.ts` uses the original admitted Source owner, `unitsFixed` and
+  packing. Configuration/collection paths remain metadata; the old live directory need not exist.
+  Capture retains an available original publication without inventory or model work. First semantic
+  search lazily enumerates the source, retaining exact revision/recipe/space matches, masking every
+  other base row and preparing only missing source material. A cold view retains an empty backing
+  through the same owner, without copying an index or changing the writer's latest publication.
+  `listDocumentStatesPinned` and `lookupVectorsPinned` read that captured token, never newer writer
+  facts. Completed chunks and vectors share the original cache's byte soft budget. Changing API keys
+  alone does not invalidate compatible document assets; current source/binding/credential checks
+  still apply and query vectors retain their account partition. Concurrent cold invocations remain
+  separate inference owners; cross-query in-flight paid deduplication is not claimed. Release aborts
+  preparation and waits for its actual work before releasing the retained reader. Live/Pi background
+  ownership and defaults remain unchanged. Transient source coverage, captured publication coverage
+  and binding readiness are separate; materialized reads are versioned per file, not an atomic project.
 - Overlay: `query-view.ts` pins surface/thread drafts at query start; masked disk paths cannot leak
   old vectors. Thread view is fixed baseline + this branch’s delta.
   An empty index with no searchable fixed-view content returns before query embedding. Remote dimension
@@ -121,7 +140,8 @@ observer semantics were replaced.
   member and the manifest into a unique private directory, then opens it in native `immutable` mode.
   These copies never use hardlinks, WAL files or writer locks. Acquisition and pinned searches never
   flush or copy the writer. Recovery creates the first publication during store initialization;
-  a cold store has no reader until a checkpoint exists. Each lease freezes coverage/lifecycle metadata
+  a cold live query has no reader until a checkpoint exists. A non-live transient view may retain an
+  empty original-owner backing without publishing a writer generation. Each lease freezes coverage/lifecycle metadata
   and uses the immutable handle's own scoped block-ID cache. New publications preserve retained old
   readers; final release closes retired handles and removes their files. Store close or owner loss
   invalidates all tokens, and startup under the exclusive writer lock removes abandoned copies.
@@ -164,7 +184,7 @@ observer semantics were replaced.
   batch retains its hints even when a later batch is interrupted; startup reuses those hints and
   prepares only the remaining/changed paths. Metadata equality remains an unverified hint, and
   explicit verification still reads content. Watcher reset/recovery uses metadata reconciliation,
-  preserving stable publications. A normal query never traverses the root; returned old hits are checked
+  preserving stable publications. A normal live query never traverses the root; returned old hits are checked
   against current Documents revision. Query-time dimension discovery resumes a deferred scan in the
   existing background owner rather than awaiting the entire inventory. Queries consume published
   generations by default; first-publication waiting is an explicit internal option. Coverage records

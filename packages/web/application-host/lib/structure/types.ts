@@ -145,6 +145,7 @@ export interface StructureImportsResult {
 }
 
 export interface StructureProvider {
+  unitsRecipe?(request: Pick<StructureOutlineRequest, "languageId" | "path" | "workspaceId">): Promise<string | undefined>;
   analyze?(request: StructureClassifyRequest): Promise<StructureAnalysis>;
   analyzeFile?(request: StructureFileRequest): Promise<StructureAnalysis>;
   units?(request: StructureOutlineRequest): Promise<StructureUnitsResult>;
@@ -159,6 +160,7 @@ export interface StructureProvider {
 }
 
 export interface StructureSource {
+  unitsRecipe?(request: Pick<StructureOutlineRequest, "languageId" | "path" | "workspaceId">): Promise<string | undefined>;
   analyze?(request: StructureClassifyRequest): Promise<StructureAnalysis>;
   analyzeFile?(request: StructureFileRequest): Promise<StructureAnalysis>;
   units?(request: StructureOutlineRequest): Promise<StructureUnitsResult>;
