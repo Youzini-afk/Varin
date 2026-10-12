@@ -12,7 +12,7 @@ import { ResearchDecisionFailure } from '../harness/research-decide.js';
 import type { SemanticInference } from '../knowledge/semantic/runtime-inference.js';
 import type { RetrievalModelLease } from './retrieval-composition.js';
 import type { KernelClient } from './kernel-client.js';
-import type { LiveSourceResolver } from './live-source.js';
+import type { RetrievalSourceOwner } from './retrieval-source.js';
 import { toolOperationId, type RetrievalQuery, type ToolOrigin } from './protocol.generated.js';
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const identity = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -27,7 +27,7 @@ export function createRetrievalModelStage(options: {
   models?: ThreadModelAuthority;
   readGlobalSettings(): Promise<unknown>;
   kernel: Pick<KernelClient, 'retrievalGrant' | 'scoped' | 'registerCredentialOwner' | 'unregisterCredentialOwner' | 'kernelEpoch'>;
-  validateSource: LiveSourceResolver;
+  sources: Pick<RetrievalSourceOwner, 'validate' | 'read'>;
 }) {
   return { async prepare(query: RetrievalQuery, signal: AbortSignal): Promise<RetrievalModelLease> {
     let released = false;
@@ -35,7 +35,7 @@ export function createRetrievalModelStage(options: {
     let harness: Record<string, unknown>;
     const assertAvailable = () => { signal.throwIfAborted(); if (released) throw new Error('Retrieval model binding was released'); options.kernel.retrievalGrant(query); };
     const validateAvailable = async (active: AbortSignal = signal) => {
-      active.throwIfAborted(); assertAvailable(); await options.validateSource(query, active); assertAvailable();
+      active.throwIfAborted(); assertAvailable(); await options.sources.validate(query, active); assertAvailable();
     };
     const unavailable = (providerId: string, status: 'disabled' | 'unavailable' | 'unsupported', configuration: unknown): RetrievalModelLease => ({
       stage: { providerId, status, configurationId: identity(configuration) }, assertAvailable, validateAvailable,
@@ -162,7 +162,7 @@ export function createRetrievalModelStage(options: {
                     const queryId = invocation.operationId;
                     const started: ExploreQueryStartResult = { queryId, question: run.question, deadlineAt: run.deadlineAt,
                       parsed: { objects: run.parsed.objects, relation: run.parsed.relation, domain: run.parsed.domain },
-                      vocab: run.vocab(), sources: run.sourceStates(), inputSource: 'disk', decisionMode: mode, duties,
+                      vocab: run.vocab(), sources: run.sourceStates(), inputSource: query.source.mode === 'live_root' ? 'disk' : query.source.mode, decisionMode: mode, duties,
                       fastDecision: { status: decision.status } };
                     const guard = async () => { await validate(active); await validateMaterials([]); };
                     model = await runExploreModelLoop({ started, ...(complete ? { complete } : {}), signal: active, ...(query.limit === undefined ? {} : { limit: query.limit }), port: {
@@ -222,15 +222,18 @@ export function createRetrievalModelStage(options: {
             if (!eligible.length) return { indices: original, status: 'partial' };
             const guard = async () => {
               await validate(active);
-              const client = options.kernel.scoped(options.kernel.retrievalGrant(query));
               for (const path of new Set(input.snippets.map(item => item.path))) {
-                await client.fileReadCheck({ workspaceId: query.workspaceId, rootId: query.liveRoot.rootId, path }, active);
+                const current = await options.sources.read(query, path, active);
+                if (current.status !== 'ready') throw new Error('Original rerank source is unavailable');
+                const lines = current.content.split('\n');
+                for (const snippet of input.snippets.filter(item => item.path === path)) {
+                  if (snippet.revision !== current.revision || lines.slice(snippet.startLine - 1, snippet.endLine).join('\n') !== snippet.content) throw new Error('Original rerank material version changed');
+                }
               }
               await validate(active);
             };
             const result = await lease.execute(invocation, { query: input.question, documents: eligible,
-              provenance: { source: { mode: 'live_root', workspaceId: query.workspaceId,
-                executionWorkspaceId: query.executionWorkspaceId, liveRoot: query.liveRoot },
+              provenance: { source: query.source, physicalRoot: query.physicalRoot,
               candidates: eligible.map(document => {
                 const snippet = input.snippets[Number(document.id)]!;
                 return { id: document.id, path: snippet.path, revision: snippet.revision, startLine: snippet.startLine, endLine: snippet.endLine };

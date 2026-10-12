@@ -1,3 +1,4 @@
+import { createRetrievalSourceOwner } from './retrieval-source.js';
 import { createServer, type ServerResponse } from 'node:http';
 import { once } from 'node:events';
 import fs from 'node:fs/promises';
@@ -74,17 +75,17 @@ async function fixture(hooks: { concurrency?: number; conversation?: (body: Reco
   await extensions.start(); cleanups.push(() => extensions.stop());
   await extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision,
     rule: { allowFallback: false, providerKey: semanticKey, scope: { projectId: 'semantic-review-project' }, serviceId: 'varin.retrieval.plan', version: 1 } });
-  const authorize = async (query: RetrievalQuery, signal: AbortSignal) => { signal.throwIfAborted(); await f.liveSources.validate(query, signal); f.kernel.retrievalGrant(query); };
+  const authorize = async (query: RetrievalQuery, signal: AbortSignal) => { signal.throwIfAborted(); await f.liveSources.validate({ workspaceId: query.source.workspace_id, executionWorkspaceId: query.source.execution_workspace_id, liveRoot: query.source.live_root! }, signal); f.kernel.retrievalGrant(query); };
   const composition = createRetrievalComposition(extensions, { structure, prepareSemantic: async (selection, signal) => {
     const query = selection.query; if (!query) throw new Error('Query identity required');
     await authorize(query, signal ?? new AbortController().signal);
     const grant = f.kernel.retrievalGrant(query);
-    return workspace.acquireQuery({ workspaceId: query.workspaceId, threadId: query.threadId, runId: query.runId, invocation: query.invocation, roots: query.paths ?? grant.pathScopes, ...(signal ? { signal } : {}), authorize: active => authorize(query, active), assertAuthorized: () => { f.kernel.retrievalGrant(query); } });
+    return workspace.acquireQuery({ workspaceId: query.source.workspace_id, threadId: query.threadId, runId: query.runId, invocation: query.invocation, roots: query.paths ?? grant.pathScopes, ...(signal ? { signal } : {}), authorize: active => authorize(query, active), assertAuthorized: () => { f.kernel.retrievalGrant(query); } });
   } });
   const queries: RetrievalQuery[] = [];
   const selections: Array<Awaited<ReturnType<typeof composition.prepare>>> = [];
-  f.kernel.setRetrievalOwner(createRetrievalOwner({ documents: f.documents.authority, kernel: f.kernel, validateSource: f.liveSources.validate,
-    preparePipeline: async (query, signal) => { queries.push(query); const selected = await composition.prepare({ threadId: query.threadId, projectId: 'semantic-review-project', workspaceId: query.liveRoot.canonicalRoot, query }, signal); selections.push(selected); return selected; } }));
+  f.kernel.setRetrievalOwner(createRetrievalOwner({ sources: createRetrievalSourceOwner({ documents: f.documents.authority, kernel: f.kernel, validateLiveSource: f.liveSources.validate }), kernel: f.kernel,
+    preparePipeline: async (query, signal) => { queries.push(query); const selected = await composition.prepare({ threadId: query.threadId, projectId: 'semantic-review-project', workspaceId: query.physicalRoot!.canonicalRoot, query }, signal); selections.push(selected); return selected; } }));
   const scan = async () => { await workspace.scanWorkspace(f.workspaceId); await workspace.drain(); };
   if (!hooks.cold) await scan();
   const run = async (id: string, roots = ['']) => { const admitted = await f.admit(id, ['code_retrieval'], roots); await admitted.start(); return admitted; };

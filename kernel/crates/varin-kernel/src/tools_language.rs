@@ -51,7 +51,7 @@ pub(super) struct Observation {
     pub(super) revision: String,
     pub(super) text: String,
 }
-fn observation(value: Value) -> Result<Observation, ExecutionError> {
+fn observation_bytes(value: &Value) -> Result<Vec<u8>, ExecutionError> {
     let bytes = if let Some(text) = value["content"]["text"].as_str() {
         text.as_bytes().to_vec()
     } else if let Some(encoded) = value["content"]["bytesBase64"].as_str() {
@@ -64,6 +64,12 @@ fn observation(value: Value) -> Result<Observation, ExecutionError> {
             "Language target is not a regular readable file",
         ));
     };
+    Ok(bytes)
+}
+fn observation(value: Value) -> Result<Observation, ExecutionError> {
+    observe_bytes(observation_bytes(&value)?)
+}
+fn observe_bytes(bytes: Vec<u8>) -> Result<Observation, ExecutionError> {
     let revision = format!("d1_{}", URL_SAFE_NO_PAD.encode(Sha256::digest(&bytes)));
     // Match the current Documents encoding contract: UTF-8 (optional BOM), no binary NUL.
     // UTF-16 is reported unavailable rather than inventing another language text decoder.
@@ -129,6 +135,43 @@ impl KernelToolExecutor {
                     "Missing canonical resource identity",
                 )
             })
+    }
+    /// Fixed bytes use the existing immutable reader; they have no physical CAS identity.
+    pub(super) fn observe_source_path(
+        &self,
+        context: &ToolExecutionContext,
+        path: &str,
+        cancel: &CancellationToken,
+    ) -> Result<Observation, ExecutionError> {
+        if self.binding.source_mode != SourceMode::FixedBranch {
+            return self.observe_language_path(context, path, cancel);
+        }
+        let mut bytes = Vec::new();
+        let mut identity: Option<(String, u64)> = None;
+        loop {
+            let offset = bytes.len() as u64;
+            let value = self.resources.call(&self.binding, context,
+                ResourceOperation::FileRead(FileReadArgs { path: path.into(), offset,
+                    length: Some(crate::protocol::MAX_BLOB_RESPONSE_BYTES as u64) }),
+                false, cancel).map_err(|failure| ExecutionError::new(error_code(&failure.error), failure.error.to_string()))?;
+            let part = observation_bytes(&value)?;
+            let content = &value["content"];
+            let invalid = || ExecutionError::new("language_source_unavailable", "Incomplete fixed source byte continuation");
+            let hash = content["hash"].as_str().ok_or_else(invalid)?;
+            let total = content["byteLength"].as_u64().ok_or_else(invalid)?;
+            let next = offset.checked_add(part.len() as u64).ok_or_else(invalid)?;
+            if content["offset"].as_u64() != Some(offset)
+                || content["nextOffset"].as_u64() != Some(next)
+                || next > total || (next == offset && next < total)
+                || content["eof"].as_bool() != Some(next == total)
+                || identity.as_ref().is_some_and(|(original_hash, original_total)| original_hash != hash || *original_total != total)
+            {
+                return Err(invalid());
+            }
+            identity = Some((hash.into(), total));
+            bytes.extend(part);
+            if next == total { return observe_bytes(bytes); }
+        }
     }
     pub(super) fn observe_language_path(
         &self,

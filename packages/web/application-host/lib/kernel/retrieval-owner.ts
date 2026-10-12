@@ -1,21 +1,20 @@
 import type { FastDecisionMaterial } from '@varin/protocol';
 import { contentHashOf } from '../knowledge/semantic/identity.js';
-import type { DocumentAuthority } from '../documents/authority.js';
 import { createExploreQueryRun, formatExploreOutput, requiredExploreComponents, DEFAULT_BYTE_BUDGET, DEFAULT_EXCERPT_LIMIT, type ExploreDeps } from '../harness/explore.js';
 import type { ExploreFileSnapshot } from '../harness/explore-file-reader.js';
 import type { BoundRetrievalPipeline, PipelinePlan, RetrievalPipelineOwner, RetrievalSnippet, RetrievalStageKind, RetrievalStageStatus } from '../harness/retrieval-pipeline.js';
 import { waitWithSignal } from '../cancellation.js';
 import { decodeSearchHit, CONTENT_SEARCH_EXCLUDED_DIRS } from '../search/content.js';
-import { runKernelCompute } from './compute-runner.js';
 import type { KernelClient } from './kernel-client.js';
-import type { LiveSourceResolver } from './live-source.js';
-import type { LiveRoot, RetrievalQuery } from './protocol.generated.js';
+import type { RetrievalSourceOwner } from './retrieval-source.js';
+import type { LiveRoot, LaunchSource, RetrievalQuery } from './protocol.generated.js';
 import type { SemanticInferenceReceipt } from '../knowledge/semantic/runtime-inference.js';
 
 export interface RetrievalResult {
   status: Exclude<RetrievalStageStatus, 'disabled'>;
   plan?: PipelinePlan;
-  source?: { mode: 'live_root'; workspaceId: string; executionWorkspaceId: string; liveRoot: LiveRoot };
+  source?: LaunchSource;
+  physicalRoot?: LiveRoot | null;
   snippets: RetrievalSnippet[];
   omissions: { outOfScope: number; stale: number; unavailable: number };
   stages: Array<{ kind: RetrievalStageKind; status: RetrievalStageStatus }>;
@@ -31,13 +30,12 @@ const within = (path: string, roots: readonly string[]): boolean => roots.some(r
 const rank: Record<RetrievalStageStatus, number> = { disabled: 0, empty: 1, ready: 2, unsupported: 3, unavailable: 4, partial: 5, stale: 6, failed: 7, cancelled: 8 };
 
 /** Identity is explicit. Explore algorithms are reused without a Pi actor/session/store.
- * Search and per-path admission use the original Run grant; Documents remains the text owner.
+ * Search/read admission uses the original Run grant and source; Documents owns text decoding.
  * Providers only receive text after admission. Rust independently verifies all returned snippets.
  */
-export function createRetrievalOwner({ documents, kernel, validateSource, pipelines, preparePipeline }: {
-  documents: Pick<DocumentAuthority, 'readSnapshot'>;
+export function createRetrievalOwner({ sources, kernel, pipelines, preparePipeline }: {
+  sources: RetrievalSourceOwner;
   kernel: KernelClient;
-  validateSource: LiveSourceResolver;
   pipelines?: Pick<RetrievalPipelineOwner, 'capture'>;
   preparePipeline?: (query: RetrievalQuery, signal: AbortSignal) => Promise<BoundRetrievalPipeline>;
 }): RetrievalOwner {
@@ -59,7 +57,7 @@ export function createRetrievalOwner({ documents, kernel, validateSource, pipeli
     }
     try {
       const result: RetrievalResult = { status: 'empty', plan: binding.plan,
-        source: { mode: 'live_root', workspaceId: query.workspaceId, executionWorkspaceId: query.executionWorkspaceId, liveRoot: { ...query.liveRoot } },
+        source: query.source, physicalRoot: query.physicalRoot,
         snippets: [], omissions: { outOfScope: 0, stale: 0, unavailable: 0 },
         stages: binding.plan.stages.map(stage => ({ kind: stage.kind, status: stage.status === 'ready' ? 'empty' : stage.status })),
       };
@@ -69,9 +67,8 @@ export function createRetrievalOwner({ documents, kernel, validateSource, pipeli
       };
       signal.throwIfAborted();
       binding.assertAvailable?.();
-      await waitWithSignal(validateSource(query, signal), signal);
+      await waitWithSignal(sources.validate(query, signal), signal);
       const grant = kernel.retrievalGrant(query);
-      const client = kernel.scoped(grant);
       const validateBinding = async (): Promise<void> => {
         signal.throwIfAborted();
         binding.assertAvailable?.();
@@ -97,15 +94,11 @@ export function createRetrievalOwner({ documents, kernel, validateSource, pipeli
         const work = (async (): Promise<ExploreFileSnapshot> => {
           try {
             await validateBinding();
-            const address = { workspaceId: query.workspaceId, rootId: query.liveRoot.rootId, path };
-            const before = await client.fileReadCheck(address, signal);
+            const snapshot = await sources.read(query, path, signal);
             await validateBinding();
-            const snapshot = await documents.readSnapshot({ workspaceId: query.workspaceId, resourceId: path }, { signal });
-            const after = await client.fileReadCheck(address, signal);
-            await validateBinding();
-            if (before.resourceKey !== after.resourceKey) { result.omissions.stale++; return { status: 'stale', message: 'Resource identity changed during retrieval' }; }
-            if (snapshot.status !== 'ready') { result.omissions.unavailable++; return { status: 'unavailable', message: 'Candidate text is unavailable' }; }
-            return { status: 'ready', content: snapshot.content, revision: snapshot.revision, source: 'disk' };
+            if (snapshot.status === 'stale') result.omissions.stale++;
+            else if (snapshot.status !== 'ready') result.omissions.unavailable++;
+            return snapshot;
           } catch (error) {
             signal.throwIfAborted();
             const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
@@ -120,8 +113,7 @@ export function createRetrievalOwner({ documents, kernel, validateSource, pipeli
       const deps: ExploreDeps = {
         readFile: read,
         rgSearch: async (pattern, options) => {
-          const page = await runKernelCompute(client, {
-            workspaceId: query.workspaceId, rootId: query.liveRoot.rootId, operation: 'search', lane: 'foreground',
+          const page = await sources.compute(query, { operation: 'search', lane: 'foreground',
             paths: options.paths?.map(relative) ?? roots, query: pattern, fixedStrings: options.fixedStrings,
             ignoreCase: true, includeHidden: true, respectGitignore: true, excludeDirectories: CONTENT_SEARCH_EXCLUDED_DIRS,
             maxResults: options.candidateBudget ?? 200,
@@ -134,7 +126,7 @@ export function createRetrievalOwner({ documents, kernel, validateSource, pipeli
           stage('keyword', page.status === 'partial' ? 'partial' : page.records.length ? 'ready' : 'empty');
           const hits = [];
           for (const record of page.records) {
-            const hit = decodeSearchHit(record, query.workspaceId);
+            const hit = decodeSearchHit(record, query.source.workspace_id);
             if (!hit) continue;
             const snapshot = await read(hit.resource.resourceId);
             if (snapshot.status !== 'ready') continue;
@@ -152,14 +144,14 @@ export function createRetrievalOwner({ documents, kernel, validateSource, pipeli
         deps.structure = {
           outline: async request => {
             try {
-              const response = await waitWithSignal(structure.outline({ ...request, workspaceId: query.workspaceId, signal }), signal);
+              const response = await waitWithSignal(structure.outline({ ...request, workspaceId: query.source.workspace_id, signal }), signal);
               stage('structure', response.status);
               return response;
             } catch (error) { stage('structure', signal.aborted ? 'cancelled' : 'failed'); throw error; }
           },
           classifyHits: async request => {
             try {
-              const response = await waitWithSignal(structure.classifyHits({ ...request, workspaceId: query.workspaceId, signal }), signal);
+              const response = await waitWithSignal(structure.classifyHits({ ...request, workspaceId: query.source.workspace_id, signal }), signal);
               stage('structure', response.status);
               return response;
             } catch (error) { stage('structure', signal.aborted ? 'cancelled' : 'failed'); throw error; }
@@ -191,11 +183,11 @@ export function createRetrievalOwner({ documents, kernel, validateSource, pipeli
       const run = createExploreQueryRun({ question: query.question, paths: roots.length === 1 && roots[0] === '' ? ['.'] : roots,
         ...(query.limit === undefined ? {} : { limit: query.limit }) }, deps, { signal });
       // Only this query owner can resolve the loop's material identities back to
-      // admitted views. Re-read current Documents versions at HTTP/delivery fences;
+      // admitted views. Re-read the same selected source at HTTP/delivery fences;
       // structure views retain their own legitimate omitted-range text.
       const validateMaterials = async (materials: readonly FastDecisionMaterial[]) => {
         await validateBinding();
-        await waitWithSignal(validateSource(query, signal), signal);
+        await waitWithSignal(sources.validate(query, signal), signal);
         const views = new Map([...run.collect().views, ...run.selectedViews()].map(view => [view.viewId, view]));
         for (const material of materials) {
           const view = views.get(material.id);
@@ -214,17 +206,13 @@ export function createRetrievalOwner({ documents, kernel, validateSource, pipeli
               || view.startLine < 1 || view.endLine < view.startLine || view.endLine > lines.length)) {
             throw new Error('Original retrieval view range changed');
           }
-          const address = { workspaceId: query.workspaceId, rootId: query.liveRoot.rootId, path };
-          const before = await client.fileReadCheck(address, signal);
-          const current = await documents.readSnapshot({ workspaceId: query.workspaceId, resourceId: path }, { signal });
-          const after = await client.fileReadCheck(address, signal);
-          if (before.resourceKey !== after.resourceKey || current.status !== 'ready'
-            || current.revision !== original.revision || current.content !== original.content) {
+          const current = await sources.read(query, path, signal);
+          if (current.status !== 'ready' || current.revision !== original.revision || current.content !== original.content) {
             result.omissions.stale++;
             throw new Error('Retrieval material version changed');
           }
         }
-        await waitWithSignal(validateSource(query, signal), signal);
+        await waitWithSignal(sources.validate(query, signal), signal);
         await validateBinding();
       };
       let modelParticipation: import('@varin/protocol').ExploreModelParticipation | undefined;
@@ -311,7 +299,7 @@ export function createRetrievalOwner({ documents, kernel, validateSource, pipeli
         if (binding.model?.kind === 'snippets' && result.snippets.length) {
           // Recheck the exact permit immediately before sending any source to a selected model.
           for (const path of new Set(result.snippets.map(item => item.path))) {
-            await client.fileReadCheck({ workspaceId: query.workspaceId, rootId: query.liveRoot.rootId, path }, signal);
+            await sources.checkPath(query, path, signal);
           }
           await validateBinding();
           try {
@@ -325,10 +313,10 @@ export function createRetrievalOwner({ documents, kernel, validateSource, pipeli
           } catch { signal.throwIfAborted(); stage('model', 'failed'); }
         }
         signal.throwIfAborted();
-        await waitWithSignal(validateSource(query, signal), signal);
+        await waitWithSignal(sources.validate(query, signal), signal);
         await validateBinding();
         for (const path of new Set(result.snippets.map(item => item.path))) {
-          await client.fileReadCheck({ workspaceId: query.workspaceId, rootId: query.liveRoot.rootId, path }, signal);
+          await sources.checkPath(query, path, signal);
         }
         await validateBinding();
         const incomplete = explored.partial || explored.searchIncomplete || Object.values(result.omissions).some(count => count > 0)

@@ -1218,9 +1218,8 @@ export interface RetrievalQuery {
   invocation: RetrievalInvocation;
   runId: string;
   threadId: string;
-  workspaceId: string;
-  executionWorkspaceId: string;
-  liveRoot: LiveRoot;
+  source: LaunchSource;
+  physicalRoot: LiveRoot | null;
   grantId: string;
   projectId: string | null;
   question: string;
@@ -1321,7 +1320,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 11; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 12; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 

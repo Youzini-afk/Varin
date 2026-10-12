@@ -5,7 +5,8 @@ use super::*;
 use crate::host_tools::ToolBridge;
 use crate::storage::Storage;
 use crate::tools::{
-    KernelResourceClient, KernelToolExecutor, ResourceCall, ToolBinding, ToolKind, serve_resource,
+    KernelResourceClient, KernelToolExecutor, ResourceCall, ResourceWork, ToolBinding, ToolKind,
+    finish_resource_blob_read, prepare_resource,
 };
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
@@ -73,6 +74,9 @@ struct Review {
     retrieval: crate::retrieval::RetrievalBridge,
     resources: mpsc::Receiver<ResourceCall>,
     executor: Arc<KernelToolExecutor>,
+    resource_client: KernelResourceClient,
+    tool_binding: ToolBinding,
+    physical_path: Option<PathBuf>,
     credentials: crate::credential_bridge::CredentialBridge,
     cursor: u64,
     native_release: Option<Arc<dyn Fn() + Send + Sync>>,
@@ -80,6 +84,15 @@ struct Review {
 }
 impl Review {
     fn new(mode: &str) -> Self {
+        Self::with_source(mode, "live_root")
+    }
+    fn with_source(mode: &str, source_mode: &str) -> Self {
+        Self::initialize(mode, source_mode, false)
+    }
+    fn with_child_source(mode: &str, source_mode: &str) -> Self {
+        Self::initialize(mode, source_mode, true)
+    }
+    fn initialize(mode: &str, source_mode: &str, child_parent: bool) -> Self {
         let root =
             std::env::temp_dir().join(format!("varin-rerank-review-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
@@ -104,14 +117,32 @@ impl Review {
             bridge,
             outgoing,
         };
-        f.host.send(json!({"kind":"fixture-initialize","root":root,"storageRoot":f.storage_root,"epoch":EPOCH,"mode":mode}));
+        f.host.send(json!({"kind":"fixture-initialize","root":root,"storageRoot":f.storage_root,"epoch":EPOCH,"mode":mode,"sourceMode":source_mode,"childParent":child_parent}));
         let ready = f.receive("fixture-prepared");
         let source = &ready["source"];
         let enabled = BTreeSet::from([ToolKind::CodeRetrieval]);
-        let tools = KernelToolExecutor::selected_schemas(&enabled);
-        let selection:LaunchSelection=serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"rerank-review","provider_family":"rerank-review","model":"script",
-            "configuration_generation":1,"tool_schema_generation":1,"tools":tools,"policy":{"name":"default","version":"1"},"source":{
-                "workspace_id":source["workspaceId"],"execution_workspace_id":source["executionWorkspaceId"],"mode":"live_root","live_root":source["liveRoot"]}})).unwrap();
+        let tools = if child_parent {
+            crate::collaboration::schemas(Vec::new())
+        } else {
+            KernelToolExecutor::selected_schemas(&enabled)
+        };
+        let mut selection:LaunchSelection=serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"rerank-review","provider_family":"rerank-review","model":"script",
+            "configuration_generation":1,"tool_schema_generation":1,"tools":tools,"policy":{"name":"default","version":"1"},"source":source})).unwrap();
+        let mut configuration = json!({});
+        if child_parent {
+            f.host.send(json!({"kind":"fixture-configure-child","capabilities":crate::child_capabilities::descriptors()}));
+            let prepared = f.receive("fixture-child-configured");
+            let model: varin_runtime::catalog::dispatch::ChildModelBinding =
+                serde_json::from_value(prepared["parent"].clone()).unwrap();
+            selection.connection_identity = model.connection_identity().unwrap();
+            selection.provider_family = model.configuration.provider_family.clone();
+            selection.model = model.configuration.model.clone();
+            selection.configuration_generation = model.configuration.configuration_generation;
+            selection.credential_scope = model.credential_scope;
+            selection.child_dispatch =
+                Some(serde_json::from_value(prepared["catalog"].clone()).unwrap());
+            configuration = serde_json::to_value(model.configuration).unwrap();
+        }
         let run = {
             let owner = f.runtime.catalog();
             let mut db = owner.lock().unwrap();
@@ -123,7 +154,7 @@ impl Review {
                         branch_id: "branch:parent".into(),
                         expected_head: None,
                         input: json!("Retrieve the authorized code"),
-                        configuration: json!({}),
+                        configuration,
                     },
                     Some(selection),
                 )
@@ -157,12 +188,21 @@ impl Review {
             db.admit_goal_mutation(prepared).unwrap();
             receipt.run_id
         };
-        f.host
-            .send(json!({"kind":"fixture-select","runId":run,"source":source}));
+        f.host.send(
+            json!({"kind":"fixture-select","runId":run,"source":source,"childParent":child_parent}),
+        );
         let grant = f.receive("fixture-prepared");
-        let tool_binding:ToolBinding=serde_json::from_value(json!({"grantId":grant["grantId"],"threadId":"thread:parent","runId":run,
-            "workspaceId":source["workspaceId"],"executionWorkspaceId":source["executionWorkspaceId"],"rootId":source["liveRoot"]["rootId"],
-            "sourceMode":"live_root","liveRoot":source["liveRoot"],"enabledTools":["code_retrieval"]})).unwrap();
+        let mut value = json!({"grantId":grant["grantId"],"threadId":"thread:parent","runId":run,
+            "workspaceId":source["workspace_id"],"executionWorkspaceId":source["execution_workspace_id"],"rootId":grant["physicalRoot"]["rootId"],
+            "sourceMode":source_mode,"liveRoot":source["live_root"],"enabledTools":["code_retrieval"]});
+        if source_mode != "live_root" {
+            value[if source_mode == "fixed_branch" {
+                "fileSource"
+            } else {
+                "materializedSource"
+            }] = json!({"branchId":source["branch_id"],"revision":source["revision"]});
+        }
+        let tool_binding: ToolBinding = serde_json::from_value(value).unwrap();
         let (send, resources) = mpsc::channel();
         let client = KernelResourceClient::new(
             move |call| {
@@ -174,7 +214,7 @@ impl Review {
             Default::default(),
         );
         let executor = Arc::new(
-            KernelToolExecutor::new(tool_binding, client)
+            KernelToolExecutor::new(tool_binding.clone(), client.clone())
                 .unwrap()
                 .with_retrieval(
                     retrieval.clone(),
@@ -190,6 +230,11 @@ impl Review {
             retrieval,
             resources,
             executor,
+            resource_client: client,
+            tool_binding,
+            physical_path: grant["physicalRoot"]["canonicalRoot"]
+                .as_str()
+                .map(PathBuf::from),
             credentials,
             cursor: 0,
             native_release: None,
@@ -216,13 +261,29 @@ impl Review {
             self.f.host.send(json!({"v":crate::protocol::PROTOCOL_VERSION,"kind":"runtime-event","kernelEpoch":EPOCH,"stream":"durable","cursor":cursor}));
         }
         while let Ok(call) = self.resources.try_recv() {
-            let result = serve_resource(
+            let prepared = prepare_resource(
                 &mut self.f.storage.lock().unwrap(),
                 EPOCH,
                 HOST,
                 GENERATION,
                 &call,
             );
+            let result = match prepared {
+                Ok(ResourceWork::Ready(value)) => Ok(value),
+                Ok(ResourceWork::BlobRead(task)) => {
+                    let body = task.run();
+                    finish_resource_blob_read(
+                        &mut self.f.storage.lock().unwrap(),
+                        EPOCH,
+                        HOST,
+                        GENERATION,
+                        &call,
+                        &task,
+                        body,
+                    )
+                }
+                Err(error) => Err(error),
+            };
             call.reply.send(result).unwrap();
         }
         let runtime = self.f.runtime.clone();
@@ -255,6 +316,13 @@ impl Review {
             return None;
         }
         if value["kind"] == "retrieval-response" {
+            if self.mode == "projection-stale" {
+                std::fs::write(
+                    self.physical_path.as_ref().unwrap().join("allowed/c.ts"),
+                    "export const retrievalNeedle = \"CHANGED_SOURCE_C\";\n",
+                )
+                .unwrap();
+            }
             if self.mode == "llm-stale" {
                 std::fs::write(
                     self.root.join("workspace/allowed/helper.ts"),
@@ -694,3 +762,9 @@ fn progressive_decision_keeps_one_query_owner_across_real_actions_and_paid_batch
 
 #[path = "retrieval_llm_review.rs"]
 mod llm;
+
+#[path = "retrieval_source_review.rs"]
+mod source;
+
+#[path = "retrieval_child_review.rs"]
+mod child_review;

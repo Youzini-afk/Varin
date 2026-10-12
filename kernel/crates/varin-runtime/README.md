@@ -102,7 +102,7 @@ records typed dependencies in its manifests. Original publication protection spa
 the short identity/epoch/revision-checked commit. GC follows those dependencies from the existing
 history, input, operation, event, policy and request roots. Catalog retains only original metadata;
 byte reads, hash/base64 work and provider serialization stay outside its control lock. Catalog
-format **58**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **11** reject older internal
+format **58**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **12** reject older internal
 formats directly. These are distinct from policy service **4** and private script worker protocol **2**.
 
 `runtime.output.media.read` uses the original caller Thread/branch plus an actual history, queued
@@ -474,8 +474,18 @@ inference Operation, original ToolOrigin and frozen Goal. Tagged callers disting
 tool from that real query context. Scope exit/cancellation forbids new requests but does not erase an
 already-dispatched child or its exact-owner receipt. Recovery cannot recreate the vanished scope.
 A cheap query may detach promptly while the child transport remains active; only the child's original
-receipt establishes local drain and updates its pending/unknown Goal usage. Catalog 58 and wire 11
+receipt establishes local drain and updates its pending/unknown Goal usage. Catalog 58 and wire 12
 retain explicit caller proof and native-generation facts, without an alias or older-format reader.
+
+Retrieval consumes the original LaunchSource in live, fixed-revision and materialized modes. The
+registered physical root is separate and absent for fixed views. Existing Storage compute readers
+and immutable blob continuations supply complete bytes; materialized queries read the actual working
+copy rather than its base. Documents retains text-decoding semantics and persisted routing identity.
+Original model guards check material before egress; short Host path checks do not duplicate Rust's
+final revision/span/required-group reconstruction. Non-live syntax uses the existing tree-sitter
+provider without a live LSP fallback. Selected semantic coverage remains explicitly unsupported until
+that exact source has its own publication. The actual source/child/cancel evidence and remaining
+admission boundaries are recorded in the [source retrieval review](../../../docs/reviews/runtime-source-retrieval-2026-10-12.md).
 
 Child task records retain ownership/state and references to task text, configuration and launch
 descriptions. Admission prepares those bodies and verifies the original dispatch arguments on a worker;

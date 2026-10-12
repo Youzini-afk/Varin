@@ -19,6 +19,13 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-12 增量：固定与物化来源的原检索
+
+- 普通 code_retrieval 直接消费原 LaunchSource/ToolBinding/grant；固定 revision 沿原 compute/tree/blob，materialized 读真实 working copy，完整分页与原 Documents 解码保持。私有 wire **12** 替换旧 live-only 查询字段，Catalog **58** 无新记录域。
+- 原 source/rerank/fast-decision/Explore LLM 复用同一 source adapter。配置 routing 使用持久 workspace 身份；不因原 live 目录改名去读另一根。外发前版本由原模型 guard 校验，Host 最后仅短授权，Rust 唯一重建 spans/revision/required groups。
+- 原 builtin 声明将 code_retrieval 作为 Source 工具开放 Worker/Retrieval 缺省目录，固定 policy 读保精确来源；显式用户数组不被改写。非 live 结构只用原 tree-sitter，selected semantic 未支持有真实说明，不回退到 live LSP/索引。
+- 源版本、真实 CAS working copy、child 派发/source/新 Run、原模型排空/Goal 与历史/GC 的有限证据见[本片验收](../reviews/runtime-source-retrieval-2026-10-12.md)。完整 source semantic/LSP、远端、后述其余设计能力与外层验收继续推进；原新输入/重绑定的目录依赖单列，不以运行中 query 验收替代。
+
 ## 2026-10-12 增量：原 Explore LLM 规划与联合选材
 
 - Native live_root code_retrieval 接原 Explore slot/模型配置/凭据与原生 adapter。Pi 与 Native 共用原完整渐进规划、联合选择、replacement/retained/显式空选和 followup；auto 的 LLM 选材与 fast-decision actions 各守自身 Off/凭据边界，不互相接管付费职责。

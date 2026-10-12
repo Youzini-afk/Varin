@@ -195,15 +195,17 @@ fn install(mode: &str, events: mpsc::SyncSender<Value>) -> (Arc<Stream>, Registr
 #[test]
 #[ignore = "requires original native adapter/Host credentials/query and Storage over stdio; no external model"]
 fn configured_explore_llm_plans_selects_and_accounts_under_the_original_query() {
-    for mode in [
-        "llm-only",
-        "llm-auto",
-        "llm-empty",
-        "llm-partial",
-        "llm-stale",
-        "llm-unknown",
+    for (mode, source) in [
+        ("llm-only", "live_root"),
+        ("llm-auto", "live_root"),
+        ("llm-empty", "live_root"),
+        ("llm-partial", "live_root"),
+        ("llm-stale", "live_root"),
+        ("llm-unknown", "live_root"),
+        ("llm-only", "fixed_branch"),
+        ("llm-only", "materialized"),
     ] {
-        let mut review = Review::new(mode);
+        let mut review = Review::with_source(mode, source);
         // Controlled provider observations share only the existing delivery channel.
         let (send, events) = mpsc::sync_channel(16);
         let (stream, guard) = install(mode, send);
@@ -249,6 +251,8 @@ fn configured_explore_llm_plans_selects_and_accounts_under_the_original_query() 
             })
             .unwrap();
         assert!(!result.to_string().contains("FORBIDDEN_SOURCE"));
+        assert!(!result.to_string().contains("WRONG_NEW_HEAD"));
+        assert_eq!(result["source"]["mode"], source);
         let snippets = result["snippets"].as_array().unwrap();
         match mode {
             "llm-empty" | "llm-stale" => assert!(

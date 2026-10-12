@@ -699,10 +699,10 @@ export class KernelClient {
   }
   setRetrievalOwner(owner: RetrievalOwner): void { this.retrievalBridge.setOwner(owner); }
   /** Resolve only an actual Host-issued native Run grant, never caller-created scope metadata. */
-  retrievalGrant(query: { grantId: string; runId: string; threadId: string; workspaceId: string; executionWorkspaceId: string }): KernelGrantHandle {
+  retrievalGrant(query: { grantId: string; runId: string; threadId: string; source: import('./protocol.generated.js').LaunchSource }): KernelGrantHandle {
     const grant = this.issuedGrants.get(query.grantId);
     if (!grant || this.inactiveGrants.has(query.grantId) || grant.runId !== query.runId || grant.threadId !== query.threadId
-      || grant.owningWorkspace !== query.workspaceId || grant.executionWorkspace !== query.executionWorkspaceId
+      || grant.owningWorkspace !== query.source.workspace_id || grant.executionWorkspace !== query.source.execution_workspace_id
       || grant.sessionId !== null || grant.workerId !== null) {
       throw new KernelClientError({ code: 'forbidden', message: 'Native retrieval Run grant is unavailable or mismatched' });
     }

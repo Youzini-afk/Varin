@@ -63,7 +63,7 @@ impl RetrievalQueryArgs {
 }
 pub(super) fn schema() -> Value {
     json!({"type":"object","additionalProperties":false,"required":["question"],"properties":{
-        "question":{"type":"string","minLength":1,"description":"Question about code in the selected live workspace."},
+        "question":{"type":"string","minLength":1,"description":"Question about code in the selected source view."},
         "paths":{"type":"array","minItems":1,"items":{"type":"string","minLength":1},"description":"Optional normalized relative files or directories within this Run's authorized scope."},
         "limit":{"type":"integer","minimum":1,"maximum":MAX_SAFE_INTEGER,"description":"Maximum number of verified source snippets."}
     }})
@@ -247,14 +247,6 @@ impl InferenceReceipt {
     }
 }
 #[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Source {
-    mode: String,
-    workspace_id: String,
-    execution_workspace_id: String,
-    live_root: varin_runtime::catalog::launches::LiveRoot,
-}
-#[derive(Deserialize, Serialize)]
 struct Stage {
     kind: String,
     status: String,
@@ -294,7 +286,9 @@ struct Snippet {
 struct Reply {
     status: String,
     plan: Option<Plan>,
-    source: Option<Source>,
+    source: Option<varin_runtime::catalog::launches::SourceSelection>,
+    #[serde(rename = "physicalRoot")]
+    physical_root: Option<varin_runtime::catalog::launches::LiveRoot>,
     snippets: Vec<Snippet>,
     omissions: Omissions,
     stages: Vec<Stage>,
@@ -388,7 +382,7 @@ impl KernelToolExecutor {
         context: &ToolExecutionContext,
         args: &RetrievalQueryArgs,
         cancel: &CancellationToken,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<Value, ExecutionError> {
         self.resources
             .call(
                 &self.binding,
@@ -397,7 +391,6 @@ impl KernelToolExecutor {
                 true,
                 cancel,
             )
-            .map(|_| ())
             .map_err(|failure| {
                 ExecutionError::new(
                     error_code(&failure.error),
@@ -441,7 +434,7 @@ impl KernelToolExecutor {
         args: &RetrievalQueryArgs,
         cancel: &CancellationToken,
     ) -> Result<Value, ExecutionError> {
-        self.admit_retrieval(context, args, cancel)?;
+        let admitted = self.admit_retrieval(context, args, cancel)?;
         let bridge = self.retrieval.as_ref().ok_or_else(|| {
             ExecutionError::new(
                 "retrieval_owner_unavailable",
@@ -473,8 +466,7 @@ impl KernelToolExecutor {
             }
         };
         let mut query = json!({"invocation":invocation,"inferenceOwner":inference.owner(),"runId":self.binding.run_id,"threadId":self.binding.thread_id,
-            "workspaceId":self.binding.workspace_id,"executionWorkspaceId":self.binding.execution_workspace_id,
-            "liveRoot":self.binding.live_root,"grantId":self.binding.grant_id,"projectId":self.retrieval_project_id,"question":args.question});
+            "source":admitted["source"],"physicalRoot":admitted["physicalRoot"],"grantId":self.binding.grant_id,"projectId":self.retrieval_project_id,"question":args.question});
         if let Some(paths) = &args.paths {
             query["paths"] = json!(paths);
         }
@@ -534,10 +526,8 @@ impl KernelToolExecutor {
                         )
                         || (stage.kind == "keyword" && stage.status != "ready")
                 })
-                || source.mode != "live_root"
-                || source.workspace_id != self.binding.workspace_id
-                || source.execution_workspace_id != self.binding.execution_workspace_id
-                || Some(&source.live_root) != self.binding.live_root.as_ref()
+                || serde_json::to_value(source).map_err(|_| invalid())? != admitted["source"]
+                || serde_json::to_value(&reply.physical_root).map_err(|_| invalid())? != admitted["physicalRoot"]
                 || !exact_stages(reply.stages.iter().map(|stage| stage.kind.as_str()))
             {
                 return Err(invalid());
@@ -551,11 +541,15 @@ impl KernelToolExecutor {
         }) {
             return Err(invalid());
         }
+        let source_message = (self.binding.source_mode != SourceMode::LiveRoot
+            && reply.plan.as_ref().is_some_and(|plan| plan.stages.iter().any(|stage|
+                stage.kind == "semantic" && stage.status == "unsupported")))
+            .then_some("Semantic retrieval is unsupported for this source view. Use keyword and source-local syntax evidence, or select a live source for the configured semantic index.");
         // Reconstructed spans can be much larger than untrusted Host content. Bound the
         // complete projection by the existing wire-derived content budget, reserving 64
         // bytes for three growing safe-integer counters and the final status spelling.
         let metadata_size = serde_json::to_vec(&json!({"status":&reply.status,"snippets":[],
-            "source":&reply.source,"omissions":&reply.omissions}))
+            "source":&reply.source,"physicalRoot":&reply.physical_root,"message":source_message,"omissions":&reply.omissions}))
         .map_err(|_| invalid())?
         .len();
         let mut output_budget = crate::protocol::MAX_BLOB_RESPONSE_BYTES
@@ -598,7 +592,7 @@ impl KernelToolExecutor {
                         .as_ref()
                         .is_none_or(|(path, _)| path != &item.path)
                     {
-                        match self.observe_language_path(context, &item.path, cancel) {
+                        match self.observe_source_path(context, &item.path, cancel) {
                             Ok(observed) => {
                                 observation = Some((item.path.clone(), observed));
                             }
@@ -705,8 +699,10 @@ impl KernelToolExecutor {
         // remain with the bound pipeline and inference ledger, outside conversation tool content.
         let mut result =
             json!({"status":reply.status,"snippets":snippets,"omissions":reply.omissions});
+        if let Some(message) = source_message { result["message"] = json!(message); }
         if let Some(source) = reply.source {
             result["source"] = json!(source);
+            result["physicalRoot"] = json!(reply.physical_root);
         }
         Ok(result)
     }

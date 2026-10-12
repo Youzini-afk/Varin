@@ -8,6 +8,7 @@ Last updated: 2026-10-12
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [固定与物化来源的原检索链（2026-10-12）](runtime-source-retrieval-2026-10-12.md) | 原 Source/Storage、真实 working copy、同源模型与语法、child 冻结/派发及取消；有限跨层验收 |
 | [原 Explore LLM 规划与联合选材（2026-10-12）](runtime-explore-llm-2026-10-12.md) | 原模型/凭据、共享 Pi/Native 循环、query 推理账、required group 与实际取消排空；有限跨层验收 |
 | [原渐进检索 fast-decision（2026-10-12）](runtime-progressive-retrieval-2026-10-12.md) | 真实材料/action/followup、多批原推理 owner、原 Goal 用量与取消排空；有限跨层验收 |
 | [原 live-root 检索与 rerank（2026-10-12）](runtime-retrieval-rerank-2026-10-12.md) | 原配置/来源、真实查询委派、逐 HTTP 回执与廉价读取消后独立排空；有限跨层验收 |

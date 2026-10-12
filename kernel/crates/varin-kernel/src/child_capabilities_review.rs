@@ -37,6 +37,16 @@ fn available_metadata_is_the_actual_native_directory_and_classifies_real_source_
             .source_requirement,
         ChildSourceRequirement::None
     );
+    let retrieval = metadata.iter().find(|tool| tool.name == "code_retrieval").unwrap();
+    assert_eq!(retrieval.source_requirement, ChildSourceRequirement::Source);
+    assert!(!retrieval.process);
+    assert_eq!(retrieval.default_presets, vec![
+        varin_runtime::catalog::dispatch::ChildPresetDefault::Worker,
+        varin_runtime::catalog::dispatch::ChildPresetDefault::Retrieval,
+    ]);
+    for name in ["language_definition", "language_references", "language_diagnostics"] {
+        assert!(!directory.iter().any(|tool| tool.name == name), "live LSP is not fixed-source syntax");
+    }
     for name in ["goal_report", "computer", "pi-only"] {
         assert!(select(&[name.into()]).is_err());
     }
@@ -231,6 +241,15 @@ fn shipped_defaults_resolve_actual_declarations_with_their_required_sources() {
         assert_eq!(resolved.profile.work_mode, mode);
         assert_eq!(executable.len(), tools.len());
         assert!(executable.iter().all(|tool| directory.contains(tool)));
+        assert!(executable.contains(&get("code_retrieval")));
+        // An explicit source capability selection stays exact when a preset evolves.
+        input.tools = Some(vec!["file_read".into()]);
+        let (_, explicit) = crate::collaboration::resolve_selection(&selected, &input).unwrap();
+        assert_eq!(explicit, vec![get("file_read")]);
+        input.tools = Some(vec!["code_retrieval".into()]);
+        let (_, explicit) = crate::collaboration::resolve_selection(&selected, &input).unwrap();
+        assert_eq!(explicit, vec![get("code_retrieval")]);
+        input.tools = None;
         assert!(resolved.source_delegation().configured_preset);
         if member == ChildPresetDefault::Worker {
             assert!(executable.contains(&get("file_write")));
@@ -284,6 +303,10 @@ fn absent_source_defaults_derive_from_frozen_declarations_but_explicit_tools_rem
         assert!(tools.iter().all(|tool| selected.source_requirement(&tool.name) == Some(ChildSourceRequirement::None)));
         assert_eq!(selected.catalog.presets[index].tools, all, "a source projection does not mutate the configured snapshot");
         assert_eq!(resolved.profile.work_mode, mode);
+        input.tools = Some(vec!["code_retrieval".into()]);
+        let error = crate::collaboration::resolve_selection(&selected, &input).unwrap_err();
+        assert!(error.message.contains("code_retrieval") && error.message.contains("select a source"));
+        input.tools = None;
         input.work_mode = Some(ChildWorkMode::ReadOnly);
         assert!(crate::collaboration::resolve_selection(&selected, &input).is_ok());
         input.work_mode = None;

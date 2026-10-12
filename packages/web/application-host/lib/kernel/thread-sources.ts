@@ -43,7 +43,7 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
       // do not recapture a changed directory or substitute the branch's mutable write root.
       return { path: root, source: { workspaceId: workspace.workspaceId, executionWorkspaceId: workspace.workspaceId,
         branchId: branch.branchId, revision: 0, mode,
-        tools: mode === 'fixed_branch' ? ['file_read', 'file_list', 'file_search'] : ['file_read', 'file_list', 'file_search', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn', 'process_write', 'process_resize'],
+        tools: mode === 'fixed_branch' ? ['file_read', 'file_list', 'file_search', 'code_retrieval'] : ['file_read', 'file_list', 'file_search', 'code_retrieval', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn', 'process_write', 'process_resize'],
       } } satisfies ThreadPreparedSource;
     }, 'shared', { threadId: input.threadId });
     preparing.set(key, preparation);
