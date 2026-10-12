@@ -279,3 +279,38 @@ test('keyless llama honors the configured credential owner and classifier header
   await assert.rejects(binding.assertAvailable(), /credential-scope-changed/);
   await assert.rejects(authority.resolveDecisionBinding('decision', 'local'), /credential-missing/);
 });
+
+test('rerank retains its dedicated route and credential owner across candidates, then honors explicit revocation', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'varin-rerank-owner-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, 'models.json');
+  const document = { providers: {
+    ranking: { baseUrl: 'https://chat.invalid/v1', apiKey: 'fake-chat-only',
+      capabilities: { rerank: { protocol: 'http-rerank', baseUrl: 'https://ranking.invalid/v1',
+        endpoint: '/original', credentialRef: 'ranking-owner', enabled: true, models: [{ id: 'rank' }] } } },
+    'ranking-owner': { apiKey: 'fake-ranking-key', headers: { 'x-owner': 'fake-ranking-header' } },
+  } };
+  await writeFile(file, JSON.stringify(document));
+  const authority = HostCredentialAuthority.open(directory);
+  const original = await authority.resolveRerankBinding('ranking', 'rank');
+  assert.equal(original.requestUrl, 'https://ranking.invalid/v1/original');
+  assert.equal(original.api, 'http-rerank');
+  assert.equal(original.credentialScope.reference, 'provider:ranking-owner');
+  assert.equal((await original.getAuth())?.auth.apiKey, 'fake-ranking-key');
+  assert.equal((await original.getAuth())?.auth.headers?.['x-owner'], 'fake-ranking-header');
+  assert.equal(JSON.stringify({ configurationId: original.configurationId, scope: original.credentialScope }).includes('fake-ranking'), false);
+  document.providers.ranking.capabilities.rerank.endpoint = '/replacement';
+  await writeFile(file, JSON.stringify(document));
+  await original.assertAvailable();
+  assert.equal(original.requestUrl, 'https://ranking.invalid/v1/original');
+  const next = await authority.resolveRerankBinding('ranking', 'rank');
+  assert.equal(next.requestUrl, 'https://ranking.invalid/v1/replacement');
+  assert.notEqual(next.configurationId, original.configurationId);
+  await writeFile(file, '{invalid candidate');
+  await original.assertAvailable();
+  assert.equal((await original.getAuth())?.auth.apiKey, 'fake-ranking-key');
+  document.providers.ranking.capabilities.rerank.enabled = false;
+  await writeFile(file, JSON.stringify(document));
+  await assert.rejects(original.assertAvailable(), /rerank-provider-disabled/);
+  await assert.rejects(next.assertAvailable(), /rerank-provider-disabled/);
+});

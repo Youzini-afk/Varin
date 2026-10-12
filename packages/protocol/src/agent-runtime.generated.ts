@@ -1190,6 +1190,7 @@ export interface ResourceSnapshotParams {
 export type RetrievalInvocation = { kind: 'model_step'; requestId: string; toolCallId: string } | { kind: 'policy_action'; actionId: string; nodeId: string; toolCallId: string } | { kind: 'nested_call'; parentOperationId: string; toolCallId: string };
 
 export interface RetrievalQuery {
+  inferenceOwner: ExecutorOwner;
   invocation: RetrievalInvocation;
   runId: string;
   threadId: string;
@@ -1296,7 +1297,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 9; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 10; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 

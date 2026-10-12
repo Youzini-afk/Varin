@@ -234,10 +234,13 @@ export function createRetrievalOwner({ documents, kernel, validateSource, pipeli
           }
           await validateBinding();
           try {
-            const selection = await waitWithSignal(binding.model({ question: query.question, snippets: Object.freeze(result.snippets.map(item => Object.freeze({ ...item }))) }, signal), signal);
+            // The private query observer may detach, but this owner retains the original
+            // model lease through actual body drain and receipt publication.
+            const selected = await binding.model({ question: query.question, snippets: Object.freeze(result.snippets.map(item => Object.freeze({ ...item }))) }, signal);
+            const selection = selected.indices;
             if (!Array.isArray(selection) || selection.some(index => !Number.isSafeInteger(index) || index < 0 || index >= result.snippets.length) || new Set(selection).size !== selection.length) throw new Error('Invalid retrieval selection');
             result.snippets = selection.map(index => result.snippets[index]!);
-            stage('model', result.snippets.length ? 'ready' : 'empty');
+            stage('model', selected.status);
           } catch { signal.throwIfAborted(); stage('model', 'failed'); }
         }
         signal.throwIfAborted();

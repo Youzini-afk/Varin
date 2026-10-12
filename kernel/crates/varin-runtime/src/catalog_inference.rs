@@ -104,8 +104,17 @@ pub struct InferenceSettleParams {
     pub response: Value,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum InferenceCaller {
+    Operation,
+    Query {
+        context: crate::execution::ToolExecutionContext,
+    },
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Intent {
+    caller: InferenceCaller,
     kind: String,
     parent_operation_id: String,
     ordinal: u64,
@@ -157,7 +166,7 @@ fn conflict() -> RuntimeError {
     RuntimeError::Conflict("inference_identity_changed".into())
 }
 pub(crate) fn is_inference(op: &Operation) -> bool {
-    op.intent["kind"] == "decision_request_v1"
+    op.intent["kind"] == "inference_request_v1"
 }
 fn intent(op: &Operation) -> Result<Intent> {
     if !is_inference(op) {
@@ -179,29 +188,33 @@ fn owned(op: &Operation, owner: &ExecutorOwner) -> Result<()> {
     Ok(())
 }
 fn parent_live(db: &Connection, op: &Operation, i: &Intent, epoch: u64) -> Result<()> {
-    let parent: Operation = record(db, "operations", &i.parent_operation_id)?;
     let run: Run = record(db, "runs", &op.run_id)?;
-    if op.epoch != epoch
-        || parent.run_id != op.run_id
-        || parent.execution_owner != op.execution_owner
-        || parent.phase != OperationPhase::Running
-        || parent.cancel_requested
-        || run.cancel_requested
-        || run.state.terminal()
-        || op.cancel_requested
-    {
+    if op.epoch != epoch || run.cancel_requested || run.state.terminal() || op.cancel_requested {
         return Err(RuntimeError::DispatchCancelled);
     }
-    let tool = tool_content::ToolIntent::from_operation(&parent)?;
-    let context = crate::execution::ToolExecutionContext {
-        run_id: run.id,
-        operation_id: parent.id,
-        origin: tool.origin().clone(),
+    let context = match &i.caller {
+        InferenceCaller::Operation => {
+            let parent: Operation = record(db, "operations", &i.parent_operation_id)?;
+            if parent.run_id != op.run_id
+                || parent.execution_owner != op.execution_owner
+                || parent.phase != OperationPhase::Running
+                || parent.cancel_requested
+            {
+                return Err(RuntimeError::DispatchCancelled);
+            }
+            let tool = tool_content::ToolIntent::from_operation(&parent)?;
+            crate::execution::ToolExecutionContext {
+                run_id: run.id,
+                operation_id: parent.id,
+                origin: tool.origin().clone(),
+            }
+        }
+        InferenceCaller::Query { context } => context.clone(),
     };
     if !goals::tool_allowed(db, &context)? {
         return Err(RuntimeError::GoalChanged);
     }
-    if goals::origin_goal(db, tool.origin())? != i.goal {
+    if goals::origin_goal(db, &context.origin)? != i.goal {
         return Err(RuntimeError::GoalChanged);
     }
     Ok(())
@@ -233,6 +246,32 @@ impl Catalog {
         p: &InferenceAdmitParams,
         body: InferenceBody,
     ) -> Result<InferenceStatus> {
+        let scopes = self.nested_tools.clone();
+        if optional_record::<Operation>(&self.db, "operations", &p.parent_operation_id)?
+            .is_some_and(|parent| {
+                parent.execution_owner.as_ref() == Some(&p.execution_owner)
+                    && matches!(p.execution_owner, ExecutorOwner::External { .. })
+            })
+        {
+            self.admit_inference_for(p, body, InferenceCaller::Operation)
+        } else {
+            scopes.with_inference_context(&p.parent_operation_id, &p.execution_owner, |context| {
+                self.admit_inference_for(
+                    p,
+                    body,
+                    InferenceCaller::Query {
+                        context: context.clone(),
+                    },
+                )
+            })
+        }
+    }
+    fn admit_inference_for(
+        &mut self,
+        p: &InferenceAdmitParams,
+        body: InferenceBody,
+        caller: InferenceCaller,
+    ) -> Result<InferenceStatus> {
         if p.ordinal == 0 || p.binding.purpose.is_empty() || p.binding.configuration_id.is_empty() {
             return Err(conflict());
         }
@@ -243,15 +282,27 @@ impl Catalog {
             if i.binding != p.binding || i.request_ref != body.reference {
                 return Err(conflict());
             }
-            return self.inference_status(&id, &p.execution_owner);
+            return self.inference_status_unfenced(&id, &p.execution_owner);
         }
-        let parent = self.operation(&p.parent_operation_id)?;
-        owned(&parent, &p.execution_owner)?;
-        let tool = tool_content::ToolIntent::from_operation(&parent)?;
-        let goal = goals::origin_goal(&self.db, tool.origin())?;
+        let (run_id, origin) = match &caller {
+            InferenceCaller::Operation => {
+                let parent = self.operation(&p.parent_operation_id)?;
+                owned(&parent, &p.execution_owner)?;
+                let tool = tool_content::ToolIntent::from_operation(&parent)?;
+                (parent.run_id, tool.origin().clone())
+            }
+            InferenceCaller::Query { context } => {
+                if context.operation_id != p.parent_operation_id {
+                    return Err(conflict());
+                }
+                (context.run_id.clone(), context.origin.clone())
+            }
+        };
+        let goal = goals::origin_goal(&self.db, &origin)?;
         let i = Intent {
-            kind: "decision_request_v1".into(),
-            parent_operation_id: parent.id.clone(),
+            caller,
+            kind: "inference_request_v1".into(),
+            parent_operation_id: p.parent_operation_id.clone(),
             ordinal: p.ordinal,
             binding: p.binding.clone(),
             request_ref: body.reference.clone(),
@@ -259,7 +310,7 @@ impl Catalog {
         };
         let op = Operation {
             id: id.clone(),
-            run_id: parent.run_id,
+            run_id,
             epoch: self.epoch,
             revision: 1,
             phase: OperationPhase::Accepted,
@@ -267,8 +318,12 @@ impl Catalog {
             effect: Effect::None,
             cancel_requested: false,
             lifetime: Lifetime::Run,
-            handed_off: false,
-            executor: Some("inference.decision.v1".into()),
+            // A query's caller may detach immediately. Its authenticated External owner
+            // independently retains the actual HTTP request and original receipt. This
+            // transfers foreground responsibility, never the Run cancellation scope or
+            // permission to dispatch after the query closes.
+            handed_off: matches!(i.caller, InferenceCaller::Query { .. }),
+            executor: Some("inference.http.v1".into()),
             execution_owner: Some(p.execution_owner.clone()),
             waiting_on: None,
             intent: serde_json::to_value(&i)?,
@@ -295,9 +350,27 @@ impl Catalog {
             json!({"runId":op.run_id,"parentOperationId":i.parent_operation_id}),
         )?;
         tx.commit()?;
-        self.inference_status(&id, &p.execution_owner)
+        self.inference_status_unfenced(&id, &p.execution_owner)
     }
     pub fn inference_status(&self, id: &str, owner: &ExecutorOwner) -> Result<InferenceStatus> {
+        let mut status = self.inference_status_unfenced(id, owner)?;
+        let op = self.operation(id)?;
+        if let InferenceCaller::Query { context } = &intent(&op)?.caller {
+            if self
+                .nested_tools
+                .with_inference_context(&context.operation_id, owner, |_| Ok(()))
+                .is_err()
+            {
+                status.live = false;
+            }
+        }
+        Ok(status)
+    }
+    fn inference_status_unfenced(
+        &self,
+        id: &str,
+        owner: &ExecutorOwner,
+    ) -> Result<InferenceStatus> {
         let op = self.operation(id)?;
         owned(&op, owner)?;
         let i = intent(&op)?;
@@ -325,6 +398,18 @@ impl Catalog {
         })
     }
     pub fn dispatch_inference(&mut self, p: &InferenceOwnerParams) -> Result<InferenceStatus> {
+        let caller = intent(&self.operation(&p.operation_id)?)?.caller;
+        let scopes = self.nested_tools.clone();
+        match caller {
+            InferenceCaller::Operation => self.dispatch_inference_held(p),
+            InferenceCaller::Query { context } => {
+                scopes.with_inference_context(&context.operation_id, &p.execution_owner, |_| {
+                    self.dispatch_inference_held(p)
+                })
+            }
+        }
+    }
+    fn dispatch_inference_held(&mut self, p: &InferenceOwnerParams) -> Result<InferenceStatus> {
         let mut op = self.operation(&p.operation_id)?;
         owned(&op, &p.execution_owner)?;
         let i = intent(&op)?;
@@ -345,7 +430,7 @@ impl Catalog {
         op.effect = Effect::Dispatched;
         publish(&tx, &mut op, &s, "inference.dispatched")?;
         tx.commit()?;
-        self.inference_status(&p.operation_id, &p.execution_owner)
+        self.inference_status_unfenced(&p.operation_id, &p.execution_owner)
     }
     /// Metadata-only loss barrier after the original transport has drained. This records
     /// unknown usage before the parent callback can release another paid boundary.
@@ -552,7 +637,7 @@ pub(super) fn cancel_children(
     parent: Option<&str>,
     run: Option<&str>,
 ) -> Result<()> {
-    let mut query = tx.prepare("SELECT body FROM operations WHERE json_extract(body,'$.intent.kind')='decision_request_v1' AND ((?1 IS NOT NULL AND json_extract(body,'$.intent.parentOperationId')=?1) OR (?2 IS NOT NULL AND run_id=?2))")?;
+    let mut query = tx.prepare("SELECT body FROM operations WHERE json_extract(body,'$.intent.kind')='inference_request_v1' AND ((?1 IS NOT NULL AND json_extract(body,'$.intent.parentOperationId')=?1) OR (?2 IS NOT NULL AND run_id=?2))")?;
     let operations = query
         .query_map(params![parent, run], |r| r.get::<_, String>(0))?
         .collect::<std::result::Result<Vec<_>, _>>()?;

@@ -3,8 +3,8 @@ import { createRetrievalPipelineOwner, type RetrievalPipelineConfiguration } fro
 
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes; }); return { promise, resolve }; };
 const configuration = (name: string, selected: number): RetrievalPipelineConfiguration => ({ configurationId: name,
-  model: { providerId: name, configurationId: name, status: 'ready', implementation: async () => [selected] } });
-const invoke = (owner: ReturnType<typeof createRetrievalPipelineOwner>['capture']) => owner().model!({ question: 'pick code', snippets: [] }, new AbortController().signal);
+  model: { providerId: name, configurationId: name, status: 'ready', implementation: async () => ({ indices: [selected], status: 'ready' }) } });
+const invoke = (owner: ReturnType<typeof createRetrievalPipelineOwner>['capture']) => owner().model!({ question: 'pick code', snippets: [] }, new AbortController().signal).then(result => result.indices);
 
 it('a newer prepared candidate wins and superseded preparation cannot reactivate the previous selection', async () => {
   const owner = createRetrievalPipelineOwner(configuration('initial', 0));

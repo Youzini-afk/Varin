@@ -421,7 +421,7 @@ passive fact interrupts an unrelated observation Wait. Physical release remains 
 Computer owner's evidence, independent of input acceptance and body failure.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version **56**, input domain 6 and collaboration domain 8 store input intents/queue bodies and context-job ownership,
+Catalog version **57**, input domain 6 and collaboration domain 8 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format **4** retains typed request origins and typed output bodies. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
@@ -429,11 +429,11 @@ history, all model outputs (including rejected output), original command intents
 checkpoints, memory projections, summary recipes and source parts, policy action/checkpoint bodies,
 and indexed graph calls/receipts, follow-up and calendar instructions/intents, Computer request/decision reasons and event details, Goal objective/reason/creation-intent references, planning-model request/output references, ordinary tool arguments/results,
 external executor receipts, immutable Host Job acceptance and User command bodies, and permission call/scope bodies, including historical receipt and completed
-permission audit events and original invocation completions. Original decision HTTP request/response
+permission audit events and original invocation completions. Original decision/rerank HTTP request/response
 references and their historical settlement event roots are also retained. It verifies each distinct live object
 before sweeping and preserves unknown files; it never deletes history or invokes system-kernel GC.
 
-`catalog_inference.rs` owns purpose-specific decision HTTP work under an already admitted tool.
+`catalog_inference.rs` owns purpose-specific decision/rerank HTTP work under an already admitted tool.
 One parent/ordinal identifies one actual request, with the original external executor, frozen binding
 and Goal. Required `requestKind` distinguishes `preparation` from `model_compute`; both retain the
 original control, permission and dispatch fences. Only actual model computation registers/refines
@@ -445,7 +445,7 @@ provider completion. Parent/Run/Goal controls fence the corresponding child requ
 rejects new dispatch without retroactively cancelling otherwise valid already-dispatched work.
 Recovery retains the external owner, marks unresolved dispatch as unknown and never resends it.
 The exact original owner may refine that recovery receipt, replacing its original Goal contribution
-in the same transaction. Repeated delivery leaves revision, events and usage unchanged. Catalog 56
+in the same transaction. Repeated delivery leaves revision, events and usage unchanged. Catalog 57
 prevents an older reader from applying generic external-operation recovery to these inference facts.
 If a drained transport's full receipt cannot be published, `receipt_pending` records that exact
 owner's short unknown-usage fact before its parent callback may finish. Known no-send evidence
@@ -453,8 +453,18 @@ removes only the original dispatch placeholder. Later full publication refines t
 a late short barrier cannot overwrite a complete receipt. If neither write succeeds, the Host keeps
 the original callback/bytes until an event or ready notification permits publication, without a timer
 retry loop or another provider request. This does not serialize unrelated valid in-flight requests.
-The Host supplies actual transport cancellation/body drain, credentials and classifier interpretation;
+The Host supplies actual transport cancellation/body drain, credentials and protocol interpretation;
 this module does not implement a second provider/configuration owner or an inference batch ledger.
+
+Cheap Kernel retrieval has no durable parent Operation. Its existing InvocationRunner/NestedTools
+scope delegates a fresh external inference identity at the real retrieval entry; no Host API creates
+that delegation. Admission/dispatch hold the same short scope fence while Catalog commits the actual
+HTTP Operation, original ToolOrigin and frozen Goal. Tagged callers distinguish a durable external
+tool from that real query context. Scope exit/cancellation forbids new requests but does not erase an
+already-dispatched child or its exact-owner receipt. Recovery cannot recreate the vanished scope.
+A cheap query may detach promptly while the child transport remains active; only the child's original
+receipt establishes local drain and updates its pending/unknown Goal usage. Catalog 57 and wire 10
+replace the former decision-only names directly, without an alias or older-format reader.
 
 Child task records retain ownership/state and references to task text, configuration and launch
 descriptions. Admission prepares those bodies and verifies the original dispatch arguments on a worker;

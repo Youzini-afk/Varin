@@ -82,8 +82,8 @@ it('selected cold semantic/structure stages preserve useful keyword evidence and
 it('an in-flight Run retains its selected model handle/generation while a failed candidate leaves the current pipeline active', async () => {
   const f = await fixture(once); await f.write('module.ts', sourceText);
   const gate = deferred(); let oldEntered = 0, oldCalls = 0, newCalls = 0;
-  const oldModel = vi.fn(async () => { oldEntered++; await gate.promise; oldCalls++; return [0]; });
-  const newModel = vi.fn(async () => { newCalls++; return [0]; });
+  const oldModel = vi.fn(async () => { oldEntered++; await gate.promise; oldCalls++; return { indices: [0], status: 'ready' as const }; });
+  const newModel = vi.fn(async () => { newCalls++; return { indices: [0], status: 'ready' as const }; });
   const pipelines = createRetrievalPipelineOwner({ configurationId: 'old-config', model: { providerId: 'selected-old', configurationId: 'old-model-config', status: 'ready', implementation: oldModel } });
   const results = install(f, pipelines); const oldPlan = pipelines.capture().plan;
   const oldRun = await f.admit('old-retrieval-generation', ['code_retrieval']);
@@ -142,7 +142,7 @@ it('selected semantic candidates use real chunk hashes, admit source before mode
   install(f, createRetrievalPipelineOwner({ configurationId: 'explicit-semantic',
     semantic: { providerId: 'published-index-fixture', configurationId: 'published-1', status: 'ready', implementation: { search: async () => ({ status: 'ready', coverage: 'complete', lifecycle: 'ready',
       hits: [hit('allowed/semantic.ts', semanticText, 1), hit('private/secret.ts', 'PRIVATE_INDEX_BODY', 2), hit('../outside.ts', 'OUTSIDE_INDEX_BODY', 3)] }) } },
-    model: { providerId: 'selected-model-fixture', configurationId: 'selection-1', status: 'ready', implementation: async input => { selectedBodies.push(JSON.stringify(input.snippets)); return input.snippets.map((_item, index) => index); } },
+    model: { providerId: 'selected-model-fixture', configurationId: 'selection-1', status: 'ready', implementation: async input => { selectedBodies.push(JSON.stringify(input.snippets)); return { indices: input.snippets.map((_item, index) => index), status: 'ready' as const }; } },
   }));
   const run = await f.admit('semantic-source-authority', ['code_retrieval'], ['allowed']); await run.start();
   await expect.poll(async () => (await f.runtime.run(run.receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');

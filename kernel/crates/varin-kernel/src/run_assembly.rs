@@ -3,7 +3,7 @@ use crate::agent_runtime::{bind_policy_model, domain, live_extension_binding, li
 use crate::error::KernelError;
 use crate::protocol::PROTOCOL_VERSION;
 use crate::protocol_generated::{LaunchSelectParams, RunStartParams};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{sync::Arc, thread};
 use varin_runtime::{
     model_session,
@@ -244,9 +244,8 @@ impl RunAssembly {
             start.binding.tools = crate::tools::KernelToolExecutor::selected_schemas(&kinds);
             start.binding.tools.push(crate::agent_resources::schema());
             if !is_child {
-                start.binding.tools = crate::run_tools::builtin_schemas(
-                    &kinds, plan_eligible, true,
-                );
+                start.binding.tools =
+                    crate::run_tools::builtin_schemas(&kinds, plan_eligible, true);
             }
             start
                 .binding
@@ -323,7 +322,15 @@ impl RunAssembly {
             let tools = crate::tools::KernelToolExecutor::new(binding, resources.clone())
                 .map_err(|e| KernelError::Authorization(e.to_string()))?
                 .with_language(language_bridge.clone())
-                .with_retrieval(retrieval_bridge.clone(), retrieval_project_id);
+                .with_retrieval(
+                    retrieval_bridge.clone(),
+                    retrieval_project_id,
+                    runtime
+                        .catalog()
+                        .lock()
+                        .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                        .nested_tools(),
+                );
             start.binding.tool_schema_generation =
                 saved_schema_generation.unwrap_or(start.binding.configuration_generation);
             declarations.extend(tools.declarations(true));

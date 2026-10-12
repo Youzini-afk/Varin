@@ -15,7 +15,7 @@
 
 export interface HttpRerankRequest {
   baseUrl: string;
-  apiKey: string;
+  apiKey?: string;
   headers?: Record<string, string>;
   model: string;
   query: string;
@@ -35,7 +35,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === "object" && value !== null && !Array.isArray(value)
 );
 
-const rerankUrl = (baseUrl: string, endpoint?: string): string => {
+export const rerankRequestUrl = (baseUrl: string, endpoint?: string): string => {
   const root = baseUrl.replace(/\/+$/u, "");
   const path = (endpoint ?? "/rerank").startsWith("/") ? (endpoint ?? "/rerank") : `/${endpoint}`;
   return `${root}${path}`;
@@ -50,11 +50,11 @@ export class RerankResponseError extends Error {
 
 export async function requestHttpRerank(request: HttpRerankRequest): Promise<HttpRerankScore[]> {
   const fetchImpl = request.fetchImpl ?? fetch;
-  const response = await fetchImpl(rerankUrl(request.baseUrl, request.endpoint), {
+  const response = await fetchImpl(rerankRequestUrl(request.baseUrl, request.endpoint), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${request.apiKey}`,
+      ...(request.apiKey ? { Authorization: `Bearer ${request.apiKey}` } : {}),
       ...request.headers,
     },
     body: JSON.stringify({
@@ -71,6 +71,11 @@ export async function requestHttpRerank(request: HttpRerankRequest): Promise<Htt
     throw new RerankResponseError(`Rerank HTTP ${response.status}`);
   }
   const payload = await response.json() as unknown;
+  return parseHttpRerankScores(payload, request.documents);
+}
+
+/** Validate the provider's original score receipt against the submitted identities. */
+export function parseHttpRerankScores(payload: unknown, documents: readonly { id: string }[]): HttpRerankScore[] {
   if (!isRecord(payload) || !Array.isArray(payload.results)) {
     throw new RerankResponseError("Rerank response is missing results");
   }
@@ -79,7 +84,7 @@ export async function requestHttpRerank(request: HttpRerankRequest): Promise<Htt
   for (const row of payload.results) {
     if (!isRecord(row)) throw new RerankResponseError("Rerank row is not an object");
     const index = row.index;
-    if (!Number.isInteger(index) || Number(index) < 0 || Number(index) >= request.documents.length) {
+    if (!Number.isInteger(index) || Number(index) < 0 || Number(index) >= documents.length) {
       throw new RerankResponseError("Rerank row index is out of range");
     }
     if (seen.has(Number(index))) throw new RerankResponseError("Rerank response has a duplicate index");
@@ -87,8 +92,8 @@ export async function requestHttpRerank(request: HttpRerankRequest): Promise<Htt
     if (typeof score !== "number" || !Number.isFinite(score)) {
       throw new RerankResponseError("Rerank row is missing a finite score");
     }
-    const id = typeof row.id === "string" && row.id ? row.id : request.documents[Number(index)]!.id;
-    if (id !== request.documents[Number(index)]!.id) {
+    const id = typeof row.id === "string" && row.id ? row.id : documents[Number(index)]!.id;
+    if (id !== documents[Number(index)]!.id) {
       throw new RerankResponseError("Rerank row id does not match the submitted document");
     }
     seen.add(Number(index));

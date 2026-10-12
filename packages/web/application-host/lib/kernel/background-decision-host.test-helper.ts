@@ -130,7 +130,7 @@ const egress = createEgressRuntime({ env: {}, resolveAll: async () => [{ address
       } });
       stopping = (async () => {
         const operations = await runtime.activeOperations('thread:parent','branch:parent');
-        const operation = operations.find(value => (value.intent as { kind?: string }).kind === 'decision_request_v1'); assert(operation);
+        const operation = operations.find(value => (value.intent as { kind?: string }).kind === 'inference_request_v1'); assert(operation);
         await withMaterialReviewClient(runtime, web.user, async api => {
           const receipt = await api.cancelOperation(operation.id); assert.equal(receipt.id,operation.id);
         });
@@ -185,7 +185,7 @@ async function initialize(frame:Record<string,unknown>) {
   }}}));
   await writeFile(join(agentDir,'settings.json'),JSON.stringify({harness:{fastDecision:{default:{protocol:'pi-classifier',providerId:'decision-review',modelId:'classifier'}}}}));
   const credentials=HostCredentialAuthority.open(agentDir);
-  inference=createSemanticInference(credentials,undefined,{decision:{kernel,runtime,egress}});
+  inference=createSemanticInference(credentials,undefined,{requests:{kernel,runtime,egress}});
   storage=new KernelStorageAdapter({client:kernel,hostId:'web-domain-host',storageRoot:String(frame.storageRoot),resolveWorkspaceRoot:unreachable});
   const access=createMaterialStorageAccess({kernel,storage,legacy:{withBranchStore:unreachable}});
   const materials=createWebMaterialStore(access), documentReader=createDocumentReader({materials});

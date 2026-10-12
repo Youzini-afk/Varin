@@ -44,7 +44,7 @@ export interface RetrievalPipelineConfiguration {
   structure?: RetrievalStageBinding<NonNullable<ExploreDeps['structure']>>;
   semantic?: RetrievalStageBinding<NonNullable<ExploreDeps['semantic']>>;
   /** Explicitly selected model may select/reorder only already-authorized snippets. No implicit model. */
-  model?: RetrievalStageBinding<(input: { question: string; snippets: readonly RetrievalSnippet[] }, signal: AbortSignal) => Promise<readonly number[]>>;
+  model?: RetrievalStageBinding<(input: { question: string; snippets: readonly RetrievalSnippet[] }, signal: AbortSignal) => Promise<{ indices: readonly number[]; status: 'ready' | 'partial' | 'empty' }>>;
 }
 export interface BoundRetrievalPipeline {
   readonly plan: PipelinePlan;
