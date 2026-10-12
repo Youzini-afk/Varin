@@ -147,15 +147,15 @@ impl Fixture {
                 let mut storage = self.storage.lock().unwrap();
                 let (grant, params) =
                     storage.authorize(grant_id, EPOCH, HOST, GENERATION, method, &params)?;
-                if method == "file.materialize" {
+                if method == "file.materialize" || method == "file.materializedView.prepare" {
                     use crate::storage::materialization::Admission;
-                    let admission = storage.prepare_materialization(
-                        &params,
-                        &grant,
-                        Arc::new(AtomicBool::new(false)),
-                    )?;
+                    let admission = if method == "file.materializedView.prepare" {
+                        storage.prepare_materialized_view(&params, &grant, Arc::new(AtomicBool::new(false)))?
+                    } else {
+                        storage.prepare_materialization(&params, &grant, Arc::new(AtomicBool::new(false)))?
+                    };
                     drop(storage);
-                    return match admission {
+                    let result = match admission {
                         Admission::Complete(value) => Ok(value),
                         Admission::Work(task) => {
                             let result = task.run(|control| {
@@ -172,6 +172,20 @@ impl Fixture {
                                 .finish_materialization(&task.operation_id, &task.job_id);
                             result
                         }
+                    }?;
+                    return if method == "file.materializedView.prepare" {
+                        self.storage.lock().unwrap().finish_materialized_view(&params, &grant, result)
+                    } else { Ok(result) };
+                }
+                if method == "file.materializedView.release" {
+                    let task = storage.prepare_materialized_view_release(&params, &grant)?;
+                    drop(storage);
+                    return match task {
+                        Some(task) => {
+                            let result = task.run();
+                            self.storage.lock().unwrap().finish_materialized_view_release(&task, result)
+                        }
+                        None => Ok(json!({"released":true})),
                     };
                 }
                 if method == "file.capture" {

@@ -1502,6 +1502,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     documents: documentsAuthority,
     spawn: kernelProcesses.spawn,
     spawnAdmitted: kernelProcesses.spawnAdmitted,
+    releaseAdmittedContext: kernelProcesses.releaseContext,
     pathModule: path,
     env: process.env,
     // Workspaces become executable only after their canonical root is an

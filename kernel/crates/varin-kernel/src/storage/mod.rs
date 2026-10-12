@@ -46,6 +46,7 @@ mod file_resources;
 mod gc;
 mod maintenance;
 pub(crate) mod materialization;
+pub(crate) mod materialized_views;
 mod objects;
 mod operations;
 pub(crate) mod process_interactions;

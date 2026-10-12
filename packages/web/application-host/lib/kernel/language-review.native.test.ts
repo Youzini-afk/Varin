@@ -73,26 +73,9 @@ it('selected language capability with no Host owner reports unavailable, never a
   expect((await f.runtime.history(run.branchId)).some(item => item.source === 'tool')).toBe(true);
 }, 20_000);
 
-it.each(['fixed_branch'] as const)('refuses %s language source without pretending the dependency closure is pinned', async mode => {
-  const f = await fixture((_body, response) => answer(response));
-  await fs.writeFile(path.join(f.workspace, 'source.ts'), 'const source = 1;\n');
-  const run = await f.admit(`source-${mode}`, ['language_definition']);
-  const actor = f.kernel.scoped(run.grant);
-  const bytes = Buffer.from('const source = 1;\n');
-  const blob = await actor.putBlob(bytes, 'language-fixed-source');
-  await actor.createBranch({ operationId: 'source-create', branchId: 'language-source', workspaceId: 'workspace', draftBasePaths: [], captureScopes: [], entries: [{ path: 'source.ts', state: { kind: 'regular-file', objectHash: blob.hash, byteLength: bytes.length, mode: 0o644 }, ownerId: blob.ownerId }] });
-  const source = await actor.readBranch({ branchId: 'language-source' });
-  const published = await actor.publishBranch({ operationId: 'source-publish', branchId: 'language-source', expectedRoot: source.root, expectedWriteRevision: source.writeRevision });
-  const lineage = { branchId: 'language-source', revision: Number(published.revision) };
-  const binding = { ...run.binding, sourceMode: mode, liveRoot: undefined, ...(mode === 'fixed_branch' ? { rootId: undefined, fileSource: lineage } : { materializedSource: lineage }) };
-  await expect(f.runtime.startRun(run.receipt.run_id, undefined, binding)).rejects.toThrow(/language|live_root|dependency/i);
-  expect(f.requests).toHaveLength(0);
-  await f.runtime.cancelRun(run.receipt.run_id);
-}, 20_000);
-
 const revision = (text: string | Buffer) => `d1_${createHash('sha256').update(text).digest('base64url')}`;
 const range = (line: number, start: number, end: number) => ({ start: { line, character: start }, end: { line, character: end } });
-const boundSource = (query: LanguageQuery, value: string): NonNullable<LanguageResult['source']> => ({ selection: query.source, physicalRoot: query.physicalRoot!, resourceId: query.path, revision: value, view: 'agent:source:controlled', documentVersion: 1, generation: 1, dependencies: 'live' });
+const boundSource = (query: LanguageQuery, value: string): NonNullable<LanguageResult['source']> => ({ selection: query.source, physicalRoot: query.physicalRoot!, resourceId: query.path, revision: value, view: 'agent:source:controlled', documentVersion: 1, generation: 1, dependencies: { source: 'live', external: 'provider_environment' } });
 const omissions = () => ({ outOfScope: 0, unmappable: 0, stale: 0, unavailable: 0 });
 const location = (resourceId: string, selectedRange = range(0, 0, 5)) => ({ resource: { workspaceId: 'workspace', resourceId }, range: selectedRange });
 
@@ -115,14 +98,15 @@ it('revalidates every returned resource under the Run grant and records each tar
     queries++;
     expect(query).toMatchObject({ method: 'references', path: 'allowed/source.ts', source: { workspace_id: 'workspace' } });
     return { status: 'ready', source: boundSource(query, revision(sourceText)), omissions: omissions(), items: [
-      location('allowed/source.ts'), location('allowed/target.ts'), location('private.ts'),
+      location('allowed/source.ts'), location('allowed/target.ts'),
+      { ...location('private.ts'), resource: { workspaceId: 'another-workspace', resourceId: 'private.ts' } },
       location('allowed/escape.ts'), location('allowed/escape-dir/private.ts'), location('../outside.ts'), location('allowed/missing.ts'),
       { ...location('allowed/source.ts'), resource: { workspaceId: 'another-workspace', resourceId: 'allowed/source.ts' } },
       location('allowed/target.ts', range(0, 0, 900)),
       location('allowed/target.ts', range(0, 7, 2)),
     ] };
   });
-  const run = await f.admit('target-authority', ['language_references'], ['allowed']); await run.start();
+  const run = await f.admit('target-authority', ['language_references']); await run.start();
   await expect.poll(async () => (await f.runtime.run(run.receipt.run_id)).state).toBe('completed');
   expect(queries).toBe(1);
   const result = output(f.requests[1]!)!;

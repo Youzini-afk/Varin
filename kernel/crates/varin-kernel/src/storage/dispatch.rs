@@ -75,6 +75,7 @@ impl Storage {
             // Real wire and native Tool readers are admitted by Kernel's shared worker path.
             #[cfg(test)]
             "storage.getBlob" => storage.read_blob_fixture(authorized_params, authorized_grant),
+            "file.materializedView.check" => storage.check_materialized_view(authorized_params, authorized_grant),
             "file.read.check" => storage.file_read_check(authorized_params, authorized_grant),
             "file.root.register" => storage.file_root_register(authorized_params, authorized_grant),
             "file.operation.list" => {

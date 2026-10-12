@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 15;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 16;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -1486,6 +1486,23 @@ pub(crate) struct KernelFileMaterializeParams {
     pub(crate) path: String,
     pub(crate) source_root: String,
     pub(crate) lease_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelMaterializedViewPrepareParams {
+    pub(crate) workspace_id: String,
+    pub(crate) execution_workspace_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) revision: i64,
+    pub(crate) view_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelMaterializedViewParams {
+    pub(crate) workspace_id: String,
+    pub(crate) view_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3643,6 +3660,21 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "file.materialize" => serde_json::from_value::<KernelFileMaterializeParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "file.materializedView.prepare" => {
+            serde_json::from_value::<KernelMaterializedViewPrepareParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "file.materializedView.check" => {
+            serde_json::from_value::<KernelMaterializedViewParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "file.materializedView.release" => {
+            serde_json::from_value::<KernelMaterializedViewParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "storage.record.put" => serde_json::from_value::<KernelRecordPutParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

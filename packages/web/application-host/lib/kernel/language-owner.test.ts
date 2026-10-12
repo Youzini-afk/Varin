@@ -26,7 +26,9 @@ async function fixture(options: { capabilities?: Record<string, unknown>; prepar
   await fs.writeFile(path.join(documents.workspaceRoot, 'main.ts'), 'const value = 1;\n');
   const validateSource = vi.fn(async () => {});
   const owner = createLanguageOwner({ documents: documents.authority, supervisor, sources: {
-    validate: validateSource,
+    validateLanguage: validateSource,
+    prepareLanguageView: async query => ({ root: query.physicalRoot!.canonicalRoot, check: async () => {}, release: async () => {} }),
+    dispose: async () => {},
     read: async (query, resourceId, signal) => {
       const snapshot = await documents.authority.readSnapshot({ workspaceId: query.source.workspace_id, resourceId }, { signal });
       await options.afterRead?.();
@@ -66,7 +68,7 @@ describe('live language owner', () => {
     f.peer.handlers.set('textDocument/definition', () => [{ uri: f.uri('main.ts'), range }]);
     const result = await f.invoke({ line: 1, character: second.indexOf('value') });
     expect(result).toMatchObject({ status: 'ready', omissions: zeroOmissions,
-      source: { resourceId: 'main.ts', view: expect.stringMatching(/^agent:source:/), dependencies: 'live' },
+      source: { resourceId: 'main.ts', view: expect.stringMatching(/^agent:source:/), dependencies: { source: 'live', external: 'provider_environment' } },
       items: [{ resource: f.documents.resource('main.ts'), targetSelectionRange: range }] });
     const sent = f.peer.requests('textDocument/definition')[0]!;
     expect(sent.params).toMatchObject({ position: { line: 1, character: second.indexOf('value') } });
@@ -157,7 +159,7 @@ describe('live language owner', () => {
     const result = await f.invoke({ method: 'references' });
     expect(result).toMatchObject({ status: 'ready', omissions: zeroOmissions,
       items: [{ resource: f.documents.resource('target.ts'), range }] });
-    expect(result.source).toMatchObject({ resourceId: 'main.ts', dependencies: 'live' });
+    expect(result.source).toMatchObject({ resourceId: 'main.ts', dependencies: { source: 'live', external: 'provider_environment' } });
     expect(result.items[0]).not.toHaveProperty('rangeRevision', result.source?.revision);
     expect(result.items[0]).not.toHaveProperty('revision', result.source?.revision);
   });
@@ -473,4 +475,90 @@ it('keeps the shared source watcher when cancelling a different language provide
   await vi.waitFor(() => expect(py.notifications('textDocument/didClose')).toHaveLength(1));
   answer.resolve([{ uri: pathToFileURL(path.join(root, 'dep.py')).href, range: testRange(0, 0, 5) }]);
   expect(await querying).toMatchObject({ status: 'stale' });
+});
+
+it('shares fixed-tree preparation after one waiter cancels and releases its physical handle only after actual exit', async () => {
+  const documents = await createDocumentAuthorityHarness();
+  const workspaceId = documents.identity.workspaceId;
+  const entered = deferred<void>(), ready = deferred<void>();
+  const peers: ReturnType<typeof createControlledLanguagePeer>[] = [];
+  const prepared: string[] = [], released: string[] = [];
+  let sharedSignal: AbortSignal | undefined;
+  const supervisor = createLanguageSupervisor({ documents: documents.authority, spawn: () => { throw new Error('Unadmitted spawn'); },
+    spawnAdmitted: async (admit, _command, _args, options) => {
+      const identity = await admit(options.signal!);
+      expect(identity.canonicalRoot).toBe(options.cwd);
+      const peer = createControlledLanguagePeer(); peers.push(peer); return peer.child;
+    } });
+  cleanups.push(async () => { for (const peer of peers) peer.child.kill(); await supervisor.dispose(); await documents.cleanup(); });
+  supervisor.registerProvider({ providerId: 'fixed-provider', command: 'fixture', languageIds: ['typescript'] });
+  const retired = new Set<string>();
+  const validate = async (query: Query, signal: AbortSignal) => { signal.throwIfAborted(); if (retired.has(query.runId)) throw new Error('Original Run retired'); };
+  const owner = createLanguageOwner({ documents: documents.authority, supervisor, sources: {
+    validateLanguage: validate, dispose: async () => {},
+    read: async () => ({ status: 'ready', content: 'const fixed = 1;\n', revision: 'fixed-original-revision', source: 'working-branch' }),
+    prepareLanguageView: async (query, viewId, signal) => {
+      await validate(query as Query, signal); sharedSignal = signal; entered.resolve(); await ready.promise; signal.throwIfAborted();
+      const root = path.join(documents.workspaceRoot, viewId); await fs.mkdir(root); await fs.writeFile(path.join(root, 'main.ts'), 'const fixed = 1;\n');
+      prepared.push(viewId);
+      return { root, derivedView: { viewId, branchId: 'fixed', revision: 0, sourceRoot: 'root', canonicalRoot: root, kernelEpoch: 'fixture-epoch' },
+        check: async () => { await fs.stat(root); },
+        release: async () => { expect(peers.every(peer => peer.child.killed)).toBe(true); released.push(viewId); await fs.rm(root, { recursive: true }); } };
+    },
+    processAdmission: (query, view) => async signal => { await validate(query as Query, signal); await view!.check(signal);
+      return { workspaceId, executionWorkspaceId: workspaceId, canonicalRoot: view!.root }; },
+  } });
+  const query = (runId: string): Query => ({ runId, threadId: runId, grantId: `grant:${runId}`, source: {
+    mode: 'fixed_branch', workspace_id: workspaceId, execution_workspace_id: workspaceId, branch_id: 'fixed', revision: 0, live_root: null },
+    physicalRoot: null, method: 'definition', path: 'main.ts', line: 0, character: 6 });
+  const cancelled = new AbortController();
+  const a = owner(query('a'), cancelled.signal);
+  const rejected = expect(a).rejects.toMatchObject({ name: 'AbortError' }); await entered.promise;
+  const b = owner(query('b'), new AbortController().signal); cancelled.abort(); await rejected;
+  expect(sharedSignal!.aborted).toBe(false); ready.resolve();
+  const result = await b;
+  expect(result).toMatchObject({ status: 'ready', source: { physicalRoot: null,
+    dependencies: { source: 'fixed_branch', external: 'provider_environment' }, derivedView: { viewId: prepared[0] } } });
+  expect(prepared).toHaveLength(1); expect(peers).toHaveLength(1);
+  retired.add('a'); await owner.releaseSource!({ runId: 'a' }); expect(released).toEqual([]);
+  const stopRequested = deferred<void>();
+  Object.assign(peers[0]!.child, { requestTermination: async () => { stopRequested.resolve(); } });
+  retired.add('b'); const draining = owner.releaseSource!({ runId: 'b' }); await stopRequested.promise;
+  expect(released).toEqual([]); expect(await fs.stat(result.source!.derivedView!.canonicalRoot)).toBeDefined();
+  peers[0]!.child.kill(); await draining;
+  expect(released).toEqual(prepared);
+  expect(await fs.stat(result.source!.derivedView!.canonicalRoot).then(() => true, () => false)).toBe(false);
+  const reopened = await owner(query('c'), new AbortController().signal);
+  expect(reopened.status).toBe('ready'); expect(prepared).toHaveLength(2);
+  expect(reopened.source!.derivedView!.viewId).not.toBe(result.source!.derivedView!.viewId);
+  await owner.releaseSource!({ runId: 'c' });
+});
+
+it('retires a changed fixed dependency tree and creates a fresh generation only on a later query', async () => {
+  const documents = await createDocumentAuthorityHarness(); const workspaceId = documents.identity.workspaceId;
+  const peers: ReturnType<typeof createControlledLanguagePeer>[] = [];
+  const releases: string[] = []; let preparations = 0;
+  const supervisor = createLanguageSupervisor({ documents: documents.authority, spawn: () => { throw new Error('Unadmitted'); },
+    spawnAdmitted: async (admit, _command, _args, options) => { await admit(options.signal!); const peer = createControlledLanguagePeer(); peers.push(peer); return peer.child; } });
+  cleanups.push(async () => { await supervisor.dispose(); await documents.cleanup(); });
+  supervisor.registerProvider({ providerId: 'fixed', command: 'fixture', languageIds: ['typescript'] });
+  const view = 'agent:source:fixed-dependencies' as const;
+  const binding = { view, workspaceId, root: '', runId: 'run', grantId: 'grant',
+    read: async () => ({ status: 'ready', content: 'const x = 1;', revision: 'fixed-revision' }),
+    prepare: async (viewId: string) => {
+      preparations += 1; const root = path.join(documents.workspaceRoot, viewId); await fs.mkdir(root); await fs.writeFile(path.join(root, 'dep.ts'), 'export const x = 1;');
+      return { root, derivedView: { viewId, branchId: 'fixed', revision: 0, sourceRoot: 'root', canonicalRoot: root, kernelEpoch: 'epoch' },
+        check: async () => { await fs.stat(root); }, release: async () => { releases.push(viewId); await fs.rm(root, { recursive: true }); } };
+    },
+    admitProcess: async (_signal: AbortSignal, environment?: import('./source-query.js').PreparedLanguageSource) => ({ workspaceId, executionWorkspaceId: workspaceId, canonicalRoot: environment!.root }),
+  };
+  const first = await supervisor.retainSourceView(binding, new AbortController().signal);
+  expect(await supervisor.syncDocument({ view, resource: { workspaceId, resourceId: 'main.ts' }, languageId: 'typescript', content: 'const x = 1;', contentRevision: 'fixed-revision' })).toMatchObject({ status: 'synced' });
+  await fs.writeFile(path.join(first.root, 'dep.ts'), 'export const x = 2;');
+  await vi.waitFor(() => expect(releases).toEqual([first.derivedView!.viewId]));
+  expect(peers[0]!.child.killed).toBe(true); expect(preparations).toBe(1);
+  await expect(supervisor.checkSourceView(workspaceId, view, first, new AbortController().signal)).rejects.toThrow(/changed/);
+  const second = await supervisor.retainSourceView(binding, new AbortController().signal);
+  expect(second.derivedView!.viewId).not.toBe(first.derivedView!.viewId); expect(preparations).toBe(2);
+  expect(await fs.readFile(path.join(second.root, 'dep.ts'), 'utf8')).toBe('export const x = 1;');
 });

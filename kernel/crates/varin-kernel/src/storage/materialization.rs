@@ -48,7 +48,7 @@ pub(crate) struct DirectoryIdentity {
     file: u64,
 }
 
-fn directory_identity(path: &Path) -> Result<Option<DirectoryIdentity>, KernelError> {
+pub(super) fn directory_identity(path: &Path) -> Result<Option<DirectoryIdentity>, KernelError> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -486,7 +486,7 @@ impl Task {
         let mut cleanup_backup = None;
         let original = journal_directory_identity(&self.journal, "materializationOriginal")?;
         let recorded_stage = journal_directory_identity(&self.journal, "materializationStage")?;
-        let result = if self.matches(&target, &entries, true)? {
+        let mut result = if self.matches(&target, &entries, true)? {
             effect_observed = self.resuming;
             // Only the original empty directory is eligible for deletion.
             cleanup_backup = original;
@@ -577,6 +577,9 @@ impl Task {
                 )
             }
         };
+        if result["status"] == "materialized" {
+            result["directoryIdentity"] = serde_json::to_value(directory_identity(&target.absolute)?)?;
+        }
         control(Control::Commit {
             result: result.clone(),
             effect_observed,

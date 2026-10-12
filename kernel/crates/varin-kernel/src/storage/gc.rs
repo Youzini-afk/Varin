@@ -153,12 +153,12 @@ impl Storage {
     }
 
     pub(super) fn cleanup_status(&self) -> Result<(i64, Vec<String>), KernelError> {
-        let pending: i64 =
+        let mut pending: i64 =
             self.conn
                 .query_row("SELECT COUNT(*) FROM pending_gc_files", [], |row| {
                     row.get(0)
                 })?;
-        let failures = self
+        let mut failures: Vec<String> = self
             .conn
             .prepare(
                 "SELECT last_error FROM pending_gc_files WHERE state = 'failed' ORDER BY queued_at",
@@ -168,6 +168,10 @@ impl Storage {
             .into_iter()
             .flatten()
             .collect();
+        let views=self.conn.prepare("SELECT payload_json FROM domain_records WHERE record_type='file.materialized-view' AND json_extract(payload_json,'$.cleanupRequested')=1")?
+            .query_map([],|row|row.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+        pending+=views.len() as i64;
+        for raw in views {let view:Value=serde_json::from_str(&raw)?;if let Some(error)=view["cleanupError"].as_str(){failures.push(format!("derived view {}: {error}",view["viewId"].as_str().unwrap_or("unknown")));}}
         Ok((pending, failures))
     }
 
@@ -186,7 +190,7 @@ impl Storage {
         }
         for row in self
             .conn
-            .prepare("SELECT root_hash FROM revisions UNION SELECT root_hash FROM pins UNION SELECT json_extract(payload_json,'$.root') FROM domain_records WHERE record_type='working.result' UNION SELECT json_extract(payload_json,'$.baseRoot') FROM domain_records WHERE record_type='working.result'")?
+            .prepare("SELECT root_hash FROM revisions UNION SELECT root_hash FROM pins UNION SELECT json_extract(payload_json,'$.root') FROM domain_records WHERE record_type='working.result' UNION SELECT json_extract(payload_json,'$.baseRoot') FROM domain_records WHERE record_type='working.result' UNION SELECT json_extract(payload_json,'$.sourceRoot') FROM domain_records WHERE record_type='file.materialized-view'")?
             .query_map([], |row| row.get::<_, String>(0))?
         {
             roots.insert(row?);

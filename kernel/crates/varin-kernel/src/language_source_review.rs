@@ -19,6 +19,8 @@ use varin_runtime::{Outcome, RunState};
 #[path = "../../varin-runtime/tests/fixtures/input_admission.rs"]
 mod admission;
 use admission::InputAdmission;
+#[path = "child_language_review.rs"]
+mod child_review;
 const THREAD: &str = "thread:language";
 const BRANCH: &str = "branch:language";
 const TOOLS: [&str; 3] = [
@@ -121,6 +123,12 @@ struct Review {
 }
 impl Review {
     fn open(root: &std::path::Path) -> Self {
+        Self::open_with_script(
+            root,
+            "packages/web/application-host/lib/kernel/language-source-host.test-helper.ts",
+        )
+    }
+    fn open_with_script(root: &std::path::Path, script: &str) -> Self {
         let executable = PathBuf::from(
             std::env::var_os("VARIN_TEST_KERNEL_EXECUTABLE")
                 .expect("fresh installed kernel process guardian is required"),
@@ -160,9 +168,7 @@ impl Review {
         });
         Self {
             f: Fixture {
-                host: Host::with_script(
-                    "packages/web/application-host/lib/kernel/language-source-host.test-helper.ts",
-                ),
+                host: Host::with_script(script),
                 runtime,
                 storage: Mutex::new(storage),
                 storage_root,
@@ -268,6 +274,23 @@ impl Review {
             }
         }
     }
+    fn initialize(&mut self, root: &std::path::Path, mode: &str, resume: bool) -> Value {
+        self.f
+            .host
+            .send(json!({"kind":"fixture-initialize","root":root,
+            "storageRoot":self.f.storage_root,"epoch":EPOCH,"mode":mode,"resume":resume}));
+        let prepared = self.receive("fixture-prepared");
+        self.child_catalog =
+            Some(serde_json::from_value(prepared["childCatalog"].clone()).unwrap());
+        self.child_model = Some(serde_json::from_value(prepared["parent"].clone()).unwrap());
+        serde_json::to_value(
+            serde_json::from_value::<varin_runtime::catalog::launches::SourceSelection>(
+                prepared["source"].clone(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    }
     fn admit(&self, source: Value, key: &str) -> String {
         let tools = KernelToolExecutor::selected_schemas(&enabled());
         let mut selection: LaunchSelection = serde_json::from_value(json!({"extension_bindings":[],
@@ -346,18 +369,21 @@ impl Review {
                 crate::collaboration::resolve_selection(&selected, &input).unwrap();
             for name in TOOLS {
                 let schema = schemas.iter().find(|schema| schema.name == name);
-                assert_eq!(
+                assert!(
                     schema.is_some(),
-                    id != "retrieval",
-                    "read-only default must remain usable"
+                    "fixed language is available to the original read-only profile"
                 );
                 if let Some(schema) = schema {
                     let requirements = schema.requirements.as_ref().unwrap();
                     assert!(requirements.accepts_mode(varin_runtime::SourceMode::Materialized));
-                    assert!(!requirements.accepts_mode(varin_runtime::SourceMode::FixedBranch));
+                    assert!(requirements.accepts_mode(varin_runtime::SourceMode::FixedBranch));
                     assert_eq!(
                         resolved.profile.work_mode,
-                        varin_runtime::catalog::dispatch::ChildWorkMode::IsolatedWrite
+                        if id == "retrieval" {
+                            varin_runtime::catalog::dispatch::ChildWorkMode::ReadOnly
+                        } else {
+                            varin_runtime::catalog::dispatch::ChildWorkMode::IsolatedWrite
+                        }
                     );
                 }
             }
@@ -365,23 +391,49 @@ impl Review {
                 let mut readonly = input;
                 readonly.work_mode =
                     Some(varin_runtime::catalog::dispatch::ChildWorkMode::ReadOnly);
-                assert!(crate::collaboration::resolve_selection(&selected, &readonly).is_err());
+                assert!(crate::collaboration::resolve_selection(&selected, &readonly).is_ok());
             }
         }
     }
 
     fn select(&mut self, run: &str, source: &Value) -> (ToolBinding, Value) {
+        let thread_id = self
+            .f
+            .runtime
+            .catalog()
+            .lock()
+            .unwrap()
+            .run(run)
+            .unwrap()
+            .thread_id;
         self.f
             .host
-            .send(json!({"kind":"fixture-select","runId":run,"source":source}));
+            .send(json!({"kind":"fixture-select","runId":run,"threadId":thread_id,"source":source,
+                "expectClean":if source["mode"]=="fixed_branch" { Some(source["revision"]==1) } else { None }}));
         let selected = self.receive("fixture-selected");
-        let value = json!({"grantId":selected["grantId"],"runId":run,"threadId":THREAD,
+        let mut value = json!({"grantId":selected["grantId"],"runId":run,"threadId":thread_id,
             "workspaceId":source["workspace_id"],"executionWorkspaceId":source["execution_workspace_id"],
-            "sourceMode":"materialized","materializedSource":{"branchId":source["branch_id"],"revision":source["revision"]},
-            "environmentRunId":source["environment_run_id"],"rootId":selected["physicalRoot"]["rootId"],"enabledTools":TOOLS});
+            "sourceMode":source["mode"],"enabledTools":TOOLS});
+        let fixed = json!({"branchId":source["branch_id"],"revision":source["revision"]});
+        if source["mode"] == "fixed_branch" {
+            value["fileSource"] = fixed;
+        } else {
+            value["materializedSource"] = fixed;
+            value["environmentRunId"] = source["environment_run_id"].clone();
+            value["rootId"] = selected["physicalRoot"]["rootId"].clone();
+        }
         (serde_json::from_value(value).unwrap(), selected)
     }
     fn execute(&mut self, run: &str, source: ToolBinding, observe: bool) -> Vec<Value> {
+        self.execute_with_provider(run, source, observe, Arc::new(Script))
+    }
+    fn execute_with_provider(
+        &mut self,
+        run: &str,
+        source: ToolBinding,
+        observe: bool,
+        provider: Arc<dyn ModelProvider>,
+    ) -> Vec<Value> {
         let executor = Arc::new(
             KernelToolExecutor::new(source, self.resource_client.clone())
                 .unwrap()
@@ -395,7 +447,7 @@ impl Review {
                 RunStart {
                     binding: binding(&self.f.runtime, run),
                     policy_state: Value::Null,
-                    provider: Arc::new(Script),
+                    provider,
                     tools: executor,
                     policy: Arc::new(DefaultAgentPolicy),
                     context_preparation: Arc::new(NoopContextPreparation),
@@ -460,7 +512,7 @@ impl Review {
         }
         let owner = self.f.runtime.catalog();
         let db = owner.lock().unwrap();
-        db.execution_history(BRANCH)
+        db.execution_history(&db.run(run).unwrap().branch_id)
             .unwrap()
             .iter()
             .filter_map(|item| match &item.content {
@@ -532,7 +584,10 @@ fn assert_results(results: &[Value], selected: &Value, source: &Value, changed: 
             result["source"]["revision"],
             selected["revisions"]["main.ts"]
         );
-        assert_eq!(result["source"]["dependencies"], "live");
+        assert_eq!(
+            result["source"]["dependencies"],
+            json!({"source":if source["mode"] == "fixed_branch" {"fixed_branch"} else {"live"}, "external":"provider_environment"})
+        );
         assert_eq!(result["source"]["providerId"], "varin.typescript-language");
         assert!(result["source"]["view"]
             .as_str()
@@ -759,6 +814,176 @@ fn materialized_typescript_dependencies_history_and_shared_process_stop_survive_
         .unwrap()
         .contains("name.length"));
     drop(reopened_storage);
+    drop(reopened);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+#[ignore = "requires installed bundled TypeScript and fresh Rust process worker; stdio only, no listener or external provider"]
+fn fixed_typescript_project_revisions_share_only_their_view_and_query_again_after_reopen() {
+    let root = std::env::temp_dir().join(format!(
+        "varin-fixed-language-source-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let mut review = Review::open(&root);
+    let source = review.initialize(&root, "fixed_branch", false);
+    assert_eq!(source["mode"], "fixed_branch");
+    let first = review.admit(source.clone(), "fixed-first");
+    review.freeze_child_directory(&first);
+    let (first_binding, first_selected) = review.select(&first, &source);
+    assert!(first_selected["physicalRoot"].is_null());
+    let initial = review.execute(&first, first_binding.clone(), false);
+    assert_results(&initial, &first_selected, &source, false);
+    let original_view = initial[0]["source"]["derivedView"].clone();
+    let original_root = PathBuf::from(original_view["canonicalRoot"].as_str().unwrap());
+    assert!(original_root.is_dir());
+    assert_eq!(original_view["branchId"], source["branch_id"]);
+    assert_eq!(original_view["revision"], 0);
+
+    // The live workspace disagreed before preparation and changes again afterward.
+    // Neither action may alter the captured project's relative imports/config/paths.
+    review.f.host.send(json!({"kind":"fixture-live-change"}));
+    review.receive("fixture-live-changed");
+    let second = review.admit(source.clone(), "fixed-second");
+    let (second_binding, second_selected) = review.select(&second, &source);
+    let shared = review.execute(&second, second_binding.clone(), false);
+    assert_results(&shared, &second_selected, &source, false);
+    assert_eq!(shared[0]["source"]["derivedView"], original_view);
+    assert_eq!(shared[0]["source"]["view"], initial[0]["source"]["view"]);
+    assert_eq!(
+        shared[0]["source"]["generation"],
+        initial[0]["source"]["generation"]
+    );
+
+    // Commit a genuinely different immutable revision through the original branch
+    // writer. The first view stays alive and cannot be silently retargeted.
+    review.f.host.send(json!({"kind":"fixture-next-revision"}));
+    let next = review.receive("fixture-next-revision");
+    let next_source = serde_json::to_value(
+        serde_json::from_value::<varin_runtime::catalog::launches::SourceSelection>(
+            next["source"].clone(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(next_source["revision"], 1);
+    let third = review.admit(next_source.clone(), "fixed-next-revision");
+    let (third_binding, third_selected) = review.select(&third, &next_source);
+    let changed = review.execute(&third, third_binding.clone(), false);
+    assert_results(&changed, &third_selected, &next_source, true);
+    let next_view = changed[0]["source"]["derivedView"].clone();
+    let next_root = PathBuf::from(next_view["canonicalRoot"].as_str().unwrap());
+    assert_ne!(next_view["viewId"], original_view["viewId"]);
+    assert_ne!(next_view["sourceRoot"], original_view["sourceRoot"]);
+    assert_ne!(next_root, original_root);
+    assert_eq!(
+        third_selected["revisions"]["main.ts"],
+        first_selected["revisions"]["main.ts"]
+    );
+    assert!(std::fs::read_to_string(original_root.join("util.ts"))
+        .unwrap()
+        .contains("\"B \" + name"));
+    assert!(std::fs::read_to_string(next_root.join("util.ts"))
+        .unwrap()
+        .contains("name.length"));
+
+    review
+        .f
+        .host
+        .send(json!({"kind":"fixture-release","grantId":first_binding.grant_id}));
+    let one_released = review.receive("fixture-released");
+    assert_eq!(one_released["processSpawns"], 2);
+    assert!(
+        original_root.is_dir(),
+        "the second retained Run still owns the original view"
+    );
+    review
+        .f
+        .host
+        .send(json!({"kind":"fixture-release","grantId":second_binding.grant_id}));
+    review.receive("fixture-released");
+    review
+        .f
+        .host
+        .send(json!({"kind":"fixture-drain","runId":second}));
+    review.receive("fixture-drained");
+    assert!(
+        !original_root.exists(),
+        "only actual source drain permits physical cleanup"
+    );
+    assert!(
+        next_root.is_dir(),
+        "retiring revision zero must not release revision one"
+    );
+    review
+        .f
+        .host
+        .send(json!({"kind":"fixture-release","grantId":third_binding.grant_id}));
+    review.receive("fixture-released");
+    review
+        .f
+        .host
+        .send(json!({"kind":"fixture-drain","runId":third}));
+    review.receive("fixture-drained");
+    assert!(!next_root.exists());
+    review.f.host.send(json!({"kind":"fixture-gc"}));
+    review.receive("fixture-gc-finished");
+    review.f.host.send(json!({"kind":"fixture-finish"}));
+    let finished = review.receive("fixture-finished");
+    assert_eq!(finished["processSpawns"], 2);
+    assert_eq!(finished["sourceQueries"], 15);
+    let history = review
+        .f
+        .runtime
+        .catalog()
+        .lock()
+        .unwrap()
+        .execution_history(BRANCH)
+        .unwrap();
+    drop(review);
+
+    // Both authority stores and the Host process are newly opened. The fixture's
+    // transport epoch string is intentionally constant; this is fresh-query/reopen
+    // evidence, not evidence of obsolete-epoch cleanup (covered by Storage tests).
+    let mut reopened = Review::open(&root);
+    assert_eq!(
+        reopened
+            .f
+            .runtime
+            .catalog()
+            .lock()
+            .unwrap()
+            .execution_history(BRANCH)
+            .unwrap(),
+        history
+    );
+    let reopened_source = reopened.initialize(&root, "fixed_branch", true);
+    assert_eq!(reopened_source, source);
+    reopened.f.host.send(json!({"kind":"fixture-gc"}));
+    reopened.receive("fixture-gc-finished");
+    let fourth = reopened.admit(reopened_source.clone(), "fixed-reopened-query");
+    let (fourth_binding, fourth_selected) = reopened.select(&fourth, &reopened_source);
+    let restored = reopened.execute(&fourth, fourth_binding.clone(), true);
+    assert_results(&restored, &fourth_selected, &source, false);
+    let restored_view = &restored[0]["source"]["derivedView"];
+    assert_ne!(restored_view["viewId"], original_view["viewId"]);
+    assert_eq!(restored_view["sourceRoot"], original_view["sourceRoot"]);
+    reopened
+        .f
+        .host
+        .send(json!({"kind":"fixture-release","grantId":fourth_binding.grant_id}));
+    reopened.receive("fixture-released");
+    reopened
+        .f
+        .host
+        .send(json!({"kind":"fixture-drain","runId":fourth}));
+    reopened.receive("fixture-drained");
+    assert!(!PathBuf::from(restored_view["canonicalRoot"].as_str().unwrap()).exists());
+    reopened.f.host.send(json!({"kind":"fixture-finish"}));
+    let finished = reopened.receive("fixture-finished");
+    assert_eq!(finished["processSpawns"], 1);
+    assert_eq!(finished["sourceQueries"], 5);
     drop(reopened);
     std::fs::remove_dir_all(root).unwrap();
 }

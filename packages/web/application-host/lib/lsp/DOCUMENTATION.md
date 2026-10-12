@@ -6,7 +6,7 @@ Rust kernel. Renderers never spawn language servers.
 
 ## Entrypoints
 
-- `supervisor.ts`: `createLanguageSupervisor({ documents, spawn, spawnAdmitted, pathModule, env, isTrusted, hostViewIdleMs, hostViewDocumentLimit, now })`
+- `supervisor.ts`: `createLanguageSupervisor({ documents, spawn, spawnAdmitted, releaseAdmittedContext, pathModule, env, isTrusted, hostViewIdleMs, hostViewDocumentLimit, now })`
 - `language-view.ts`: `createLanguageViewBinder({ documents, supervisor })` — binds one document in the
   Host-owned view to a named text identity (fixed editor draft or disk revision)
 - `jsonrpc.ts`: Content-Length framed JSON-RPC client/server
@@ -55,8 +55,8 @@ editor's live buffer and an agent turn's fixed text (D-087):
 - `agent:<content hash>` — a fixed draft view. Its captured buffers are synchronized together; identical
   draft contents can share the same view across sessions. Fixed buffers and active query documents are
   not LRU-evicted. These views expire independently of a retained project disk view.
-- `agent:source:<identity>` — an admitted native physical source, retained by actual Run/grant references.
-  The original project namespace selects configuration; the admitted live root or managed working copy
+- `agent:source:<identity>` — an admitted native source, retained by actual Run/grant references; fixed sources prepare their own derived physical view.
+  The original project namespace selects configuration; the admitted live root, managed working copy or fixed derived project
   supplies cwd, root URI, workspace folders, file mapping and its watcher. Compatible callers share the
   same supervisor session and startup. Query cancellation does not withdraw its Run's reference, and
   the legacy idle reaper does not retire this view. Last-reference release waits for actual process exit.
@@ -168,7 +168,7 @@ real LSP initialization/completion/disposal is covered by the
 ## Native physical-source queries
 
 Native Threads call this same supervisor through the private native language adapter. They bind the
-actual live or materialized source through the shared `SourceQueryOwner`, using the original frozen
+actual live, fixed or materialized source through the shared `SourceQueryOwner`, using the original frozen
 selection, Run grant and Documents registration. `KernelProcessService.spawnAdmitted` consumes a trusted
 source-owner callback; it is not a public path/cwd permission. Native navigation opts
 into strict URI/range projection and omission reasons; ordinary Pi/editor location shapes are unchanged.
@@ -179,18 +179,27 @@ verification and no claimed range revision; empty unversioned publications never
 
 Returned locations are still server observations. The native resource owner separately admits and reads
 the target before delivery; a cross-file observed revision does not certify which bytes produced an LSP
-range. Imports, native project configuration and compiler libraries remain live dependencies, explicitly
-reported as `dependencies: live`. A materialized source uses its real working copy rather than the old
-project directory or its immutable base. Fixed branches remain unsupported until a complete project
-view or source-aware dependency adapter exists; didOpen alone is not a fixed dependency closure.
+range. A materialized source uses its real working copy rather than the old project directory or its
+immutable base. A fixed source lazily materializes its original branch tree using the existing Storage
+worker; imports, captured configuration and paths resolution then use that actual project view, not just
+one substituted didOpen buffer. The original immutable reader still owns query/target content.
+Dependency provenance is `{ source: 'fixed_branch' | 'live', external: 'provider_environment' }`.
+External SDKs, compiler libraries and explicitly out-of-tree configuration are not claimed frozen.
+The service requires the original Run's whole-project read scope; ordinary path-scoped file reads do not.
+
+The supervisor owns one shared preparation and Run reference set. Storage owns only a derived physical
+handle, root/journal and directory identity. A changed derived tree becomes stale, drains its process,
+and is rebuilt only by a later actual query. Cleanup retains unknown writers and performs recursive
+deletion on the original worker lane rather than inside Storage control. The exact stopped process
+context is also retired, without withdrawing another view's context.
 
 Terminal Run notifications and explicit grant retirement withdraw source references without treating
 their ACK as a process-stop receipt. Writable child result capture separately awaits the same
 supervisor's drain and still passes Rust's original directory-writer barrier. Another retained Run can
 keep a shared process alive. Epoch loss invalidates old queries but does not manufacture an exit or
-replace a still-unconfirmed process. Native language tools require a physical source: Worker defaults
-include them; the read-only Retrieval default does not. Explicit read-only selection reports the need
-for `isolated_write` or compatible tools rather than silently dropping user selections.
+replace a still-unconfirmed process. Native language tools use the original Source requirement and are
+available to default Worker and read-only Retrieval profiles; the read-only child gains no file-write
+or process tool merely because the Host language backend needs a physical view.
 
 Focused native acceptance includes the real already-bundled TypeScript provider through all three
 native tools: cross-file definition/reference and actual unversioned diagnostics retained as pending.
@@ -198,9 +207,12 @@ Versioned/pull correctness, independent preparation/cancellation, malformed URI/
 stale source behavior also have controlled-provider coverage; existing Pi navigation and diagnostic
 adapter regressions passed. Exact suite counts and the frozen native build are recorded in the
 [implementation plan](../../../../../docs/plan/agent-runtime-implementation.md#已核验增量live-root-原生语言工具).
-This does not certify fixed dependency closure, all language providers or all deployment platforms.
+This does not certify all language providers, external compiler environments or all deployment platforms.
 
 The [materialized-source review](../../../../../docs/reviews/runtime-source-language-2026-10-12.md)
 records actual working-copy imports/configuration, original Rust history, watcher recovery and precise
 reference retirement. It distinguishes cold TypeScript aliases, test-gated diagnostic publications,
 main Run execution and child-directory admission; none is promoted into an untested guarantee.
+The subsequent [fixed-language review](../../../../../docs/reviews/runtime-fixed-language-2026-10-12.md)
+records actual fixed-project imports/config, fresh queries after reopening, and actual read-only/Worker
+child language/report consumers. Worker code-result publication remains a separate tested boundary.

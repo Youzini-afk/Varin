@@ -774,7 +774,7 @@
     "MediaReadParams",
     "MediaReadChunk"
   ],
-  "protocolVersion": 15,
+  "protocolVersion": 16,
   "runtimeStructs": {"ContentCollectionReport":{"fields":{"status":{"type":"ContentCollectionStatus"},"phase":{"type":"ContentCollectionPhase"},"removedObjects":{"type":"number"},"removedBytes":{"type":"number"},"removedStagingFiles":{"type":"number"},"reason":{"type":"string | null"}}},"ModelSessionConfiguration":{"fields":{"providerId":{"type":"string","optional":true},"providerFamily":{"type":"string"},"model":{"type":"string"},"endpoint":{"type":"string"},"credentialEnvironment":{"type":"string | null"},"allowAnonymous":{"type":"boolean"},"acceptsImages":{"type":"boolean","optional":true},"configurationGeneration":{"type":"number"},"maxOutputTokens":{"type":"number | null"},"azureDeployment":{"type":"string | null","optional":true},"azureApiVersion":{"type":"string | null","optional":true},"legacyMaxTokens":{"type":"boolean","optional":true},"includeStreamUsage":{"type":"boolean","optional":true},"reasoningEffort":{"type":"string | null","optional":true},"anthropicOauth":{"type":"boolean","optional":true},"adapterId":{"type":"string","optional":true},"adapterVersion":{"type":"string","optional":true},"contextWindowTokens":{"type":"number","optional":true},"thinkingLevel":{"type":"string","optional":true},"modelOptions":{"type":"unknown","optional":true}}},"KernelWorkingResultCandidate":{"fields":{"publicationId":{"type":"string"},"candidateOperationId":{"type":"string"},"workspaceId":{"type":"string"},"branchId":{"type":"string"},"root":{"type":"string"},"baseRoot":{"type":"string"},"writeRevision":{"type":"number"},"pinId":{"type":"string"},"basePinId":{"type":"string"}}}},
   "runtimeEnums": {
     "McpInteractionMode": ["Form", "Url", "Sampling"],
@@ -1138,6 +1138,9 @@
     "file.scan": "KernelFileScanParams",
     "file.measure": "KernelFileMeasureParams",
     "file.materialize": "KernelFileMaterializeParams",
+    "file.materializedView.prepare": "KernelMaterializedViewPrepareParams",
+    "file.materializedView.check": "KernelMaterializedViewParams",
+    "file.materializedView.release": "KernelMaterializedViewParams",
     "storage.record.put": "KernelRecordPutParams",
     "storage.record.get": "KernelRecordGetParams",
     "storage.record.list": "KernelRecordListParams",
@@ -1919,6 +1922,9 @@
     "KernelFileMeasureParams": {"fields": {
       "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}
     }},
+    "KernelMaterializedViewPrepareParams": {"fields":{"workspaceId":{"type":"string"},"executionWorkspaceId":{"type":"string"},"branchId":{"type":"string"},"revision":{"type":"number"},"viewId":{"type":"string"}}},
+    "KernelMaterializedViewParams": {"fields":{"workspaceId":{"type":"string"},"viewId":{"type":"string"}}},
+    "KernelMaterializedView": {"fields":{"viewId":{"type":"string"},"branchId":{"type":"string"},"revision":{"type":"number"},"sourceRoot":{"type":"string"},"canonicalRoot":{"type":"string"},"kernelEpoch":{"type":"string"}}},
     "KernelFileMaterializeParams": {"fields": {
       "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}, "sourceRoot": {"type": "string"}, "leaseId": {"type": "string", "optional": true}
     }},
@@ -2664,6 +2670,9 @@
     "file.scan": "page a fixed filesystem inventory for baseline capture without reading bodies in the Host",
     "file.measure": "measure one managed filesystem subtree without Host-side recursive scanning",
     "file.materialize": "durably materialize one immutable kernel root into a managed filesystem directory",
+    "file.materializedView.prepare": "prepare a derived immutable project view through the original materialization owner",
+    "file.materializedView.check": "check the original derived project view identity",
+    "file.materializedView.release": "release a stopped derived project view through its resource owner",
     "storage.record.put": "publish a typed durable product record and its object references",
     "storage.record.get": "read a durable product record by identity",
     "storage.experiment.artifacts": "Read one experiment artifact record page by original attempt identity",

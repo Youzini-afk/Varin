@@ -58,7 +58,7 @@ fn available_metadata_is_the_actual_native_directory_and_classifies_real_source_
         let capability = metadata.iter().find(|tool| tool.name == name).unwrap();
         assert_eq!(
             capability.source_requirement,
-            ChildSourceRequirement::Physical
+            ChildSourceRequirement::Source
         );
         assert!(
             !capability.process,
@@ -66,11 +66,11 @@ fn available_metadata_is_the_actual_native_directory_and_classifies_real_source_
         );
         assert_eq!(
             capability.default_presets,
-            vec![varin_runtime::catalog::dispatch::ChildPresetDefault::Worker,]
+            vec![varin_runtime::catalog::dispatch::ChildPresetDefault::Worker, varin_runtime::catalog::dispatch::ChildPresetDefault::Retrieval]
         );
         let schema = directory.iter().find(|tool| tool.name == name).unwrap();
         let requirements = schema.requirements.as_ref().unwrap();
-        assert!(!requirements.accepts_mode(varin_runtime::SourceMode::FixedBranch));
+        assert!(requirements.accepts_mode(varin_runtime::SourceMode::FixedBranch));
         assert!(requirements.accepts_mode(varin_runtime::SourceMode::Materialized));
         assert!(requirements.accepts_mode(varin_runtime::SourceMode::LiveRoot));
     }

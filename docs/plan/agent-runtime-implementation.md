@@ -8,6 +8,13 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-12 增量：固定工程语言视图与真实 child 消费
+
+- fixed_branch 沿原 Storage 物化器准备完整的已捕获工程，Run 仍保原 source/revision；supervisor 独占引用/共享准备，派生目录与原 Run 权限分开。Catalog **58**、私有 wire **16**。
+- 原语言工具目录现支持默认只读 Retrieval 与 Worker；原 Run 必须准入该后端所需的完整工程读取范围，不因 Host service context 获得额外路径或 process 工具。
+- 真正 TypeScript 主链覆盖固定/不同 live 的依赖与配置、同 revision 共享/新 revision 隔离、精确排空与目录回收、GC 后重开新查询；实际 child dispatch/Run/report 分别走固定和物化源。Worker code-result 发布并未由本片假称完成。
+- 四个旧 continuation startup fixture 已按原 adapter/store 修复并精确归因。当前复验与边界见[本片记录](../reviews/runtime-fixed-language-2026-10-12.md)；外部 provider environment、远端来源、全平台/产品验证与其余设计能力仍分别推进。
+
 ## 2026-10-12 增量：物化来源的原语言服务
 
 - 原三语言工具接实际 materialized working copy，共用 SourceQueryOwner、原 Documents 注册/信任、Run grant、supervisor 与 Rust 进程。原配置身份不充当 cwd，dependency 明确 live；Catalog **58**、私有 wire **15**直接拒旧。
@@ -688,13 +695,13 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 
 ## 完整设计对照与剩余工程范围
 
-2026-10-12 按两份设计、当前源码和本文件最新已发布增量重新核对。此表替代早期仍把 Goal、策略子任务、MCP Tasks、Computer 或自动容量压缩列为未实现的中间对照；各历史阶段的原始验证记录仍保留。decision 已完成 TypeSafe/Cloudflare/llama.cpp 与 research_decide 有限片；dedicated rerank 与原渐进 fast-decision 已接 native live_root code_retrieval，Explore LLM/材料用途及协议特定已知计量尚未完成。实现、真实产品组合与外部平台验证分别判断，不按提交数、测试数或条目数估计完成比例。
+2026-10-12 按两份设计、当前源码和本文件最新增量重新核对。此表替代早期仍把 Goal、策略子任务、MCP Tasks、Computer 或自动容量压缩列为未实现的中间对照；各历史阶段的原始验证记录仍保留。decision 已完成 TypeSafe/Cloudflare/llama.cpp 与 research_decide 有限片；dedicated rerank、原渐进 fast-decision、Explore LLM 和 query embedding 已接原推理回执及固定/物化/live_root code_retrieval。材料 rerank、其他用途及协议特定已知计量仍分别推进。实现、真实产品组合与外部平台验证分别判断，不按提交数、测试数或条目数估计完成比例。
 
 以下顺序是 decision/rerank 后的工程优先级；可独立交付的领域可以并行。默认 runtime 切换、Pi 删除与全面用户资产迁移由用户验收后执行，我们负责迁移前能力、验收入口和交接清单。
 
 | 设计要求 / 剩余类别 | 已有实际能力，不再作为从零缺口 | 仍需实现或闭合的实际路径 | 验收重点 |
 | --- | --- | --- | --- |
-| 总设 §15–17：来源、语言与检索 | 固定/物化/live_root 来源、隔离可写 child 与逐项结果集成；live_root 定义/引用/诊断、可组合关键词/结构/显式语义、dedicated rerank 与原渐进 fast-decision；原 immutable reader、撤权与 embedding 账本 | fixed/materialized 的完整工程依赖闭包；其余 LSP 查询与跨文件计算版本证据；远端文件/语言/检索同源映射；Explore LLM 与材料 rerank 组合消费者 | 固定视图不能悄悄读 live 配置/库；同名远端路径不串源；旧 reader/配置切代与取消恢复；正常可选缺失不吞选定实现失败 |
+| 总设 §15–17：来源、语言与检索 | 固定/物化/live_root 来源、隔离可写 child 与逐项结果集成；三类来源的定义/引用/诊断、关键词/结构/显式语义、dedicated rerank、渐进 fast-decision 与 Explore LLM；原 immutable reader、撤权和推理账本；固定工程派生视图及实际 child 消费 | 其余 LSP 查询与跨文件计算版本证据；远端文件/语言/检索同源映射；材料 rerank 组合消费者、本地 native embedding；更多 provider/工程规模下的来源合同验证 | 固定捕获树不能悄悄读 live 配置，目录外 provider environment 明确标识；同名远端路径不串源；旧 reader/配置切代与取消恢复；正常可选缺失不吞选定实现失败 |
 | 总设 §12–13、§18、§24：推理用途、记忆与 Bot | 多 API 家族原生适配及原 credential owner；规划模型、embedding、TypeSafe/Cloudflare/llama.cpp decision 与真实 research_decide；自动容量水位、分段摘要、普通 notes/计划和稳定 memory checkpoint；Goal/预算/暂停/各种持久触发 | 其他检索/材料 rerank 消费者、协议特定已知计量；其余建议/评估消费者与独立 image 用途；实际模型配置覆盖和服务器工作续接；可替换上下文预算策略、provider 容量反馈；完整自动记忆与 Bot 独立知识/身份/睡眠恢复/长期任务 | 每次实际外发按用途、原凭据、来源和 Goal 受理；未知 usage 不变成零；不重放潜在收费请求；原记忆 revision 和祖先压缩边界保持 |
 | 扩设 §4–9：完整能力组合与作者接口 | Provider/Transform/Decision/Observer 已有真实切片；ToolGraph、直接 child、Deliver/Pause、运行中策略换绑；SDK tools.list/describe/invoke、普通工具/嵌套调用、候选更新与 owner 独立准备；已有 typed workbench slot 声明 | 同一合同的完整 service/method/event/UI slot/props/来源/就绪状态精确查询；Agent 产包→既有授权候选→工作台挂载/释放整链；更广领域 Provider/Transform、父子作用域共享键与局部复用、多变换顺序/冲突、独占资源交接 | 不另养能力名单或第二安装器；失败候选保留旧实例；旧调用保留真实绑定；关闭 UI 不取消后台业务；仅依赖自己的工作等待准备 |
 | 总设 §14–16、§21、§24：文件与产品工作流 | 原文件工具/CAS/捕获、child 报告与 WorkingResult、family 消息/读取/Wait、历史引用与分支、Storage 与 Catalog GC 锁外准备 | 未保存编辑器草稿、Documents/Git/overview 与工作源的关联；历史/磁盘组合恢复；完整 IDE/Research/Bot 模式、通知等产品消费者接同一身份/revision/cursor | 草稿不是聊天回滚副作用；重开保留真实副本与效果；报告和代码集成各有事实；各视图不能有第二份状态权威 |
@@ -708,13 +715,13 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 - 既有平台组件不等于真实平台已验；反过来，缺真实机证据也不等于该平台完全没有实现。完整产品验证可能发现接线问题，不能提前把全部余项称为“只剩测试”。
 - 完整能力交付后提供用户验收方法、明确支持边界及迁移前清单；不擅自切默认 runtime、删除 Pi 或做全面资产迁移。
 
-### 当前领域纵切：live-root 语言与检索已接通，继续补依赖闭包与环境范围
+### 当前领域纵切：三类本地来源的语言与检索已接通，继续补查询与环境范围
 
 - `SourceMode` 现有 `FixedBranch`、`Materialized`、`LiveRoot`；显式 live_root 不捕获目录，受理、续接和恢复保持同一已验证 host/workspace/root。固定来源仍固定，物化环境仍保留实际副本，不随当前 UI/cwd 改绑。
-- live_root 已通过原生注册表执行 `language_definition`、`language_references`、`language_diagnostics`。Rust 拥有工具准入与结果提交，Host 直接使用现有 LanguageViewBinder/LanguageSupervisor 和选定 provider；没有第二个语言进程/config owner、Pi 身份冒充或 decide 内隐藏 I/O。
+- live_root、fixed_branch 与 materialized 已通过原生注册表执行 `language_definition`、`language_references`、`language_diagnostics`。Rust 拥有工具准入与结果提交，Host 直接使用现有 LanguageViewBinder/LanguageSupervisor 和选定 provider；没有第二个语言进程/config owner、Pi 身份冒充或 decide 内隐藏 I/O。
 - 当前 live 路径核对同一 Host 和实际 Documents 环境；同 workspace/provider/view 的准备复用，实际 query 绑定 generation/documentVersion。输入前后 revision 核对，返回目标逐项授权；目标的 observedRevision 不证明语言服务器计算跨文件 range 时使用了该版本。
-- fixed_branch/materialized LSP 仍明确不可用：外部/绝对 symlink、tsconfig 等配置与编译器库闭包未固定。仅物化目录或 didOpen 目标文件不能证明全工程固定，cwd 也不是 OS sandbox。草稿、远端同名路径和完整 LSP 功能仍须分别建立合同与证据。
-- 同一 live_root 已接入实际检索 PipelinePlan 与显式语义 owner，证据见后文；下一步继续补任务/环境范围的能力组合、固定依赖闭包和恢复。无版本诊断可保留真实非空观测，但仍是 pending，不能称为 current/clean。
+- fixed_branch 的捕获树、相对 imports/配置与路径映射由原 Storage 准备派生工程；materialized 使用原真实 working copy。返回正文始终取原来源；目录外 SDK、显式外部配置与 symlink 属于明确标识的 provider environment，不称为完整 OS 快照。真实固定与物化 child 已执行语言工具、原报告/历史、停止与 GC 重开；Worker 代码发布保持单独验收。
+- 三类来源已接实际检索 PipelinePlan 与显式语义 owner；继续补其余查询、草稿、远端同名路径和跨层产品范围。无版本诊断可保留真实非空观测，但仍是 pending，不能称为 current/clean。
 
 ## 已核验增量：策略辅助规划模型
 
@@ -758,7 +765,7 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 | 文件、草稿、恢复 | Rust `storage`；Host `documents`/`recovery`；UI Document Registry | 复用内容对象/条件写入/恢复；明确草稿owner；分支与磁盘效果区分；组合恢复可核对 | 原生文件工具、固定/可写来源、结果保留与逐项集成已有闭环；完整草稿与历史/磁盘组合恢复的产品接线仍需完成 |
 | 工作分支、基线与dispatch | Host `harness/thread-services.ts`、`thread-runtime.ts`、`kernel/storage-adapter.ts` | 持久受理立即回执；准备独立作业；批量capture；真实一致性标记；无变更报告与代码集成分开 | 固定与可写 child 持久受理、原来源准备、递归取消、报告/WorkingResult 与逐项集成已接；更广捕获与恢复产品组合仍待 |
 | Shell、PTY、输出、进程树 | Rust `process` guardian；Host `kernel/process-service.ts`/`terminal` | 保留真实进程回执；推送I/O与stdin确认；控制独立；取消观察不同于终止进程 | 原生 spawn/持久观察/停止、PTY input/resize 回执、原进程终端与恢复已接；平台和产品完整验收仍待 |
-| LSP、结构/关键词/语义检索 | Host `lsp`/`search`/`structure`/`knowledge`；Rust `compute` | 按environment/project/config/view共享服务；来源修订明确；独立准备；不等待无关索引 | 局部实现：live_root 定义/引用/诊断及可组合关键词/结构/显式语义已接原 owner 与原生历史；真实reader切代、撤权和推理账本已验收。dedicated rerank、渐进 fast-decision 和原 Explore LLM 已接原推理回执。fixed/materialized 闭包、其余 LSP/模型消费者与远端仍未完成 |
+| LSP、结构/关键词/语义检索 | Host `lsp`/`search`/`structure`/`knowledge`；Rust `compute` | 按environment/project/config/view共享服务；来源修订明确；独立准备；不等待无关索引 | 三类本地来源的定义/引用/诊断、关键词/结构/显式语义和实际 child 消费已接；固定捕获工程与目录外 provider environment 分开。dedicated rerank、渐进 fast-decision、Explore LLM 与 query embedding 共用原回执。其余 LSP/模型消费者、草稿、远端和完整产品验证仍未完成 |
 | 任务协作、消息、wait | Host `harness` registry/services | 单一Thread/Run事实；有来源消息；Wait持久化与游标；结果恰当去重；旧世代不污染新执行 | 真实 family 发现/互读、inform/request/reply、关联 Wait/期限、多观察屏障、child 独立新 Run 已接；完整 Host 与平台验收仍待 |
 | 计划、普通记忆、Bot知识 | Host `memory`/`knowledge`；普通Agent notes为Rust typed record | 保留各领域owner、权限和revision；不把所有知识塞入泛化状态库 | 普通 notes、真实自身计划、root/child 两调用来源、CAS 和原回执恢复已接；Bot 知识与完整自动记忆流程仍待 |
 | Goal、自动接续、辅助模型 | Host `bots`/`pi-session-automation`/`run` | 显式Goal授权、暂停/预算/用量；等待不覆盖手动暂停；辅助请求独立身份 | 显式 Goal、原用量/预算、暂停、依赖、root/child 自动接续及独立规划模型已接；其他辅助用途与完整产品验收仍待 |
