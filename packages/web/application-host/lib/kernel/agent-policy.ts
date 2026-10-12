@@ -3,7 +3,7 @@
 import { waitWithSignal } from '../cancellation.js';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { HostServiceBindingError, type ApplicationExtensionRuntime, type HostServiceBinding } from '@varin/extension-host';
+import { HostServiceBindingError, HostCompositionPreparationRequiredError, type ApplicationExtensionRuntime, type HostServiceBinding } from '@varin/extension-host';
 import {
   parseVarinAgentPolicyDescription, parseVarinAgentPolicyInput, parseVarinAgentPolicyDecision,
   parseVarinAgentPolicyTransitionInput, parseVarinAgentPolicyTransition, resolveVarinExtensionServiceRouting,
@@ -38,11 +38,11 @@ async function retainAgentPolicy(
   assertSelection: () => Promise<void>,
   signal?: AbortSignal,
 ): Promise<AgentPolicyLease> {
-  const pin = selected.pin();
+  const pin = (() => { try { return selected.pin(); } catch (error) { selected.release(); throw error; } })();
   try {
     const provider = runtime.services.getSnapshot().providers.find(candidate => candidate.providerId === selected.providerId);
     const artifact = provider && runtime.supervisor.getRetainedArtifactIdentity(provider);
-    if (!provider || !artifact) throw new Error('Policy executing artifact identity is unavailable');
+    if (!provider || !artifact || !selected.composition) throw new Error('Policy executing composition identity is unavailable');
     const description = parseVarinAgentPolicyDescription(await waitWithSignal(pin.invoke('describe', [], signal), signal));
     signal?.throwIfAborted();
     await assertSelection();
@@ -51,8 +51,8 @@ async function retainAgentPolicy(
     const durable: AgentPolicyArtifactBinding = {
       providerKey: selected.providerKey, extensionId: provider.extensionId, extensionVersion: provider.extensionVersion,
       serviceId: VARIN_AGENT_POLICY_SERVICE_ID, serviceVersion: VARIN_AGENT_POLICY_VERSION, artifactIntegrity: artifact,
-      configurationIdentity, declaredIdentity: description.identity, modelRoles: description.modelRoles, stateTransition: description.stateTransition,
-      identity: { name: `${selected.providerKey}:${description.identity.name}`, version: hash({ artifact, configurationIdentity,
+      composition: selected.composition, configurationIdentity, declaredIdentity: description.identity, modelRoles: description.modelRoles, stateTransition: description.stateTransition,
+      identity: { name: `${selected.providerKey}:${description.identity.name}`, version: hash({ artifact, composition: selected.composition.root, configurationIdentity,
         identity: description.identity, modelRoles: description.modelRoles, stateTransition: description.stateTransition, serviceVersion: VARIN_AGENT_POLICY_VERSION }) },
     };
     if (required && !isDeepStrictEqual(durable, required)) throw new Error('policy_exact_binding_unavailable');
@@ -64,138 +64,83 @@ async function retainAgentPolicy(
         if (durable.stateTransition === 'unsupported') return { kind: 'incompatible', reason: 'Policy does not implement state compatibility' };
         return parseVarinAgentPolicyTransition(await pin.invoke('transitionState', [input as unknown as JsonValue], AbortSignal.any([signal, pin.revocationSignal])));
       },
-      release: () => pin.release() };
-  } catch (error) { pin.release(); throw error; }
+      release: () => { pin!.release(); selected.release(); } };
+  } catch (error) { pin?.release(); selected.release(); throw error; }
 }
 
 export function createAgentPolicy(runtime: ApplicationExtensionRuntime): AgentPolicyPreparer {
+  const explicitRoute = (routing: Awaited<ReturnType<typeof runtime.routing.read>>, scope: AgentPolicyScope, version: number) => {
+    const resolution = resolveVarinExtensionServiceRouting({ candidates: [], document: routing.document,
+      serviceId: VARIN_AGENT_POLICY_SERVICE_ID, version, context: scope });
+    return resolution.matchedRule !== undefined || resolution.diagnostics.some(diagnostic => diagnostic.code.startsWith('service_selection_'));
+  };
   const prepare = async (scope: AgentPolicyScope, signal?: AbortSignal): Promise<AgentPolicyLease | undefined> => {
     signal?.throwIfAborted();
     const required = scope.requiredBinding;
-    let selected: HostServiceBinding;
-    let assertSelection = async (): Promise<void> => {};
+    const request = { serviceId: VARIN_AGENT_POLICY_SERVICE_ID, version: VARIN_AGENT_POLICY_VERSION,
+      method: 'describe', args: [], routing: { sessionId: scope.sessionId, ...(scope.projectId ? { projectId: scope.projectId } : {}) } };
     if (required) {
-      if (required.serviceId !== VARIN_AGENT_POLICY_SERVICE_ID || required.serviceVersion !== VARIN_AGENT_POLICY_VERSION) {
-        throw new Error('policy_exact_binding_unavailable');
-      }
-      // An already pinned original generation remains the authority across ordinary replacement.
-      // Recovery may derive its own pin; it cannot resurrect a released or revoked artifact.
+      if (required.serviceId !== VARIN_AGENT_POLICY_SERVICE_ID || required.serviceVersion !== VARIN_AGENT_POLICY_VERSION) throw new Error('policy_exact_binding_unavailable');
       const retained = runtime.services.getSnapshot().providers.filter(provider => provider.providerKey === required.providerKey
         && provider.extensionId === required.extensionId && provider.extensionVersion === required.extensionVersion
-        && runtime.supervisor.getRetainedArtifactIdentity(provider) === required.artifactIntegrity);
-      if (retained.length) {
-        // The same artifact can have live generations with different declared configuration.
-        // Only a complete identity match restores the saved policy; enumeration is not routing.
-        for (const provider of retained) {
-          signal?.throwIfAborted();
-          try {
-            selected = runtime.services.bindPinned(required.serviceId, required.serviceVersion, provider.providerId);
-            return await retainAgentPolicy(runtime, selected, required, assertSelection, signal);
-          } catch {
-            signal?.throwIfAborted();
-            // A mismatching or unavailable generation owns no replacement authority. The helper
-            // releases its pin before the next exact-artifact candidate is inspected.
-          }
-        }
-        throw new Error('policy_exact_binding_unavailable');
-      } else {
-        const snapshot = await waitWithSignal(runtime.state(), signal);
-        if (!snapshot.catalog.authoritative) throw new Error('Policy catalog is unavailable');
-        const installed = snapshot.catalog.extensions.find(entry => entry.manifest.id === required.extensionId);
-        if (!installed || !installed.desired.enabled || installed.manifest.version !== required.extensionVersion
-          || installed.integrity !== required.artifactIntegrity
-          || !installed.manifest.provides?.services?.some(service => service.id === required.serviceId && service.version === required.serviceVersion)) {
-          throw new Error('policy_exact_binding_unavailable');
-        }
-        await waitWithSignal(runtime.supervisor.activateExtension(required.extensionId), signal);
-        const provider = runtime.services.getSnapshot().providers.find(candidate => candidate.status === 'active'
-          && candidate.providerKey === required.providerKey && candidate.extensionId === required.extensionId
-          && candidate.extensionVersion === required.extensionVersion);
-        if (!provider || runtime.supervisor.getActiveArtifactIdentity(provider) !== required.artifactIntegrity) throw new Error('policy_exact_binding_unavailable');
-        selected = runtime.services.bind(required.serviceId, required.serviceVersion, provider.providerId);
+        && runtime.supervisor.getRetainedArtifactIdentity(provider) === required.artifactIntegrity
+        && runtime.supervisor.getRetainedComposition(provider)?.root === required.composition.root);
+      for (const provider of retained) {
+        signal?.throwIfAborted();
+        try {
+          const selected = runtime.services.bindPinned(required.serviceId, required.serviceVersion, provider.providerId);
+          return await retainAgentPolicy(runtime, selected, required, async () => {}, signal);
+        } catch { signal?.throwIfAborted(); }
       }
-    } else {
-      const routing = await waitWithSignal(runtime.routing.read(), signal);
-      if (!routing.authoritative) throw new Error('Cannot prepare a Host service from stale selection state');
-      const readSelections = () => Object.fromEntries(Object.entries(runtime.services.getSnapshot().selections)
-        .filter(([key]) => key.startsWith(`${VARIN_AGENT_POLICY_SERVICE_ID}@`)).sort(([a], [b]) => a.localeCompare(b)));
-      const selections = readSelections();
-      const assertSelectionsUnchanged = () => {
-        if (!isDeepStrictEqual(readSelections(), selections)) throw new Error('Policy selection changed during preparation');
-      };
-      const explicitRoute = (version: number) => {
-        const resolution = resolveVarinExtensionServiceRouting({ candidates: [], document: routing.document,
-          serviceId: VARIN_AGENT_POLICY_SERVICE_ID, version, context: scope });
-        return resolution.matchedRule !== undefined || resolution.diagnostics.some(diagnostic => diagnostic.code.startsWith('service_selection_'));
-      };
-      if (!selections[`${VARIN_AGENT_POLICY_SERVICE_ID}@${VARIN_AGENT_POLICY_VERSION}`] && !explicitRoute(VARIN_AGENT_POLICY_VERSION)) {
-        const versions = new Set(routing.document.rules.filter(rule => rule.serviceId === VARIN_AGENT_POLICY_SERVICE_ID
-          && rule.version !== VARIN_AGENT_POLICY_VERSION).map(rule => rule.version));
-        for (const key of Object.keys(selections)) versions.add(Number(key.slice(`${VARIN_AGENT_POLICY_SERVICE_ID}@`.length)));
-        for (const version of versions) if (version !== VARIN_AGENT_POLICY_VERSION
-          && (selections[`${VARIN_AGENT_POLICY_SERVICE_ID}@${version}`] || explicitRoute(version))) {
-          throw new HostServiceBindingError('selected_unavailable', `Selected agent policy service version ${version} is unsupported; version ${VARIN_AGENT_POLICY_VERSION} is required`);
-        }
-        // The built-in loop is the default. Merely installing the sole provider
-        // must not apply its orchestration to unrelated threads or child tasks.
-        const current = await waitWithSignal(runtime.routing.read(), signal);
-        if (!current.authoritative || current.document.revision !== routing.document.revision) {
-          throw new Error('Policy routing changed during preparation');
-        }
-        assertSelectionsUnchanged();
-        return undefined;
-      }
-      const request = { serviceId: VARIN_AGENT_POLICY_SERVICE_ID, version: VARIN_AGENT_POLICY_VERSION, method: 'describe', args: [], routing: scope };
-      try { selected = await waitWithSignal(runtime.prepareService(request, { expectedRoutingRevision: routing.document.revision }), signal); }
-      catch (error) {
-        if (error instanceof HostServiceBindingError && error.code === 'missing') { assertSelectionsUnchanged(); return undefined; }
-        throw error;
-      }
-      assertSelection = async () => {
-        assertSelectionsUnchanged();
-        const current = await waitWithSignal(runtime.prepareService(request, { expectedRoutingRevision: routing.document.revision }), signal);
-        if (current.providerId !== selected.providerId) throw new Error('Policy selection changed during preparation');
-        assertSelectionsUnchanged();
-      };
+      try {
+        const selected = await runtime.prepareService(request, { ...(signal ? { signal } : {}), frozenComposition: required.composition });
+        return await retainAgentPolicy(runtime, selected, required, async () => {}, signal);
+      } catch (error) { signal?.throwIfAborted(); throw new Error('policy_exact_binding_unavailable', { cause: error }); }
     }
-    return retainAgentPolicy(runtime, selected, required, assertSelection, signal);
+    const routing = await waitWithSignal(runtime.routing.read(), signal);
+    if (!routing.authoritative) throw new Error('Cannot prepare a Host service from stale selection state');
+    if (!explicitRoute(routing, scope, VARIN_AGENT_POLICY_VERSION)) {
+      const versions = new Set(routing.document.rules.filter(rule => rule.serviceId === VARIN_AGENT_POLICY_SERVICE_ID
+        && rule.version !== VARIN_AGENT_POLICY_VERSION).map(rule => rule.version));
+      for (const version of versions) if (explicitRoute(routing, scope, version)) {
+        throw new HostServiceBindingError('selected_unavailable', `Selected agent policy service version ${version} is unsupported; version ${VARIN_AGENT_POLICY_VERSION} is required`);
+      }
+      const current = await waitWithSignal(runtime.routing.read(), signal);
+      if (!current.authoritative || current.document.revision !== routing.document.revision) throw new Error('Policy routing changed during preparation');
+      return undefined;
+    }
+    const selected = await runtime.prepareService(request, { ...(signal ? { signal } : {}), expectedRoutingRevision: routing.document.revision });
+    return retainAgentPolicy(runtime, selected, undefined, async () => {
+      const current = await runtime.resolveServiceCompositions(request, { ...(signal ? { signal } : {}), expectedRoutingRevision: routing.document.revision });
+      if (current.services.length !== 1 || current.services[0]!.providerKey !== selected.providerKey
+        || current.services[0]!.composition.root !== selected.composition?.root) throw new Error('Policy selection changed during preparation');
+    }, signal);
   };
   const observe: AgentPolicyPreparer['observe'] = (scope, changed, signal) => {
     let closed = false, reading = false, dirty = false, previous: string | undefined;
     const refresh = async () => {
-      if (closed) return;
-      dirty = true;
-      if (reading) return;
-      reading = true;
+      if (closed) return; dirty = true; if (reading) return; reading = true;
       try {
         while (dirty && !closed) {
           dirty = false;
-          const state = await runtime.state();
+          const routing = await runtime.routing.read();
           if (closed) return;
-          const versions = new Set([VARIN_AGENT_POLICY_VERSION as number,
-            ...state.routing.document.rules.filter(rule => rule.serviceId === VARIN_AGENT_POLICY_SERVICE_ID).map(rule => rule.version),
-            ...Object.keys(state.services.selections).filter(key => key.startsWith(`${VARIN_AGENT_POLICY_SERVICE_ID}@`)).map(key => Number(key.slice(`${VARIN_AGENT_POLICY_SERVICE_ID}@`.length))),
-          ]);
-          const selections = [...versions].sort((a, b) => a - b).flatMap(version => {
-            const candidates = state.catalog.extensions.filter(entry => entry.desired.enabled && entry.manifest.entrypoints?.host
-              && entry.manifest.provides?.services?.some(service => service.id === VARIN_AGENT_POLICY_SERVICE_ID && service.version === version))
-              .map(entry => ({ providerId: entry.manifest.id, providerKey: `${entry.manifest.id}:host:${VARIN_AGENT_POLICY_SERVICE_ID}@${version}` }));
-            const resolution = resolveVarinExtensionServiceRouting({ candidates, document: state.routing.document,
-              serviceId: VARIN_AGENT_POLICY_SERVICE_ID, version, context: scope });
-            const selected = state.services.selections[`${VARIN_AGENT_POLICY_SERVICE_ID}@${version}`];
-            if (!selected && !resolution.matchedRule
-              && !resolution.diagnostics.some(item => item.code.startsWith('service_selection_'))) return [];
-            const provider = state.services.providers.find(item => item.status === 'active'
-              && (selected ? item.providerId === selected : resolution.status === 'resolved' && resolution.providerKeys.length === 1
-                && resolution.providerKeys.includes(item.providerKey)));
-            const extensionId = provider?.extensionId ?? (resolution.status === 'resolved' && resolution.providerIds.length === 1
-              ? resolution.providerIds[0] : undefined);
-            const entry = state.catalog.extensions.find(item => item.manifest.id === extensionId);
-            return [{ version, selected: selected ?? null, resolution, provider: provider?.providerId ?? null,
-              package: entry ? { id: entry.manifest.id, version: entry.manifest.version, artifact: entry.integrity, enabled: entry.desired.enabled } : null }];
-          });
-          const token = canonical({ authoritative: [state.catalog.authoritative, state.routing.authoritative], selections });
-          if (token !== previous) { previous = token; changed(); }
+          let token: string;
+          if (!routing.authoritative) token = 'stale';
+          else if (!explicitRoute(routing, scope, VARIN_AGENT_POLICY_VERSION)) token = canonical({ default: true,
+            unsupported: routing.document.rules.filter(rule => rule.serviceId === VARIN_AGENT_POLICY_SERVICE_ID
+              && rule.version !== VARIN_AGENT_POLICY_VERSION && explicitRoute(routing, scope, rule.version)) });
+          else {
+            try {
+              const resolved = await runtime.resolveServiceCompositions({ serviceId: VARIN_AGENT_POLICY_SERVICE_ID,
+                version: VARIN_AGENT_POLICY_VERSION, method: 'describe', args: [], routing: scope }, { signal });
+              token = canonical(resolved.services.map(service => [service.providerKey, service.composition.root]));
+            } catch (error) {
+              token = error instanceof HostCompositionPreparationRequiredError ? `needs_preparation:${error.extensionId}`
+                : `unavailable:${error instanceof Error ? error.message : String(error)}`;
+            }
+          }
+          if (!closed && token !== previous) { previous = token; changed(); }
         }
       } finally { reading = false; }
     };

@@ -353,7 +353,7 @@ const isApplicationTokenWritePath = (pathname: string): boolean => (
   || pathname === '/api/varin/extensions/v1/candidates/select'
   || pathname === '/api/varin/extensions/v1/host-state/wait'
   || pathname === '/api/varin/extensions/v1/services/invoke'
-  || pathname === '/api/varin/extensions/v1/services/select'
+  || pathname === '/api/varin/extensions/v1/services/lease'
   || pathname === '/api/varin/extensions/v1/actual'
   || pathname === '/api/varin/extensions/v1/install'
 );

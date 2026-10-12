@@ -35,7 +35,7 @@ pub struct LaunchSelectionMetadata {
 pub struct LaunchMetadata {
     pub dispatch_context_ref: Option<Value>,
     pub policy_generation: u64,
-    pub policy_target: super::policy_switch::PolicyTarget,
+    pub policy_target: super::policy_switch::PolicyTargetMetadata,
     pub preparation_failure: Option<String>,
     pub run_id: String,
     pub revision: u64,
@@ -222,10 +222,13 @@ pub struct LaunchRead {
     _publication: crate::content::ContentPublication,
 }
 impl LaunchRead {
+    pub fn load_policy_target(&self) -> Result<super::policy_switch::PolicyTarget> {
+        self.metadata.policy_target.load(&self.content)
+    }
     pub fn load(self) -> Result<LaunchIntent> {
         Ok(LaunchIntent {
             policy_generation: self.metadata.policy_generation,
-            policy_target: self.metadata.policy_target,
+            policy_target: self.metadata.policy_target.load(&self.content)?,
             startable: self.startable,
             policy_preparable: self.policy_preparable,
             pause: self
@@ -344,7 +347,7 @@ enum LaunchChange {
 pub struct PreparedLaunchChange {
     pub(super) expected: LaunchMetadata,
     pub(super) selection: LaunchSelectionMetadata,
-    pub(super) policy_target: super::policy_switch::PolicyTarget,
+    pub(super) policy_target: super::policy_switch::PolicyTargetMetadata,
     pub(super) epoch: u64,
     pub(super) kind: &'static str,
     _publication: crate::content::ContentPublication,
@@ -444,8 +447,8 @@ impl LaunchChangePreparation {
             } => {
                 // A child resolves its own policy after acceptance. This changes neither the
                 // original delegation nor the independently frozen tool/source selection.
-                target.validate()?;
-                policy_target = target;
+                policy_target =
+                    super::policy_switch::PolicyTargetMetadata::stage(&content, target)?;
                 if identity.name.is_empty() || identity.version.is_empty() {
                     return Err(RuntimeError::Invalid("policy identity is empty".into()));
                 }

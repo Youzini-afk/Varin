@@ -27,7 +27,7 @@ const manifest = () => ({
     host: { file: "dist/host.mjs", mode: "brokered" },
     surfaces: [{ id: "main", file: "dist/surface.mjs", mode: "managed", supports: ["web", "desktop"] }],
   },
-  requires: { services: [{ id: "varin.sessions", version: 1 }] },
+  requires: { services: [{ realms: ["host", "surface"], id: "varin.sessions", version: 1 }] },
   provides: { services: [{ id: "dev.example.memory", version: 1, multiple: true }] },
   capabilities: { host: ["extension-storage"], surface: ["commands"] },
   contributions: [{
@@ -347,4 +347,15 @@ test("explicit update group validates members and publication evidence is not ap
   assert.deepEqual(parseVarinExtensionCandidatePublicationRequest(request), request);
   assert.throws(() => parseVarinExtensionCandidateSelectionRequest(request), /invalid/);
   assert.throws(() => parseVarinExtensionCandidatePublicationRequest({ ...request, surfaceReadiness: { ...request.surfaceReadiness, members: [...request.surfaceReadiness.members, ...request.surfaceReadiness.members] } }), VarinExtensionContractError);
+});
+
+
+test("dependency realms are explicit, nonempty and unique", () => {
+  for (const realms of [undefined, [], ['host', 'host'], ['worker']]) {
+    const input = manifest();
+    Object.assign(input.requires.services[0]!, { realms });
+    assert.throws(() => parseVarinExtensionManifest(input), error => error instanceof VarinExtensionContractError && error.issues.some(issue => issue.includes('realms')));
+  }
+  const input = manifest(); input.requires.services[0]!.realms = ['surface'];
+  assert.deepEqual(parseVarinExtensionManifest(input).requires!.services![0]!.realms, ['surface']);
 });

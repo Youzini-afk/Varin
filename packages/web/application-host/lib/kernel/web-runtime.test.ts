@@ -45,7 +45,7 @@ it('keeps an unconfirmed Storage mutation unknown and unstopped rather than conv
   });
   const declaration = WEB_TOOL_DECLARATIONS.find(value => value.tool!.name === 'materials')!;
   const prepare = await web.prepareConfiguration({ runId: 'run', threadId: 'thread', source: null }, []);
-  const args = { action: 'create' }, owner = { extensionId: 'varin.builtin.web', extensionVersion: '0.1.0', entrypointId: 'host', generation: 1 };
+  const args = { action: 'create' }, owner = { extensionId: 'varin.builtin.web', extensionVersion: '0.1.0', entrypointId: 'host', instanceKey: 'web-runtime-fixture', generation: 1 };
   const signal = new AbortController().signal;
   let receipt: import('./tool-bridge.js').ToolExecutionReceipt | undefined;
   await withToolInvocation({ owner, signal, onEffectReceipt: value => { receipt = value; }, authority: {

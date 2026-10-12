@@ -21,7 +21,7 @@ import type {
   VarinExtensionAssetPayload,
   VarinExtensionContributionKind,
   VarinExtensionServiceProvision,
-  VarinExtensionServiceRoutingContext,
+  VarinHostServiceConsumers,
   VarinExtensionStaticContribution,
   VarinExtensionStorageOpenRequest,
   VarinExtensionStorageSnapshot,
@@ -290,14 +290,7 @@ export interface VarinHostCapabilityClient {
   call(capability: string, method: string, params: JsonValue): Promise<JsonValue>;
 }
 
-export interface VarinHostServiceClient {
-  call(method: string, ...args: JsonValue[]): Promise<JsonValue>;
-}
-
-export interface VarinHostServiceUseOptions {
-  providerId?: string;
-  routing?: VarinExtensionServiceRoutingContext;
-}
+export type { VarinHostServiceClient, VarinHostServiceUseOptions } from '@varin/extension-contract';
 
 export interface VarinHostServiceInvocationContext {
   /** Cooperative cancellation; an aborted signal does not prove an external effect was undone. */
@@ -330,9 +323,8 @@ export interface VarinBrokeredHostContext {
   readonly assets: VarinHostAssets;
   readonly capabilities: VarinHostCapabilityClient;
   effect(disposer: () => void | Promise<void>): void;
-  readonly services: {
+  readonly services: VarinHostServiceConsumers & {
     provide(descriptor: VarinExtensionServiceProvision, handler: VarinHostServiceHandler): void;
-    use(id: string, version: number, provider?: string | VarinHostServiceUseOptions): VarinHostServiceClient;
   };
   readonly signal: AbortSignal;
   readonly storage: VarinHostStorageClient;

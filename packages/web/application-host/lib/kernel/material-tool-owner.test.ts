@@ -11,7 +11,7 @@ import { createMaterialCollections } from "../harness/material-collections.js";
 import { createMaterialToolOwner as createOwner, MATERIAL_SNAPSHOT_CAPABILITY, type MaterialSnapshotReadResult } from "./material-tool-owner.js";
 import { withToolInvocation, type ToolInvocationAuthority } from "./tool-invocation.js";
 
-const owner = { extensionId: "example.materials", extensionVersion: "1.0.0", entrypointId: "host", generation: 1 };
+const owner = { extensionId: "example.materials", extensionVersion: "1.0.0", entrypointId: "host", instanceKey: "material-tool-owner-fixture", generation: 1 };
 const authority = (policy = false): ToolInvocationAuthority => ({
   callId: policy ? "node" : "call", executorOwner: { kind: "kernel" },
   invocationId: "invocation",

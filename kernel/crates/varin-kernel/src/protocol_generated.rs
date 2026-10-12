@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 21;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 22;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -2560,6 +2560,7 @@ pub(crate) struct ExtensionToolBinding {
     pub(crate) service_id: String,
     pub(crate) service_version: i64,
     pub(crate) artifact_integrity: String,
+    pub(crate) composition: varin_runtime::catalog::service_composition::HostServiceComposition,
     pub(crate) declaration_hash: String,
     pub(crate) configuration_identity: RequiredNullable<String>,
     pub(crate) tool: LaunchTool,

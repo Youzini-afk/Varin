@@ -115,7 +115,7 @@ const hostSnapshot = (entry: VarinExtensionCatalogEntry): VarinExtensionHostStat
     hostId,
     storageState: 'missing',
   },
-  services: { hostId, providers: [], revision: 0, selections: {} },
+  services: { hostId, providers: [], revision: 0 },
   workbench: {
     authoritative: true,
     diagnostics: [],
@@ -131,7 +131,6 @@ const emptySurface = (): SurfaceRegistrySnapshot => ({
   layoutReferences: [],
   replacementSelections: {},
   revision: 1,
-  serviceSelections: {},
   services: [],
   visibleContributions: [],
 });

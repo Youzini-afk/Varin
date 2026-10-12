@@ -44,6 +44,7 @@ export interface VarinExtensionSurfaceEntrypoint extends VarinExtensionEntrypoin
 }
 
 export interface VarinExtensionServiceRequirement {
+  realms: Array<"host" | "surface">;
   binding?: "all" | "selected" | "single";
   id: string;
   optional?: boolean;
@@ -407,26 +408,21 @@ export interface VarinExtensionServiceProviderSnapshot {
   providerId: string;
   providerKey: string;
   status: VarinExtensionServiceProviderStatus;
+  instanceKey: string;
 }
 
 export interface VarinExtensionServiceCatalogSnapshot {
   hostId: string;
   providers: VarinExtensionServiceProviderSnapshot[];
   revision: number;
-  selections: Record<string, string>;
 }
 
 export interface VarinExtensionServiceInvocationRequest {
   args: JsonValue[];
   method: string;
   providerId?: string;
+  lease?: import('./surface-service-lease.js').VarinSurfaceServiceInvocationLease;
   routing?: import("./service-routing.js").VarinExtensionServiceRoutingContext;
-  serviceId: string;
-  version: number;
-}
-
-export interface VarinExtensionServiceSelectionRequest {
-  providerId: string | null;
   serviceId: string;
   version: number;
 }

@@ -13,6 +13,8 @@ import type {
   VarinExtensionStaticContribution,
 } from "@varin/extension-contract";
 import { SurfaceCapabilityRegistry, SurfaceExtensionRuntime } from "@varin/extension-surface";
+import { serviceRoutingOptions } from "../../ui/src/lib/extensions/service-routing-options.js";
+import { surfaceServiceRoutingContext } from "../../ui/src/lib/extensions/surface-routing-context.js";
 import { createWorkbenchCompositionHost } from "../../ui/src/lib/extensions/workbench-composition-host.js";
 import { createAuthoredPanelTestContainer } from "../../ui/src/lib/extensions/authored-surface-consumer.test-support.js";
 import {
@@ -20,6 +22,7 @@ import {
   evaluateManagedSurfaceModule,
   SurfaceExtensionLoader,
   type ManagedStyleHost,
+  type SurfaceExtensionHost,
   type IsolatedSurfaceRealmFactory,
 } from "../src/index.js";
 
@@ -82,16 +85,20 @@ const hostState = (
   providers: VarinExtensionHostStateSnapshot['services']['providers'] = [],
   selections: Record<string, string> = {},
 ): VarinExtensionHostStateSnapshot => ({
-  catalog,
+  catalog: { ...catalog, extensions: [...catalog.extensions, ...providers.filter(provider => !catalog.extensions.some(entry => entry.manifest.id === provider.extensionId))
+    .map(provider => ({ ...catalogEntry(provider.extensionVersion, integrityFor(provider.extensionId)), manifest: {
+      schemaVersion: 1 as const, id: provider.extensionId, version: provider.extensionVersion, engines: { varin: "*" },
+      entrypoints: { host: { file: "host.js", mode: "brokered" as const } }, provides: { services: [provider.descriptor] },
+    } }))] },
   revision,
   routing: {
     authoritative: true,
     diagnostics: [],
-    document: { revision: 0, rules: [], schemaVersion: 1, updatedAt: '1970-01-01T00:00:00.000Z' },
+    document: { revision: 0, rules: Object.entries(selections).map(([key, id]) => { const split = key.lastIndexOf('@'); return { serviceId: key.slice(0, split), version: Number(key.slice(split + 1)), providerKeys: [providers.find(value => value.providerId === id)?.providerKey ?? id], allowFallback: false, scope: { profileId: "default" } }; }), schemaVersion: 1, updatedAt: '1970-01-01T00:00:00.000Z' },
     hostId: catalog.hostId,
     storageState: 'missing',
   },
-  services: { hostId: catalog.hostId, providers, revision, selections },
+  services: { hostId: catalog.hostId, providers, revision },
   workbench: {
     authoritative: true,
     diagnostics: [],
@@ -104,6 +111,22 @@ const hostState = (
     storageState: 'missing',
   },
 });
+
+const holdServiceLease: SurfaceExtensionHost["watchServiceLease"] = async function(this: SurfaceExtensionHost, request, onEvent, signal) {
+  const state = await this.hostState();
+  onEvent({ kind: "ready", leaseId: `lease:${request.owner.entrypointId}:${request.owner.generation}`,
+    routingRevision: request.expectedRoutingRevision,
+    providers: request.services.map(choice => {
+      const provider = state.services.providers.find(value => value.providerKey === choice.providerKey);
+      if (!provider) throw new Error(`Test Host provider is unavailable: ${choice.providerKey}`);
+      return provider;
+    }),
+  });
+  await new Promise<void>(resolve => {
+    if (signal?.aborted) resolve();
+    else signal?.addEventListener("abort", () => resolve(), { once: true });
+  });
+};
 
 for (const surface of ["web", "desktop", "mobile"] as const satisfies readonly VarinApplicationSurface[]) {
   test(`pure declarative ${surface} lifecycle registers without module bytes and withdraws on disable`, async () => {
@@ -149,7 +172,8 @@ for (const surface of ["web", "desktop", "mobile"] as const satisfies readonly V
         throw new Error("declarative Surface must not evaluate a module");
       },
       host: {
-        activateExtension: async () => undefined,
+        watchServiceLease: holdServiceLease,
+      activateExtension: async () => undefined,
         catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
         discardPreparedCandidate: async () => undefined,
         hostState: async () => hostState(current),
@@ -238,6 +262,7 @@ test("manifest and managed contributions publish as one Surface generation", asy
       },
     }),
     host: {
+      watchServiceLease: holdServiceLease,
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
@@ -298,6 +323,7 @@ test("eager entrypoint with only incompatible contributions does not execute its
       throw new Error("incompatible-only entrypoint must not evaluate a module");
     },
     host: {
+      watchServiceLease: holdServiceLease,
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
@@ -382,6 +408,7 @@ test("lazy Surface entrypoints index declarative contributions and activate once
       },
     }),
     host: {
+      watchServiceLease: holdServiceLease,
       activateExtension: async () => { hostActivations += 1; },
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
@@ -438,7 +465,7 @@ test("lazy Surface entrypoints index declarative contributions and activate once
   await loader.triggerActivation("service-request", { entrypointId: "service", extensionId: "dev.example.lazy" });
   assert.deepEqual(Object.fromEntries(reads), { command: 1, service: 1, visible: 1, workspace: 1 });
   assert.deepEqual(Object.fromEntries(executions), { command: 1, service: 1, visible: 1, workspace: 1 });
-  assert.equal(hostActivations, 4);
+  assert.equal(hostActivations, 0);
 
   current = snapshot(2, {
     ...current.extensions[0] as VarinExtensionCatalogEntry,
@@ -453,7 +480,7 @@ test("lazy Surface entrypoints index declarative contributions and activate once
   await loader.reconcile();
   assert.equal(runtime.getSnapshot().visibleContributions.length, 4);
   assert.deepEqual(Object.fromEntries(reads), { command: 1, service: 1, visible: 1, workspace: 1 });
-  assert.equal(hostActivations, 4);
+  assert.equal(hostActivations, 0);
   assert.equal(runtime.getSnapshot().actual.find((state) => state.entrypointId === "command")?.status, "inactive");
 
   await loader.triggerActivation("command", { contributionId: "dev.example.lazy.command" });
@@ -483,6 +510,7 @@ test("declarative owner is replaced across an application-host switch", async ()
   const loader = new SurfaceExtensionLoader({
     evaluateModule: () => { throw new Error("unexpected module evaluation"); },
     host: {
+      watchServiceLease: holdServiceLease,
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
@@ -537,6 +565,7 @@ test("declarative contributions do not register on an incompatible Surface", asy
   const loader = new SurfaceExtensionLoader({
     evaluateModule: () => { throw new Error("unexpected module evaluation"); },
     host: {
+      watchServiceLease: holdServiceLease,
       activateExtension: async () => { hostActivations += 1; },
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
@@ -573,7 +602,7 @@ test("declarative contributions honor capability availability and required Host 
     version: "1.0.0",
     engines: { varin: "*" },
     capabilities: { surface: [capabilityId] },
-    requires: { services: [{ id: serviceId, version: 1 }] },
+    requires: { services: [{ realms: ["surface"], id: serviceId, version: 1 }] },
     contributions: [{
       contractVersion: 1,
       data: { source: "manifest" },
@@ -608,6 +637,7 @@ test("declarative contributions honor capability availability and required Host 
     capabilities,
     evaluateModule: () => { throw new Error("unexpected module evaluation"); },
     host: {
+      watchServiceLease: holdServiceLease,
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
@@ -628,7 +658,7 @@ test("declarative contributions honor capability availability and required Host 
 
   await loader.reconcile();
   assert.equal(runtime.getSnapshot().visibleContributions.length, 0);
-  assert.equal(runtime.getSnapshot().actual[0]?.status, "failed");
+  assert.equal(loader.getSnapshot().diagnostics.some(value => value.code === "service_composition_unavailable"), true);
 
   providers = [{
     descriptor: { id: serviceId, version: 1 },
@@ -638,7 +668,8 @@ test("declarative contributions honor capability availability and required Host 
     generation: 1,
     providerId: `dev.example.provider:host:1:${serviceId}@1`,
     providerKey: `dev.example.provider:host:${serviceId}@1`,
-    status: "active",
+    instanceKey: "test-composition",
+  status: "active",
   }];
   stateRevision += 1;
   await loader.reconcile();
@@ -656,7 +687,7 @@ const serviceManifest = (binding: "single" | "selected" | "all"): VarinExtension
   id: `dev.example.binding-${binding}`,
   version: "1.0.0",
   engines: { varin: "*" },
-  requires: { services: [{ id: "dev.example.matrix-service", version: 1, binding }] },
+  requires: { services: [{ realms: ["surface"], id: "dev.example.matrix-service", version: 1, binding }] },
   entrypoints: {
     surfaces: [{ id: "main", file: "surface.js", mode: "managed", supports: ["web"] }],
   },
@@ -678,6 +709,7 @@ const matrixProvider = (providerId: string): VarinExtensionHostStateSnapshot["se
   generation: 1,
   providerId: `dev.example.provider-${providerId}:host:1:dev.example.matrix-service@1`,
   providerKey: `dev.example.provider-${providerId}:host:dev.example.matrix-service@1`,
+  instanceKey: "test-composition",
   status: "active",
 });
 
@@ -693,6 +725,7 @@ test("service binding matrix: single requires exactly one provider", async () =>
       contractVersion: 1, data: {}, entrypoint: "main", id: "dev.example.binding-single.page", kind: "page", supports: ["web"],
     }, {}) } }),
     host: {
+      watchServiceLease: holdServiceLease,
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
@@ -721,11 +754,11 @@ test("service binding matrix: single requires exactly one provider", async () =>
   await loader.reconcile();
   assert.equal(runtime.getSnapshot().visibleContributions.length, 1);
 
-  // Two providers — single binding should withdraw (count !== 1)
+  // Ambiguous replacement must preserve the previously ready exact binding.
   providers = [matrixProvider("a"), matrixProvider("b")];
   stateRevision += 1;
   await loader.reconcile();
-  assert.equal(runtime.getSnapshot().visibleContributions.length, 0);
+  assert.equal(runtime.getSnapshot().visibleContributions.length, 1);
 });
 
 test("service binding matrix: selected requires and resolves the explicit provider", async () => {
@@ -750,6 +783,7 @@ test("service binding matrix: selected requires and resolves the explicit provid
       }, {});
     } } }),
     host: {
+      watchServiceLease: holdServiceLease,
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
@@ -772,11 +806,11 @@ test("service binding matrix: selected requires and resolves the explicit provid
   await loader.reconcile();
   assert.equal(runtime.getSnapshot().visibleContributions.length, 0);
 
-  // One provider without a selection remains unsatisfied.
+  // The canonical resolver permits the sole available implementation.
   providers = [matrixProvider("a")];
   stateRevision += 1;
   await loader.reconcile();
-  assert.equal(runtime.getSnapshot().visibleContributions.length, 0);
+  assert.equal(runtime.getSnapshot().visibleContributions.length, 1, JSON.stringify(loader.getSnapshot().diagnostics));
 
   // An explicit provider selection activates and resolves that exact provider.
   selections = { "dev.example.matrix-service@1": matrixProvider("a").providerId };
@@ -793,11 +827,11 @@ test("service binding matrix: selected requires and resolves the explicit provid
   assert.equal(runtime.getSnapshot().visibleContributions.length, 1);
   assert.deepEqual(resolvedProviders, [matrixProvider("a").providerId, matrixProvider("b").providerId]);
 
-  // A stale selection withdraws the dependent instead of binding an arbitrary provider.
-  selections = { "dev.example.matrix-service@1": "dev.example.provider-missing:host:1:dev.example.matrix-service@1" };
+  // A failed replacement preserves the existing lease without choosing another implementation.
+  selections = { "dev.example.matrix-service@1": "dev.example.provider-missing:host:dev.example.matrix-service@1" };
   stateRevision += 1;
   await loader.reconcile();
-  assert.equal(runtime.getSnapshot().visibleContributions.length, 0);
+  assert.equal(runtime.getSnapshot().visibleContributions.length, 1);
 });
 
 test("service binding matrix: all activates with at least one provider", async () => {
@@ -812,6 +846,7 @@ test("service binding matrix: all activates with at least one provider", async (
       contractVersion: 1, data: {}, entrypoint: "main", id: "dev.example.binding-all.page", kind: "page", supports: ["web"],
     }, {}) } }),
     host: {
+      watchServiceLease: holdServiceLease,
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
@@ -909,6 +944,7 @@ test("managed candidate activation, rollback, style ownership, and disable are r
       },
     }),
     host: {
+      watchServiceLease: holdServiceLease,
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
@@ -1085,6 +1121,7 @@ test("lazy candidates stay unread until triggered and a triggered candidate fail
       };
     },
     host: {
+      watchServiceLease: holdServiceLease,
       activateExtension: async () => { hostActivations += 1; },
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
@@ -1169,7 +1206,7 @@ test("lazy candidates stay unread until triggered and a triggered candidate fail
   assert.deepEqual(reads, [v2Integrity]);
   assert.deepEqual(evaluations, ["v2"]);
   assert.deepEqual(implementation(), { release: "v2" });
-  assert.equal(hostActivations, 1);
+  assert.equal(hostActivations, 0);
 
   current = snapshot(current.revision + 1, {
     ...current.extensions[0] as VarinExtensionCatalogEntry,
@@ -1227,6 +1264,7 @@ test("candidate code does not execute before added capabilities are reviewed", a
       return { default: { activate: () => undefined } };
     },
     host: {
+      watchServiceLease: holdServiceLease,
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
@@ -1259,7 +1297,7 @@ test("withdrawn Host services tear down dependent Surface owners", async () => {
   const artifactIntegrity = integrityFor("service-artifact");
   const serviceManifest: VarinExtensionManifest = {
     ...manifest("1.0.0"),
-    requires: { services: [{ id: "dev.example.host-service", version: 1 }] },
+    requires: { services: [{ realms: ["surface"], id: "dev.example.host-service", version: 1 }] },
   };
   let current = snapshot(1, { ...catalogEntry("1.0.0", artifactIntegrity), manifest: serviceManifest });
   let stateRevision = 1;
@@ -1271,8 +1309,10 @@ test("withdrawn Host services tear down dependent Surface owners", async () => {
     generation: 1,
     providerId: "dev.example.provider:host:1:dev.example.host-service@1",
     providerKey: "dev.example.provider:host:dev.example.host-service@1",
+    instanceKey: "test-composition",
     status: "active" as const,
   }];
+  let revoke!: () => void;
   const runtime = new SurfaceExtensionRuntime({ surface: "web" });
   const loader = new SurfaceExtensionLoader({
     evaluateModule: () => ({
@@ -1290,6 +1330,10 @@ test("withdrawn Host services tear down dependent Surface owners", async () => {
       },
     }),
     host: {
+      watchServiceLease: async function(request, onEvent, signal) {
+        revoke = () => onEvent({ kind: "revoked", code: "provider_disabled" });
+        await holdServiceLease.call(this, request, onEvent, signal);
+      },
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
@@ -1315,6 +1359,7 @@ test("withdrawn Host services tear down dependent Surface owners", async () => {
   await loader.reconcile();
   assert.deepEqual(runtime.getSnapshot().visibleContributions[0]?.implementation, { value: "host-value" });
   providers = [];
+  revoke();
   stateRevision += 1;
   current = { ...current, revision: current.revision + 1 };
   await loader.reconcile();
@@ -1350,6 +1395,7 @@ test("isolated Surface realms contribute transactionally and are physically disp
   const runtime = new SurfaceExtensionRuntime({ surface: "web" });
   const loader = new SurfaceExtensionLoader({
     host: {
+      watchServiceLease: holdServiceLease,
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
@@ -1504,7 +1550,7 @@ test("Surface-local external service factories bind consumer owners and preserve
   const failedIntegrity = integrityFor("local-service-failed");
   const serviceManifest = (version: string): VarinExtensionManifest => ({
     ...manifest(version),
-    requires: { services: [{ id: "varin.editor.monaco", optional: true, version: 1 }] },
+    requires: { services: [{ realms: ["surface"], id: "varin.editor.monaco", optional: true, version: 1 }] },
   });
   let current = snapshot(1, {
     ...catalogEntry("1.0.0", v1Integrity),
@@ -1543,8 +1589,10 @@ test("Surface-local external service factories bind consumer owners and preserve
       },
       descriptor: { id: "varin.editor.monaco", version: 1 },
       providerId: "varin.builtin.text",
+      providerKey: "varin.builtin.text:surface:varin.editor.monaco@1",
     }],
     host: {
+      watchServiceLease: holdServiceLease,
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
@@ -1621,7 +1669,7 @@ test("isolated realms call the serializable Surface-local editor service subset"
     entrypoints: {
       surfaces: [{ id: "main", file: "surface.js", isolation: "iframe", mode: "isolated", supports: ["web"] }],
     },
-    requires: { services: [{ id: "varin.editor.monaco", optional: true, version: 1 }] },
+    requires: { services: [{ realms: ["surface"], id: "varin.editor.monaco", optional: true, version: 1 }] },
   };
   const current = snapshot(1, { ...catalogEntry("1.0.0", artifactIntegrity), manifest: isolatedManifest });
   let response: unknown;
@@ -1651,8 +1699,10 @@ test("isolated realms call the serializable Surface-local editor service subset"
       }),
       descriptor: { id: "varin.editor.monaco", version: 1 },
       providerId: "varin.builtin.text",
+      providerKey: "varin.builtin.text:surface:varin.editor.monaco@1",
     }],
     host: {
+      watchServiceLease: holdServiceLease,
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
@@ -1717,6 +1767,7 @@ test("trusted-native Surface activation failure requires a Surface reload and is
       throw new Error("native top-level failure");
     },
     host: {
+      watchServiceLease: holdServiceLease,
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
@@ -1785,6 +1836,7 @@ test("Host-state watch reconnects from an authoritative snapshot after a transie
   const loader = new SurfaceExtensionLoader({
     evaluateModule: () => { throw new Error("declarative Surface must not evaluate a module"); },
     host: {
+      watchServiceLease: holdServiceLease,
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
@@ -1854,6 +1906,7 @@ test("a pending module does not block another catalog owner's activation or disa
   const loader = new SurfaceExtensionLoader({
     surface: "web", surfaceRuntime: runtime,
     host: {
+      watchServiceLease: holdServiceLease,
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       hostState: async () => hostState(current),
@@ -1892,6 +1945,7 @@ test("the exact candidate promoted by the Host during prepare is consumed withou
   const loader = new SurfaceExtensionLoader({
     surface: "web", surfaceRuntime: runtime,
     host: {
+      watchServiceLease: holdServiceLease,
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       hostState: async () => hostState(current),
@@ -1975,6 +2029,7 @@ const groupedLoaderHarness = () => {
       });
     } }),
     host: {
+      watchServiceLease: holdServiceLease,
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => { discards += 1; },
@@ -2188,4 +2243,187 @@ test("publishing an unrelated owner in the same slot preserves a prepared owner'
   assert.equal(bError, undefined);
   assert.deepEqual(visible, ["a2", "b2"]);
   assert.deepEqual(errors, []);
+});
+
+test("scoped leases freeze original calls, preserve ready owners on failed scope change, and revoke without reconnect", async () => {
+  const consumerManifest = serviceManifest("selected");
+  consumerManifest.requires!.services!.push({ id: "varin.editor.monaco", version: 1, realms: ["surface"] });
+  const current = snapshot(1, { ...catalogEntry("1.0.0", integrityFor("scoped-consumer")), manifest: consumerManifest });
+  const providers = [matrixProvider("a"), matrixProvider("b")];
+  const state = () => {
+    const value = hostState(current, 1, providers);
+    value.routing.document = { ...value.routing.document, revision: 9, rules: providers.map((provider, index) => ({
+      serviceId: provider.descriptor.id, version: 1, providerKeys: [provider.providerKey], allowFallback: false,
+      scope: { sessionId: index === 0 ? "thread-p" : "thread-q" },
+    })) };
+    return value;
+  };
+  let sessionId = "thread-p";
+  let rejectQ = false;
+  const leases: Array<{ request: Parameters<SurfaceExtensionHost["watchServiceLease"]>[0]; signal: AbortSignal;
+    emit: Parameters<SurfaceExtensionHost["watchServiceLease"]>[1] }> = [];
+  let holdRead = false;
+  let finishRead!: () => void;
+  const callGate = new Promise<void>(resolve => { finishRead = resolve; });
+  const callSignals: AbortSignal[] = [];
+  const calls: Array<Parameters<SurfaceExtensionHost["invokeService"]>[0]> = [];
+  const factories: number[] = [];
+  const disposed: number[] = [];
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  const host: SurfaceExtensionHost = {
+    activateExtension: async () => { throw new Error("A Surface lease must not create a global Host activation anchor"); },
+    catalog: async () => ({ supported: true, status: "ready", snapshot: current }), hostState: async () => state(),
+    discardPreparedCandidate: async () => undefined,
+    watchServiceLease: async function(request, emit, signal) {
+      assert.ok(signal);
+      leases.push({ request, signal, emit });
+      if (request.routing.sessionId === "thread-q" && rejectQ) { emit({ kind: "error", message: "Q provider preparation failed" }); return; }
+      await holdServiceLease.call(this, request, emit, signal);
+    },
+    invokeService: async (request, signal) => {
+      assert.ok(signal); signal.throwIfAborted(); calls.push(request); callSignals.push(signal);
+      if (holdRead && request.routing?.sessionId === "thread-p") await callGate;
+      signal.throwIfAborted();
+      return request.providerId!;
+    },
+    prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
+    requestCandidateApplication: async () => current,
+    readAsset: async () => { throw new Error("No asset read"); },
+    readManagedEntrypoint: async request => ({ artifactIntegrity: request.integrity, entrypointId: request.entrypointId,
+      module: asset("scoped", request.integrity, "surface.js"), styles: [] }),
+    reportActualState: async () => undefined, selectCandidate: async () => current,
+    waitForHostState: async () => { throw new Error("Explicit reconciliation only"); },
+  };
+  const loader = new SurfaceExtensionLoader({ surface: "web", surfaceRuntime: runtime, host, realmId,
+    accessContext: () => ({ access: "remote", projectTrusted: false, routing: { sessionId } }),
+    externalServiceFactories: [{ descriptor: { id: "varin.editor.monaco", version: 1 }, providerId: "monaco-local",
+      providerKey: "varin.builtin.text:surface:varin.editor.monaco@1", create: owner => {
+        factories.push(owner.generation);
+        return { descriptor: { id: "varin.editor.monaco", version: 1 }, providerId: "monaco-local", implementation: { local: true },
+          dispose: () => { disposed.push(owner.generation); } };
+      } }],
+    evaluateModule: () => ({ default: { activate(context) {
+      assert.equal(context.useService<{ local: boolean }>("varin.editor.monaco", 1)?.local, true);
+      const service = context.useService<{ read(): Promise<string> }>("dev.example.matrix-service", 1)!;
+      context.contribute(consumerManifest.contributions![0]!, { read: () => service.read() });
+    } } }),
+  });
+  await loader.reconcile();
+  const localOptions = serviceRoutingOptions(state(), { factories: loader.getLocalServiceDeclarations(), services: runtime.getSnapshot().services });
+  assert.equal(localOptions.get("varin.editor.monaco@1")?.[0]?.providerKey, loader.getLocalServiceDeclarations()[0]!.providerKey);
+  const first = runtime.getSnapshot().visibleContributions[0]!.implementation as { read(): Promise<string> };
+  const initialFactories = [...factories];
+  assert.equal(await first.read(), providers[0]!.providerId);
+  assert.equal(leases[0]!.request.services.length, 1);
+  assert.equal(leases[0]!.request.expectedRoutingRevision, 9);
+  assert.equal(calls[0]!.routing?.sessionId, "thread-p");
+  assert.equal(calls[0]!.lease?.owner.generation, leases[0]!.request.owner.generation);
+  sessionId = "thread-q"; rejectQ = true;
+  await loader.reconcile();
+  assert.equal(runtime.getSnapshot().visibleContributions[0]!.implementation, first);
+  assert.equal(await first.read(), providers[0]!.providerId);
+  assert.equal(calls[1]!.routing?.sessionId, "thread-p");
+  assert.equal(factories.length, initialFactories.length);
+  assert.deepEqual(disposed, []);
+  holdRead = true;
+  const pendingRead = first.read();
+  const pendingSignal = callSignals.at(-1)!;
+  rejectQ = false;
+  await loader.reconcile();
+  assert.equal(leases[0]!.signal.aborted, true);
+  assert.equal(pendingSignal.aborted, false);
+  finishRead();
+  assert.equal(await pendingRead, providers[0]!.providerId);
+  assert.deepEqual(disposed, initialFactories);
+  assert.throws(() => first.read(), /inactive/);
+  const second = runtime.getSnapshot().visibleContributions[0]!.implementation as { read(): Promise<string> };
+  assert.equal(await second.read(), providers[1]!.providerId);
+  assert.equal(calls.at(-1)!.routing?.sessionId, "thread-q");
+  const withdrawn = new Promise<void>(resolve => {
+    const unsubscribe = runtime.subscribe(() => {
+      if (!runtime.getSnapshot().visibleContributions.length) { unsubscribe(); resolve(); }
+    });
+  });
+  const count = leases.length;
+  leases.at(-1)!.emit({ kind: "revoked", code: "capabilities_changed" });
+  await withdrawn;
+  assert.equal(leases.length, count);
+  assert.throws(() => second.read());
+  await loader.stop();
+});
+
+
+test("a pending local dependency change never publishes after a newer routing choice supersedes it", async () => {
+  const current = snapshot(1, catalogEntry("1.0.0", integrityFor("local-composition")));
+  current.extensions[0]!.manifest.requires = { services: [{ realms: ["surface"], id: "review.local", version: 1, binding: "selected" }] };
+  const state = hostState(current);
+  const route = (name: string) => {
+    state.revision += 1;
+    state.routing.document.revision += 1;
+    state.routing.document.rules = [{ serviceId: "review.local", version: 1, scope: { sessionId: "same-thread" },
+      allowFallback: false, providerKeys: [`review.${name}:surface:review.local@1`] }];
+  };
+  let entered!: () => void, release!: () => void;
+  let enter = Promise.resolve(), gate = Promise.resolve(), blocked = false;
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  const publications: string[] = [];
+  runtime.subscribe(() => {
+    const implementation = runtime.getSnapshot().visibleContributions[0]?.implementation as { name: string } | undefined;
+    if (implementation) publications.push(implementation.name);
+  });
+  const host: SurfaceExtensionHost = {
+    activateExtension: async () => undefined,
+    catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
+    hostState: async () => structuredClone(state),
+    discardPreparedCandidate: async () => undefined, invokeService: async () => { throw new Error("No Host service call"); },
+    prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
+    requestCandidateApplication: async () => current, selectCandidate: async () => current,
+    reportActualState: async () => undefined, readAsset: async () => { throw new Error("No asset read"); },
+    readManagedEntrypoint: async request => ({ artifactIntegrity: request.integrity, entrypointId: request.entrypointId,
+      module: asset("local", request.integrity, "surface.js"), styles: [] }),
+    waitForHostState: async () => { throw new Error("Explicit reconciliation only"); },
+    watchServiceLease: holdServiceLease,
+  };
+  const loader = new SurfaceExtensionLoader({ host, surface: "web", surfaceRuntime: runtime,
+    accessContext: () => ({ access: "local", projectTrusted: true, routing: { sessionId: "same-thread" } }),
+    externalServiceFactories: ["b", "c"].map(name => ({ descriptor: { id: "review.local", version: 1, multiple: true },
+      providerId: `local-${name}`, providerKey: `review.${name}:surface:review.local@1`, create: () => ({
+        descriptor: { id: "review.local", version: 1, multiple: true }, providerId: `local-${name}`, implementation: { read: () => name },
+      }) })),
+    evaluateModule: () => ({ default: { async activate(context) {
+      const dependency = context.useService<{ read(): string }>("review.local", 1)!;
+      if (blocked) { entered(); await gate; }
+      context.contribute({ id: "dev.example.managed.page", kind: "page", contractVersion: 1, supports: ["web"], data: {} }, { name: dependency.read() });
+    } } }),
+  });
+  try {
+    route("b"); await loader.reconcile();
+    assert.equal((runtime.getSnapshot().visibleContributions[0]!.implementation as { name: string }).name, "b");
+    // The delivered-watch case fences immediately; the no-watch case must still fail the final read.
+    for (const notify of [true, false]) {
+      publications.length = 0;
+      enter = new Promise<void>(resolve => { entered = resolve; });
+      gate = new Promise<void>(resolve => { release = resolve; });
+      blocked = true; route("c");
+      const preparing = loader.reconcile(); await enter;
+      route("b"); const newer = notify ? loader.reconcile() : Promise.resolve();
+      release(); await Promise.all([preparing, newer]); blocked = false;
+      assert.equal(publications.includes("c"), false, "superseded C must never become visible");
+      assert.equal((runtime.getSnapshot().visibleContributions[0]!.implementation as { name: string }).name, "b");
+    }
+  } finally { release?.(); await loader.stop(); }
+});
+
+test("product Surface scope preserves the service configuration namespace and resolves the actual user-selected Workbench profile", () => {
+  const state = hostState(snapshot(1, catalogEntry("1.0.0", integrityFor("profile-scope"))));
+  state.workbench.document.profiles.push({ id: "research", label: "Research" });
+  state.workbench.document.profileSelections.users.default = "research";
+  const scope = surfaceServiceRoutingContext({ configurationDirectory: "/projects/research", documentWorkspaceId: "documents-workspace-id",
+    runtimeId: "runtime-p", sessionId: "thread-p", snapshot: state, surface: "web" });
+  assert.equal(scope.workspaceId, "/projects/research");
+  assert.equal(scope.profileId, "research");
+  assert.equal(scope.userId, "default");
+  assert.equal(scope.sessionId, "thread-p");
+  assert.equal(scope.runtimeId, "runtime-p");
+  assert.equal(scope.projectId, undefined);
 });

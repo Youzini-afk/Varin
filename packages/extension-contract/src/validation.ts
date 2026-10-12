@@ -1,3 +1,4 @@
+import { parseVarinSurfaceServiceInvocationLease } from './surface-service-lease.js';
 import { VarinExtensionContractError } from "./contract-error.js";
 export { VarinExtensionContractError } from "./contract-error.js";
 import { parseVarinExtensionSourceViewProvenance } from "./package-authoring.js";
@@ -49,7 +50,6 @@ import {
   type VarinExtensionServiceCatalogSnapshot,
   type VarinExtensionServiceInvocationRequest,
   type VarinExtensionServiceProviderSnapshot,
-  type VarinExtensionServiceSelectionRequest,
   type VarinExtensionServiceRequirement,
   type VarinExtensionStaticContribution,
   type VarinExtensionStorageAddress,
@@ -337,6 +337,8 @@ function parseServices<T extends VarinExtensionServiceRequirement | VarinExtensi
       ? raw.binding
       : undefined;
     if (kind === "require" && raw.binding !== undefined && !binding) issues.push(`${itemPath}.binding must be all, selected, or single`);
+    const realms = kind === 'require' ? uniqueStrings(raw.realms, `${itemPath}.realms`, issues) : undefined;
+    if (realms && (!realms.length || realms.some(realm => realm !== 'host' && realm !== 'surface'))) issues.push(`${itemPath}.realms must contain host and/or surface`);
     let tool: VarinExtensionServiceProvision["tool"];
     if (kind === "provide" && raw.tool !== undefined) {
       try { tool = parseVarinExtensionToolDeclaration(raw.tool); }
@@ -355,6 +357,7 @@ function parseServices<T extends VarinExtensionServiceRequirement | VarinExtensi
       ...(contract ? { contract } : {}),
       ...(typeof flag === "boolean" ? { [flagKey]: flag } : {}),
       ...(binding ? { binding } : {}),
+      ...(realms ? { realms } : {}),
     } as T);
   });
   return result;
@@ -1502,6 +1505,7 @@ function parseServiceProvider(value: unknown, path: string, issues: string[]): V
     entrypointId: identifier(value.entrypointId, `${path}.entrypointId`, issues),
     extensionId: identifier(value.extensionId, `${path}.extensionId`, issues),
     extensionVersion,
+    instanceKey: text(value.instanceKey) ?? (issues.push(`${path}.instanceKey must be non-empty`), 'invalid'),
     generation: positiveRevision(value.generation, `${path}.generation`, issues, true),
     providerId: providerId ?? "invalid",
     providerKey: providerKey ?? "invalid",
@@ -1545,20 +1549,10 @@ export function parseVarinExtensionServiceCatalogSnapshot(value: unknown): Varin
     if (providerIds.has(provider.providerId)) issues.push(`providers contains duplicate provider ${provider.providerId}`);
     providerIds.add(provider.providerId);
   }
-  const selections: Record<string, string> = {};
-  if (!isRecord(value.selections)) issues.push("selections must be an object");
-  else {
-    for (const [service, provider] of Object.entries(value.selections)) {
-      const selected = text(provider);
-      if (!selected) issues.push(`selections.${service} must be a non-empty provider ID`);
-      else selections[service] = selected;
-    }
-  }
   const result = {
     hostId: hostId(value.hostId, "hostId", issues),
     providers,
     revision: positiveRevision(value.revision, "revision", issues, true),
-    selections,
   };
   throwIssues("Varin extension service catalog", issues);
   return result;
@@ -1579,29 +1573,21 @@ export function parseVarinExtensionServiceInvocationRequest(value: unknown): Var
     try { routing = parseVarinExtensionServiceRoutingContext(value.routing, { allowEmpty: true }); }
     catch (error) { issues.push(`routing.${error instanceof Error ? error.message : String(error)}`); }
   }
+  let lease: VarinExtensionServiceInvocationRequest['lease'];
+  if (value.lease !== undefined) {
+    try { lease = parseVarinSurfaceServiceInvocationLease(value.lease); } catch (error) { issues.push(String(error)); }
+    if (!providerId) issues.push('Surface lease invocation requires an exact providerId');
+  }
   const result: VarinExtensionServiceInvocationRequest = {
     args,
     method: method ?? "invalid",
     serviceId: identifier(value.serviceId, "serviceId", issues),
     version: positiveRevision(value.version, "version", issues),
     ...(providerId ? { providerId } : {}),
+    ...(lease ? { lease } : {}),
     ...(routing ? { routing } : {}),
   };
   throwIssues("Varin extension service invocation", issues);
-  return result;
-}
-
-export function parseVarinExtensionServiceSelectionRequest(value: unknown): VarinExtensionServiceSelectionRequest {
-  const issues: string[] = [];
-  if (!isRecord(value)) throw new VarinExtensionContractError("Varin extension service selection is invalid", ["request must be an object"]);
-  const providerId = value.providerId === null ? null : text(value.providerId);
-  if (value.providerId !== null && !providerId) issues.push("providerId must be a non-empty string or null");
-  const result: VarinExtensionServiceSelectionRequest = {
-    providerId: providerId ?? null,
-    serviceId: identifier(value.serviceId, "serviceId", issues),
-    version: positiveRevision(value.version, "version", issues),
-  };
-  throwIssues("Varin extension service selection", issues);
   return result;
 }
 

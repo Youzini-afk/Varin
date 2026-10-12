@@ -38,13 +38,17 @@ copy. Archive-backed distributions resolve their logical module address to the c
 directory before constructing the package manager; brokered processes are launched only from the
 resulting immutable artifact, never from an application archive.
 
-Host activation is serialized per extension owner, not across the catalog. Dependency preparation
-resolves before owner admission; concurrent consumers reuse the provider generation after its
-preparation finishes. Independent startup and retirement proceed in parallel. A canceled or stale
-preparation cannot publish, and shutdown closes admission before aborting unpublished broker owners.
+Host activation resolves the complete dependency graph before starting workers. Requirements declare
+their `realms` explicitly; Surface-only dependencies do not block a headless Host. The existing
+ServiceRoutingStore chooses implementations for the actual scope. There is no registry selection map.
+Concurrent preparation of one effective graph is shared; canceling one waiter does not cancel another.
+Instance identity includes the immutable artifact, reviewed grants and exact prepared dependency
+generations, not Thread IDs or unrelated routing revisions. Independent startup and retirement proceed
+in parallel. A canceled or stale preparation cannot publish, and shutdown closes admission before
+aborting unpublished broker owners.
 Service publication reserves only conflicting declared single-provider services during storage/catalog
 commit; registry publication itself is synchronous. Retired generations still drain their pinned calls
-before transport disposal. Failed replacement routing rollback touches only selections it changed.
+before transport disposal. Candidate failure preserves the previous selected combination.
 
 Capability decisions are part of activation identity. A changed selected grant advances the desired
 revision; candidate grant reviews are checked independently before publication. Revocations update
@@ -52,10 +56,26 @@ the Host-owned grant arrays used by live and draining transport callbacks before
 so retaining an old implementation after a failed update cannot retain revoked privileges.
 
 `ApplicationExtensionRuntime.prepareService` resolves the existing scoped routing configuration once
-and returns an exact-generation service handle. Production service invocation uses this same binding
+and returns an exact-generation strong service lease. Every consumer releases it; an independent
+`pin()` retains an accepted exchange without retaining its former selection context. Pure validation
+uses `assertBinding`, not a leaked temporary bind. Production service invocation uses this same binding
 path. Registry invocation indexes only the requested service (or directly looks up an explicit
-provider); it does not scan all installed providers. Selected-provider failure never falls back to a
-different implementation. Non-authoritative routing cannot create a new binding.
+provider); it does not scan all installed providers. Only the original routing rule can explicitly
+permit fallback; invocation through a frozen handle never reselects. Non-authoritative routing cannot
+create a new binding. Each instance retains its exact dependency pins through real callbacks and
+transport/disposer completion. Explicit revocation follows those exact owner edges, not service names.
+
+Brokered and trusted-native `services.use`/`useAll` capture declared dependencies before activation.
+Nested calls propagate the current opaque invocation and cancellation; shared instances never retain
+a particular Run's authority. The original tool scope temporarily recognizes the actual dependency
+owner only while that call is alive, preserving the root tool's permissions, effect and receipt identity.
+
+Managed Surface consumers use an authenticated `watchServiceLease` response stream. It retains the
+actual scoped Host roots and exact service members, including candidate roots for grouped updates.
+The original principal and Surface owner identify later invocations. Response closure releases those
+references; a completed POST body or long-poll timeout does not. An already admitted callback owns its
+own reference through physical completion. The directly registered WorkbenchLayout native service
+keeps its existing native owner and has no fabricated package graph.
 
 `ApplicationExtensionRuntime.queryContracts` lists/describes current service and UI-slot contracts from the
 same manifest, routing, registry and workbench owners. Those metadata operations never activate a provider or invoke its
@@ -222,9 +242,11 @@ transport tests exercise these interruption windows against the real artifact, C
 owners; they do not claim a whole-process or cross-process atomic transaction.
 
 
-Context preparation caches exact members against the original Host publication and routing revisions.
-Unchanged requests use bound registry identities, without rescanning/activating the catalog; replacing
-one provider redescribes only that generation. New candidates check current bindings and propagate
+Pure context/retrieval declarations cache values against their resolved immutable composition, without
+keeping an unused worker alive. Pure graph resolution does not activate or materialize a cold package;
+ordinary preparation handles a declared package that still needs materialization. Budget descriptions
+also include the actual provider generation in their cache identity: a new activation can capture new
+configuration from the original storage owner. New candidates check current bindings and propagate
 caller cancellation. Ending a caller's wait does not claim its actual callback drained; registry
 in-flight accounting remains authoritative. Disable/revocation blocks fresh preparation and cached
 admission. Already admitted checkpoint/request bytes remain historical facts and recover unchanged.

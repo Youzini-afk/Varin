@@ -105,7 +105,7 @@ const scripts = createScriptRuntime({ kernel, runtime,
 });
 const memory = createNestedMemoryHostFixture();
 const owners = new Map<string, AbortController>();
-const owner: HostServiceOwnerIdentity = { extensionId: 'varin.builtin.scripts', extensionVersion: '0.1.0', entrypointId: 'host', generation: 1 };
+const owner: HostServiceOwnerIdentity = { extensionId: 'varin.builtin.scripts', extensionVersion: '0.1.0', entrypointId: 'host', instanceKey: 'managed-script-fixture', generation: 1 };
 let configurationIdentity: string;
 let computer: ReturnType<typeof createComputerRuntime> | undefined;
 let computers: ReturnType<typeof createComputerService> | undefined;

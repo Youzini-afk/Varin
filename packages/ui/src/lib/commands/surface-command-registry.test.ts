@@ -90,7 +90,6 @@ test('a declarative command activates and executes the latest dynamic implementa
     layoutReferences: [],
     replacementSelections: {},
     revision: 1,
-    serviceSelections: {},
     services: [],
     visibleContributions: [value],
   });

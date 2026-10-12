@@ -9,11 +9,14 @@ import { createRetrievalComposition, type RetrievalSemanticLease } from './retri
 import type { StructureOutlineRequest, StructureClassifyRequest } from '../structure/types.js';
 
 it('keeps fixed and materialized syntax separate from live LSP while acquiring their own semantic leases', async () => {
-  const pin = () => ({ assertAvailable() {}, release: vi.fn(), invoke: vi.fn(async () => ({ configurationId: 'explicit', structure: 'builtin', semantic: 'builtin' })) });
+  const pin = () => ({ revocationSignal: new AbortController().signal, assertAvailable() {}, release: vi.fn(), invoke: vi.fn(async () => ({ configurationId: 'explicit', structure: 'builtin', semantic: 'builtin' })) });
   const provider = { providerId: 'selected', providerKey: 'selected-key', status: 'active' };
+  const declaration = { schemaVersion: 1, root: 'composition', nodes: [{ id: 'composition', extensionId: 'selected',
+    entrypointId: 'host', extensionVersion: '1', artifactIntegrity: 'artifact', activationConfiguration: null, grants: [], dependencies: [] }] };
   const runtime = {
     routing: { read: async () => ({ authoritative: true, document: { revision: 1 } }) },
-    prepareService: async () => ({ ...provider, pin }),
+    prepareService: async () => ({ ...provider, composition: declaration, assertAvailable() {}, release() {}, pin }),
+    resolveServiceCompositions: async () => ({ services: [{ providerKey: provider.providerKey, composition: declaration }], routingRevision: 1 }),
     services: { getSnapshot: () => ({ providers: [provider] }) },
     supervisor: { getActiveArtifactIdentity: () => 'artifact' },
   } as unknown as ApplicationExtensionRuntime;

@@ -19,6 +19,11 @@ writing Pi session files or the Host harness's existing execution records.
   inspection/list serialization runs on workers, and content collection retains every launch reference.
   Policy preparation binds the actual admitted baseline supplied by its assembly owner; the runtime
   does not hard-code a kernel policy wrapper's name.
+- Catalog 62 / wire 22 retain reconstructable Host dependency graphs in the original tool/policy
+  binding content. Graph validation, hashing, persistence and hydration run outside Catalog. Short
+  policy metadata records exact identity and a ContentStore reference; launch, selection and delegated
+  execution roots participate in the same GC publication protocol. Recovery preserves the saved
+  choices rather than applying current service routing.
 - `execution` drives a bound model provider and tool executor on a worker. Tool results have stable
   request/call/operation identities, real effect receipts and provider-specific original items.
   The default policy is replaceable; it does not own or mutate the catalog itself.
@@ -511,7 +516,7 @@ Cold source preparation begins only with semantic search, leaving keyword work i
 Storage/Catalog and final-history evidence is recorded in the
 [fixed semantic review](../../../docs/reviews/runtime-fixed-semantic-2026-10-12.md).
 
-Catalog 61 / wire 21 tags the frozen inference executor as HTTP or a local component. Local bindings
+The frozen inference executor is tagged as HTTP or a local component. Local bindings
 retain the verified component-manifest digest and original model identity, without invented endpoints
 or credentials. Installed Bekko query and foreground document grains use this same parent/ordinal,
 ContentStore and Goal authority; background indexing retains its existing separate owner. The CPU

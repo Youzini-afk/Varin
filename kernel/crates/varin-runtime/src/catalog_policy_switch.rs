@@ -20,6 +20,7 @@ pub struct AgentPolicyArtifactBinding {
     pub service_id: String,
     pub service_version: u64,
     pub artifact_integrity: String,
+    pub composition: super::service_composition::HostServiceComposition,
     pub configuration_identity: String,
     pub declared_identity: PolicyIdentity,
     pub identity: PolicyIdentity,
@@ -37,6 +38,14 @@ pub enum PolicyTarget {
 impl PolicyTarget {
     pub fn validate(&self) -> Result<()> {
         if let Self::Extension { artifact: a } = self {
+            a.composition.validate_root(
+                &a.extension_id,
+                &a.extension_version,
+                &a.artifact_integrity,
+                &a.provider_key,
+                &a.service_id,
+                a.service_version,
+            )?;
             if [
                 &a.provider_key,
                 &a.extension_id,
@@ -148,9 +157,182 @@ pub struct PolicySelections {
     pub active: ActivePolicySelection,
     pub desired: Option<PolicySelection>,
 }
+/// Small Catalog identity; graph and extension declaration bodies live in the existing ContentStore.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PolicyTargetMetadata {
+    Default,
+    Extension {
+        provider_key: String,
+        extension_id: String,
+        extension_version: String,
+        artifact_integrity: String,
+        composition_root: String,
+        configuration_identity: String,
+        identity: PolicyIdentity,
+        declared_identity: PolicyIdentity,
+        model_roles: Vec<String>,
+        state_transition: PolicyStateTransition,
+        body: Value,
+    },
+}
+impl PolicyTargetMetadata {
+    fn from_target(target: &PolicyTarget, body: Value) -> Self {
+        match target {
+            PolicyTarget::Default => Self::Default,
+            PolicyTarget::Extension { artifact: a } => Self::Extension {
+                provider_key: a.provider_key.clone(),
+                extension_id: a.extension_id.clone(),
+                extension_version: a.extension_version.clone(),
+                artifact_integrity: a.artifact_integrity.clone(),
+                composition_root: a.composition.root.clone(),
+                configuration_identity: a.configuration_identity.clone(),
+                identity: a.identity.clone(),
+                declared_identity: a.declared_identity.clone(),
+                model_roles: a.model_roles.clone(),
+                state_transition: a.state_transition,
+                body,
+            },
+        }
+    }
+    pub(super) fn stage(
+        content: &crate::content::ContentStore,
+        target: PolicyTarget,
+    ) -> Result<Self> {
+        target.validate()?;
+        if target == PolicyTarget::Default {
+            return Ok(Self::Default);
+        }
+        let body = content.save(&serde_json::to_value(&target)?)?;
+        Ok(Self::from_target(&target, body))
+    }
+    pub(super) fn load(&self, content: &crate::content::ContentStore) -> Result<PolicyTarget> {
+        let Self::Extension { body, .. } = self else {
+            return Ok(PolicyTarget::Default);
+        };
+        let target: PolicyTarget = serde_json::from_value(content.load(body)?)?;
+        target.validate()?;
+        if Self::from_target(&target, body.clone()) != *self {
+            return Err(RuntimeError::Invalid(
+                "policy body differs from its retained identity".into(),
+            ));
+        }
+        Ok(target)
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PolicySelectionMetadata {
+    pub selection_id: String,
+    pub run_id: String,
+    pub generation: u64,
+    pub expected_generation: u64,
+    pub expected_selection_id: Option<String>,
+    pub target: PolicyTargetMetadata,
+    pub state_mode: PolicyStateMode,
+    pub status: PolicySelectionStatus,
+    pub failure: Option<String>,
+    pub activation_cursor: Option<u64>,
+}
+impl PolicySelectionMetadata {
+    fn load(self, content: &crate::content::ContentStore) -> Result<PolicySelection> {
+        Ok(PolicySelection {
+            target: self.target.load(content)?,
+            selection_id: self.selection_id,
+            run_id: self.run_id,
+            generation: self.generation,
+            expected_generation: self.expected_generation,
+            expected_selection_id: self.expected_selection_id,
+            state_mode: self.state_mode,
+            status: self.status,
+            failure: self.failure,
+            activation_cursor: self.activation_cursor,
+        })
+    }
+}
+pub struct PolicySelectionRead {
+    pub metadata: PolicySelectionMetadata,
+    content: crate::content::ContentStore,
+    _publication: crate::content::ContentPublication,
+}
+impl PolicySelectionRead {
+    fn new(metadata: PolicySelectionMetadata, content: &crate::content::ContentStore) -> Self {
+        Self {
+            metadata,
+            content: content.clone(),
+            _publication: content.begin_publication(),
+        }
+    }
+    pub fn load(self) -> Result<PolicySelection> {
+        self.metadata.load(&self.content)
+    }
+}
+pub struct PolicySelectionsRead {
+    active: (u64, PolicyTargetMetadata, PolicyIdentity, Option<u64>),
+    desired: Option<PolicySelectionMetadata>,
+    content: crate::content::ContentStore,
+    _publication: crate::content::ContentPublication,
+}
+impl PolicySelectionsRead {
+    pub fn desired_selection_id(&self) -> Option<&str> {
+        self.desired
+            .as_ref()
+            .map(|value| value.selection_id.as_str())
+    }
+    pub fn load(self) -> Result<PolicySelections> {
+        Ok(PolicySelections {
+            active: ActivePolicySelection {
+                generation: self.active.0,
+                target: self.active.1.load(&self.content)?,
+                identity: self.active.2,
+                activation_cursor: self.active.3,
+            },
+            desired: self
+                .desired
+                .map(|value| value.load(&self.content))
+                .transpose()?,
+        })
+    }
+}
+pub struct PolicySelectionPreparation {
+    run_id: String,
+    selection_id: String,
+    expected_generation: u64,
+    expected_selection_id: Option<String>,
+    target: PolicyTarget,
+    state_mode: PolicyStateMode,
+    epoch: u64,
+    content: crate::content::ContentStore,
+    publication: crate::content::ContentPublication,
+}
+pub struct PreparedPolicySelection {
+    run_id: String,
+    selection_id: String,
+    expected_generation: u64,
+    expected_selection_id: Option<String>,
+    target: PolicyTargetMetadata,
+    state_mode: PolicyStateMode,
+    epoch: u64,
+    _publication: crate::content::ContentPublication,
+}
+impl PolicySelectionPreparation {
+    pub fn store(self) -> Result<PreparedPolicySelection> {
+        Ok(PreparedPolicySelection {
+            run_id: self.run_id,
+            selection_id: self.selection_id,
+            expected_generation: self.expected_generation,
+            expected_selection_id: self.expected_selection_id,
+            target: PolicyTargetMetadata::stage(&self.content, self.target)?,
+            state_mode: self.state_mode,
+            epoch: self.epoch,
+            _publication: self.publication,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 struct PolicyCandidateMetadata {
-    selection: PolicySelection,
+    selection: PolicySelectionMetadata,
     identity: Option<PolicyIdentity>,
     models: Vec<PolicyModelReference>,
 }
@@ -196,14 +378,14 @@ fn active_cursor(db: &Connection, run: &str, generation: u64) -> Result<Option<u
 }
 
 pub struct PolicyReadyPreparation {
-    expected: PolicySelection,
+    expected: PolicySelectionMetadata,
     identity: PolicyIdentity,
     models: Vec<crate::execution::PolicyModelCapability>,
     content: crate::content::ContentStore,
     publication: crate::content::ContentPublication,
 }
 pub struct PreparedPolicyReady {
-    expected: PolicySelection,
+    expected: PolicySelectionMetadata,
     identity: PolicyIdentity,
     models: Vec<PolicyModelReference>,
     _publication: crate::content::ContentPublication,
@@ -236,8 +418,8 @@ pub struct PreparedPolicyActivation {
     continuation_ref: Value,
 }
 impl PolicyActivationPreparation {
-    pub fn previous_target(&self) -> &PolicyTarget {
-        &self.launch.policy_target
+    pub fn previous_target(&self) -> Result<PolicyTarget> {
+        self.launch.policy_target.load(&self.content)
     }
     pub fn state_mode(&self) -> PolicyStateMode {
         self.candidate.selection.state_mode
@@ -253,40 +435,75 @@ impl PolicyActivationPreparation {
     }
 }
 impl Catalog {
-    pub fn policy_selection(&self, run_id: &str, id: &str) -> Result<PolicySelection> {
+    pub fn policy_selection(&self, run_id: &str, id: &str) -> Result<PolicySelectionRead> {
         let c = selection(&self.db, id)?;
         if c.selection.run_id != run_id {
             return Err(RuntimeError::Conflict(
                 "policy selection Run differs".into(),
             ));
         }
-        Ok(c.selection)
+        Ok(PolicySelectionRead::new(c.selection, &self.content))
     }
-    pub fn policy_selections(&self, run_id: &str) -> Result<PolicySelections> {
+    pub fn policy_selections(&self, run_id: &str) -> Result<PolicySelectionsRead> {
         self.run(run_id)?;
         let launch = self
             .launch_metadata(run_id)?
             .ok_or_else(|| RuntimeError::NotFound("policy launch".into()))?;
-        Ok(PolicySelections {
-            active: ActivePolicySelection {
-                generation: launch.policy_generation,
-                activation_cursor: active_cursor(&self.db, run_id, launch.policy_generation)?,
-                target: launch.policy_target,
-                identity: launch.selection.policy,
-            },
-            desired: latest(&self.db, run_id)?.map(|c| c.selection),
+        Ok(PolicySelectionsRead {
+            active: (
+                launch.policy_generation,
+                launch.policy_target,
+                launch.selection.policy,
+                active_cursor(&self.db, run_id, launch.policy_generation)?,
+            ),
+            desired: latest(&self.db, run_id)?.map(|value| value.selection),
+            content: self.content.clone(),
+            _publication: self.content.begin_publication(),
         })
     }
-    pub fn select_policy(
-        &mut self,
+    pub fn prepare_policy_selection(
+        &self,
         run_id: &str,
         selection_id: &str,
         expected_generation: u64,
         expected_selection_id: Option<String>,
         target: PolicyTarget,
         state_mode: PolicyStateMode,
-    ) -> Result<PolicySelection> {
-        target.validate()?;
+    ) -> Result<PolicySelectionPreparation> {
+        self.run(run_id)?;
+        Ok(PolicySelectionPreparation {
+            run_id: run_id.into(),
+            selection_id: selection_id.into(),
+            expected_generation,
+            expected_selection_id,
+            target,
+            state_mode,
+            epoch: self.epoch,
+            content: self.content.clone(),
+            publication: self.content.begin_publication(),
+        })
+    }
+    pub fn publish_policy_selection(
+        &mut self,
+        prepared: PreparedPolicySelection,
+    ) -> Result<PolicySelectionRead> {
+        let PreparedPolicySelection {
+            run_id,
+            selection_id,
+            expected_generation,
+            expected_selection_id,
+            target,
+            state_mode,
+            epoch,
+            _publication,
+        } = prepared;
+        if epoch != self.epoch {
+            return Err(RuntimeError::Conflict(
+                "policy selection epoch changed".into(),
+            ));
+        }
+        let run_id = run_id.as_str();
+        let selection_id = selection_id.as_str();
         if selection_id.trim().is_empty() {
             return Err(RuntimeError::Invalid(
                 "policy selection identity is required".into(),
@@ -303,7 +520,7 @@ impl Catalog {
                 && p.target == target
                 && p.state_mode == state_mode
             {
-                return Ok(p);
+                return Ok(PolicySelectionRead::new(p, &self.content));
             }
             return Err(RuntimeError::Conflict(
                 "policy selection identity was used for another intent".into(),
@@ -346,7 +563,7 @@ impl Catalog {
             }
         }
         let candidate = PolicyCandidateMetadata {
-            selection: PolicySelection {
+            selection: PolicySelectionMetadata {
                 selection_id: selection_id.into(),
                 run_id: run_id.into(),
                 generation,
@@ -373,7 +590,7 @@ impl Catalog {
             json!({"selection_id":selection_id,"generation":generation}),
         )?;
         tx.commit()?;
-        Ok(candidate.selection)
+        Ok(PolicySelectionRead::new(candidate.selection, &self.content))
     }
     pub fn prepare_policy_ready(
         &self,
@@ -385,8 +602,8 @@ impl Catalog {
     ) -> Result<PolicyReadyPreparation> {
         let candidate = selection(&self.db, selection_id)?;
         let roles = match &candidate.selection.target {
-            PolicyTarget::Default => Vec::new(),
-            PolicyTarget::Extension { artifact } => artifact.model_roles.clone(),
+            PolicyTargetMetadata::Default => Vec::new(),
+            PolicyTargetMetadata::Extension { model_roles, .. } => model_roles.clone(),
         };
         if models
             .iter()
@@ -418,7 +635,7 @@ impl Catalog {
     pub fn publish_policy_ready(
         &mut self,
         prepared: PreparedPolicyReady,
-    ) -> Result<PolicySelection> {
+    ) -> Result<PolicySelectionRead> {
         let tx = self.db.transaction()?;
         let mut candidate = selection(&tx, &prepared.expected.selection_id)?;
         let mut run: Run = record(&tx, "runs", &candidate.selection.run_id)?;
@@ -438,14 +655,14 @@ impl Catalog {
                     "policy ready content changed".into(),
                 ));
             }
-            return Ok(candidate.selection);
+            return Ok(PolicySelectionRead::new(candidate.selection, &self.content));
         }
         if candidate.selection.status != PolicySelectionStatus::Preparing {
-            return Ok(candidate.selection);
+            return Ok(PolicySelectionRead::new(candidate.selection, &self.content));
         }
         fence(&run, self.epoch)?;
         if run.cancel_requested {
-            return Ok(candidate.selection);
+            return Ok(PolicySelectionRead::new(candidate.selection, &self.content));
         }
         candidate.identity = Some(prepared.identity);
         candidate.models = prepared.models;
@@ -461,14 +678,14 @@ impl Catalog {
             json!({"selection_id":candidate.selection.selection_id,"generation":candidate.selection.generation}),
         )?;
         tx.commit()?;
-        Ok(candidate.selection)
+        Ok(PolicySelectionRead::new(candidate.selection, &self.content))
     }
     pub fn fail_policy_selection(
         &mut self,
         run_id: &str,
         selection_id: &str,
         code: &str,
-    ) -> Result<PolicySelection> {
+    ) -> Result<PolicySelectionRead> {
         if code.trim().is_empty() {
             return Err(RuntimeError::Invalid("policy failure code required".into()));
         }
@@ -478,7 +695,7 @@ impl Catalog {
         &mut self,
         run_id: &str,
         selection_id: &str,
-    ) -> Result<PolicySelection> {
+    ) -> Result<PolicySelectionRead> {
         self.end_policy_selection(run_id, selection_id, None)
     }
     fn end_policy_selection(
@@ -486,7 +703,7 @@ impl Catalog {
         run_id: &str,
         selection_id: &str,
         failure: Option<String>,
-    ) -> Result<PolicySelection> {
+    ) -> Result<PolicySelectionRead> {
         let tx = self.db.transaction()?;
         let mut candidate = selection(&tx, selection_id)?;
         if candidate.selection.run_id != run_id {
@@ -498,7 +715,7 @@ impl Catalog {
             candidate.selection.status,
             PolicySelectionStatus::Preparing | PolicySelectionStatus::Ready
         ) {
-            return Ok(candidate.selection);
+            return Ok(PolicySelectionRead::new(candidate.selection, &self.content));
         }
         let mut run: Run = record(&tx, "runs", run_id)?;
         candidate.selection.status = if failure.is_some() {
@@ -518,7 +735,7 @@ impl Catalog {
             json!({"selection_id":selection_id,"status":candidate.selection.status,"failure":candidate.selection.failure}),
         )?;
         tx.commit()?;
-        Ok(candidate.selection)
+        Ok(PolicySelectionRead::new(candidate.selection, &self.content))
     }
     pub fn capture_policy_activation(
         &self,
@@ -561,7 +778,7 @@ impl Catalog {
     pub fn activate_policy(
         &mut self,
         prepared: PreparedPolicyActivation,
-    ) -> Result<Option<PolicySelection>> {
+    ) -> Result<Option<PolicySelectionRead>> {
         let PreparedPolicyActivation {
             captured: c,
             state_ref,
@@ -570,7 +787,10 @@ impl Catalog {
         let tx = self.db.transaction()?;
         let mut candidate = selection(&tx, &c.candidate.selection.selection_id)?;
         if candidate.selection.status == PolicySelectionStatus::Active {
-            return Ok(Some(candidate.selection));
+            return Ok(Some(PolicySelectionRead::new(
+                candidate.selection,
+                &self.content,
+            )));
         }
         let mut run: Run = record(&tx, "runs", &c.run.id)?;
         fence(&run, c.run.epoch)?;
@@ -632,7 +852,10 @@ impl Catalog {
         candidate.selection.activation_cursor = Some(cursor);
         save(&tx, &candidate)?;
         tx.commit()?;
-        Ok(Some(candidate.selection))
+        Ok(Some(PolicySelectionRead::new(
+            candidate.selection,
+            &self.content,
+        )))
     }
 }
 fn policy_cut_cursor(db: &Connection, run: &str) -> Result<u64> {

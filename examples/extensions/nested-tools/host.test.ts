@@ -8,7 +8,7 @@ import extension from './host.ts';
 // A consumer unit harness: real SDK registration and invocation-scoped capability adaptation,
 // with controlled completion inputs. No broker, permission authority or memory store is simulated.
 async function withTool(check: (handler: VarinHostServiceHandler) => Promise<void>) {
-  await runHostExtensionConformance({ extensionId: 'example.nested-tools', activation: async context => {
+  await runHostExtensionConformance({ dependencies: [], extensionId: 'example.nested-tools', activation: async context => {
     let handler: VarinHostServiceHandler | undefined;
     const provide = context.services.provide;
     context.services.provide = (descriptor, implementation) => {

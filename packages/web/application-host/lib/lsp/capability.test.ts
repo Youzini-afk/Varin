@@ -31,8 +31,8 @@ describe('workspace language capability', () => {
       expect(resultRecord(status).status).toBe('absent');
       await expect(call('watch', {})).rejects.toThrow(/does not implement watch/);
 
-      const ownerA = { extensionId: 'dev.example.a', extensionVersion: '1.0.0', entrypointId: 'host', generation: 1 };
-      const ownerB = { extensionId: 'dev.example.b', extensionVersion: '1.0.0', entrypointId: 'host', generation: 1 };
+      const ownerA = { extensionId: 'dev.example.a', extensionVersion: '1.0.0', entrypointId: 'host', instanceKey: 'lsp-provider-a-fixture', generation: 1 };
+      const ownerB = { extensionId: 'dev.example.b', extensionVersion: '1.0.0', entrypointId: 'host', instanceKey: 'lsp-provider-b-fixture', generation: 1 };
       await call('registerProvider', {
         providerId: 'shared',
         command: 'server-a',

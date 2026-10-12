@@ -3,9 +3,11 @@
 #[path = "input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
+#[path = "service_composition.rs"]
+mod service_composition;
 use serde_json::json;
 use varin_runtime::catalog::collaboration::{
-    ChildSourcePin, DISPATCH_TOOL, DispatchInput, WAIT_TOOL,
+    ChildSourcePin, DispatchInput, DISPATCH_TOOL, WAIT_TOOL,
 };
 use varin_runtime::catalog::launches::{LaunchSelection, SourceSelection};
 use varin_runtime::execution::*;
@@ -330,7 +332,7 @@ impl Fixture {
             "credential_scope":{"reference":"credential-ref","authority":"credential-owner","account":"account-A","generation":3}})).unwrap();
         if parent_extension {
             let extension:varin_runtime::catalog::launches::ExtensionToolBinding=serde_json::from_value(json!({"providerKey":"example:host:helper@1","extensionId":"example","extensionVersion":"1.0.0","serviceId":"helper","serviceVersion":1,
-                "artifactIntegrity":"sha256-original","declarationHash":"declaration","configurationIdentity":null,
+                "artifactIntegrity":"sha256-original","composition":service_composition::graph("example","1.0.0","sha256-original"),"declarationHash":"declaration","configurationIdentity":null,
                 "tool":{"name":"helper","version":"declaration","description":"Parent extension","schema":{"type":"object"},"output_schema":null,"metadata":{"service_id":"helper","service_version":1,"completion":"result","operation":"read"}}})).unwrap();
             launch.tools.push(extension.tool.clone());
             launch.extension_bindings.push(extension);

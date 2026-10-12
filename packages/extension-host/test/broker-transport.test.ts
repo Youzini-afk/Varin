@@ -34,7 +34,7 @@ for (const failure of ["callback", "throw"] as const) {
     });
     child.emit("message", { kind: "event", event: "ready" });
     const registry = new HostServiceRegistry("cancel-failure-fixture");
-    const owner = { extensionId: "dev.example.cancel", entrypointId: "host", extensionVersion: "1", generation: 1 };
+    const owner = { extensionId: "dev.example.cancel", entrypointId: "host", instanceKey: "transport-fixture", extensionVersion: "1", generation: 1 };
     await registry.replaceOwner(owner, [{
       descriptor: { id: "dev.example.cancel", version: 1 },
       handler: async (method, args, call) => await transport.request("service.invoke", { method, args }, call.signal) as string,
@@ -70,7 +70,7 @@ for (const failure of ["callback", "throw"] as const) {
 for (const failure of ["request-callback", "request-throw", "process-error", "disconnect"] as const) {
   test(`${failure} retains callback and pin ownership until the unreliable broker actually exits`, async () => {
     const registry = new HostServiceRegistry("request-failure-fixture");
-    const owner = { extensionId: "dev.example.channel", entrypointId: "host", extensionVersion: "1", generation: 1 };
+    const owner = { extensionId: "dev.example.channel", entrypointId: "host", instanceKey: "transport-fixture", extensionVersion: "1", generation: 1 };
     let killed = false;
     let requestId = "";
     let crashCount = 0;
@@ -97,7 +97,8 @@ for (const failure of ["request-callback", "request-throw", "process-error", "di
     child.emit("message", { kind: "event", event: "ready" });
     await registry.replaceOwner(owner, [{ descriptor: { id: "dev.example.channel", version: 1 },
       handler: async (method, args, context) => await transport.request("service.invoke", { method, args }, context.signal) as string }]);
-    const pin = registry.bind("dev.example.channel", 1).pin();
+    const binding = registry.bind("dev.example.channel", 1);
+    const pin = binding.pin(); binding.release();
     let settled = false;
     const pending = pin.invoke("wait", []).then(value => ({ value }), (error: unknown) => ({ error }))
       .finally(() => { settled = true; });

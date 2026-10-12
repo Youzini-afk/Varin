@@ -11,7 +11,7 @@ const input = () => ({ boundary: 'before_model_dispatch', requestId: 'request',
   candidates: [{ throughId: 'input', prefixEstimatedTokens: 90, retainedEstimatedTokens: 30 }],
 });
 test('the author Decision receives detached frozen metadata and exposes its real service contract', async () => {
-  await runHostExtensionConformance({ extensionId: 'review.context-budget', activation: async context => {
+  await runHostExtensionConformance({ dependencies: [], extensionId: 'review.context-budget', activation: async context => {
     let handler!: VarinHostServiceHandler;
     const provide = context.services.provide;
     context.services.provide = (descriptor, implementation) => { handler = implementation; provide(descriptor, implementation); };
@@ -37,7 +37,7 @@ test('the author Decision receives detached frozen metadata and exposes its real
   } });
 });
 test('cancellation discards late budget output and malformed estimates never enter the callback', async () => {
-  await runHostExtensionConformance({ extensionId: 'review.context-budget-cancel', activation: async context => {
+  await runHostExtensionConformance({ dependencies: [], extensionId: 'review.context-budget-cancel', activation: async context => {
     let handler!: VarinHostServiceHandler;
     const provide = context.services.provide;
     context.services.provide = (descriptor, implementation) => { handler = implementation; provide(descriptor, implementation); };

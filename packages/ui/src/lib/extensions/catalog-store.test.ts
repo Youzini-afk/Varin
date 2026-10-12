@@ -47,7 +47,7 @@ const snapshot = (): VarinExtensionHostStateSnapshot => ({
     hostId,
     storageState: 'missing',
   },
-  services: { hostId, providers: [], revision: 0, selections: {} },
+  services: { hostId, providers: [], revision: 0 },
   workbench: {
     authoritative: true,
     diagnostics: [],

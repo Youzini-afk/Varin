@@ -1,21 +1,36 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { BrokeredHostSupervisor } from '../src/broker-supervisor.js';
+import { defaultVarinExtensionServiceRoutingDocument, type VarinExtensionCapabilityGrant,
+  type VarinExtensionHostEntrypoint, type VarinExtensionManifest, type VarinExtensionServiceProvision } from '@varin/extension-contract';
+import { BrokeredHostSupervisor, type BrokeredHostSupervisorOptions } from '../src/broker-supervisor.js';
+import { HostCapabilityRegistry } from '../src/capability-registry.js';
 import { HostServiceRegistry } from '../src/service-registry.js';
 
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; };
-const entry = (id: string, requires: string[] = [], service = id) => ({
-  manifest: { schemaVersion: 1, id, version: '1.0.0', engines: { varin: '*' }, entrypoints: { host: { mode: 'brokered', file: 'host.cjs' } }, provides: { services: [{ id: service, version: 1 }] }, requires: { services: requires.map(id => ({ id, version: 1, binding: 'single' })) } },
+/** Only the Catalog facts consumed by this lifecycle harness are controlled. */
+interface LifecycleEntry {
+  manifest: VarinExtensionManifest & { entrypoints: { host: VarinExtensionHostEntrypoint }; provides: { services: VarinExtensionServiceProvision[] } };
+  integrity: string;
+  selectedVersion: string;
+  desired: { enabled: boolean; revision: number };
+  capabilityGrants: Array<Pick<VarinExtensionCapabilityGrant, 'capability' | 'realm' | 'granted' | 'manifestVersion'>>;
+  actual: [];
+  candidate?: { integrity: string; resolvedVersion: string; capabilitiesReviewed: boolean;
+    capabilityGrants: LifecycleEntry['capabilityGrants']; manifest: LifecycleEntry['manifest']; applyRequested?: boolean };
+}
+const entry = (id: string, requires: string[] = [], service = id): LifecycleEntry => ({
+  manifest: { schemaVersion: 1, id, version: '1.0.0', engines: { varin: '*' }, entrypoints: { host: { mode: 'brokered', file: 'host.cjs' } }, provides: { services: [{ id: service, version: 1 }] }, requires: { services: requires.map(id => ({ id, realms: ['host'], version: 1, binding: 'single' })) } },
   integrity: `${id}-v1`, selectedVersion: '1.0.0', desired: { enabled: true, revision: 1 }, capabilityGrants: [], actual: [],
 });
+const pin = (services: HostServiceRegistry, id: string) => { const binding = services.bind(id, 1); try { return binding.pin(); } finally { binding.release(); } };
 const tick = () => new Promise<void>(r => setImmediate(r));
 const bounded = async <T>(promise: Promise<T>): Promise<T> => {
   let timer: ReturnType<typeof setTimeout>;
   try { return await Promise.race([promise, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Operation blocked by unrelated lifecycle')), 1000); })]); }
   finally { clearTimeout(timer!); }
 };
-function harness(entries: ReturnType<typeof entry>[]) {
-  const snapshot: any = { hostId: 'test-host', authoritative: true, revision: 1, extensions: entries };
+function harness(entries: [LifecycleEntry, ...LifecycleEntry[]]) {
+  const snapshot = { hostId: 'test-host', authoritative: true, revision: 1, extensions: entries };
   const gates = new Map<string, ReturnType<typeof deferred>>();
   const disposal = new Map<string, ReturnType<typeof deferred>>();
   const entered = new Map<string, ReturnType<typeof deferred>>();
@@ -30,13 +45,20 @@ function harness(entries: ReturnType<typeof entry>[]) {
   let afterSelection: (() => void) | undefined;
   const crashes = new Map<number, (error: Error) => void>();
   const supervisor = new BrokeredHostSupervisor({
-    brokerScript: '', capabilities: {} as any, services,
-    catalog: { snapshot: async () => structuredClone(snapshot), reportActualState: async () => {} } as any,
+    brokerScript: '', capabilities: new HostCapabilityRegistry(), services,
+    routing: { read: async () => ({ authoritative: true, document: defaultVarinExtensionServiceRoutingDocument() }), assertCurrentRevision: (revision: number) => assert.equal(revision, 0) } as unknown as BrokeredHostSupervisorOptions['routing'],
+    catalog: { snapshot: async () => structuredClone(snapshot), reportActualState: async () => {} } as unknown as BrokeredHostSupervisorOptions['catalog'],
     packages: {
       resolveBrokeredHostEntrypoint: async () => ({ modulePath: '/unused', packageRoot: '/unused' }),
-      selectCandidate: async ({extensionId}: any, validateBeforeCommit?: () => void) => { selectEntered.resolve(); await selectGate?.promise; validateBeforeCommit?.(); const e = snapshot.extensions.find((x: any) => x.manifest.id === extensionId); e.integrity = e.candidate.integrity; e.manifest = e.candidate.manifest; delete e.candidate; afterSelection?.(); return structuredClone(snapshot); },
-    } as any,
-    storage: { read: async () => ({ document: { schemaVersion: 1, revision: 0, data: {} } }), prepareMigration: async () => null } as any,
+      selectCandidate: async ({ extensionId }: { extensionId: string }, validateBeforeCommit?: () => void) => {
+        selectEntered.resolve(); await selectGate?.promise; validateBeforeCommit?.();
+        const selected = snapshot.extensions.find(value => value.manifest.id === extensionId);
+        assert(selected?.candidate);
+        selected.integrity = selected.candidate.integrity; selected.manifest = selected.candidate.manifest;
+        delete selected.candidate; afterSelection?.(); return structuredClone(snapshot);
+      },
+    } as unknown as BrokeredHostSupervisorOptions['packages'],
+    storage: { read: async () => ({ document: { schemaVersion: 1, revision: 0, data: {} } }), prepareMigration: async () => null } as unknown as BrokeredHostSupervisorOptions['storage'],
     transportFactory: ({owner, onCrash}) => { crashes.set(owner.generation, onCrash); return {
       forceTerminate() { forced.push(owner.generation); },
       terminate: async () => { await disposal.get(owner.extensionId)?.promise; await ownerDisposal.get(owner.generation)?.promise; disposed.push(owner.generation); },
@@ -58,7 +80,7 @@ test('publication returns with old model pins retained; retirement and explicit 
   for (const path of ['candidate', 'selected']) for (const teardown of ['release', 'disable', 'shutdown']) {
     const id = 'dev.test.retirement', h = harness([entry(id)]);
     await h.supervisor.activateExtension(id);
-    const old = h.services.bind(id, 1).pin();
+    const old = pin(h.services, id);
     const selected = h.snapshot.extensions[0];
     if (path === 'candidate') {
       selected.candidate = { integrity: 'v2', resolvedVersion: '1.0.0', capabilitiesReviewed: true,
@@ -68,7 +90,7 @@ test('publication returns with old model pins retained; retirement and explicit 
       selected.integrity = 'v2';
       await bounded(h.supervisor.activateExtension(id));
     }
-    let current = h.services.bind(id, 1).pin(), generation = 2;
+    let current = pin(h.services, id), generation = 2;
     assert.equal(await old.invoke('read', []), 1);
     assert.equal(await current.invoke('read', []), 2);
     assert.equal(h.disposed.length, 0);
@@ -81,7 +103,7 @@ test('publication returns with old model pins retained; retirement and explicit 
       } else {
         selected.integrity = 'v3'; await bounded(h.supervisor.activateExtension(id));
       }
-      generation = 3; current = h.services.bind(id, 1).pin();
+      generation = 3; current = pin(h.services, id);
       await bounded((async () => { while (!h.disposed.includes(2)) await tick(); })());
       assert.equal(h.disposed.includes(1), false, 'A remains owned by its original pin');
       assert.equal(await old.invoke('read', []), 1);
@@ -130,15 +152,50 @@ test('concurrent consumers prepare their shared dependency once and cycles rejec
   const results = await bounded(Promise.allSettled([cyclic.supervisor.activateExtension('dev.test.a'), cyclic.supervisor.activateExtension('dev.test.b')]));
   assert.ok(results.every(x => x.status === 'rejected' && /cycle/.test(String(x.reason))));
   await cyclic.supervisor.shutdown();
+  const joined = harness([entry('dev.test.joined')]), controller = new AbortController();
+  const ready = deferred(), gate = deferred(); joined.entered.set('dev.test.joined', ready); joined.gates.set('dev.test.joined', gate);
+  const first = joined.supervisor.prepareExtension('dev.test.joined', {}, controller.signal);
+  const cancelled = assert.rejects(first, /cancelled/); await ready.promise;
+  const second = joined.supervisor.prepareExtension('dev.test.joined'); await tick();
+  controller.abort(new Error('first consumer cancelled')); await cancelled; gate.resolve();
+  const lease = await second, binding = lease.bind('dev.test.joined', 1);
+  try { assert.equal(await binding.invoke('read', []), 1); assert.equal(joined.counts.get('dev.test.joined'), 1); }
+  finally { binding.release(); lease.release(); await joined.supervisor.shutdown(); }
 });
 
 test('disable and shutdown during activation cannot publish a stale generation', async () => {
   for (const shutdown of [false, true]) {
     const h = harness([entry('dev.test.a')]); const gate = deferred(); h.gates.set('dev.test.a', gate); const entered = deferred(); h.entered.set('dev.test.a', entered);
-    const activating = h.supervisor.activateExtension('dev.test.a'); const rejected = assert.rejects(activating, /cancel|shutting/); await entered.promise;
+    const activating = h.supervisor.activateExtension('dev.test.a'); const rejected = assert.rejects(activating, /cancel|shutting|revoked/); await entered.promise;
     const stopping = shutdown ? h.supervisor.shutdown() : h.supervisor.deactivateExtension('dev.test.a');
     await bounded(Promise.all([rejected, stopping])); gate.resolve(); assert.deepEqual(h.supervisor.activeExtensions(), []); assert.deepEqual(h.services.getSnapshot().providers, []);
     await h.supervisor.shutdown();
+  }
+});
+
+test('disable and grant revocation detach a pending dependent while another root keeps the shared dependency', async () => {
+  for (const change of ['disable', 'grant']) {
+    const h = harness([entry('dev.test.a', ['dev.test.b']), entry('dev.test.b')]);
+    for (const extension of h.snapshot.extensions) extension.manifest.entrypoints.host.activation = ['service-request'];
+    const a = h.snapshot.extensions[0];
+    a.capabilityGrants = [{ capability: 'example.reviewed', realm: 'host', granted: true, manifestVersion: '1.0.0' }];
+    const gate = deferred(), entered = deferred(); h.gates.set('dev.test.b', gate); h.entered.set('dev.test.b', entered);
+    const dependent = h.supervisor.prepareExtension('dev.test.a');
+    const rejected = assert.rejects(dependent, /revoked/); await entered.promise;
+    const independent = h.supervisor.prepareExtension('dev.test.b'); await tick();
+    try {
+      if (change === 'disable') a.desired.enabled = false;
+      else a.capabilityGrants[0]!.granted = false;
+      a.desired.revision += 1;
+      await bounded(h.supervisor.reconcile());
+      await bounded(rejected);
+      assert.equal(h.counts.has('dev.test.a'), false, 'A cancels before it starts a transport');
+      assert.deepEqual(h.forced, [], 'A cancellation must not abort the shared B preparation');
+      gate.resolve();
+      const lease = await bounded(independent), binding = lease.bind('dev.test.b', 1);
+      try { assert.equal(await binding.invoke('read', []), 1); assert.equal(h.counts.get('dev.test.b'), 1); }
+      finally { binding.release(); lease.release(); }
+    } finally { gate.resolve(); await Promise.allSettled([dependent, independent]); await h.supervisor.shutdown(); }
   }
 });
 
@@ -170,12 +227,12 @@ test('optional prepared cleanup and a cancelled second selector cannot revoke an
   gate.resolve();
   const selected = await bounded(selecting); await bounded(Promise.all([cancelled, cleanup]));
   assert.equal(selected.extensions[0]!.integrity, 'v2');
-  assert.equal(await h.services.bind(id, 1).invoke('read', []), 2);
+  assert.equal(await h.services.invoke({ serviceId: id, version: 1, method: 'read', args: [] }), 2);
   assert.equal(h.forced.includes(2), false);
   await h.supervisor.shutdown();
 });
 
-const owner = (id: string, generation = 1) => ({ extensionId: id, entrypointId: 'host', generation, extensionVersion: `${generation}.0.0` });
+const owner = (id: string, generation = 1) => ({ instanceKey: id, extensionId: id, entrypointId: 'host', generation, extensionVersion: `${generation}.0.0` });
 const provision = (id: string, multiple = false) => ({ descriptor: { id, version: 1, multiple }, handler: () => id });
 test('exclusive publication reservation blocks a racing owner and rollback releases only its reservation', async () => {
   const services = new HostServiceRegistry('test');
@@ -186,18 +243,18 @@ test('exclusive publication reservation blocks a racing owner and rollback relea
   assert.equal(services.getSnapshot().providers.length, 1);
 });
 
-test('failed owner replacement rollback preserves another owners concurrent selection changes', async () => {
+test('failed owner replacement rollback preserves another owners concurrent providers', async () => {
   const services = new HostServiceRegistry('test');
   await services.replaceOwner(owner('dev.test.a'), [provision('dev.test.one', true)]);
   await services.replaceOwner(owner('dev.test.b'), [provision('dev.test.two', true)]);
-  await services.replaceOwner(owner('dev.test.c'), [provision('dev.test.two', true)]);
-  const find = (id: string) => services.getSnapshot().providers.find(p => p.extensionId === id)!.providerId;
-  services.setSelection('dev.test.one', 1, find('dev.test.a'));
-  services.setSelection('dev.test.two', 1, find('dev.test.b'));
+  const retained = services.getSnapshot().providers.find(p => p.extensionId === 'dev.test.b')!.providerId;
   const replacement = services.prepareOwnerReplacement(owner('dev.test.a', 2), [provision('dev.test.one', true)]);
-  replacement.commit(); services.setSelection('dev.test.two', 1, find('dev.test.c')); await replacement.rollback();
-  assert.equal(services.getSnapshot().selections['dev.test.two@1'], find('dev.test.c'));
-  assert.equal(services.getSnapshot().selections['dev.test.one@1'], find('dev.test.a'));
+  replacement.commit();
+  await services.replaceOwner(owner('dev.test.c'), [provision('dev.test.two', true)]);
+  await replacement.rollback();
+  services.assertBinding('dev.test.two', 1, retained);
+  assert.equal(services.getSnapshot().providers.filter(p => p.descriptor.id === 'dev.test.two').length, 2);
+  assert.equal(await services.invoke({ serviceId: 'dev.test.one', version: 1, method: 'read', args: [] }), 'dev.test.one');
 });
 
 test('drain revokes calls immediately but retains ownership until the callback settles', async () => {
@@ -278,7 +335,7 @@ test('explicit update group validates the original Host preparation without gati
   Object.assign(selected.manifest, { updateReadiness: group, entrypoints: { ...selected.manifest.entrypoints,
     surfaces: [{ id: 'panel', mode: 'managed', file: 'panel.cjs', supports: ['web'] }] } });
   await h.supervisor.activateExtension(id);
-  const old = h.services.bind(id, 1).pin();
+  const old = pin(h.services, id);
   h.snapshot.extensions[0].candidate = { integrity: 'v2', resolvedVersion: '1.0.0', capabilitiesReviewed: true,
     capabilityGrants: [], applyRequested: true, manifest: structuredClone(selected.manifest) };
   await assert.rejects(h.supervisor.selectCandidate(id, 'v2', 1), /compatible Surface/);
@@ -295,7 +352,7 @@ test('explicit update group validates the original Host preparation without gati
   assert.equal(h.snapshot.extensions[0].integrity, `${id}-v1`);
   await h.supervisor.selectCandidate(id, 'v2', 1, undefined, readiness);
   assert.equal(await old.invoke('read', []), 1);
-  assert.equal(await h.services.bind(id, 1).invoke('read', []), 2);
+  assert.equal(await h.services.invoke({ serviceId: id, version: 1, method: 'read', args: [] }), 2);
   old.release(); await h.supervisor.shutdown();
 });
 
@@ -314,7 +371,7 @@ test('required group withdrawal before the actual catalog commit preserves selec
   const rejected = assert.rejects(selecting, /closed/);
   await h.selectEntered.promise; controller.abort(new Error('Surface preparation closed')); gate.resolve(); await rejected;
   assert.equal(h.snapshot.extensions[0].integrity, `${id}-v1`);
-  assert.equal(await h.services.bind(id, 1).invoke('read', []), 1);
+  assert.equal(await h.services.invoke({ serviceId: id, version: 1, method: 'read', args: [] }), 1);
   await h.supervisor.selectCandidate(id, 'v2', 1, undefined, readiness);
   assert.equal(h.snapshot.extensions[0].integrity, 'v2');
   await h.supervisor.shutdown();
@@ -325,7 +382,7 @@ test('after selection a disconnected Surface cannot roll back and a crashed cand
   for (const failure of ['disconnect', 'crash']) {
     const id = 'dev.test.group-postcommit', h = harness([entry(id)]);
     await h.supervisor.activateExtension(id);
-    const old = h.services.bind(id, 1).pin();
+    const old = pin(h.services, id);
     h.snapshot.extensions[0].candidate = { integrity: 'v2', resolvedVersion: '1.0.0', capabilitiesReviewed: true,
       capabilityGrants: [], applyRequested: true, manifest: { ...structuredClone(h.snapshot.extensions[0].manifest),
         updateReadiness: { surfaceEntrypoints: ['panel'] }, entrypoints: { host: { mode: 'brokered', file: 'host.cjs' },
@@ -346,7 +403,7 @@ test('after selection a disconnected Surface cannot roll back and a crashed cand
     assert.equal(h.snapshot.extensions[0].candidate, undefined);
     assert.equal(old.revocationSignal.aborted, false, 'the old process did not crash or lose its accepted exchange');
     assert.equal(await old.invoke('read', []), 1);
-    assert.equal(await h.services.bind(id, 1).invoke('read', []), failure === 'disconnect' ? 2 : 3);
+    assert.equal(await h.services.invoke({ serviceId: id, version: 1, method: 'read', args: [] }), failure === 'disconnect' ? 2 : 3);
     old.release(); await h.supervisor.shutdown();
   }
 });

@@ -39,17 +39,29 @@ impl SourceFailureCode {
     }
     pub fn message(self) -> &'static str {
         match self {
-            Self::SourceUnavailable => "The selected source revision is unavailable. Select an available source and retry.",
-            Self::SourceRegistrationMissing => "The source is not registered on this Host. Restore its original registration or select a new source.",
-            Self::SourceAuthorityDenied => "Access to the selected source was denied. Restore its authorization before retrying.",
-            Self::SourceEnvironmentUnavailable => "The original working copy is unavailable. Restore that copy or explicitly select a new source.",
-            Self::SourceChanged => "The source no longer matches its admitted identity. Select the intended source again.",
+            Self::SourceUnavailable => {
+                "The selected source revision is unavailable. Select an available source and retry."
+            }
+            Self::SourceRegistrationMissing => {
+                "The source is not registered on this Host. Restore its original registration or select a new source."
+            }
+            Self::SourceAuthorityDenied => {
+                "Access to the selected source was denied. Restore its authorization before retrying."
+            }
+            Self::SourceEnvironmentUnavailable => {
+                "The original working copy is unavailable. Restore that copy or explicitly select a new source."
+            }
+            Self::SourceChanged => {
+                "The source no longer matches its admitted identity. Select the intended source again."
+            }
         }
     }
 }
 pub fn valid_preparation_failure(code: &str) -> bool {
-    matches!(code, "preparation_failed" | "credentials_unavailable" | "binding_changed")
-        || SourceFailureCode::parse(code).is_some()
+    matches!(
+        code,
+        "preparation_failed" | "credentials_unavailable" | "binding_changed"
+    ) || SourceFailureCode::parse(code).is_some()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -284,6 +296,7 @@ pub struct ExtensionToolBinding {
     pub service_id: String,
     pub service_version: u64,
     pub artifact_integrity: String,
+    pub composition: super::service_composition::HostServiceComposition,
     pub declaration_hash: String,
     #[serde(deserialize_with = "required_configuration_identity")]
     pub configuration_identity: Option<String>,
@@ -296,6 +309,14 @@ fn required_configuration_identity<'de, D: serde::Deserializer<'de>>(
 }
 impl ExtensionToolBinding {
     pub fn validate(&self) -> Result<()> {
+        self.composition.validate_root(
+            &self.extension_id,
+            &self.extension_version,
+            &self.artifact_integrity,
+            &self.provider_key,
+            &self.service_id,
+            self.service_version,
+        )?;
         if [
             &self.provider_key,
             &self.extension_id,
@@ -771,7 +792,7 @@ impl Catalog {
                 let intent = LaunchMetadata {
                     dispatch_context_ref: None,
                     policy_generation: 0,
-                    policy_target: super::policy_switch::PolicyTarget::Default,
+                    policy_target: super::policy_switch::PolicyTargetMetadata::Default,
                     preparation_failure: None,
                     run_id: run_id.into(),
                     revision: 1,
@@ -907,7 +928,7 @@ pub(super) fn policy_preparable(
         || run.state.terminal()
         || launch.bound_epoch.is_some()
         || launch.policy_generation != 0
-        || launch.policy_target != super::policy_switch::PolicyTarget::Default
+        || launch.policy_target != super::policy_switch::PolicyTargetMetadata::Default
         || !launch.selection.policy_models.is_empty()
     {
         return Ok(false);

@@ -57,13 +57,13 @@ for (const mode of ['brokered', 'native'] as const) {
     const h = await fixture(mode);
     try {
       const providerId = h.runtime.services.getSnapshot().providers[0]!.providerId;
-      const pending = h.invoke('wait', providerId); const rejected = assert.rejects(pending, /not granted/);
+      const pending = h.invoke('wait', providerId); const rejected = assert.rejects(pending, /not granted|revoked|cancel|exited|terminated/);
       await h.entered.promise;
       await h.revoke();
       h.release.resolve(); await rejected;
-      await assert.rejects(h.invoke('read', providerId), /not granted/);
+      await assert.rejects(h.invoke('read', providerId), /not granted|unavailable|revoked/);
       assert.equal(h.privilegedCalls(), 1, 'no privileged handler entered after the initial activation');
-      assert.ok(h.runtime.supervisor.activeExtensions().includes(id), 'old implementation remains live');
+      assert.equal(h.runtime.services.getSnapshot().providers.some(provider => provider.providerId === providerId && provider.status === 'active'), false, 'revoked exact instance cannot admit new work');
     } finally { await h.cleanup(); }
   });
 }
@@ -85,7 +85,7 @@ test('revocation reaches a real draining callback from the previous selected ver
     h.release.resolve();
     const result = await pending;
     await Promise.all([selecting, revoking]);
-    assert.match(result.error, /not granted/);
+    assert.match(result.error, /not granted|revoked|cancel|exited|terminated/);
     assert.ok(h.privilegedCalls() >= 2);
   } finally { await h.cleanup(); }
 });
@@ -119,7 +119,7 @@ test(`${stopMode} revokes a retired exchange pin without waiting for that pin to
     const candidate = staged.extensions.find(e => e.manifest.id === id)!.candidate!;
     const requested = await h.runtime.requestCandidateApplication({ extensionId: id, candidateIntegrity: candidate.integrity, expectedRevision: staged.revision });
     const binding = await h.runtime.prepareService({ serviceId, version: 1, method: 'version', args: [] });
-    const pin = binding.pin(); releasePin = () => pin.release();
+    const pin = binding.pin(); releasePin = () => { pin.release(); binding.release(); };
     const selecting = h.runtime.selectCandidate({ extensionId: id, candidateIntegrity: candidate.integrity, expectedRevision: requested.revision });
     while (!h.runtime.services.getSnapshot().providers.some(p => p.extensionVersion === '2.0.0' && p.status === 'active')) await new Promise(r => setTimeout(r, 5));
     assert.equal(await pin.invoke('version', []), '1.0.0', 'ordinary replacement preserves frozen exchange');
@@ -153,9 +153,9 @@ for (const mode of ['brokered', 'native'] as const) {
   test(`${mode}: revocation still reaches a retiring transport while its async disposer runs`, { timeout: 30_000 }, async () => {
     const h = await fixture(mode, true);
     try {
-      const disabling = h.runtime.setEnabled(id, false, (await h.runtime.catalog.snapshot()).revision);
+      const disabling = h.runtime.setEnabled(id, false, (await h.runtime.catalog.snapshot()).revision).then(() => undefined, error => error);
       await h.disposalEntered();
-      const revoking = h.revoke();
+      const revoking = h.revoke().then(() => undefined, error => error);
       while ((await h.runtime.catalog.snapshot()).extensions.find(e => e.manifest.id === id)!.capabilityGrants.find(g => g.capability === protectedCapability)!.granted) await new Promise(r => setTimeout(r, 5));
       await new Promise(r => setTimeout(r, 30));
       await h.releaseDisposal(); await Promise.allSettled([disabling, revoking]);
@@ -188,13 +188,14 @@ test('new published generation prepares while the previous exchange remains pinn
     const staged = await h.runtime.installOrStage({ source: await h.source('2.0.0'), expectedRevision: (await h.runtime.catalog.snapshot()).revision });
     const candidate = staged.extensions.find(e => e.manifest.id === id)!.candidate!;
     const requested = await h.runtime.requestCandidateApplication({ extensionId: id, candidateIntegrity: candidate.integrity, expectedRevision: staged.revision });
-    const pin = (await h.runtime.prepareService({ serviceId, version: 1, method: 'version', args: [] })).pin(); releasePin = () => pin.release();
+    const selected = await h.runtime.prepareService({ serviceId, version: 1, method: 'version', args: [] });
+    const pin = selected.pin(); selected.release(); releasePin = () => pin.release();
     const selecting = h.runtime.selectCandidate({ extensionId: id, candidateIntegrity: candidate.integrity, expectedRevision: requested.revision });
     while (!h.runtime.services.getSnapshot().providers.some(p => p.extensionVersion === '2.0.0' && p.status === 'active')) await new Promise(r => setTimeout(r, 5));
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const bound = await Promise.race([h.runtime.prepareService({ serviceId, version: 1, method: 'version', args: [] }), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('new generation blocked by old pin')), 1500); })]);
-      assert.equal(await bound.invoke('version', []), '2.0.0');
+      try { assert.equal(await bound.invoke('version', []), '2.0.0'); } finally { bound.release(); }
       assert.equal(await pin.invoke('version', []), '1.0.0');
     } finally { clearTimeout(timer); pin.release(); await selecting; }
   } finally { releasePin?.(); await h.cleanup(); }

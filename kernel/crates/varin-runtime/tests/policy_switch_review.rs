@@ -1,10 +1,12 @@
-//! Real Catalog cuts and Engine recovery; no Host IPC, paid model, or synthetic activation action.
+#[path = "fixtures/service_composition.rs"]
+mod service_composition;
+// Real Catalog cuts and Engine recovery; no Host IPC, paid model, or synthetic activation action.
 #[path = "fixtures/content_collection.rs"]
 mod content_collection;
 #[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use varin_runtime::{
     catalog::{inputs::EnqueueInput, launches::LaunchSelection, policy_switch::*},
@@ -14,12 +16,17 @@ use varin_runtime::{
 fn target(version: &str) -> PolicyTarget {
     PolicyTarget::Extension {
         artifact: AgentPolicyArtifactBinding {
-            provider_key: "fixture:policy".into(),
+            provider_key: "fixture:host:varin.agent.policy@4".into(),
             extension_id: "fixture".into(),
             extension_version: version.into(),
             service_id: "varin.agent.policy".into(),
             service_version: 4,
             artifact_integrity: format!("artifact-{version}"),
+            composition: service_composition::graph(
+                "fixture",
+                version,
+                &format!("artifact-{version}"),
+            ),
             configuration_identity: "configuration".into(),
             declared_identity: PolicyIdentity {
                 name: "strategy".into(),
@@ -110,10 +117,10 @@ impl Fixture {
     }
     fn ready(&mut self, id: &str, mode: PolicyStateMode) -> PolicySelection {
         let run = self.run.clone();
-        let selected = self.db().policy_selections(&run).unwrap();
+        let selected = self.db().policy_selections(&run).unwrap().load().unwrap();
         let selection = self
             .db()
-            .select_policy(
+            .prepare_policy_selection(
                 &run,
                 id,
                 selected.active.generation,
@@ -121,6 +128,13 @@ impl Fixture {
                 target(id),
                 mode,
             )
+            .unwrap();
+        let prepared = selection.store().unwrap();
+        let selection = self
+            .db()
+            .publish_policy_selection(prepared)
+            .unwrap()
+            .load()
             .unwrap();
         let prep = self
             .db()
@@ -134,7 +148,11 @@ impl Fixture {
             .unwrap()
             .load()
             .unwrap();
-        self.db().publish_policy_ready(prep).unwrap()
+        self.db()
+            .publish_policy_ready(prep)
+            .unwrap()
+            .load()
+            .unwrap()
     }
     fn control(&mut self, action: PolicyAction, state: Value) -> PolicyControlReceipt {
         let run = self.run.clone();
@@ -297,27 +315,24 @@ fn resumed_cut_survives_activation_then_pending_decision_crash_and_gc() {
     };
     let selection = f.ready("new", PolicyStateMode::RestartState);
     let epoch = f.db().epoch();
-    assert!(
-        f.db()
-            .capture_policy_activation(&run, epoch, &selection.selection_id, selection.generation)
-            .unwrap()
-            .is_none()
-    );
+    assert!(f
+        .db()
+        .capture_policy_activation(&run, epoch, &selection.selection_id, selection.generation)
+        .unwrap()
+        .is_none());
     f.enqueue("new actual instruction");
-    assert!(
-        f.db()
-            .capture_policy_activation(&run, epoch, &selection.selection_id, selection.generation)
-            .unwrap()
-            .is_none()
-    );
+    assert!(f
+        .db()
+        .capture_policy_activation(&run, epoch, &selection.selection_id, selection.generation)
+        .unwrap()
+        .is_none());
     let resume = f.db().resume_policy_pause(&run, &wait_id, epoch).unwrap();
     assert_eq!(resume.action_id, action_id);
-    assert!(
-        f.db()
-            .capture_policy_activation(&run, epoch, &selection.selection_id, selection.generation)
-            .unwrap()
-            .is_none()
-    );
+    assert!(f
+        .db()
+        .capture_policy_activation(&run, epoch, &selection.selection_id, selection.generation)
+        .unwrap()
+        .is_none());
     let head = f.db().head("main").unwrap();
     f.db().consume_inputs(&run, epoch, head.as_deref()).unwrap();
     let event = PolicyEvent::Resumed {
@@ -331,7 +346,13 @@ fn resumed_cut_survives_activation_then_pending_decision_crash_and_gc() {
         .unwrap()
         .load(&Value::Null, &event)
         .unwrap();
-    let activated = f.db().activate_policy(prepared).unwrap().unwrap();
+    let activated = f
+        .db()
+        .activate_policy(prepared)
+        .unwrap()
+        .unwrap()
+        .load()
+        .unwrap();
     assert_eq!(activated.status, PolicySelectionStatus::Active);
     // No Host acknowledgment or in-memory swap is necessary for the committed choice to recover.
     let old_boundary = f.db().policy_boundary(&run, epoch).unwrap();
@@ -401,6 +422,8 @@ fn resumed_cut_survives_activation_then_pending_decision_crash_and_gc() {
             .unwrap()
             .policy_selections(&run)
             .unwrap()
+            .load()
+            .unwrap()
             .active
             .generation,
         selection.generation
@@ -426,16 +449,15 @@ fn pending_decision_input_and_superseded_candidates_cannot_be_overwritten() {
         )
         .unwrap();
     let a = f.ready("a", PolicyStateMode::RestartState);
-    assert!(
-        f.db()
-            .capture_policy_activation(&run, epoch, "a", a.generation)
-            .unwrap()
-            .is_none()
-    );
+    assert!(f
+        .db()
+        .capture_policy_activation(&run, epoch, "a", a.generation)
+        .unwrap()
+        .is_none());
     let b = f.ready("b", PolicyStateMode::Preserve);
     let retry = f
         .db()
-        .select_policy(
+        .prepare_policy_selection(
             &run,
             "a",
             0,
@@ -444,38 +466,59 @@ fn pending_decision_input_and_superseded_candidates_cannot_be_overwritten() {
             PolicyStateMode::RestartState,
         )
         .unwrap();
+    let retry = f
+        .db()
+        .publish_policy_selection(retry.store().unwrap())
+        .unwrap()
+        .load()
+        .unwrap();
     assert_eq!(retry.status, PolicySelectionStatus::Superseded);
     assert_eq!(
         f.db()
             .policy_selections(&run)
+            .unwrap()
+            .load()
             .unwrap()
             .desired
             .unwrap()
             .selection_id,
         "b"
     );
-    assert!(
-        f.db()
-            .select_policy(
-                &run,
-                "stale",
-                0,
-                Some("a".into()),
-                target("stale"),
-                PolicyStateMode::RestartState
-            )
-            .is_err()
-    );
+    let stale = f
+        .db()
+        .prepare_policy_selection(
+            &run,
+            "stale",
+            0,
+            Some("a".into()),
+            target("stale"),
+            PolicyStateMode::RestartState,
+        )
+        .unwrap()
+        .store()
+        .unwrap();
+    assert!(f.db().publish_policy_selection(stale).is_err());
     f.db()
         .fail_policy_selection(&run, "b", "policy_state_incompatible")
         .unwrap();
-    assert_eq!(f.db().policy_selections(&run).unwrap().active.identity, old);
+    assert_eq!(
+        f.db()
+            .policy_selections(&run)
+            .unwrap()
+            .load()
+            .unwrap()
+            .active
+            .identity,
+        old
+    );
     let c = f.ready("c", PolicyStateMode::Preserve);
     assert!(c.generation > b.generation);
     f.reopen();
     assert_eq!(
         f.db()
             .policy_selection(&run, "c")
+            .unwrap()
+            .load()
             .unwrap()
             .failure
             .as_deref(),
@@ -506,7 +549,16 @@ fn staged_activation_rechecks_input_cancellation_and_latest_selection() {
         .unwrap();
     f.enqueue("wins before activation");
     assert!(f.db().activate_policy(prepared).unwrap().is_none());
-    assert_eq!(f.db().policy_selections(&run).unwrap().active.generation, 0);
+    assert_eq!(
+        f.db()
+            .policy_selections(&run)
+            .unwrap()
+            .load()
+            .unwrap()
+            .active
+            .generation,
+        0
+    );
     let head = f.db().head("main").unwrap();
     let delivered = f.db().consume_inputs(&run, epoch, head.as_deref()).unwrap();
     let event = PolicyEvent::InputDelivered {
@@ -536,7 +588,16 @@ fn staged_activation_rechecks_input_cancellation_and_latest_selection() {
         .unwrap();
     f.db().cancel_policy_selection(&run, "b").unwrap();
     assert!(f.db().activate_policy(prepared).unwrap().is_none());
-    assert_eq!(f.db().policy_selections(&run).unwrap().active.generation, 0);
+    assert_eq!(
+        f.db()
+            .policy_selections(&run)
+            .unwrap()
+            .load()
+            .unwrap()
+            .active
+            .generation,
+        0
+    );
 }
 
 struct InputWinsCompletion {
@@ -753,6 +814,8 @@ fn input_winning_pending_completion_preserves_committed_activation_live_and_afte
                     .unwrap()
                     .policy_selections(&run)
                     .unwrap()
+                    .load()
+                    .unwrap()
                     .active
                     .generation,
                 selected.generation
@@ -761,4 +824,157 @@ fn input_winning_pending_completion_preserves_committed_activation_live_and_afte
             drop(db);
         }
     }
+}
+
+#[test]
+fn large_frozen_policy_graph_uses_body_workers_and_survives_candidate_and_launch_gc_roots() {
+    use std::{sync::mpsc, time::Duration};
+    use varin_runtime::catalog::service_composition::{
+        HostCompositionDependency, HostCompositionProvider,
+    };
+    let mut f = Fixture::new();
+    let run = f.run.clone();
+    let mut full = target("large");
+    let PolicyTarget::Extension { artifact } = &mut full else {
+        unreachable!()
+    };
+    let mut providers = Vec::new();
+    // This is a control/body isolation witness, not a graph size limit.
+    for index in 0..4096 {
+        let mut child = service_composition::graph(
+            &format!("dependency-{index}"),
+            "1",
+            &format!("artifact-{index}"),
+        );
+        providers.push(HostCompositionProvider {
+            node_id: child.root.clone(),
+            provider_key: format!("dependency-{index}:host:example.dependency@1"),
+        });
+        artifact.composition.nodes.append(&mut child.nodes);
+    }
+    let root = &mut artifact.composition.nodes[0];
+    root.dependencies.push(HostCompositionDependency {
+        id: "example.dependency".into(),
+        version: 1,
+        binding: "all".into(),
+        optional: false,
+        providers,
+    });
+    root.id = root.content_identity().unwrap();
+    artifact.composition.root = root.id.clone();
+    full.validate().unwrap();
+    assert!(serde_json::to_vec(&full).unwrap().len() > 1_000_000);
+    let expected = full.clone();
+    let db = Arc::new(Mutex::new(f.db.take().unwrap()));
+    let preparation = db
+        .lock()
+        .unwrap()
+        .prepare_policy_selection(&run, "large", 0, None, full, PolicyStateMode::RestartState)
+        .unwrap();
+    let (send, receive) = mpsc::channel();
+    let control = db.lock().unwrap();
+    let writer = std::thread::spawn(move || {
+        send.send(preparation.store().unwrap()).unwrap();
+    });
+    let stored = receive
+        .recv_timeout(Duration::from_secs(20))
+        .expect("body worker cannot depend on the occupied Catalog lock");
+    drop(control);
+    writer.join().unwrap();
+    // The original publication guard protects newly written bodies before the short publish.
+    content_collection::collect(|| {
+        db.lock()
+            .unwrap()
+            .prepare_content_collection(Default::default())
+    })
+    .unwrap();
+    let read = db.lock().unwrap().publish_policy_selection(stored).unwrap();
+    let metadata = serde_json::to_value(&read.metadata).unwrap();
+    assert!(metadata["target"]["body"]["content_object"].is_string());
+    assert!(metadata["target"].get("artifact").is_none());
+    assert!(serde_json::to_vec(&metadata).unwrap().len() < 4_096);
+    let (send, receive) = mpsc::channel();
+    let control = db.lock().unwrap();
+    let reader = std::thread::spawn(move || {
+        send.send(read.load().unwrap()).unwrap();
+    });
+    let selection = receive
+        .recv_timeout(Duration::from_secs(20))
+        .expect("graph hydration cannot depend on the occupied Catalog lock");
+    drop(control);
+    reader.join().unwrap();
+    assert_eq!(selection.target, expected);
+    let ready = db
+        .lock()
+        .unwrap()
+        .prepare_policy_ready(
+            &run,
+            "large",
+            selection.generation,
+            expected.identity(),
+            vec![],
+        )
+        .unwrap();
+    let ready = ready.load().unwrap();
+    db.lock().unwrap().publish_policy_ready(ready).unwrap();
+    let epoch = db.lock().unwrap().epoch();
+    let activation = db
+        .lock()
+        .unwrap()
+        .capture_policy_activation(&run, epoch, "large", selection.generation)
+        .unwrap()
+        .unwrap();
+    let activation = activation
+        .load(&Value::Null, &PolicyEvent::Started)
+        .unwrap();
+    db.lock()
+        .unwrap()
+        .activate_policy(activation)
+        .unwrap()
+        .unwrap();
+    let next = db
+        .lock()
+        .unwrap()
+        .prepare_policy_selection(
+            &run,
+            "pending",
+            selection.generation,
+            Some("large".into()),
+            target("pending"),
+            PolicyStateMode::Preserve,
+        )
+        .unwrap();
+    let next = next.store().unwrap();
+    db.lock().unwrap().publish_policy_selection(next).unwrap();
+    content_collection::collect(|| {
+        db.lock()
+            .unwrap()
+            .prepare_content_collection(Default::default())
+    })
+    .unwrap();
+    f.db = Some(Arc::try_unwrap(db).ok().unwrap().into_inner().unwrap());
+    f.reopen();
+    content_collection::collect(|| f.db().prepare_content_collection(Default::default())).unwrap();
+    let retained = f.db().policy_selections(&run).unwrap().load().unwrap();
+    assert_eq!(retained.active.target, expected);
+    assert_eq!(retained.desired.unwrap().target, target("pending"));
+    assert_eq!(
+        f.db()
+            .policy_selection(&run, "large")
+            .unwrap()
+            .load()
+            .unwrap()
+            .target,
+        expected
+    );
+    assert_eq!(
+        f.db()
+            .capture_launch(&run)
+            .unwrap()
+            .unwrap()
+            .load()
+            .unwrap()
+            .policy_target,
+        expected
+    );
 }

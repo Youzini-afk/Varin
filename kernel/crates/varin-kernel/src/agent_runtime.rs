@@ -223,7 +223,9 @@ pub(crate) enum Command {
 }
 pub(crate) fn domain(error: varin_runtime::RuntimeError) -> KernelError {
     match error {
-        varin_runtime::RuntimeError::ContextJobAlreadyAdmitted => KernelError::ContextJobAlreadyAdmitted,
+        varin_runtime::RuntimeError::ContextJobAlreadyAdmitted => {
+            KernelError::ContextJobAlreadyAdmitted
+        }
         varin_runtime::RuntimeError::DispatchCancelled => KernelError::Cancelled,
         varin_runtime::RuntimeError::RequestActivationHeld => {
             KernelError::ActivationHeld("original ingress is held by its current owner".into())
@@ -1985,23 +1987,43 @@ pub(crate) fn spawn(
                         }
                         if method == "runtime.tools.inspect" {
                             let p: NestedToolInspectParams = serde_json::from_value(params)?;
-                            let registry = runtime.catalog().lock()
-                                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?.nested_tools();
+                            let registry = runtime
+                                .catalog()
+                                .lock()
+                                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                                .nested_tools();
                             let response_id = id.clone();
                             let response_sender = responses.clone();
                             let done = finished.clone();
                             // The original read pool also keeps large schemas off Agent/control admission.
-                            content_tasks.send(Box::new(move || {
-                                let result = registry.inspect(&p.parent_operation_id, &p.executor_owner, p.name.as_deref())
-                                    .map_err(|error| KernelError::Operation(format!("{}: {}", error.code, error.message)))
-                                    .and_then(|inspection| serde_json::to_value(inspection).map_err(KernelError::from));
-                                let response = match result {
-                                    Ok(value) => response_ok(&response_id, value),
-                                    Err(error) => response_error(&response_id, &error),
-                                };
-                                done(&response_id);
-                                let _ = response_sender.send(response);
-                            })).map_err(|_| KernelError::Storage("content reader unavailable".into()))?;
+                            content_tasks
+                                .send(Box::new(move || {
+                                    let result = registry
+                                        .inspect(
+                                            &p.parent_operation_id,
+                                            &p.executor_owner,
+                                            p.name.as_deref(),
+                                        )
+                                        .map_err(|error| {
+                                            KernelError::Operation(format!(
+                                                "{}: {}",
+                                                error.code, error.message
+                                            ))
+                                        })
+                                        .and_then(|inspection| {
+                                            serde_json::to_value(inspection)
+                                                .map_err(KernelError::from)
+                                        });
+                                    let response = match result {
+                                        Ok(value) => response_ok(&response_id, value),
+                                        Err(error) => response_error(&response_id, &error),
+                                    };
+                                    done(&response_id);
+                                    let _ = response_sender.send(response);
+                                }))
+                                .map_err(|_| {
+                                    KernelError::Storage("content reader unavailable".into())
+                                })?;
                             deferred = true;
                             return Ok(Value::Null);
                         }
@@ -2261,6 +2283,7 @@ pub(crate) fn extension_binding(
             .try_into()
             .map_err(|_| KernelError::Protocol("negative service version".into()))?,
         artifact_integrity: binding.artifact_integrity,
+        composition: binding.composition,
         declaration_hash: binding.declaration_hash,
         configuration_identity: binding.configuration_identity.0,
         tool: tool_schema(binding.tool),
@@ -2708,7 +2731,7 @@ pub(crate) fn personalization_basis(
                 .context_composition
                 .map(|composition| {
                     use varin_runtime::composition::context::{
-                        ContextComposition, ContextTransform, ContextFragment, FragmentKind,
+                        ContextComposition, ContextFragment, ContextTransform, FragmentKind,
                     };
                     Ok::<_, KernelError>(ContextComposition {
                         scope_id: composition.scope_id,

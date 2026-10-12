@@ -7,8 +7,11 @@ import type { RuntimeContextTarget } from '@varin/protocol';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { getPiSettings } from '@/lib/pi-runtime/settings';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@varin/application-client';
+import { getResolvedWorkbenchWorkspaceId, subscribeWorkbenchWorkspace } from './workbench-workspace';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { varinSurfaceRuntime } from './surface-runtime';
+import { surfaceServiceRoutingContext } from './surface-routing-context';
 import { startBuiltinVarinExtensions } from './builtin-surface-manager';
 import { surfaceCapabilityRegistry } from './surface-capabilities';
 import { createMonacoExtensionExternalService } from '@/lib/monaco/extension-service';
@@ -24,23 +27,33 @@ let activeProjectTrusted = false;
 export const setVarinExtensionProjectTrust = (trusted: boolean): void => {
   if (activeProjectTrusted === trusted) return;
   activeProjectTrusted = trusted;
-  void surfaceExtensionLoader.reconcile();
+  reconcileSurfaceContext();
 };
 
 export const surfaceExtensionLoader = new SurfaceExtensionLoader({
-  accessContext: () => ({
-    access: varinSurfaceRuntime.surface === 'desktop'
-      || (typeof window !== 'undefined' && typeof window.__VARIN_LOCAL_ORIGIN__ === 'string')
-      ? 'local'
-      : 'remote',
-    projectTrusted: activeProjectTrusted,
-  }),
+  accessContext: (state) => {
+    const directory = useDirectoryStore.getState().currentDirectory;
+    const workspaceId = directory ? getResolvedWorkbenchWorkspaceId(directory) : undefined;
+    const sessionId = usePiSessionStore.getState().currentSessionId;
+    return {
+      access: varinSurfaceRuntime.surface === 'desktop'
+        || (typeof window !== 'undefined' && typeof window.__VARIN_LOCAL_ORIGIN__ === 'string') ? 'local' : 'remote',
+      projectTrusted: activeProjectTrusted,
+      routing: surfaceServiceRoutingContext({
+        surface: varinSurfaceRuntime.surface, runtimeId: getRuntimeKey(),
+        ...(state ? { snapshot: state } : {}), ...(sessionId ? { sessionId } : {}),
+        ...(directory ? { configurationDirectory: directory } : {}),
+        ...(workspaceId ? { documentWorkspaceId: workspaceId } : {}),
+      }),
+    };
+  },
   host: {
     activateExtension: (extensionId) => runtimeExtensions().activateExtension(extensionId),
     catalog: () => runtimeExtensions().catalog(),
     discardPreparedCandidate: (extensionId, candidateIntegrity) => runtimeExtensions().discardPreparedCandidate(extensionId, candidateIntegrity),
     hostState: () => runtimeExtensions().hostState(),
-    invokeService: (request) => runtimeExtensions().invokeService(request),
+    invokeService: (request, signal) => runtimeExtensions().invokeService(request, signal),
+    watchServiceLease: (request, onEvent, signal) => runtimeExtensions().watchServiceLease(request, onEvent, signal),
     prepareCandidate: (extensionId, candidateIntegrity, signal) => runtimeExtensions().prepareCandidate(extensionId, candidateIntegrity, signal),
     requestCandidateApplication: (request) => runtimeExtensions().requestCandidateApplication(request),
     readAsset: (request) => runtimeExtensions().readAsset(request),
@@ -58,11 +71,19 @@ export const surfaceExtensionLoader = new SurfaceExtensionLoader({
           version: VARIN_EDITOR_MONACO_SERVICE_VERSION,
         },
         providerId: 'varin.builtin.text',
+        providerKey: `varin.builtin.text:surface:${VARIN_EDITOR_MONACO_SERVICE_ID}@${VARIN_EDITOR_MONACO_SERVICE_VERSION}`,
       }]
     : [],
   surface: varinSurfaceRuntime.surface,
   surfaceRuntime: varinSurfaceRuntime,
 });
+
+function reconcileSurfaceContext(): void {
+  if (!getRegisteredRuntimeAPIs()?.extensions) return;
+  void surfaceExtensionLoader.reconcile().catch((error) => {
+    console.error('[Varin Extensions] Surface context reconciliation failed:', error);
+  });
+}
 
 let trustOwnerKey = '';
 let trustGeneration = 0;
@@ -82,6 +103,7 @@ const refreshProjectTrustOwner = (): void => {
   trustOwnerKey = nextOwnerKey;
   const generation = ++trustGeneration;
   setVarinExtensionProjectTrust(false);
+  reconcileSurfaceContext();
   if (!target) return;
   void surfaceExtensionLoader.triggerActivation('workspace-match').catch((error) => {
     console.error('[Varin Extensions] Workspace Surface activation failed:', error);
@@ -100,6 +122,10 @@ usePiSessionStore.subscribe((state, previous) => {
     refreshProjectTrustOwner();
   }
 });
+useDirectoryStore.subscribe((state, previous) => {
+  if (state.currentDirectory !== previous.currentDirectory) reconcileSurfaceContext();
+});
+subscribeWorkbenchWorkspace(reconcileSurfaceContext);
 subscribeRuntimeEndpointChanged(refreshProjectTrustOwner);
 refreshProjectTrustOwner();
 

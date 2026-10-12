@@ -167,7 +167,7 @@ describe('Varin extension recovery routes', () => {
         hostId: snapshot().hostId,
         storageState: 'missing',
       },
-      services: { hostId: snapshot().hostId, providers: [], revision: 2, selections: {} },
+      services: { hostId: snapshot().hostId, providers: [], revision: 2 },
       workbench: {
         authoritative: true,
         diagnostics: [],

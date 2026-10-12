@@ -90,7 +90,7 @@ test("consumer-owned external services clean up failed, replaced, and disabled o
   await runtime.activate({
     externalServices: [external("first")],
     owner: owner("dev.example.alpha", 1, 1),
-    requirements: [{ id: "varin.editor.monaco", optional: true, version: 1 }],
+    requirements: [{ realms: ["surface"], id: "varin.editor.monaco", optional: true, version: 1 }],
   }, (context) => {
     assert.ok(context.useService("varin.editor.monaco", 1));
     context.contribute(page("dev.example.alpha.settings"), { version: 1 });
@@ -98,7 +98,7 @@ test("consumer-owned external services clean up failed, replaced, and disabled o
   await assert.rejects(() => runtime.activate({
     externalServices: [external("failed")],
     owner: owner("dev.example.alpha", 2, 2),
-    requirements: [{ id: "varin.editor.monaco", optional: true, version: 1 }],
+    requirements: [{ realms: ["surface"], id: "varin.editor.monaco", optional: true, version: 1 }],
   }, () => { throw new Error("failed update"); }), /failed update/);
   assert.deepEqual(cleanup, ["failed"]);
   assert.equal((runtime.getSnapshot().visibleContributions[0]?.implementation as { version: number }).version, 1);
@@ -106,7 +106,7 @@ test("consumer-owned external services clean up failed, replaced, and disabled o
   await runtime.activate({
     externalServices: [external("second")],
     owner: owner("dev.example.alpha", 3, 3),
-    requirements: [{ id: "varin.editor.monaco", optional: true, version: 1 }],
+    requirements: [{ realms: ["surface"], id: "varin.editor.monaco", optional: true, version: 1 }],
   }, (context) => context.contribute(page("dev.example.alpha.settings"), { version: 3 }));
   assert.deepEqual(cleanup, ["failed", "first"]);
   await runtime.deactivate(owner("dev.example.alpha", 4, 4));
@@ -117,7 +117,7 @@ test("a missing optional external service does not block activation", async () =
   const runtime = new SurfaceExtensionRuntime({ surface: "web" });
   await runtime.activate({
     owner: owner("dev.example.alpha", 1, 1),
-    requirements: [{ id: "varin.editor.monaco", optional: true, version: 1 }],
+    requirements: [{ realms: ["surface"], id: "varin.editor.monaco", optional: true, version: 1 }],
   }, (context) => {
     assert.equal(context.useService("varin.editor.monaco", 1), undefined);
     context.contribute(page("dev.example.alpha.settings"), { active: true });
@@ -267,8 +267,7 @@ test("multiple service providers require an explicit single-provider selection",
 
   assert.equal(runtime.getService("dev.example.shared", 1), undefined);
   assert.deepEqual(runtime.getServices("dev.example.shared", 1), ["alpha", "beta"]);
-  runtime.setServiceSelection("dev.example.shared", 1, "dev.example.beta");
-  assert.equal(runtime.getService("dev.example.shared", 1), "beta");
+
 });
 
 test("selected service binding resolves exactly the configured provider", async () => {
@@ -279,10 +278,10 @@ test("selected service binding resolves exactly the configured provider", async 
   await runtime.activate({ owner: owner("dev.example.beta", 1, 1) }, (context) => {
     context.provide({ id: "dev.example.shared", multiple: true, version: 1 }, "beta");
   });
-  runtime.setServiceSelection("dev.example.shared", 1, "dev.example.beta");
   await runtime.activate({
     owner: owner("dev.example.consumer", 1, 1),
-    requirements: [{ binding: "selected", id: "dev.example.shared", version: 1 }],
+    exactProviderIds: { "dev.example.shared@1": runtime.getSnapshot().services.filter(service => service.owner.extensionId === "dev.example.beta").map(service => service.providerId) },
+    requirements: [{ realms: ["surface"], binding: "selected", id: "dev.example.shared", version: 1 }],
   }, (context) => {
     assert.equal(context.useService("dev.example.shared", 1), "beta");
     assert.deepEqual(context.useServices("dev.example.shared", 1), ["beta"]);
@@ -299,13 +298,13 @@ test("selected external binding rejects an absent selection and exposes only the
   await assert.rejects(() => runtime.activate({
     externalServices,
     owner: owner("dev.example.consumer", 1, 1),
-    requirements: [{ binding: "selected", id: "dev.example.shared", version: 1 }],
+    requirements: [{ realms: ["surface"], binding: "selected", id: "dev.example.shared", version: 1 }],
   }, () => undefined), /Selected Surface service provider is unavailable/);
   await runtime.activate({
     externalServices,
     owner: owner("dev.example.consumer", 2, 2),
-    requirements: [{ binding: "selected", id: "dev.example.shared", version: 1 }],
-    serviceSelections: { "dev.example.shared@1": "host-b" },
+    requirements: [{ realms: ["surface"], binding: "selected", id: "dev.example.shared", version: 1 }],
+    exactProviderIds: { "dev.example.shared@1": ["host-b"] },
   }, (context) => {
     assert.equal(context.useService("dev.example.shared", 1), "host-b");
     assert.deepEqual(context.useServices("dev.example.shared", 1), ["host-b"]);
@@ -325,12 +324,12 @@ test("single and all service bindings use the same complete provider set", async
   await assert.rejects(() => runtime.activate({
     externalServices: [external],
     owner: owner("dev.example.single-consumer", 1, 1),
-    requirements: [{ binding: "single", id: "dev.example.shared", version: 1 }],
+    requirements: [{ realms: ["surface"], binding: "single", id: "dev.example.shared", version: 1 }],
   }, () => undefined), /ambiguous/);
   await runtime.activate({
     externalServices: [external],
     owner: owner("dev.example.all-consumer", 1, 1),
-    requirements: [{ binding: "all", id: "dev.example.shared", version: 1 }],
+    requirements: [{ realms: ["surface"], binding: "all", id: "dev.example.shared", version: 1 }],
   }, (context) => {
     assert.deepEqual(context.useServices("dev.example.shared", 1), ["local", "external"]);
     assert.equal(context.useService("dev.example.shared", 1), undefined);
@@ -338,7 +337,7 @@ test("single and all service bindings use the same complete provider set", async
   await assert.rejects(() => runtime.activate({
     externalServices: [external],
     owner: owner("dev.example.version-consumer", 1, 1),
-    requirements: [{ binding: "single", id: "dev.example.shared", version: 2 }],
+    requirements: [{ realms: ["surface"], binding: "single", id: "dev.example.shared", version: 2 }],
   }, () => undefined), /unavailable/);
 });
 
@@ -352,7 +351,7 @@ test("required-service withdrawal tears down dependents before their provider", 
   });
   await runtime.activate({
     owner: owner("dev.example.consumer", 1, 1),
-    requirements: [{ id: "dev.example.required", version: 1 }],
+    requirements: [{ realms: ["surface"], id: "dev.example.required", version: 1 }],
   }, (context) => {
     assert.equal(context.useService<{ read(): string }>("dev.example.required", 1)?.read(), "ok");
     context.contribute(page("dev.example.consumer.page"), "consumer");
@@ -630,7 +629,7 @@ test("a declared local service generation is rechecked after candidate preparati
   const prepared = new Promise<void>((resolve) => { entered = resolve; });
   let committed = false;
   const consumer = runtime.activateWithCommit({
-    owner: owner("dev.example.consumer", 1, 1), requirements: [{ id: "dev.example.required", version: 1 }],
+    owner: owner("dev.example.consumer", 1, 1), requirements: [{ realms: ["surface"], id: "dev.example.required", version: 1 }],
   }, async (context) => {
     assert.equal(context.useService<{ version: number }>("dev.example.required", 1)?.version, 1);
     entered(); await gate;
@@ -642,4 +641,79 @@ test("a declared local service generation is rechecked after candidate preparati
   });
   release(); await rejected;
   assert.equal(committed, false);
+});
+
+test("frozen local clients retain their provider generation until consumer exit and admitted call drain", async () => {
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  const retired: string[] = [];
+  let finish!: () => void;
+  const gate = new Promise<void>(resolve => { finish = resolve; });
+  const service = { id: "dev.example.retained", version: 1 };
+  await runtime.activate({ owner: owner("dev.example.provider", 1, 1) }, context => {
+    context.provide(service, { version: 1, async read() { await gate; return "old"; } });
+    context.onDispose(() => { retired.push("old"); });
+  });
+  let frozen!: { version: number; read(): Promise<string> };
+  let useAgain!: () => typeof frozen | undefined;
+  const consumer = await runtime.activate({ owner: owner("dev.example.consumer", 1, 1), requirements: [{ ...service, realms: ["surface"] }] }, context => {
+    frozen = context.useService<typeof frozen>(service.id, 1)!;
+    useAgain = () => context.useService<typeof frozen>(service.id, 1);
+  });
+  await runtime.activate({ owner: owner("dev.example.provider", 2, 2) }, context => {
+    context.provide(service, { version: 2, read: async () => "new" });
+  });
+  const unrelated = await runtime.activate({ owner: owner("dev.example.unrelated", 1, 1) }, () => undefined);
+  await unrelated.deactivate(2, 2);
+  assert.equal(frozen.version, 1);
+  assert.equal(useAgain(), frozen);
+  assert.deepEqual(retired, []);
+  const pending = frozen.read();
+  await consumer.deactivate(2, 2);
+  assert.deepEqual(retired, []);
+  assert.throws(() => frozen.read(), /inactive/);
+  finish();
+  assert.equal(await pending, "old");
+  assert.deepEqual(retired, ["old"]);
+});
+
+test("owner retirement closes its external lifetime before a factory call drains", async () => {
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  const events: string[] = [];
+  let finish!: () => void;
+  const gate = new Promise<void>(resolve => { finish = resolve; });
+  const descriptor = { id: "dev.example.local", version: 1 };
+  let read!: () => Promise<string>;
+  const handle = await runtime.activate({ owner: owner("dev.example.consumer", 1, 1), requirements: [{ ...descriptor, realms: ["surface"] }],
+    onRetire: () => { events.push("stream-closed"); },
+    externalServices: [{ descriptor, providerId: "local-owner", implementation: { async read() { await gate; return "finished"; } },
+      dispose: () => { events.push("factory-disposed"); } }],
+  }, context => { read = context.useService<{ read(): Promise<string> }>(descriptor.id, 1)!.read; });
+  const pending = read();
+  await handle.deactivate(2, 2);
+  assert.deepEqual(events, ["stream-closed"]);
+  assert.throws(read, /inactive/);
+  finish();
+  assert.equal(await pending, "finished");
+  assert.deepEqual(events, ["stream-closed", "factory-disposed"]);
+});
+
+
+test("withdrawing an optional bound local provider retires its consumer instead of keeping a callable disabled owner", async () => {
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  const descriptor = { id: "dev.example.optional", version: 1 };
+  const disposed: string[] = [];
+  const provider = await runtime.activate({ owner: owner("dev.example.provider", 1, 1) }, context => {
+    context.provide(descriptor, { read: () => "alive" });
+    context.onDispose(() => { disposed.push("provider"); });
+  });
+  let read!: () => string;
+  await runtime.activate({ owner: owner("dev.example.consumer", 1, 1),
+    requirements: [{ ...descriptor, optional: true, realms: ["surface"] }],
+  }, context => {
+    read = context.useService<{ read(): string }>(descriptor.id, 1)!.read;
+    context.onDispose(() => { disposed.push("consumer"); });
+  });
+  await provider.deactivate(2, 2);
+  assert.throws(read, /inactive/);
+  assert.deepEqual(disposed, ["consumer", "provider"]);
 });

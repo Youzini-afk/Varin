@@ -12,7 +12,7 @@ const input = (completion: JsonValue): JsonValue => ({
 
 test('registered v4 policy gets immutable typed completions and passes only result references to inference', async () => {
   let calls = 0;
-  const result = await runHostExtensionConformance({ extensionId: 'review.policy-contract', activation: async context => {
+  const result = await runHostExtensionConformance({ dependencies: [], extensionId: 'review.policy-contract', activation: async context => {
     let handler!: VarinHostServiceHandler;
     const provide = context.services.provide;
     context.services.provide = (descriptor, implementation) => { handler = implementation; provide(descriptor, implementation); };
@@ -47,7 +47,7 @@ test('registered v4 policy gets immutable typed completions and passes only resu
 });
 
 test('cancellation after an awaited policy decision discards its returned graph', async () => {
-  await runHostExtensionConformance({ extensionId: 'review.policy-cancel', activation: async context => {
+  await runHostExtensionConformance({ dependencies: [], extensionId: 'review.policy-cancel', activation: async context => {
     let handler!: VarinHostServiceHandler;
     const provide = context.services.provide;
     context.services.provide = (descriptor, implementation) => { handler = implementation; provide(descriptor, implementation); };
@@ -60,7 +60,7 @@ test('cancellation after an awaited policy decision discards its returned graph'
 });
 
 test('state transition is explicit, immutable and independently cancellable', async () => {
-  await runHostExtensionConformance({ extensionId: 'review.policy-transition', activation: async context => {
+  await runHostExtensionConformance({ dependencies: [], extensionId: 'review.policy-transition', activation: async context => {
     let handler!: VarinHostServiceHandler;
     const provide = context.services.provide;
     context.services.provide = (descriptor, implementation) => { handler = implementation; provide(descriptor, implementation); };
@@ -88,7 +88,7 @@ test('state transition is explicit, immutable and independently cancellable', as
 });
 
 test('missing compatibility hook rejects even null source state', async () => {
-  await runHostExtensionConformance({ extensionId: 'review.policy-no-transition', activation: async context => {
+  await runHostExtensionConformance({ dependencies: [], extensionId: 'review.policy-no-transition', activation: async context => {
     let handler!: VarinHostServiceHandler;
     const provide = context.services.provide;
     context.services.provide = (descriptor, implementation) => { handler = implementation; provide(descriptor, implementation); };

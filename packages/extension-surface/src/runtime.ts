@@ -38,8 +38,31 @@ import type {
   SurfaceService,
 } from "./types.js";
 
+
+/** A frozen local handle keeps its owner alive through the consumer and every admitted call. */
+function retainServiceCalls(value: unknown, provider: SurfaceOwnerScope, consumer: SurfaceOwnerScope): unknown {
+  if ((typeof value !== "object" || value === null) && typeof value !== "function") return value;
+  return new Proxy(value as object, {
+    get(target, property) {
+      const member = Reflect.get(target, property);
+      if (typeof member !== "function") return member;
+      return (...args: unknown[]) => {
+        if (consumer.disposed) throw new Error("Surface service consumer is inactive");
+        const release = provider.retain();
+        try {
+          const result = Reflect.apply(member, target, args);
+          if (result && typeof (result as { then?: unknown }).then === "function") return Promise.resolve(result).finally(release);
+          void release();
+          return result;
+        } catch (error) { void release(); throw error; }
+      };
+    },
+  });
+}
+
 interface ActiveOwner {
   contributions: SurfaceContribution[];
+  boundLocalOwners: ReadonlySet<string>;
   contextLease: SurfaceContextWriterLease | null;
   diagnostics: VarinExtensionDiagnostic[];
   externalServices: SurfaceExternalService[];
@@ -47,14 +70,14 @@ interface ActiveOwner {
   requirements: VarinExtensionServiceRequirement[];
   preparedLocalBindings: string;
   scope: SurfaceOwnerScope;
-  serviceSelections: Readonly<Record<string, string>>;
+  exactProviderIds: Readonly<Record<string, readonly string[]>>;
   services: SurfaceService[];
 }
 
 interface ServiceConsumer {
   externalServices: readonly SurfaceExternalService[];
   requirements: readonly VarinExtensionServiceRequirement[];
-  serviceSelections: Readonly<Record<string, string>>;
+  exactProviderIds: Readonly<Record<string, readonly string[]>>;
 }
 
 interface ResolvedServiceCandidate {
@@ -135,7 +158,7 @@ function normalizeRequirements(
     engines: { varin: "*" },
     requires: { services: requirements },
   });
-  return parsed.requires?.services ?? [];
+  return parsed.requires?.services?.filter(requirement => requirement.realms.includes("surface")) ?? [];
 }
 
 function normalizeContribution(
@@ -280,14 +303,12 @@ export class SurfaceExtensionRuntime {
   readonly #publicationReservations = new Map<string, Promise<void>>();
   readonly #contributionConsumers = new Set<SurfaceContributionConsumer>();
   readonly #replacementSelections = new Map<string, string>();
-  readonly #serviceSelections = new Map<string, string>();
   #snapshot: SurfaceRegistrySnapshot = {
     actual: [],
     contributions: [],
     layoutReferences: [],
     replacementSelections: {},
     revision: 0,
-    serviceSelections: {},
     services: [],
     visibleContributions: [],
   };
@@ -371,19 +392,20 @@ export class SurfaceExtensionRuntime {
           const owner = request.options.owner;
           const key = ownerKey(owner);
           const scope = new SurfaceOwnerScope();
+          if (request.options.onRetire) scope.onRetire(request.options.onRetire);
           const stagedContributions: SurfaceContribution[] = [];
           const stagedDiagnostics: VarinExtensionDiagnostic[] = [];
           const stagedServices: SurfaceService[] = [];
           const granted = new Set(request.options.grantedCapabilities ?? []);
           const requirements = normalizeRequirements(owner, request.options.requirements ?? []);
-          const serviceSelections = Object.fromEntries(Object.entries(request.options.serviceSelections ?? {}).map(([key, value]) => {
-            if (!key.trim() || !value.trim()) throw new Error("Surface service selection keys and provider IDs must be non-empty");
-            return [key, value];
+          const exactProviderIds = Object.fromEntries(Object.entries(request.options.exactProviderIds ?? {}).map(([key, value]) => {
+            if (!key.trim() || value.some(id => !id.trim()) || new Set(value).size !== value.length) throw new Error("Surface frozen provider IDs must be non-empty and unique");
+            return [key, [...value]];
           }));
           const externalServices = [...(request.options.externalServices ?? [])].map((service) => ({
             descriptor: validateService(service.descriptor),
             ...(service.dispose ? { dispose: service.dispose } : {}),
-            implementation: service.implementation,
+            implementation: retainServiceCalls(service.implementation, scope, scope),
             providerId: service.providerId,
           }));
           for (const service of externalServices) {
@@ -392,7 +414,30 @@ export class SurfaceExtensionRuntime {
           for (const service of externalServices) {
             if (service.dispose) scope.onDispose(service.dispose);
           }
-          const preparedLocalBindings = this.#localBindingSignature({ externalServices, requirements, serviceSelections });
+          const preparedLocalBindings = this.#localBindingSignature({ externalServices, requirements, exactProviderIds });
+          const frozenBindings = new Map<string, ResolvedServiceCandidate[]>();
+          const boundLocalOwners = new Set<string>();
+          for (const requirement of requirements) {
+            const bindings = this.#servicesForConsumer({ externalServices, requirements, exactProviderIds }, requirement.id, requirement.version);
+            const serviceKey = `${requirement.id}@${requirement.version}`;
+            const expected = exactProviderIds[serviceKey];
+            if ((expected && expected.length !== bindings.length) || (!requirement.optional && !bindings.length)
+              || (requirement.binding !== "all" && bindings.length > 1)) {
+              await scope.dispose();
+              throw new SurfaceRegistryConflictError(`${requirement.binding === "selected" ? "Selected Surface service provider is unavailable" : "Required Surface service is unavailable or ambiguous"}: ${serviceKey}`, [requirement.id]);
+            }
+            const localBindings = this.#matchingServices(requirement.id, requirement.version)
+              .filter(service => bindings.some(binding => binding.identity === service.providerId));
+            for (const service of localBindings) {
+              boundLocalOwners.add(ownerKey(service.owner));
+              const providerScope = this.#activeOwners.get(ownerKey(service.owner))!.scope;
+              scope.onDispose(providerScope.retain());
+              const binding = bindings.find(value => value.identity === service.providerId)!;
+              binding.implementation = retainServiceCalls(binding.implementation, providerScope, scope);
+            }
+            exactProviderIds[serviceKey] = bindings.map(binding => binding.identity);
+            frozenBindings.set(serviceKey, bindings);
+          }
           const contextLease = this.#createContextWriter(owner, scope);
           const context: SurfaceActivationContext = {
             signal: AbortSignal.any([scope.signal, preparationSignal]),
@@ -426,22 +471,17 @@ export class SurfaceExtensionRuntime {
               stagedContributions.push({ descriptor: normalized, implementation, owner: { ...owner } });
             },
             provide: (descriptor, implementation) => {
-              stagedServices.push({ descriptor: validateService(descriptor), implementation, owner: { ...owner } });
+              stagedServices.push({ descriptor: validateService(descriptor), implementation, owner: { ...owner },
+                providerKey: `${owner.extensionId}:${owner.entrypointId}:${descriptor.id}@${descriptor.version}`,
+                providerId: `${owner.hostId}:${owner.realmId}:${owner.extensionId}:${owner.entrypointId}:${owner.generation}:${descriptor.id}@${descriptor.version}` });
             },
             onDispose: (disposer) => scope.onDispose(disposer),
             useService: <TImplementation = unknown>(id: string, version: number): TImplementation | undefined => {
-              const candidates = this.#servicesForConsumer(
-                { externalServices, requirements, serviceSelections },
-                id,
-                version,
-              );
-              return candidates.length === 1 ? candidates[0]?.implementation as TImplementation : undefined;
+              const bindings = frozenBindings.get(`${id}@${version}`) ?? [];
+              return bindings.length === 1 ? bindings[0]?.implementation as TImplementation : undefined;
             },
-            useServices: <TImplementation = unknown>(id: string, version: number): TImplementation[] => this.#servicesForConsumer(
-              { externalServices, requirements, serviceSelections },
-              id,
-              version,
-            ).map((service) => service.implementation as TImplementation),
+            useServices: <TImplementation = unknown>(id: string, version: number): TImplementation[] =>
+              (frozenBindings.get(`${id}@${version}`) ?? []).map(service => service.implementation as TImplementation),
             context: contextLease?.writer ?? unavailableContextWriter,
           };
           try {
@@ -452,6 +492,7 @@ export class SurfaceExtensionRuntime {
           }
           candidates.set(key, {
             contributions: stagedContributions,
+            boundLocalOwners,
             contextLease,
             diagnostics: stagedDiagnostics,
             externalServices,
@@ -459,7 +500,7 @@ export class SurfaceExtensionRuntime {
             requirements,
             preparedLocalBindings,
             scope,
-            serviceSelections,
+            exactProviderIds,
             services: stagedServices,
           });
           this.#assertLatest(key, owner);
@@ -682,26 +723,9 @@ export class SurfaceExtensionRuntime {
     this.#publish();
   }
 
-  setServiceSelection(id: string, version: number, providerId: string | null): void {
-    if (!isVarinExtensionId(id) || !Number.isSafeInteger(version) || version <= 0) {
-      throw new Error(`Invalid Surface service selection: ${id}@${version}`);
-    }
-    const key = `${id}@${version}`;
-    if (providerId === null) this.#serviceSelections.delete(key);
-    else {
-      if (!providerId.trim()) throw new Error("Surface service provider ID must be non-empty");
-      this.#serviceSelections.set(key, providerId);
-    }
-    this.#publish();
-  }
-
   getService<TImplementation = unknown>(id: string, version: number): TImplementation | undefined {
     const services = this.#matchingServices(id, version);
-    const selectedExtensionId = this.#serviceSelections.get(`${id}@${version}`);
-    const selected = selectedExtensionId
-      ? services.find((service) => service.owner.extensionId === selectedExtensionId)
-      : services.length === 1 ? services[0] : undefined;
-    return selected?.implementation as TImplementation | undefined;
+    return services.length === 1 ? services[0]?.implementation as TImplementation : undefined;
   }
 
   getServices<TImplementation = unknown>(id: string, version: number): TImplementation[] {
@@ -750,7 +774,7 @@ export class SurfaceExtensionRuntime {
     const withoutProvider = new Map(this.#activeOwners);
     withoutProvider.delete(key);
     for (const [dependentKey, dependent] of [...withoutProvider]) {
-      if (this.#requirementsSatisfied(dependent, withoutProvider)) continue;
+      if (!dependent.boundLocalOwners.has(key)) continue;
       const latest = this.#latestRequests.get(dependentKey);
       const dependentOwner = {
         ...dependent.owner,
@@ -797,20 +821,12 @@ export class SurfaceExtensionRuntime {
     this.#publish();
     for (const retire of retirements) await Promise.resolve(retire()).catch(() => undefined);
     try {
-      await active.scope.dispose("Surface extension disabled");
+      await active.scope.dispose("Surface extension disabled", true);
     } catch (error) {
       diagnostics.push(diagnostic(requestedOwner, "deactivation_cleanup_failed", error instanceof Error ? error.message : String(error)));
     }
     this.#actual.set(key, actual(requestedOwner, "inactive", diagnostics));
     this.#publish();
-  }
-
-  #requirementsSatisfied(owner: ActiveOwner, owners: ReadonlyMap<string, ActiveOwner>): boolean {
-    return owner.requirements.every((requirement) => {
-      if (requirement.optional) return true;
-      const resolved = this.#servicesForConsumer(owner, requirement.id, requirement.version, owners);
-      return requirement.binding === "all" ? resolved.length > 0 : resolved.length === 1;
-    });
   }
 
   #validateCandidates(candidates: ReadonlyMap<string, ActiveOwner>): void {
@@ -858,7 +874,7 @@ export class SurfaceExtensionRuntime {
         throw new SurfaceRegistryConflictError(`Surface service ${serviceKey} does not allow multiple providers`, providers.map((provider) => provider.owner.extensionId));
       }
     }
-    for (const activeOwner of candidateOwners.values()) {
+    for (const activeOwner of candidates.values()) {
       for (const requirement of activeOwner.requirements) {
         if (requirement.optional) continue;
         const serviceKey = `${requirement.id}@${requirement.version}`;
@@ -872,10 +888,8 @@ export class SurfaceExtensionRuntime {
           throw new SurfaceRegistryConflictError(`Required Surface service is unavailable: ${serviceKey}`, [requirement.id]);
         }
         if (requirement.binding === "selected") {
-          const selected = this.#selectionFor(activeOwner, serviceKey);
-          const matches = selected
-            ? candidatesForRequirement.filter((candidate) => candidate.identity === selected)
-            : [];
+          const exact = activeOwner.exactProviderIds[serviceKey] ?? [];
+          const matches = candidatesForRequirement.filter(candidate => exact.includes(candidate.identity));
           if (matches.length !== 1) {
             throw new SurfaceRegistryConflictError(`Selected Surface service provider is unavailable: ${serviceKey}`, [requirement.id]);
           }
@@ -888,10 +902,6 @@ export class SurfaceExtensionRuntime {
     }
   }
 
-  #selectionFor(consumer: ServiceConsumer, serviceKey: string): string | undefined {
-    return consumer.serviceSelections[serviceKey] ?? this.#serviceSelections.get(serviceKey);
-  }
-
   #serviceCandidatesForConsumer(
     consumer: ServiceConsumer,
     id: string,
@@ -899,7 +909,7 @@ export class SurfaceExtensionRuntime {
     owners: ReadonlyMap<string, ActiveOwner> = this.#activeOwners,
   ): ResolvedServiceCandidate[] {
     const local = this.#matchingServices(id, version, owners).map((service) => ({
-      identity: service.owner.extensionId,
+      identity: service.providerId,
       implementation: service.implementation,
     }));
     const external = consumer.externalServices
@@ -917,11 +927,10 @@ export class SurfaceExtensionRuntime {
     const candidates = this.#serviceCandidatesForConsumer(consumer, id, version, owners);
     const requirement = consumer.requirements.find((item) => item.id === id && item.version === version);
     if (!requirement) return candidates.length === 1 ? candidates : [];
+    const exact = consumer.exactProviderIds[`${id}@${version}`];
+    if (exact) return exact.flatMap(identity => candidates.filter(candidate => candidate.identity === identity));
     if (requirement.binding === "all") return candidates;
-    if (requirement.binding === "selected") {
-      const selected = this.#selectionFor(consumer, `${id}@${version}`);
-      return selected ? candidates.filter((candidate) => candidate.identity === selected) : [];
-    }
+    if (requirement.binding === "selected") return [];
     return candidates.length === 1 ? candidates : [];
   }
 
@@ -958,7 +967,6 @@ export class SurfaceExtensionRuntime {
       layoutReferences: [...this.#layoutReferences.values()].map((reference) => ({ ...reference })),
       replacementSelections: Object.fromEntries(this.#replacementSelections),
       revision: this.#snapshot.revision + 1,
-      serviceSelections: Object.fromEntries(this.#serviceSelections),
       services: [...services],
       visibleContributions,
     };
@@ -1042,7 +1050,7 @@ export class SurfaceExtensionRuntime {
     return JSON.stringify(consumer.requirements.map((requirement) => {
       const resolved = this.#servicesForConsumer(consumer, requirement.id, requirement.version);
       return [requirement.id, requirement.version, this.#matchingServices(requirement.id, requirement.version)
-        .filter((service) => resolved.some((binding) => binding.identity === service.owner.extensionId))
+        .filter((service) => resolved.some((binding) => binding.identity === service.providerId))
         .map((service) => [ownerKey(service.owner), service.owner.desiredRevision, service.owner.generation])];
     }));
   }

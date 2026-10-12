@@ -1,5 +1,6 @@
 import {
   parseVarinRuntimeContractResult,
+  parseVarinSurfaceServiceLeaseEvent,
   parseVarinExtensionCatalogAvailability,
   parseVarinExtensionAssetPayload,
   parseVarinExtensionCatalogSnapshot,
@@ -51,10 +52,11 @@ const applicationHostRequest = async (
   body: unknown,
   signal?: AbortSignal,
   method = 'POST',
+  accept = 'application/json',
 ): Promise<Response> => {
   const origin = applicationHostOrigin();
   const target = origin ? new URL(path, `${origin}/`) : new URL(path, window.location.href);
-  const headers = new Headers({ Accept: 'application/json', 'Content-Type': 'application/json' });
+  const headers = new Headers({ Accept: accept, 'Content-Type': 'application/json' });
   if (origin && origin !== currentOrigin()) {
     headers.set('X-Varin-Application-Token', await refreshLocalRuntimeUrlAuthToken(origin));
   }
@@ -150,10 +152,50 @@ export const createWebExtensionsAPI = (): ExtensionsAPI => ({
     if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Varin extension install response is malformed');
     return parseVarinExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
   },
-  invokeService: async (request) => {
-    const payload = await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/services/invoke', request));
+  invokeService: async (request, signal) => {
+    const payload = await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/services/invoke', request, signal));
     if (!payload || typeof payload !== 'object' || !('result' in payload)) throw new Error('Varin Host service response is malformed');
     return JSON.parse(JSON.stringify((payload as { result: unknown }).result));
+  },
+  watchServiceLease: async (request, onEvent, signal) => {
+    const response = await applicationHostRequest('/api/varin/extensions/v1/services/lease', request, signal, 'POST', 'text/event-stream');
+    if (!response.ok) await readJsonOrThrow(response);
+    if (!response.headers.get('content-type')?.toLowerCase().startsWith('text/event-stream') || !response.body) {
+      throw new Error('Varin Surface service lease response is not an event stream');
+    }
+    const reader = response.body.getReader();
+    const abortReader = (): void => { void reader.cancel(signal?.reason).catch(() => undefined); };
+    signal?.addEventListener('abort', abortReader, { once: true });
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let data: string[] = [];
+    const acceptLine = (line: string): void => {
+      if (!line) {
+        if (data.length) onEvent(parseVarinSurfaceServiceLeaseEvent(JSON.parse(data.join('\n'))));
+        data = [];
+      } else if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''));
+    };
+    try {
+      for (;;) {
+        signal?.throwIfAborted();
+        const { value, done } = await reader.read();
+        signal?.throwIfAborted();
+        buffer += decoder.decode(value, { stream: !done });
+        let end: number;
+        while ((end = buffer.indexOf('\n')) !== -1) {
+          acceptLine(buffer.slice(0, end).replace(/\r$/, ''));
+          buffer = buffer.slice(end + 1);
+        }
+        if (done) {
+          if (buffer || data.length) throw new Error('Varin Surface service lease stream ended with an incomplete event');
+          return;
+        }
+      }
+    } finally {
+      signal?.removeEventListener('abort', abortReader);
+      await reader.cancel().catch(() => undefined);
+      reader.releaseLock();
+    }
   },
   prepareCandidate: async (extensionId, candidateIntegrity, signal) => {
     const response = await applicationHostRequest('/api/varin/extensions/v1/candidates/prepare', { candidateIntegrity, extensionId }, signal);
@@ -213,9 +255,6 @@ export const createWebExtensionsAPI = (): ExtensionsAPI => ({
     if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Varin extension enabled response is malformed');
     return parseVarinExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
   },
-  setServiceSelection: async (request) => parseVarinExtensionHostStateSnapshot(
-    await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/services/select', request)),
-  ),
   upsertServiceRoutingRule: async (request) => parseVarinExtensionServiceRoutingSnapshot(
     await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/services/routing', request, undefined, 'PUT')),
   ),

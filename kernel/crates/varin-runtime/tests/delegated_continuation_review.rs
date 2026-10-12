@@ -1,5 +1,7 @@
-//! Actual Catalog/ContentStore admission, source identity, history and recovery consumers.
-//! Host source capture, credentials and provider I/O are covered separately.
+#[path = "fixtures/service_composition.rs"]
+mod service_composition;
+// Actual Catalog/ContentStore admission, source identity, history and recovery consumers.
+// Host source capture, credentials and provider I/O are covered separately.
 #[path = "fixtures/content_collection.rs"]
 mod content_collection;
 #[path = "fixtures/child_dispatch.rs"]
@@ -8,7 +10,7 @@ mod fixture;
 mod input_admission;
 use fixture::Fixture;
 use input_admission::InputAdmission;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use varin_runtime::catalog::{
     collaboration::*, context::ContextProposal, delegated::*, dispatch::TreeCancelTarget,
     inputs::EnqueueInput, launches::SourceSelection, personalization::PersonalizationBasis,
@@ -286,11 +288,11 @@ fn pending_cancel_fences_late_source_but_a_new_user_intent_after_cancel_can_proc
     };
     let source = ready_source(&mut f.db, &next);
     let child = prepare(&mut f.db, &next, source);
-    assert!(
-        f.db.require_child_launch(&child.receipt.unwrap().run_id)
-            .unwrap()
-            .is_some()
-    );
+    assert!(f
+        .db
+        .require_child_launch(&child.receipt.unwrap().run_id)
+        .unwrap()
+        .is_some());
     let root = f.root.clone();
     drop(f);
     std::fs::remove_dir_all(root).unwrap();
@@ -315,12 +317,12 @@ fn concurrent_preparation_is_one_execution_and_failed_pre_run_intent_does_not_bl
     assert_eq!(f.db.accept_child_continuation(b).unwrap(), accepted);
     let mut changed = command.clone();
     changed.input = json!("different");
-    assert!(
-        f.db.capture_child_continuation(changed)
-            .unwrap()
-            .load()
-            .is_err()
-    );
+    assert!(f
+        .db
+        .capture_child_continuation(changed)
+        .unwrap()
+        .load()
+        .is_err());
     let mut other = command.clone();
     other.key = "other".into();
     let blocked =
@@ -676,10 +678,10 @@ fn each_new_run_retargets_only_the_original_mcp_definition_and_its_own_recovery_
             .mcp_binding,
         Some(second_binding.clone())
     );
-    assert!(
-        f.db.prepare_mcp_launch(&run, derive(second_binding, "third"))
-            .is_err()
-    );
+    assert!(f
+        .db
+        .prepare_mcp_launch(&run, derive(second_binding, "third"))
+        .is_err());
     drop(f);
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -705,10 +707,10 @@ fn continuation_freezes_the_previous_actual_model_and_policy_instead_of_initial_
     let choice =
         f.db.select_model(&run_id, "user-model", configuration.clone(), scope.clone())
             .unwrap();
-    assert!(
-        f.db.prepare_model_selection(&choice, f.db.epoch(), None)
-            .unwrap()
-    );
+    assert!(f
+        .db
+        .prepare_model_selection(&choice, f.db.epoch(), None)
+        .unwrap());
     let identity = varin_runtime::catalog::dispatch::ChildModelBinding {
         configuration: configuration.clone(),
         credential_scope: scope,
@@ -716,17 +718,18 @@ fn continuation_freezes_the_previous_actual_model_and_policy_instead_of_initial_
     .connection_identity()
     .unwrap();
     let binding:RequestBinding=serde_json::from_value(json!({"child_dispatch":null,"goal":null,"resource_activations":[],"resource_checkpoint_id":null,"connection_identity":identity,"provider_family":configuration.provider_family,"model":configuration.model,"credential_ref":null,"configuration_generation":configuration.configuration_generation,"tool_schema_generation":first.launch.tool_schema_generation,"tools":f.launch.tools,"instruction_sources":[],"memory_checkpoint":null,"attachment_refs":[],"environment_cursor":0,"history_range":{"branch_id":first.child_branch_id,"ancestor_id":null,"leaf_id":f.db.head(&first.child_branch_id).unwrap()}})).unwrap();
-    assert!(
-        f.db.activate_model_selection(&choice, f.db.epoch(), &binding)
-            .unwrap()
-    );
+    assert!(f
+        .db
+        .activate_model_selection(&choice, f.db.epoch(), &binding)
+        .unwrap());
     let mut artifact = AgentPolicyArtifactBinding {
-        provider_key: "policy:exact".into(),
+        provider_key: "policy:host:varin.agent.policy@4".into(),
         extension_id: "policy".into(),
         extension_version: "1".into(),
         service_id: "varin.agent.policy".into(),
         service_version: 4,
         artifact_integrity: "retained-artifact".into(),
+        composition: service_composition::graph("policy", "1", "retained-artifact"),
         configuration_identity: "retained-configuration".into(),
         declared_identity: PolicyIdentity {
             name: "policy".into(),
@@ -790,7 +793,7 @@ fn continuation_freezes_the_previous_actual_model_and_policy_instead_of_initial_
         artifact: artifact.clone(),
     };
     let selected =
-        f.db.select_policy(
+        f.db.prepare_policy_selection(
             &run_id,
             "user-policy",
             0,
@@ -799,6 +802,12 @@ fn continuation_freezes_the_previous_actual_model_and_policy_instead_of_initial_
             PolicyStateMode::RestartState,
         )
         .unwrap();
+    let prepared = selected.store().unwrap();
+    let selected =
+        f.db.publish_policy_selection(prepared)
+            .unwrap()
+            .load()
+            .unwrap();
     assert_eq!(selected.generation, 1);
     let p =
         f.db.prepare_policy_ready(
@@ -833,7 +842,14 @@ fn continuation_freezes_the_previous_actual_model_and_policy_instead_of_initial_
     let command = continuation_command(&f.db, &first, "preserve-selection", json!("continue"));
     let next = accept(&mut f.db, command);
     assert_eq!(next.launch.model, configuration.model);
-    assert_eq!(next.policy_target, target);
+    assert_eq!(
+        f.db.capture_delegated_execution(next.clone())
+            .unwrap()
+            .load()
+            .unwrap()
+            .policy_target,
+        target
+    );
     assert_eq!(next.launch.policy, artifact.identity);
     let source = ready_source(&mut f.db, &next);
     let child = prepare(&mut f.db, &next, source);
@@ -1382,8 +1398,8 @@ fn calendar_child_hold_reopen_and_resume_preserve_original_execution_source_and_
     std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
-fn cancelled_calendar_trigger_releases_other_ingress_without_cancelling_thread_or_reusing_dead_source()
- {
+fn cancelled_calendar_trigger_releases_other_ingress_without_cancelling_thread_or_reusing_dead_source(
+) {
     use varin_runtime::catalog::calendar::*;
     let mut f = Fixture::new_in_project();
     let initial = first(&mut f);
@@ -1429,12 +1445,12 @@ fn cancelled_calendar_trigger_releases_other_ingress_without_cancelling_thread_o
     let cancelled = f.db.delegated_execution(&old.execution_id).unwrap();
     assert!(cancelled.cancel_requested && cancelled.receipt.is_none());
     assert_eq!(cancelled.report.unwrap().outcome, Outcome::Cancelled);
-    assert!(
-        f.db.calendar_occurrence(&b.id)
-            .unwrap()
-            .execution_id
-            .is_none()
-    );
+    assert!(f
+        .db
+        .calendar_occurrence(&b.id)
+        .unwrap()
+        .execution_id
+        .is_none());
     let next = calendar_execution(&mut f.db);
     assert_ne!(next.execution_id, old.execution_id);
     let source = ready_source(&mut f.db, &next);

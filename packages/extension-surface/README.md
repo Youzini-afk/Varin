@@ -12,9 +12,13 @@ generation. This package does not import React or load external bundles.
 Owner context keys participate in the same activation transaction. A candidate writes into a private
 layer; the layer becomes visible only after the external commit succeeds. Replacing an owner fences the
 old writer before cleanup, and disposing one entrypoint cannot remove another entrypoint or a newer
-generation's values. `single`, `selected`, and `all` service requirements use the same complete provider
-set: selected requires one explicit matching provider, single requires exactly one candidate, and all
-exposes every compatible candidate.
+generation's values. Service requirements explicitly declare nonempty `realms`; this runtime consumes
+only those including `surface`. `single`, `selected`, and `all` resolve against the same complete
+provider set before activation. The loader uses the authoritative Host service-routing document for
+selected choices and supplies `exactProviderIds`, immutable implementation references for this owner.
+This runtime has no mutable service selection table. `single` requires exactly one candidate; `all`
+binds every compatible candidate. Missing required or ambiguous dependencies fail before extension
+activation, retaining the previous committed owner.
 
 Most extension authors use `@varin/extension-sdk`; this lower-level package is public for alternate
 Surface hosts and advanced lifecycle tests. See the
@@ -49,3 +53,11 @@ preparation, the original context store projects the proposed layer commits/with
 publishing them. `when` visibility and its actual dependent mount points use that projection; the same
 view is checked again before publication. Plain read-only context providers need no writer or preview.
 Context withdrawal and registry withdrawal publish together, before the retired owner's resources.
+
+Local service declarations carry a stable `providerKey` and a generation-specific `providerId`.
+Activation freezes actual clients; calling `useService` again cannot pick a different registry
+generation. Consumers retain their selected local provider owners, and admitted method calls retain
+the actual resources until completion. Ordinary replacement withdraws presentation and closes the
+external lifetime through `onRetire`, then releases resources after retained calls drain. Explicit
+disable cancels the owner signal. Retiring a Surface does not own or stop independent Host backend
+work; Host leases and their admitted-call pins govern those resources.

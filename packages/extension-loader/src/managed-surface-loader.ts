@@ -5,6 +5,18 @@ import {
   parseVarinExtensionCandidatePreparationResult,
   parseVarinExtensionHostStateSnapshot,
   parseVarinExtensionManagedEntrypointPayload,
+  parseVarinSurfaceServiceLeaseEvent,
+  resolveVarinSurfaceManifestOwner,
+  varinSurfaceManifestOwnerId,
+  resolveVarinExtensionServiceRouting,
+  resolveVarinWorkbenchProfile,
+  canonicalServiceComposition,
+  VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
+  VARIN_WORKBENCH_LAYOUT_SERVICE_ID,
+  type VarinSurfaceServiceLeaseRequest,
+  type VarinSurfaceServiceLeaseEvent,
+  type VarinSurfaceServiceInvocationLease,
+  type VarinExtensionServiceRoutingContext,
   checkVarinContributionCompatibility,
   isVarinContributionCompatible,
   type VarinApplicationSurface,
@@ -61,7 +73,8 @@ export interface SurfaceExtensionHost {
   catalog(): Promise<VarinExtensionCatalogAvailability>;
   discardPreparedCandidate(extensionId: string, candidateIntegrity: string): Promise<void>;
   hostState(): Promise<VarinExtensionHostStateSnapshot>;
-  invokeService(request: VarinExtensionServiceInvocationRequest): Promise<JsonValue>;
+  invokeService(request: VarinExtensionServiceInvocationRequest, signal?: AbortSignal): Promise<JsonValue>;
+  watchServiceLease(request: VarinSurfaceServiceLeaseRequest, onEvent: (event: VarinSurfaceServiceLeaseEvent) => void, signal: AbortSignal): Promise<void>;
   prepareCandidate(extensionId: string, candidateIntegrity: string, signal?: AbortSignal): Promise<VarinExtensionCandidatePreparationResult>;
   requestCandidateApplication(request: VarinExtensionCandidateSelectionRequest): Promise<VarinExtensionCatalogSnapshot>;
   readAsset(request: VarinExtensionAssetRequest): Promise<VarinExtensionAssetPayload>;
@@ -113,7 +126,7 @@ export interface SurfaceActivationTarget {
 }
 
 export interface SurfaceExtensionLoaderOptions {
-  accessContext?: () => Omit<SurfaceCapabilityAccessContext, "surface">;
+  accessContext?: (state?: VarinExtensionHostStateSnapshot) => Omit<SurfaceCapabilityAccessContext, "surface">;
   capabilities?: SurfaceCapabilityRegistry;
   evaluateModule?: ManagedSurfaceModuleEvaluator;
   externalServiceFactories?: readonly SurfaceLocalExternalServiceFactory[];
@@ -137,6 +150,7 @@ export interface SurfaceLocalExternalServiceFactory {
   ): SurfaceExternalService | Promise<SurfaceExternalService>;
   descriptor: VarinExtensionServiceProvision;
   providerId: string;
+  providerKey: string;
 }
 
 /**
@@ -147,6 +161,42 @@ export interface SurfaceLocalExternalServiceFactory {
 export interface DeclarativeSurfaceContributionImplementation {
   readonly descriptor: VarinExtensionStaticContribution;
   readonly kind: "declarative";
+}
+
+interface BoundSurfaceServiceLease {
+  providers: VarinExtensionServiceProviderSnapshot[];
+  identity: VarinSurfaceServiceInvocationLease;
+  signal: AbortSignal;
+  dispose: SurfaceDisposer;
+}
+
+interface SurfaceDependency {
+  descriptor: VarinExtensionServiceProvision;
+  providerId: string;
+  providerKey: string;
+  kind: "host" | "native" | "factory" | "surface";
+}
+
+function resolveSurfaceRequirement(requirement: VarinExtensionServiceRequirement, all: SurfaceDependency[],
+  state: VarinExtensionHostStateSnapshot, routing: VarinExtensionServiceRoutingContext): SurfaceDependency[] {
+  const candidates = all.filter(value => value.descriptor.id === requirement.id && value.descriptor.version === requirement.version);
+  const key = `${requirement.id}@${requirement.version}`;
+  if (requirement.binding === "all") {
+    if (!candidates.length && !requirement.optional) throw new Error(`Required Surface service is unavailable: ${key}`);
+    return candidates;
+  }
+  if (requirement.binding !== "selected") {
+    if (candidates.length === 1 || (!candidates.length && requirement.optional)) return candidates;
+    throw new Error(`Surface service must have exactly one implementation: ${key}`);
+  }
+  const resolution = resolveVarinExtensionServiceRouting({ candidates, context: routing,
+    document: state.routing.document, serviceId: requirement.id, version: requirement.version });
+  if (resolution.status === "unavailable" && !candidates.length && requirement.optional && !resolution.matchedRule
+    && !resolution.diagnostics.some(value => value.code.startsWith("service_selection_"))) return [];
+  if (resolution.status !== "resolved" || resolution.providerIds.length !== 1) {
+    throw new Error(resolution.diagnostics.map(value => value.message).join("; "));
+  }
+  return resolution.providerIds.map(id => candidates.find(value => value.providerId === id)!);
 }
 
 interface ActiveEntrypoint {
@@ -172,6 +222,7 @@ interface PendingPreparation {
   hostId: string;
   integrity: string;
   capabilityBindings: string;
+  serviceBindings: string;
 }
 
 type ExecutableSurfaceEntrypoint = VarinExtensionSurfaceEntrypoint & {
@@ -399,15 +450,6 @@ const selectionCapabilities = (selection: ArtifactSelection): string[] => select
   .filter((grant) => grant.realm === "surface" && grant.granted && grant.manifestVersion === selection.version)
   .map((grant) => grant.capability);
 
-const manifestOwnerEntrypointId = (manifest: VarinExtensionManifest): string => {
-  const occupied = new Set((manifest.entrypoints?.surfaces ?? []).map((entrypoint) => entrypoint.id));
-  const base = `${manifest.id}.manifest`;
-  if (!occupied.has(base)) return base;
-  let suffix = 2;
-  while (occupied.has(`${base}-${suffix}`)) suffix += 1;
-  return `${base}-${suffix}`;
-};
-
 const compatibleActivationPlans = (
   manifest: VarinExtensionManifest,
   surface: VarinApplicationSurface,
@@ -426,7 +468,7 @@ const compatibleActivationPlans = (
       mode: entrypoint.mode,
     });
   }
-  const staticContributions: VarinExtensionStaticContribution[] = [];
+  const manifestOwner = resolveVarinSurfaceManifestOwner(manifest, surface);
   const incompatible: VarinExtensionStaticContribution[] = [];
   // Track which entrypoints have at least one incompatible static contribution
   // and which have at least one compatible static contribution.
@@ -450,11 +492,8 @@ const compatibleActivationPlans = (
       } else {
         entrypointHasIncompatible.add(contribution.entrypoint);
       }
-      if (compatible && !(groupedIds.has(contribution.entrypoint)
-        && executable.get(contribution.entrypoint)?.mode === "declarative")) staticContributions.push(contribution);
       continue;
     }
-    if (compatible) staticContributions.push(contribution);
   }
   // Remove eager executable plans where ALL static contributions are
   // incompatible. An eager entrypoint whose every declared contribution is
@@ -477,11 +516,10 @@ const compatibleActivationPlans = (
   return {
     executable: executablePlans,
     incompatible,
-    ...(staticContributions.length > 0 || compatibleEntrypoints.some((entrypoint) => entrypoint.mode === "declarative" && !groupedIds.has(entrypoint.id))
+    ...(manifestOwner
       ? {
           manifest: {
-            contributions: staticContributions,
-            entrypointId: manifestOwnerEntrypointId(manifest),
+            ...manifestOwner,
             mode: "declarative",
           },
         }
@@ -541,7 +579,7 @@ const toReportedActual = (state: ReturnType<SurfaceExtensionRuntime["getSnapshot
 });
 
 export class SurfaceExtensionLoader {
-  readonly #accessContext: () => SurfaceCapabilityAccessContext;
+  readonly #accessContext: (state?: VarinExtensionHostStateSnapshot) => SurfaceCapabilityAccessContext;
   readonly #active = new Map<string, ActiveEntrypoint>();
   readonly #capabilities: SurfaceCapabilityRegistry;
   readonly #diagnostics: SurfaceExtensionLoaderDiagnostic[] = [];
@@ -572,17 +610,27 @@ export class SurfaceExtensionLoader {
   #watchController: AbortController | null = null;
 
   constructor(options: SurfaceExtensionLoaderOptions) {
-    this.#accessContext = () => {
-      const provided = options.accessContext?.();
+    this.#accessContext = (state) => {
+      const provided = options.accessContext?.(state);
       return {
         access: provided?.access ?? (options.surface === "desktop" ? "local" : "remote"),
         projectTrusted: provided?.projectTrusted ?? false,
         surface: options.surface,
+        routing: { ...(state ? { profileId: resolveVarinWorkbenchProfile(state.workbench.document, state.catalog,
+          { surface: options.surface, userId: provided?.routing?.userId ?? "default" }).profileId } : {}),
+          ...structuredClone(provided?.routing ?? {}) },
       };
     };
     this.#capabilities = options.capabilities ?? new SurfaceCapabilityRegistry();
     this.#evaluate = options.evaluateModule ?? evaluateManagedSurfaceModule;
     this.#externalServiceFactories = [...(options.externalServiceFactories ?? [])];
+    const factoryKeys = new Set<string>();
+    for (const factory of this.#externalServiceFactories) {
+      if (!factory.providerKey.trim() || !factory.providerId.trim() || factoryKeys.has(factory.providerKey)) {
+        throw new Error(`Surface service factory requires a unique stable provider key: ${factory.descriptor.id}@${factory.descriptor.version}`);
+      }
+      factoryKeys.add(factory.providerKey);
+    }
     this.#host = options.host;
     this.#isolatedRealmFactory = options.isolatedRealmFactory ?? browserIsolatedSurfaceRealmFactory;
     this.#realmId = options.realmId ?? defaultRealmId();
@@ -590,6 +638,11 @@ export class SurfaceExtensionLoader {
     this.#surface = options.surface;
     this.#surfaceRuntime = options.surfaceRuntime;
     this.#watchRetry = options.watchRetry ?? defaultWatchRetry;
+  }
+
+  /** Read-only view of the actual injected factories, shared with provider-choice presentation. */
+  getLocalServiceDeclarations(): ReadonlyArray<Pick<SurfaceLocalExternalServiceFactory, "descriptor" | "providerId" | "providerKey">> {
+    return this.#externalServiceFactories.map(({ descriptor, providerId, providerKey }) => ({ descriptor: structuredClone(descriptor), providerId, providerKey }));
   }
 
   getSnapshot = (): SurfaceExtensionLoaderSnapshot => ({
@@ -809,12 +862,17 @@ export class SurfaceExtensionLoader {
       const selection = entry && (entry.integrity === preparation.integrity ? publicCandidateSelection(entry)
         : entry.candidate?.integrity === preparation.integrity && entry.candidate.capabilitiesReviewed
           ? explicitCandidateSelection(entry, preparation.integrity) : null);
-      const access = this.#accessContext();
-      if (snapshot.hostId !== preparation.hostId || !entry?.desired.enabled
+      const access = this.#accessContext(hostState);
+      let superseded = snapshot.hostId !== preparation.hostId || !entry?.desired.enabled
         || entry.desired.revision !== preparation.desiredRevision || !selection
         || preparation.capabilityBindings !== this.#capabilityBindingSignature(
           selectionCapabilities(selection), access,
-        )) preparation.controller.abort(new Error("Surface preparation was superseded by Host, desired state, artifact, or access changes"));
+        );
+      if (!superseded && selection) {
+        try { superseded = preparation.serviceBindings !== this.#serviceBindingSignature(selection, hostState); }
+        catch { superseded = true; }
+      }
+      if (superseded) preparation.controller.abort(new Error("Surface preparation was superseded by Host, desired state, artifact, access, or dependency changes"));
     }
     if (this.#hostId && this.#hostId !== snapshot.hostId) {
       this.#lifecycleEpoch += 1;
@@ -926,29 +984,18 @@ export class SurfaceExtensionLoader {
       const failedKey = `${entry.manifest.id}\0${selected.integrity}\0${entry.desired.revision}`;
       if (selected.slot === "candidate" && this.#failedCandidates.has(failedKey)) continue;
       if (executablePlans.some((plan) => plan.mode === "native") && this.#nativeRestartRequired.has(entry.manifest.id)) continue;
-      const expectedBindings = selected.slot === "selected"
-        ? this.#serviceBindingSignature(
-            this.#resolveExternalProviders(selected, hostState, null),
-            this.#matchingLocalServiceFactories(selected.manifest.requires?.services ?? []),
-          )
-        : null;
-      const accessContext = this.#accessContext();
+      let expectedBindings: string;
+      try { expectedBindings = this.#serviceBindingSignature(selected, hostState); }
+      catch (error) {
+        this.#diagnose(entry.manifest.id, "service_composition_unavailable", error instanceof Error ? error.message : String(error));
+        continue;
+      }
+      const accessContext = this.#accessContext(hostState);
       const grantedCapabilities = this.#capabilities.resolveGranted(selectionCapabilities(selected), accessContext);
       const expectedCapabilityBindings = this.#capabilityBindingSignature(grantedCapabilities, accessContext);
       const currentEntrypoints = desiredPlans
         .map((plan) => this.#active.get(keyFor(entry.manifest.id, plan.entrypointId)))
         .filter((value): value is ActiveEntrypoint => value !== undefined);
-      if (selected.slot === "selected"
-        && (currentEntrypoints.length > 0 || executablePlans.length > 0)
-        && !this.#requirementsSatisfied(selected, hostState)) {
-        if (currentEntrypoints.length > 0) {
-          for (const active of currentEntrypoints) {
-            if (active.artifactIntegrity === selected.integrity) await this.#deactivate(active, entry.desired.revision);
-          }
-        }
-        this.#diagnose(entry.manifest.id, "required_service_withdrawn", "A required extension service is no longer available");
-        continue;
-      }
       const missingContributionCapabilities = [...new Set(desiredPlans
         .flatMap((plan) => plan.contributions)
         .flatMap((contribution) => contribution.requiresCapabilities ?? []))]
@@ -965,8 +1012,7 @@ export class SurfaceExtensionLoader {
       const allCurrent = desiredPlans.every((plan) => (
         this.#active.get(keyFor(entry.manifest.id, plan.entrypointId))?.artifactIntegrity === selected.integrity
         && this.#active.get(keyFor(entry.manifest.id, plan.entrypointId))?.capabilityBindings === expectedCapabilityBindings
-        && (expectedBindings === null
-          || this.#active.get(keyFor(entry.manifest.id, plan.entrypointId))?.serviceBindings === expectedBindings)
+        && this.#active.get(keyFor(entry.manifest.id, plan.entrypointId))?.serviceBindings === expectedBindings
       ));
       if (allCurrent) {
         await this.#ensureInactivePlans(entry, selected, plans.executable.filter((plan) => !executablePlans.includes(plan)), snapshot.hostId);
@@ -977,7 +1023,7 @@ export class SurfaceExtensionLoader {
           const active = this.#active.get(keyFor(entry.manifest.id, plan.entrypointId));
           return active?.artifactIntegrity !== selected.integrity
             || active.capabilityBindings !== expectedCapabilityBindings
-            || (expectedBindings !== null && active.serviceBindings !== expectedBindings);
+            || active.serviceBindings !== expectedBindings;
         });
         const selection = await this.#activatePlans(
           entry,
@@ -1024,13 +1070,15 @@ export class SurfaceExtensionLoader {
   ): Promise<VarinExtensionCatalogSnapshot | null> {
     const lifecycleEpoch = this.#lifecycleEpoch;
     const groupedCandidate = isGroupedCandidate(selection);
-    const initialAccess = this.#accessContext();
+    let currentHostState = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
+    const initialAccess = this.#accessContext(currentHostState);
     const preparation: PendingPreparation = {
       controller: new AbortController(),
       desiredRevision: entry.desired.revision,
       hostId: snapshot.hostId,
       integrity: selection.integrity,
       capabilityBindings: this.#capabilityBindingSignature(selectionCapabilities(selection), initialAccess),
+      serviceBindings: this.#serviceBindingSignature(selection, currentHostState),
     };
     this.#preparations.set(entry.manifest.id, preparation);
     const signal = preparation.controller.signal;
@@ -1049,34 +1097,24 @@ export class SurfaceExtensionLoader {
     const resources: ModuleResourceScope[] = [];
     const realms: IsolatedSurfaceRealm[] = [];
     const localExternalServices: SurfaceExternalService[] = [];
+    const serviceLeases: Array<{ dispose: SurfaceDisposer }> = [];
     const nativeOwners: SurfaceOwnerIdentity[] = [];
     const requests: Array<{ activation: SurfaceActivation; options: SurfaceActivationOptions }> = [];
     const activated: ActiveEntrypoint[] = [];
     try {
       let prepared: VarinExtensionCandidatePreparationResult | null = null;
-      if (selection.slot === "candidate") {
-        const missing = selection.manifest.updateReadiness?.surfaceEntrypoints
-          .filter((id) => !plans.some((plan) => plan.entrypointId === id));
-        if (missing?.length) throw new Error(`This Surface cannot prepare every required update member: ${missing.join(", ")}`);
-        prepared = parseVarinExtensionCandidatePreparationResult(
-          await this.#host.prepareCandidate(entry.manifest.id, selection.integrity, signal),
-        );
-      } else if (executablePlansToActivate.length > 0) {
-        await this.#host.activateExtension(entry.manifest.id);
-      }
-      const currentHostState = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
+      const missing = selection.slot === "candidate" ? selection.manifest.updateReadiness?.surfaceEntrypoints
+        .filter((id) => !plans.some((plan) => plan.entrypointId === id)) : undefined;
+      if (missing?.length) throw new Error(`This Surface cannot prepare every required update member: ${missing.join(", ")}`);
       signal.throwIfAborted();
       const currentEntry = currentHostState.catalog.extensions.find((candidate) => candidate.manifest.id === entry.manifest.id);
-      if (selection.slot === "candidate" && currentEntry?.integrity === selection.integrity) {
-        selection = { ...selection, slot: "selected" };
-      }
-      const externalProviders = this.#resolveExternalProviders(selection, currentHostState, prepared);
-      const serviceSelections = this.#resolvedServiceSelections(selection, currentHostState, externalProviders);
-      const hostExternalServices = this.#externalServices(externalProviders);
-      const matchingLocalFactories = this.#matchingLocalServiceFactories(selection.manifest.requires?.services ?? []);
-      const serviceBindings = this.#serviceBindingSignature(externalProviders, matchingLocalFactories);
+      if (selection.slot === "candidate" && currentEntry?.integrity === selection.integrity) selection = { ...selection, slot: "selected" };
+      const resolved = this.#resolveDependencies(selection, currentHostState);
+      const serviceBindings = preparation.serviceBindings;
+      const matchingLocalFactories = this.#externalServiceFactories.filter(factory => resolved.some(binding => binding.providerKey === factory.providerKey && binding.kind === "factory"));
+      const routing = structuredClone(initialAccess.routing ?? {});
       const requestedGrants = selectionCapabilities(selection);
-      const accessContext = this.#accessContext();
+      const accessContext = initialAccess;
       const grantedCapabilities = this.#capabilities.resolveGranted(requestedGrants, accessContext);
       const capabilityBindings = this.#capabilityBindingSignature(grantedCapabilities, accessContext);
       const plannedKeys = new Set([
@@ -1084,6 +1122,7 @@ export class SurfaceExtensionLoader {
         ...desiredExecutablePlans.map((plan) => keyFor(entry.manifest.id, plan.entrypointId)),
       ]);
 
+      const preparedOwners: Array<{ plan: SurfaceActivationPlan; owner: SurfaceOwnerIdentity; moduleGeneration: number; lease: BoundSurfaceServiceLease }> = [];
       for (const plan of plans) {
         signal.throwIfAborted();
         const key = keyFor(entry.manifest.id, plan.entrypointId);
@@ -1098,6 +1137,42 @@ export class SurfaceExtensionLoader {
           hostId: snapshot.hostId,
           realmId: this.#realmId,
         };
+        const lease = await this.#openServiceLease({ owner, surface: this.#surface, artifactIntegrity: selection.integrity,
+          slot: selection.slot, routing, expectedRoutingRevision: currentHostState.routing.document.revision,
+          services: resolved.filter(binding => binding.kind === "host" || binding.kind === "native").map(binding => ({
+            serviceId: binding.descriptor.id, version: binding.descriptor.version, providerKey: binding.providerKey,
+          })),
+        }, signal, error => {
+          preparation.controller.abort(error);
+          const active = this.#active.get(key);
+          if (active?.owner.generation === owner.generation) {
+            this.#diagnose(owner.extensionId, "service_lease_lost", error.message, { entrypointId: owner.entrypointId });
+            void this.#enqueueOwner(owner.extensionId, () => this.#deactivate(active, owner.desiredRevision));
+          }
+        });
+        serviceLeases.push(lease);
+        preparedOwners.push({ plan, owner, moduleGeneration, lease });
+      }
+      // Scope owners precede group preparation; byte reads use the resulting authoritative slot.
+      if (selection.slot === "candidate") {
+        prepared = parseVarinExtensionCandidatePreparationResult(await this.#host.prepareCandidate(entry.manifest.id, selection.integrity, signal));
+        const latest = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
+        currentHostState = latest;
+        if (latest.catalog.extensions.some(value => value.manifest.id === entry.manifest.id && value.integrity === selection.integrity)) {
+          selection = { ...selection, slot: "selected" };
+        }
+      }
+      for (const { plan, owner, moduleGeneration, lease } of preparedOwners) {
+        signal.throwIfAborted();
+        let invocationSignal = signal;
+        const hostExternalServices = this.#externalServices(lease.providers, lease.identity, routing, lease.signal, () => invocationSignal);
+        const exactProviderIds: Record<string, string[]> = {};
+        for (const requirement of selection.manifest.requires?.services?.filter(requirement => requirement.realms.includes("surface")) ?? []) {
+          exactProviderIds[`${requirement.id}@${requirement.version}`] = resolved
+            .filter(binding => binding.descriptor.id === requirement.id && binding.descriptor.version === requirement.version)
+            .map(binding => (binding.kind === "host" || binding.kind === "native")
+              ? lease.providers.find(provider => provider.providerKey === binding.providerKey)!.providerId : binding.providerId);
+        }
         const ownerLocalExternalServices = await this.#createLocalExternalServices(owner, matchingLocalFactories);
         localExternalServices.push(...ownerLocalExternalServices);
         const externalServices = [...hostExternalServices, ...ownerLocalExternalServices];
@@ -1186,15 +1261,10 @@ export class SurfaceExtensionLoader {
                   ),
                   callService: async (serviceId, version, providerId, method, args) => {
                     if (providerId) {
-                      const service = externalServices.find((candidate) => (
-                        candidate.providerId === providerId
-                        && candidate.descriptor.id === serviceId
-                        && candidate.descriptor.version === version
-                      ));
-                      const handler = (service?.implementation as Record<string, unknown> | undefined)?.[method];
-                      if (typeof handler !== "function") {
-                        throw new Error(`Isolated Surface service provider is unavailable: ${providerId}`);
-                      }
+                      const index = exactProviderIds[`${serviceId}@${version}`]?.indexOf(providerId) ?? -1;
+                      const service = index < 0 ? undefined : stagingContext.useServices<Record<string, unknown>>(serviceId, version)[index];
+                      const handler = service?.[method];
+                      if (typeof handler !== "function") throw new Error(`Isolated Surface service provider is unavailable: ${providerId}`);
                       return Promise.resolve((handler as (...values: JsonValue[]) => JsonValue | Promise<JsonValue>)(...args));
                     }
                     const implementation = stagingContext.useService<Record<string, (...values: JsonValue[]) => JsonValue | Promise<JsonValue>>>(serviceId, version);
@@ -1206,11 +1276,7 @@ export class SurfaceExtensionLoader {
                   deleteContext: (key) => stagingContext.context.delete(key),
                   grantedCapabilities,
                   hasService: (serviceId, version, providerId) => providerId
-                    ? externalServices.some((service) => (
-                        service.providerId === providerId
-                        && service.descriptor.id === serviceId
-                        && service.descriptor.version === version
-                      ))
+                    ? (exactProviderIds[`${serviceId}@${version}`] ?? []).includes(providerId)
                     : stagingContext.useServices(serviceId, version).length > 0,
                   readAsset: async (path) => {
                     const value = await this.#host.readAsset({
@@ -1250,16 +1316,20 @@ export class SurfaceExtensionLoader {
           }
         }
         requests.push({
-          activation,
+          activation: async context => {
+            invocationSignal = context.signal;
+            await activation(context);
+          },
           options: {
             grantedCapabilities,
             owner,
+            onRetire: () => { void lease.dispose(); },
             signal,
             ...(externalServices.length > 0 ? { externalServices } : {}),
             ...(selection.manifest.requires?.services
-              ? { requirements: selection.manifest.requires.services }
+              ? { requirements: selection.manifest.requires.services.filter(requirement => requirement.realms.includes("surface")) }
               : {}),
-            ...(Object.keys(serviceSelections).length > 0 ? { serviceSelections } : {}),
+            exactProviderIds,
           },
         });
         activated.push({
@@ -1282,7 +1352,7 @@ export class SurfaceExtensionLoader {
           ...(entry.manifest.contributions ?? []).filter((contribution) => contribution.entrypoint && group.has(contribution.entrypoint))
             .map((contribution) => contribution.id),
         ]);
-        const manifestOwner = this.#active.get(keyFor(entry.manifest.id, manifestOwnerEntrypointId(entry.manifest)));
+        const manifestOwner = this.#active.get(keyFor(entry.manifest.id, varinSurfaceManifestOwnerId(entry.manifest)));
         if (manifestOwner) {
           const contributions = this.#surfaceRuntime.getSnapshot().contributions.filter((contribution) => (
             contribution.owner.extensionId === entry.manifest.id
@@ -1349,16 +1419,18 @@ export class SurfaceExtensionLoader {
             || !latestEntry?.desired.enabled
             || latestEntry.desired.revision !== entry.desired.revision
             || latestEntry.integrity !== selection.integrity
+            || serviceBindings !== this.#serviceBindingSignature(selection, latest)
           ) {
-            throw new Error("Surface activation was superseded by a newer Host or desired artifact generation");
+            throw new Error("Surface activation was superseded by a newer Host, desired artifact, or dependency generation");
           }
         }
         if (selection.slot === "candidate") {
           const latest = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
           const latestEntry = latest.catalog.extensions.find((candidate) => candidate.manifest.id === entry.manifest.id);
           if (!latest.catalog.authoritative || latest.catalog.hostId !== snapshot.hostId
-            || !latestEntry?.desired.enabled || latestEntry.desired.revision !== entry.desired.revision) {
-            throw new Error("Surface candidate was superseded by a newer Host or desired generation");
+            || !latestEntry?.desired.enabled || latestEntry.desired.revision !== entry.desired.revision
+            || serviceBindings !== this.#serviceBindingSignature(selection, latest)) {
+            throw new Error("Surface candidate was superseded by a newer Host, desired, or dependency generation");
           }
           for (const resource of resources) resource.validate();
           publicationSignal.throwIfAborted();
@@ -1400,6 +1472,7 @@ export class SurfaceExtensionLoader {
       await this.#reportActual(entry.manifest.id);
       return committedSnapshot;
     } catch (error) {
+      for (const lease of serviceLeases) await lease.dispose();
       for (const service of [...localExternalServices].reverse()) {
         await Promise.resolve(service.dispose?.()).catch(() => undefined);
       }
@@ -1485,70 +1558,98 @@ export class SurfaceExtensionLoader {
     }
   }
 
-  #resolveExternalProviders(
-    selection: ArtifactSelection,
-    state: VarinExtensionHostStateSnapshot,
-    prepared: VarinExtensionCandidatePreparationResult | null,
-  ): VarinExtensionServiceProviderSnapshot[] {
-    const requirements = selection.manifest.requires?.services ?? [];
-    const preparedProviders = prepared?.providers ?? [];
-    const selectedProviders: VarinExtensionServiceProviderSnapshot[] = [];
-    for (const requirement of requirements) {
-      const candidateKeys = new Set(preparedProviders
-        .filter((provider) => provider.descriptor.id === requirement.id && provider.descriptor.version === requirement.version)
-        .map((provider) => `${provider.extensionId}\0${provider.descriptor.id}\0${provider.descriptor.version}`));
-      const active = state.services.providers.filter((provider) => (
-        provider.status === "active"
-        && provider.descriptor.id === requirement.id
-        && provider.descriptor.version === requirement.version
-        && !candidateKeys.has(`${provider.extensionId}\0${provider.descriptor.id}\0${provider.descriptor.version}`)
-      ));
-      const candidates = preparedProviders.filter((provider) => (
-        provider.descriptor.id === requirement.id && provider.descriptor.version === requirement.version
-      ));
-      const matches = [...active, ...candidates];
-      const binding = requirement.binding ?? "single";
-      if (binding === "all") selectedProviders.push(...matches);
-      else if (binding === "selected") {
-        const selectedId = state.services.selections[`${requirement.id}@${requirement.version}`];
-        const selected = matches.find((provider) => provider.providerId === selectedId)
-          ?? (candidates.length === 1 && state.services.providers.some((provider) => (
-            provider.providerId === selectedId && provider.extensionId === candidates[0]?.extensionId
-          )) ? candidates[0] : undefined);
-        if (selected) {
-          selectedProviders.push(selected);
-        }
-      } else selectedProviders.push(...matches);
+  #hostDeclarations(selection: ArtifactSelection, state: VarinExtensionHostStateSnapshot): SurfaceDependency[] {
+    const candidates: SurfaceDependency[] = [];
+    for (const entry of state.catalog.extensions) {
+      const manifest = entry.manifest.id === selection.manifest.id ? selection.manifest : entry.manifest;
+      if (!entry.desired.enabled || !manifest.entrypoints?.host) continue;
+      for (const descriptor of manifest.provides?.services ?? []) {
+        const providerKey = `${manifest.id}:host:${descriptor.id}@${descriptor.version}`;
+        candidates.push({ descriptor, kind: "host", providerKey, providerId: providerKey });
+      }
     }
-    return [...new Map(selectedProviders.map((provider) => [provider.providerId, provider])).values()];
+    const builtin = state.catalog.extensions.find(entry => entry.manifest.id === VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID && entry.desired.enabled);
+    if (builtin) {
+      const native = state.services.providers.filter(provider => provider.status === "active"
+        && provider.extensionId === builtin.manifest.id && provider.extensionVersion === builtin.selectedVersion
+        && provider.entrypointId === "workbench-layout" && provider.descriptor.id === VARIN_WORKBENCH_LAYOUT_SERVICE_ID
+        && builtin.manifest.provides?.services?.some(descriptor => descriptor.id === provider.descriptor.id && descriptor.version === provider.descriptor.version));
+      if (native.length > 1) throw new Error("Workbench layout service has ambiguous native owners");
+      candidates.push(...native.map(provider => ({ ...provider, kind: "native" as const })));
+    }
+    return candidates;
   }
 
-  #externalServices(
-    providers: VarinExtensionServiceProviderSnapshot[],
-  ): NonNullable<SurfaceActivationOptions["externalServices"]> {
-    return providers.map((provider) => ({
-      descriptor: { ...provider.descriptor },
+  #resolveDependencies(selection: ArtifactSelection, state: VarinExtensionHostStateSnapshot): SurfaceDependency[] {
+    if (!state.catalog.authoritative || !state.routing.authoritative) throw new Error("Service composition is unavailable until the Host catalog and routing are authoritative");
+    const candidates = this.#hostDeclarations(selection, state);
+    candidates.push(...this.#externalServiceFactories.map(factory => ({ ...factory, kind: "factory" as const })));
+    candidates.push(...this.#surfaceRuntime.getSnapshot().services.map(service => ({ ...service, kind: "surface" as const })));
+    const resolved = (selection.manifest.requires?.services?.filter(requirement => requirement.realms.includes("surface")) ?? []).flatMap(requirement =>
+      resolveSurfaceRequirement(requirement, candidates, state, this.#accessContext(state).routing ?? {}));
+    return [...new Map(resolved.map(value => [`${value.descriptor.id}@${value.descriptor.version}\0${value.providerId}`, value])).values()];
+  }
+
+  #externalServices(providers: VarinExtensionServiceProviderSnapshot[], lease: VarinSurfaceServiceInvocationLease,
+    routing: VarinExtensionServiceRoutingContext, signal: AbortSignal, callSignal: () => AbortSignal): SurfaceExternalService[] {
+    return providers.map(provider => ({ descriptor: { ...provider.descriptor }, providerId: provider.providerId,
       implementation: new Proxy({}, {
-        get: (_target, property) => property === "then" || typeof property !== "string"
-          ? undefined
-          : (...args: JsonValue[]) => this.#host.invokeService({
-            args,
-            method: property,
-            providerId: provider.providerId,
-            serviceId: provider.descriptor.id,
-            version: provider.descriptor.version,
-          }),
+        get: (_target, property) => property === "then" || typeof property !== "string" ? undefined
+          : (...args: JsonValue[]) => {
+            signal.throwIfAborted();
+            return this.#host.invokeService({ args, method: property, providerId: provider.providerId,
+              serviceId: provider.descriptor.id, version: provider.descriptor.version, routing, lease }, callSignal());
+          },
       }),
-      providerId: provider.providerId,
     }));
   }
 
-  #matchingLocalServiceFactories(
-    requirements: readonly VarinExtensionServiceRequirement[],
-  ): SurfaceLocalExternalServiceFactory[] {
-    return this.#externalServiceFactories.filter((factory) => requirements.some((requirement) => (
-      requirement.id === factory.descriptor.id && requirement.version === factory.descriptor.version
-    )));
+  async #openServiceLease(request: VarinSurfaceServiceLeaseRequest, preparationSignal: AbortSignal,
+    invalidated: (error: Error) => void): Promise<BoundSurfaceServiceLease> {
+    const controller = new AbortController();
+    const signal = AbortSignal.any([controller.signal, preparationSignal]);
+    let ready = false;
+    let closed = false;
+    let resolveReady!: (event: Extract<VarinSurfaceServiceLeaseEvent, { kind: "ready" }>) => void;
+    let rejectReady!: (error: Error) => void;
+    const readiness = new Promise<Extract<VarinSurfaceServiceLeaseEvent, { kind: "ready" }>>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
+    const fail = (reason: unknown): void => {
+      if (closed) return;
+      closed = true;
+      const error = reason instanceof Error ? reason : new Error(String(reason));
+      controller.abort(error);
+      rejectReady(error);
+      if (ready) invalidated(error);
+    };
+    const aborted = (): void => fail(signal.reason ?? new Error("Surface service lease was cancelled"));
+    signal.addEventListener("abort", aborted, { once: true });
+    const stream = Promise.resolve().then(() => this.#host.watchServiceLease(request, raw => {
+      if (closed) return;
+      const event = parseVarinSurfaceServiceLeaseEvent(raw);
+      if (event.kind !== "ready") { fail(new Error(event.kind === "error" ? event.message : `Surface service lease revoked: ${event.code}`)); return; }
+      if (ready) { fail(new Error("Surface service lease sent duplicate readiness")); return; }
+      if (event.routingRevision !== request.expectedRoutingRevision || event.providers.length !== request.services.length
+        || request.services.some(choice => !event.providers.some(provider => provider.providerKey === choice.providerKey
+          && provider.descriptor.id === choice.serviceId && provider.descriptor.version === choice.version))) {
+        fail(new Error("Surface service lease does not match the frozen dependency request")); return;
+      }
+      ready = true;
+      resolveReady(event);
+    }, signal));
+    void stream.then(() => fail(new Error("Surface service lease stream ended")), fail);
+    try {
+      const event = await readiness;
+      signal.throwIfAborted();
+      return { providers: event.providers, identity: { id: event.leaseId, owner: {
+        realmId: request.owner.realmId, extensionId: request.owner.extensionId,
+        entrypointId: request.owner.entrypointId, generation: request.owner.generation,
+      } }, signal, dispose: () => {
+        if (closed) return;
+        closed = true;
+        signal.removeEventListener("abort", aborted);
+        controller.abort(new Error("Surface service lease owner retired"));
+      } };
+    } catch (error) { closed = true; signal.removeEventListener("abort", aborted); controller.abort(error); throw error; }
   }
 
   async #createLocalExternalServices(
@@ -1586,66 +1687,30 @@ export class SurfaceExtensionLoader {
     };
   }
 
-  #requirementsSatisfied(selection: ArtifactSelection, state: VarinExtensionHostStateSnapshot): boolean {
-    const external = this.#resolveExternalProviders(selection, state, null);
-    return (selection.manifest.requires?.services ?? []).every((requirement) => {
-      if (requirement.optional) return true;
-      const externalCount = external.filter((provider) => (
-        provider.descriptor.id === requirement.id && provider.descriptor.version === requirement.version
-      )).length;
-      const localExternalCount = this.#externalServiceFactories.filter((factory) => (
-        factory.descriptor.id === requirement.id && factory.descriptor.version === requirement.version
-      )).length;
-      const localCount = this.#surfaceRuntime.getServices(requirement.id, requirement.version).length;
-      const count = externalCount + localExternalCount + localCount;
-      if ((requirement.binding ?? "single") === "single") return count === 1;
-      if (requirement.binding === "selected") {
-        const serviceKey = `${requirement.id}@${requirement.version}`;
-        const selected = state.services.selections[serviceKey]
-          ?? this.#surfaceRuntime.getSnapshot().serviceSelections[serviceKey];
-        if (!selected) return false;
-        const matches = [
-          ...external.map((provider) => provider.providerId),
-          ...this.#externalServiceFactories
-            .filter((factory) => factory.descriptor.id === requirement.id && factory.descriptor.version === requirement.version)
-            .map((factory) => factory.providerId),
-          ...this.#surfaceRuntime.getSnapshot().services
-            .filter((service) => service.descriptor.id === requirement.id && service.descriptor.version === requirement.version)
-            .map((service) => service.owner.extensionId),
-        ].filter((providerId) => providerId === selected);
-        return matches.length === 1;
+  #serviceBindingSignature(selection: ArtifactSelection, state: VarinExtensionHostStateSnapshot): string {
+    const scope = this.#accessContext(state).routing ?? {};
+    const resolved = this.#resolveDependencies(selection, state);
+    const hostGraph = new Map<string, unknown>();
+    const visit = (extensionId: string): void => {
+      if (hostGraph.has(extensionId)) return;
+      const entry = state.catalog.extensions.find(value => value.manifest.id === extensionId);
+      if (!entry) throw new Error(`Host service artifact is unavailable: ${extensionId}`);
+      const manifest = extensionId === selection.manifest.id ? selection.manifest : entry.manifest;
+      if (!manifest.entrypoints?.host) {
+        const native = this.#hostDeclarations(selection, state).filter(value => value.kind === "native" && value.providerKey.startsWith(`${extensionId}:`));
+        if (!native.length) throw new Error(`Native Host service owner is unavailable: ${extensionId}`);
+        hostGraph.set(extensionId, native.map(value => [value.providerKey, value.providerId]));
+        return;
       }
-      return count > 0;
-    });
-  }
-
-  #resolvedServiceSelections(
-    selection: ArtifactSelection,
-    state: VarinExtensionHostStateSnapshot,
-    providers: readonly VarinExtensionServiceProviderSnapshot[],
-  ): Record<string, string> {
-    const resolved: Record<string, string> = {};
-    for (const requirement of selection.manifest.requires?.services ?? []) {
-      if (requirement.binding !== "selected") continue;
-      const serviceKey = `${requirement.id}@${requirement.version}`;
-      const configured = state.services.selections[serviceKey];
-      if (!configured) continue;
-      const provider = providers.find((candidate) => (
-        candidate.descriptor.id === requirement.id && candidate.descriptor.version === requirement.version
-      ));
-      resolved[serviceKey] = provider?.providerId ?? configured;
-    }
-    return resolved;
-  }
-
-  #serviceBindingSignature(
-    providers: VarinExtensionServiceProviderSnapshot[],
-    localFactories: readonly SurfaceLocalExternalServiceFactory[] = [],
-  ): string {
-    return [
-      ...providers.map((provider) => `host:${provider.providerId}`),
-      ...localFactories.map((factory) => `surface:${factory.providerId}`),
-    ].sort().join("\0");
+      const candidates = this.#hostDeclarations(selection, state);
+      const dependencies = (manifest.requires?.services?.filter(requirement => requirement.realms.includes("host")) ?? []).flatMap(requirement => resolveSurfaceRequirement(requirement, candidates, state, scope));
+      hostGraph.set(extensionId, { integrity: extensionId === selection.manifest.id ? selection.integrity : entry.integrity,
+        grants: entry.capabilityGrants, dependencies: dependencies.map(value => value.providerKey) });
+      for (const dependency of dependencies) visit(dependency.providerKey.split(":")[0]!);
+    };
+    for (const dependency of resolved.filter(value => value.kind === "host" || value.kind === "native")) visit(dependency.providerKey.split(":")[0]!);
+    if (selection.manifest.entrypoints?.host) visit(selection.manifest.id);
+    return canonicalServiceComposition({ scope, dependencies: resolved.map(value => [value.kind, value.providerId]), hostGraph: [...hostGraph] });
   }
 
   #capabilityBindingSignature(capabilities: Iterable<string>, context: SurfaceCapabilityAccessContext): string {
@@ -1654,6 +1719,7 @@ export class SurfaceExtensionLoader {
       capabilities: this.#capabilities.resolveGranted(capabilities, context).sort(),
       projectTrusted: context.projectTrusted,
       surface: context.surface,
+      routing: context.routing,
     });
   }
 

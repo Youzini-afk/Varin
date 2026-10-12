@@ -10,12 +10,17 @@ mod input_admission;
 use input_admission::InputAdmission;
 fn artifact(version: &str, transition: PolicyStateTransition) -> AgentPolicyArtifactBinding {
     AgentPolicyArtifactBinding {
-        provider_key: "fixture:strategy".into(),
+        provider_key: "fixture:host:varin.agent.policy@4".into(),
         extension_id: "fixture".into(),
         extension_version: version.into(),
         service_id: "varin.agent.policy".into(),
         service_version: 4,
         artifact_integrity: format!("artifact-{version}"),
+        composition: crate::service_composition_fixture::graph(
+            "fixture",
+            version,
+            &format!("artifact-{version}"),
+        ),
         configuration_identity: "configuration".into(),
         declared_identity: PolicyIdentity {
             name: "strategy".into(),
@@ -202,12 +207,14 @@ impl Fixture {
             .lock()
             .unwrap()
             .policy_selections(&self.run)
+            .unwrap()
+            .load()
             .unwrap();
         let selected = self
             .db
             .lock()
             .unwrap()
-            .select_policy(
+            .prepare_policy_selection(
                 &self.run,
                 name,
                 previous.active.generation,
@@ -218,6 +225,14 @@ impl Fixture {
                 mode,
             )
             .unwrap();
+        let prepared = selected.store().unwrap();
+        let read = self
+            .db
+            .lock()
+            .unwrap()
+            .publish_policy_selection(prepared)
+            .unwrap();
+        let selected = read.load().unwrap();
         self.bridge
             .ready(
                 selected,
@@ -388,6 +403,8 @@ fn old_decision_model_and_job_acceptance_close_before_new_binding_activates() {
             .unwrap()
             .policy_selections(&f.run)
             .unwrap()
+            .load()
+            .unwrap()
             .active
             .generation,
         0
@@ -402,6 +419,8 @@ fn old_decision_model_and_job_acceptance_close_before_new_binding_activates() {
         f.db.lock()
             .unwrap()
             .policy_selections(&f.run)
+            .unwrap()
+            .load()
             .unwrap()
             .active
             .generation,
@@ -451,10 +470,11 @@ fn old_decision_model_and_job_acceptance_close_before_new_binding_activates() {
         Some(varin_runtime::catalog::result_content::ToolCompletionMetadata::JobAccepted { .. })
     ));
     let history = f.db.lock().unwrap().history("main").unwrap();
-    assert!(history.iter().any(|h| h
-        .provider
-        .as_ref()
-        .is_some_and(|p| p.item == json!({"signed":"original-provider"}))));
+    assert!(history.iter().any(|h| {
+        h.provider
+            .as_ref()
+            .is_some_and(|p| p.item == json!({"signed":"original-provider"}))
+    }));
 }
 #[test]
 fn incompatible_candidate_keeps_original_checkpoint_and_large_explicit_transition_is_not_rejected_as_one_frame(
@@ -498,6 +518,8 @@ fn incompatible_candidate_keeps_original_checkpoint_and_large_explicit_transitio
                     .unwrap()
                     .policy_selections(&f.run)
                     .unwrap()
+                    .load()
+                    .unwrap()
                     .active
                     .generation,
                 0
@@ -523,6 +545,8 @@ fn incompatible_candidate_keeps_original_checkpoint_and_large_explicit_transitio
                 f.db.lock()
                     .unwrap()
                     .policy_selection(&f.run, "next")
+                    .unwrap()
+                    .load()
                     .unwrap()
                     .failure
                     .as_deref(),
