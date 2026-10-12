@@ -57,7 +57,12 @@ impl ModelProvider for Model {
                 "runtime_contract",
                 json!({"action":"list","kind":"service"}),
             ),
-            1 => ("contract-sdk", "contract_probe", json!({"nested":true})),
+            1 => (
+                "contract-source",
+                "runtime_contract",
+                source_request(&results["contract-current"]),
+            ),
+            2 => ("contract-sdk", "contract_probe", json!({"nested":true})),
             _ => return Ok(FinishReason::Stop),
         };
         let schema = request
@@ -182,7 +187,26 @@ impl AgentPolicy for Policy {
         DefaultAgentPolicy.decide(view, event, state, cancel)
     }
 }
-fn assert_directory(value: &Value, run: &str, tools: &[ToolSchema]) {
+fn source_request(current: &Value) -> Value {
+    let service = current["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|service| service["serviceId"] == "review.cold-contract.future")
+        .unwrap();
+    let artifact = &service["implementations"][0]["artifacts"]["selected"];
+    json!({"action":"read","kind":"source","extensionId":artifact["extensionId"],
+        "slot":artifact["slot"],"artifactIntegrity":artifact["artifactIntegrity"],
+        "path":"host.cjs","offset":0,"maxBytes":4})
+}
+fn assert_source_start(value: &Value) {
+    assert_eq!(value["origin"], "immutable_artifact");
+    assert_eq!(value["status"], "found");
+    assert_eq!(value["page"]["text"], "// 源");
+    assert_eq!(value["page"]["byteLength"], 6);
+    assert_eq!(value["page"]["nextOffset"], 6);
+}
+fn assert_directory(value: &Value, run: &str, tools: &[ToolSchema], source_text: &str) {
     let listed = &value["listed"];
     assert_eq!(listed["origin"], "accepted_run");
     assert_eq!(listed["runId"], run);
@@ -226,6 +250,30 @@ fn assert_directory(value: &Value, run: &str, tools: &[ToolSchema]) {
     assert_eq!(
         query["completion"]["content"]["data"]["slot"]["live"],
         "unobserved"
+    );
+    let source = &value["source"];
+    let pages = source["pages"].as_array().unwrap();
+    assert!(pages.len() > 2, "source uses real byte pages");
+    assert_source_start(&pages[0]);
+    let mut offset = 0;
+    let mut joined = String::new();
+    for page in pages {
+        assert_eq!(
+            page["artifactIntegrity"],
+            source["metadata"]["service"]["implementations"][0]["artifacts"]["selected"]["artifactIntegrity"]
+        );
+        assert_eq!(page["fileIntegrity"], pages[0]["fileIntegrity"]);
+        assert_eq!(page["page"]["offset"], offset);
+        let text = page["page"]["text"].as_str().unwrap();
+        assert_eq!(page["page"]["byteLength"], text.len());
+        assert_eq!(page["page"]["totalBytes"], source_text.len());
+        offset += text.len();
+        joined.push_str(text);
+    }
+    assert!(pages.last().unwrap()["page"]["nextOffset"].is_null());
+    assert_eq!(
+        joined, source_text,
+        "installed original source survives mutable checkout edits"
     );
 }
 
@@ -272,6 +320,7 @@ fn current_catalog_and_frozen_sdk_tools_share_actual_model_policy_receipts_after
     };
     f.host.send(json!({"kind":"fixture-initialize","root":root,"storageRoot":storage_root,"epoch":EPOCH,"runId":submitted.run_id,"threadId":THREAD}));
     let ready = f.receive("fixture-prepared");
+    let source_text = ready["sourceText"].as_str().unwrap().to_owned();
     let live: Vec<_> = ready["bindings"]
         .as_array()
         .unwrap()
@@ -332,7 +381,7 @@ fn current_catalog_and_frozen_sdk_tools_share_actual_model_policy_receipts_after
     let report = wait_execution(&mut f, execution, owner.clone(), sender.clone());
     assert_eq!(report.state, RunState::Completed, "{:?}", report.failure);
     let results = results.lock().unwrap();
-    assert_eq!(results.len(), 2);
+    assert_eq!(results.len(), 3);
     let current = &results["contract-current"];
     assert_eq!(current["origin"], "current_catalog");
     assert!(
@@ -342,11 +391,19 @@ fn current_catalog_and_frozen_sdk_tools_share_actual_model_policy_receipts_after
             .iter()
             .any(|entry| entry["serviceId"] == "review.cold-contract.future")
     );
-    assert_directory(&results["contract-sdk"], &submitted.run_id, &schemas);
+    let child_source_request = source_request(current);
+    assert_source_start(&results["contract-source"]);
+    assert_directory(
+        &results["contract-sdk"],
+        &submitted.run_id,
+        &schemas,
+        &source_text,
+    );
     assert_directory(
         policy_result.lock().unwrap().result.as_ref().unwrap(),
         &submitted.run_id,
         &schemas,
+        &source_text,
     );
     drop(results);
     let history = owner.lock().unwrap().execution_history(BRANCH).unwrap();
@@ -355,10 +412,16 @@ fn current_catalog_and_frozen_sdk_tools_share_actual_model_policy_receipts_after
             .iter()
             .filter(|item| matches!(&item.content, Content::ToolResult { .. }))
             .count(),
-        2,
+        3,
         "nested/Policy results must not fabricate model pairs"
     );
-    exercise_child(&mut f, &schemas, original_bindings, sender.clone());
+    exercise_child(
+        &mut f,
+        &schemas,
+        original_bindings,
+        sender.clone(),
+        child_source_request,
+    );
     f.host.send(json!({"kind":"fixture-finish"}));
     f.receive("fixture-finished");
     let collection = owner
@@ -448,6 +511,7 @@ fn wait_execution(
 
 struct ChildModel {
     results: Arc<Mutex<Vec<Value>>>,
+    source_request: Value,
 }
 impl ModelProvider for ChildModel {
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
@@ -480,7 +544,7 @@ impl ModelProvider for ChildModel {
                 Some(content.data.clone())
             })
             .collect();
-        if results.len() == 3 {
+        if results.len() == 4 {
             emit(ProviderEvent::ItemCompleted {
                 item: ProviderItem {
                     id: "child-report".into(),
@@ -499,7 +563,8 @@ impl ModelProvider for ChildModel {
         let arguments = match results.len() {
             0 => json!({"action":"list","kind":"tool"}),
             1 => json!({"action":"describe","kind":"tool","name":"contract_probe"}),
-            _ => json!({"action":"describe","kind":"tool","name":"runtime_contract"}),
+            2 => json!({"action":"describe","kind":"tool","name":"runtime_contract"}),
+            _ => self.source_request.clone(),
         };
         emit(ProviderEvent::ItemCompleted {
             item: ProviderItem {
@@ -524,6 +589,7 @@ fn exercise_child(
     schemas: &[ToolSchema],
     bindings: Vec<varin_runtime::catalog::launches::ExtensionToolBinding>,
     sender: mpsc::SyncSender<Value>,
+    source_request: Value,
 ) {
     use varin_runtime::catalog::{collaboration::ChildSource, launches::LaunchSelection};
     let declared = crate::child_capabilities::schemas()
@@ -651,6 +717,7 @@ fn exercise_child(
                 policy_state: Value::Null,
                 provider: Arc::new(ChildModel {
                     results: results.clone(),
+                    source_request,
                 }),
                 tools: executor,
                 policy: Arc::new(DefaultAgentPolicy),
@@ -672,6 +739,7 @@ fn exercise_child(
         "parent tools cannot be rediscovered into a narrowed child"
     );
     assert_eq!(values[2]["tool"], serde_json::to_value(&schema).unwrap());
+    assert_source_start(&values[3]);
     drop(values);
     let owner = runtime.catalog();
     let (history, terminal) = {

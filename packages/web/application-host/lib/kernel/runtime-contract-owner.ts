@@ -7,7 +7,7 @@ import type { RunContextScope } from './protocol.generated.js';
 import { requireToolInvocation, runNestedToolCall } from './tool-invocation.js';
 
 export { VARIN_RUNTIME_CONTRACTS_CAPABILITY };
-/** Metadata only. Current selection is distinct from this invocation's frozen executable tools. */
+/** Current metadata and explicit immutable source reads retain this invocation's original authority. */
 export function createRuntimeContractOwner(options: {
   extensions: ApplicationExtensionRuntime;
   kernel: KernelClient;
@@ -21,7 +21,7 @@ export function createRuntimeContractOwner(options: {
       requireToolInvocation(context);
       const result = await options.extensions.queryContracts(request, { routing: {
         sessionId: authority.threadId, ...(admitted?.projectId ? { projectId: admitted.projectId } : {}),
-      } });
+      } }, context.signal);
       requireToolInvocation(context);
       return parseVarinToolJson(result);
     });

@@ -100,3 +100,19 @@ the extension can return that Job reference. A declaration or returned JSON alon
 subject or prove executor stop. Its service ID/version remain the stable contract identity. Manifest parsing preserves and
 validates this metadata; the executing Host compiles schemas before admitting calls. The declaration
 is inspectable metadata and never permission, trusted replay evidence, or a resource/execution receipt.
+
+Runtime discovery separates current-catalog metadata, an accepted Run's frozen tools, and explicit
+immutable package source reads. A `queryContracts` source request uses
+`{ action: 'read', kind: 'source', extensionId, slot, artifactIntegrity, path, offset?, maxBytes? }`.
+Use the artifact reference from the service implementation and its declared package-relative source
+path. `slot` is `selected` or `candidate`; an artifact integrity is a content address, not a semantic
+version. A candidate reference does not change which descriptor the metadata describes. The shared
+request declaration generates the tool schema and input decoder; public API and ordinary
+`runtime_contract` consumers use the same result decoder.
+
+Successful source results expose the artifact/file integrities and a UTF-8 byte page with exact
+offset, byte length, total bytes and nullable continuation. A page never splits a code point. Code
+is returned as data, not evaluated. This API does not grant arbitrary Host filesystem access or
+activate an unprepared package; unavailable, stale, missing, invalid and corrupt results retain their
+distinct codes. It does not promise source access to retired accepted-Run bindings after their
+catalog slot has changed.

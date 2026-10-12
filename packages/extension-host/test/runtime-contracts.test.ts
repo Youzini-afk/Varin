@@ -126,7 +126,7 @@ test('undeclared metadata, disabled declarations and failed activation stay dist
   } finally { await h.close(); }
 });
 
-test('same-version candidate publication never labels the old descriptor as the current contract', async () => {
+for (const change of ['contract', 'source'] as const) test(`same-version ${change} publication never labels the old instance as the current artifact`, async () => {
   const h = await fixture();
   let markPublished!: () => void;
   let release!: () => void;
@@ -141,7 +141,8 @@ test('same-version candidate publication never labels the old descriptor as the 
     const file = join(h.root, id, 'varin.extension.json');
     const manifest = JSON.parse(await readFile(file, 'utf8'));
     const next = declaration();
-    next.contract!.methods.read!.outputSchema = { type: 'number' };
+    if (change === 'contract') next.contract!.methods.read!.outputSchema = { type: 'number' };
+    else await writeFile(join(h.root, id, 'host.cjs'), '// New implementation; unchanged ID, version and descriptor');
     manifest.provides.services = [next];
     await writeFile(file, JSON.stringify(manifest));
     h.descriptors.set(id, next);
@@ -166,6 +167,10 @@ test('same-version candidate publication never labels the old descriptor as the 
     assert.ok(during.action === 'describe' && during.kind === 'service');
     assert.equal(during.service?.implementations[0]?.registration, 'declared');
     assert.equal(during.service?.selection.providerId, undefined);
+    assert.equal(during.service?.implementations[0]?.artifacts.selected?.artifactIntegrity, candidate.integrity);
+    const oldProvider = h.runtime.services.getSnapshot().providers.find(provider => provider.providerId === binding.providerId)!;
+    assert.equal(h.runtime.supervisor.getRetainedArtifactIdentity(oldProvider), snapshot.extensions.find(entry => entry.manifest.id === id)!.integrity);
+    assert.notEqual(h.runtime.supervisor.getRetainedArtifactIdentity(oldProvider), candidate.integrity);
     assert.deepEqual(during.member?.contract, next.contract!.methods.read);
     h.runtime.services.setSelection(serviceId, 1, binding.providerId);
     const explicit = await h.query(request);

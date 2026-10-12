@@ -55,8 +55,8 @@ path. Registry invocation indexes only the requested service (or directly looks 
 provider); it does not scan all installed providers. Selected-provider failure never falls back to a
 different implementation. Non-authoritative routing cannot create a new binding.
 
-`ApplicationExtensionRuntime.queryContracts` reads current service and UI-slot contracts from the
-same manifest, routing, registry and workbench owners. It never activates a provider or invokes its
+`ApplicationExtensionRuntime.queryContracts` lists/describes current service and UI-slot contracts from the
+same manifest, routing, registry and workbench owners. Those metadata operations never activate a provider or invoke its
 `inspect` callback. Read-only workbench snapshots do not migrate profiles or resolve/create workspace
 identities. Revisions and original lifecycle codes distinguish declared/cold, active, draining,
 disabled, failed and unresolved selections. Missing method metadata is `undeclared`, not an empty
@@ -69,6 +69,22 @@ source locations through the same manifest and activation descriptor. A declared
 callable through the original handler lookup at activation. Tool execute schemas derive from the
 existing `tool` declaration; no second tool schema is maintained. This is a finite author contract,
 not automatic reflection over every Application API or every provider implementation.
+
+The explicit `read/source` query reads package-relative UTF-8 source through the existing package
+manager and immutable artifact verifier. Metadata supplies the exact selected/candidate artifact
+integrity; a same-version replacement cannot redirect an old request to new bytes. Candidate references
+identify the candidate package, not the selected service descriptor. No query materializes a missing
+built-in artifact, activates a provider, or reads the mutable installation checkout. Missing source,
+unmaterialized/unavailable artifacts, stale slots, invalid text/ranges and verified corruption remain
+distinct. A retained old directory alone does not authorize reading it as the current selected slot.
+
+Source pages use UTF-8 byte offsets, defaulting to offset 0 and a 16 KiB budget. The final code point
+may extend the page by at most three bytes; `nextOffset` is the exact continuation. Empty files and
+EOF return a found empty page. Each read verifies the original full-file hash in asynchronous 64 KiB
+chunks, retaining only the requested page; consequently reading many small pages re-reads the file.
+There is no second source cache or hash authority. Cancellation closes the actual file stream, and
+the package manager rechecks only the requested slot before publishing. Source bodies in an Agent
+call remain ordinary tool results in the original ContentStore/history, including after GC/reopen.
 
 A bound handle admits ordinary calls while its generation is active. A caller freezing an exchange
 can explicitly pin that generation, including its real broker drain lifetime, and must release the

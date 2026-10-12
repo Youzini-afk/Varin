@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import type { HostServiceOwnerIdentity } from './service-registry.js';
 import {
   parseVarinContractSource, parseVarinRuntimeContractRequest,
   resolveVarinExtensionServiceRouting, resolveVarinWorkbenchProfile,
@@ -44,13 +45,16 @@ function toolMethod(descriptor: VarinExtensionServiceProvision): VarinServiceMet
   };
 }
 function serviceSummary(state: VarinExtensionHostStateSnapshot, serviceId: string, version: number,
-  scope: VarinRuntimeContractScope): VarinRuntimeServiceSummary {
+  scope: VarinRuntimeContractScope, artifactIdentityForOwner: (owner: HostServiceOwnerIdentity) => string | undefined): VarinRuntimeServiceSummary {
   const providers = state.services.providers.filter(provider => provider.descriptor.id === serviceId && provider.descriptor.version === version);
   const currentDeclarationMatches = (provider: typeof providers[number]): boolean => {
     const entry = state.catalog.extensions.find(entry => entry.manifest.id === provider.extensionId);
     const descriptor = entry?.manifest.provides?.services?.find(service => service.id === serviceId && service.version === version);
     return !!entry?.manifest.entrypoints?.host && entry.manifest.version === provider.extensionVersion
-      && isDeepStrictEqual(descriptor, provider.descriptor);
+      && isDeepStrictEqual(descriptor, provider.descriptor)
+      // Same-semver source updates can publish before registry replacement. Only the original
+      // supervisor's exact generation identity can associate an instance with this declaration.
+      && !!entry.integrity && artifactIdentityForOwner(provider) === entry.integrity;
   };
   const instances = providers
     .map(({ providerId, providerKey, extensionId, extensionVersion, generation, status }) =>
@@ -59,6 +63,10 @@ function serviceSummary(state: VarinExtensionHostStateSnapshot, serviceId: strin
     const descriptor = entry.manifest.provides?.services?.find(service => service.id === serviceId && service.version === version);
     if (!descriptor || !entry.manifest.entrypoints?.host) return [];
     return [{ extensionId: entry.manifest.id, extensionVersion: entry.manifest.version,
+      artifacts: {
+        selected: entry.integrity ? { extensionId: entry.manifest.id, slot: 'selected' as const, artifactIntegrity: entry.integrity } : null,
+        candidate: entry.candidate ? { extensionId: entry.manifest.id, slot: 'candidate' as const, artifactIntegrity: entry.candidate.integrity } : null,
+      },
       providerKey: `${entry.manifest.id}:host:${serviceId}@${version}`,
       enabled: entry.desired.enabled,
       registration: providers.some(provider => provider.extensionId === entry.manifest.id && currentDeclarationMatches(provider))
@@ -118,8 +126,10 @@ function slots(state: VarinExtensionHostStateSnapshot, scope: VarinRuntimeContra
 
 /** Reads only already-owned metadata. No activation, package reads, handler calls or new binding. */
 export function queryRuntimeContracts(state: VarinExtensionHostStateSnapshot,
-  requestValue: VarinRuntimeContractRequest | unknown, scope: VarinRuntimeContractScope): VarinRuntimeContractResult {
+  requestValue: VarinRuntimeContractRequest | unknown, scope: VarinRuntimeContractScope,
+  artifactIdentityForOwner: (owner: HostServiceOwnerIdentity) => string | undefined): VarinRuntimeContractResult {
   const request = parseVarinRuntimeContractRequest(requestValue);
+  if (request.kind === 'source') throw new Error('Source reads require the original package owner');
   const basis = { origin: 'current_catalog' as const, permission: 'checked_on_invocation' as const,
     hostId: state.catalog.hostId, authoritative: state.catalog.authoritative && state.routing.authoritative && state.workbench.authoritative,
     revisions: { catalog: state.catalog.revision, services: state.services.revision,
@@ -139,10 +149,10 @@ export function queryRuntimeContracts(state: VarinExtensionHostStateSnapshot,
     }
     for (const provider of state.services.providers) services.set(`${provider.descriptor.id}@${provider.descriptor.version}`, provider.descriptor);
     const entries = [...services.values()].sort((a, b) => a.id.localeCompare(b.id) || a.version - b.version)
-      .map(service => serviceSummary(state, service.id, service.version, scope));
+      .map(service => serviceSummary(state, service.id, service.version, scope, artifactIdentityForOwner));
     return { ...basis, action: 'list', kind: 'service', entries };
   }
-  const service = serviceSummary(state, request.serviceId, request.version, scope);
+  const service = serviceSummary(state, request.serviceId, request.version, scope, artifactIdentityForOwner);
   const candidates = state.catalog.extensions.filter(entry => (!request.extensionId || entry.manifest.id === request.extensionId)
     && entry.manifest.provides?.services?.some(descriptor => descriptor.id === request.serviceId && descriptor.version === request.version));
   if (!candidates.length) return { ...basis, action: 'describe', kind: 'service', status: 'missing', service: null, member: null };

@@ -1,3 +1,8 @@
+import {
+  parseVarinPackageSourcePath, parseVarinRuntimeSourceRequest, parseVarinRuntimeSourceResult,
+  parseVarinRuntimeSourceArtifact, VARIN_RUNTIME_SOURCE_REQUEST_SCHEMA,
+  type VarinRuntimeSourceArtifact, type VarinRuntimeSourceRequest, type VarinRuntimeSourceResult,
+} from './runtime-source.js';
 import type {
   JsonObject, JsonValue, VarinExtensionActualStatus, VarinExtensionServiceRequirement,
   VarinExtensionServiceProviderStatus,
@@ -27,7 +32,7 @@ export interface VarinExtensionServiceContract {
   events?: Record<string, VarinServiceEventContract>;
 }
 
-export type VarinRuntimeContractRequest =
+export type VarinRuntimeContractRequest = VarinRuntimeSourceRequest
   | { action: 'list'; kind: 'service' | 'ui_slot' }
   | { action: 'describe'; kind: 'service'; serviceId: string; version: number; extensionId?: string;
       member?: { kind: 'method' | 'event'; name: string } }
@@ -55,6 +60,8 @@ export interface VarinRuntimeContractBasis {
 export interface VarinRuntimeServiceImplementation {
   extensionId: string;
   extensionVersion: string;
+  /** Current selected descriptor; candidate is only an exact package reference, not this descriptor's contract. */
+  artifacts: { selected: VarinRuntimeSourceArtifact | null; candidate: VarinRuntimeSourceArtifact | null };
   providerKey: string;
   enabled: boolean;
   registration: 'declared' | 'registered';
@@ -96,7 +103,7 @@ export interface VarinRuntimeSlotSummary {
   codes?: string[];
   selectedShell: { extensionId: string; contributionId: string } | null;
 }
-export type VarinRuntimeContractResult = VarinRuntimeContractBasis & (
+export type VarinRuntimeContractResult = VarinRuntimeSourceResult | VarinRuntimeContractBasis & (
   | { action: 'list'; kind: 'service'; entries: VarinRuntimeServiceSummary[] }
   | { action: 'list'; kind: 'ui_slot'; entries: VarinRuntimeSlotSummary[] }
   | { action: 'describe'; kind: 'service'; status: 'found' | 'missing' | 'undeclared' | 'unresolved';
@@ -113,7 +120,7 @@ const objectSchema = (properties: JsonObject, required: string[]): JsonObject =>
 });
 /** The normal tool and author/API query decoder share this declaration. */
 export const VARIN_RUNTIME_CONTRACT_REQUEST_SCHEMA: JsonObject = {
-  oneOf: [
+  oneOf: [VARIN_RUNTIME_SOURCE_REQUEST_SCHEMA,
     objectSchema({ action: { const: 'list' }, kind: { enum: ['service', 'ui_slot'] } }, ['action', 'kind']),
     objectSchema({ action: { const: 'describe' }, kind: { const: 'service' }, serviceId: textSchema,
       version: { type: 'integer', minimum: 1 }, extensionId: textSchema,
@@ -143,6 +150,7 @@ function text(value: unknown, label: string): string {
 }
 export function parseVarinRuntimeContractRequest(value: unknown): VarinRuntimeContractRequest {
   const raw = record(value, 'Contract query');
+  if (raw.kind === 'source') return parseVarinRuntimeSourceRequest(value);
   if (raw.action === 'list' && (raw.kind === 'service' || raw.kind === 'ui_slot')) {
     fields(raw, ['action', 'kind'], 'Contract query');
     return { action: 'list', kind: raw.kind };
@@ -185,11 +193,7 @@ export function parseVarinRuntimeInspectionRequest(value: unknown): VarinRuntime
 export function parseVarinContractSource(value: unknown): VarinContractSource {
   const raw = record(value, 'Contract source');
   fields(raw, ['path', 'line'], 'Contract source');
-  const path = text(raw.path, 'Contract source path');
-  if (path.includes('\\') || path.includes('\0') || path.startsWith('/') || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(path)
-    || path.split('/').some(segment => !segment || segment === '.' || segment === '..')) {
-    throw new Error('Contract source must be a package-relative path');
-  }
+  const path = parseVarinPackageSourcePath(raw.path);
   if (raw.line !== undefined && (!Number.isSafeInteger(raw.line) || Number(raw.line) < 1)) throw new Error('Contract source line must be positive');
   return { path, ...(raw.line === undefined ? {} : { line: Number(raw.line) }) };
 }
@@ -229,6 +233,7 @@ export function parseVarinExtensionServiceContract(value: unknown): VarinExtensi
 /** Validate the public response at the transport boundary without calling an extension. */
 export function parseVarinRuntimeContractResult(value: unknown): VarinRuntimeContractResult {
   const raw = record(parseVarinToolJson(value), 'Contract result');
+  if (raw.kind === 'source') return parseVarinRuntimeSourceResult(raw);
   const requireValue = (condition: unknown): void => { if (!condition) throw new Error('Invalid contract result'); };
   const number = (value: unknown): void => requireValue(Number.isSafeInteger(value) && Number(value) >= 0);
   const strings = (value: unknown): void => {
@@ -258,6 +263,11 @@ export function parseVarinRuntimeContractResult(value: unknown): VarinRuntimeCon
     }
     for (const value of list(item.implementations)) {
       const implementation = record(value, 'Service implementation');
+      const artifacts = record(implementation.artifacts, 'Implementation artifacts');
+      for (const slot of ['selected', 'candidate']) if (artifacts[slot] !== null) {
+        const artifact = parseVarinRuntimeSourceArtifact(artifacts[slot]);
+        requireValue(artifact.slot === slot && artifact.extensionId === implementation.extensionId);
+      }
       for (const key of ['providerKey', 'extensionId', 'extensionVersion']) text(implementation[key], key);
       requireValue(typeof implementation.enabled === 'boolean' && ['declared', 'registered'].includes(String(implementation.registration))
         && ['declared', 'undeclared'].includes(String(implementation.contractStatus)));

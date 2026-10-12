@@ -31,6 +31,7 @@ import {
   type VarinExtensionServiceRoutingRuleUpdateRequest,
   type VarinExtensionServiceRoutingSnapshot,
   type VarinExtensionServiceSelectionRequest,
+  parseVarinRuntimeContractRequest,
   type VarinRuntimeContractRequest,
   type VarinRuntimeContractScope,
   type VarinRuntimeContractResult,
@@ -160,14 +161,21 @@ export class ApplicationExtensionRuntime {
     }
   }
 
-  async queryContracts(request: VarinRuntimeContractRequest | unknown, scope: VarinRuntimeContractScope = {}): Promise<VarinRuntimeContractResult> {
+  async queryContracts(requestValue: VarinRuntimeContractRequest | unknown, scope: VarinRuntimeContractScope = {}, signal?: AbortSignal): Promise<VarinRuntimeContractResult> {
+    const request = parseVarinRuntimeContractRequest(requestValue);
+    signal?.throwIfAborted();
+    // Only this explicit branch reads immutable package bytes, outside lifecycle/control admission.
+    if (request.kind === 'source') return this.packages.readSource(request, signal);
+    // list/describe remain pure metadata reads: no package preparation or provider activation.
     for (;;) {
+      signal?.throwIfAborted();
       const revision = this.#revision;
       const catalog = await this.catalog.snapshot();
       const services = this.services.getSnapshot();
       const routing = await this.routing.read();
       const workbench = await this.workbench.snapshot();
-      if (revision === this.#revision) return queryRuntimeContracts({ catalog, services, routing, workbench, revision }, request, scope);
+      if (revision === this.#revision) return queryRuntimeContracts({ catalog, services, routing, workbench, revision }, request, scope,
+        owner => this.supervisor.getRetainedArtifactIdentity(owner));
     }
   }
 
