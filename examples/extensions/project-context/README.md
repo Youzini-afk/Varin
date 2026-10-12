@@ -1,7 +1,7 @@
 # Project context contribution
 
 This is an ordinary brokered Host extension, using the executable
-`provideContextFragments(context, { sections })` author contract. The declaration is immutable;
+`provideContextFragments(context, { sections }, { declareContract: true })` author contract. The declaration is immutable;
 `describe` accepts no arguments and returns no executable callbacks. Do not perform model calls,
 retrieval, network access or external effects in this contract. Such work needs an explicit operation.
 
@@ -38,5 +38,24 @@ admission rechecks selection; failure preserves the old checkpoint and reports p
 The Rust compiler reuses a typed binding for unchanged declarations, appends instruction sections as
 system instructions and data sections as external data, and freezes the result in the normal model
 snapshot. Conversation history is never rewritten. Inspect the native context checkpoint's
-`personalization.contextComposition` for the exact provider, immutable content digest and selection
-revision. Previously prepared model requests retain their compiled context.
+`personalization.contextComposition.transforms` for the ordered providers and immutable content
+digests; their containing composition retains its original scope and selection revision. Previously prepared model requests retain their compiled context.
+
+
+This example explicitly declares `contract.composition: "ordered"` in its manifest and registration.
+To retain the packaged instruction first and append this project's contribution, replace `providerKey`
+with the ordered field in the same original routing rule:
+
+```json
+"providerKeys": [
+  "varin.builtin.context-fragments:host:varin.context.fragments@1",
+  "example.project-context:host:varin.context.fragments@1"
+]
+```
+
+Do not include both fields. `providerKeys: []` explicitly selects no fragments and does not fall
+through to the default. Every selected provider is required; missing or incompatible members report
+preparation failure. Two providers may use the same local section name without overwriting each
+other. A one-member collection still requires the collection consumer; ordinary service invocation
+keeps its original single-provider result. Default-user and original admitted workspace configuration
+rules also participate in the same routing precedence.

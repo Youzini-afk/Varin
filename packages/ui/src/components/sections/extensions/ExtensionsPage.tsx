@@ -53,7 +53,8 @@ import {
   serviceRoutingScopeKey,
 } from '@varin/extension-contract';
 import { VARIN_BUILTIN_RETRIEVAL_DEFAULT_PROVIDER_KEY } from '@varin/extension-builtins';
-import { serviceRoutingOptions } from '@/lib/extensions/service-routing-options';
+import { serviceRoutingComposition, serviceRoutingOptions } from '@/lib/extensions/service-routing-options';
+import { ServiceRoutingControl } from './ServiceRoutingControl';
 import {
   selectActiveWorkbenchProfile,
   applyWorkbenchProfile,
@@ -558,7 +559,9 @@ const ServiceRoutingSection: React.FC = () => {
 
   const providerGroups = serviceRoutingOptions(snapshot);
   const serviceKeys = new Set([
-    ...[...providerGroups].filter(([, providers]) => providers.length > 1).map(([key]) => key),
+    ...[...providerGroups].filter(([, providers]) => (
+      providers.length > 1 || providers.some((provider) => provider.descriptor.contract?.composition === 'ordered')
+    )).map(([key]) => key),
     ...snapshot.routing.document.rules.map((rule) => `${rule.serviceId}@${rule.version}`),
   ]);
   if (serviceKeys.size === 0) return null;
@@ -578,12 +581,12 @@ const ServiceRoutingSection: React.FC = () => {
   const selectProvider = async (
     serviceId: string,
     version: number,
-    providerKey: string | null,
+    selection: string | readonly string[] | null,
   ): Promise<void> => {
     const key = `${serviceId}@${version}`;
     setBusyKey(key);
     try {
-      await setVarinExtensionServiceRoute(serviceId, version, editableScope, providerKey);
+      await setVarinExtensionServiceRoute(serviceId, version, editableScope, selection);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -618,13 +621,17 @@ const ServiceRoutingSection: React.FC = () => {
             && rule.version === version
             && serviceRoutingScopeKey(rule.scope) === editableScopeKey
           ));
-          const selected = exactRule?.providerKey ?? '__automatic__';
-          const selectedMissing = selected !== '__automatic__'
-            && !providers.some((provider) => provider.providerKey === selected);
+          const selection = exactRule?.providerKeys ?? exactRule?.providerKey ?? null;
+          const composition = serviceRoutingComposition(snapshot, id, version);
           const resolution = resolveVarinExtensionServiceRouting({
             // The pure resolver uses an opaque candidate identity. A declared option has no
             // executable generation yet; selecting its stable key asks the Host to prepare it.
-            candidates: providers.map((provider) => ({ providerId: provider.providerId ?? provider.providerKey, providerKey: provider.providerKey })),
+            candidates: providers.map((provider) => ({
+              composition: provider.descriptor.contract?.composition,
+              providerId: provider.providerId ?? provider.providerKey,
+              providerKey: provider.providerKey,
+            })),
+            composition,
             context: routingContext,
             document: snapshot.routing.document,
             serviceId: id,
@@ -632,7 +639,10 @@ const ServiceRoutingSection: React.FC = () => {
             ...(id === VARIN_RETRIEVAL_PLAN_SERVICE_ID && version === VARIN_RETRIEVAL_PLAN_VERSION
               ? { defaultProviderKey: VARIN_BUILTIN_RETRIEVAL_DEFAULT_PROVIDER_KEY } : {}),
           });
-          const resolved = providers.find((provider) => provider.providerKey === resolution.providerKey);
+          const resolvedKeys = resolution.providerKeys ?? (resolution.providerKey ? [resolution.providerKey] : []);
+          const allReady = resolvedKeys.length > 0 && resolvedKeys.every((providerKey) => (
+            providers.find((provider) => provider.providerKey === providerKey)?.status === 'active'
+          ));
           return (
             <div key={key} className="grid gap-2 rounded-lg border border-border/60 px-3 py-3 @xl:grid-cols-[minmax(0,1fr)_minmax(14rem,0.8fr)] @xl:items-center">
               <div className="min-w-0">
@@ -642,30 +652,27 @@ const ServiceRoutingSection: React.FC = () => {
                   ? 'typography-micro text-muted-foreground'
                   : 'typography-micro text-[var(--status-warning)]'}>
                   {resolution.status === 'resolved'
-                    ? t(resolved?.status === 'active' ? 'settings.varin.extensions.routing.status.ready' : 'settings.varin.extensions.routing.status.declared')
+                    ? t(resolution.providerKeys?.length === 0 ? 'settings.varin.extensions.routing.empty'
+                      : allReady ? 'settings.varin.extensions.routing.status.ready' : 'settings.varin.extensions.routing.status.declared')
                     : resolution.status === 'ambiguous'
                       ? t('settings.varin.extensions.routing.status.choose')
                       : t('settings.varin.extensions.routing.status.unavailable')}
                 </div>
+                {resolution.diagnostics.map((diagnostic, index) => (
+                  <p key={`${diagnostic.code}:${index}`} className="break-words typography-micro text-[var(--status-warning)]">
+                    {diagnostic.message}
+                  </p>
+                ))}
               </div>
-              <Select
-                value={selected}
-                disabled={busyKey === key}
-                onValueChange={(value) => { void selectProvider(id, version, value === '__automatic__' ? null : value); }}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__automatic__">{t('settings.varin.extensions.routing.automatic')}</SelectItem>
-                  {selectedMissing ? (
-                    <SelectItem value={selected}>{t('settings.varin.extensions.routing.missing')}</SelectItem>
-                  ) : null}
-                  {providers.map((provider) => (
-                    <SelectItem key={provider.providerKey} value={provider.providerKey}>
-                      {extensionNames.get(provider.extensionId) ?? provider.extensionId}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <ServiceRoutingControl
+                busy={busyKey === key}
+                composition={composition}
+                extensionNames={extensionNames}
+                inheritedSelection={!exactRule ? resolution.matchedRule?.providerKeys ?? resolution.matchedRule?.providerKey : undefined}
+                onSelect={(next) => { void selectProvider(id, version, next); }}
+                providers={providers}
+                selection={selection}
+              />
             </div>
           );
         })}

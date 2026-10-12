@@ -1146,3 +1146,16 @@ item referenced by that child's durable report. `collaboration.readReport` retur
 page with byte offsets and total size. The UI replaces pages on explicit continuation rather than
 assembling an unbounded report in memory. Status/list contain report metadata only; the original
 history content owner remains the sole durable body owner.
+
+
+## Ordered context transforms
+
+The original ContextCheckpoint personalization field retains `ContextComposition.transforms` in
+explicit service-routing order. `thread-context` resolves default user, admitted project/Thread and
+its existing resource snapshot's configuration root; a source-free Thread has no workspace route.
+The Host calls only selected broker declarations, caching unchanged exact providers and propagating
+original preparation cancellation. Declaration bodies persist via the existing unlocked content
+publication and checkpoint CAS. Rust ContextRead applies the typed ordered handle outside Catalog's
+mutex; immutable model requests, children and recovery keep that checkpoint's exact identities.
+Provider disable blocks new candidates, without deleting already admitted context or claiming to
+retract an in-flight model request. No new configuration, permission, history or Context store exists.

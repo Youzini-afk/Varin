@@ -16,6 +16,7 @@ export const VARIN_CONTEXT_FRAGMENTS_CONTRACT = {
   id: VARIN_CONTEXT_FRAGMENTS_SERVICE_ID,
   version: VARIN_CONTEXT_FRAGMENTS_VERSION,
   participation: 'transform',
+  composition: 'ordered',
   method: VARIN_CONTEXT_FRAGMENTS_METHOD,
   inputSchema: { type: 'array', maxItems: 0 },
   outputSchema: {
@@ -33,6 +34,7 @@ export const VARIN_CONTEXT_FRAGMENTS_SERVICE = {
   multiple: true,
   contract: {
     participation: VARIN_CONTEXT_FRAGMENTS_CONTRACT.participation,
+    composition: VARIN_CONTEXT_FRAGMENTS_CONTRACT.composition,
     methods: {
       [VARIN_CONTEXT_FRAGMENTS_METHOD]: {
         inputSchema: VARIN_CONTEXT_FRAGMENTS_CONTRACT.inputSchema,

@@ -2707,11 +2707,9 @@ pub(crate) fn personalization_basis(
                 .context_composition
                 .map(|composition| {
                     use varin_runtime::composition::context::{
-                        ContextComposition, ContextFragment, FragmentKind,
+                        ContextComposition, ContextTransform, ContextFragment, FragmentKind,
                     };
                     Ok::<_, KernelError>(ContextComposition {
-                        provider_id: composition.provider_id,
-                        content_version: composition.content_version,
                         scope_id: composition.scope_id,
                         selection_revision: composition.selection_revision.try_into().map_err(
                             |_| {
@@ -2720,22 +2718,32 @@ pub(crate) fn personalization_basis(
                                 )
                             },
                         )?,
-                        sections: composition
-                            .sections
+                        transforms: composition
+                            .transforms
                             .into_iter()
-                            .map(|section| {
-                                Ok::<_, KernelError>(ContextFragment {
-                                    name: section.name,
-                                    content: section.content,
-                                    kind: match section.kind.as_str() {
-                                        "instruction" => FragmentKind::Instruction,
-                                        "data" => FragmentKind::Data,
-                                        _ => {
-                                            return Err(KernelError::Protocol(
-                                                "invalid context fragment kind".into(),
-                                            ));
-                                        }
-                                    },
+                            .map(|transform| {
+                                Ok::<_, KernelError>(ContextTransform {
+                                    provider_id: transform.provider_id,
+                                    content_version: transform.content_version,
+                                    sections: transform
+                                        .sections
+                                        .into_iter()
+                                        .map(|section| {
+                                            Ok::<_, KernelError>(ContextFragment {
+                                                name: section.name,
+                                                content: section.content,
+                                                kind: match section.kind.as_str() {
+                                                    "instruction" => FragmentKind::Instruction,
+                                                    "data" => FragmentKind::Data,
+                                                    _ => {
+                                                        return Err(KernelError::Protocol(
+                                                            "invalid context fragment kind".into(),
+                                                        ));
+                                                    }
+                                                },
+                                            })
+                                        })
+                                        .collect::<Result<_, _>>()?,
                                 })
                             })
                             .collect::<Result<_, _>>()?,
@@ -3118,3 +3126,7 @@ mod retrieval_inference_review;
 #[cfg(test)]
 #[path = "language_source_review.rs"]
 mod language_source_review;
+
+#[cfg(test)]
+#[path = "context_transform_review.rs"]
+mod context_transform_review;

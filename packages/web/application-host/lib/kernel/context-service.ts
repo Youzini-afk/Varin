@@ -71,7 +71,7 @@ export class ContextService implements ContextOwner {
   private async admit(run:Run,query:CompactQuery,key:string,signal:AbortSignal):Promise<ContextJob> {
     const [checkpoint,existing,launch]=await Promise.all([this.runtime.context(run.branch_id,signal),this.runtime.contextJobs(run.branch_id,signal),this.runtime.launch(run.id,signal)]);
     const previous=existing.find(job=>job.request.key===key);
-    const candidate=!previous && checkpoint && this.prepareContext.compact ? await this.prepareContext.compact(checkpoint) : undefined;
+    const candidate=!previous && checkpoint && this.prepareContext.compact ? await this.prepareContext.compact(checkpoint, signal) : undefined;
     const recipe=previous?.request ?? (candidate ? {effective_system_prompt:candidate.effectiveSystemPrompt,instruction_sources:candidate.instructionSources,memory_checkpoint:candidate.memoryCheckpoint} : checkpoint?.proposal);
     const personalization=previous?.request.personalization ?? candidate?.personalization ?? checkpoint?.personalization;
     const configuration=run.configuration as ModelSessionConfiguration;

@@ -85,6 +85,14 @@ user/workspace routing rules; the Host prepares and validates the selected gener
 or removed selections remain visible as unavailable rules. Native code retrieval offers the packaged
 keyword-and-structure default and keyword-only declaration through this same picker.
 
+Service contracts that explicitly declare `composition: 'ordered'` expose an ordered provider editor;
+`multiple` registration alone does not enable composition. The original routing CAS stores additions,
+removals and reordering as `providerKeys`, preserving order through Host refresh. Automatic removes the
+exact scope override, a single choice retains `providerKey`, and an explicit empty list suppresses
+providers. Inherited choices stay read-only until the user selects an override. Missing members and
+collections whose contract is unavailable remain visible in full with the shared resolver's diagnostics;
+the UI never truncates a collection or includes another installed provider automatically.
+
 `components/sections/assistant` owns the ordinary Agent memory and system-prompt settings pages.
 Memory CRUD and scope changes use the Host personalization authority; the editor stores only changed
 native prompt sections. Full previews include current project files, skills and memories, while the

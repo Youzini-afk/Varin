@@ -7,7 +7,7 @@ import type {
   VarinExtensionPackageSource,
   VarinExtensionServiceRoutingContext,
 } from '@varin/extension-contract';
-import { serviceRoutingRuleKey } from '@varin/extension-contract';
+import { parseVarinExtensionServiceRoutingRule, serviceRoutingRuleKey } from '@varin/extension-contract';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 
 export interface VarinExtensionCatalogStoreState {
@@ -311,8 +311,11 @@ export const setVarinExtensionServiceRoute = (
   serviceId: string,
   version: number,
   scope: VarinExtensionServiceRoutingContext,
-  providerKey: string | null,
+  selection: string | readonly string[] | null,
 ): Promise<void> => {
+  // Capture the user's ordered choice before it enters the shared mutation queue. Empty is an
+  // explicit collection; only null removes the override and restores automatic routing.
+  const selected = typeof selection === 'string' || selection === null ? selection : [...selection];
   const operation = mutationQueue.then(async () => {
     await startVarinExtensionCatalog();
     const current = state.snapshot;
@@ -320,7 +323,7 @@ export const setVarinExtensionServiceRoute = (
     const requestGeneration = generation;
     const identity = serviceRoutingRuleKey({ scope, serviceId, version });
     const existing = current.routing.document.rules.find((rule) => serviceRoutingRuleKey(rule) === identity);
-    if (providerKey === null) {
+    if (selected === null) {
       if (!existing) return;
       await extensionsApi().removeServiceRoutingRule({
         expectedRevision: current.routing.document.revision,
@@ -331,7 +334,13 @@ export const setVarinExtensionServiceRoute = (
     } else {
       await extensionsApi().upsertServiceRoutingRule({
         expectedRevision: current.routing.document.revision,
-        rule: { allowFallback: false, providerKey, scope, serviceId, version },
+        rule: parseVarinExtensionServiceRoutingRule({
+          allowFallback: existing?.allowFallback ?? false,
+          ...(typeof selected === 'string' ? { providerKey: selected } : { providerKeys: selected }),
+          scope,
+          serviceId,
+          version,
+        }),
       });
     }
     if (requestGeneration === generation) await refreshVarinExtensionCatalog();

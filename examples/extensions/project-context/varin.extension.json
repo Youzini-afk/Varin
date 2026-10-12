@@ -3,7 +3,74 @@
   "id": "example.project-context",
   "displayName": "Project Research Context",
   "version": "1.0.0",
-  "engines": { "varin": "*" },
-  "entrypoints": { "host": { "file": "host.cjs", "mode": "brokered", "activation": ["service-request"] } },
-  "provides": { "services": [{ "id": "varin.context.fragments", "version": 1, "multiple": true }] }
+  "engines": {
+    "varin": "*"
+  },
+  "entrypoints": {
+    "host": {
+      "file": "host.cjs",
+      "mode": "brokered",
+      "activation": [
+        "service-request"
+      ]
+    }
+  },
+  "provides": {
+    "services": [
+      {
+        "id": "varin.context.fragments",
+        "version": 1,
+        "multiple": true,
+        "contract": {
+          "participation": "transform",
+          "composition": "ordered",
+          "methods": {
+            "describe": {
+              "inputSchema": {
+                "type": "array",
+                "maxItems": 0
+              },
+              "outputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "sections"
+                ],
+                "properties": {
+                  "sections": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "name",
+                        "kind",
+                        "content"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "\\S"
+                        },
+                        "kind": {
+                          "enum": [
+                            "instruction",
+                            "data"
+                          ]
+                        },
+                        "content": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
 }

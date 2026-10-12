@@ -6,7 +6,7 @@ import { CalendarOwner } from '../scheduled-tasks/calendar-owner.js';
 import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { createMemoryOwner } from './memory-owner.js';
-import { ApplicationExtensionRuntime } from '@varin/extension-host';
+import { ApplicationExtensionRuntime, type HostServiceBinding } from '@varin/extension-host';
 import { createContextComposition } from './context-composition.js';
 import { createRequire } from 'node:module';
 import { createThreadContext } from './thread-context.js';
@@ -133,15 +133,15 @@ it('packaged default and installable scoped example reach captured model request
   const oldBytes = structuredClone(f.requests[0]!.body);
   expect(system(oldBytes)).toContain('Distinguish completed work, attempted work');
   const old = (await f.api.snapshot(identity)).context.checkpoint!;
-  expect(old.personalization!.contextComposition!.sections[0]!.name).toBe('execution-reporting');
+  expect(old.personalization!.contextComposition!.transforms[0]!.sections[0]!.name).toBe('execution-reporting');
   await installExample(f);
   await route(f, 'example.project-context:host:varin.context.fragments@1', { projectId: 'selected-project' });
   const other = await f.composition({ sessionId: 'other-session', projectId: 'different-project' });
-  expect(other!.sections[0]!.name).toBe('execution-reporting');
+  expect(other!.transforms[0]!.sections[0]!.name).toBe('execution-reporting');
   await f.adapter.refreshPersonalization();
   const refreshed = (await f.api.snapshot(identity)).context.checkpoint!;
   expect(refreshed.personalization!.revision).toBe(old.personalization!.revision);
-  expect(refreshed.personalization!.contextComposition!.sections[0]!.name).toBe('research-evidence');
+  expect(refreshed.personalization!.contextComposition!.transforms[0]!.sections[0]!.name).toBe('research-evidence');
   expect(refreshed.proposal).toMatchObject({ effective_system_prompt: old.proposal.effective_system_prompt, memory_checkpoint: old.proposal.memory_checkpoint });
   expect(f.requests[0]!.body).toEqual(oldBytes);
   complete(held, 'old-completed', 'done');
@@ -159,13 +159,13 @@ it('packaged default and installable scoped example reach captured model request
   await f.adapter.refreshPersonalization();
   const prior = (await f.api.snapshot(identity)).context.checkpoint!;
   expect(prior.personalization!.revision).toBe(beforeRestart.personalization!.revision);
-  expect(prior.personalization!.contextComposition!.providerId).not.toBe(beforeRestart.personalization!.contextComposition!.providerId);
+  expect(prior.personalization!.contextComposition!.transforms[0]!.providerId).not.toBe(beforeRestart.personalization!.contextComposition!.transforms[0]!.providerId);
   const { contextComposition, ...basis } = prior.personalization!;
   await expect(f.runtime.refreshContext({ branchId: identity.branchId, expectedRevision: prior.revision, context: {
     ...(prior.resources ? { resources: prior.resources } : {}),
     effectiveSystemPrompt: prior.proposal.effective_system_prompt + ' UNAUTHORIZED SAME REVISION',
     instructionSources: prior.proposal.instruction_sources, memoryCheckpoint: prior.proposal.memory_checkpoint,
-    personalization: { ...basis, contextComposition: { ...contextComposition!, contentVersion: 'changed', sections: [] } },
+    personalization: { ...basis, contextComposition: { ...contextComposition!, transforms: [{ ...contextComposition!.transforms[0]!, contentVersion: 'changed', sections: [] }] } },
   } })).rejects.toThrow();
   await route(f, 'missing.context:host:varin.context.fragments@1', { projectId: 'selected-project' });
   await expect(f.adapter.refreshPersonalization()).rejects.toThrow();
@@ -175,11 +175,12 @@ it('a cache hit cannot return an old selection revision if routing changes befor
   const f = await fixture((_body, response) => complete(response, 'unused', 'unused'));
   const scope = { sessionId: 'race-session', projectId: 'race-project' };
   const first = await f.composition(scope);
-  const originalPrepare = f.extensions.prepareService.bind(f.extensions);
+  const originalRead = f.extensions.routing.read.bind(f.extensions.routing);
   let changed = false;
-  f.extensions.prepareService = async (...args) => {
+  f.extensions.routing.read = async () => {
+    const snapshot = await originalRead();
     if (!changed) { changed = true; await route(f, 'varin.builtin.context-fragments:host:varin.context.fragments@1', { projectId: 'race-project' }); }
-    return originalPrepare(...args);
+    return snapshot;
   };
   const result = await f.composition(scope).catch(() => undefined);
   expect(result?.selectionRevision).not.toBe(first!.selectionRevision);
@@ -188,7 +189,7 @@ it('a cache hit cannot return an old selection revision if routing changes befor
 it('optional unavailable default is empty, but explicit missing and failing providers cannot silently erase context', async () => {
   const f = await fixture((_body, response) => complete(response, 'unused', 'unused'));
   const scope = { sessionId: 'optional-session' };
-  expect((await f.composition(scope))!.sections[0]!.name).toBe('execution-reporting');
+  expect((await f.composition(scope))!.transforms[0]!.sections[0]!.name).toBe('execution-reporting');
   await f.extensions.setEnabled('varin.builtin.context-fragments', false, (await f.extensions.state()).catalog.revision);
   expect(await f.composition(scope)).toBeUndefined();
   await route(f, 'varin.builtin.context-fragments:host:varin.context.fragments@1', scope);
@@ -207,16 +208,24 @@ it('optional unavailable default is empty, but explicit missing and failing prov
 it('unchanged context preparation invokes describe once and reuses the real worker generation', async () => {
   const f = await fixture((_body, response) => complete(response, 'unused', 'unused'));
   let describes = 0;
-  const originalPrepare = f.extensions.prepareService.bind(f.extensions);
-  f.extensions.prepareService = async (...args) => {
-    const binding = await originalPrepare(...args);
-    return { ...binding, invoke: (...callArgs) => { if (callArgs[0] === 'describe') describes++; return binding.invoke(...callArgs); } };
+  const originalPrepare = f.extensions.prepareServiceCollection.bind(f.extensions);
+  f.extensions.prepareServiceCollection = async (...args) => {
+    const collection = await originalPrepare(...args);
+    return { ...collection, bindings: collection.bindings.map<HostServiceBinding>(binding => ({ ...binding,
+      pin: () => {
+        const pin = binding.pin();
+        return { ...pin, invoke: (method, input, signal, invocation) => {
+          if (method === 'describe') describes++;
+          return pin.invoke(method, input, signal, invocation);
+        } };
+      },
+    })) };
   };
   const generations = new Set<string>();
   for (let index = 0; index < 5; index++) {
     const result = await f.composition({ sessionId: 'reuse-session' });
-    generations.add(result!.providerId);
-    expect(result!.sections[0]!.name).toBe('execution-reporting');
+    generations.add(result!.transforms[0]!.providerId);
+    expect(result!.transforms[0]!.sections[0]!.name).toBe('execution-reporting');
   }
   const beforeRouting = await f.composition({ sessionId: 'reuse-session' });
   await route(f, 'unrelated.missing:host:varin.context.fragments@1', { projectId: 'unrelated-project' });

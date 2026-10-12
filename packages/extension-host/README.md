@@ -94,8 +94,10 @@ supervisor keeps its artifact identity through actual owner retirement. Normal r
 pinned calls; disable/crash drainage
 revokes both the active generation and older retained generations without waiting for abandoned pins.
 The first production native consumer is `varin.context.fragments@1`: existing scoped routing selects
-one brokered package, its frozen declaration crosses the private context boundary, and Rust's existing
-composition resolver/registry binds a typed immutable transform. The SDK's `provideContextFragments`
+one brokered package or an explicitly ordered collection. `prepareServiceCollection` returns exact
+selected handles without changing the ordinary `prepareService`/`invokeService` result. Only the selected
+roots and their original dependencies prepare. Frozen declarations cross the private context boundary,
+and Rust's existing composition resolver/registry binds the typed immutable ordered transform. The SDK's `provideContextFragments`
 helper and `inspect` metadata share the contract; the packaged default and installable project example
 use the ordinary lifecycle. `varin.retrieval.plan@1` also uses this binding path: its declarative
 stage choices are frozen with the executing artifact and a separate pin for every native query.
@@ -214,3 +216,13 @@ back its committed storage migration. The original registry closes old new-call 
 retained old exchange pins drain; recovery prepares the committed selected artifact. Controlled
 transport tests exercise these interruption windows against the real artifact, Catalog and storage
 owners; they do not claim a whole-process or cross-process atomic transaction.
+
+
+Context preparation caches exact members against the original Host publication and routing revisions.
+Unchanged requests use bound registry identities, without rescanning/activating the catalog; replacing
+one provider redescribes only that generation. New candidates check current bindings and propagate
+caller cancellation. Ending a caller's wait does not claim its actual callback drained; registry
+in-flight accounting remains authoritative. Disable/revocation blocks fresh preparation and cached
+admission. Already admitted checkpoint/request bytes remain historical facts and recover unchanged.
+Context routing uses the existing default-user namespace, admitted project/Thread and the resource
+snapshot's original configuration `projectRoot` as workspace namespace, never its execution cwd.

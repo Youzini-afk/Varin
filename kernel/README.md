@@ -240,8 +240,8 @@ drain their holders/calls, and Host shutdown awaits connection cleanup already i
 ## Selected context composition
 
 Native context checkpoints retain an optional `personalization.contextComposition`: exact Host
-provider identity, immutable declaration digest, session scope, originating selection revision and
-named instruction/data sections. Ordinary Host service routing selects the brokered provider; the
+session scope and originating selection revision, plus an ordered `transforms` array retaining each
+provider identity, immutable declaration digest and named instruction/data sections. Ordinary Host service routing selects the brokered provider collection; the
 context contract accepts only a frozen declarative result, with no model/network/effect callback.
 The packaged default and `examples/extensions/project-context` use the same SDK contract.
 
@@ -256,3 +256,12 @@ preserves the previous checkpoint; ordinary absence is distinct from selected-pr
 This is one production Provider/Transform slice, not a general policy/observer implementation or a
 claim that all extension services have moved into Rust. Independent review covers actual broker
 selection and captured model requests, replacement/failure, unchanged binding reuse and old pins.
+
+
+Ordered context composition uses Catalog format 59 and private kernel protocol 19. Older internal
+catalogs are rejected at open before writable access; obsolete single-transform DTOs are rejected,
+without conversion or migration. Generated public context types follow the same schema. Provider
+`describe` remains v1. A transform emits only new typed context fragments, preserving provider/content/
+section identity and instruction/data provenance, including duplicate local names across providers.
+Empty composition adds no item; original history and real tool results are never rewritten. Replacement
+reuses unchanged member implementations, while already pinned requests retain their exact old order.

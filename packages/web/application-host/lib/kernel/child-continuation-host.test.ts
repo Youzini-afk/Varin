@@ -249,7 +249,7 @@ it.each(['dispatch', 'user_continuation', 'message_request', 'followup', 'calend
     expect(continueRun).toHaveBeenCalledWith('source-free-run', expect.any(AbortSignal));
     expect(runtime.prepareChild).toHaveBeenCalledWith(expect.objectContaining({ source: null,
       expectedContextCheckpoint: kind === 'dispatch' ? null : checkpoint.id }), expect.any(AbortSignal));
-    if (kind === 'dispatch') expect(prepareContext).toHaveBeenCalledWith(identity, null, expect.objectContaining({ threadRole: 'worker', childProfile: child.selected_profile }));
+    if (kind === 'dispatch') expect(prepareContext).toHaveBeenCalledWith(identity, null, expect.objectContaining({ threadRole: 'worker', childProfile: child.selected_profile }), expect.any(AbortSignal));
     else expect(prepareContext.forSource).toHaveBeenCalledWith(checkpoint, null, expect.any(AbortSignal));
     expect(runtime.readyChildSource).not.toHaveBeenCalled(); expect(kernel.claimChildSource).not.toHaveBeenCalled();
     expect(kernel.issueGrant).not.toHaveBeenCalled(); expect(runtime.failChild).not.toHaveBeenCalled(); expect(errors).toEqual([]);

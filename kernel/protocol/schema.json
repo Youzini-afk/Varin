@@ -658,6 +658,7 @@
     "ThreadCreateParams",
     "SystemSection",
     "ContextFragment",
+    "ContextTransform",
     "ContextComposition",
     "MemorySnapshot",
     "ContextPersonalization",
@@ -776,7 +777,7 @@
     "MediaReadParams",
     "MediaReadChunk"
   ],
-  "protocolVersion": 18,
+  "protocolVersion": 19,
   "runtimeStructs": {"ContentCollectionReport":{"fields":{"status":{"type":"ContentCollectionStatus"},"phase":{"type":"ContentCollectionPhase"},"removedObjects":{"type":"number"},"removedBytes":{"type":"number"},"removedStagingFiles":{"type":"number"},"reason":{"type":"string | null"}}},"ModelSessionConfiguration":{"fields":{"providerId":{"type":"string","optional":true},"providerFamily":{"type":"string"},"model":{"type":"string"},"endpoint":{"type":"string"},"credentialEnvironment":{"type":"string | null"},"allowAnonymous":{"type":"boolean"},"acceptsImages":{"type":"boolean","optional":true},"configurationGeneration":{"type":"number"},"maxOutputTokens":{"type":"number | null"},"azureDeployment":{"type":"string | null","optional":true},"azureApiVersion":{"type":"string | null","optional":true},"legacyMaxTokens":{"type":"boolean","optional":true},"includeStreamUsage":{"type":"boolean","optional":true},"reasoningEffort":{"type":"string | null","optional":true},"anthropicOauth":{"type":"boolean","optional":true},"adapterId":{"type":"string","optional":true},"adapterVersion":{"type":"string","optional":true},"contextWindowTokens":{"type":"number","optional":true},"thinkingLevel":{"type":"string","optional":true},"modelOptions":{"type":"unknown","optional":true}}},"KernelWorkingResultCandidate":{"fields":{"publicationId":{"type":"string"},"candidateOperationId":{"type":"string"},"workspaceId":{"type":"string"},"branchId":{"type":"string"},"root":{"type":"string"},"baseRoot":{"type":"string"},"writeRevision":{"type":"number"},"pinId":{"type":"string"},"basePinId":{"type":"string"}}}},
   "runtimeEnums": {
     "McpInteractionMode": ["Form", "Url", "Sampling"],
@@ -1764,7 +1765,8 @@
     "ThreadCreateParams": {"fields": {"threadId": {"type": "string"}, "branchId": {"type": "string"}}},
     "SystemSection": {"fields": {"name":{"type":"string"},"content":{"type":"string"}}},
     "ContextFragment": {"fields":{"name":{"type":"string"},"kind":{"type":"string"},"content":{"type":"string"}}},
-    "ContextComposition": {"fields":{"providerId":{"type":"string"},"contentVersion":{"type":"string"},"scopeId":{"type":"string"},"selectionRevision":{"type":"number"},"sections":{"type":"ContextFragment[]"}}},
+    "ContextTransform": {"fields":{"providerId":{"type":"string"},"contentVersion":{"type":"string"},"sections":{"type":"ContextFragment[]"}}},
+    "ContextComposition": {"fields":{"scopeId":{"type":"string"},"selectionRevision":{"type":"number"},"transforms":{"type":"ContextTransform[]"}}},
     "MemorySnapshot": {"fields":{"revision":{"type":"number"},"memories":{"type":"unknown[]"}}},
     "ContextPersonalization": {"fields": {"memorySnapshot":{"type":"MemorySnapshot"},"configurationDigest":{"type":"string"},"mode":{"type":"string"},"threadRole":{"type":"string"},"contextComposition":{"type":"ContextComposition","optional":true},"revision":{"type":"number"},"sessionId":{"type":"string"},"projectId":{"type":"string | null"},"originalSections":{"type":"SystemSection[]"},"instructionSources":{"type":"string[]"}}},
     "ContextRefreshParams": {"fields": {"branchId":{"type":"string"},"expectedRevision":{"type":"number"},"context":{"type":"InitialContext"}}},

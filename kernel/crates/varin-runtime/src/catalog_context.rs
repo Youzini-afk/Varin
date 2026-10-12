@@ -715,12 +715,16 @@ impl ContextRead {
             .map_err(RuntimeError::Invalid)?;
         let mut instruction_sources = checkpoint.proposal.instruction_sources.clone();
         if let Some(composition) = composition {
-            instruction_sources.push(format!(
-                "{}:{}:{}",
-                crate::composition::context::CAPABILITY,
-                composition.provider_id,
-                composition.content_version
-            ));
+            for transform in &composition.transforms {
+                instruction_sources.push(
+                    serde_json::json!([
+                        crate::composition::context::CAPABILITY,
+                        transform.provider_id,
+                        transform.content_version
+                    ])
+                    .to_string(),
+                );
+            }
         }
         if !checkpoint.proposal.effective_system_prompt.is_empty() {
             history.push(ConversationItem {

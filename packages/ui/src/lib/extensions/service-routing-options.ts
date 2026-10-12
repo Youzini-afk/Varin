@@ -8,6 +8,23 @@ export interface ServiceRoutingOption {
   status: 'active' | 'declared';
 }
 
+/** Multiplicity describes registrations, not whether a consumer can compose them. Keep this
+ * projection tied to the published contract, including installed but currently disabled owners. */
+export function serviceRoutingComposition(
+  snapshot: VarinExtensionHostStateSnapshot,
+  serviceId: string,
+  version: number,
+): 'ordered' | undefined {
+  const descriptors = [
+    ...snapshot.services.providers.filter((provider) => provider.status === 'active').map((provider) => provider.descriptor),
+    ...(snapshot.catalog.authoritative
+      ? snapshot.catalog.extensions.flatMap((entry) => entry.manifest.provides?.services ?? []) : []),
+  ];
+  return descriptors.some((descriptor) => (
+    descriptor.id === serviceId && descriptor.version === version && descriptor.contract?.composition === 'ordered'
+  )) ? 'ordered' : undefined;
+}
+
 /** Installed lazy Host declarations are selectable before activation. A declaration is not a
  * ready generation; only the Host's prepareService can activate and bind it after selection. */
 export function serviceRoutingOptions(snapshot: VarinExtensionHostStateSnapshot): Map<string, ServiceRoutingOption[]> {
