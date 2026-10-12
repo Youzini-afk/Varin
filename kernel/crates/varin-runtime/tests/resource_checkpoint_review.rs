@@ -680,6 +680,7 @@ fn compaction_copies_original_resource_bytes_even_before_previous_summary_bounda
     previous.summary = "Summary after the earlier boundary".into();
     let original = db.publish_context(previous).unwrap();
     let request = varin_runtime::context_job::ContextJobRequest {
+            summary_recipe: varin_runtime::context_job::ContextSummaryRecipe::manual(),
         owner_run_id: None,
         personalization: original.personalization.clone(),
         key: "earlier-compaction".into(),

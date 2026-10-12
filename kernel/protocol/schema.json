@@ -642,6 +642,8 @@
     "PlanContainsParams",
     "PlanViewParams",
     "BranchForkResult",
+    "ContextBudgetStrategy",
+    "ContextSummaryRecipe",
     "ContextJobCreateParams",
     "RunStartParams",
     "CredentialScope",
@@ -777,7 +779,7 @@
     "MediaReadParams",
     "MediaReadChunk"
   ],
-  "protocolVersion": 19,
+  "protocolVersion": 20,
   "runtimeStructs": {"ContentCollectionReport":{"fields":{"status":{"type":"ContentCollectionStatus"},"phase":{"type":"ContentCollectionPhase"},"removedObjects":{"type":"number"},"removedBytes":{"type":"number"},"removedStagingFiles":{"type":"number"},"reason":{"type":"string | null"}}},"ModelSessionConfiguration":{"fields":{"providerId":{"type":"string","optional":true},"providerFamily":{"type":"string"},"model":{"type":"string"},"endpoint":{"type":"string"},"credentialEnvironment":{"type":"string | null"},"allowAnonymous":{"type":"boolean"},"acceptsImages":{"type":"boolean","optional":true},"configurationGeneration":{"type":"number"},"maxOutputTokens":{"type":"number | null"},"azureDeployment":{"type":"string | null","optional":true},"azureApiVersion":{"type":"string | null","optional":true},"legacyMaxTokens":{"type":"boolean","optional":true},"includeStreamUsage":{"type":"boolean","optional":true},"reasoningEffort":{"type":"string | null","optional":true},"anthropicOauth":{"type":"boolean","optional":true},"adapterId":{"type":"string","optional":true},"adapterVersion":{"type":"string","optional":true},"contextWindowTokens":{"type":"number","optional":true},"thinkingLevel":{"type":"string","optional":true},"modelOptions":{"type":"unknown","optional":true}}},"KernelWorkingResultCandidate":{"fields":{"publicationId":{"type":"string"},"candidateOperationId":{"type":"string"},"workspaceId":{"type":"string"},"branchId":{"type":"string"},"root":{"type":"string"},"baseRoot":{"type":"string"},"writeRevision":{"type":"number"},"pinId":{"type":"string"},"basePinId":{"type":"string"}}}},
   "runtimeEnums": {
     "McpInteractionMode": ["Form", "Url", "Sampling"],
@@ -1744,7 +1746,9 @@
     "PlanContainsParams": {"fields": {"branchId": {"type": "string"}, "headId": {"type": "string | null"}, "candidateHeadId": {"type": "string | null"}, "cursor": {"type": "string", "optional": true}}},
     "PlanViewParams": {"fields": {"branchId": {"type": "string"}, "headId": {"type": "string | null"}, "current": {"type": "boolean"}}},
     "BranchForkResult": {"fields": {"threadId": {"type": "string"}, "branchId": {"type": "string"}}},
-    "ContextJobCreateParams": {"fields": {"ownerRunId":{"type":"string","optional":true},"personalization":{"type":"ContextPersonalization","optional":true},"key": {"type": "string"}, "branchId": {"type": "string"}, "throughId": {"type": "string"}, "expectedRevision": {"type": "number"}, "effectiveSystemPrompt": {"type": "string"}, "instructionSources": {"type": "string[]"}, "memoryCheckpoint": {"type": "string | null"}, "configuration": {"type": "unknown"}, "credentialScope": {"type": "CredentialScope", "optional": true}}},
+    "ContextBudgetStrategy": {"raw":"export type ContextBudgetStrategy = { kind: 'builtin'; name: string; version: string } | { kind: 'extension'; providerKey: string; extensionId: string; extensionVersion: string; artifactIntegrity: string; serviceVersion: number; configurationIdentity: string; name: string; version: string };","rustType":"varin_runtime::context_job::ContextBudgetStrategy"},
+    "ContextSummaryRecipe": {"fields":{"strategy":{"type":"ContextBudgetStrategy"},"mode":{"type":"'manual' | 'background' | 'blocking'"},"configurationIdentity":{"type":"string | null"},"additionalInstructions":{"type":"string | null"}},"rustType":"varin_runtime::context_job::ContextSummaryRecipe"},
+    "ContextJobCreateParams": {"fields": {"summaryRecipe":{"type":"ContextSummaryRecipe"},"ownerRunId":{"type":"string","optional":true},"personalization":{"type":"ContextPersonalization","optional":true},"key": {"type": "string"}, "branchId": {"type": "string"}, "throughId": {"type": "string"}, "expectedRevision": {"type": "number"}, "effectiveSystemPrompt": {"type": "string"}, "instructionSources": {"type": "string[]"}, "memoryCheckpoint": {"type": "string | null"}, "configuration": {"type": "unknown"}, "credentialScope": {"type": "CredentialScope", "optional": true}}},
     "ModelSelectParams": {"fields":{"runId":{"type":"string"},"key":{"type":"string"},"configuration":{"type":"unknown"},"credentialScope":{"type":"CredentialScope","optional":true},"childDispatch":{"type":"ChildDispatchCatalog","optional":true}}},
     "RunModelSelection": {"fields":{"id":{"type":"string"},"run_id":{"type":"string"},"revision":{"type":"number"},"binding_id":{"type":"string"},"configuration":{"type":"ModelSessionConfiguration"},"credential_scope":{"type":"CredentialScope | null"},"status":{"type":"'preparing' | 'ready' | 'active' | 'failed' | 'superseded'"},"failure":{"type":"string | null"}}},
     "RunModelSelections": {"fields":{"desired":{"type":"RunModelSelection | null"},"active":{"type":"RunModelSelection | null"}}},

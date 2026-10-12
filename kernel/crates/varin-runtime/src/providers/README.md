@@ -91,9 +91,11 @@ https://ai.google.dev/api/generate-content and https://ai.google.dev/gemini-api/
 - Environment-key lookup and an injected transactional native OAuth broker are implemented. The broker
   supports scope pinning and cancellation-safe refresh/persistence; the Host store/private bridge is now wired and checked with temporary/fake credentials. Platform
   keychain integration, Entra/ADC/AWS identity and live-auth verification remain separate work.
-- Built-in remote tools and server-job continuation, embeddings/rerank/decision/image purpose-specific
-  contracts, model override compatibility, pricing catalogs and complete multimodal support remain
-  explicit work. No generic base URL alias should claim those contracts are implemented.
+- Purpose-specific execution must follow the actual configured capability and its existing consumer,
+  not a list of hypothetical products. A generic base URL alias does not implement server-job
+  continuation or a different inference protocol. Current delivery and remaining concrete paths are
+  recorded in the runtime implementation ledger. Native image generation is deferred from the current
+  delivery by the user; existing Pi image calls and native typed-media transport are distinct facts.
 
 ## Mistral configured-family contract
 

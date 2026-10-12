@@ -689,7 +689,7 @@ impl ContextRead {
                         input_id: request.key.clone(),
                     },
                     content: Content::Text {
-                        text: crate::context_job::SUMMARY_REQUEST.into(),
+                        text: request.summary_recipe.request_text(),
                     },
                     opaque: None,
                 });

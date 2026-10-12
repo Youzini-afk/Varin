@@ -857,6 +857,9 @@ export class AgentRuntimeClient {
       signal,
     );
   }
+  contextScope(runId: string, signal?: AbortSignal): Promise<RunContextScope | null> {
+    return this.kernel.agentRuntimeRequest('runtime.run.scope', { runId }, signal);
+  }
   context(
     branchId: string,
     signal?: AbortSignal,
@@ -1318,7 +1321,7 @@ export class AgentRuntimeClient {
     state.controller.abort(); state.pending?.controller.abort(); state.unobserve?.();
   }
   private async policyScope(runId: string, threadId: string, signal?: AbortSignal): Promise<RunPolicyScope> {
-    const admitted = await this.kernel.agentRuntimeRequest<RunContextScope | null, 'runtime.run.scope'>('runtime.run.scope', { runId }, signal);
+    const admitted = await this.contextScope(runId, signal);
     return { runId, threadId, ...(admitted?.projectId ? { projectId: admitted.projectId } : {}) };
   }
   private observePolicy(scope: RunPolicyScope): void {

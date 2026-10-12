@@ -22,6 +22,7 @@ fn computer_scope_uses_active_branch_owner_not_auxiliary_runs() {
     let job = db
         .create_context_job(
             crate::context_job::ContextJobRequest {
+            summary_recipe: varin_runtime::context_job::ContextSummaryRecipe::manual(),
                 owner_run_id: None,
                 personalization: None,
                 key: "computer-auxiliary".into(),

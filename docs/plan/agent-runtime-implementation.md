@@ -8,6 +8,19 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-12 范围与兼容约束纠正
+
+- 当前合同直接替代旧版本，不为历史字段、scalar 形状、旧 schema 或双轨选择入口保留兼容分支。消费者一起更新；既有在途调用冻结、当前格式恢复、世代排空和真实异构 provider 协商仍是当前语义。不得据此删除用户实际文件、成果或提前切换默认 runtime。
+- 推理用途接入不等于每个用途都有本地推理包。已有提供商 decision/rerank/embedding 的配置、真实消费者与原生执行合同仍需保留/接通；本地包当前只有已有 Bekko。用户本轮明确暂缓 native 图像生成，不计剩余交付范围；旧 Pi 的 `models.generateImages()` 基础不等于 native 已实现。§18.1/§24 的建议/评估限定已有配置的辅助请求，不能扩成默认模型链；没有另设独立“材料 rerank”产品的任务。此前清单混用用途、消费者和本地包，现以这些明确边界纠正，历史台账不充当新需求。
+- 已有本地嵌入是 `bekko-embedding-v1-a8m` 的 `local-semantic` ONNX 组件，安装、校验、worker 与 CPU 调度已实现。当前 native query 入口只接已配置的 OpenAI-compatible HTTP lease（端点可以本机或外部），尚未接通该已有本地执行器。HTTP 模拟响应下的 Catalog/Goal 验证不代表用户配置了此后端，也不代表本地路径已迁移；后续优先补原 Bekko 路径。
+
+## 2026-10-12 增量：可替换 Context Budget Decision
+
+- 设计依据为扩设 §6/§11 的命名压缩 Decision 和总设 §13.2 的固定祖先 `摘要(A)+B+N`。原 settings、service routing、Run、ContextJob 与 ContentStore 继续各司其职；默认原生预算只做短设置查询，不执行未选择扩展。选中普通策略只接收候选边界/估量元数据，核心仍验证祖先、工具配对及用户后台开关。
+- 当前 ContextJob 必须保存原 `summaryRecipe`，包含策略/包/配置身份、blocking/background 模式和摘要指导；手动压缩显式构造 manual 配方。Catalog **60**、wire **20**直接拒绝旧格式，不写缺字段补旧逻辑。相同 owner/checkpoint/model/credential 的并发候选只受理一份，失败/未知收费工作不靠换 key 自动重试。
+- 真正 Settings/client/Router、普通 broker、主 Run/summary、child 准入后的 scope、取消/换代以及完成摘要在重开后发布已验证。独审发现外部策略可越过用户禁后台设置，已由 Rust 唯一决策边界修复并在真实整链复验。[本片合同与证据](../reviews/runtime-context-budget-2026-10-12.md)区分真实生命周期、受控推理和未验平台。
+- provider 容量错误反馈、完整自动记忆/Bot 等仍未完成；后续先做有界历史兼容清理，再接已有 Bekko 本地执行器。单值 routing 与旧 registry selection 是尚待删除的现行旧轨，不再承诺历史兼容。
+
 ## 2026-10-12 增量：有序纯 Context Transform
 
 - 原 service routing 支持明确 `providerKeys` 顺序、空选择和原单值资产；组合能力由合同声明，设置页共用原 parser/CAS 与实际 metadata。Context 接原 user/session/project 及已准入 workspace 配置身份，不另造工具名单或授予来源权限。Catalog **59**、wire **19**直接拒旧。
@@ -737,15 +750,15 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 
 ## 完整设计对照与剩余工程范围
 
-2026-10-12 按两份设计、当前源码和本文件最新增量重新核对。此表替代早期仍把 Goal、策略子任务、MCP Tasks、Computer 或自动容量压缩列为未实现的中间对照；各历史阶段的原始验证记录仍保留。decision 已完成 TypeSafe/Cloudflare/llama.cpp 与 research_decide 有限片；dedicated rerank、原渐进 fast-decision、Explore LLM 和 query embedding 已接原推理回执及固定/物化/live_root code_retrieval。材料 rerank、其他用途及协议特定已知计量仍分别推进。实现、真实产品组合与外部平台验证分别判断，不按提交数、测试数或条目数估计完成比例。
+2026-10-12 按两份设计、当前源码和本文件最新增量重新核对。此表替代早期仍把 Goal、策略子任务、MCP Tasks、Computer 或自动容量压缩列为未实现的中间对照；各历史阶段的原始验证记录仍保留。decision 已完成 TypeSafe/Cloudflare/llama.cpp 与 research_decide 有限片；dedicated rerank、原渐进 fast-decision、Explore LLM 和 query embedding 已接原推理回执及固定/物化/live_root code_retrieval。这些是既有可选调用路径的接线证据，不代表用户启用了相应模型；本地 Bekko 执行器与 native 查询的接入仍需完成。实现、真实产品组合与外部平台验证分别判断，不按提交数、测试数或条目数估计完成比例。
 
 以下顺序是 decision/rerank 后的工程优先级；可独立交付的领域可以并行。默认 runtime 切换、Pi 删除与全面用户资产迁移由用户验收后执行，我们负责迁移前能力、验收入口和交接清单。
 
 | 设计要求 / 剩余类别 | 已有实际能力，不再作为从零缺口 | 仍需实现或闭合的实际路径 | 验收重点 |
 | --- | --- | --- | --- |
-| 总设 §15–17：来源、语言与检索 | 固定/物化/live_root 来源、隔离可写 child 与逐项结果集成；三类来源的定义/引用/诊断/hover/symbols/call hierarchy、关键词/结构/显式语义、dedicated rerank、渐进 fast-decision 与 Explore LLM；原 immutable reader、撤权和推理账本；固定工程派生视图及实际 child 消费 | 其余编辑器语言/编辑候选与跨文件计算版本证据；远端文件/语言/检索同源映射；材料 rerank 组合消费者、本地 native embedding；更多 provider/工程规模下的来源合同验证 | 固定捕获树不能悄悄读 live 配置，目录外 provider environment 明确标识；同名远端路径不串源；旧 reader/配置切代与取消恢复；正常可选缺失不吞选定实现失败 |
-| 总设 §12–13、§18、§24：推理用途、记忆与 Bot | 多 API 家族原生适配及原 credential owner；规划模型、embedding、TypeSafe/Cloudflare/llama.cpp decision 与真实 research_decide；自动容量水位、分段摘要、普通 notes/计划和稳定 memory checkpoint；Goal/预算/暂停/各种持久触发 | 其他检索/材料 rerank 消费者、协议特定已知计量；其余建议/评估消费者与独立 image 用途；实际模型配置覆盖和服务器工作续接；可替换上下文预算策略、provider 容量反馈；完整自动记忆与 Bot 独立知识/身份/睡眠恢复/长期任务 | 每次实际外发按用途、原凭据、来源和 Goal 受理；未知 usage 不变成零；不重放潜在收费请求；原记忆 revision 和祖先压缩边界保持 |
-| 扩设 §4–9：完整能力组合与作者接口 | Provider/Transform/Decision/Observer 已有真实切片；ToolGraph、直接 child、Deliver/Pause、运行中策略换绑；SDK tools.invoke；原冻结tools.list/describe与普通runtime_contract、同源service/method/event/UI slot/props/准备状态及精确不可变包源码有限查询；Agent产包/原授权候选/实际工作台挂载释放、显式Host/Surface就绪组；有序纯Context Transform、同名来源隔离与未变成员复用 | 其余legacy service元数据、完整API/更广UI贡献查询；更广领域Provider/Transform和结构化patch冲突合同、父子作用域共享键与局部复用；trusted-native不能并存实例的热交接仍需沿原owner实现 | 不另养能力名单或第二安装器；失败候选保留旧实例；旧调用保留真实绑定；关闭 UI 不取消后台业务；仅依赖自己的工作等待准备 |
+| 总设 §15–17：来源、语言与检索 | 固定/物化/live_root 来源、隔离可写 child 与逐项结果集成；三类来源的定义/引用/诊断/hover/symbols/call hierarchy、关键词/结构/显式语义、dedicated rerank、渐进 fast-decision 与 Explore LLM；原 immutable reader、撤权和推理账本；固定工程派生视图及实际 child 消费 | 其余编辑器语言/编辑候选与跨文件计算版本证据；远端文件/语言/检索同源映射；已有 Bekko 本地 ONNX 执行器接入 native 查询与来源生命周期；更多 provider/工程规模下的来源合同验证 | 固定捕获树不能悄悄读 live 配置，目录外 provider environment 明确标识；同名远端路径不串源；旧 reader/配置切代与取消恢复；正常可选缺失不吞选定实现失败 |
+| 总设 §12–13、§18、§24：推理用途、记忆与 Bot | 多 API 家族原生适配及原 credential owner；规划模型、embedding、TypeSafe/Cloudflare/llama.cpp decision 与真实 research_decide；自动容量水位、可替换预算 Decision/冻结摘要配方、分段摘要、普通 notes/计划和稳定 memory checkpoint；Goal/预算/暂停/各种持久触发 | 现有实际模型配置与协议特定回执、服务器工作续接；provider 容量反馈；完整自动记忆与 Bot 独立知识/身份/睡眠恢复/长期任务。图像生成按用户本轮指令暂缓；不另设建议/评估新产品、材料重排产品或其他用途本地包 | 每次实际外发按用途、原凭据、来源和 Goal 受理；未知 usage 不变成零；不重放潜在收费请求；原记忆 revision 和祖先压缩边界保持 |
+| 扩设 §4–9：完整能力组合与作者接口 | Provider/Transform/Decision/Observer 已有真实切片；ToolGraph、直接 child、Deliver/Pause、运行中策略换绑；SDK tools.invoke；原冻结tools.list/describe与普通runtime_contract、同源service/method/event/UI slot/props/准备状态及精确不可变包源码有限查询；Agent产包/原授权候选/实际工作台挂载释放、显式Host/Surface就绪组；有序纯Context Transform、同名来源隔离与未变成员复用 | 其余当前异构 service 的元数据声明、完整API/更广UI贡献查询；更广领域Provider/Transform和结构化patch冲突合同、父子作用域共享键与局部复用；trusted-native不能并存实例的热交接仍需沿原owner实现 | 不另养能力名单或第二安装器；失败候选保留旧实例；旧调用保留真实绑定；关闭 UI 不取消后台业务；仅依赖自己的工作等待准备 |
 | 总设 §14–16、§21、§24：文件与产品工作流 | 原文件工具/CAS/捕获、child 报告与 WorkingResult、family 消息/读取/Wait、历史引用与分支、Storage 与 Catalog GC 锁外准备 | 未保存编辑器草稿、Documents/Git/overview 与工作源的关联；历史/磁盘组合恢复；完整 IDE/Research/Bot 模式、通知等产品消费者接同一身份/revision/cursor | 草稿不是聊天回滚副作用；重开保留真实副本与效果；报告和代码集成各有事实；各视图不能有第二份状态权威 |
 | 总设 §19–20、§22：环境、Computer 与 MCP | Computer 原操作、精确 stop、source-less child request/Wait/handback、持久 async 脚本；MCP tools/content/Tasks/resource observers/有限交互和两次审阅 sampling；typed media 的存储与跨层消费 | 真实远端/VM 环境的一致资源映射及平台组件缺口；支持范围内 provider/server/无 UI 生命周期的实际产品组合。Wayland 可靠截图/坐标输入仍需正式会话组件；macOS JXA 已有实现但缺真实机证据。typed media 不代表全部模型音视频/image 用途已实现 | 同物理桌面共享占用、独立桌面并行；失联不证明停止；旧 epoch 不续发；MCP 可选音频/toolChoice 等明确有限支持不自动扩成整份协议实现任务；实际配置与权限流程不能被省略 |
 | 总设 §7–9、§23、§27–28，扩设 §10–12：全局组合与发行实证 | 跨 Run 原子资源/FIFO、FileSearch 任务族公平、事件背压、正文/回执 ContentStore、锁外捕获/GC、分层产品投影已各有真实纵切 | 其余资源分类/provider 配额与全域共享准备；大内容请求成本、原始控制隔离的组合负载；Web/Electron/Mobile/无 UI Host 的完整后端寿命、安装升级/数据保留；代表性冷/热/并发/更新成本 | 只跑源码或受控 stdio 不称产品 IPC/真机/真账号通过；不预设性能倍数或任意门槛；未用扩展不增加热路径扫描；旧世代按实际引用释放；验证中发现的产品缺陷仍需修复 |

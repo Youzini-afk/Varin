@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 19;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 20;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -778,6 +778,7 @@ pub(crate) struct PlanContainsParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ContextJobCreateParams {
+    pub(crate) summary_recipe: varin_runtime::context_job::ContextSummaryRecipe,
     pub(crate) owner_run_id: Option<String>,
     pub(crate) personalization: Option<ContextPersonalization>,
     pub(crate) key: String,

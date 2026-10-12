@@ -710,7 +710,7 @@ it('retries summary generation without duplicating the job and applies its compl
   f.view.historyPage = { head: 'summary-cut', previous: null };
   const run = { ...initialSnapshot(true).activeRun!, id: 'summary-run', state: 'completed' as const };
   const compact = vi.fn<ThreadsAPI['compact']>().mockRejectedValueOnce(new Error('uncertain summary acceptance')).mockImplementation(async input => {
-    const job = { request: { key: input.key, branch_id: input.branchId, through_id: input.throughId, expected_revision: input.expectedRevision, effective_system_prompt: '', instruction_sources: [], memory_checkpoint: null }, receipt: { thread_id: 'context-job-thread:fixture', branch_id: 'context-job-branch:fixture', run_id: run.id, input_id: 'summary-input', cursor: 2 } };
+    const job = { request: { summary_recipe: { strategy: { kind: 'builtin' as const, name: 'manual', version: '1' }, mode: 'manual' as const, configurationIdentity: null, additionalInstructions: null }, key: input.key, branch_id: input.branchId, through_id: input.throughId, expected_revision: input.expectedRevision, effective_system_prompt: '', instruction_sources: [], memory_checkpoint: null }, receipt: { thread_id: 'context-job-thread:fixture', branch_id: 'context-job-branch:fixture', run_id: run.id, input_id: 'summary-input', cursor: 2 } };
     f.view.context.jobs = [{ job, run }];
     return job;
   });
