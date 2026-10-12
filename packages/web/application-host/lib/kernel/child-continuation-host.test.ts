@@ -229,6 +229,7 @@ it.each(['dispatch', 'user_continuation', 'message_request', 'followup', 'calend
     onEvent: () => () => {}, onExit: () => () => {}, onReady: () => () => {}, reconcileObservations: async () => [],
     children: async () => [], childExecutions: async () => [structuredClone(child)], unacceptedChildSources: async () => [],
     status: async () => ({ eventCursor: 1 }), events: async () => [], context: async () => checkpoint,
+    thread: async () => ({ bot_id: null }),
     childExecution: async () => structuredClone(child), readyChildSource: vi.fn(),
     prepareChild: vi.fn(async (_input: Parameters<AgentRuntimeClient['prepareChild']>[0]) => {
       child.receipt = { run_id: 'source-free-run', input_id: 'input', thread_id: child.child_thread_id, branch_id: child.child_branch_id, cursor: 2 };
@@ -288,4 +289,46 @@ it('cancels child settlement observation while the original language process sti
     stopped(); await drain;
     expect(readRun).not.toHaveBeenCalled();
   } finally { stopped(); collaboration.stop(); }
+});
+
+it('Bot Sleep joins its original child owner, while Delete retries original resource release before removal', async () => {
+  const child = execution();
+  child.source = { kind: 'absent' }; child.source_basis = null; child.code_result = { kind: 'not_applicable' };
+  child.state = 'ready'; child.receipt = { run_id: 'child-run', input_id: 'input', thread_id: child.child_thread_id, branch_id: child.child_branch_id, cursor: 9 };
+  const other = { ...structuredClone(child), execution_id: 'other-execution', child_thread_id: 'thread:other' };
+  let allowed = true; let finish!: () => void;
+  const running = new Promise<void>(resolve => { finish = resolve; });
+  let releasingFails = true;
+  const runtime = {
+    onEvent: () => () => {}, onExit: () => () => {}, onReady: () => () => {}, reconcileObservations: async () => [],
+    children: async () => [], childExecutions: async () => [structuredClone(child), other], unacceptedChildSources: async () => [],
+    status: async () => ({ eventCursor: 1 }), events: async () => [], childExecution: async () => structuredClone(child),
+    releaseChildResources: vi.fn(async () => {
+      if (releasingFails) throw new Error('Original child release is not confirmed');
+      child.resources_released = true; return structuredClone(child);
+    }),
+  };
+  const continueRun = vi.fn(async () => running);
+  const collaboration = new ThreadCollaboration({ kernel: { reconcileChildToolHandoffs() {}, releaseChildToolHandoff() {} } as never,
+    runtime: runtime as unknown as AgentRuntimeClient, storageAdapter: {} as never, sourceCaptureOwners: {} as never,
+    resolveLiveSource: vi.fn(), prepareContext: vi.fn() as never, continueRun, recoverLaunches: async () => {},
+    canExecuteThread: async id => id === child.child_thread_id && allowed, onError: vi.fn() });
+  try {
+    await collaboration.recover();
+    await vi.waitFor(() => expect(continueRun).toHaveBeenCalledOnce());
+    allowed = false;
+    let drained = false;
+    const stop = collaboration.suspendThreads(new Set([child.child_thread_id])).then(() => { drained = true; });
+    await Promise.resolve(); expect(drained).toBe(false);
+    finish(); await stop;
+    expect(child.cancel_requested).toBe(false);
+    expect(child.report).toBeNull();
+    child.report = { outcome: 'cancelled', sender_thread_id: child.child_thread_id, run_id: child.receipt.run_id, history_ids: [], detail: 'User deleted this Bot' };
+    await expect(collaboration.releaseCancelledThreads(new Set([child.child_thread_id]))).rejects.toThrow('Original child release is not confirmed');
+    expect(child.resources_released).toBe(false);
+    releasingFails = false;
+    await collaboration.releaseCancelledThreads(new Set([child.child_thread_id]));
+    expect(child.resources_released).toBe(true);
+    expect(other.resources_released).toBe(false);
+  } finally { finish(); collaboration.stop(); }
 });

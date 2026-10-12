@@ -5,13 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BotWorkspaceShell } from './BotWorkspaceShell';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
-import type { BotSummary } from '@/lib/bots';
+import { useBotNavigation, type BotSummary } from '@/lib/bots';
 
 const state = vi.hoisted(() => ({
   profileId: 'varin.bot',
   list: vi.fn(), ensure: vi.fn(), work: vi.fn(), create: vi.fn(), update: vi.fn(), archive: vi.fn(), open: vi.fn(), change: vi.fn(),
 }));
-vi.mock('@/lib/bots', () => ({
+vi.mock('@/lib/bots', async original => ({
+  ...await original<typeof import('@/lib/bots')>(),
   listBots: state.list,
   ensureBotEntry: state.ensure,
   listBotWork: state.work,
@@ -21,6 +22,8 @@ vi.mock('@/lib/bots', () => ({
   changeBotState: state.change,
   deleteBot: vi.fn(),
 }));
+vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ threads: {} }) }));
+vi.mock('@/components/thread/ThreadConversation', () => ({ ThreadConversation: ({ identity, readOnly, preferredModel }: { identity: { threadId: string; branchId: string }; readOnly: boolean; preferredModel?: { providerId: string; modelId: string } | null }) => <div data-agent={identity.threadId} data-branch={identity.branchId} data-readonly={String(readOnly)} data-model={JSON.stringify(preferredModel)} /> }));
 vi.mock('@/lib/pi-runtime/sessionNavigation', () => ({ openPiSessionFromNavigation: state.open }));
 vi.mock('@/lib/workbench/profile-context', () => ({ useWorkbenchProfileId: () => state.profileId }));
 vi.mock('@/lib/device', () => ({ useDeviceInfo: () => ({ isMobile: false }) }));
@@ -34,7 +37,8 @@ vi.mock('@/components/sections/bots/BotMenu', () => ({ BotMenu: ({ bot, onAction
   <button onClick={() => onAction('sleep')}>sleep-{bot.id}</button>
 </div> }));
 vi.mock('@/components/sections/bots/BotNameDialog', () => ({
-  BotNameDialog: ({ open, name, onNameChange, onSubmit }: {
+  BotNameDialog: ({ open, name, onNameChange, onSubmit, onRuntimeChange }: {
+    onRuntimeChange?: (runtime: 'pi' | 'agent') => void;
     open: boolean;
     name: string;
     onNameChange: (value: string) => void;
@@ -42,6 +46,7 @@ vi.mock('@/components/sections/bots/BotNameDialog', () => ({
   }) => open ? <form onSubmit={onSubmit}>
     <input value={name} onChange={(event) => onNameChange(event.target.value)} />
     <button type="button" onClick={() => onNameChange('Named bot')}>set-name</button>
+    <button type="button" onClick={() => onRuntimeChange?.('agent')}>use-agent</button>
     <button type="submit">settings.bots.save</button>
   </form> : null,
 }));
@@ -50,7 +55,7 @@ vi.mock('@/components/layout/MainLayout', () => ({
 }));
 
 const bot = (id: string): BotSummary => ({
-  id, name: `Bot ${id}`, entrySessionId: `entry-${id}`, archived: false,
+  id, name: `Bot ${id}`, entry: { runtime: 'pi', sessionId: `entry-${id}` }, archived: false,
   homeDir: `/bots/${id}`, coordinatorHostId: 'host-a', instructions: null, model: null,
   createdAt: '', updatedAt: '',
 });
@@ -73,9 +78,10 @@ describe('Bot mode navigation', () => {
     container = document.createElement('div');
     document.body.append(container);
     root = createRoot(container);
+    useBotNavigation.setState({ botId: null, entry: null });
     state.profileId = 'varin.bot';
     state.list.mockReset().mockResolvedValue([bot('a'), bot('b')]);
-    state.ensure.mockReset().mockImplementation(async (id: string) => ({ bot: bot(id), sessionId: `entry-${id}` }));
+    state.ensure.mockReset().mockImplementation(async (id: string) => ({ bot: bot(id), model: null, entry: { runtime: 'pi', sessionId: `entry-${id}` } }));
     state.work.mockReset().mockResolvedValue([]);
     state.create.mockReset().mockResolvedValue(bot('new'));
     state.update.mockReset().mockResolvedValue(bot('a'));
@@ -129,7 +135,7 @@ describe('Bot mode navigation', () => {
       form!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
     });
     expect(state.create).toHaveBeenCalledTimes(1);
-    expect(state.create).toHaveBeenCalledWith({ name: 'Named bot' });
+    expect(state.create).toHaveBeenCalledWith({ name: 'Named bot', runtime: 'pi' });
     expect(state.open).toHaveBeenLastCalledWith({ sessionId: 'entry-new', directory: '/bots/new' });
   });
 
@@ -144,7 +150,7 @@ describe('Bot mode navigation', () => {
   it('views a sleeping Bot read-only without waking it', async () => {
     const sleeping = { ...bot('a'), activity: { state: 'asleep' as const, operationId: 'sleep-a', planned: true, work: [], machines: [], error: null } };
     state.list.mockResolvedValue([sleeping]);
-    state.ensure.mockResolvedValue({ bot: sleeping, sessionId: 'entry-a' });
+    state.ensure.mockResolvedValue({ bot: sleeping, entry: { runtime: 'pi', sessionId: 'entry-a' } });
     await render();
     expect(container.querySelector('[data-chat]')?.getAttribute('data-readonly')).toBe('true');
     expect(state.change).not.toHaveBeenCalled();
@@ -161,21 +167,21 @@ describe('Bot mode navigation', () => {
   });
 
   it('discards a pending entry after the shell unmounts', async () => {
-    let finish!: (value: { bot: BotSummary; sessionId: string }) => void;
+    let finish!: (value: { bot: BotSummary; entry: BotSummary['entry'] }) => void;
     state.ensure.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
     await render();
     act(() => root.render(null));
-    await act(async () => { finish({ bot: bot('a'), sessionId: 'entry-a' }); });
+    await act(async () => { finish({ bot: bot('a'), entry: { runtime: 'pi', sessionId: 'entry-a' } }); });
     expect(state.open).not.toHaveBeenCalled();
   });
 
   it('discards an old Host response and loads the new Host', async () => {
-    let finish!: (value: { bot: BotSummary; sessionId: string }) => void;
+    let finish!: (value: { bot: BotSummary; entry: BotSummary['entry'] }) => void;
     state.ensure.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
     await render();
     state.list.mockResolvedValue([]);
     await act(async () => { usePiSessionStore.setState({ runtimeKey: 'host-b', currentSessionId: null }); });
-    await act(async () => { finish({ bot: bot('a'), sessionId: 'entry-a' }); });
+    await act(async () => { finish({ bot: bot('a'), entry: { runtime: 'pi', sessionId: 'entry-a' } }); });
     expect(state.open).not.toHaveBeenCalled();
     expect(container.textContent).toContain('settings.bots.empty');
   });
@@ -187,4 +193,43 @@ describe('Bot mode navigation', () => {
     expect(container.textContent).not.toContain('settings.bots.empty');
     expect(state.create).not.toHaveBeenCalled();
   });
+  it('opens native entry and child work from tagged Host identities without opening Pi', async () => {
+    const entry = { runtime: 'agent' as const, threadId: 'root-work', branchId: 'root-branch' };
+    const native = { ...bot('a'), entry };
+    const child = { runtime: 'agent' as const, threadId: 'child-work', branchId: 'child-branch' };
+    state.list.mockResolvedValue([native]); state.ensure.mockResolvedValue({ bot: native, entry, model: null });
+    state.work.mockResolvedValue([{ runtime: 'agent', identity: child, purpose: 'work', activeRun: null,
+      thread: { thread_id: child.threadId, bot_id: native.id, observer_project_ids: [null], branches: [{ branch_id: child.branchId, head: null, active_run_id: null, latest_run: null }] } }]);
+    await render();
+    expect(container.querySelector('[data-agent]')?.getAttribute('data-agent')).toBe('root-work');
+    const updated = { ...native, model: { providerId: 'changed-provider', modelId: 'changed-model' } };
+    state.list.mockResolvedValue([updated]); state.ensure.mockResolvedValue({ bot: updated, entry, model: updated.model });
+    await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="tasksHub.refresh"]')!.click(); });
+    expect(container.querySelector('[data-agent]')?.getAttribute('data-model')).toBe(JSON.stringify(updated.model));
+    await click('child-work');
+    expect(container.querySelector('[data-agent]')?.getAttribute('data-branch')).toBe('child-branch');
+    expect(container.querySelector('[data-agent]')?.hasAttribute('data-model')).toBe(false);
+    expect(state.open).not.toHaveBeenCalled();
+  });
+
+  it('keeps sleeping native history read-only and does not ensure or wake it', async () => {
+    const entry = { runtime: 'agent' as const, threadId: 'sleep-work', branchId: 'sleep-branch' };
+    state.list.mockResolvedValue([{ ...bot('a'), entry, activity: { state: 'asleep', operationId: 'sleep', planned: true, work: [], machines: [], error: null } }]);
+    await render();
+    expect(container.querySelector('[data-agent]')?.getAttribute('data-readonly')).toBe('true');
+    expect(state.ensure).not.toHaveBeenCalled(); expect(state.change).not.toHaveBeenCalled(); expect(state.open).not.toHaveBeenCalled();
+  });
+
+  it('creates an Agent Bot only after explicit runtime selection', async () => {
+    state.list.mockResolvedValue([]);
+    const entry = { runtime: 'agent' as const, threadId: 'new-agent', branchId: 'new-agent-branch' };
+    const native = { ...bot('new'), entry };
+    state.create.mockResolvedValue(native); state.ensure.mockResolvedValue({ bot: native, entry, model: null });
+    await render(); await click('settings.bots.create'); await click('set-name'); await click('use-agent');
+    await act(async () => { document.querySelector('form')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); });
+    expect(state.create).toHaveBeenCalledWith({ name: 'Named bot', runtime: 'agent' });
+    expect(container.querySelector('[data-agent]')?.getAttribute('data-agent')).toBe('new-agent');
+    expect(state.open).not.toHaveBeenCalled();
+  });
+
 });

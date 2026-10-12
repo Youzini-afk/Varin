@@ -138,7 +138,7 @@ async function initialize(frame: Record<string, unknown>) {
     assert(await bots.get(botId));
   } else {
     const bot = await bots.create({ name: 'Memory review Bot', model: { providerId: 'memory-review', modelId: 'bot-profile-model' } });
-    botId = bot.id; scopeId = `bot:${botId}`; ({ sessionId } = await bots.ensureEntry(botId));
+    botId = bot.id; scopeId = `bot:${botId}`; const ready = await bots.ensureEntry(botId); if (ready.entry.runtime !== 'pi') throw new Error('Pi fixture entry required'); sessionId = ready.entry.sessionId;
     await writeFile(join(root, 'memory-fixture.json'), JSON.stringify({ botId, scopeId, sessionId }));
   }
   const canExecute = (scope: string) => bots.canExecute(scope.slice(4));

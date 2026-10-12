@@ -54,8 +54,13 @@ export function createComputerAutomation(options: {
   const waiters = new Map<string, Set<() => void>>();
   const foreign = new Map<string, ComputerLease>();
   const ready = new Map<string, Promise<void>>();
-  const releasing = new Map<string, Promise<void>>();
+  // A removed permission is not a completed physical release. Keep the original
+  // lease with its in-flight callback so concurrent lifecycle callers join it.
+  const releasing = new Map<string, { lease: ComputerLease; promise: Promise<void> }>();
   const failedReleases = new Map<string, ComputerLease>();
+  const cleanupLeases = () => [...new Map([
+    ...leases.values(), ...failedReleases.values(), ...[...releasing.values()].map(entry => entry.lease),
+  ].map(lease => [lease.id, lease])).values()];
   const reservationAborts = new Map<string, AbortController>();
   const peerClaims = new Map<string, { identity: string; origin: string; assignmentId: string; actor: ComputerActor; lease?: ComputerLease; ready: Promise<string> }>();
   const revokedClaims = new Set<string>();
@@ -90,6 +95,7 @@ export function createComputerAutomation(options: {
       if (lease.actor.execution.work.runtime === 'pi' ? !scope.currentRootExecution || !lease.actor.rootExecution || !sameComputerExecution(lease.actor.rootExecution, scope.currentRootExecution) : ended.has(computerExecutionKey(lease.actor.execution)) || sameComputerWork(lease.actor.execution.work, scope.work) && (!scope.currentExecution || !sameComputerExecution(lease.actor.execution, scope.currentExecution))) add(lease.actor, lease.desktopId, 'cancel-unconfirmed');
     }
     for (const lease of failedReleases.values()) add(lease.actor, lease.desktopId, 'cancel-unconfirmed');
+    for (const { lease } of releasing.values()) add(lease.actor, lease.desktopId, 'cancelling');
     for (const entry of options.pendingReleases?.() ?? []) add(entry.actor, entry.desktopId, 'cancel-unconfirmed');
     return [...result.values()];
   };
@@ -178,9 +184,9 @@ export function createComputerAutomation(options: {
   };
   const removeLease = async (lease: ComputerLease) => {
     const pending = releasing.get(lease.id);
-    if (pending) return pending;
+    if (pending) return pending.promise;
     if (!leases.has(lease.id) && !failedReleases.has(lease.id)) return;
-    const release = (async () => {
+    const release = Promise.resolve().then(async () => {
       reservationAborts.get(lease.id)?.abort(new Error('Desktop assignment was revoked'));
       reservationAborts.delete(lease.id);
       const reservation = ready.get(lease.id);
@@ -197,9 +203,9 @@ export function createComputerAutomation(options: {
       }
       catch (error) { failedReleases.set(lease.id, lease); if (lease.access === 'control') unconfirmed.add(lease.desktopId); throw error; }
       finally { if (lease.access === 'control') transfers.delete(lease.desktopId); }
-    })();
-    releasing.set(lease.id, release);
-    try { await release; } finally { releasing.delete(lease.id); }
+    });
+    releasing.set(lease.id, { lease, promise: release });
+    try { await release; } finally { if (releasing.get(lease.id)?.promise === release) releasing.delete(lease.id); }
   };
   const accessRequest = async (work: ComputerWorkRef, desktopId: string, access: ComputerAccess, reason: string): Promise<ComputerAccessRequest> => {
     const sequence = ++admissionSequence;
@@ -262,13 +268,13 @@ export function createComputerAutomation(options: {
   };
   const release = async (work: ComputerWorkRef, desktopId?: string) => {
     const actor = await resolve(work);
-    const own = [...leases.values(), ...failedReleases.values()].filter(lease => (actorKey(lease.actor) === actorKey(actor)
+    const own = cleanupLeases().filter(lease => (actorKey(lease.actor) === actorKey(actor)
       || rootActor(actor) && sameFamily(lease.actor, actor)) && (!desktopId || lease.desktopId === desktopId));
     for (const lease of own) await removeLease(lease);
   };
   const cancelWork = async (actor: ComputerActor, desktopId?: string, exact = false) => {
     const key = exact ? `execution:${actorKey(actor)}${desktopId ? `\0${desktopId}` : ''}` : workKey(actor, desktopId);
-    const accepted = [...leases.values(), ...failedReleases.values(), ...controllers.values(), ...(options.pendingReleases?.() ?? []), ...(options.pendingControlFacts?.() ?? [])];
+    const accepted = [...cleanupLeases(), ...controllers.values(), ...(options.pendingReleases?.() ?? []), ...(options.pendingControlFacts?.() ?? [])];
     const captured = new Set(accepted.filter(entry => actor.execution.work.runtime === 'agent' && rootActor(actor) && sameFamily(entry.actor, actor)).map(entry => actorKey(entry.actor)));
     const belongs = (candidate: ComputerActor, target?: string) => (exact ? actorKey(candidate) === actorKey(actor) : actor.execution.work.runtime === 'agent' ? actorKey(candidate) === actorKey(actor) || captured.has(actorKey(candidate)) : roundKey(candidate) === roundKey(actor)) && (!desktopId || target === desktopId);
     const ongoing = cancellations.get(key);
@@ -283,7 +289,7 @@ export function createComputerAutomation(options: {
       cancelledThrough.set(ownKey, admissionSequence); revisions.set(ownKey, (revisions.get(ownKey) ?? 0) + 1);
     }
     const requestCancellation = actor.execution.work.runtime === 'agent' ? nativeRequests?.cancel(actor, desktopId, !exact && rootActor(actor)) : undefined;
-    const affected = [...leases.values(), ...failedReleases.values()].filter(lease => belongs(lease.actor, lease.desktopId));
+    const affected = cleanupLeases().filter(lease => belongs(lease.actor, lease.desktopId));
     const desktopsFor = (recipient: ComputerActor) => [...new Set(accepted.filter(entry => belongs(entry.actor, entry.desktopId)
       && actorKey(entry.actor) === actorKey(recipient)).flatMap(entry => entry.desktopId ? [entry.desktopId] : []))];
     const participants = accepted.filter(entry => belongs(entry.actor, entry.desktopId)).map(entry => entry.actor);
@@ -331,7 +337,7 @@ export function createComputerAutomation(options: {
   };
   const stop = async (execution: ComputerExecutionRef, desktopId?: string) => {
     // Accepted cleanup does not need a working Catalog channel to start physical stopping.
-    const accepted = [...leases.values(), ...failedReleases.values()].filter(lease => !desktopId || lease.desktopId === desktopId).map(lease => lease.actor);
+    const accepted = cleanupLeases().filter(lease => !desktopId || lease.desktopId === desktopId).map(lease => lease.actor);
     accepted.push(...[...controllers.values()].filter(entry => !desktopId || entry.desktopId === desktopId).map(entry => entry.actor));
     accepted.push(...(options.pendingReleases?.() ?? []).filter(entry => !desktopId || entry.desktopId === desktopId).map(entry => entry.actor));
     accepted.push(...(options.pendingControlFacts?.() ?? []).filter(entry => !desktopId || entry.desktopId === desktopId).map(entry => entry.actor));
@@ -354,15 +360,31 @@ export function createComputerAutomation(options: {
     ended.add(computerExecutionKey(execution));
     const belongs = (actor: ComputerActor) => !originFor(actor) && (sameComputerExecution(actor.execution, execution)
       || Boolean(actor.execution.work.runtime === 'pi' && actor.rootExecution && sameComputerExecution(actor.rootExecution, execution)));
+    const capturedLeases = cleanupLeases().filter(lease => belongs(lease.actor));
+    // After restart the original physical owner may survive without a live
+    // lease. Reuse its exact Stop callback; absence of an in-memory lease is
+    // not a release receipt and must not make Bot Sleep succeed.
+    const pendingOwners = new Map<string, { actor: ComputerActor; desktops: Set<string> }>();
+    for (const pending of options.pendingReleases?.() ?? []) {
+      if (!belongs(pending.actor) || capturedLeases.some(lease => lease.desktopId === pending.desktopId
+        && sameComputerExecution(lease.actor.execution, pending.actor.execution))) continue;
+      const key = actorKey(pending.actor);
+      const owner = pendingOwners.get(key) ?? { actor: pending.actor, desktops: new Set<string>() };
+      owner.desktops.add(pending.desktopId); pendingOwners.set(key, owner);
+    }
     for (const { actor, abort } of controllers.values()) if (belongs(actor)) abort.abort(new Error('Computer Use execution ended'));
     for (const request of requests.values()) if (belongs(request.actor) && request.status === 'pending') { request.status = 'denied'; request.revision += 1; request.detail = 'Execution ended'; wake(request.id); }
     const results = await Promise.allSettled([
       ...(execution.work.runtime === 'agent' ? [...lastActors.values()].filter(actor => sameComputerExecution(actor.execution, execution)).map(actor => nativeRequests?.cancel(actor, undefined, false)) : []),
-      ...[...leases.values(), ...failedReleases.values()].filter(lease => belongs(lease.actor)).map(removeLease),
+      ...capturedLeases.map(removeLease),
+      ...[...pendingOwners.values()].map(owner => options.cancelWork
+        ? options.cancelWork(owner.actor, [...owner.desktops], `finish:${computerExecutionKey(execution)}`)
+        : Promise.reject(new ComputerReleaseUnconfirmed())),
       ...[...lastActors.values()].filter(belongs).map(actor => options.revokeSession(actor)),
     ]);
     for (const actor of lastActors.values()) if (belongs(actor)) {
       if (results.some(result => result.status === 'rejected')) cancellationState.set(roundKey(actor), 'cancel-unconfirmed');
+      else if (!(options.pendingReleases?.() ?? []).some(entry => belongs(entry.actor))) cancellationState.delete(roundKey(actor));
       publish(actor);
     }
     if (results.some(result => result.status === 'rejected')) throw new HarnessServiceError('unavailable', 'Computer Use execution ended, but resource release was not confirmed');
@@ -402,7 +424,7 @@ export function createComputerAutomation(options: {
       return structuredClone(lease);
     },
     confirmRequest(assignmentId: string) { if (leases.has(assignmentId)) pendingAssignments.delete(assignmentId); },
-    async releaseRequest(assignmentId: string) { const lease = leases.get(assignmentId) ?? failedReleases.get(assignmentId); if (lease) await removeLease(lease); },
+    async releaseRequest(assignmentId: string) { const lease = leases.get(assignmentId) ?? failedReleases.get(assignmentId) ?? releasing.get(assignmentId)?.lease; if (lease) await removeLease(lease); },
     async manage<T>(work: ComputerWorkRef, expected: ComputerExecutionRef, task: (signal: AbortSignal) => Promise<T>, desktopId?: string): Promise<T> {
       const actor = await resolve(work, desktopId, undefined, expected); assertRound(actor);
       const abort = new AbortController(), id = randomUUID();
@@ -413,18 +435,18 @@ export function createComputerAutomation(options: {
       const actor = await resolve(work, desktopId, undefined, execution);
       const controller = owner(desktopId)?.actor;
       if (controller && !(sameComputerExecution(controller.execution, execution) || rootActor(actor) && sameFamily(controller, actor))) throw new HarnessServiceError('forbidden', 'This work cannot cancel another desktop controller');
-      if (!controller && ![...leases.values(), ...failedReleases.values()].some(lease => lease.desktopId === desktopId && sameComputerExecution(lease.actor.execution, execution))) throw new HarnessServiceError('forbidden', 'This execution has no assignment to cancel');
+      if (!controller && !cleanupLeases().some(lease => lease.desktopId === desktopId && sameComputerExecution(lease.actor.execution, execution))) throw new HarnessServiceError('forbidden', 'This execution has no assignment to cancel');
       await cancelWork(actor, desktopId, !rootActor(actor));
     },
     context, invalidate, authorize, request: accessRequest, decide, wait, release, stop, finishRun, snapshot, isCurrent,
     async cancelDesktop(desktopId: string, captured?: ComputerActor) {
-      const actor = owner(desktopId)?.actor ?? [...failedReleases.values()].find(lease => lease.desktopId === desktopId)?.actor ?? captured;
+      const actor = owner(desktopId)?.actor ?? cleanupLeases().find(lease => lease.desktopId === desktopId)?.actor ?? captured;
       if (!actor) return;
       await cancelWork(actor, desktopId);
     },
     controller: (desktopId: string) => owner(desktopId)?.actor ?? null,
     acceptedExecutions(): ComputerExecutionRef[] {
-      const actors = [...leases.values(), ...failedReleases.values(), ...controllers.values(), ...(options.pendingReleases?.() ?? [])].map(entry => entry.actor);
+      const actors = [...cleanupLeases(), ...controllers.values(), ...(options.pendingReleases?.() ?? [])].map(entry => entry.actor);
       return [...new Map(actors.filter(actor => !originFor(actor)).map(actor => [computerExecutionKey(actor.execution), actor.execution])).values()];
     },
     desktopFor(execution: ComputerExecutionRef) {
@@ -434,7 +456,7 @@ export function createComputerAutomation(options: {
     },
     cancellationStatus: statusFor,
     physicalReleaseConfirmed(actor: ComputerActor, desktopId: string) {
-      return ![...failedReleases.values(), ...(options.pendingReleases?.() ?? [])]
+      return ![...failedReleases.values(), ...[...releasing.values()].map(entry => entry.lease), ...(options.pendingReleases?.() ?? [])]
         .some(entry => entry.desktopId === desktopId && sameComputerExecution(entry.actor.execution, actor.execution));
     },
     delegation: (lease: ComputerLease) => { const entry = delegationFor(lease.actor); return entry ? { origin: entry.origin, assignmentId: entry.assignmentId } : null; },

@@ -101,7 +101,7 @@ test('native notes reuse the editor with admitted scopes and preserve the opened
     { id: 3, scope: { kind: 'session', id: threadIdentity.threadId }, content: 'Child private note', updatedAt: '' },
     { id: 4, scope: { kind: 'project', id: 'admitted-project' }, content: 'Admitted project note', updatedAt: '' },
   );
-  const render = () => act(async () => root.render(<ThreadMemory identity={threadIdentity} basis={contextBasis} />));
+  const render = () => act(async () => root.render(<ThreadMemory botId={null} identity={threadIdentity} basis={contextBasis} />));
   await render();
   expect([...container.querySelectorAll('option')].map(option => option.value)).toEqual(['global', 'project:admitted-project', 'session:thread:child']);
   expect(container.textContent).toContain('Child private note');
@@ -117,16 +117,16 @@ test('native notes reuse the editor with admitted scopes and preserve the opened
 });
 
 test('native identity changes discard drafts and Bot or mismatched bases expose no notes editor', async () => {
-  await act(async () => root.render(<ThreadMemory identity={threadIdentity} basis={contextBasis} />));
+  await act(async () => root.render(<ThreadMemory botId={null} identity={threadIdentity} basis={contextBasis} />));
   await click('assistant.add'); await type('Old child private draft');
   const next = { ...threadIdentity, threadId: 'thread:next', branchId: 'branch:next' };
-  await act(async () => root.render(<ThreadMemory identity={next} basis={{ ...contextBasis, sessionId: next.threadId, projectId: null }} />));
+  await act(async () => root.render(<ThreadMemory botId={null} identity={next} basis={{ ...contextBasis, sessionId: next.threadId, projectId: null }} />));
   expect(container.querySelector('textarea')).toBeNull();
   expect([...container.querySelectorAll('option')].map(option => option.value)).toEqual(['global', 'session:thread:next']);
   await click('assistant.add'); await type('Next private note'); await click('assistant.save');
   expect(fixture.update).toHaveBeenLastCalledWith('memory', { scope: { kind: 'session', id: next.threadId }, content: 'Next private note', revision: 4 });
-  await act(async () => root.render(<ThreadMemory identity={next} basis={{ ...contextBasis, mode: 'bot', sessionId: next.threadId }} />));
+  await act(async () => root.render(<ThreadMemory botId={null} identity={next} basis={{ ...contextBasis, mode: 'bot', sessionId: next.threadId }} />));
   expect(container.textContent).toBe('');
-  await act(async () => root.render(<ThreadMemory identity={next} basis={contextBasis} />));
+  await act(async () => root.render(<ThreadMemory botId={null} identity={next} basis={contextBasis} />));
   expect(container.textContent).toBe('');
 });

@@ -15,6 +15,8 @@ interface BotNameDialogProps {
   title: string;
   name: string;
   busy?: boolean;
+  runtime?: 'pi' | 'agent';
+  onRuntimeChange?: (runtime: 'pi' | 'agent') => void;
   error?: string | null;
   onNameChange: (name: string) => void;
   onOpenChange: (open: boolean) => void;
@@ -26,6 +28,8 @@ export const BotNameDialog: React.FC<BotNameDialogProps> = ({
   title,
   name,
   busy = false,
+  runtime = 'pi',
+  onRuntimeChange,
   error,
   onNameChange,
   onOpenChange,
@@ -51,6 +55,14 @@ export const BotNameDialog: React.FC<BotNameDialogProps> = ({
               placeholder={t('settings.bots.name.label')}
             />
           </label>
+          {onRuntimeChange ? <label className="block space-y-2">
+            <span className="typography-ui-label font-medium">Runtime</span>
+            <select aria-label="Bot runtime" className="w-full rounded border bg-background p-2 text-sm" value={runtime} disabled={busy}
+              onChange={event => onRuntimeChange(event.target.value === 'agent' ? 'agent' : 'pi')}>
+              <option value="pi">Pi</option><option value="agent">Agent</option>
+            </select>
+            <p className="typography-meta text-muted-foreground">The runtime belongs to this new Bot and cannot be changed later.</p>
+          </label> : null}
           {error ? <p role="alert" className="typography-meta text-destructive">{error}</p> : null}
           <DialogFooter>
             <Button type="button" variant="ghost" disabled={busy} onClick={() => onOpenChange(false)}>

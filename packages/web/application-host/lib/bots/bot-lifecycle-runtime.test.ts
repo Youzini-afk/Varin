@@ -4,7 +4,7 @@ import type { ComputerDesktop, ComputerVmDescriptor } from '@varin/protocol';
 import { createBotLifecycleRuntime, type BotLifecycleRuntimeOptions } from './bot-lifecycle-runtime.js';
 
 const bot: BotSummary = { id: 'b', name: 'Bot', archived: false, instructions: null, model: null,
-  homeDir: '/bot', coordinatorHostId: 'coordinator', entrySessionId: null, createdAt: '', updatedAt: '' };
+  homeDir: '/bot', coordinatorHostId: 'coordinator', entry: { runtime: 'pi', sessionId: null }, createdAt: '', updatedAt: '' };
 const vm = (id: string): ComputerVmDescriptor => ({ machineId: id, name: id, state: 'running',
   binding: { domainUuid: id, guest: { state: 'ready', connectionId: `vm:${id}`, hostId: `guest-${id}` } },
 } as ComputerVmDescriptor);
@@ -33,7 +33,7 @@ const setup = () => {
 
 it('accepts already-closed delegated and historical sessions but propagates a real close failure', async () => {
   const { runtime, options } = setup();
-  const work = { threadId: 't', sessionId: 'child', runId: 'run', resume: true, stopped: false, resumed: false };
+  const work = { runtime: 'pi' as const, threadId: 't', sessionId: 'child', runId: 'run', resume: true, stopped: false, resumed: false };
   await runtime.stop(bot, work);
   expect(options.runtime.suspendForBot).toHaveBeenCalledWith('bot:b', 't');
   expect(options.stopSessionProcesses).toHaveBeenCalledWith('child');

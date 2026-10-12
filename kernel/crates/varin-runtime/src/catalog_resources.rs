@@ -429,6 +429,7 @@ impl ResourceRefresh {
             memory_checkpoint,
         };
         let checkpoint = context::ContextCheckpoint {
+            bot_memory_snapshot: current.bot_memory_snapshot,
             resource_activations: current.resource_activations,
             id: proposal.key.clone(),
             revision,
@@ -436,7 +437,7 @@ impl ResourceRefresh {
             personalization: Some(personalization),
             resources: Some(resources),
         };
-        let reference = content.save(&serde_json::to_value(&checkpoint)?)?;
+        let reference = checkpoint.save(&content)?;
         Ok(PreparedResourceRefresh {
             previous_id: current.id,
             epoch,

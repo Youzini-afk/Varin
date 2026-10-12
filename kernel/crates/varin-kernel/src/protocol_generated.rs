@@ -5,10 +5,11 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 23;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 24;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
+    "runtime.bot.scope.inspect",
     "runtime.bot.gate.publish",
     "runtime.bot.thread.create",
     "runtime.bot.scope.suspend",
@@ -71,6 +72,7 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.calendar.calculation.retry",
 ];
 pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
+    "runtime.bot.scope.inspect",
     "runtime.bot.gate.publish",
     "runtime.bot.thread.create",
     "runtime.bot.scope.suspend",
@@ -166,6 +168,30 @@ pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct BotScopeSuspension {
+    pub(crate) bot_id: String,
+    pub(crate) profile_revision: i64,
+    pub(crate) activity_operation_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct BotScopeParams {
+    pub(crate) bot_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct BotHistoryReadParams {
+    pub(crate) bot_id: String,
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) head_id: String,
+    pub(crate) item_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct BotExecutionGate {
     pub(crate) bot_id: String,
     pub(crate) profile_revision: i64,
@@ -179,14 +205,6 @@ pub(crate) struct BotThreadCreateParams {
     pub(crate) bot_id: String,
     pub(crate) thread_id: String,
     pub(crate) branch_id: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct BotScopeSuspension {
-    pub(crate) bot_id: String,
-    pub(crate) profile_revision: i64,
-    pub(crate) activity_operation_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3007,6 +3025,17 @@ pub(crate) struct ContextFragment {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "runtime.bot.scope.remove" => serde_json::from_value::<BotScopeSuspension>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.bot.scope.inspect" => serde_json::from_value::<BotScopeParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.bot.history.read" => {
+            serde_json::from_value::<BotHistoryReadParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.bot.gate.publish" => serde_json::from_value::<BotExecutionGate>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

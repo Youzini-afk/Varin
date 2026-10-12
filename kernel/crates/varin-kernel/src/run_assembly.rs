@@ -92,6 +92,7 @@ impl RunAssembly {
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
             catalog.run(&p.run_id).map_err(domain)?
         };
+        let is_bot = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.bot_for_thread(&run.thread_id).map_err(domain)?.is_some();
         let saved_schema_generation = runtime
             .catalog()
             .lock()
@@ -249,7 +250,7 @@ impl RunAssembly {
             start.binding.tools.push(crate::agent_resources::schema());
             if !is_child {
                 start.binding.tools =
-                    crate::run_tools::builtin_schemas(&kinds, plan_eligible, true);
+                    crate::run_tools::builtin_schemas(&kinds, plan_eligible, true, is_bot);
             }
             start
                 .binding
@@ -376,6 +377,7 @@ impl RunAssembly {
                 runtime.catalog(),
                 memory_bridge.clone(),
                 true,
+                is_bot,
             ));
         }
         if plan_eligible {

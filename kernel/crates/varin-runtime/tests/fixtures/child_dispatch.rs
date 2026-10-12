@@ -299,7 +299,7 @@ impl Fixture {
     pub(crate) fn new_in_bot(bot: &str) -> Self {
         Self::new_parent_scoped(7, read_schema(), ToolSchema { requirements:None, description:String::new(), output_schema:None, metadata:None, name:DISPATCH_TOOL.into(), version:"1".into(), schema:json!({"type":"object"}) }, false, false, false, |_,_|{}, None, Some(bot))
     }
-    fn new_parent_scoped(
+    pub(crate) fn new_parent_scoped(
         revision: i64,
         read: ToolSchema,
         dispatch: ToolSchema,

@@ -80,3 +80,11 @@ test('the actual SDK rejects non-metadata input and cancelled decisions', async 
   controller.abort(new Error('cancelled by owner'));
   await assert.rejects(handlers.decide([input()], { signal: controller.signal }), /cancelled by owner/);
 });
+
+ test('a later capacity decision applies the already accepted source and instructions', async () => {
+  const view = input();
+  view.estimate.estimatedTokens = view.inputBudgetTokens + 1;
+  view.acceptedCandidate = { throughId: 'early', mode: 'background', summaryInstructions: 'Original guidance' };
+  const decision = await handlers.decide([view], call);
+  assert.deepEqual(decision, { kind: 'compact', throughId: 'early', mode: 'blocking', summaryInstructions: 'Original guidance' });
+});

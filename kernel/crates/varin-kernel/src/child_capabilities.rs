@@ -6,7 +6,7 @@ use varin_runtime::catalog::dispatch::ChildSourceRequirement;
 use varin_runtime::execution::ToolSchema;
 
 fn definitions() -> Vec<crate::run_tools::BuiltinSchema> {
-    crate::run_tools::builtin_definitions(&ToolKind::all().collect(), true, false)
+    crate::run_tools::builtin_definitions(&ToolKind::all().collect(), true, false, false)
         .into_iter()
         .filter(|definition| definition.child.is_some())
         .collect()
@@ -70,9 +70,9 @@ pub(crate) fn select_frozen(
             if let Some(tool) = selected.host_tool(name) {
                 return Ok(tool.clone());
             }
-            available
+            selected.frozen.allowed_delegation
                 .iter()
-                .find(|tool| &tool.name == name)
+                .find(|tool| &tool.name == name && (available.contains(tool) || *tool == &crate::memory::bot_schema(true) || *tool == &crate::memory::bot_schema(false)))
                 .cloned()
                 .ok_or_else(|| {
                     varin_runtime::RuntimeError::Invalid(format!(
@@ -212,13 +212,14 @@ impl varin_runtime::execution::ContextPreparation for BindingPreparation {
         view: &varin_runtime::execution::RequestView,
         serialized: &serde_json::Value,
         budget_protocol: Option<varin_runtime::context_capacity::RequestBudgetProtocol>,
+        preview: &dyn Fn(varin_runtime::execution::ContextProjection) -> Result<varin_runtime::context_capacity::InputEstimate, varin_runtime::execution::ExecutionError>,
         cancel: &varin_runtime::execution::CancellationToken,
     ) -> Result<
         varin_runtime::execution::ContextRequestPreparation,
         varin_runtime::execution::ExecutionError,
     > {
         self.inner
-            .prepare_request(epoch, view, serialized, budget_protocol, cancel)
+            .prepare_request(epoch, view, serialized, budget_protocol, preview, cancel)
     }
 }
 

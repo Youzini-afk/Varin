@@ -283,7 +283,7 @@ fn bot_child_source_publication_obeys_derived_parent_gate() {
         instruction_sources: vec![],
         memory_checkpoint: None,
     };
-    let basis:crate::catalog::personalization::PersonalizationBasis=serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,"configurationDigest":"original","memorySnapshot":{"revision":0,"memories":[]},"sessionId":child.child_thread_id,"projectId":child.project_id,"originalSections":[{"name":"preamble","content":"original child"}],"instructionSources":[]})).unwrap();
+    let basis:crate::catalog::personalization::PersonalizationBasis=serde_json::from_value(json!({"mode":"bot","threadRole":"worker","revision":0,"configurationDigest":"original","memorySnapshot":{"revision":0,"memories":[]},"sessionId":child.child_thread_id,"projectId":child.project_id,"originalSections":[{"name":"preamble","content":"original child"}],"instructionSources":[]})).unwrap();
     f.db.publish_bot_gate(gate(2, false)).unwrap();
     assert!(matches!(
         f.db.prepare_child(
@@ -359,4 +359,30 @@ fn bot_wake_does_not_resume_original_manual_policy_pause() {
         db.run(&r.run_id).unwrap().waiting_on.as_deref(),
         Some(wait_id.as_str())
     );
+}
+
+#[test]
+fn bot_history_uses_original_item_identity_and_rejects_cross_bot_or_unreachable_witnesses() {
+    let f = Fixture::new(); let mut db = f.open(); let input = bot_submit(&mut db);
+    db.fork_branch("main", "fork", Some(&input.input_id)).unwrap();
+    let main = db.capture_bot_history("bot", "thread", "main", &input.input_id, &input.input_id).unwrap().load(&||false).unwrap();
+    let fork = db.capture_bot_history("bot", "thread", "fork", &input.input_id, &input.input_id).unwrap().load(&||false).unwrap();
+    assert_eq!(main, fork);
+    assert!(db.capture_bot_history("other-bot", "thread", "main", &input.input_id, &input.input_id).is_err());
+    assert!(db.capture_bot_history("bot", "thread", "fork", "unreachable-head", &input.input_id).unwrap().load(&||false).is_err());
+}
+#[test]
+fn bot_scope_delete_retains_shared_history_atomically_then_removes_only_original_scope() {
+    let f = Fixture::new(); let mut db = f.open(); let input = bot_submit(&mut db);
+    db.create_thread("unrelated", "unrelated-main").unwrap();
+    db.db.execute("UPDATE branches SET head=?1 WHERE id='unrelated-main'", [&input.input_id]).unwrap();
+    db.publish_bot_gate(gate(2, false)).unwrap(); db.suspend_bot_scope(suspension(2)).unwrap();
+    assert!(db.remove_bot_scope(&suspension(2)).unwrap_err().to_string().contains("retains"));
+    assert_eq!(db.head("main").unwrap(), Some(input.input_id.clone()));
+    db.db.execute("UPDATE branches SET head=NULL WHERE id='unrelated-main'", []).unwrap();
+    db.remove_bot_scope(&suspension(2)).unwrap();
+    assert!(db.inspect_thread("thread").is_err());
+    assert!(db.run(&input.run_id).is_err());
+    assert!(db.inspect_thread("unrelated").is_ok());
+    db.remove_bot_scope(&suspension(2)).unwrap();
 }

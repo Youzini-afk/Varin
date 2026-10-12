@@ -2514,6 +2514,7 @@ export interface WorkspaceTestAPI {
 }
 
 export interface RuntimeAPIs {
+  bots?: import('./bots.js').BotsAPI;
   agentProfiles?: import("./agent-profiles.js").AgentProfilesAPI;
   schedules?: import("./schedules.js").ScheduledTasksAPI;
   threads?: import("./threads.js").ThreadsAPI;

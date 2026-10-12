@@ -1,3 +1,7 @@
+import { createBotMemoryOwner } from './lib/kernel/bot-memory-owner.js';
+import { createBotHistory } from './lib/memory/bot-history.js';
+import { createThreadMemory } from './lib/memory/thread-memory.js';
+import { registerThreadMemoryRoutes } from './lib/memory/thread-memory-routes.js';
 import { createMemoryInference } from './lib/memory/memory-inference.js';
 import { createExtensionPackageOwner, VARIN_EXTENSION_PACKAGES_CAPABILITY } from "./lib/kernel/extension-package-owner.js";
 import { createRetrievalModelStage } from './lib/kernel/retrieval-model.js';
@@ -162,7 +166,7 @@ import { createThreadRegistry } from './lib/harness/thread-registry.js';
 import { createOnThreadDequeued } from './lib/harness/thread-dequeue.js';
 import { createThreadTranscriptReader } from './lib/harness/thread-transcript.js';
 import { createHarnessPathAuthority } from './lib/harness/path-authority.js';
-import { sessionScopeId, isSessionScopeId, sessionIdFromScopeId, isSessionStoreKey, isBotStoreKey, isBotScopeId, botIdFromScopeId, botScopeId, knowledgeStoreKeyForScope, scopeOfScopeId } from './lib/harness/owner-scope.js';
+import { threadScopeId, isThreadScopeId, threadIdFromScopeId, sessionScopeId, isSessionScopeId, sessionIdFromScopeId, isSessionStoreKey, isBotStoreKey, isBotScopeId, botIdFromScopeId, botScopeId, knowledgeStoreKeyForScope, scopeOfScopeId } from './lib/harness/owner-scope.js';
 import { createMemoryService } from './lib/memory/memory-service.js';
 import { createMemoryOrganizer, type OrganizerRunSource } from './lib/memory/memory-organizer.js';
 import { registerSelectionMemoryRoutes } from './lib/memory/selection-memory-routes.js';
@@ -1859,6 +1863,38 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     hostId,
     dataDir: VARIN_DATA_DIR,
     registry: threadRegistry,
+    agent: {
+      ensureEntry: async bot => {
+        if (bot.entry.runtime !== 'agent') throw new Error('Agent Bot identity is required');
+        await agentRuntime.createBotThread(bot.id, bot.entry.threadId, bot.entry.branchId);
+        return bot.entry;
+      },
+      model: bot => botAgentModel(bot),
+      listWork: async (bot, includeEntry) => {
+        const scope = await agentRuntime.botScope(bot.id);
+        return scope.threads.flatMap(thread => thread.branches.flatMap(branch => {
+          const entry = bot.entry.runtime === 'agent' && bot.entry.threadId === thread.thread_id && bot.entry.branchId === branch.branch_id;
+          if (entry && !includeEntry) return [];
+          return [{ runtime: 'agent' as const, identity: { runtime: 'agent' as const, threadId: thread.thread_id, branchId: branch.branch_id }, thread,
+            activeRun: branch.latest_run, purpose: entry ? 'bot-root' as const : 'work' as const }];
+        }));
+      },
+      applyProfile: async bot => {
+        if (bot.entry.runtime !== 'agent') return;
+        const scope = await agentRuntime.botScope(bot.id);
+        await threads.refreshPersonalization(scope.threads.flatMap(thread => thread.branches.map(branch => ({ runtime: 'agent', threadId: thread.thread_id, branchId: branch.branch_id }))));
+        const entry = bot.entry;
+        const thread = await agentRuntime.thread(entry.threadId);
+        const run = thread.branches.find(branch => branch.branch_id === entry.branchId)?.latest_run;
+        const model = await botAgentModel(bot);
+        if (run && !run.cancel_requested && model) {
+          const selected = await agentRuntime.modelSelections(run.id);
+          const configuration = (selected.desired?.configuration ?? run.configuration) as { providerId?: string; model?: string };
+          if (configuration.providerId !== model.providerId || configuration.model !== model.modelId) await threads.selectModel({ ...entry, runId: run.id,
+            key: `bot-profile:${bot.id}:${(await botService.executionGate(bot.id)).profileRevision}`, model });
+        }
+      },
+    },
     publishExecutionGate: (gate) => kernelClient.agentRuntimeRequest<void, 'runtime.bot.gate.publish'>('runtime.bot.gate.publish', gate),
     lifecycle: () => {
       if (!botLifecycleRuntime) throw new Error('Bot lifecycle is not ready');
@@ -1872,6 +1908,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         if (!threadRuntime) throw new Error('Thread runtime is not ready');
         return threadRuntime.deleteUser(...args);
       },
+      deleteAgentScope: async bot => {
+        const gate = await botService.executionGate(bot.id);
+        if (!gate.activityOperationId) throw new Error('Bot deletion requires the original Sleep intent');
+        const scope = await agentRuntime.botScope(bot.id);
+        for (const thread of scope.threads) await agentRuntime.cancelTree({ kind: 'thread', thread_id: thread.thread_id });
+        await collaboration.releaseCancelledThreads(new Set(scope.threads.map(thread => thread.thread_id)));
+        for (const run of scope.runs) await agentRuntime.retireSourceGrants(run.runId);
+        await kernelClient.agentRuntimeRequest('runtime.bot.scope.remove', { botId: bot.id, profileRevision: gate.profileRevision, activityOperationId: gate.activityOperationId });
+      },
       deleteSession: async (sessionId) => {
         const result = await piRuntimeBroker.deleteSession(sessionId);
         broadcastGlobalUiEvent?.({ type: 'varin:session-deleted', properties: { sessionId } });
@@ -1879,7 +1924,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       },
       releaseRemoteScope: (scopeId) => managedRemoteTargets.releaseScope(scopeId),
       closeMemory: async (scopeId, storeKey) => {
-        await knowledgeVectors?.releaseScope('bot', scopeId);
+        await knowledgeVectors?.releaseScope(scopeOfScopeId(scopeId), scopeId);
         const loading = knowledgeStoreLoads.get(storeKey);
         if (loading) await Promise.allSettled([loading]);
         await knowledgeStores.get(storeKey)?.close();
@@ -2049,8 +2094,16 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const memoryService = createMemoryService({
     storeForScopeId: getKnowledgeStoreForScope,
     userStore: getUserKnowledgeStore,
+    threadStoreIfPresent: async threadId => await knowledgeStoreExistsForScope(threadScopeId(threadId)) ? getKnowledgeStoreForScope(threadScopeId(threadId)) : null,
     sessionStoreIfPresent: async (sessionId) => await knowledgeStoreExistsForScope(sessionScopeId(sessionId))
       ? getKnowledgeStoreForScope(sessionScopeId(sessionId)) : null,
+    ownerForThread: async threadId => {
+      const thread = await agentRuntime.thread(threadId);
+      if (!thread.bot_id) throw new Error('Thread is not bound to a Bot');
+      return { scope: 'bot', ownerId: thread.bot_id };
+    },
+    associationForThread: threadId => workAssociationForThread(threadId),
+    readHistorySource: async (botId, span) => (await botHistory.read(botId, span)).text,
     ownerForSession: async (sessionId) => {
       const scopeId = await owningKnowledgeScopeIdForSession(sessionId) ?? sessionScopeId(sessionId);
       if (isBotScopeId(scopeId)) return { scope: 'bot', ownerId: botIdFromScopeId(scopeId) };
@@ -2106,6 +2159,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // keeps suggested/accepted semantics, dedupe, and correction CAS.
   const memoryOrganizer = createMemoryOrganizer({
     getInference: () => memoryInference,
+    nativeMaterials: async scopeId => {
+      if (!isBotScopeId(scopeId)) return [];
+      const bot = await botService.get(botIdFromScopeId(scopeId));
+      return bot?.entry.runtime === 'agent' ? botHistory.bot(bot.id) : [];
+    },
+    readNativeSource: async (scopeId, span) => (await botHistory.read(botIdFromScopeId(scopeId), span)).text,
+    scopeForThread: async threadId => { const botId = (await agentRuntime.thread(threadId)).bot_id; return botId ? botScopeId(botId) : null; },
     storeForScopeId: getKnowledgeStoreForScope,
     hasStoreForScope: async (scopeId) => {
       const storePath = path.join(VARIN_DATA_DIR, 'knowledge', hostId, `${knowledgeStoreKeyForScope(scopeId)}.tdb`);
@@ -2156,15 +2216,16 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const bot = await botService.get(botIdFromScopeId(scopeId));
       if (!bot || bot.archived) return null;
       if (bot.model) return bot.model;
-      if (!bot.entrySessionId) return null;
+      if (bot.entry.runtime === 'agent') return botAgentModel(bot);
+      if (!bot.entry.sessionId) return null;
       // An unset preference inherits the Bot entry's actual Pi selection,
       // including Pi's default. It must not disable background memory or borrow
       // whichever unrelated chat happens to be live.
-      const liveModel = recordOf(sessionSnapshots.get(bot.entrySessionId)?.model);
+      const liveModel = recordOf(sessionSnapshots.get(bot.entry.sessionId)?.model);
       if (typeof liveModel.provider === 'string' && typeof liveModel.id === 'string') {
         return { providerId: liveModel.provider, modelId: liveModel.id };
       }
-      const entries = (await piRuntimeBroker.previewSessionEntries(bot.entrySessionId, bot.homeDir, 'branch')).entries;
+      const entries = (await piRuntimeBroker.previewSessionEntries(bot.entry.sessionId, bot.homeDir, 'branch')).entries;
       const selected = entries.findLast((entry) => entry.type === 'model_change');
       return selected?.type === 'model_change' ? { providerId: selected.provider, modelId: selected.modelId } : null;
     },
@@ -2995,6 +3056,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   kernelClient.subscribeExit(() => { for (const runId of agentMcpScopes.keys()) releaseAgentMcpScope(runId); });
   const prepareAgentPolicy = createAgentPolicy(extensionRuntime);
   const modelAuthority = createModelAuthority(hostCredentialAuthority);
+  const botAgentModel = async (bot: import('@varin/application-client').BotSummary) => {
+    const global = (await readHostSettingsSnapshot(mcpAgentDir)).global;
+    const selection = bot.model ?? (typeof global.defaultProvider === 'string' && typeof global.defaultModel === 'string'
+      ? { providerId: global.defaultProvider, modelId: global.defaultModel } : null);
+    if (selection && !(await modelAuthority.listModels()).some(model => model.providerId === selection.providerId && model.modelId === selection.modelId)) throw new Error('Bot model is no longer registered. Select an available Agent model in Bot settings.');
+    return selection;
+  };
   const liveSources = createLiveSourceOwner({ documents: documentsAuthority, kernel: kernelClient });
   kernelClient.setLanguageOwner(createLanguageOwner({ documents: documentsAuthority, supervisor: languageSupervisor,
     sources: createSourceQueryOwner({ kernel: kernelClient, documents: documentsAuthority, validateLiveSource: liveSources.validate }) }));
@@ -3098,6 +3166,28 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     console.error('[RunObserver] Activity projection requires attention:', threadId ?? 'selection');
   });
   personalizationRuntime = agentRuntime;
+  const botHistory = createBotHistory(agentRuntime);
+  const workAssociationForThread = async (threadId: string) => {
+    const botId = (await agentRuntime.thread(threadId)).bot_id;
+    if (!botId) return undefined;
+    const [scope, children] = await Promise.all([agentRuntime.botScope(botId), agentRuntime.children()]);
+    const associated = new Set([threadId]);
+    let cursor = threadId;
+    for (;;) {
+      const parent = children.find(child => child.child_thread_id === cursor)?.parent_thread_id;
+      if (!parent || associated.has(parent)) break;
+      associated.add(parent); cursor = parent;
+    }
+    // Include this work's own delegated descendants, not its siblings' local work.
+    const descendants = new Set([threadId]);
+    for (;;) {
+      const before = descendants.size;
+      for (const child of children) if (descendants.has(child.parent_thread_id)) descendants.add(child.child_thread_id);
+      if (descendants.size === before) break;
+    }
+    for (const id of descendants) associated.add(id);
+    return { threadIds: [...associated], runIds: scope.runs.filter(run => associated.has(run.threadId)).map(run => run.runId) };
+  };
   const threadWorkingStates = createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter);
   const threadResources = createThreadResourceScope({
     agentDir: mcpAgentDir, documents: documentsAuthority, workingStates: threadWorkingStates, resolvePrimaryWorktreeRoot,
@@ -3107,6 +3197,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     withSourceRead: (input, consume) => kernelStorageAdapter.withResourceRead(input, consume),
   });
   const threadContext = createThreadContext({ personalization: agentPersonalization,
+      botForThread: async threadId => {
+        const botId = (await agentRuntime.thread(threadId)).bot_id;
+        if (!botId) return null;
+        const bot = await botService.get(botId);
+        if (!bot) throw new Error('Bot profile is unavailable');
+        return { id: bot.id, name: bot.name, instructions: bot.instructions, revision: (await botService.executionGate(bot.id)).profileRevision };
+      },
       resources: threadResources,
       composition: createContextComposition(extensionRuntime),
       projectForWorkspace: async workspaceId => {
@@ -3117,7 +3214,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     });
   kernelClient.setResourceOwner(createResourceOwner({ runtime: agentRuntime, resources: threadResources }));
   kernelClient.setPlanOwner(createPlanOwner(getUserKnowledgeStore, agentRuntime));
-  kernelClient.setMemoryOwner(createMemoryOwner({ personalization: agentPersonalization, prepareContext: threadContext }));
+  kernelClient.setMemoryOwner(createMemoryOwner({ personalization: agentPersonalization, prepareContext: threadContext,
+    bot: createBotMemoryOwner({ runtime: agentRuntime, history: botHistory, memory: memoryService, prepareContext: threadContext,
+      knowledge: input => knowledgeContextRuntime.knowledgeForThread(input) }) }));
   const contextService=new ContextService(agentRuntime,threadContext,async(run,launch,signal)=>{
     const source=launch?.selection.source;
     const root=source ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
@@ -3146,6 +3245,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const reconcileMaterialReceipts = createMaterialReceiptReconciler({ runtime: agentRuntime, kernel: kernelClient, collections: materialCollectionsService,
     onError: (_operationId, _error) => console.error('[Materials] Original mutation receipt requires attention') });
   const collaboration = new ThreadCollaboration({ runtime: agentRuntime,
+    canExecuteThread: async threadId => {
+      const botId = (await agentRuntime.thread(threadId)).bot_id;
+      return !botId || (await botService.executionGate(botId)).permitted;
+    },
     kernel: kernelClient, storageAdapter: kernelStorageAdapter, resolveLiveSource: liveSources.validate,
     sourceCaptureOwners: { documents: documentsAuthority, prepareResources: threadResources.prepareSourceCapture, inspectInventory: (directory, signal) => threadWorktreeRuntime.inspectGitBaselineInventory(directory, signal) },
     reconcileDomainReceipts: async signal => { await Promise.all([reconcileIntegrationReceipts(signal), reconcileMaterialReceipts(signal)]); },
@@ -3279,6 +3382,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   registerAgentPersonalizationRoutes(app, agentPersonalization, uiAuthController?.requireAuth ?? ((_req, _res, next) => next()));
+  registerThreadMemoryRoutes(app, createThreadMemory({ history: botHistory, memory: memoryService,
+    narrate: (scopeId, system, prompt, signal, selection) => memoryOrganizer.extractSelection(scopeId, system, prompt, signal, selection) }),
+    uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
   registerSelectionMemoryRoutes(app, {
     agentPersonalization,
     memory: memoryService,
@@ -3347,12 +3453,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // the persisted store key differs — records keep their real scope. BC0
     // adds `bot:<id>` scopes that resolve to the Bot's own memory store.
     const scope = isBotScopeId(scopeId) ? 'bot' as const
-      : isSessionScopeId(scopeId) ? 'session' as const
+      : isSessionScopeId(scopeId) || isThreadScopeId(scopeId) ? 'session' as const
         : 'workspace' as const;
     const assertMemoryOwner = async () => {
+      if (isThreadScopeId(scopeId)) { if (!(await agentRuntime.thread(threadIdFromScopeId(scopeId))).bot_id) throw new Error('Thread memory has no Bot owner'); return; }
       if (scope !== 'bot') return;
       const bot = await botService.get(botIdFromScopeId(scopeId));
-      if (!bot || bot.deletion) throw new Error('Bot memory is unavailable during or after deletion');
+      if (!bot) throw new Error('Bot memory owner is unavailable');
     };
     await assertMemoryOwner();
     const storeKey = knowledgeStoreKeyForScope(scopeId);
@@ -3514,6 +3621,23 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   };
 
   const knowledgeContextRuntime = createKnowledgeContextRuntime({
+    goalForThread: async threadId => {
+      const goals = await agentRuntime.goals(threadId);
+      return goals.findLast(goal => goal.control === 'active')?.objective;
+    },
+    getThreadStore: async threadId => await knowledgeStoreExistsForScope(threadScopeId(threadId)) ? getKnowledgeStoreForScope(threadScopeId(threadId)) : null,
+    recallForThread: async ({ workspaceId, store, threadId, query, goal, signal }) => {
+      const sources: MemoryRecallSource[] = [{ authority: store, scope: 'bot', scopeId: workspaceId }];
+      if (await knowledgeStoreExistsForScope(threadScopeId(threadId))) sources.push({ authority: await getKnowledgeStoreForScope(threadScopeId(threadId)), scope: 'session', scopeId: threadScopeId(threadId) });
+      const user = await getUserKnowledgeStore();
+      if (user) sources.push({ authority: user, scope: 'user', scopeId: 'user' });
+      const semantic = semanticRuntimeHolder.current;
+      const { results } = await recallMemories({ sources, query, k: 5, workspaceId, judgeWorkspaceId: workspaceId,
+        associated: (await workAssociationForThread(threadId)) ?? {}, ...(knowledgeVectors ? { vectors: knowledgeVectors } : {}),
+        ...(goal ? { goal } : {}), ...(signal ? { signal } : {}),
+        ...(semantic ? { fastDecision: { status: semantic.fastDecisionStatus, decide: semantic.fastDecision } } : {}) });
+      return results;
+    },
     recallEnabled: async (sessionId) => isBotScopeId(await owningKnowledgeScopeIdForSession(sessionId) ?? ''),
     getStore: getKnowledgeStoreForScope,
     getUserStore: getUserKnowledgeStore,
@@ -3880,7 +4004,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   catalogScan.start = (workspaceId: string): void => {
     // Session-owned stores have no resource root to index; callers pass either
     // the scope id or its hashed store key depending on the loop they run in.
-    if (isSessionScopeId(workspaceId) || isSessionStoreKey(workspaceId)
+    if (isThreadScopeId(workspaceId) || /^thread-[0-9a-f]{32}$/.test(workspaceId) || isSessionScopeId(workspaceId) || isSessionStoreKey(workspaceId)
       || isBotScopeId(workspaceId) || isBotStoreKey(workspaceId)) return;
     queueMicrotask(() => {
       void symbolGraphRuntime.scanWorkspace(workspaceId).catch((error) => {
@@ -3916,7 +4040,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     knowledgeContextRuntime.bindSession(sessionId, scopeId);
     // Language subscriptions are workspace-addressed; session- and bot-owned
     // scopes have no workspace LSP to observe.
-    if (isSessionScopeId(scopeId) || isBotScopeId(scopeId) || knowledgeLanguageSubscriptions.has(scopeId)) return;
+    if (isThreadScopeId(scopeId) || isSessionScopeId(scopeId) || isBotScopeId(scopeId) || knowledgeLanguageSubscriptions.has(scopeId)) return;
     const workspaceId = scopeId;
     knowledgeLanguageSubscriptions.set(workspaceId, languageSupervisor.subscribe(workspaceId, (value) => {
       const event = recordOf(value);
@@ -4497,6 +4621,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   harnessRouter.register('mcp.owner', mcpHarness.services['mcp.owner']);
   botLifecycleRuntime = createBotLifecycleRuntime({
     hostId, registry: threadRegistry, runtime: threadRuntime, broker: piRuntimeBroker, computers: computerService,
+    agent: { runtime: agentRuntime, kernel: kernelClient, gate: botId => botService.executionGate(botId),
+      continueLaunch: runId => threads.continueLaunch(runId), drainScripts: runIds => scriptRuntimeOwner.current!.drainRuns(runIds),
+      drainCollaborations: threadIds => collaboration.suspendThreads(threadIds) },
     stopSessionProcesses: harnessServiceHost.closeSessionShell,
     stopRoot: (sessionId) => botRootRuntime.cancelSession(sessionId, 'Bot sleeping'),
     stopMemory: (scopeId) => memoryOrganizer.suspendScope(scopeId),

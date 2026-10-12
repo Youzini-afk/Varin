@@ -8,6 +8,7 @@ Last updated: 2026-10-12
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [Bot 产品入口、原记忆与摘要准备（2026-10-12）](runtime-bot-product-context-2026-10-12.md) | 实际 Bot 身份/来源/召回、产品配置、Sleep/Wake、原 Plan 与摘要基线；真实消费者与有限验证边界 |
 | [私有 Bot 身份与可恢复暂停基础（2026-10-12）](runtime-bot-suspension-foundation-2026-10-12.md) | 原来源 gate、实际 worker 排空、保留等待与单一路径恢复；完整 Bot 产品链仍待接入 |
 | [原 Bot 记忆整理与选段推理](runtime-bot-memory-inference-2026-10-12.md) | 原 Bot/MemoryService、独立后台推理与固定来源、原回执恢复、Sleep 实际排空和显式选文消费；有限链路证据 |
 | [原成功 usage 与请求预算校准](runtime-context-usage-2026-10-12.md) | 原请求/回执、adapter 计数语义、锁外完整前缀、真实 main/Goal 预算消费及取消恢复边界 |

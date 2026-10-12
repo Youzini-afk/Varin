@@ -1640,6 +1640,7 @@ pub trait ContextPreparation: Send + Sync {
         _view: &RequestView,
         _serialized: &Value,
         _budget_protocol: Option<crate::context_capacity::RequestBudgetProtocol>,
+        _preview: &dyn Fn(ContextProjection) -> Result<crate::context_capacity::InputEstimate, ExecutionError>,
         _cancel: &CancellationToken,
     ) -> Result<ContextRequestPreparation, ExecutionError> {
         Ok(ContextRequestPreparation::Ready)
@@ -2268,11 +2269,7 @@ impl<
                         Some(selected) => Some(selected.executor),
                         None => self.tools.freeze(&binding.tools)?,
                     };
-                    let mut request_history = compile_history(
-                        &history,
-                        &binding.provider_family,
-                        &binding.connection_identity,
-                    );
+                    let mut request_evidence = Vec::new();
                     let mut selected = BTreeSet::new();
                     for reference in evidence {
                         if !selected
@@ -2288,8 +2285,7 @@ impl<
                             Ok(item) => item,
                             Err(error) => finish!('agent,RunState::Failed,None,Some(error)),
                         };
-                        request_history.retain(|previous| !matches!(&previous.provenance,Provenance::EnvironmentFact{event_id} if item.memory_facts.contains(event_id)));
-                        request_history.push(item.item);
+                        request_evidence.push(item);
                     }
                     let goal = self
                         .persistence
@@ -2299,14 +2295,18 @@ impl<
                     // the existing system prefix and before growing history. Keep Goal's original
                     // provenance (and provider user role); neither these items nor their placement
                     // rewrite conversation history or an already prepared request.
-                    let prefix = request_history
-                        .iter()
-                        .take_while(|item| item.provenance.is_system())
-                        .count();
-                    request_history.splice(
-                        prefix..prefix,
-                        binding_context.into_iter().chain(goal.and_then(|g| g.item)),
-                    );
+                    let project_request = |history: &[ConversationItem]| {
+                        let mut request_history = compile_history(history, &binding.provider_family, &binding.connection_identity);
+                        for item in &request_evidence {
+                            request_history.retain(|previous| !matches!(&previous.provenance, Provenance::EnvironmentFact { event_id } if item.memory_facts.contains(event_id)));
+                            request_history.push(item.item.clone());
+                        }
+                        let prefix = request_history.iter().take_while(|item| item.provenance.is_system()).count();
+                        request_history.splice(prefix..prefix,
+                            binding_context.iter().cloned().chain(goal.as_ref().and_then(|g| g.item.clone())));
+                        request_history
+                    };
+                    let request_history = project_request(&history);
                     binding.resource_activations =
                         crate::catalog::resources::retained_activations(&request_history);
                     let view = RequestView {
@@ -2319,7 +2319,7 @@ impl<
                             step: steps,
                             history_range: binding.history_range.clone(),
                         },
-                        binding,
+                        binding: binding.clone(),
                         history: request_history,
                     };
                     let model_cancel = cancel.child(&format!("model:{}", view.request_id));
@@ -2331,6 +2331,21 @@ impl<
                             Ok(serialized) => serialized,
                             Err(error) => finish!('agent, RunState::Failed, None, Some(error)),
                         };
+                    let preview = |context: ContextProjection| {
+                        validate_history_pairs(&context.history)?;
+                        let mut proposed = view.clone();
+                        proposed.history = project_request(&context.history);
+                        proposed.binding.resource_checkpoint_id = context.resource_checkpoint_id;
+                        proposed.binding.instruction_sources = context.instruction_sources;
+                        proposed.binding.memory_checkpoint = context.memory_checkpoint;
+                        proposed.binding.resource_activations = crate::catalog::resources::retained_activations(&proposed.history);
+                        let serialized = guarded("provider_serialize_panicked", || match &selected_model {
+                            Some(selected) => selected.provider.serialize(&proposed),
+                            None => self.provider.serialize(&proposed),
+                        })?;
+                        // A changed checkpoint cannot borrow the previous request's usage calibration.
+                        Ok(crate::context_capacity::estimate_request(&proposed, &serialized))
+                    };
                     match self.context_preparation.prepare_request(
                         input.owner_generation,
                         &view,
@@ -2339,6 +2354,7 @@ impl<
                             || self.provider.request_budget_protocol(),
                             |selected| selected.provider.request_budget_protocol(),
                         ),
+                        &preview,
                         &cancel,
                     ) {
                         Ok(ContextRequestPreparation::Recompile) => {

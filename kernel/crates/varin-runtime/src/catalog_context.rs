@@ -16,6 +16,8 @@ pub struct ContextProposal {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ContextCheckpoint {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bot_memory_snapshot: Option<super::memory::BotMemorySnapshotRef>,
     pub resource_activations: Vec<super::resources::ResourceActivation>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resources: Option<super::resources::ContextResources>,
@@ -24,6 +26,13 @@ pub struct ContextCheckpoint {
     pub proposal: ContextProposal,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub personalization: Option<super::personalization::PersonalizationBasis>,
+}
+
+impl ContextCheckpoint {
+    pub(crate) fn save(&self, content: &crate::content::ContentStore) -> Result<Value> {
+        let dependencies = self.bot_memory_snapshot.as_ref().map(|snapshot| snapshot.dependency()).transpose()?.into_iter().collect();
+        content.save_with_dependencies(&serde_json::to_value(self)?, dependencies)
+    }
 }
 
 /// Scope metadata derived from the exact immutable checkpoint at publication.
@@ -411,6 +420,7 @@ impl Catalog {
                 .and_then(|context| context.personalization),
         };
         let checkpoint = ContextCheckpoint {
+            bot_memory_snapshot: self.active_context(&proposal.branch_id)?.and_then(|context| context.bot_memory_snapshot),
             resource_activations,
             id: proposal.key.clone(),
             revision,
@@ -418,7 +428,7 @@ impl Catalog {
             personalization,
             resources,
         };
-        let reference = self.content.save(&serde_json::to_value(&checkpoint)?)?;
+        let reference = checkpoint.save(&self.content)?;
         Ok((checkpoint, reference))
     }
     pub fn prepare_context_read(
@@ -597,6 +607,20 @@ enum ContextReadKind {
     },
 }
 impl ContextRead {
+    /// Reuse the ordinary compiler with an immutable, unpublished candidate. All captured
+    /// source/head/memory ownership stays unchanged; this is not active-context publication.
+    pub fn with_checkpoint(mut self, checkpoint: &ContextCheckpoint, candidate_reference: Value) -> Result<Self> {
+        match &mut self.kind {
+            ContextReadKind::Checkpoint { branch_id, checkpoint_id, reference, through_id, .. }
+                if *branch_id == checkpoint.proposal.branch_id => {
+                *checkpoint_id = checkpoint.id.clone();
+                *reference = candidate_reference;
+                *through_id = checkpoint.proposal.through_id.clone();
+                Ok(self)
+            }
+            _ => Err(RuntimeError::Conflict("context preview belongs to another source".into())),
+        }
+    }
     pub fn load(self) -> Result<ContextProjection> {
         let Self {
             kind,
@@ -773,11 +797,13 @@ impl ContextRead {
                 &item.content,
             )?);
         }
+        let baseline = checkpoint.bot_memory_snapshot.as_ref().map(|snapshot| snapshot.load(&content)).transpose()?;
         history.extend(super::memory::project(
             memory.as_ref(),
             checkpoint.personalization.as_ref(),
             &history,
             &trusted_receipts,
+            baseline.as_ref(),
         )?);
         Ok(ContextProjection {
             resource_checkpoint_id: checkpoint.resources.as_ref().map(|_| checkpoint_id.clone()),

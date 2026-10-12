@@ -74,7 +74,7 @@ it('closes admission and retains the profile until stopped work and data cleanup
   await expect(service.update(bot.id, { name: 'Changed' })).rejects.toThrow(/being deleted/);
   await vi.waitFor(() => expect(removeData).toHaveBeenCalledTimes(1));
   await service.releaseEntry('session-1');
-  expect((await service.get(bot.id))?.entrySessionId).toBe('session-1');
+  expect((await service.get(bot.id))?.entry).toEqual({ runtime: 'pi', sessionId: 'session-1' });
   expect(await service.listSessionIds()).toContain('session-1');
   expect(catalog.releaseRecord).not.toHaveBeenCalled();
   await service.remove(bot.id);
@@ -125,14 +125,14 @@ it("concurrent entry opens share one durably bound session", async () => {
   const bot = await service.create();
   const entries = await Promise.all([service.ensureEntry(bot.id), service.ensureEntry(bot.id)]);
   expect(createSession).toHaveBeenCalledTimes(1);
-  expect(entries.map((entry) => entry.sessionId)).toEqual(["session-1", "session-1"]);
+  expect(entries.map((entry) => entry.entry.runtime === 'pi' ? entry.entry.sessionId : null)).toEqual(["session-1", "session-1"]);
   expect((await service.botForSession("session-1"))?.id).toBe(bot.id);
 });
 
 it('closes admission before stopping work, retains failures, and retries only unfinished stops', async () => {
   const { service, lifecycle } = await setup();
   const bot = await service.create();
-  lifecycle.planWork.mockResolvedValue(['a', 'b'].map((threadId) => ({ threadId, sessionId: threadId,
+  lifecycle.planWork.mockResolvedValue(['a', 'b'].map((threadId) => ({ runtime: 'pi' as const, threadId, sessionId: threadId,
     runId: `run-${threadId}`, resume: true, stopped: false, resumed: false })));
   lifecycle.stop.mockImplementation(async (_bot, work) => {
     expect(await service.canExecute(bot.id)).toBe(false);
@@ -157,7 +157,7 @@ it('closes admission before stopping work, retains failures, and retries only un
 it('recovers an unfinished VM shutdown after restart and only wakes work after the VM is ready', async () => {
   const { service, lifecycle, recreate } = await setup();
   const bot = await service.create();
-  lifecycle.planWork.mockResolvedValue([{ threadId: 'a', sessionId: 'a', runId: 'r', resume: true, stopped: false, resumed: false }]);
+  lifecycle.planWork.mockResolvedValue([{ runtime: 'pi' as const, threadId: 'a', sessionId: 'a', runId: 'r', resume: true, stopped: false, resumed: false }]);
   lifecycle.planMachines.mockResolvedValue([{ machineId: 'vm', label: 'VM', state: 'pending' }]);
   lifecycle.machine.mockImplementation(async (_bot, machine) => ({ ...machine, state: 'stopping' }));
   await service.archive(bot.id);
@@ -186,7 +186,7 @@ it('reading a sleeping entry does not open or configure a worker and does not wa
   await service.sleep(bot.id);
   await vi.waitFor(async () => expect((await service.get(bot.id))?.activity?.state).toBe('asleep'));
   openSession.mockClear(); applyInstructions.mockClear();
-  expect((await service.ensureEntry(bot.id)).sessionId).toBe('session-1');
+  expect(((await service.ensureEntry(bot.id)).entry as { runtime: 'pi'; sessionId: string }).sessionId).toBe('session-1');
   await service.update(bot.id, { instructions: 'New instructions', pinned: true });
   expect(openSession).not.toHaveBeenCalled();
   expect(applyInstructions).not.toHaveBeenCalled();
@@ -196,7 +196,7 @@ it('reading a sleeping entry does not open or configure a worker and does not wa
 it('stops work even when the VM inventory is unavailable, and retains that progress on retry', async () => {
   const { service, lifecycle } = await setup();
   const bot = await service.create();
-  lifecycle.planWork.mockResolvedValue([{ threadId: 'a', sessionId: 'a', runId: 'r', resume: true, stopped: false, resumed: false }]);
+  lifecycle.planWork.mockResolvedValue([{ runtime: 'pi' as const, threadId: 'a', sessionId: 'a', runId: 'r', resume: true, stopped: false, resumed: false }]);
   lifecycle.planMachines.mockRejectedValueOnce(new Error('VM inventory offline'));
   await service.sleep(bot.id);
   await vi.waitFor(async () => expect((await service.get(bot.id))?.activity?.state).toBe('sleep-failed'));
@@ -226,7 +226,7 @@ it("does not replace an entry on transport failure or return an unbound entry on
   openSession.mockRejectedValueOnce(new Error("worker disconnected"));
   await expect(service.ensureEntry(bot.id)).rejects.toThrow("worker disconnected");
   expect(createSession).toHaveBeenCalledTimes(1);
-  expect((await service.get(bot.id))?.entrySessionId).toBe("session-1");
+  expect((await service.get(bot.id))?.entry).toEqual({ runtime: 'pi', sessionId: 'session-1' });
   await service.releaseEntry("session-1");
   failWrite();
   await expect(service.ensureEntry(bot.id)).rejects.toThrow("storage disconnected");
@@ -317,8 +317,8 @@ it("reports the latest run session as a work item's navigation target", async ()
   });
   const bot = await service.create();
   const work = await service.listWork(bot.id);
-  expect(work.map((item) => item.thread.id)).toEqual(["thread-1"]);
-  expect(work[0]?.sessionId).toBe("worker-9");
+  expect(work.map((item) => item.runtime === 'pi' ? item.thread.id : item.thread.thread_id)).toEqual(["thread-1"]);
+  expect(work[0]?.runtime === 'pi' ? work[0].sessionId : null).toBe("worker-9");
   await service.ensureEntry(bot.id);
   await service.archive(bot.id);
   expect(new Set(await service.listSessionIds())).toEqual(new Set(["session-1", "older", "worker-9"]));

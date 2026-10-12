@@ -22,7 +22,12 @@ export class PlanService {
     const basis = context?.personalization;
     if (!basis) throw new PlanScopeUnavailable('plan-not-ready');
     if (basis.sessionId !== identity.threadId) throw new Error('Context belongs to another Thread');
-    if (basis.mode !== 'agent' || (basis.threadRole !== 'main' && !await this.runtime.childForThread(identity.threadId))) {
+    // Mode alone is not authority: a Bot keeps its original Catalog identity.
+    const bot = (await this.runtime.thread(identity.threadId)).bot_id;
+    if (basis.mode !== (bot ? 'bot' : 'agent')) {
+      throw new PlanScopeUnavailable('plan-unsupported');
+    }
+    if (!['agent', 'bot'].includes(basis.mode) || (basis.threadRole !== 'main' && !await this.runtime.childForThread(identity.threadId))) {
       throw new PlanScopeUnavailable('plan-unsupported');
     }
   }

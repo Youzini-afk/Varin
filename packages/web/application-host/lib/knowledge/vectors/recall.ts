@@ -87,7 +87,18 @@ const isAssociated = (candidate: Candidate, associated: MemoryRecallAssociation 
   if (!associated || !source) return false;
   return (source.sessionId !== undefined && associated.sessionIds?.includes(source.sessionId) === true)
     || (source.threadId !== undefined && associated.threadIds?.includes(source.threadId) === true)
-    || (source.runId !== undefined && associated.runIds?.includes(source.runId) === true);
+    || (source.runId !== undefined && associated.runIds?.includes(source.runId) === true)
+    // Explicit duplicates merge their original evidence. The latest top-level
+    // producer must not erase the earlier work's relationship to the same row.
+    || source.spans?.some(span => {
+      switch (span.kind) {
+        case 'pi-entry':
+        case 'event': return associated.sessionIds?.includes(span.sessionId) === true;
+        case 'run-report': return associated.threadIds?.includes(span.threadId) === true
+          || associated.runIds?.includes(span.id) === true;
+        case 'history-item': return associated.threadIds?.includes(span.threadId) === true;
+      }
+    }) === true;
 };
 
 const acceptedCandidates = async (

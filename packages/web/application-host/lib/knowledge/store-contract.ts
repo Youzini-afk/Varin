@@ -469,6 +469,15 @@ export const terminalCommandDedupeKey = (sessionId: string, commandId: string): 
   `terminal-command:${JSON.stringify([sessionId, commandId])}`
 );
 
+/** Domain idempotency only: the original Operation owns execution and cancellation. */
+export interface KnowledgeMutationOrigin { id: string; intent: string }
+export interface KnowledgeMutationReceipt {
+  origin: KnowledgeMutationOrigin;
+  action: 'remember' | 'correct' | 'forget';
+  result: KnowledgeCreateIfAbsentResult | { id: NodeId; previous: Knowledge } | null;
+  changes: Knowledge[];
+}
+
 export interface KnowledgeStore {
   readonly dim: number;
   /** O(1) in-process revision for accepted/suggested knowledge mutations. */
@@ -520,7 +529,8 @@ export interface KnowledgeStore {
    * Atomically create one knowledge row unless the same normalized content
    * already exists in this scope, including dismissed and retired history.
    */
-  createKnowledgeIfAbsent(k: KnowledgeInput, options?: { expectedRevision?: string; explicit?: boolean }): Promise<KnowledgeCreateIfAbsentResult>;
+  readKnowledgeMutation(origin: KnowledgeMutationOrigin): Promise<KnowledgeMutationReceipt | null>;
+  createKnowledgeIfAbsent(k: KnowledgeInput, options?: { expectedRevision?: string; explicit?: boolean; origin?: KnowledgeMutationOrigin }): Promise<KnowledgeCreateIfAbsentResult>;
   updateSuggestedKnowledge(
     id: NodeId,
     patch: { content: string; trigger: string },
@@ -544,6 +554,7 @@ export interface KnowledgeStore {
     input: KnowledgeInput,
     expectedScope?: KnowledgeScope,
     expected?: KnowledgeExpectedRevision,
+    origin?: KnowledgeMutationOrigin,
   ): Promise<{ id: NodeId; previous: Knowledge }>;
   /**
    * Hide one knowledge row from current-effective queries by setting `invalidAt`.
@@ -553,6 +564,7 @@ export interface KnowledgeStore {
     id: NodeId,
     expectedScope?: KnowledgeScope,
     expected?: KnowledgeExpectedRevision,
+    origin?: KnowledgeMutationOrigin,
   ): Promise<void>;
   getKnowledge(id: NodeId): Promise<Knowledge | null>;
   listKnowledge(filter: { scope?: KnowledgeScope; status?: KnowledgeStatus; activeOnly?: boolean }): Promise<Knowledge[]>;

@@ -9,6 +9,7 @@ export interface ContextPolicySnapshot {
   enabled: boolean;
   reserveTokens: number;
   keepRecentTokens: number;
+  explicitKeepRecentTokens: number | null;
   backgroundPreparation: boolean;
   preparationWaterline: number;
 }
@@ -46,7 +47,9 @@ export async function readContextPolicy(input: {agentDir: string; projectRoot?: 
   const enabled = ordinary.enabled ?? true;
   if (typeof enabled !== 'boolean') throw new Error('Compaction enabled setting must be boolean');
   const harness = mergeHarnessSettings(global.value.harness as HarnessSettingsInput ?? {},project.value.harness as HarnessSettingsInput ?? {});
+  const explicitKeep = override.keepRecentTokens ?? ordinary.keepRecentTokens;
   const policy = {enabled,reserveTokens:tokens(override.reserveTokens,reserve),keepRecentTokens:tokens(override.keepRecentTokens,keep),
+    explicitKeepRecentTokens:explicitKeep === undefined || explicitKeep === null ? null : tokens(explicitKeep,keep),
     backgroundPreparation:harness.context.backgroundPreparation,preparationWaterline:harness.context.preparationWaterline};
   return {...policy,configurationIdentity:createHash('sha256').update(JSON.stringify([global.revision,project.revision,input.projectRoot ?? null,modelKey ?? null,policy])).digest('hex')};
 }

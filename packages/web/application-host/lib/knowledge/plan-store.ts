@@ -40,7 +40,13 @@ function originOf(value: PlanOrigin): PlanOrigin {
   if (value?.kind !== 'tool') return fail('Plan mutation origin is required');
   const admitted = value.toolOrigin;
   if (!validToolOrigin(admitted)) return fail('Plan tool origin is required');
-  const toolOrigin = structuredClone(admitted);
+  // Trivium payloads may reorder object fields. Preserve semantic origin identity
+  // in one shape before hashing or comparing a recovered receipt.
+  const toolOrigin = admitted.kind === 'model_step'
+    ? { kind: admitted.kind, request_id: admitted.request_id }
+    : admitted.kind === 'policy_action'
+      ? { kind: admitted.kind, action_id: admitted.action_id, node_id: admitted.node_id }
+      : { kind: admitted.kind, parent_operation_id: admitted.parent_operation_id };
   const origin: Extract<PlanOrigin, { kind: 'tool' }> = { kind: 'tool', operationId: text(value.operationId, 'Operation'),
     runId: text(value.runId, 'Run'), toolOrigin, callId: text(value.callId, 'call'), epoch: value.epoch };
   const operationId = toolOperationId(toolOrigin, origin.callId);

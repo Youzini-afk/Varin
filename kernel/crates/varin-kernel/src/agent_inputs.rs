@@ -91,7 +91,7 @@ fn submit_input(
         .with_input_preparation(p.input_preparation)
         .with_expected_context_checkpoint(p.expected_context_checkpoint);
     let plan_eligible = preparation.scope().is_some_and(|scope| {
-        scope.mode == "agent"
+        matches!(scope.mode.as_str(), "agent" | "bot")
             && scope.thread_role == "main"
             && scope.session_id == preparation.thread_id()
     });
@@ -102,7 +102,7 @@ fn submit_input(
         .unwrap_or(false);
     let launch = p
         .launch
-        .map(|selected| selected_launch(&configuration, selected, plan_eligible))
+        .map(|selected| selected_launch(&configuration, selected, plan_eligible, preparation.scope().is_some_and(|scope| scope.mode == "bot")))
         .transpose()?;
     if receipt_only {
         let receipt = preparation
@@ -134,6 +134,7 @@ pub(super) fn selected_launch(
     configuration: &Value,
     selected: SubmitLaunch,
     plan_eligible: bool,
+    bot: bool,
 ) -> Result<varin_runtime::catalog::launches::LaunchSelection, KernelError> {
     let configuration: varin_runtime::ModelSessionConfiguration =
         serde_json::from_value(configuration.clone())?;
@@ -209,7 +210,7 @@ pub(super) fn selected_launch(
         } else {
             0
         },
-        tools: crate::run_tools::builtin_schemas(&kinds, plan_eligible, true),
+        tools: crate::run_tools::builtin_schemas(&kinds, plan_eligible, true, bot),
         policy: crate::observations::default_policy_identity(),
         source,
     })

@@ -708,16 +708,19 @@ export type MemoryNature = "experience" | "decision" | "preference" | "judgment"
 export type MemoryScope = "workspace" | "user" | "session" | "bot";
 
 /** A range in an original source, with UTF-16 offsets into its text projection. */
-export interface MemorySourceSpan {
-  kind: "pi-entry" | "event" | "run-report";
+interface MemorySourceRange {
   id: string;
-  sessionId?: string;
-  scopeId?: string;
-  threadId?: string;
   revision: string;
   start: number;
   end: number;
 }
+/** UTF-16 ranges. Branch/head witness visibility; they do not change immutable item identity. */
+export type MemorySourceSpan = MemorySourceRange & (
+  | { kind: 'pi-entry'; sessionId: string }
+  | { kind: 'event'; scopeId: string; sessionId: string }
+  | { kind: 'run-report'; scopeId: string; threadId: string }
+  | { kind: 'history-item'; threadId: string; branchId: string; headId: string }
+);
 
 export interface MemorySourceExcerpt {
   span: MemorySourceSpan;

@@ -14,6 +14,7 @@ import { ContextService } from './context-service.js';
 import { readContextPolicy } from './context-settings.js';
 import { createMemoryOwner } from './memory-owner.js';
 import { createThreadContext } from './thread-context.js';
+import { waitWithSignal } from '../cancellation.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import type { ChildTask, KernelHandshakeResult } from './protocol.generated.js';
 
@@ -72,16 +73,13 @@ async function initialize(frame: Record<string, unknown>) {
     return { policy, scope: { sessionId: run.thread_id, ...(scope?.projectId ? { projectId: scope.projectId } : {}) } };
   }, async (id, signal) => { await runtime.startRun(id, signal); }, budget);
   kernel.setContextOwner(service);
-  const publish = runtime.publishContextJob.bind(runtime);
-  runtime.publishContextJob = async (id, signal) => {
-    if (holdPublication) {
+  const resume = runtime.resumeContextJob.bind(runtime);
+  runtime.resumeContextJob = async (id, signal) => {
+    if (holdPublication && (await runtime.run(id, signal)).state === 'completed') {
       send({ kind: 'fixture-publication-held', job: await runtime.contextJob(id), observations });
-      await new Promise<void>((_, reject) => {
-        const abort = () => reject(signal?.reason ?? new Error('Original owner closed'));
-        if (signal?.aborted) abort(); else signal?.addEventListener('abort', abort, { once: true });
-      });
+      await waitWithSignal(new Promise<never>(() => {}), signal);
     }
-    return publish(id, signal);
+    return resume(id, signal);
   };
   if (frame.reopen) {
     holdPublication = false;
@@ -107,8 +105,8 @@ async function initialize(frame: Record<string, unknown>) {
     const childRun = prepared.receipt!.run_id;
     const checkpoint = await runtime.context(child.child_branch_id); assert(checkpoint);
     const signal = new AbortController().signal;
-    const selected = await service.query({ action: 'prepare', runId: childRun, requestId: 'scope-only', expectedRevision: checkpoint.revision, hasAcceptedJob: false }, signal);
-    const parent = await service.query({ action: 'prepare', runId: child.parent_run_id, requestId: 'parent-scope-only', expectedRevision: 0, hasAcceptedJob: false }, signal);
+    const selected = await service.query({ action: 'prepare', runId: childRun, requestId: 'scope-only', expectedRevision: checkpoint.revision }, signal);
+    const parent = await service.query({ action: 'prepare', runId: child.parent_run_id, requestId: 'parent-scope-only', expectedRevision: 0 }, signal);
     assert.equal(selected.status, 'ready'); assert.equal(selected.status === 'ready' && selected.external, true);
     assert.equal(parent.status, 'ready'); assert.equal(parent.status === 'ready' && parent.external, false);
     assert.equal(checkpoint.personalization?.sessionId, child.child_thread_id);
@@ -164,7 +162,9 @@ async function handle(frame: Record<string, unknown>) {
   if (frame.kind === 'fixture-second') {
     assert.equal(observations.length, 1, 'Invalid provider was actually called once');
     observations.length = 0;
-    await settings(12000);
+    // Keep this budget unchanged across recovery. It must fit the real fixed tool schemas
+    // plus S1/B/N, while the original source request remains above capacity.
+    await settings(9000);
     await extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision,
       rule: { serviceId: 'varin.context.budget', version: 1,
         providerKeys: ['example.context-budget:host:varin.context.budget@1'], scope: { userId: 'default' }, allowFallback: false } });
@@ -191,13 +191,8 @@ async function handle(frame: Record<string, unknown>) {
     send({ kind: 'fixture-calibrated-submitted', receipt }); return;
   }
   if (frame.kind === 'fixture-tail') {
-    // The accepted old recipe survives both a route change and a relaxed new-request budget.
-    await settings(128);
+    // The original source is frozen; a later request must recompile this complete new tail.
     await runtime.enqueue({ key: 'budget-tail', threadId, branchId, mode: 'boundary', input: { text: 'NEW_TAIL N entered while original summary was running' } });
-    const routing = await extensions.routing.read();
-    assert.equal(routing.document.rules.length, 1);
-    await extensions.removeServiceRoutingRule({ expectedRevision: routing.document.revision,
-      serviceId: 'varin.context.budget', version: 1, scope: { userId: 'default' } });
     send({ kind: 'fixture-tail-added' }); return;
   }
   if (frame.kind === 'fixture-finish') {

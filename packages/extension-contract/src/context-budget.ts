@@ -26,6 +26,8 @@ export interface VarinContextBudgetInput {
   inputBudgetTokens: number;
   settings: { reserveTokens: number; keepRecentTokens: number; backgroundPreparation: boolean; preparationWaterline: number };
   candidates: VarinContextBudgetCandidate[];
+  /** Already paid/admitted work. Compact may apply only this exact source and instructions. */
+  acceptedCandidate?: { throughId: string; mode: 'background' | 'blocking'; summaryInstructions?: string };
 }
 export type VarinContextBudgetDecision = { kind: 'continue' } | {
   kind: 'compact'; throughId: string; mode: 'background' | 'blocking'; summaryInstructions?: string;
@@ -42,7 +44,8 @@ const inputSchema = objectSchema({ boundary: { const: 'before_model_dispatch' },
   settings: objectSchema({ reserveTokens: integerSchema, keepRecentTokens: integerSchema, backgroundPreparation: { type: 'boolean' },
     preparationWaterline: { type: 'number', exclusiveMinimum: 0, exclusiveMaximum: 1 } }),
   candidates: { type: 'array', items: objectSchema({ throughId: textSchema, prefixEstimatedTokens: integerSchema, retainedEstimatedTokens: integerSchema }) },
-});
+  acceptedCandidate: objectSchema({ throughId: textSchema, mode: { enum: ['background', 'blocking'] }, summaryInstructions: { type: 'string' } }, ['summaryInstructions']),
+}, ['acceptedCandidate']);
 const decisionSchema = { oneOf: [objectSchema({ kind: { const: 'continue' } }), objectSchema({ kind: { const: 'compact' },
   throughId: textSchema, mode: { enum: ['background', 'blocking'] }, summaryInstructions: { type: 'string' } }, ['summaryInstructions'])] };
 export const VARIN_CONTEXT_BUDGET_CONTRACT = {
@@ -87,12 +90,21 @@ export function parseVarinContextBudgetCandidates(value: unknown): VarinContextB
   return structuredClone(value) as VarinContextBudgetCandidate[];
 }
 export function parseVarinContextBudgetInput(value: unknown): VarinContextBudgetInput {
-  if (!record(value) || !exact(value, ['boundary', 'requestId', 'estimate', 'capacityTokens', 'inputBudgetTokens', 'settings', 'candidates'])
+  if (!record(value) || !exact(value, ['boundary', 'requestId', 'estimate', 'capacityTokens', 'inputBudgetTokens', 'settings', 'candidates'], ['acceptedCandidate'])
     || value.boundary !== 'before_model_dispatch' || !text(value.requestId) || !integer(value.capacityTokens) || !integer(value.inputBudgetTokens)
     || !record(value.settings) || !exact(value.settings, ['reserveTokens', 'keepRecentTokens', 'backgroundPreparation', 'preparationWaterline'])
     || !integer(value.settings.reserveTokens) || !integer(value.settings.keepRecentTokens) || typeof value.settings.backgroundPreparation !== 'boolean'
     || typeof value.settings.preparationWaterline !== 'number' || !(value.settings.preparationWaterline > 0 && value.settings.preparationWaterline < 1)) throw new Error('Invalid context budget input');
   parseVarinContextBudgetEstimate(value.estimate); parseVarinContextBudgetCandidates(value.candidates);
+  if (value.acceptedCandidate !== undefined) {
+    const accepted = value.acceptedCandidate;
+    if (!record(accepted) || !exact(accepted, ['throughId', 'mode'], ['summaryInstructions'])
+      || !text(accepted.throughId) || !['background', 'blocking'].includes(String(accepted.mode))
+      || 'summaryInstructions' in accepted && typeof accepted.summaryInstructions !== 'string'
+      || !(value.candidates as VarinContextBudgetCandidate[]).some(candidate => candidate.throughId === accepted.throughId)) {
+      throw new Error('Invalid accepted context candidate');
+    }
+  }
   return structuredClone(value) as unknown as VarinContextBudgetInput;
 }
 export function parseVarinContextBudgetDecision(value: unknown): VarinContextBudgetDecision {

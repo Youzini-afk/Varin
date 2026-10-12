@@ -14,12 +14,19 @@
 - 推理用途接入不等于每个用途都有本地推理包。已有提供商 decision/rerank/embedding 的配置、真实消费者与原生执行合同仍需保留/接通；本地包当前只有已有 Bekko。用户本轮明确暂缓 native 图像生成，不计剩余交付范围；旧 Pi 的 `models.generateImages()` 基础不等于 native 已实现。§18.1/§24 的建议/评估限定已有配置的辅助请求，不能扩成默认模型链；没有另设独立“材料 rerank”产品的任务。此前清单混用用途、消费者和本地包，现以这些明确边界纠正，历史台账不充当新需求。
 - 已有本地嵌入是 `bekko-embedding-v1-a8m` 的 `local-semantic` ONNX 组件。下述增量已将其原安装/校验/worker 接入 native query 和前台文档向量，HTTP 仍是显式配置的另一执行器。HTTP 或受控本地模型的执行验证不代表用户配置了外部服务，也不代表实际 ONNX 权重、硬件质量/性能已验收；当前组件协议需按原 builder 构建 v3 包后导入。
 
+## 2026-10-12 增量：Bot 产品与原记忆/Plan、摘要准备
+
+- 新建 Agent Bot 的实际 Thread/branch 已沿原 BotProfile、client、认证 Router 与共享工作台接通；默认仍 Pi。原 MemoryService/Knowledge 处理 typed native 历史来源、Bot/user/current-Thread 召回及原事务回执，实际 RequestSnapshot 消费同一状态。Sleep/Wake 保留原等待与手动暂停，加入原 Host domain/preparation、子任务与 Computer 执行停止证据；删除另沿原 owner 释放确切引用。
+- Bot 记忆随原 ContextJob 配方冻结，并由原 ContentStore manifest/checkpoint 引用持有；只有发布 CAS 推进摘要基线。后台摘要按实际耗时/输入增长提前准备，当前 Decision 及实际 provider 序列化的完整输入决定自动发布，超预算保留原候选与原文，不自动重新收费。
+- 原 Plan 域接实际 Bot 身份和 selected Tool/Operation。文件 source 的 read-only 不是所有领域只读；不新增禁止独立 notes/plan 修改的权限表。原持久 mutation receipt 与同 epoch 执行停止事实各保其语义。
+- Catalog **65**、wire **24**。[本轮记录](../reviews/runtime-bot-product-context-2026-10-12.md)分列真实 Bot stdio、记忆基线 GC、Plan child/Host 和 UI/direct Router 的证据，未把受控 provider 当实际模型验收。下一实际实现缺口是原 Documents 草稿、Git 来源和明确恢复在 native 产品中的消费者，复用已有存储及捕获 owner。
+
 ## 2026-10-12 增量：私有 Bot 身份与可恢复暂停基础
 
 - 原 BotService profile/activity 仍唯一决定身份和工作准入。Catalog **64**、wire **23** 将短来源 gate 绑定当前 epoch，root Thread 仅存 Bot 关联；child、context job、MemoryWork 从各自原关系派生，不复制 ThreadRegistry 或新建生命周期账本。
 - 原 Run 的 Bot hold 与用户 Stop 分开；Sleep 保留 Prepared/proposal、Wait/trigger 和手动 pause，Wake 沿原 recovery 和 continuation。实际 worker join、原 executor stop、未知 effect/模型分列；同 completion 的迟到停止证据支持幂等精化。Host preparation 注册等底层工作真正结束。
-- [本片验证记录](../reviews/runtime-bot-suspension-foundation-2026-10-12.md)分列真实 BotService/Storage epoch、原后台记忆消费者及独立 warm/cold 单次发送证据；原 probe 已入仓复跑。尚未开放 native Bot 创建，也未将局部 status 当完整 asleep。
-- 下一接 typed native 来源、Bot MemoryService/Knowledge recall、实际请求材料，再贯穿主/子工作、进程/Computer、产品配置和删除；不提前切换默认或迁移用户资产。
+- [本片验证记录](../reviews/runtime-bot-suspension-foundation-2026-10-12.md)分列真实 BotService/Storage epoch、原后台记忆消费者及独立 warm/cold 单次发送证据；原 probe 已入仓复跑。该基础片当时尚未开放 native Bot 创建，也未将局部 status 当完整 asleep。
+- 后续 typed 来源、召回、产品入口及完整生命周期的当前进展见上方新记录；不提前切换默认或迁移用户资产。
 
 ## 2026-10-12 增量：原 Bot 整理与选段的后台推理
 

@@ -171,6 +171,112 @@ pub(super) fn run_permitted(db: &Connection, run: &Run) -> Result<bool> {
 }
 
 impl Catalog {
+    /// Product discovery uses the same relationship indexes as execution admission.
+    pub fn inspect_bot_scope(&self, bot_id: &str) -> Result<Value> {
+        let mut query = self.db.prepare("WITH RECURSIVE scope(thread_id) AS (
+            SELECT thread_id FROM bot_thread_bindings WHERE bot_id=?1
+            UNION SELECT c.child_thread_id FROM child_tasks c JOIN scope s ON json_extract(c.body,'$.parent_thread_id')=s.thread_id
+        ) SELECT thread_id FROM scope ORDER BY thread_id")?;
+        let ids = query.query_map([bot_id], |r| r.get::<_, String>(0))?.collect::<std::result::Result<Vec<_>, _>>()?;
+        let threads = ids.iter().map(|id| self.inspect_thread(id)).collect::<Result<Vec<_>>>()?;
+        let runs = self.bot_scope_run_ids(bot_id)?.iter().map(|id| {
+            let run = self.run(id)?;
+            Ok(json!({"threadId":run.thread_id,"branchId":run.branch_id,"runId":run.id,"state":run.state,"cancelRequested":run.cancel_requested}))
+        }).collect::<Result<Vec<_>>>()?;
+        Ok(json!({"botId":bot_id,"threads":threads,"runs":runs}))
+    }
+
+    /// Delete only this Bot's original runtime records after its actual executors drained.
+    /// Foreign keys protect retained external owners; source files and Git workspaces are assets.
+    pub fn remove_bot_scope(&mut self, suspension: &BotSuspension) -> Result<()> {
+        self.check_bot_scope_gate(suspension, Some(false))?;
+        let runs = self.bot_scope_run_ids(&suspension.bot_id)?;
+        for id in &runs {
+            let (stops, effects, models) = self.bot_run_barriers(id)?;
+            if !stops.is_empty() || !effects.is_empty() || !models.is_empty() {
+                return Err(RuntimeError::Conflict(format!("Bot deletion is blocked by original Run {id}. Reconcile its pending executor, effect or model request, then retry Delete.")));
+            }
+        }
+        let mut threads = std::collections::BTreeSet::new();
+        let mut query = self.db.prepare("SELECT thread_id FROM bot_thread_bindings WHERE bot_id=?1")?;
+        for id in query.query_map([&suspension.bot_id], |row| row.get::<_,String>(0))? { threads.insert(id?); }
+        drop(query);
+        for id in &runs { threads.insert(self.run(id)?.thread_id); }
+        // Empty children are real work too, even if no Run was admitted yet.
+        loop {
+            let keys = encode(&threads)?;
+            let mut query = self.db.prepare("SELECT child_thread_id FROM child_tasks WHERE json_extract(body,'$.parent_thread_id') IN (SELECT value FROM json_each(?1))")?;
+            let children = query.query_map([keys], |row|row.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
+            let before = threads.len(); threads.extend(children); if threads.len() == before { break; }
+        }
+        let threads = encode(&threads)?;
+        let runs = encode(&runs)?;
+        let unreleased: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM delegated_executions WHERE (run_id IN (SELECT value FROM json_each(?1)) OR child_operation_id IN (SELECT id FROM operations WHERE run_id IN (SELECT value FROM json_each(?1)))) AND json_extract(body,'$.resources_released')=0)", [&runs], |row|row.get(0))?;
+        if unreleased { return Err(RuntimeError::Conflict("Bot child work retains its original handoff or source. Release that work through its original owner, then retry Delete; no history was removed.".into())); }
+        let tx = self.db.transaction()?;
+        // Cycles between Runs, checkpoints and history are removed atomically, never disabled.
+        tx.execute_batch("PRAGMA defer_foreign_keys=ON")?;
+        let retained: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM run_launches WHERE id NOT IN (SELECT value FROM json_each(?1)) AND json_extract(body,'$.selection.source.environment_run_id') IN (SELECT value FROM json_each(?1)))", [&runs], |row|row.get(0))?;
+        if retained { return Err(RuntimeError::Conflict("Another Run retains this Bot's original execution environment. Release that source reference, then retry Delete; its workspace is preserved.".into())); }
+        let shared_history: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM branches b JOIN history h ON h.id=b.head WHERE b.thread_id NOT IN (SELECT value FROM json_each(?1)) AND h.thread_id IN (SELECT value FROM json_each(?1)))", [&threads], |row|row.get(0))?;
+        if shared_history { return Err(RuntimeError::Conflict("Another Thread branch retains this Bot's original history. Remove that branch's reference before retrying Delete; no records were removed.".into())); }
+        let r = "IN (SELECT value FROM json_each(?1))";
+        let b = "IN (SELECT id FROM branches WHERE thread_id IN (SELECT value FROM json_each(?2)))";
+        let op = format!("IN (SELECT id FROM operations WHERE run_id {r})");
+        let requests = format!("IN (SELECT id FROM model_steps WHERE run_id {r})");
+        let goals = format!("IN (SELECT id FROM goals WHERE thread_id IN (SELECT value FROM json_each(?2)))");
+        let statements = vec![
+            format!("DELETE FROM policy_graph_dependencies WHERE action_id {op}"),
+            format!("DELETE FROM policy_graph_nodes WHERE action_id {op}"),
+            format!("DELETE FROM mcp_interactions WHERE operation_id {op}"),
+            format!("DELETE FROM resource_occupancy WHERE operation_id {op}"),
+            format!("DELETE FROM goal_children WHERE id {op}"),
+            format!("DELETE FROM goal_runs WHERE id {r}"),
+            format!("DELETE FROM goal_usage WHERE id {goals}"),
+            "DELETE FROM goals WHERE thread_id IN (SELECT value FROM json_each(?2))".into(),
+            format!("DELETE FROM delegated_executions WHERE child_operation_id {op} OR run_id {r}"),
+            format!("DELETE FROM child_tasks WHERE id {op}"),
+            format!("DELETE FROM followup_occurrences WHERE followup_id IN (SELECT id FROM followups WHERE source_run_id {r})"),
+            format!("DELETE FROM followups WHERE source_run_id {r}"),
+            format!("DELETE FROM input_history_content WHERE input_id IN (SELECT id FROM input_queue WHERE branch_id {b})"),
+            format!("DELETE FROM input_queue WHERE branch_id {b}"),
+            format!("DELETE FROM resumptions WHERE run_id {r}"),
+            format!("DELETE FROM waits WHERE run_id {r}"),
+            format!("DELETE FROM deliveries WHERE request {requests}"),
+            format!("DELETE FROM tool_calls WHERE request_id {requests}"),
+            format!("DELETE FROM model_outputs WHERE request_id {requests}"),
+            format!("DELETE FROM model_steps WHERE run_id {r}"),
+            format!("DELETE FROM model_selections WHERE run_id {r}"),
+            format!("DELETE FROM policy_checkpoints WHERE run_id {r}"),
+            format!("DELETE FROM policy_selections WHERE run_id {r}"),
+            format!("DELETE FROM computer_requests WHERE requester_run_id {r}"),
+            format!("DELETE FROM operations WHERE run_id {r}"),
+            format!("DELETE FROM context_job_parts WHERE run_id {r}"),
+            format!("DELETE FROM context_jobs WHERE run_id {r}"),
+            format!("DELETE FROM run_launches WHERE id {r}"),
+            format!("DELETE FROM bot_run_holds WHERE run_id {r}"),
+            format!("DELETE FROM commands WHERE json_extract(receipt,'$.run_id') {r}"),
+            format!("DELETE FROM runs WHERE id {r}"),
+            "DELETE FROM history WHERE thread_id IN (SELECT value FROM json_each(?2))".into(),
+            format!("DELETE FROM memory_states WHERE branch_id {b}"),
+            format!("DELETE FROM active_contexts WHERE branch_id {b}"),
+            format!("DELETE FROM context_checkpoints WHERE branch_id {b}"),
+            "DELETE FROM bot_thread_bindings WHERE thread_id IN (SELECT value FROM json_each(?2))".into(),
+            "DELETE FROM branches WHERE thread_id IN (SELECT value FROM json_each(?2))".into(),
+            "DELETE FROM threads WHERE id IN (SELECT value FROM json_each(?2))".into(),
+        ];
+        for statement in statements {
+            // Numbered slots preserve both immutable scope sets, including statements using only ?2.
+            let statement = if statement.contains("?2") { statement } else { format!("{statement} AND ?2 IS NOT NULL") };
+            let statement = if statement.contains("?1") { statement } else { format!("{statement} AND ?1 IS NOT NULL") };
+            tx.execute(&statement, params![runs,threads])?;
+        }
+        let retained: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM pragma_foreign_key_check)", [], |row|row.get(0))?;
+        if retained { return Err(RuntimeError::Conflict("Bot history is retained by another original runtime owner (shared branch, context, calendar or execution). Release that owner's reference, then retry Delete. No records were removed.".into())); }
+        event(&tx, &suspension.bot_id, suspension.profile_revision, "bot.scope_deleted", Value::Null)?;
+        tx.commit()?;
+        Ok(())
+    }
     pub fn bot_for_thread(&self, thread_id: &str) -> Result<Option<String>> {
         thread_bot(&self.db, thread_id)
     }

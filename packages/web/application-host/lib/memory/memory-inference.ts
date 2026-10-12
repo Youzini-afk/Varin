@@ -1,3 +1,4 @@
+import { sourceIdentity } from './memory-sources.js';
 /** Bot MemoryWork admission and original native inference receipts. Knowledge is not written here. */
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -34,7 +35,7 @@ export interface MemoryWork<R = unknown> {
 export interface MemorySelectionRequest {
   requestKey: string;
   retryOf?: string;
-  sessionId: string;
+  conversation: { runtime: 'pi'; sessionId: string } | { runtime: 'agent'; threadId: string; branchId: string; headId: string };
   sources: MemorySourceSpan[];
 }
 export class MemoryInferenceError extends Error {
@@ -50,7 +51,7 @@ const fail = (code: string, message: string, retryDisposition: 'observe' | 'new_
   throw new MemoryInferenceError(code, message, retryDisposition);
 };
 export const memorySourceClaims = (spans: readonly MemorySourceSpan[]): MemoryWorkClaim[] => spans.map(span => ({
-  source: JSON.stringify([span.kind, span.id, span.scopeId ?? null, span.sessionId ?? null, span.threadId ?? null, span.revision]), start: span.start, end: span.end,
+  source: JSON.stringify([...sourceIdentity(span), span.revision]), start: span.start, end: span.end,
 }));
 export function createMemoryInference(options: {
   kernel: KernelClient;

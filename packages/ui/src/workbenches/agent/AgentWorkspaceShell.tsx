@@ -34,7 +34,7 @@ export const AgentWorkspaceShell: React.FC<Record<string, unknown>> = () => {
     try {
       const threads = await threadAPI.list();
       if (generation !== hostGeneration.current) return;
-      setAvailable(threads.flatMap(thread => thread.branches.map(branch => ({ runtime: 'agent' as const, threadId: thread.thread_id, branchId: branch.branch_id }))));
+      setAvailable(threads.filter(thread => thread.bot_id === null).flatMap(thread => thread.branches.map(branch => ({ runtime: 'agent' as const, threadId: thread.thread_id, branchId: branch.branch_id }))));
     } catch (value) { if (generation === hostGeneration.current) setError(value instanceof Error ? value.message : 'Threads unavailable'); }
   };
   if (varinSurfaceRuntime.surface === 'mobile') {

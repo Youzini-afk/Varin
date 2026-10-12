@@ -1,11 +1,21 @@
 # Varin 当前状态
 
 Status: maintained delivery summary — 汇总实现边界，具体证据由链接的模块或验收记录保留。
-Last updated: 2026-10-06
+Last updated: 2026-10-13
 
-本页以 `f26cd440` 的代码、近期变更和既有验收记录为整理基线；本次文档核对没有新增运行验收。
+下方 Pi 产品总览保留 `f26cd440` 的整理基线；native 开发分支的当前合同与新增证据见本节及
+[运行时实施台账](plan/agent-runtime-implementation.md)，不能从旧总览推断 native 已实现或未实现。
 版本号、发布任务和在线 CI 结果分别由包清单、发布记录和工作流负责，不从文档中的“完成”推断。
 [架构](architecture.md) · [后续路线](roadmap.md) · [验收与证据](reviews/README.md)
+
+## Native 开发分支
+
+两设计仍在实施，产品默认保持 Pi。已接线的执行、存储、工具/策略、协作、Goal、持久条件、扩展组合及
+原领域消费者由[实施台账](plan/agent-runtime-implementation.md)逐项链接真实证据和边界。
+当前 [Bot 产品与摘要整合](reviews/runtime-bot-product-context-2026-10-12.md)连接原 Bot 身份、来源/召回、
+Sleep/Wake、Plan 与 ContextJob，并分列原 stdio、Knowledge IPC、UI 与受控模型证据。Documents 草稿/Git 来源及明确恢复的
+native 产品消费者继续实施。正式安装、真实桌面/VM、实际模型权重/账号和性能证据按具体环境另验。
+用户先验收两设计能力，再自行全面迁移、切换默认和移除 Pi。
 
 ## 当前能力
 

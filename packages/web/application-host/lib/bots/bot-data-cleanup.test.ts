@@ -15,10 +15,10 @@ async function fixture() {
   const scope = botScopeId(id);
   const key = knowledgeStoreKeyForScope(scope);
   const bot: BotSummary = { id, name: 'Bot', homeDir: join(dataDir, 'bots', id), coordinatorHostId: 'host',
-    archived: true, instructions: null, model: null, entrySessionId: 'entry', createdAt: '', updatedAt: '',
+    archived: true, instructions: null, model: null, entry: { runtime: 'pi', sessionId: 'entry' }, createdAt: '', updatedAt: '',
     deletion: { operationId: 'delete', error: null },
     activity: { state: 'asleep', operationId: 'sleep', planned: true, error: null, machines: [],
-      work: [{ threadId: 'child', sessionId: 'old-worker', runId: null, resume: false, stopped: true, resumed: false }] } };
+      work: [{ runtime: 'pi' as const, threadId: 'child', sessionId: 'old-worker', runId: null, resume: false, stopped: true, resumed: false }] } };
   await mkdir(join(dataDir, 'knowledge', 'host'), { recursive: true });
   await mkdir(bot.homeDir, { recursive: true });
   for (const name of [`${key}.tdb`, `${key}.tdb.wal`, `${key}.vec`, `${key}.pld.4`, 'other.tdb', 'user.tdb']) {

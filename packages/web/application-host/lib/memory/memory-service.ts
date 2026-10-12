@@ -1,6 +1,7 @@
 import type {
   Knowledge,
   KnowledgeExpectedRevision,
+  KnowledgeMutationOrigin,
   KnowledgeScope,
   KnowledgeSource,
   KnowledgeStatus,
@@ -12,7 +13,7 @@ import type {
 } from "../knowledge/store.js";
 import { KnowledgeMutationError } from "../knowledge/store.js";
 import { recallSources, type KnowledgeVectorRuntime, type MemoryRecallAssociation } from "../knowledge/vectors/index.js";
-import { botScopeId, sessionScopeId } from "../harness/owner-scope.js";
+import { botScopeId, sessionScopeId, threadScopeId } from "../harness/owner-scope.js";
 import type { MemorySourceExcerpt, MemorySourceSpan, PiSessionEntry } from "@varin/protocol";
 import { entrySourceText, sourceRevision } from "./memory-sources.js";
 
@@ -32,12 +33,14 @@ export interface MemoryOwner {
    * id, `user` → null (the single user store).
    */
   ownerId: string | null;
+  /** Distinguishes native current-Thread memory from Pi session-local memory. */
+  runtime?: 'agent' | 'pi';
 }
 
 export const memoryOwnerScopeId = (owner: MemoryOwner): string | null => {
   switch (owner.scope) {
     case "bot": return owner.ownerId ? botScopeId(owner.ownerId) : null;
-    case "session": return owner.ownerId ? sessionScopeId(owner.ownerId) : null;
+    case "session": return owner.ownerId ? owner.runtime === "agent" ? threadScopeId(owner.ownerId) : sessionScopeId(owner.ownerId) : null;
     case "workspace": return owner.ownerId;
     case "user": return null;
   }
@@ -53,6 +56,7 @@ export interface MemoryServiceDeps {
   userStore(): Promise<KnowledgeStore | null>;
   /** Existing session memory, if any; lookup must not create an empty store. */
   sessionStoreIfPresent?(sessionId: string): Promise<KnowledgeStore | null>;
+  threadStoreIfPresent?(threadId: string): Promise<KnowledgeStore | null>;
   /**
    * Resolve the memory owner a session acts as: a session bound under a
    * `bot:<id>` scope writes Bot memory; an ordinary bound session writes its
@@ -71,6 +75,10 @@ export interface MemoryServiceDeps {
    * automatic recall closure builds.
    */
   associationForSession?(sessionId: string): Promise<MemoryRecallAssociation | undefined>;
+  ownerForThread?(threadId: string): Promise<MemoryOwner>;
+  associationForThread?(threadId: string): Promise<MemoryRecallAssociation | undefined>;
+  /** Rust verifies the source's original Bot binding and selected ancestry before reading bytes. */
+  readHistorySource?(botId: string, span: Extract<MemorySourceSpan, { kind: 'history-item' }>): Promise<string>;
   readSessionEntries?(sessionId: string, scope: "branch" | "all"): Promise<PiSessionEntry[]>;
   readRunReport?(scopeId: string, threadId: string, runId: string): Promise<string | null>;
   onChanged?(owner: MemoryOwner, ids: readonly NodeId[]): void;
@@ -157,14 +165,18 @@ export function createMemoryService(deps: MemoryServiceDeps) {
     }] };
   };
 
-  const readSource = async (owner: MemoryOwner, id: NodeId): Promise<MemorySourceExcerpt[]> => {
+  const readSource = async (owner: MemoryOwner, id: NodeId, callerBotId?: string): Promise<MemorySourceExcerpt[]> => {
     // Authorization is the memory owner lookup. Only its persisted ranges are
     // readable; callers cannot substitute another session or request its history.
     const item = await requireRow(await storeFor(owner), owner, id);
     return Promise.all((item.source?.spans ?? []).map(async (span: MemorySourceSpan): Promise<MemorySourceExcerpt> => {
       let text: string | undefined;
       try {
-        if (span.kind === "pi-entry" && span.sessionId && deps.readSessionEntries) {
+        if (span.kind === 'history-item') {
+          // A shared user row is not authority to cross another Bot's history boundary.
+          const botId = callerBotId ?? (owner.scope === 'bot' ? owner.ownerId : null);
+          if (botId && deps.readHistorySource) text = await deps.readHistorySource(botId, span);
+        } else if (span.kind === "pi-entry" && span.sessionId && deps.readSessionEntries) {
           const entry = (await deps.readSessionEntries(span.sessionId, "all")).find((entry) => entry.id === span.id);
           if (entry) text = entrySourceText(entry);
         } else if (span.kind === "event" && span.scopeId && span.sessionId) {
@@ -186,7 +198,7 @@ export function createMemoryService(deps: MemoryServiceDeps) {
    * a caller explicitly asked to remember. Automatic source retries respect
    * forgetting; a new explicit instruction can intentionally remember it again.
    */
-  const remember = async (owner: MemoryOwner, input: MemoryRecordInput): Promise<MemoryRecordResult> => {
+  const remember = async (owner: MemoryOwner, input: MemoryRecordInput, origin?: KnowledgeMutationOrigin): Promise<MemoryRecordResult> => {
     const store = await storeFor(owner);
     const content = input.content.trim();
     if (!content) throw new KnowledgeMutationError("invalid", "Memory content is required");
@@ -199,7 +211,7 @@ export function createMemoryService(deps: MemoryServiceDeps) {
       ...(input.nature ? { nature: input.nature } : {}),
       ...(source ? { source } : {}),
       ...(input.supplements !== undefined ? { supplements: input.supplements } : {}),
-    }, { explicit: input.source?.kind !== "memory-organizer", ...(input.expectedRevision !== undefined ? { expectedRevision: input.expectedRevision } : {}) });
+    }, { explicit: input.source?.kind !== "memory-organizer", ...(origin ? { origin } : {}), ...(input.expectedRevision !== undefined ? { expectedRevision: input.expectedRevision } : {}) });
     if (result.created) notify(owner, [result.knowledge.id]);
     return { created: result.created, duplicate: result.duplicate, item: result.knowledge };
   };
@@ -209,6 +221,7 @@ export function createMemoryService(deps: MemoryServiceDeps) {
     owner: MemoryOwner,
     id: NodeId,
     patch: { content: string; trigger?: string; nature?: MemoryNature; source?: KnowledgeSource; sourceText?: string; sourceEntryId?: string; expected?: KnowledgeExpectedRevision },
+    origin?: KnowledgeMutationOrigin,
   ): Promise<{ id: NodeId; previous: Knowledge }> => {
     const store = await storeFor(owner);
     const source = await captureSource(patch);
@@ -219,7 +232,7 @@ export function createMemoryService(deps: MemoryServiceDeps) {
       trigger: patch.trigger?.trim() ?? "",
       ...(patch.nature ? { nature: patch.nature } : {}),
       ...(source ? { source } : {}),
-    }, owner.scope, patch.expected);
+    }, owner.scope, patch.expected, origin);
     notify(owner, [result.id, id]);
     return result;
   };
@@ -229,10 +242,11 @@ export function createMemoryService(deps: MemoryServiceDeps) {
     owner: MemoryOwner,
     id: NodeId,
     expected?: KnowledgeExpectedRevision,
+    origin?: KnowledgeMutationOrigin,
   ): Promise<void> => {
     const store = await storeFor(owner);
     await requireRow(store, owner, id);
-    await store.retireKnowledge(id, owner.scope, expected);
+    await store.retireKnowledge(id, owner.scope, expected, origin);
     notify(owner, [id]);
   };
 
@@ -257,13 +271,12 @@ export function createMemoryService(deps: MemoryServiceDeps) {
     owner: MemoryOwner,
     query: string,
     k = 8,
-    context?: { sessionId?: string; includeShared?: boolean },
+    context?: { sessionId?: string; threadId?: string; includeShared?: boolean },
   ): Promise<RecallResult[]> => {
     const store = await storeFor(owner);
     const scopeId = memoryOwnerScopeId(owner) ?? owner.scope;
-    const associated = context?.sessionId
-      ? await deps.associationForSession?.(context.sessionId)
-      : undefined;
+    const associated = context?.threadId ? await deps.associationForThread?.(context.threadId)
+      : context?.sessionId ? await deps.associationForSession?.(context.sessionId) : undefined;
     const vectors = deps.vectors?.() ?? undefined;
     const sources = [{ authority: store, scope: owner.scope, scopeId }];
     if (context?.includeShared && owner.scope !== "user") {
@@ -274,6 +287,10 @@ export function createMemoryService(deps: MemoryServiceDeps) {
     if (context?.includeShared && context.sessionId && owner.scope !== "session") {
       const sessionStore = await deps.sessionStoreIfPresent?.(context.sessionId);
       if (sessionStore) sources.push({ authority: sessionStore, scope: "session", scopeId: sessionScopeId(context.sessionId) });
+    }
+    if (context?.includeShared && context.threadId && owner.scope !== 'session') {
+      const threadStore = await deps.threadStoreIfPresent?.(context.threadId);
+      if (threadStore) sources.push({ authority: threadStore, scope: 'session', scopeId: threadScopeId(context.threadId) });
     }
     // Active default-scope lookup and automatic Zone 2 recall now use the
     // same sources and selection service. Explicit scope searches stay narrow.
@@ -298,6 +315,11 @@ export function createMemoryService(deps: MemoryServiceDeps) {
     readSource,
     revision: async (owner: MemoryOwner) => (await storeFor(owner)).knowledgeRevision(),
     ownerForSession: deps.ownerForSession,
+    ownerForThread: async (threadId: string) => {
+      if (!deps.ownerForThread) throw new MemoryOwnerUnavailableError('Thread memory identity is unavailable');
+      return deps.ownerForThread(threadId);
+    },
+    mutationReceipt: async (owner: MemoryOwner, origin: KnowledgeMutationOrigin) => (await storeFor(owner)).readKnowledgeMutation(origin),
   };
 }
 

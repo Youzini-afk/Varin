@@ -365,7 +365,7 @@ function artifactConversationFixture() {
   const f = researchFixture();
   const unused = async (): Promise<never> => { throw new Error('Unused fixture API'); };
   const snapshot = async (work: ThreadIdentity): Promise<ThreadSnapshot> => ({ identity: work, eventCursor: 0,
-    thread: { thread_id: work.threadId, observer_project_ids: [null], branches: [{ branch_id: work.branchId, head: null, active_run_id: null, latest_run: null }] },
+    thread: { thread_id: work.threadId, bot_id: null, observer_project_ids: [null], branches: [{ branch_id: work.branchId, head: null, active_run_id: null, latest_run: null }] },
     activeRun: null, history: [], historyPage: { head: null, previous: null }, inputs: [], operations: [], followups: [], goals: [],
     launch: null, modelSelection: { desired: null, active: null }, policySelection: null, context: { checkpoint: null, jobs: [] } });
   const submit = vi.fn(async (input: ThreadSubmit) => ({ thread_id: input.threadId, branch_id: input.branchId,

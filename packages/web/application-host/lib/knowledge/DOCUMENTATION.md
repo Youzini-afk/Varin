@@ -206,9 +206,9 @@ Process-kill recovery is not equivalent to a power-loss guarantee.
 
 ## Native Thread plans
 
-Native ordinary main and admitted child Thread plans use this same private KnowledgeStore writer, in the existing
+Native Agent and Bot main and admitted child Thread plans use this same private KnowledgeStore writer, in the existing
 user store as a physical home. `plan-store.ts` records explicit Thread/branch identities;
-it does not invent Pi session IDs or change project/Bot/Pi plan scope. Version bodies, branch
+it does not invent Pi session IDs, duplicate plans by Bot, or change legacy Pi plan scope. Version bodies, branch
 current references, fork captures and reference-only mutation receipts live here. Native records
 have their own types and no legacy session identity, so block queries, user knowledge lists,
 recall and semantic knowledge indexing exclude them through their existing type filters.
@@ -244,11 +244,28 @@ KnowledgeStore latest-reference CAS. Native tool reads, user edits and the nativ
 consume the same body and reference. The card refreshes from the owner after a mutation and on
 matching plan-change/reconnect events; it preserves a conflicting draft for explicit resolution.
 
-Native HTTP reads/edits check the real persisted ordinary-main context and child relationship.
-An uninitialized context is not-ready; Bot/child plans are unsupported, never successful empty
-plans. Existing conversation forks for unsupported scopes retain their previous no-plan path;
-a storage or Catalog failure cannot silently downgrade a supported plan-aware fork. The card
-separates these states, disables unsupported edits and refreshes after context admission.
+Native HTTP reads/edits and tool admission check the real persisted context, Catalog Bot binding,
+and child relationship. A Bot keeps mode `bot` and its original Thread owner. Child tools retain
+their actual frozen selection and Operation contract. A `read_only` file source does not forbid
+updates to the child's selected plan capability; authenticated user edits retain their existing
+authority. An uninitialized context is not-ready and a fabricated mode/role is unsupported,
+never a successful empty plan. Existing conversation forks for unsupported scopes retain their
+previous no-plan path; a storage or Catalog failure cannot silently downgrade a supported plan-aware
+fork. The card separates these states and refreshes after context admission.
+
+Cancellation ends the caller's observer before the original Knowledge transaction may settle.
+Bot drain waits for that original owner promise. A same-kernel-epoch receipt lookup first reads the
+durable mutation receipt; only when it is absent can the bridge return the exact original owner’s
+stopping fact. An original mutation that never entered the writer, or was explicitly rejected before
+commit by the existing stale-selection check, is Failed/None. A settled writer with no confirmed
+result remains Indeterminate/Unknown with its executor stopped. Restart loses transient
+stopping evidence, so absence alone never proves None. Receipt lookup never repeats a mutation.
+
+Bot deletion removes its Catalog relations and separately owned knowledge stores. The shared user
+store currently retains native plan versions, pointers, fork captures and receipts, as it does for
+other deleted Thread owners; there is no plan-history purge API. Deleted Catalog identity cannot
+expose those records through the public plan service. This is a retention boundary, not a claim
+that deleting a Bot erases all historical plan bytes.
 
 The initial 2026-10-09 native slice's independent acceptance included 22 real-owner/IPC cases and 22
 real-kernel Host cases; UI/client focused acceptance covers 18 cases. Production Host bundling

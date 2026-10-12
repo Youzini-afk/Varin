@@ -832,12 +832,24 @@ pub(crate) fn spawn(
                         if method == "runtime.bot.scope.suspend" {
                             let p: varin_runtime::catalog::bot::BotSuspension = serde_json::from_value(params)?;
                             let capture = runtime.suspend_bot_scope(p).map_err(|e|KernelError::Operation(e.to_string()))?;
+                            let processes = {
+                                let owner = runtime.catalog(); let catalog = owner.lock().map_err(|_| KernelError::Storage("Catalog owner failed".into()))?;
+                                catalog.pending_managed_processes().map_err(domain)?.into_iter().map(|id| catalog.operation(&id)).collect::<Result<Vec<_>,_>>().map_err(domain)?
+                                    .into_iter().filter(|op| capture.run_ids.contains(&op.run_id)).collect::<Vec<_>>()
+                            };
+                            let resources = resources.clone();
                             let runtime = runtime.clone();
                             let response_id = id.clone();
                             let response_sender = responses.clone();
                             let done = finished.clone();
                             thread::spawn(move || {
-                                let result = runtime.drain_bot_scope(&capture).map_err(|e|KernelError::Operation(e.to_string()));
+                                let result = (|| {
+                                    for operation in processes {
+                                        runtime.cancel_operation_control(&operation.id);
+                                        if !resources.cancel_known_process(&operation.id)? { resources.cancel_process(&operation.id, &operation.run_id)?; }
+                                    }
+                                    runtime.drain_bot_scope(&capture).map_err(|e|KernelError::Operation(e.to_string()))
+                                })();
                                 let response = match result {
                                     Ok(value) => response_ok(&response_id, serde_json::to_value(value).expect("scope status is serializable")),
                                     Err(error) => response_error(&response_id, &error),
@@ -1969,6 +1981,19 @@ pub(crate) fn spawn(
                             deferred = true;
                             return Ok(Value::Null);
                         }
+                        if method == "runtime.bot.history.read" {
+                            let p: BotHistoryReadParams = serde_json::from_value(params)?;
+                            let read = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                                .capture_bot_history(&p.bot_id, &p.thread_id, &p.branch_id, &p.head_id, &p.item_id).map_err(domain)?;
+                            let response_id = id.clone(); let response_sender = responses.clone(); let done = finished.clone(); let cancelled = cancellation.clone();
+                            content_tasks.send(Box::new(move || {
+                                let result = read.load(&|| cancelled.load(Ordering::Acquire)).map_err(domain)
+                                    .and_then(|item| serde_json::to_value(item).map_err(Into::into));
+                                let response = match result { Ok(value) => response_ok(&response_id, value), Err(error) => response_error(&response_id, &error) };
+                                done(&response_id); let _ = response_sender.send(response);
+                            })).map_err(|_| KernelError::Storage("content reader unavailable".into()))?;
+                            deferred = true; return Ok(Value::Null);
+                        }
                         if method == "runtime.history.page" {
                             let p: HistoryPageParams = serde_json::from_value(params)?;
                             let limit = u32::try_from(p.limit).map_err(|_| {
@@ -2386,6 +2411,15 @@ pub(crate) fn live_mcp_binding(
     })
 }
 fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value, KernelError> {
+    if method == "runtime.bot.scope.remove" {
+        let p: varin_runtime::catalog::bot::BotSuspension = serde_json::from_value(params)?;
+        catalog.remove_bot_scope(&p).map_err(domain)?;
+        return Ok(json!({"removed":true}));
+    }
+    if method == "runtime.bot.scope.inspect" {
+        let p: BotScopeParams = serde_json::from_value(params)?;
+        return catalog.inspect_bot_scope(&p.bot_id).map_err(domain);
+    }
     if method == "runtime.bot.gate.publish" {
         let p: varin_runtime::catalog::bot::BotGate = serde_json::from_value(params)?;
         catalog.publish_bot_gate(p).map_err(domain)?;

@@ -135,7 +135,7 @@ pub(super) fn execute(
                     "new calendar work requires its actual source selection".into(),
                 ));
             }
-            let launch = input_commands::selected_launch(&p.configuration, p.launch, true)?;
+            let launch = input_commands::selected_launch(&p.configuration, p.launch, true, false)?;
             let basis = p
                 .initial_context
                 .personalization

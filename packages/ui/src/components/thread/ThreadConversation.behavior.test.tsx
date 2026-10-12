@@ -36,7 +36,7 @@ const storedImage: StoredMedia = { media_type: 'image/png', content_ref: { conte
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:ui-fixture', branchId: 'branch:ui-fixture' };
 function initialSnapshot(active = false): ThreadSnapshot {
   const run = { id: 'ui-run', thread_id: identity.threadId, branch_id: identity.branchId, state: 'generating' as const, revision: 1, epoch: 1, configuration: { providerId: 'fixture-provider', model: 'fixture-model' }, cancel_requested: false, waiting_on: null };
-  return { identity, eventCursor: 0, thread: { thread_id: identity.threadId, observer_project_ids: [null], branches: [{ branch_id: identity.branchId, head: null, active_run_id: active ? run.id : null, latest_run: active ? run : null }] }, activeRun: active ? run : null,
+  return { identity, eventCursor: 0, thread: { thread_id: identity.threadId, bot_id: null, observer_project_ids: [null], branches: [{ branch_id: identity.branchId, head: null, active_run_id: active ? run.id : null, latest_run: active ? run : null }] }, activeRun: active ? run : null,
     history: [], historyPage: { head: null, previous: null }, inputs: [], operations: [], followups: [], goals: [], launch: null, modelSelection: {desired:null,active:null}, policySelection: null, context: { checkpoint: null, jobs: [] } };
 }
 function fixture(active = false) {
@@ -2397,4 +2397,43 @@ it('projects a delegated rerank request independently of its cheap query, preser
   expect(container.textContent).toContain('Input tokens: unknown');
   expect(container.textContent).toContain('Output tokens: unknown');
   expect(container.textContent).toContain('does not establish input/output token usage or cost');
+});
+
+
+it('keeps sleeping Bot history readable without composer or execution mutations', async () => {
+  const f = fixture(true);
+  f.view.history = [{ id: 'saved', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'user', content: { text: 'Retained Bot history' }, provider: null }];
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} readOnly />));
+  expect(container.textContent).toContain('Retained Bot history');
+  expect(container.querySelector('form')).toBeNull();
+  expect(container.querySelector('[aria-label="Message thread"]')).toBeNull();
+  expect([...container.querySelectorAll('button')].some(button => button.textContent === 'Stop run')).toBe(false);
+  expect(f.submit).not.toHaveBeenCalled(); expect(f.cancelRun).not.toHaveBeenCalled();
+});
+
+
+it('uses the Host-resolved Bot default for its first native message without choosing a catalog fallback', async () => {
+  const f = fixture(false);
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} preferredModel={{ providerId: 'fixture-provider', modelId: 'fixture-model' }} />));
+  expect(f.submit).not.toHaveBeenCalled();
+  await edit('[aria-label="Message thread"]', 'Start Bot work');
+  await act(async () => { container.querySelector('form')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); });
+  expect(f.submit).toHaveBeenCalledWith(expect.objectContaining({ ...identity, text: 'Start Bot work', model: { providerId: 'fixture-provider', modelId: 'fixture-model', thinkingLevel: 'off' } }));
+});
+
+it('applies a changed Bot model to the next draft after a cancelled Run and preserves later draft choices', async () => {
+  const f = fixture(true);
+  await f.cancelRun();
+  f.api.listModels = async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }, { providerId: 'replacement-provider', modelId: 'replacement-model' }];
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} preferredModel={{ providerId: 'fixture-provider', modelId: 'fixture-model' }} />));
+  const renderChangedProfile = () => root.render(<ThreadConversation api={f.api} identity={identity} preferredModel={{ providerId: 'replacement-provider', modelId: 'replacement-model' }} />);
+  await act(async () => renderChangedProfile());
+  await edit('[aria-label="Message thread"]', 'Use the changed Bot model');
+  await submitForm(container.querySelector('form')!);
+  expect(f.submit).toHaveBeenLastCalledWith(expect.objectContaining({ model: { providerId: 'replacement-provider', modelId: 'replacement-model', thinkingLevel: 'off' } }));
+  await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
+  await act(async () => renderChangedProfile());
+  await edit('[aria-label="Message thread"]', 'Use my later draft selection');
+  await submitForm(container.querySelector('form')!);
+  expect(f.submit).toHaveBeenLastCalledWith(expect.objectContaining({ model: { providerId: 'fixture-provider', modelId: 'fixture-model', thinkingLevel: 'off' } }));
 });

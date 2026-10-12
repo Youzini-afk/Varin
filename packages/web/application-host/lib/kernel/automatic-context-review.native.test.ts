@@ -72,7 +72,7 @@ it.each([
   installOwner();
   let publicationEntered=false;
   if(restart==='completed') {
-    runtime.publishContextJob=async(_runId,signal)=>{
+    runtime.resumeContextJob=async(_runId,signal)=>{
       publicationEntered=true;
       await waitWithSignal(new Promise<never>(()=>undefined),signal);
       throw new Error('the old Host publication must not survive its epoch');
@@ -179,9 +179,11 @@ it.each([
     expect(summaries).toHaveLength(1);
     expect(JSON.stringify(main[2]!.body.input)).toContain('NEW_TAIL');
     answer(summaries[0]!,'COMPACT_SUMMARY: old evidence was read; continue the pending work.');
-    await expect.poll(async()=>(await runtime.context(branchId))?.revision).toBe(before!.revision+1);
+    await expect.poll(async()=>(await runtime.run(jobs[0]!.receipt.run_id)).state).toBe('completed');
+    expect((await runtime.context(branchId))?.revision).toBe(before!.revision);
     answer(main[2]!.response,'Third response');
     await expect.poll(async()=>(await runtime.run(second.run_id)).state).toBe('completed');
+    await runtime.publishContextJob(jobs[0]!.receipt.run_id); // Explicit apply uses the existing owner.
     const history=await runtime.history(branchId);
     const next=await runtime.submit({key:'after-compaction',threadId,branchId,expectedHead:history.at(-1)!.id,input:{text:'Finish using the summary'},configuration});
     await runtime.startRun(next.run_id);

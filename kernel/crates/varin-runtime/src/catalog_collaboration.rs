@@ -656,6 +656,7 @@ impl Catalog {
             })
             .transpose()?;
         Ok(ChildPreparation {
+            bot: self.bot_for_thread(&child.child_thread_id)?.is_some(),
             ingress,
             execution: self.delegated_execution(operation_id)?,
             current: self.capture_active_checkpoint(&child.child_branch_id)?,
@@ -717,6 +718,7 @@ impl Catalog {
     }
 }
 pub struct ChildPreparation {
+    bot: bool,
     execution: delegated::DelegatedExecution,
     ingress: Option<(inputs::QueuedInputMetadata, Value)>,
     current: Option<context::CheckpointRead>,
@@ -756,6 +758,7 @@ impl ChildPreparation {
     }
     pub fn load(self) -> Result<PreparedChild> {
         let Self {
+            bot,
             execution,
             ingress,
             current,
@@ -801,7 +804,7 @@ impl ChildPreparation {
         let scope = serde_json::to_value(&basis)?;
         if basis.session_id != child.child_thread_id
             || basis.project_id != child.project_id
-            || scope.get("mode").and_then(Value::as_str) != Some("agent")
+            || scope.get("mode").and_then(Value::as_str) != Some(if bot { "bot" } else { "agent" })
             || scope.get("threadRole").and_then(Value::as_str) != Some("worker")
             || proposal.branch_id != child.child_branch_id
             || proposal.through_id.is_some()

@@ -1,5 +1,5 @@
 //! Worker-owned memory projection preparation; Catalog publishes only immutable references.
-use super::memory::{allowed, note_id, scope_key, MemoryState};
+use super::memory::{MemoryState, allowed, note_id, scope_key};
 use super::personalization::PersonalizationBasis;
 use super::*;
 
@@ -76,6 +76,17 @@ impl Catalog {
     ) -> Result<MemoryStatePreparation> {
         let run = self.run(run_id)?;
         fence(&run, epoch)?;
+        let bot = self.bot_for_thread(&run.thread_id)?;
+        if bot.as_deref()
+            != state
+                .bot_knowledge
+                .as_ref()
+                .map(|state| state.bot_id.as_str())
+        {
+            return Err(RuntimeError::Invalid(
+                "memory projection differs from the actual Bot binding".into(),
+            ));
+        }
         let context = self
             .capture_active_checkpoint(&run.branch_id)?
             .ok_or_else(|| RuntimeError::Invalid("memory requires an admitted context".into()))?;
@@ -189,6 +200,47 @@ fn synchronize(
     previous: Option<MemoryState>,
     mut state: MemoryState,
 ) -> Result<MemoryState> {
+    if basis.mode == "bot" {
+        let knowledge = state
+            .bot_knowledge
+            .as_ref()
+            .ok_or_else(|| RuntimeError::Invalid("Bot Knowledge projection is missing".into()))?;
+        if knowledge.thread_id != basis.session_id
+            || !state.memories.is_empty()
+            || !state.known.is_empty()
+            || !state.note_revisions.is_empty()
+            || knowledge
+                .items
+                .iter()
+                .chain(&knowledge.invalidations)
+                .chain(&knowledge.corrections)
+                .any(|row| {
+                    row["id"].as_u64().is_none_or(|id| id == 0)
+                        || !matches!(row["scope"].as_str(), Some("bot" | "user" | "session"))
+                })
+        {
+            return Err(RuntimeError::Invalid(
+                "invalid Bot Knowledge projection".into(),
+            ));
+        }
+        if previous.as_ref().is_some_and(|old| {
+            old.revision > state.revision
+                || old
+                    .bot_knowledge
+                    .as_ref()
+                    .is_some_and(|prior| prior.bot_id != knowledge.bot_id)
+        }) {
+            return Err(RuntimeError::Conflict(
+                "Bot Knowledge owner or revision changed".into(),
+            ));
+        }
+        return Ok(state);
+    }
+    if state.bot_knowledge.is_some() {
+        return Err(RuntimeError::Invalid(
+            "Bot Knowledge cannot enter ordinary memory".into(),
+        ));
+    }
     state.known.clear();
     if let Some(previous) = previous {
         if state.revision < previous.revision {
@@ -248,6 +300,7 @@ fn observe(
         memories: basis.memory_snapshot.memories.clone(),
         note_revisions: std::collections::BTreeMap::new(),
         known: std::collections::BTreeMap::new(),
+        bot_knowledge: None,
     });
     for change in changes {
         let id = change["id"]

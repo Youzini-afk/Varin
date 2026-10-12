@@ -6,7 +6,7 @@ import type { BotSummary } from '@/lib/bots';
 import { BotSettings } from './BotSettings';
 
 const api = vi.hoisted(() => ({ list: vi.fn(), work: vi.fn(), update: vi.fn(), remove: vi.fn(), archive: vi.fn(), change: vi.fn() }));
-vi.mock('@/lib/bots', () => ({ listBots: api.list, listBotWork: api.work, updateBot: api.update,
+vi.mock('@/lib/bots', async original => ({ ...await original<typeof import('@/lib/bots')>(), listBots: api.list, listBotWork: api.work, updateBot: api.update,
   deleteBot: api.remove, archiveBot: api.archive, changeBotState: api.change, createBot: vi.fn(), openBotEntryFor: vi.fn() }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
@@ -28,7 +28,7 @@ vi.mock('./BotNameDialog', () => ({ BotNameDialog: ({ open, onNameChange, onSubm
 </form> : null }));
 
 const bot = (id: string, archived = false): BotSummary => ({ id, name: id, archived, homeDir: `/bots/${id}`,
-  coordinatorHostId: 'host', entrySessionId: null, instructions: null, model: null, createdAt: '', updatedAt: '' });
+  coordinatorHostId: 'host', entry: { runtime: 'pi', sessionId: null }, instructions: null, model: null, createdAt: '', updatedAt: '' });
 let container: HTMLDivElement;
 let root: Root;
 beforeEach(() => {

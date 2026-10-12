@@ -43,7 +43,7 @@ import {
   type OrganizerPreparedProposal,
 } from "../knowledge/store.js";
 import type { MemoryOwner, MemoryService } from "./memory-service.js";
-import { entrySourceText, mergeSourceSpans, sourceRevision, uncoveredSourceSpans } from "./memory-sources.js";
+import { entrySourceText, mergeSourceSpans, sourceIdentity, sourceRevision, uncoveredSourceSpans } from "./memory-sources.js";
 
 // ── Boundaries ─────────────────────────────────────────────────────
 
@@ -91,7 +91,10 @@ export interface MemoryOrganizerDeps {
   canExecuteScope?(scopeId: string): Promise<boolean>;
   /** Returns the owning Bot scope, or null for ordinary Agent sessions. */
   scopeForSession(sessionId: string): Promise<string | null>;
-  /** All native entries, including inactive branches; never wakes a live worker. */
+  nativeMaterials?(scopeId: string): Promise<import('./bot-history.js').HistoryMemoryMaterial[]>;
+  readNativeSource?(scopeId: string, span: Extract<MemorySourceSpan, { kind: 'history-item' }>): Promise<string>;
+  scopeForThread?(threadId: string): Promise<string | null>;
+  /** Actual Pi entries, including inactive branches; never wakes a live worker. */
   readEntries(sessionId: string): Promise<PiSessionEntry[]>;
   /**
    * Scope-level inference binding: when the `models.memoryOrganizer` slot is
@@ -163,7 +166,7 @@ const progressKeyForRun = (runId: string, part: number): string =>
  */
 const unitSourceKey = (scopeId: string, unit: OrganizerUnit | Omit<OrganizerUnit, "sourceKey" | "rangeKey">): string =>
   createHash("sha256").update(JSON.stringify([
-    scopeId, unit.key, unit.source.spans?.map((span) => [span.kind, span.id, span.sessionId, span.scopeId, span.threadId, span.revision, span.start, span.end]), unit.texts,
+    scopeId, unit.key, unit.source.spans?.map((span) => [...sourceIdentity(span), span.revision, span.start, span.end]), unit.texts,
     ...(unit.runStartOffset === undefined ? [] : [unit.runStartOffset, unit.runEndOffset]),
   ])).digest("hex");
 const unitRangeKey = (scopeId: string, key: string, start: unknown, end: unknown): string =>
@@ -171,7 +174,7 @@ const unitRangeKey = (scopeId: string, key: string, start: unknown, end: unknown
 const preparedProposalKey = (source: KnowledgeSource, proposal: OrganizerPreparedProposal): string | undefined =>
   source.key ? createHash("sha256").update(JSON.stringify([
     source.key, proposal.action, proposal.scope, proposal.content, proposal.trigger, proposal.target,
-    proposal.spans?.map((span) => [span.kind, span.id, span.sessionId, span.scopeId, span.threadId, span.revision, span.start, span.end]),
+    proposal.spans?.map((span) => [...sourceIdentity(span), span.revision, span.start, span.end]),
   ])).digest("hex") : undefined;
 
 /** Terminal coverage for this exact source content — the transaction is done. */
@@ -484,7 +487,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     return {
       ...unit,
       sourceKey,
-      rangeKey: unitRangeKey(scopeId, key, spans.map((span) => [span.kind, span.id, span.sessionId, span.scopeId, span.threadId, span.start, span.end]), null),
+      rangeKey: unitRangeKey(scopeId, key, spans.map((span) => [...sourceIdentity(span), span.start, span.end]), null),
     };
   };
 
@@ -566,6 +569,31 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     const rows = await store.listOrganizerProgress();
     const progress = new Map(rows.map((row) => [row.key, row]));
     const units: OrganizerUnit[] = [];
+
+    const native = await deps.nativeMaterials?.(scopeId) ?? [];
+    if (native.length) {
+      const memories = [...await store.listKnowledge({}), ...await deps.memory.list({ scope: 'user', ownerId: null })];
+      const covered = [...rows.flatMap(row => row.coveredSources ?? []), ...(reservedSources.get(scopeId) ?? []), ...memories.flatMap(item => item.source?.spans ?? [])];
+      for (const material of native) {
+        for (const uncovered of uncoveredSourceSpans(material.span, covered)) {
+          let start = uncovered.start;
+          while (start < uncovered.end && units.length < MAX_UNITS_PER_RUN) {
+            const length = takePrefix(material.text, start, Math.min(unitChars - material.role.length - 3, uncovered.end - start));
+            if (!length) throw new Error('Organizer model cannot fit the original history passage');
+            const span = { ...uncovered, start, end: start + length };
+            const key = `history:${JSON.stringify(sourceIdentity(span))}:${start}`;
+            const unit = { key, label: `Thread ${material.span.threadId}`, texts: [`[${material.role}] ${material.text.slice(start, span.end)}`],
+              source: { kind: 'memory-organizer', threadId: material.span.threadId, spans: [span] },
+              ...(span.end < uncovered.end ? { hasMoreSource: true } : {}) };
+            const sourceKey = unitSourceKey(scopeId, unit); const row = progress.get(key);
+            if (!isCovered(row, sourceKey) && (row?.status !== 'failed' || retryable(row, timestamp, force)))
+              units.push({ ...unit, sourceKey, rangeKey: unitRangeKey(scopeId, key, start, span.end) });
+            start = span.end;
+          }
+        }
+        if (units.length >= MAX_UNITS_PER_RUN) break;
+      }
+    }
 
     for (const source of await deps.listRunSources(scopeId)) {
       if (units.length >= MAX_UNITS_PER_RUN) break;
@@ -766,7 +794,8 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     // Re-read only to verify the frozen ranges; never re-collect/re-number today's materials.
     for (const span of unit.source.spans ?? []) {
       let text: string | undefined;
-      if (span.kind === "run-report") text = (await deps.listRunSources(scopeId)).find(run => run.runId === span.id)?.reportText;
+      if (span.kind === 'history-item') text = await deps.readNativeSource?.(scopeId, span);
+      else if (span.kind === "run-report") text = (await deps.listRunSources(scopeId)).find(run => run.runId === span.id)?.reportText;
       else if (span.kind === "event") text = (await store.listEvents({ sessionId: span.sessionId ?? unit.source.sessionId! })).find(event => String(event.id) === span.id)?.text;
       else if (span.kind === "pi-entry") {
         const entry = (await deps.readEntries(span.sessionId ?? unit.source.sessionId!)).find(entry => entry.id === span.id);
@@ -1158,8 +1187,9 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         // not get an empty .tdb created by a background sweep.
         const runs = await deps.listRunSources(scopeId);
         const sessions = await deps.listScopeSessions(scopeId);
+        const native = await deps.nativeMaterials?.(scopeId) ?? [];
         const storeExists = await deps.hasStoreForScope(scopeId);
-        if (runs.length === 0 && sessions.length === 0 && !storeExists) continue;
+        if (runs.length === 0 && sessions.length === 0 && native.length === 0 && !storeExists) continue;
         const store = await deps.storeForScopeId(scopeId);
         if (!store) continue;
         const timestamp = now();
@@ -1168,6 +1198,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         const hasSources = hasWork
           || runs.length > 0
           || sessions.length > 0
+          || native.length > 0
           || (await store.listEventSessionIds()).length > 0;
         if (hasWork || hasSources) schedule(scopeId);
       } catch (error) {
@@ -1275,13 +1306,26 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         });
       }
       const assertSelection = async () => {
-        if (await deps.scopeForSession(selection.sessionId) !== scopeId)
-          throw new MemoryInferenceError('memory-work-owner-changed', 'The selected conversation owner changed.', 'none');
-        const entries = await deps.readEntries(selection.sessionId);
-        for (const span of selection.sources) {
-          const entry = entries.find(entry => entry.id === span.id);
-          if (!entry || sourceRevision(entrySourceText(entry)) !== span.revision)
-            throw new MemoryInferenceError('memory-work-source-changed', 'The selected source changed. Select it again.', 'none');
+        const conversation = selection.conversation;
+        if (conversation.runtime === 'agent') {
+          if (!deps.readNativeSource || await deps.scopeForThread?.(conversation.threadId) !== scopeId)
+            throw new MemoryInferenceError('memory-work-owner-changed', 'The selected Thread owner changed.', 'none');
+          for (const span of selection.sources) {
+            if (span.kind !== 'history-item' || span.threadId !== conversation.threadId || span.branchId !== conversation.branchId || span.headId !== conversation.headId)
+              throw new MemoryInferenceError('memory-work-source-changed', 'The selected history witness changed.', 'none');
+            const text = await deps.readNativeSource(scopeId, span);
+            if (sourceRevision(text) !== span.revision || span.end > text.length)
+              throw new MemoryInferenceError('memory-work-source-changed', 'The selected source changed. Select it again.', 'none');
+          }
+        } else {
+          if (await deps.scopeForSession(conversation.sessionId) !== scopeId)
+            throw new MemoryInferenceError('memory-work-owner-changed', 'The selected conversation owner changed.', 'none');
+          const entries = await deps.readEntries(conversation.sessionId);
+          for (const span of selection.sources) {
+            const entry = entries.find(entry => entry.id === span.id);
+            if (span.kind !== 'pi-entry' || span.sessionId !== conversation.sessionId || !entry || sourceRevision(entrySourceText(entry)) !== span.revision)
+              throw new MemoryInferenceError('memory-work-source-changed', 'The selected source changed. Select it again.', 'none');
+          }
         }
       };
       const result = await inference.generate(work, work.recipe.system, work.recipe.prompt, signal, assertSelection);

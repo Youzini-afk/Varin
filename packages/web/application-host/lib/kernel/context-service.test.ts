@@ -27,7 +27,7 @@ it('keeps shared compaction preparation alive for a cancelled query but cancels 
   const service = new ContextService(runtime as unknown as AgentRuntimeClient, prepare,
     async () => { throw new Error('Unrequested policy'); }, async () => { throw new Error('Unrequested Run'); }, null);
   const query = new AbortController();
-  const pending = service.query({ action: 'compact', requestId: 'request', runId: 'run', expectedRevision: 1, throughId: 'input', nativeBlock: false, summaryRecipe: { strategy: { kind: 'builtin', name: 'capacity', version: '1' }, mode: 'background', configurationIdentity: 'fixture', additionalInstructions: null } }, query.signal);
+  const pending = service.query({ action: 'compact', requestId: 'request', runId: 'run', expectedRevision: 1, throughId: 'input', block: false, summaryRecipe: { strategy: { kind: 'builtin', name: 'capacity', version: '1' }, mode: 'background', configurationIdentity: 'fixture', additionalInstructions: null } }, query.signal);
   const rejection = expect(pending).rejects.toThrow();
   try {
     await entered;
@@ -43,4 +43,63 @@ it('keeps shared compaction preparation alive for a cancelled query but cancels 
     await rejection;
   }
   expect(createContextJob).not.toHaveBeenCalled();
+});
+
+it.each(['main', 'child'])('stages a %s candidate, measures only new work, and reuses its original job across Runs', async role => {
+  let now = 0;
+  let summaryState = 'running';
+  const listeners = new Set<(event: { stream: string }) => void>();
+  const parent = { id: 'parent', thread_id: `thread:${role}`, branch_id: `branch:${role}`, state: 'running', cancel_requested: false, configuration: { model: 'same-model' } };
+  const successor = { ...parent, id: 'next' };
+  const checkpoint = { id: 'original', revision: 1, proposal: { memory_checkpoint: 'original-memory', effective_system_prompt: '', instruction_sources: [] } };
+  const recipe = { strategy: { kind: 'builtin', name: 'capacity', version: '1' }, mode: 'background', configurationIdentity: 'settings', additionalInstructions: null } as const;
+  const jobs: import('@varin/application-client').ContextJob[] = [];
+  const publishContextJob = vi.fn(async () => checkpoint);
+  const runtime = {
+    run: async (id: string) => id === 'parent' ? parent : id === 'next' ? successor : { ...parent, id: 'summary', state: summaryState },
+    launch: async () => null, context: async () => checkpoint, contextJobs: async () => jobs,
+    createContextJob: vi.fn(async (input: { key: string }) => {
+      const job = { request: { key: input.key, owner_run_id: 'parent', branch_id: parent.branch_id, through_id: 'prefix', expected_revision: 1, summary_recipe: recipe }, receipt: { run_id: 'summary' } };
+      jobs.push(job as never); return job;
+    }),
+    publishContextJob,
+    onEvent: (listener: (event: { stream: string }) => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    resumeContextJob: vi.fn(async () => null),
+  };
+  const prepare = Object.assign(async () => { throw new Error('No initial context'); }, { main: async () => { throw new Error('No main context'); } });
+  const service = new ContextService(runtime as unknown as AgentRuntimeClient, prepare as ContextPreparer,
+    async () => ({ policy: { configurationIdentity: 'settings', enabled: true, reserveTokens: 100, keepRecentTokens: 20000,
+      explicitKeepRecentTokens: null, backgroundPreparation: true, preparationWaterline: 0.75 }, scope: { sessionId: parent.thread_id } }),
+    async () => { throw new Error('A sendable parent must not restart'); }, null, () => now);
+  const signal = new AbortController().signal;
+  const observe = (requestId: string, tokens: number, runId = 'parent') => service.query({ action: 'prepare', runId, requestId,
+    expectedRevision: 1, observation: { identity: 'binding', estimatedTokens: tokens } }, signal);
+  try {
+    expect(await observe('a', 400)).toMatchObject({ timing: { durationMs: null, tokensPerMs: null } });
+    now = 1000;
+    expect(await observe('b', 600)).toMatchObject({ timing: { durationMs: null, tokensPerMs: 0.2, pendingTokens: 200 } });
+    const query = { action: 'compact', requestId: 'b', runId: 'parent', throughId: 'prefix', expectedRevision: 1, block: false, summaryRecipe: recipe } as const;
+    expect(await service.query(query, signal)).toMatchObject({ published: false, accepted: { block: false } });
+    now = 3500; summaryState = 'completed';
+    for (const notify of listeners) notify({ stream: 'durable' });
+    await vi.waitFor(() => expect(listeners.size).toBe(0));
+    expect(publishContextJob).not.toHaveBeenCalled();
+    expect(checkpoint.proposal.memory_checkpoint).toBe('original-memory');
+    parent.state = 'completed'; now = 4000;
+    expect(await observe('c', 800, 'next')).toMatchObject({ timing: { durationMs: 2500 } });
+    const accepted = await service.query({ ...query, runId: 'next', requestId: 'c', block: true }, signal);
+    expect(accepted).toMatchObject({ published: false, jobRunId: 'summary', accepted: { throughId: 'prefix', block: true } });
+    expect(runtime.createContextJob).toHaveBeenCalledTimes(1);
+    expect(publishContextJob).not.toHaveBeenCalled();
+    // A fresh Host can recover the result, but cannot infer the old generation's elapsed time.
+    service.close();
+    const reopened = new ContextService(runtime as unknown as AgentRuntimeClient, prepare as ContextPreparer,
+      async () => ({ policy: { configurationIdentity: 'settings', enabled: true, reserveTokens: 100, keepRecentTokens: 20000,
+        explicitKeepRecentTokens: null, backgroundPreparation: true, preparationWaterline: 0.75 }, scope: { sessionId: parent.thread_id } }), async () => {}, null, () => now);
+    try {
+      const cold = await reopened.query({ action: 'prepare', runId: 'next', requestId: 'd', expectedRevision: 1,
+        observation: { identity: 'binding', estimatedTokens: 900 } }, signal);
+      expect(cold).toMatchObject({ timing: { durationMs: null, tokensPerMs: null } });
+    } finally { reopened.close(); }
+  } finally { service.close(); }
 });
