@@ -8,6 +8,8 @@ Last updated: 2026-10-12
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [当前扩展声明与严格 Catalog](runtime-current-extension-contracts-2026-10-12.md) | 删除 SDK opt-in、source 吞错与历史 raw repair；真实 broker/source/当前更新与原 native 消费有限验收 |
+| [可替换 Context Budget Decision](runtime-context-budget-2026-10-12.md) | 原设置/选择、冻结摘要配方、真实主子作用域、原收费回执重开及独立后台开关修复 |
 | [有序纯 Context Transform](runtime-context-transforms-2026-10-12.md) | 原选择/配置作用域、真实 broker 与模型序列化、child ContextRead、取消和 GC 重开；有限跨层验收 |
 | [显式 Host 与 Surface 更新组](runtime-readiness-groups-2026-10-12.md) | 指定成员真实准备、原 Catalog 提交/取消、失败保旧与已选恢复；有限跨层证据 |
 | [Agent 产包与原扩展生命周期](runtime-authored-extensions-2026-10-12.md) | 原 Source/授权/Artifact 到 Model、Policy 与真实 Surface watch/mount；原资源归属/取消修复及有限验收 |

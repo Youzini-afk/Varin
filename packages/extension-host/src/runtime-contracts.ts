@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { HostServiceOwnerIdentity } from './service-registry.js';
 import {
-  parseVarinContractSource, parseVarinRuntimeContractRequest,
+  parseVarinRuntimeContractRequest,
   resolveVarinExtensionServiceRouting, resolveVarinWorkbenchProfile,
   resolveVarinWorkbenchShellSurfaceSeams, parseVarinWorkbenchShellContributionData,
   VARIN_WORKBENCH_SLOT_CONTRACTS,
@@ -36,15 +36,12 @@ function methodNames(descriptor: VarinExtensionServiceProvision): string[] | nul
 function toolMethod(descriptor: VarinExtensionServiceProvision): VarinServiceMethodContract | undefined {
   const tool = descriptor.tool;
   if (!tool) return undefined;
-  let source;
-  // Older author declarations allowed arbitrary source text. Discovery never returns Host paths.
-  if (tool.source) { try { source = parseVarinContractSource(tool.source); } catch { /* no safe package location */ } }
   return {
     description: tool.description,
     inputSchema: { type: 'array', minItems: 1, maxItems: 1, items: tool.inputSchema },
     outputSchema: tool.outputSchema,
     ...(tool.examples ? { examples: tool.examples.map(input => [input]) } : {}),
-    ...(source ? { source } : {}),
+    ...(tool.source ? { source: tool.source } : {}),
   };
 }
 function serviceSummary(state: VarinExtensionHostStateSnapshot, serviceId: string, version: number,

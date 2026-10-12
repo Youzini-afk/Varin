@@ -30,12 +30,26 @@ test('published manifest schema and runtime reject unsafe source locators and ma
   // Same schema engine as the existing manifest consistency suite.
   const Constructor = Ajv2020 as unknown as new (options: object) => { compile(schema: unknown): (input: unknown) => boolean };
   const validate = new Constructor({ strict: false, formats: { 'semver-range': () => true } }).compile(schema);
+  const tool = { name: 'source', description: 'Locate its implementation', inputSchema: true, outputSchema: true,
+    operation: 'read', completion: 'result' };
   for (const source of [{ path: '/host/private.ts' }, { path: '../escape' }, { path: 'file:///secret' },
-    { path: 'C:\\secret' }, { path: './relative' }, { path: 'source//file' }, { path: 'source/file', line: 0 }]) {
-    const value = manifest({ id: 'example.service', version: 1,
-      contract: { methods: { read: { inputSchema: true, outputSchema: true, source } } } });
-    assert.equal(validate(value), false, JSON.stringify(source));
-    assert.throws(() => parseVarinExtensionManifest(value));
+    { path: 'C:\\secret' }, { path: './relative' }, { path: 'source//file' }, { path: 'source/file', line: 0 },
+    { path: ' ' }, { path: 'src/\n/../secret' }, { path: 'src/\u0000file' }, { path: 'src/' },
+    { path: 'src/file', line: Number.MAX_SAFE_INTEGER + 1 }, { path: 'src/file', host: '/private' }]) {
+    for (const declaration of [
+      { contract: { methods: { read: { inputSchema: true, outputSchema: true, source } } } },
+      { contract: { methods: {}, events: { changed: { schema: true, source } } } },
+      { tool: { ...tool, source } },
+    ]) {
+      const value = manifest({ id: 'example.service', version: 1, ...declaration });
+      assert.equal(validate(value), false, JSON.stringify(source));
+      assert.throws(() => parseVarinExtensionManifest(value));
+    }
+  }
+  for (const source of [undefined, { path: 'src/entry.ts', line: Number.MAX_SAFE_INTEGER }, { path: 'src/中文 file.ts' }]) {
+    const value = manifest({ id: 'example.tool', version: 1, tool: { ...tool, ...(source ? { source } : {}) } });
+    assert.equal(validate(value), true);
+    assert.deepEqual(parseVarinExtensionManifest(value).provides!.services![0]!.tool!.source, source);
   }
   const valid = manifest({ id: 'example.service', version: 1, contract: {
     methods: { read: { inputSchema: true, outputSchema: false, source: { path: 'src/entry.ts', line: 5 } } },

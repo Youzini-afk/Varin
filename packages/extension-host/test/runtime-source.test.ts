@@ -18,7 +18,8 @@ async function fixture(extra: Record<string, string | Buffer> = {}) {
     entrypoints: { host: { mode: 'brokered', file: 'host.cjs', activation: ['service-request'] } },
     provides: { services: [{ id: 'example.source', version: 1, contract: { methods: {
       read: { inputSchema: true, outputSchema: true, source: { path: 'source.unknown', line: 1 } },
-    } } }] } }));
+    } } }, { id: 'example.source-tool', version: 1, tool: { name: 'source_tool', description: 'Read source metadata',
+      inputSchema: true, outputSchema: true, completion: 'result', operation: 'read', source: { path: 'source.unknown', line: 1 } } }] } }));
   for (const [path, content] of Object.entries({ 'host.cjs': 'throw Error("Never activate this package");', 'source.unknown': text, 'empty': '', 'binary': Buffer.from([0xc0, 0xaf]), ...extra })) {
     await writeFile(join(directory, path), content);
   }
@@ -48,6 +49,11 @@ test('cold metadata exposes original slot identities without package I/O; source
       selected: { extensionId: id, slot: 'selected', artifactIntegrity: h.request.artifactIntegrity }, candidate: null,
     });
     assert.deepEqual(description.member?.contract.source, { path: 'source.unknown', line: 1 });
+    const toolDescription = await h.runtime.queryContracts({ action: 'describe', kind: 'service', serviceId: 'example.source-tool', version: 1,
+      member: { kind: 'method', name: 'execute' } });
+    assert.ok(toolDescription.kind === 'service' && toolDescription.action === 'describe');
+    assert.deepEqual(toolDescription.member?.contract.source, description.member?.contract.source);
+
     h.runtime.packages.artifacts.readSource = original;
     await writeFile(join(h.directory, 'source.unknown'), 'Live checkout changed and must not be read');
     let offset = 0, content = '';

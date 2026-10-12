@@ -1,7 +1,7 @@
 # Project context contribution
 
 This is an ordinary brokered Host extension, using the executable
-`provideContextFragments(context, { sections }, { declareContract: true })` author contract. The declaration is immutable;
+`provideContextFragments(context, { sections })` author contract. The declaration is immutable;
 `describe` accepts no arguments and returns no executable callbacks. Do not perform model calls,
 retrieval, network access or external effects in this contract. Such work needs an explicit operation.
 

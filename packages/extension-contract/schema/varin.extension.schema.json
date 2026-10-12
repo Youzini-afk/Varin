@@ -690,22 +690,7 @@
           "type": "array"
         },
         "source": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "path"
-          ],
-          "properties": {
-            "path": {
-              "type": "string",
-              "pattern": "\\S"
-            },
-            "line": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 9007199254740991
-            }
-          }
+          "$ref": "#/$defs/contractSource"
         },
         "lifetime": {
           "enum": [
@@ -1031,11 +1016,12 @@
         "path": {
           "type": "string",
           "minLength": 1,
-          "pattern": "^(?!/)(?![a-zA-Z][a-zA-Z0-9+.-]*:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000])(?!.*//)(?!.*\\/$).+$"
+          "pattern": "^(?!\\s*$)(?!/)(?![a-zA-Z][a-zA-Z0-9+.-]*:)(?![\\s\\S]*[\\\\\\x00])(?![\\s\\S]*(?:^|/)\\.{1,2}(?:/|$))(?![\\s\\S]*//)(?![\\s\\S]*/$)[\\s\\S]+$"
         },
         "line": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "maximum": 9007199254740991
         }
       }
     },

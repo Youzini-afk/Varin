@@ -165,13 +165,13 @@ Surface activation. The [authored panel example](../../examples/extensions/agent
 uses the same package, build, tool, view and disposal contracts as other extensions.
 
 
-`provideContextFragments(context, { sections }, { declareContract: true })` supplies a frozen
+`provideContextFragments(context, { sections })` supplies a frozen
 `varin.context.fragments@1` declaration. Its manifest uses `VARIN_CONTEXT_FRAGMENTS_SERVICE`, including
 `contract.composition: "ordered"`, to allow explicit ordered routing. The body/method stays v1.
 Each provider owns its section names; identical names in different providers remain distinct.
 Instruction/data roles are preserved and the helper accepts no callback, model, network or mutable
-history input. An older undeclared provider can still be selected by the original single-provider
-rule, but joining a collection requires explicit metadata in its own authored manifest.
+history input. The helper always registers the complete shared descriptor; its manifest and
+registration must match. Other heterogeneous service contracts may still omit optional metadata.
 
 
 `provideContextBudget(context, { identity, configuration, decide })` registers the metadata-only

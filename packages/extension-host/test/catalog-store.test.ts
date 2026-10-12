@@ -159,6 +159,17 @@ test("reconciles Varin-owned built-ins while preserving their desired state", as
   assert.equal(reconciled.revision, disabled.revision);
   assert.equal(reconciled.extensions.find((entry) => entry.manifest.id === extensionId)?.desired.enabled, false);
 
+  const updatedDefinitions = VARIN_BUILTIN_EXTENSION_DEFINITIONS.map((definition) => definition.manifest.id === extensionId
+    ? { ...definition, manifest: { ...definition.manifest, version: "9.9.9" } } : definition);
+  const updated = await catalog.reconcileBuiltins(updatedDefinitions, VARIN_BUILTIN_EXTENSION_PREFIX);
+  const updatedEntry = updated.extensions.find((entry) => entry.manifest.id === extensionId)!;
+  assert.equal(updatedEntry.selectedVersion, "9.9.9");
+  assert.deepEqual(updatedEntry.manifest, updatedDefinitions[0]!.manifest);
+  assert.equal(updatedEntry.desired.enabled, false);
+  assert.equal(updatedEntry.desired.revision, disabled.extensions.find((entry) => entry.manifest.id === extensionId)!.desired.revision);
+  const stable = await catalog.reconcileBuiltins(updatedDefinitions, VARIN_BUILTIN_EXTENSION_PREFIX);
+  assert.equal(stable.revision, updated.revision);
+
   const trimmed = await catalog.reconcileBuiltins(
     VARIN_BUILTIN_EXTENSION_DEFINITIONS.slice(1),
     VARIN_BUILTIN_EXTENSION_PREFIX,
@@ -166,81 +177,36 @@ test("reconciles Varin-owned built-ins while preserving their desired state", as
   assert.equal(trimmed.extensions.some((entry) => entry.manifest.id === extensionId), false);
 });
 
-test("repairs only known legacy built-ins before strict catalog reconciliation", async () => {
+for (const kind of ["builtin", "external"] as const) test(`built-in reconciliation rejects an invalid ${kind} record without repairing storage`, async () => {
   const dataDir = await temporaryDirectory();
   const catalog = new ApplicationExtensionCatalog({ dataDir });
-  const seeded = await catalog.reconcileBuiltins(
-    VARIN_BUILTIN_EXTENSION_DEFINITIONS,
-    VARIN_BUILTIN_EXTENSION_PREFIX,
-  );
-  const shellDefinition = VARIN_BUILTIN_EXTENSION_DEFINITIONS.find(({ manifest }) => (
-    manifest.contributions?.some((contribution) => contribution.kind === "shell")
-  ));
-  assert.ok(shellDefinition);
-  const disabled = await catalog.setEnabled(shellDefinition.manifest.id, false, seeded.revision);
-  const stored = JSON.parse(await readFile(catalog.store.catalogPath, "utf8")) as {
-    extensions: Record<string, Record<string, unknown>>;
-    revision: number;
-  };
-  const legacyRecord = stored.extensions[shellDefinition.manifest.id];
-  assert.ok(legacyRecord);
-  const legacyManifest = legacyRecord.manifest as {
-    contributions: Array<{ data?: unknown; kind: string }>;
-  };
-  const shellContribution = legacyManifest.contributions.find(({ kind }) => kind === "shell");
-  assert.ok(shellContribution);
-  shellContribution.data = {};
-  legacyRecord.resolvedVersion = "0.0.0";
-  legacyRecord.selectedVersion = "0.0.0";
-  legacyRecord.candidate = {};
-  await writeFile(catalog.store.catalogPath, JSON.stringify(stored, null, 2), "utf8");
-
-  const restarted = new ApplicationExtensionCatalog({ dataDir });
-  const repaired = await restarted.reconcileBuiltins(
-    VARIN_BUILTIN_EXTENSION_DEFINITIONS,
-    VARIN_BUILTIN_EXTENSION_PREFIX,
-  );
-  const repairedRecord = repaired.extensions.find(({ manifest }) => manifest.id === shellDefinition.manifest.id);
-  assert.ok(repairedRecord);
-  assert.equal(repaired.revision, disabled.revision + 1);
-  assert.equal(repairedRecord.desired.enabled, false);
-  assert.deepEqual(repairedRecord.manifest, shellDefinition.manifest);
-  assert.equal(repairedRecord.resolvedVersion, shellDefinition.manifest.version);
-  assert.equal(repairedRecord.selectedVersion, shellDefinition.manifest.version);
-  assert.equal(repairedRecord.candidate, undefined);
-  const stable = await restarted.reconcileBuiltins(
-    VARIN_BUILTIN_EXTENSION_DEFINITIONS,
-    VARIN_BUILTIN_EXTENSION_PREFIX,
-  );
-  assert.equal(stable.revision, repaired.revision);
-});
-
-test("does not use built-in reconciliation to repair an invalid external extension", async () => {
-  const dataDir = await temporaryDirectory();
-  const catalog = new ApplicationExtensionCatalog({ dataDir });
-  const seeded = await catalog.reconcileBuiltins(
-    VARIN_BUILTIN_EXTENSION_DEFINITIONS,
-    VARIN_BUILTIN_EXTENSION_PREFIX,
-  );
+  const seeded = await catalog.reconcileBuiltins(VARIN_BUILTIN_EXTENSION_DEFINITIONS, VARIN_BUILTIN_EXTENSION_PREFIX);
   await catalog.upsert(installation(), seeded.revision);
+  const valid = await catalog.snapshot();
   const stored = JSON.parse(await readFile(catalog.store.catalogPath, "utf8")) as {
     extensions: Record<string, Record<string, unknown>>;
   };
-  const external = stored.extensions["dev.example.extension"];
-  assert.ok(external);
-  external.resolvedVersion = "9.9.9";
+  const id = kind === "builtin" ? VARIN_BUILTIN_EXTENSION_DEFINITIONS[0]!.manifest.id : "dev.example.extension";
+  stored.extensions[id]!.candidate = {};
   const invalidCatalog = `${JSON.stringify(stored, null, 2)}\n`;
   await writeFile(catalog.store.catalogPath, invalidCatalog, "utf8");
 
-  const restarted = new ApplicationExtensionCatalog({ dataDir });
-  await assert.rejects(
-    () => restarted.reconcileBuiltins(
-      VARIN_BUILTIN_EXTENSION_DEFINITIONS,
-      VARIN_BUILTIN_EXTENSION_PREFIX,
-    ),
-    ExtensionCatalogStorageError,
-  );
-  assert.equal(await readFile(catalog.store.catalogPath, "utf8"), invalidCatalog);
+  for (const reader of [catalog, new ApplicationExtensionCatalog({ dataDir })]) {
+    await assert.rejects(
+      () => reader.reconcileBuiltins(VARIN_BUILTIN_EXTENSION_DEFINITIONS, VARIN_BUILTIN_EXTENSION_PREFIX),
+      (error: unknown) => error instanceof ExtensionCatalogStorageError && error.code === "catalog_invalid",
+    );
+    if (reader === catalog) {
+      const state = await reader.snapshot();
+      assert.equal(state.authoritative, false);
+      assert.equal(state.storageState, "stale");
+      assert.deepEqual(state.extensions, valid.extensions, "retain the last valid non-authoritative view");
+    } else {
+      await assert.rejects(() => reader.snapshot(), (error: unknown) =>
+        error instanceof ExtensionCatalogStorageError && error.code === "catalog_invalid");
+    }
+    assert.equal(await readFile(catalog.store.catalogPath, "utf8"), invalidCatalog);
+  }
 });
 
 test("candidate capability deltas require explicit decisions and carry unchanged decisions forward", async () => {

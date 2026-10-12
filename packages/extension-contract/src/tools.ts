@@ -1,4 +1,5 @@
 import type { JsonValue, VarinExtensionToolDeclaration } from "./types.js";
+import { parseVarinContractSource } from "./runtime-source.js";
 
 export const VARIN_RUNTIME_TOOLS_CAPABILITY = 'runtime.tools';
 
@@ -40,14 +41,6 @@ export function parseVarinExtensionToolDeclaration(value: unknown): VarinExtensi
       || !['source', 'physical', 'live'].includes(String(requirement.source)) || typeof requirement.process !== 'boolean'
       || Object.keys(requirement).some(key => key !== 'source' && key !== 'process')) throw new Error('tool.requirements must declare source and process dependencies');
   }
-  if (declaration.source !== undefined) {
-    const source = declaration.source;
-    if (!source || typeof source !== "object" || Array.isArray(source)
-      || typeof source.path !== "string" || !source.path.trim()
-      || (source.line !== undefined && (typeof source.line !== "number" || !Number.isSafeInteger(source.line) || source.line <= 0))) {
-      throw new Error("tool.source must contain a path and optional positive line number");
-    }
-    for (const key of Object.keys(source)) if (key !== "path" && key !== "line") throw new Error(`Unknown tool source field: ${key}`);
-  }
+  if (declaration.source !== undefined) parseVarinContractSource(declaration.source);
   return declaration as unknown as VarinExtensionToolDeclaration;
 }

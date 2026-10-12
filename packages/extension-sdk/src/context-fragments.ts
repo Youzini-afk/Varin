@@ -1,6 +1,6 @@
 import {
   parseVarinContextFragments, VARIN_CONTEXT_FRAGMENTS_METHOD, VARIN_CONTEXT_FRAGMENTS_CONTRACT,
-  VARIN_CONTEXT_FRAGMENTS_SERVICE, VARIN_CONTEXT_FRAGMENTS_SERVICE_ID, VARIN_CONTEXT_FRAGMENTS_VERSION,
+  VARIN_CONTEXT_FRAGMENTS_SERVICE,
   type VarinContextFragments,
 } from '@varin/extension-contract';
 import type { VarinBrokeredHostContext } from './index.js';
@@ -9,12 +9,9 @@ import type { VarinBrokeredHostContext } from './index.js';
  * No callbacks, model calls, network, filesystem access or mutable conversation objects are
  * accepted by this author contract. Package activation itself remains a trust boundary.
  */
-export function provideContextFragments(context: VarinBrokeredHostContext, fragments: VarinContextFragments,
-  options: { declareContract: true } | undefined = undefined): void {
+export function provideContextFragments(context: VarinBrokeredHostContext, fragments: VarinContextFragments): void {
   const prepared = parseVarinContextFragments(fragments);
-  context.services.provide(options?.declareContract
-    ? JSON.parse(JSON.stringify(VARIN_CONTEXT_FRAGMENTS_SERVICE))
-    : { id: VARIN_CONTEXT_FRAGMENTS_SERVICE_ID, version: VARIN_CONTEXT_FRAGMENTS_VERSION, multiple: true }, {
+  context.services.provide(JSON.parse(JSON.stringify(VARIN_CONTEXT_FRAGMENTS_SERVICE)), {
     inspect: args => {
       if (args.length !== 0) throw new Error('Context fragments inspect takes no arguments');
       return JSON.parse(JSON.stringify(VARIN_CONTEXT_FRAGMENTS_CONTRACT));
