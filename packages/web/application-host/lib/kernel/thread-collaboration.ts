@@ -402,12 +402,8 @@ export class ThreadCollaboration {
       await withManagedChildSource(runtime, child, signal, async (service, address) => {
         await service.service({ ...address, requestId: randomUUID(),
           operation: { kind: 'child_release', execution: child } }, signal);
-        signal.throwIfAborted();
-        await runtime.releaseChildResources(child.execution_id, signal);
       });
-      return;
-    }
-    if (child.trigger.kind !== 'dispatch') {
+    } else if (child.trigger.kind !== 'dispatch') {
       if (!child.receipt && child.source_basis) {
         await this.withSourceStore(child.source_basis.source, child.child_thread_id, signal, async store => {
           if (!store.releaseBranchHandoffPin) throw new Error('Durable source pin release is unavailable');
@@ -420,28 +416,33 @@ export class ThreadCollaboration {
           }
         });
       }
-      signal.throwIfAborted();
-      await runtime.releaseChildResources(child.execution_id, signal);
-      return;
+    } else {
+      const handoff = child.source?.handoff;
+      if (!handoff) throw new Error('Original dispatch handoff is unavailable');
+      const grant = await kernel.claimChildSource({ handoffOperationId: handoff.operation_id, grantId: `child-release:${randomUUID()}`,
+        childThreadId: child.child_thread_id, childBranchId: child.child_branch_id }, signal);
+      try {
+        if (handoff.root.kind === 'fixed') {
+          await kernel.scoped(grant).unpinBranch({ operationId: `child-handoff-release:${child.execution_id}`,
+            branchId: handoff.root.pin.source.branch_id!, pinId: handoff.root.pin.pin_id }, signal);
+        }
+        if (!child.receipt) {
+          const branchId = `child-source:${child.execution_id}`;
+          const client = kernel.scoped(grant);
+          await client.unpinBranch({ operationId: `child-unused-source-unpin:${child.execution_id}`, branchId,
+            pinId: `child-source-pin:${child.execution_id}` }, signal);
+          await client.deleteBranch({ operationId: `child-unused-source-delete:${child.execution_id}`, branchId }, signal);
+        }
+      } finally { await kernel.revokeGrant(grant.grantId); }
     }
-    const handoff = child.source?.handoff;
-    if (!handoff) throw new Error('Original dispatch handoff is unavailable');
-    const grant = await kernel.claimChildSource({ handoffOperationId: handoff.operation_id, grantId: `child-release:${randomUUID()}`,
-      childThreadId: child.child_thread_id, childBranchId: child.child_branch_id }, signal);
-    try {
-      if (handoff.root.kind === 'fixed') {
-        await kernel.scoped(grant).unpinBranch({ operationId: `child-handoff-release:${child.execution_id}`,
-          branchId: handoff.root.pin.source.branch_id!, pinId: handoff.root.pin.pin_id }, signal);
-      }
-      if (!child.receipt) {
-        const branchId = `child-source:${child.execution_id}`;
-        const client = kernel.scoped(grant);
-        await client.unpinBranch({ operationId: `child-unused-source-unpin:${child.execution_id}`, branchId,
-          pinId: `child-source-pin:${child.execution_id}` }, signal);
-        await client.deleteBranch({ operationId: `child-unused-source-delete:${child.execution_id}`, branchId }, signal);
-      }
-      await runtime.releaseChildResources(child.execution_id, signal);
-    } finally { await kernel.revokeGrant(grant.grantId); }
+    // The handoff can be released once a Run owns its source, but discovery must
+    // retain this execution until result publication and original grant retirement
+    // both finish. A failed release is retried through this same durable child.
+    if (!child.report || (child.receipt && ['pending', 'settling', 'candidate'].includes(child.code_result.kind))) return;
+    signal.throwIfAborted();
+    if (child.receipt) await runtime.retireSourceGrants(child.receipt.run_id);
+    signal.throwIfAborted();
+    await runtime.releaseChildResources(child.execution_id, signal);
   }
   private async advance(admitted: DelegatedExecution, signal: AbortSignal, ownerSignal: AbortSignal): Promise<void> {
     const { runtime, prepareContext } = this.owners;
@@ -490,7 +491,6 @@ export class ThreadCollaboration {
         child = await runtime.childExecution(child.execution_id, ownerSignal);
         if (child.report && child.trigger.kind === 'dispatch') this.owners.kernel.releaseChildToolHandoff(child.parent_run_id, child.child_operation_id);
         await this.releaseHandoff(child, ownerSignal);
-        if (child.report && child.receipt && ['published', 'no_changes', 'unavailable'].includes(child.code_result.kind)) await runtime.retireSourceGrants(child.receipt.run_id);
       }
     }
   }

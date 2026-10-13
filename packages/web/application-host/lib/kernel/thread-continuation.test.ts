@@ -384,7 +384,7 @@ it.each(['child_revision', 'process_receipt'] as const)('%s observed during an a
     child_thread_id: 'child-thread', child_branch_id: 'child-branch', origin: { kind: 'model_step', request_id: 'original-request' }, call_id: 'dispatch', project_id: null,
     input: { task: 'Read source', workMode: 'read_only' }, selected_profile: {preset_id:null, catalog_identity:null, work_mode:'read_only', tools:[], instructions:''}, configuration: {}, launch: f.launch.selection,
     state: 'ready', revision: 1, cursor: 1, receipt: { key: 'child-input', run_id: f.run.id, input_id: 'child-input', branch_id: 'child-branch', thread_id: 'child-thread', cursor: 1 },
-    report: null, resources_released: true, code_result: { kind: 'no_changes' },
+    report: null, resources_released: false, code_result: { kind: 'no_changes' },
     source: { kind: 'pending', handoff: { resource_authority: null, operation_id: 'handoff', source: { mode: 'fixed_branch', resource_owner: { kind: 'local' as const }, workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null }, root: { kind: 'fixed', pin: { pin_id: 'pin', root: 'root', source: { mode: 'fixed_branch', resource_owner: { kind: 'local' as const }, workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null } } } } },
   } as import('./protocol.generated.js').DelegatedExecution;
   const children = vi.fn(async () => [structuredClone(child)]);
@@ -392,7 +392,8 @@ it.each(['child_revision', 'process_receipt'] as const)('%s observed during an a
   const runtime = Object.assign(f.runtime, {
     onEvent: (handler: typeof listener) => { listener = handler; return () => {}; }, onExit: () => () => {}, onReady: () => () => {},
     reconcileObservations: async () => [], children, childExecutions: async () => [structuredClone(child)], unacceptedChildSources: async () => [],
-    childExecution: async () => structuredClone(child), retireSourceGrants: vi.fn(async () => {}),
+    childExecution: async () => structuredClone(child), retireSourceGrants: vi.fn(async () => {}), releaseMcpResourceSource: vi.fn(async () => {}),
+    releaseChildResources: vi.fn(async () => { child.resources_released = true; return structuredClone(child); }),
     status: async () => ({ eventCursor: 0 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
   });
   const continueRun = vi.fn(async () => { await gate; });

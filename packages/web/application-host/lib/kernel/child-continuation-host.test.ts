@@ -194,8 +194,8 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
     expect(prepareContext.forSource).toHaveBeenCalledWith(checkpoint, expect.objectContaining({ branchId: 'child-source:execution:new', revision: 0 }), expect.any(AbortSignal));
     expect(continueRun).toHaveBeenCalledWith('new-run', expect.any(AbortSignal));
     expect(kernel.claimChildSource).not.toHaveBeenCalled(); expect(kernel.releaseChildToolHandoff).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(runtime.releaseChildResources).toHaveBeenCalledOnce());
-    expect(runtime.releaseMcpResourceSource).toHaveBeenCalledWith('new-run');
+    await vi.waitFor(() => expect(runtime.releaseMcpResourceSource).toHaveBeenCalledWith('new-run'));
+    expect(runtime.releaseChildResources).not.toHaveBeenCalled();
     expect(scoped.unpinBranch).toHaveBeenCalledOnce();
     expect(scoped.unpinBranch).toHaveBeenCalledWith({ operationId: 'branch-query-unpin:old-result:predecessor-query-pin',
       branchId: 'old-result', pinId: 'predecessor-query-pin' });
