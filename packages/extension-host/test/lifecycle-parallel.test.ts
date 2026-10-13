@@ -372,6 +372,8 @@ test('required group withdrawal before the actual catalog commit preserves selec
   await h.selectEntered.promise; controller.abort(new Error('Surface preparation closed')); gate.resolve(); await rejected;
   assert.equal(h.snapshot.extensions[0].integrity, `${id}-v1`);
   assert.equal(await h.services.invoke({ serviceId: id, version: 1, method: 'read', args: [] }), 1);
+  // Loader failure cleanup must not withdraw another Surface's shared candidate.
+  await h.supervisor.discardPreparedCandidate(id, 'v2');
   await h.supervisor.selectCandidate(id, 'v2', 1, undefined, readiness);
   assert.equal(h.snapshot.extensions[0].integrity, 'v2');
   await h.supervisor.shutdown();

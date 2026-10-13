@@ -364,7 +364,7 @@ it('the kernel refuses process effects attached to a fixed branch even with a va
   const grant = await f.kernel.issueGrant({ grantId: 'fixed-process-attempt', owningWorkspace: source.workspaceId, executionWorkspace: source.executionWorkspaceId, threadId: identity.threadId, runId: pending.run_id,
     capabilities: ['storage.read', 'storage.write', 'process'], pathScopes: [''] });
   const registered = await f.kernel.scoped(grant).fileRootRegister({ workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId, canonicalRoot: f.workspace });
-  await f.runtime.startRun(pending.run_id, undefined, { grantId: grant.grantId, runId: pending.run_id, threadId: identity.threadId,
+  await f.runtime.startRun(pending.run_id, undefined, { resourceOwner: { kind: 'local' }, grantId: grant.grantId, runId: pending.run_id, threadId: identity.threadId,
     workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId, sourceMode: 'fixed_branch', rootId: registered.rootId,
     fileSource: { branchId: source.branchId, revision: source.revision }, enabledTools: ['process_spawn'] });
   await expect.poll(async () => (await f.runtime.run(pending.run_id)).state).toBe('waiting');

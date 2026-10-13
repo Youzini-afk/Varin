@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { DocumentAuthority } from '../documents/authority.js';
 import { inspectDocumentBytes, revisionFromBytes } from '../documents/inspect.js';
 import type { ExploreFileSnapshot } from '../harness/explore-file-reader.js';
-import { normalizePathIdentity } from '../workspace/path-safety.js';
+import { normalizePathIdentity, stripWindowsNamespacePrefix } from '../workspace/path-safety.js';
 import type { KernelClient, KernelGrantHandle } from './kernel-client.js';
 import type { LiveSourceResolver } from './live-source.js';
 import { runKernelCompute, type KernelComputeInput, type KernelComputeOptions, type KernelComputeResult } from './compute-runner.js';
@@ -55,6 +55,9 @@ export function createSourceQueryOwner(options: {
   targetAuthority?: { grant(query: SourceQueryAccess): KernelGrantHandle };
 }): SourceQueryOwner {
   const { kernel, documents } = options;
+  // Language servers use ordinary file URLs and module resolution paths. Rust's
+  // Windows namespace spelling remains in the source identity, not the server cwd.
+  const languageRoot = (root: string) => process.platform === 'win32' ? stripWindowsNamespacePrefix(root) : root;
   const targetQueries = options.targetAuthority !== undefined;
   const managed = (query: SourceQueryAccess) => query.source.resource_owner.kind === 'managed_host' && !options.targetAuthority;
   const service = async <Operation extends SourceServiceOperation>(query: SourceQueryAccess, operation: Operation, signal?: AbortSignal): Promise<SourceServiceResponse<Operation>> => {
@@ -90,7 +93,8 @@ export function createSourceQueryOwner(options: {
     if (query.source.execution_workspace_id !== query.source.workspace_id) await documents.admitWorkspaceRegistration(query.source.execution_workspace_id, signal);
     const source = query.source, root = query.physicalRoot;
     if (source.mode === 'live_root') {
-      if (!source.live_root || !isDeepStrictEqual(root, source.live_root)) throw new Error('The original source root changed');
+      if (!source.live_root || !root || root.hostId !== source.live_root.hostId || root.rootId !== source.live_root.rootId
+        || normalizePathIdentity(root.canonicalRoot) !== normalizePathIdentity(source.live_root.canonicalRoot)) throw new Error('The original source root changed');
       await options.validateLiveSource({ workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id, liveRoot: root! }, signal);
     } else {
       if (source.live_root || !source.branch_id || !Number.isSafeInteger(source.revision) || source.revision! < 0) throw new Error('The original fixed source is incomplete');
@@ -156,7 +160,7 @@ export function createSourceQueryOwner(options: {
       await validateLanguage(query, signal);
       if (query.source.mode !== 'fixed_branch') {
         if (!query.physicalRoot) throw new Error('The original source root is unavailable');
-        return { root: query.physicalRoot.canonicalRoot, check: async active => { active.throwIfAborted(); }, release: async () => {} };
+        return { root: languageRoot(query.physicalRoot.canonicalRoot), check: async active => { active.throwIfAborted(); }, release: async () => {} };
       }
       const { client } = await context(query);
       await validateLanguage(query, signal);
@@ -167,7 +171,7 @@ export function createSourceQueryOwner(options: {
           branchId: query.source.branch_id!, revision: query.source.revision! }, signal);
         if (derivedView.branchId !== query.source.branch_id || derivedView.revision !== query.source.revision
           || derivedView.viewId !== viewId || derivedView.kernelEpoch !== kernel.kernelEpoch) throw new Error('Derived source view changed during preparation');
-        return { root: derivedView.canonicalRoot, derivedView, release,
+        return { root: languageRoot(derivedView.canonicalRoot), derivedView, release,
           async check(active) {
             active.throwIfAborted();
             const checked = await client.materializedViewCheck(address, active);

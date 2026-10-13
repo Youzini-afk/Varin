@@ -470,6 +470,7 @@ it('selected read-only child owns its ordinary notes and plan through real Host 
   try {
     await entered.promise;
     await expect.poll(() => operationId).not.toBe('');
+    await expect.poll(async () => (await h.runtime.run(run.run_id)).state).toBe('waiting');
     const parentState = await h.api.plan!.read(identity);
     const parentPlan = await h.api.plan!.update({ ...identity, key: 'parent-plan', expectedHeadId: parentState.headId, expectedRef: null, content: 'PARENT_PRIVATE_PLAN' });
     release.release();
@@ -1163,7 +1164,10 @@ function combinedResult(body: Record<string, unknown>, family: CombinedFamily, n
   const items = combinedItems(body, family);
   const call = items.findLast(item => item.type === 'tool_use' && item.name === name);
   const output = items.findLast(item => item.type === 'tool_result' && item.tool_use_id === call?.id);
-  return output ? JSON.parse(String(output.content)) as Record<string, unknown> : undefined;
+  if (!output) return undefined;
+  const blocks = output.content as Array<{ type: string; text?: string }>;
+  expect(blocks[0]?.type).toBe('text');
+  return JSON.parse(blocks[0]!.text!) as Record<string, unknown>;
 }
 async function durableRequests(root: string, runId: string) {
   const database = new DatabaseSync(path.join(root, 'agent-runtime', 'conversation.sqlite'), { readOnly: true });

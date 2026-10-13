@@ -1005,14 +1005,10 @@ impl Storage {
                 KernelError::Operation("record update requires expectedRecordRevision".to_string())
             })?;
             if existing_record_revision != expected {
-                return Err(KernelError::Operation(
-                    "record revision conflict".to_string(),
-                ));
+                return Err(KernelError::RecordRevisionConflict);
             }
         } else if expected_record_revision.is_some() {
-            return Err(KernelError::Operation(
-                "record revision conflict: record does not exist".to_string(),
-            ));
+            return Err(KernelError::RecordRevisionConflict);
         }
         let now = now_ms();
         self.conn.execute(

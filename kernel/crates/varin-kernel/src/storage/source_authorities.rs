@@ -354,7 +354,7 @@ impl Storage {
             let grant = self.load_grant(&record.result.grant_id)?;
             let registered = self.registered_file_root(&root.root_id, &grant)?;
             if root.host_id != host_id
-                || root.canonical_root != registered.canonical_root
+                || fs::canonicalize(&root.canonical_root)? != registered.canonical_root
                 || registered.execution_workspace_id != record.result.source.execution_workspace_id
             {
                 return Err(denied("Source physical root changed"));

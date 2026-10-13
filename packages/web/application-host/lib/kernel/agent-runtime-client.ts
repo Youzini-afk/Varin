@@ -1076,7 +1076,7 @@ export class AgentRuntimeClient {
   }
   reconcileRun(
     runId: string,
-    toolBinding: unknown,
+    toolBinding: CalendarProtocol.SourceToolBinding,
     signal?: AbortSignal,
   ): Promise<RunReconcileResult> {
     return this.kernel.agentRuntimeRequest(
@@ -1664,7 +1664,7 @@ export class AgentRuntimeClient {
   async startRun(
     runId: string,
     signal?: AbortSignal,
-    toolBinding?: unknown,
+    toolBinding?: CalendarProtocol.SourceToolBinding,
   ): Promise<RunStartReceipt> {
     return this.withRunPreparation(runId, signal, async (signal) => {
       const delegatedChild = await this.childExecutionForRun(runId, signal);
@@ -1703,7 +1703,7 @@ export class AgentRuntimeClient {
     runId: string,
     owner: ExistingHostCredentialOwner,
     signal?: AbortSignal,
-    toolBinding?: unknown,
+    toolBinding?: CalendarProtocol.SourceToolBinding,
   ): Promise<RunStartReceipt> {
     return this.withRunPreparation(runId, signal, async (signal) => {
       const delegatedChild = await this.childExecutionForRun(runId, signal);

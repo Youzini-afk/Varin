@@ -2,11 +2,11 @@
  * grants, Storage, subscriptions and guardian execution. Stdio only delivers test requests.
  * This does not implement, replace, or establish the product Kernel socket transport. */
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { SCRIPT_TOOL_DECLARATIONS, COMPUTER_TOOL_DECLARATIONS } from '@varin/extension-builtins';
-import { parseVarinToolJson } from '@varin/extension-contract';
+import { canonicalServiceComposition, parseVarinToolJson } from '@varin/extension-contract';
 import type { HostServiceOwnerIdentity } from '@varin/extension-host';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { KernelScopedClient, type KernelClient, type KernelGrantHandle, type KernelProcessObserver } from './kernel-client.js';
@@ -16,11 +16,17 @@ import { createComputerRuntime } from './computer-runtime.js';
 import { createComputerService } from '../computer/computer-service.js';
 import type { ComputerDriverSession, DriverResponse } from '../computer/driver-host.js';
 import { withToolInvocation } from './tool-invocation.js';
-import { KERNEL_PROTOCOL_VERSION, type ExecutorOwner, type HostToolCall, type KernelProcessStreamEvent } from './protocol.generated.js';
+import { KERNEL_PROTOCOL_VERSION, type ExecutorOwner, type HostToolCall, type KernelProcessStreamEvent, type HostServiceComposition, type ExtensionToolBinding } from './protocol.generated.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
 import { createNestedMemoryHostFixture } from './nested-memory-host.test-helper.js';
 
 const write = (frame: unknown) => process.stdout.write(`${JSON.stringify(frame)}\n`);
+function composition(extensionId: string, extensionVersion: string): HostServiceComposition {
+  const body = { extensionId, extensionVersion, entrypointId: 'host' as const,
+    artifactIntegrity: 'controlled-fixture-artifact', activationConfiguration: null, grants: [], dependencies: [] };
+  const id = createHash('sha256').update(canonicalServiceComposition(body)).digest('hex');
+  return { schemaVersion: 1, root: id, nodes: [{ id, ...body }] };
+}
 let nextId = 0;
 const requests = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
 function request<T>(method: string, params: unknown, grant?: KernelGrantHandle): Promise<T> {
@@ -182,13 +188,15 @@ async function receive(frame: Record<string, unknown>) {
     const resolveConfiguration = await scripts.prepareConfiguration(() => null, null);
     configurationIdentity = resolveConfiguration(SCRIPT_TOOL_DECLARATIONS[0])!;
     write({ kind: 'fixture-prepared', configurationIdentity,
-      bindings: SCRIPT_TOOL_DECLARATIONS.map(descriptor => ({ providerKey: `script:${descriptor.id}`, extensionId: owner.extensionId, extensionVersion: owner.extensionVersion,
+      bindings: SCRIPT_TOOL_DECLARATIONS.map(descriptor => ({ providerKey: `${owner.extensionId}:host:${descriptor.id}@${descriptor.version}`, extensionId: owner.extensionId, extensionVersion: owner.extensionVersion,
+        composition: composition(owner.extensionId, owner.extensionVersion),
         serviceId: descriptor.id, serviceVersion: descriptor.version, artifactIntegrity: 'controlled-fixture-artifact',
         declarationHash: extensionToolSchema(descriptor).version, configurationIdentity, tool: extensionToolSchema(descriptor) })).concat(mediaMode ? COMPUTER_TOOL_DECLARATIONS.filter(descriptor => ['computer_observe', 'computer_act'].includes(descriptor.tool!.name)).map(descriptor => ({
-          providerKey: `computer:${descriptor.id}`, extensionId: 'varin.builtin.computer', extensionVersion: '1.0.0',
+          providerKey: `varin.builtin.computer:host:${descriptor.id}@${descriptor.version}`, extensionId: 'varin.builtin.computer', extensionVersion: '1.0.0',
+          composition: composition('varin.builtin.computer', '1.0.0'),
           serviceId: descriptor.id, serviceVersion: descriptor.version, artifactIntegrity: 'controlled-fixture-artifact',
           declarationHash: extensionToolSchema(descriptor).version, configurationIdentity: JSON.stringify({ version: 1, defaultDesktopId: null }), tool: extensionToolSchema(descriptor),
-        })) : []) });
+        })) : []) satisfies ExtensionToolBinding[] });
   } else if (frame.kind === 'host-tool-request') {
     await hostCall(frame);
   } else if (frame.kind === 'host-tool-cancel') {

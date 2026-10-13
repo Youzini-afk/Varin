@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { languageIdForPath } from '@varin/protocol';
+import { normalizePathIdentity } from '../workspace/path-safety.js';
 import type { DocumentAuthority } from '../documents/authority.js';
 import { createLanguageViewBinder } from '../lsp/language-view.js';
 import type { createLanguageSupervisor } from '../lsp/supervisor.js';
@@ -58,7 +59,7 @@ export function createLanguageOwner({ documents, supervisor, sources, remote, ta
     const view = `agent:source:${createHash('sha256').update(JSON.stringify([
       query.source.resource_owner, query.source.mode, query.source.workspace_id, query.source.execution_workspace_id,
       ...(query.source.mode === 'fixed_branch' ? [query.source.branch_id, query.source.revision]
-        : [query.physicalRoot?.hostId, query.physicalRoot?.rootId, query.physicalRoot?.canonicalRoot]),
+        : [query.physicalRoot?.hostId, query.physicalRoot?.rootId, query.physicalRoot ? normalizePathIdentity(query.physicalRoot.canonicalRoot) : null]),
     ])).digest('hex')}` as const;
     const environment = await supervisor.retainSourceView({ view, workspaceId: query.source.workspace_id, root: query.physicalRoot?.canonicalRoot ?? '',
       runId: query.runId, grantId: query.grantId, executionWorkspaceId: query.source.execution_workspace_id,

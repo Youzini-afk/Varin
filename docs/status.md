@@ -12,6 +12,8 @@ Last updated: 2026-10-13
 
 两设计仍在实施，产品默认保持 Pi。已接线的执行、存储、工具/策略、协作、Goal、持久条件、扩展组合及
 原领域消费者由[实施台账](plan/agent-runtime-implementation.md)逐项链接真实证据和边界。
+最新[Windows 整合验收](reviews/runtime-2026-10-13.md)修复实际 IPC、回执、通知、清理及路径问题；
+目录访问时间引发的快照失效仍未解决，整体交付不能标为通过。
 当前 [Bot 产品与摘要整合](reviews/runtime-bot-product-context-2026-10-12.md)连接原 Bot 身份、来源/召回、
 Sleep/Wake、Plan 与 ContextJob，并分列原 stdio、Knowledge IPC、UI 与受控模型证据。
 [Documents 草稿与来源](reviews/runtime-document-source-2026-10-12.md)接通显式内容选择、同源资源闭包、Git 选根和原固定 receipt。

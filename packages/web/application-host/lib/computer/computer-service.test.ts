@@ -10,6 +10,7 @@ import type { AddressInfo } from 'node:net';
 import { registerComputerRoutes } from './computer-routes.js';
 import type { DriverResponse, DriverSpawnSpec, ComputerDriverSession } from "./driver-host.js";
 import type { KernelRecordResult } from "../kernel/protocol.generated.js";
+import { KernelClientError } from '../kernel/kernel-client.js';
 
 /**
  * BC4 focused coverage: catalog records, observation freshness, serialized
@@ -41,7 +42,7 @@ const fakeKernel = () => {
       const key = `${params.workspaceId}:${params.recordId}`;
       const existing = records.get(key);
       if (params.expectedRecordRevision !== undefined && params.expectedRecordRevision !== existing?.recordRevision) {
-        throw new Error("revision conflict");
+        throw new KernelClientError({ code: 'record-revision-conflict', message: 'record revision conflict' });
       }
       const stored: StoredRecord = {
         recordId: params.recordId,
@@ -210,15 +211,16 @@ describe("computer service (BC4)", () => {
       expect(remoteId).toBeDefined(); await b.list();
       const id = remoteId!;
       const call = <T>(service: typeof a, access: 'control' | 'observe', run: () => Promise<T>) => service.automation.authorize(piWork('main'), access, id, run);
-      const control = await call(a, 'observe', () => a.control(id));
+      const control = await call(a, 'control', () => a.control(id));
+      await call(a, 'observe', () => a.observe({ desktopId: id, app: 'notepad' }));
+      expect((await call(a, 'control', () => a.act({ desktopId: id, action: { kind: 'key', app: 'notepad', key: 'enter' }, automationEpoch: control.automationEpoch }))).accepted).toBe(true);
       const observed = await call(a, 'observe', () => a.observe({ desktopId: id, app: 'notepad' }));
-      await call(a, 'control', () => a.act({ desktopId: id, action: { kind: 'key', app: 'notepad', key: 'enter' }, automationEpoch: control.automationEpoch }));
       await call(b, 'observe', () => b.observe({ desktopId: id, app: 'notepad' }));
       await b.automation.release(piWork('main'));
       expect((await call(a, 'control', () => a.act({ desktopId: id, action: { kind: 'click', app: 'notepad', observationId: observed.id, elementIndex: 1 }, automationEpoch: control.automationEpoch }))).accepted).toBe(true);
       await expect(call(b, 'control', () => b.act({ desktopId: id, action: { kind: 'key', app: 'notepad', key: 'enter' } }))).rejects.toMatchObject({ harnessCode: 'forbidden' });
       expect((await a.automation.stop(main.execution)).status).toBe('enabled');
-      const resumedControl = await call(b, 'observe', () => b.control(id));
+      const resumedControl = await call(b, 'control', () => b.control(id));
       await call(b, 'observe', () => b.observe({ desktopId: id, app: 'notepad' }));
       expect((await call(b, 'control', () => b.act({ desktopId: id, automationEpoch: resumedControl.automationEpoch,
         action: { kind: 'key', app: 'notepad', key: 'enter' } }))).accepted).toBe(true);

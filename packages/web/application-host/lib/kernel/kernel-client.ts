@@ -243,7 +243,7 @@ export class KernelScopedClient {
     return this.owner.getBlob(hash, source, this.grant, options);
   }
 
-  fileRootRegister(params: KernelMethodParams["file.root.register"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+  fileRootRegister(params: KernelMethodParams["file.root.register"], signal?: AbortSignal): Promise<import('./protocol.generated.js').KernelFileRootRegisterResult> {
     return this.owner.fileRootRegister(params, this.grant, signal);
   }
 
@@ -1301,8 +1301,8 @@ export class KernelClient {
     return this.requestRaw<KernelObjectSlice>("storage.getBlob", params, { signal: options.signal, grant, settleCancellation: true });
   }
 
-  async fileRootRegister(params: KernelMethodParams["file.root.register"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    return this.requestRaw<Record<string, unknown>>("file.root.register", params, { signal, grant });
+  async fileRootRegister(params: KernelMethodParams["file.root.register"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<import('./protocol.generated.js').KernelFileRootRegisterResult> {
+    return this.requestRaw<import('./protocol.generated.js').KernelFileRootRegisterResult>("file.root.register", params, { signal, grant });
   }
 
   async fileOperationList(params: KernelMethodParams["file.operation.list"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {

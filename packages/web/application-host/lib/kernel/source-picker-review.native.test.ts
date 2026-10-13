@@ -107,7 +107,9 @@ it('prepares saved disk through real Documents and capture; concurrent and reope
   expect(first.source.workspaceId).toBe((await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId);
   expect(first.source.tools).toContain('file_read');
   expect(first.source.tools).toContain('code_retrieval');
-  expect(first.source.tools.every(tool => ['file_read', 'file_list', 'file_search', 'code_retrieval'].includes(tool))).toBe(true);
+  expect(first.source.tools).toContain('language_definition');
+  expect(first.source.tools).not.toEqual(expect.arrayContaining(['file_write']));
+  expect(first.source.tools).not.toContain('process_spawn');
   expect(first.source.revision).toBe(0);
   await fs.writeFile(path.join(f.workspace, 'source.txt'), 'changed disk after capture');
   expect(await f.api.prepareSource(request)).toEqual(first);
@@ -141,7 +143,7 @@ it('prepared editable copy runs a real process without modifying the source fold
   const identity = await f.api.create('editable-prepared-source');
   const prepared = await f.api.prepareSource({ ...identity, key: 'editable-capture', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'materialized' });
   const input = { ...identity, key: 'execute-isolated-copy', expectedHead: null, text: 'edit only isolated working copy', model, source: prepared.source };
-  await expect(f.api.submit({ ...input, source: { ...prepared.source, workspaceId: 'invented-workspace' } })).rejects.toMatchObject({ status: 400 });
+  await expect(f.api.submit({ ...input, source: { ...prepared.source, workspaceId: 'invented-workspace' } })).rejects.toMatchObject({ status: 404, code: 'source_registration_missing' });
   expect((await f.api.snapshot(identity)).history).toEqual([]);
   const receipt = await f.api.submit(input);
   await expect.poll(async () => (await f.api.run(receipt.run_id)).state, { timeout: 15_000 }).toBe('completed');

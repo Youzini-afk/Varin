@@ -19,6 +19,11 @@ describe('core-routes', () => {
     '/api/language/sync',
     '/api/language-support/status',
     '/api/tasks/run',
+    '/api/agent-profiles/read',
+    '/api/runtime/content/collect',
+    '/api/bot-memory/preview',
+    '/api/computers/automation/stop',
+    '/api/harness/managed-execution/v1/sources/resolve',
     '/api/debug/start',
     '/api/tests/run',
   ])('parses JSON bodies for workbench endpoint %s', async (endpoint) => {

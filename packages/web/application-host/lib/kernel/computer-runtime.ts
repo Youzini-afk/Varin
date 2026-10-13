@@ -357,16 +357,36 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
   };
   // Original Computer assignments select the work to reconcile. Notifications are wake-ups,
   // never proof of Run completion or input release, including a Tool owner generation change.
-  let stopped = false, dirty = false, reconciling: Promise<void> | undefined;
+  let stopped = false, dirty = false, planning: Promise<Set<Promise<void>>> | undefined;
+  const requestTasks = new Map<string, Promise<void>>();
+  const executionTasks = new Map<string, Promise<void>>();
+  const track = (tasks: Map<string, Promise<void>>, key: string, action: () => Promise<void>): Promise<void> => {
+    const existing = tasks.get(key);
+    if (existing) return existing;
+    const task = action();
+    tasks.set(key, task);
+    void task.finally(() => { if (tasks.get(key) === task) tasks.delete(key); }).catch(() => undefined);
+    return task;
+  };
   const removers: Array<() => void> = [];
   const reconcileExecutions = (): Promise<void> => {
     if (stopped) return Promise.resolve();
     dirty = true;
-    if (reconciling) return reconciling;
-    const work = (async () => {
-      const errors: unknown[] = [];
+    planning ??= (async () => {
+      const tasks = new Set<Promise<void>>();
       while (dirty && !stopped) {
         dirty = false;
+        for (const execution of computers.automation.acceptedExecutions()) {
+          const originalWork = execution.work;
+          if (originalWork.runtime !== 'agent') continue;
+          tasks.add(track(executionTasks, `${computerWorkKey(execution.work)}\0${execution.runId}`, async () => {
+            // Pure Catalog inspection: AgentRuntimeClient.run itself withdraws Tool owners on terminal.
+            const run = await kernel.agentRuntimeRequest<Run, 'runtime.run.inspect'>('runtime.run.inspect', { runId: execution.runId });
+            if (stopped) return;
+            if (run.thread_id !== originalWork.threadId || run.branch_id !== originalWork.branchId) throw new ComputerError('computer-owner-unavailable', 'Accepted Computer execution no longer matches its original Thread and branch');
+            if (['completed', 'failed', 'cancelled'].includes(run.state)) await computers.finishExecution(execution);
+          }));
+        }
         try {
           const requests = await reconcileRequests();
           // Durable notifications contain only a cursor. Derive affected family addresses from
@@ -381,32 +401,30 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
             if (!claim || claim.hostEpoch !== hostEpoch) continue;
             const lease = computers.automation.assignment(claim.assignmentId);
             if (!lease) continue;
-            try {
+            tasks.add(track(requestTasks, claim.assignmentId, async () => {
               if (request.status === 'granted') computers.automation.confirmRequest(claim.assignmentId);
               else if (request.status === 'granting' && !decisions.has(request.id)) {
                 const settled = await rpc<ComputerRequestRecord, 'runtime.computer.decision.settle'>('runtime.computer.decision.settle', { requestId: request.id, claim, status: 'granted' });
                 if (settled.status === 'granted') computers.automation.confirmRequest(claim.assignmentId);
                 else await computers.automation.releaseRequest(claim.assignmentId);
               } else if (!['pending', 'granting'].includes(request.status)) await computers.automation.releaseRequest(claim.assignmentId);
-            } catch (error) { errors.push(error); }
+            }));
           }
-        } catch (error) { errors.push(error); }
-        for (const execution of computers.automation.acceptedExecutions()) {
-          if (execution.work.runtime !== 'agent') continue;
-          try {
-            // Pure Catalog inspection: AgentRuntimeClient.run itself withdraws Tool owners on terminal.
-            const run = await kernel.agentRuntimeRequest<Run, 'runtime.run.inspect'>('runtime.run.inspect', { runId: execution.runId });
-            if (stopped) return;
-            if (run.thread_id !== execution.work.threadId || run.branch_id !== execution.work.branchId) throw new ComputerError('computer-owner-unavailable', 'Accepted Computer execution no longer matches its original Thread and branch');
-            if (['completed', 'failed', 'cancelled'].includes(run.state)) await computers.finishExecution(execution);
-          } catch (error) { errors.push(error); }
+        } catch (error) {
+          const failed = Promise.reject<void>(error); void failed.catch(() => undefined); tasks.add(failed);
         }
       }
+      return tasks;
+    })().finally(() => { planning = undefined; });
+    // Only short Catalog planning is shared. A pending release retains its own
+    // assignment and cannot prevent a later wake from scheduling another desktop.
+    return planning.then(async tasks => {
+      // A wake can arrive after the final loop check but before planning settles.
+      const next = dirty && !stopped ? reconcileExecutions() : Promise.resolve();
+      const settled = await Promise.allSettled([...tasks, next]);
+      const errors = settled.flatMap(value => value.status === 'rejected' ? [value.reason] : []);
       if (errors.length) throw new AggregateError(errors, 'Some original Computer executions remain unconfirmed; other accepted work was still reconciled');
-    })();
-    reconciling = work;
-    void work.finally(() => { if (reconciling === work) reconciling = undefined; }).catch(() => undefined);
-    return work;
+    });
   };
   const start = (onError: (error: unknown) => void = () => {}) => {
     if (removers.length || stopped) return;

@@ -85,16 +85,24 @@ pub(crate) fn durable_rename(source: &Path, target: &Path) -> io::Result<()> {
         unsafe extern "system" {
             fn MoveFileExW(existing: *const u16, replacement: *const u16, flags: u32) -> i32;
         }
-        let existing = source
-            .as_os_str()
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect::<Vec<_>>();
-        let replacement = target
-            .as_os_str()
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect::<Vec<_>>();
+        fn wide_path(path: &Path) -> io::Result<Vec<u16>> {
+            // Unlike Rust's filesystem APIs, a direct Win32 call does not expand
+            // long paths for us. Resolve syntax without following the final link.
+            let absolute = std::path::absolute(path)?;
+            let (prefix, skip) = match absolute.components().next() {
+                Some(std::path::Component::Prefix(prefix)) => match prefix.kind() {
+                    std::path::Prefix::Disk(_) => (r"\\?\", 0),
+                    std::path::Prefix::UNC(_, _) => (r"\\?\UNC\", 2),
+                    _ => ("", 0),
+                },
+                _ => ("", 0),
+            };
+            Ok(std::ffi::OsStr::new(prefix).encode_wide()
+                .chain(absolute.as_os_str().encode_wide().skip(skip))
+                .chain(std::iter::once(0)).collect())
+        }
+        let existing = wide_path(source)?;
+        let replacement = wide_path(target)?;
         let moved = unsafe {
             MoveFileExW(
                 existing.as_ptr(),

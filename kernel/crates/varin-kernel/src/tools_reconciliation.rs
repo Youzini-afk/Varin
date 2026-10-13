@@ -89,7 +89,10 @@ impl KernelResourceClient {
             let original = executor
                 .operation(Some(&context), &admitted.call)
                 .map_err(|error| KernelError::Authorization(error.to_string()))?;
-            if executor.contract(&admitted.call, &original) != admitted.contract {
+            let contract = executor
+                .planned_contract(&context, &admitted.call, &original, &cancellation)
+                .map_err(|error| KernelError::Authorization(error.to_string()))?;
+            if contract != admitted.contract {
                 return Err(KernelError::Authorization(
                     "mutation source or contract changed before recovery".into(),
                 ));

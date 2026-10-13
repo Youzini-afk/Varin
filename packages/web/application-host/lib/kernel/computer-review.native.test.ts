@@ -69,6 +69,7 @@ it('source-less public Native work executes the shipped Computer tool, drains ex
     async request(operation, dispatch) {
       dispatch?.beforeDispatch?.();
       driverCalls.push(String(operation.tool));
+      if (operation.tool === 'capabilities') return response({ capabilities: { platform: 'windows', driver: 'controlled', status: 'ready' } });
       if (operation.tool === 'get_app_state') return response({ snapshot: {
         app: { name: 'fixture-editor', pid: 42, windowTitle: 'Controlled Computer acceptance' },
         windowBounds: { x: 10, y: 20, width: 800, height: 600 }, treeLines: ['0 Edit Fixture text'],
@@ -79,6 +80,8 @@ it('source-less public Native work executes the shipped Computer tool, drains ex
   };
   const computers = createComputerService({ client: kernel, hostId: kernelOptions.hostId, dataDir: path.join(root, 'computer'), platform: 'windows',
     createDriver: () => driver,
+    onControlEvent: event => computer.acceptControlEvent(event).then(() => {}),
+    onControlEventCancel: command => computer.cancelControlEvents(command),
     resolveActor: async work => work.runtime === 'agent' ? (await computer.resolve(work)).actor : null,
     resolveScope: async work => work.runtime === 'agent' ? (await computer.resolve(work)).scope : null,
   });
@@ -88,18 +91,24 @@ it('source-less public Native work executes the shipped Computer tool, drains ex
   cleanups.push(async () => { computer.stop(); });
   extensions.capabilities.register(COMPUTER_CAPABILITY, computer.capability);
   await extensions.start();
+  await computers.ensureLocal();
   await computers.setDefaultDesktop('local-console');
   let finalResponse: ServerResponse | undefined;
+  let naturalPhase = false, naturalSteps = 0;
   const requests: Record<string, unknown>[] = [];
   const provider = createServer((request, outgoing) => {
     const chunks: Buffer[] = [];
     request.on('data', (chunk: Buffer) => chunks.push(chunk));
     request.on('end', () => {
       requests.push(JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>);
-      if (requests.length === 1) respond(outgoing, 'computer_observe', { app: 'fixture-editor' });
+      if (naturalPhase) {
+        if (++naturalSteps === 1) respond(outgoing, 'computer_control', {});
+        else if (naturalSteps === 2) respond(outgoing, 'computer_observe', { app: 'fixture-editor' });
+        else if (naturalSteps === 3) respond(outgoing, 'computer_act', { action: { kind: 'key', app: 'fixture-editor', key: 'tab' } });
+        else respond(outgoing);
+      } else if (requests.length === 1) respond(outgoing, 'computer_observe', { app: 'fixture-editor' });
       else if (requests.length === 2) respond(outgoing, 'computer_act', { action: { kind: 'key', app: 'fixture-editor', key: 'enter' } });
       else if (requests.length === 3) finalResponse = outgoing;
-      else if (requests.length === 4) respond(outgoing, 'computer_act', { action: { kind: 'key', app: 'fixture-editor', key: 'tab' } });
       else respond(outgoing);
     });
   });
@@ -123,8 +132,11 @@ it('source-less public Native work executes the shipped Computer tool, drains ex
   setRuntimeExtraHeaders({ 'x-fixture-auth': 'computer-review' });
   const api = createThreadsHttpAPI();
   const identity = await api.create('source-less-computer');
+  const prepared = await extensions.prepareService({ serviceId: 'varin.computer.observe', version: 1,
+    method: 'execute', args: [], routing: { sessionId: identity.threadId } });
+  cleanups.push(async () => { prepared.release(); });
   expect((await api.computer.state(identity)).state).toMatchObject({ work: identity, currentExecution: null, currentRootExecution: null, active: false });
-  expect(driverCalls).toEqual([]);
+  expect(driverCalls.filter(call => !['release_input', 'ping', 'capabilities'].includes(call))).toEqual([]);
   const accepted = await api.submit({ ...identity, key: 'computer-input', expectedHead: null, text: 'Exercise the original Computer owner',
     model: { providerId: 'computer-fixture', modelId: 'computer-fixture' } });
   await expect.poll(() => finalResponse !== undefined, { timeout: 15_000 }).toBe(true);
@@ -145,6 +157,7 @@ it('source-less public Native work executes the shipped Computer tool, drains ex
   await expect.poll(async () => (await api.run(accepted.run_id)).state, { timeout: 10_000 }).toBe('completed');
   expect((await api.computer.state(identity)).state.currentExecution).toBeNull();
   await expect(api.computer.stop(identity, { runId: accepted.run_id })).rejects.toMatchObject({ code: 'computer-execution-stale' });
+  naturalPhase = true;
   const natural = await api.submit({ ...identity, key: 'computer-natural-completion', expectedHead: (await api.snapshot(identity)).historyPage.head,
     text: 'Finish this work without a separate Computer Stop', model: { providerId: 'computer-fixture', modelId: 'computer-fixture' } });
   await expect.poll(async () => (await api.run(natural.run_id)).state, { timeout: 15_000 }).toBe('completed');

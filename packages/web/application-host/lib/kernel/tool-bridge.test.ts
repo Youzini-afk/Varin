@@ -167,6 +167,31 @@ it('retained v1 executes its first call after v2 publication and drains only aft
   f.bridge.unregister('run');
   expect(f.released).toEqual(['v1', 'v2']);
 });
+
+it('waits for its own durable no-effect receipt while another invocation can complete', async () => {
+  const f = fixture();
+  f.setAcknowledge(false);
+  const read = f.lease('read');
+  read.execute = async () => ({ completion: { kind: 'result', outcome: 'succeeded', effect: 'none',
+    content: { data: { observed: true }, parts: [] } }, executor_stopped: true });
+  const owner = f.bridge.register('run', read);
+  f.hold('retain', owner);
+  f.request(owner, 'read-authorize', 'authorize'); await tick();
+  f.request(owner, 'read-execute', 'execute'); await tick();
+  const receipt = f.frames.find(frame => frame.kind === 'host-tool-receipt');
+  expect(receipt).toBeDefined();
+  expect(f.frames.some(frame => frame.kind === 'host-tool-response' && frame.id === 'read-execute')).toBe(false);
+  f.setAcknowledge(true);
+  const other = { ...call, callId: 'other', operationId: 'request:tool:other' };
+  f.request(owner, 'other-authorize', 'authorize', other); await tick();
+  f.request(owner, 'other-execute', 'execute', other); await tick();
+  expect(f.frames.find(frame => frame.kind === 'host-tool-response' && frame.id === 'other-execute')).toMatchObject({ completion: { effect: 'none', outcome: 'succeeded' } });
+  expect(f.frames.some(frame => frame.kind === 'host-tool-response' && frame.id === 'read-execute')).toBe(false);
+  f.bridge.consume({ v: 1, kind: 'host-tool-receipt-ack', kernelEpoch: 'epoch', id: receipt!.id, accepted: true });
+  await tick();
+  expect(f.frames.find(frame => frame.kind === 'host-tool-response' && frame.id === 'read-execute')).toMatchObject({ completion: { effect: 'none', outcome: 'succeeded' }, executor_stopped: true });
+  f.bridge.unregister('run');
+});
 it('cancel/Run release/reset leaves original callback and lost-ACK evidence alive across transport epochs without reinvoking', async () => {
   const f = fixture();
   f.setAcknowledge(false);
