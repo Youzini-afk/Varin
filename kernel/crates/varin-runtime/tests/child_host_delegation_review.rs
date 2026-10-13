@@ -43,16 +43,19 @@ fn mcp() -> HostToolBinding {
         ]
         .into(),
         provenance: McpProvenance {
-            execution_scope: McpExecutionScope::Workspace,
-            configuration: McpConfiguration {
-                agent_dir: "/fixture/agent".into(),
-                config_cwd: "/fixture/source".into(),
-                project_trusted: true,
-            },
             servers: [
                 (
                     "A".into(),
                     McpServerSelection {
+                        owner: McpServerOwner {
+                            resource_owner: SourceResourceOwner::Local,
+                            configuration: McpConfiguration {
+                                agent_dir: "/fixture/agent".into(),
+                                config_cwd: "/fixture/source".into(),
+                                project_trusted: true,
+                            },
+                            execution_scope: McpExecutionScope::Workspace,
+                        },
                         definition_version: "definition-A".into(),
                         resource_key: "parent-server-A".into(),
                     },
@@ -60,6 +63,15 @@ fn mcp() -> HostToolBinding {
                 (
                     "B".into(),
                     McpServerSelection {
+                        owner: McpServerOwner {
+                            resource_owner: SourceResourceOwner::Local,
+                            configuration: McpConfiguration {
+                                agent_dir: "/fixture/agent".into(),
+                                config_cwd: "/fixture/source".into(),
+                                project_trusted: true,
+                            },
+                            execution_scope: McpExecutionScope::Workspace,
+                        },
                         definition_version: "definition-B".into(),
                         resource_key: "parent-server-B".into(),
                     },
@@ -210,16 +222,29 @@ fn host_tool_with_native_process_name_does_not_gain_a_native_process_source_gran
 #[test]
 fn child_derives_mcp_once_preserving_original_definitions_then_reopens_only_its_committed_binding()
 {
-    let mut f = Fixture::new_host_child(false, Some(mcp()), vec!["first".into(), "helper".into()]);
+    let mut parent_mcp = mcp();
+    let global_owner = &mut parent_mcp.provenance.servers.get_mut("B").unwrap().owner;
+    global_owner.execution_scope = McpExecutionScope::Global;
+    global_owner.configuration.config_cwd = "/fixture/global".into();
+    let mut f = Fixture::new_host_child(
+        false,
+        Some(parent_mcp),
+        vec!["first".into(), "second".into(), "helper".into()],
+    );
     let child = f.accept();
     let child = prepare(&mut f, &child);
     let run = child.receipt.as_ref().unwrap().run_id.clone();
     let original = f.launch.mcp_binding.clone().unwrap();
     let binding = derived(&original);
+    assert_eq!(binding.provenance.servers.len(), 2);
+    assert!(binding.derives_from(&original));
+    let global_owner = binding.provenance.servers["B"].owner.clone();
     for changed in [
         "definition",
         "configuration",
         "execution-scope",
+        "resource-owner",
+        "sibling-owner",
         "schema",
         "resource",
     ] {
@@ -233,13 +258,32 @@ fn child_derives_mcp_once_preserving_original_definitions_then_reopens_only_its_
                     .unwrap()
                     .definition_version = "latest".into()
             }
-            "configuration" => wrong.provenance.configuration.config_cwd = "/other/source".into(),
-            "execution-scope" => wrong.provenance.execution_scope = McpExecutionScope::Global,
+            "configuration" => {
+                wrong.provenance.servers.get_mut("A").unwrap().owner.configuration.config_cwd =
+                    "/other/source".into();
+            }
+            "execution-scope" => {
+                wrong.provenance.servers.get_mut("A").unwrap().owner.execution_scope =
+                    McpExecutionScope::Global;
+            }
+            "resource-owner" => {
+                wrong.provenance.servers.get_mut("A").unwrap().owner.resource_owner =
+                    SourceResourceOwner::ManagedHost {
+                        host_id: "other-host".into(),
+                        connection_id: "other-connection".into(),
+                        endpoint_identity: "other-endpoint".into(),
+                    };
+            }
+            "sibling-owner" => {
+                wrong.provenance.servers.get_mut("A").unwrap().owner = global_owner.clone();
+            }
             "schema" => wrong.tools[0].description.push_str(" changed"),
             _ => {
                 wrong.resources.insert("first".into(), "unrelated".into());
             }
         }
+        assert_eq!(wrong.provenance.servers["B"].owner, global_owner);
+        assert!(!wrong.derives_from(&original), "{changed} must preserve its original contribution owner");
         assert!(
             f.db.prepare_mcp_launch(&run, wrong).is_err(),
             "{changed} must remain frozen"
@@ -421,7 +465,9 @@ fn child_result_waits_for_original_workspace_and_service_callbacks_but_not_globa
     use varin_runtime::catalog::collaboration::{ChildCodeResult, ChildWorkingResultRef};
     for scope in [McpExecutionScope::Workspace, McpExecutionScope::Global] {
         let mut parent_mcp = mcp();
-        parent_mcp.provenance.execution_scope = scope.clone();
+        for server in parent_mcp.provenance.servers.values_mut() {
+            server.owner.execution_scope = scope;
+        }
         let selected = if scope == McpExecutionScope::Global {
             // Native-looking names do not change the actual external execution scope.
             parent_mcp.tools[0].name = "process_spawn".into();
@@ -851,7 +897,9 @@ fn child_result_waits_for_original_workspace_and_service_callbacks_but_not_globa
 fn source_free_delegation_preserves_actual_global_or_workspace_mcp_scope() {
     for scope in [McpExecutionScope::Global, McpExecutionScope::Workspace] {
         let mut binding = mcp();
-        binding.provenance.execution_scope = scope;
+        for server in binding.provenance.servers.values_mut() {
+            server.owner.execution_scope = scope;
+        }
         let first = binding.tools[0].clone();
         let f = Fixture::new_parent_custom(
             0,
@@ -885,7 +933,7 @@ fn source_free_delegation_preserves_actual_global_or_workspace_mcp_scope() {
         if scope == McpExecutionScope::Global {
             let resolved = result.unwrap();
             assert_eq!(
-                resolved.mcp_binding.unwrap().provenance.execution_scope,
+                resolved.mcp_binding.unwrap().provenance.servers["A"].owner.execution_scope,
                 McpExecutionScope::Global
             );
         } else {

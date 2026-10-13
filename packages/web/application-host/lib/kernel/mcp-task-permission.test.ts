@@ -27,7 +27,7 @@ describe('Task management tools use original permission admission',()=>{
       throw new Error(`Unexpected method ${method}`);
     }} as unknown as KernelClient;
     const tasks={async control(){controls++;return{executor_stopped:true,completion:{kind:'result',outcome:'succeeded',effect:'none',content:{data:{},parts:[]}}};}} as unknown as McpTaskRuntime;
-    const lease=createMcpLease({lease:await authority.acquire({agentDir:root,configCwd:root,executionCwd:root,executionScope:'global',environmentId:'host:global',projectTrusted:false,sessionId:'agent:reader'},{servers:[]}),
+    const lease=createMcpLease({lease:await authority.acquire({resourceOwner:{kind:'local'},agentDir:root,configCwd:root,executionCwd:root,executionScope:'global',environmentId:'host:global',projectTrusted:false,sessionId:'agent:reader'},{servers:[]}),
       kernel,tasks,currentPolicy:async()=>({mode:'normal',rules:[{tool:schema.name,decision}]})});
     const call:HostToolCall={runId:'reader-run',origin:{kind:'model_step',request_id:'reader-step'},operationId:'reader-call',callId:'reader-call',name:schema.name,schemaVersion:schema.version,arguments:{operationId:'original-job'}};
     const signal=new AbortController().signal,owner={kind:'external' as const,identity:'original-host',epoch:'owner'};

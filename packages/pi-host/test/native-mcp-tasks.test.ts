@@ -36,7 +36,7 @@ function fixture(support=true){
       }};
   };
   const authority=new McpAuthority({createTransport,providerToken:async()=>`token-${grant}`,credentialScope:async()=>({reference:`grant-${grant}`,generation:1})});
-  const scope={agentDir:root,configCwd:root,executionCwd:root,environmentId:'host:global',executionScope:'global' as const,projectTrusted:false,sessionId:'agent:thread'};
+  const scope={agentDir:root,configCwd:root,executionCwd:root,environmentId:'host:global',resourceOwner: { kind: 'local' as const }, executionScope:'global' as const,projectTrusted:false,sessionId:'agent:thread'};
   return {authority,scope,sent,closed:()=>closed,changeTool(){description='changed';receive({jsonrpc:'2.0',method:'notifications/tools/list_changed'});},changeGrant(){grant++;},invalidCreate(){invalidCreate=true;},toolError(){toolError=true;},serverRequest(id:string,method:string,params:Record<string,unknown>){receive({jsonrpc:'2.0',id,method,params});},
     async close(){await authority.close();rmSync(root,{recursive:true,force:true});}};
 }

@@ -334,7 +334,7 @@ it.each(['dispatch', 'user_continuation'] as const)('%s binds only its admitted 
   const released: string[] = [], extension = contribution('chosen', '1', released), f = setup([extension]);
   const base = contribution('mcp_read', '1', released).lease;
   const original: McpToolLease = { ...base, slot: 'mcp', binding: { ...base.binding, routes: Object.fromEntries(base.binding.tools.map(tool => [tool.name,{kind:'direct' as const}])),
-    provenance: { execution_scope: 'global', configuration: { agent_dir: '/fixture', config_cwd: '/fixture', project_trusted: false }, servers: {} } } };
+    provenance: { servers: {} } } };
   f.launch.selection.extension_bindings = [extension.binding];
   f.launch.selection.mcp_binding = original.binding;
   f.child({ execution_id: trigger === 'dispatch' ? 'parent-dispatch' : 'next-execution', child_operation_id: 'parent-dispatch',
@@ -371,7 +371,7 @@ it('first Run starts without slow contributions; concurrent ready completions an
   const mcp = (name: string): McpToolLease => ({
     ...contribution(name, '1', released).lease,
     slot: 'mcp',
-    binding: { ...contribution(name, '1', released).lease.binding, routes: { [name]: {kind:'direct'} }, provenance: { execution_scope: 'global', configuration: { agent_dir: '/fixture', config_cwd: '/fixture', project_trusted: false }, servers: {} } },
+    binding: { ...contribution(name, '1', released).lease.binding, routes: { [name]: {kind:'direct'} }, provenance: { servers: {} } },
   });
   f.mcpLeases.push(mcp('mcp_initial'));
   await f.runtime.prepareMcp('run', null);
@@ -566,7 +566,7 @@ it('source start, saved rebind and successor continuation preserve ordinary and 
     const mcp: McpToolLease = {
       ...contribution('mcp_read', 'v1', released).lease,
       slot: 'mcp',
-      binding: { ...contribution('mcp_read', 'v1', released).lease.binding, routes: {mcp_read:{kind:'direct'}}, provenance: { execution_scope: 'global', configuration: { agent_dir: '/fixture', config_cwd: '/fixture', project_trusted: false }, servers: {} } },
+      binding: { ...contribution('mcp_read', 'v1', released).lease.binding, routes: {mcp_read:{kind:'direct'}}, provenance: { servers: {} } },
     };
     f.mcpLeases.push(mcp);
     f.launch.selection.source = {

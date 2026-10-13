@@ -123,8 +123,8 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
   }
   if (options.selection) {
     const selected = options.selection;
-    if (binding.provenance.execution_scope !== selected.provenance.execution_scope || !isDeepStrictEqual(binding.provenance.configuration, selected.provenance.configuration)) throw new HostToolAdmissionError('mcp_configuration_source_changed');
     for (const [name, original] of Object.entries(selected.provenance.servers)) {
+      if (!isDeepStrictEqual(binding.provenance.servers[name]?.owner, original.owner)) throw new HostToolAdmissionError('mcp_configuration_source_changed');
       if (binding.provenance.servers[name]?.definition_version !== original.definition_version) throw new HostToolAdmissionError('mcp_saved_definition_unavailable');
     }
     binding.provenance.servers = Object.fromEntries(Object.entries(binding.provenance.servers).filter(([name]) => name in selected.provenance.servers));

@@ -57,7 +57,7 @@ function fixture(options: { changedCapabilities?: boolean; provider?: boolean } 
     credentialScope: async () => ({ reference: 'fake-grant', generation: 1 }),
   });
   const scope = { agentDir: root, configCwd: root, executionCwd: root, environmentId: 'http-fixture',
-    executionScope: 'global' as const, projectTrusted: false, sessionId: 'one' };
+    resourceOwner: { kind: 'local' as const }, executionScope: 'global' as const, projectTrusted: false, sessionId: 'one' };
   return {
     authority, scope, calls, sessions: () => sessions,
     async waitFor(uri: string) {

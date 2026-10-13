@@ -45,7 +45,7 @@ for (const mode of ['provider', 'oauth'] as const) it(`${mode} grants preserve t
   const firstBinding = store.binding('fixture', url);
   writeFileSync(join(root, 'mcp.json'), JSON.stringify({ mcpServers: { fixture: { url, exposure: 'direct', ...(mode === 'provider' ? { auth: { provider: 'fixture-provider' } } : {}) } } }));
   const authority = new McpAuthority({ createTransport: transport(calls), providerToken: async () => token, credentialScope: async () => grant });
-  const scope = { agentDir: root, configCwd: root, executionCwd: root, environmentId: 'fixture', executionScope: 'global' as const, projectTrusted: false, sessionId: 'one' };
+  const scope = { agentDir: root, configCwd: root, executionCwd: root, environmentId: 'fixture', resourceOwner: { kind: 'local' as const }, executionScope: 'global' as const, projectTrusted: false, sessionId: 'one' };
   const signal = new AbortController().signal;
   try {
     const lease = await authority.acquire(scope, { servers: ['fixture'] });

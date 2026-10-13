@@ -26,7 +26,7 @@ it('Pi MCP owner startup does not require a harness request before the session c
       observations.push(observation);
       void host.getSettings().then(settings => {
         observation.settingsAvailable = true;
-        const opened = authority.open({ agentDir, configCwd: root, executionCwd: root, environmentId: 'startup-fixture', executionScope: 'workspace', projectTrusted: settings.projectTrusted, sessionId: host.sessionId ?? 'unbound' });
+        const opened = authority.open({ agentDir, configCwd: root, executionCwd: root, environmentId: 'startup-fixture', resourceOwner: { kind: 'local' as const }, executionScope: 'workspace', projectTrusted: settings.projectTrusted, sessionId: host.sessionId ?? 'unbound' });
         host.respondHarness(host.sessionId ?? '', request.requestId, { ok: true, result: opened });
       }, error => host.respondHarness(host.sessionId ?? '', request.requestId, { ok: false, error: { code: 'failed', message: String(error) } }));
     } else if (params.operation === 'close') {

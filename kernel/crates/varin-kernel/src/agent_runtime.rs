@@ -2466,28 +2466,7 @@ fn mcp_binding(binding: McpBinding) -> Result<crate::host_tools::McpBinding, Ker
             .map_err(|_| KernelError::Protocol("MCP generation must be nonnegative".into()))?,
         resources: binding.resources,
         routes: binding.routes,
-        provenance: varin_runtime::catalog::launches::McpProvenance {
-            execution_scope: binding.provenance.execution_scope,
-            configuration: varin_runtime::catalog::launches::McpConfiguration {
-                agent_dir: binding.provenance.configuration.agent_dir,
-                config_cwd: binding.provenance.configuration.config_cwd,
-                project_trusted: binding.provenance.configuration.project_trusted,
-            },
-            servers: binding
-                .provenance
-                .servers
-                .into_iter()
-                .map(|(name, server)| {
-                    (
-                        name,
-                        varin_runtime::catalog::launches::McpServerSelection {
-                            definition_version: server.definition_version,
-                            resource_key: server.resource_key,
-                        },
-                    )
-                })
-                .collect(),
-        },
+        provenance: binding.provenance,
         tools: binding
             .tools
             .into_iter()

@@ -98,7 +98,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result})+'\\n')
     const Transport = base.constructor as new (options: Record<string, unknown>) => typeof base;
     return new Transport({ ...base.options, maxMessageBytes });
   } } : {}); cleanups.push(() => mcp.close());
-  const scope = (threadId: string) => ({ agentDir, configCwd: workspace, executionCwd: workspace,
+  const scope = (threadId: string) => ({ resourceOwner: { kind: 'local' as const }, agentDir, configCwd: workspace, executionCwd: workspace,
     environmentId: 'fixture-environment', executionScope: 'workspace' as const, projectTrusted: true, sessionId: threadId });
   const compositionErrors: string[]=[];
   const compositions=selectedServers==='composed'?new McpCompositions(mcp,code=>compositionErrors.push(code)):undefined;

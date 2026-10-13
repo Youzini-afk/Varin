@@ -1069,8 +1069,10 @@ The original supervisor supplies artifact identity for live draining owners as w
 `HostServiceRegistry.bindPinned` can derive an independent child pin from a retained generation. The
 child's fresh invocation scope and current permission policy are checked for every call.
 
-`mcp-child-preparation.ts` uses the same original `McpAuthority`. Required provenance includes explicit
-execution scope, configuration directory/trust and selected server definitions. Workspace MCP receives
+`mcp-child-preparation.ts` uses the same original `McpAuthority`. Each selected server retains its own resource owner,
+execution scope and configuration directory/trust alongside its frozen definition; the composition
+has no shared owner that can relabel a sibling. Current child preparation still requires a single
+original owner; mixed Host child composition belongs to the managed MCP continuation. Workspace MCP receives
 the child's real materialized cwd; global MCP keeps the neutral environment. One unused-launch CAS
 publishes the actual child binding, after which restoration requires it exactly. Direct tools preserve
 their original server and disambiguated public name; discovery cannot expand the frozen server set.

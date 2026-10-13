@@ -56,7 +56,7 @@ it('session-only trust reaches the Host MCP owner through out-of-band settings.c
     const settings = await request('settings.context', {}); contextReads++;
     const configCwd = ctx.actor.cwd ?? ctx.actor.authorityRoot ?? agentDir;
     if (resolve(settings.cwd) !== resolve(configCwd)) throw new Error('MCP session configuration scope changed');
-    return { agentDir, configCwd, executionCwd: ctx.actor.cwd ?? agentDir, environmentId: 'review', executionScope: 'workspace', projectTrusted: settings.projectTrusted, sessionId: ctx.sessionId };
+    return { agentDir, configCwd, executionCwd: ctx.actor.cwd ?? agentDir, environmentId: 'review', resourceOwner: { kind: 'local' as const }, executionScope: 'workspace', projectTrusted: settings.projectTrusted, sessionId: ctx.sessionId };
   });
   const controller = new HostController({ agentDir, transport }); controller.start();
   const bind = (snapshot: SessionSnapshot): HarnessServiceContext => ({ sessionId: snapshot.sessionId, workspaceId: 'review', actor: { authorityInstanceId: 'review', workerId: 'review', workerGeneration: ++serial, sessionId: snapshot.sessionId, cwd: snapshot.cwd, authorityRoot: root, workspaceId: 'review', grantedCapabilities: [] }, authorizedPaths: [], signal: new AbortController().signal });

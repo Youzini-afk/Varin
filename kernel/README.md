@@ -240,7 +240,11 @@ MCP composition prepares each direct dependency independently over the shared Ho
 contributions publish at a closed model exchange; unrelated slow preparation does not delay the model.
 Durable schema/configuration identity is separate from the ephemeral live owner handle. Re-enabling an
 identically described dependency creates a fresh live binding while old revoked exchanges stay revoked.
-Recovery waits only for its recorded dependencies and restores that exact selection. Retired connections
+Each selected server freezes its resource owner, configuration/trust and execution scope. Child
+source requirements and writer drainage follow the selected tool's server rather than the whole
+composition; original resource/interaction cleanup keeps its own scope even after server removal.
+Recovery waits only for its recorded dependencies and restores that exact selection. Ready originals,
+including service-only contributions, do not wait for an unrelated replacement candidate. Retired connections
 drain their holders/calls, and Host shutdown awaits connection cleanup already in progress.
 
 ## Selected context composition

@@ -18,7 +18,7 @@ export function createMcpResourceRecovery(options: McpOriginalOwnerOptions & {
             binding: McpBinding;
         }, 'runtime.mcp.resource.context'>('runtime.mcp.resource.context', { operationId: op.operationId }, signal);
         const lease = await original(op.runId, selected.binding.endpoint, context, signal);
-        const configuration = context.binding.provenance.configuration;
+        const configuration = context.binding.provenance.servers[selected.binding.endpoint.server]!.owner.configuration;
         const allowed = async () => {
             const current = await options.currentPolicy(configuration.config_cwd, configuration.project_trusted);
             if (evaluateGate('mcp_subscribe_resource', { server: selected.binding.endpoint.server, schemaVersion: selected.binding.schemaVersion, uri: selected.binding.uri }, current).decision === 'deny')

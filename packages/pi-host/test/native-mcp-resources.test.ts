@@ -35,7 +35,7 @@ function fixture(subscribe = true) {
       } };
   };
   const authority = new McpAuthority({ createTransport, providerToken: async () => `token-${grant}`, credentialScope: async () => ({ reference: `grant-${grant}`, generation: 1 }) });
-  const scope = { agentDir: root, configCwd: root, executionCwd: root, environmentId: 'host:global', executionScope: 'global' as const, projectTrusted: false, sessionId: 'thread:one' };
+  const scope = { agentDir: root, configCwd: root, executionCwd: root, environmentId: 'host:global', resourceOwner: { kind: 'local' as const }, executionScope: 'global' as const, projectTrusted: false, sessionId: 'thread:one' };
   return { authority, scope, sent, peers, rejectSubscribe(){rejectSubscribe=true;}, rejectCleanup(){rejectCleanup=true;}, hold() { held = true; }, finish() { held = false; for (const release of pending.splice(0)) release(); }, changeGrant() { grant++; },
     async close() { await authority.close(); rmSync(root, { recursive: true, force: true }); } };
 }

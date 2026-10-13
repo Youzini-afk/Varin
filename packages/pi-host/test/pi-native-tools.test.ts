@@ -145,7 +145,7 @@ test("native MCP, codemode, permissions, nested events, and shutdown share one o
   const mcpRuntime = await loadMcpRuntime(); let transports = 0;
   const authority = new McpAuthority({ createTransport: (...args) => { transports++; return mcpRuntime.createDefaultTransport(...args); } });
   const ownerScope = { agentDir, configCwd: root, executionCwd: root, environmentId: "fixture",
-    executionScope: "workspace" as const, projectTrusted: true, sessionId: manager.getSessionId() };
+    resourceOwner: { kind: 'local' as const }, executionScope: "workspace" as const, projectTrusted: true, sessionId: manager.getSessionId() };
   const host = createMcpHarnessServices(authority, () => ownerScope);
   const hostBridge = { request: async (method: string, params: unknown, options?: { signal?: AbortSignal }) => {
     assert.equal(method, "mcp.owner");

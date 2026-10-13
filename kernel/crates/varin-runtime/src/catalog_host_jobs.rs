@@ -509,7 +509,9 @@ impl Catalog {
             }
             _ => None,
         };
-        if key != Some(&endpoint.resource_key) {
+        if key != Some(&endpoint.resource_key)
+            || frozen.provenance.servers.get(&endpoint.server)
+                .is_none_or(|server| !server.owner.accepts_source(snapshot.frozen.source.as_ref())) {
             return Err(RuntimeError::Conflict(
                 "Task server differs from the selected invocation".into(),
             ));

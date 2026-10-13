@@ -976,12 +976,6 @@ mod tests {
                 resources: std::collections::BTreeMap::new(),
                 routes: std::collections::BTreeMap::new(),
                 provenance: varin_runtime::catalog::launches::McpProvenance {
-                    execution_scope: varin_runtime::catalog::launches::McpExecutionScope::Global,
-                    configuration: varin_runtime::catalog::launches::McpConfiguration {
-                        agent_dir: "/fixture/agent".into(),
-                        config_cwd: "/fixture/project".into(),
-                        project_trusted: true,
-                    },
                     servers: Default::default(),
                 },
             };
@@ -1207,12 +1201,6 @@ mod tests {
             resources: [("query".into(), "bound-resource".into())].into(),
             routes: [("query".into(), varin_runtime::McpRoute::Direct)].into(),
             provenance: varin_runtime::catalog::launches::McpProvenance {
-                execution_scope: varin_runtime::catalog::launches::McpExecutionScope::Global,
-                configuration: varin_runtime::catalog::launches::McpConfiguration {
-                    agent_dir: "/fixture/agent".into(),
-                    config_cwd: "/fixture/project".into(),
-                    project_trusted: true,
-                },
                 servers: Default::default(),
             },
         };

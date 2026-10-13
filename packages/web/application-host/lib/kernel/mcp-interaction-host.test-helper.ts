@@ -39,7 +39,7 @@ export async function createInteractionFixture(options: { root: string; mode: 'h
   const consumer = createInteractionConsumer(runtime, models);
   const scopes: McpCompositionScope[] = [];
   let nested: Awaited<ReturnType<typeof import('./mcp-consumer-host.test-helper.js').createMcpConsumers>> | undefined;
-  const baseScope = { agentDir, configCwd: agentDir, executionCwd: agentDir, environmentId: 'fixture-host:global', executionScope: 'global' as const, projectTrusted: false };
+  const baseScope = { resourceOwner: { kind: 'local' as const }, agentDir, configCwd: agentDir, executionCwd: agentDir, environmentId: 'fixture-host:global', executionScope: 'global' as const, projectTrusted: false };
   // The same product authority may connect for Pi first. That must not make the subsequent real
   // Native call's negotiated capability depend on connection order or create a second connection.
   const firstLease = await authority.acquire({ ...baseScope, sessionId: 'pi:first' }, { servers: ['original'] });

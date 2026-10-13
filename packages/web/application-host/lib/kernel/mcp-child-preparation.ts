@@ -1,5 +1,6 @@
 /** Original MCP definitions rebound to an admitted child's own execution view.
  * Configuration, transports and credentials remain owned by the shared McpAuthority. */
+import { isDeepStrictEqual } from 'node:util';
 import type { McpAuthority } from '@varin/pi-host/mcp-authority';
 import type { PermissionPolicy } from '@varin/protocol';
 import type { McpPreparation } from './agent-runtime-client.js';
@@ -27,8 +28,18 @@ export function createChildMcpPreparer(owners: {
       throw new Error(
         'Child MCP preparation requires its original dependency selection',
       );
-    const configuration = selection.provenance.configuration;
-    const needsWorkspace = selection.provenance.execution_scope === 'workspace';
+    // Empty server selections contain only Catalog-owned controls. Their neutral local
+    // scope supplies no endpoint authority. Mixed owners require contribution composition.
+    const selectedOwners = Object.values(selection.provenance.servers).map(server => server.owner);
+    const owner = selectedOwners[0] ?? { resource_owner: { kind: 'local' as const },
+      configuration: { agent_dir: owners.agentDir, config_cwd: owners.agentDir, project_trusted: false },
+      execution_scope: 'global' as const };
+    if (selectedOwners.some(selected => !isDeepStrictEqual(selected, owner)))
+      throw new Error('Child MCP requires composition of its original server owners');
+    if (owner.resource_owner.kind !== 'local')
+      throw new Error('Child MCP requires its original target Host execution owner');
+    const configuration = owner.configuration;
+    const needsWorkspace = owner.execution_scope === 'workspace';
     if (needsWorkspace && input.source?.resourceOwner.kind === 'managed_host')
       throw new Error('Project MCP requires its original target Host execution owner. Managed file sources currently support coordinator-global MCP only.');
     if (needsWorkspace && (!input.source || !input.executionCwd))
@@ -70,6 +81,7 @@ export function createChildMcpPreparer(owners: {
       .map(([name]) => name);
     const lease = await owners.authority.acquire(
       {
+        resourceOwner: owner.resource_owner,
         agentDir: configuration.agent_dir,
         configCwd: configuration.config_cwd,
         projectTrusted: configuration.project_trusted,
@@ -77,7 +89,7 @@ export function createChildMcpPreparer(owners: {
         environmentId: workspace
           ? `${owners.hostId}:${input.source!.executionWorkspaceId}`
           : `${owners.hostId}:global`,
-        executionScope: selection.provenance.execution_scope,
+        executionScope: owner.execution_scope,
         sessionId: `agent:${input.threadId}`,
       },
       {

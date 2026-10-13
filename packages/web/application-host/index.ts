@@ -3106,6 +3106,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       ? await documentsAuthority.admitWorkspaceRegistration(input.source.workspaceId, signal) : undefined;
     const configCwd = workspace?.canonicalPath ?? mcpAgentDir;
     const scope = {
+      resourceOwner: { kind: 'local' as const },
       agentDir: mcpAgentDir, configCwd, executionCwd: workspace ? input.executionCwd! : mcpAgentDir,
       environmentId: workspace ? `${hostId}:${input.source!.executionWorkspaceId}` : `${hostId}:global`,
       executionScope: workspace ? 'workspace' as const : 'global' as const,
@@ -4705,6 +4706,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const configCwd = ctx.actor.cwd ?? ctx.actor.authorityRoot ?? mcpAgentDir;
     if (path.resolve(settings.cwd) !== path.resolve(configCwd)) throw new Error('MCP session configuration scope changed');
     return {
+      resourceOwner: { kind: 'local' as const },
       agentDir: mcpAgentDir, configCwd, executionCwd: ctx.actor.cwd ?? mcpAgentDir,
       // MCP remains a Host-owned capability. A remote shell placement does not relocate it.
       environmentId: ctx.workspaceId ? `${hostId}:${ctx.workspaceId}` : `${hostId}:global`,

@@ -21,6 +21,10 @@ const retain = (generation: Generation) => { generation.references++; return gen
 const release = (generation: Generation) => { if (--generation.references === 0) generation.lease.release(); };
 const generation = (lease: McpAuthorityLease): Generation => ({ identity: randomUUID(), lease, references: 1, revoked: new Map() });
 const targetKey = (name: string, version: string) => JSON.stringify([name, version]);
+function freeze<T>(value: T): T {
+  if (value && typeof value === 'object') { for (const child of Object.values(value)) freeze(child); Object.freeze(value); }
+  return value;
+}
 function revoke(generation: Generation, tools?: readonly string[]): void {
   if (!tools) for (const server of generation.lease.binding.servers.filter(server => server.selected)) {
     const key = `server:${server.name}`;
@@ -61,9 +65,10 @@ class Scope {
 
   constructor(readonly authority: McpAuthority, readonly scope: McpAuthorityScope, gateway: McpAuthorityLease,
     private readonly failed: (code: string, reference: string) => void) {
+    this.scope = freeze(structuredClone(scope));
     this.gateway = generation(gateway);
     this.apply(gateway, false);
-    void authority.subscribe(scope, change => this.refresh(change)).then(unsubscribe => {
+    void authority.subscribe(this.scope, change => this.refresh(change)).then(unsubscribe => {
       if (this.closed) unsubscribe(); else {
         this.unsubscribe = unsubscribe;
         // Close the initial read/watch-registration gap using the same configuration owner.
@@ -163,7 +168,6 @@ class Scope {
     }
   }
   private requiredServers(selection: McpCompositionSelection): Set<string> {
-    if (selection.provenance.execution_scope !== this.gateway.lease.binding.provenance.execution_scope || !isDeepStrictEqual(selection.provenance.configuration, this.gateway.lease.binding.provenance.configuration)) throw new Error('mcp_configuration_source_changed');
     for (const [name, expected] of Object.entries(selection.provenance.servers)) {
       // A ready contribution can legitimately retain its original definition while a new
       // candidate prepares. The current gateway must not relabel that endpoint's identity.
@@ -173,7 +177,7 @@ class Scope {
     }
     const resources = new Set(selection.tools.filter(tool => ['direct','direct_task'].includes(selection.routes[tool.name]?.kind ?? '')).map(tool => selection.resources[tool.name]).filter(value => typeof value === 'string'));
     const selected = new Set<string>();
-    for (const server of this.gateway.lease.binding.servers) if (resources.delete(server.resourceKey)) selected.add(server.name);
+    for (const [name, server] of Object.entries(selection.provenance.servers)) if (resources.delete(server.resource_key)) selected.add(name);
     if (resources.size) throw new Error('mcp_saved_dependency_unavailable');
     return selected;
   }
@@ -186,8 +190,9 @@ class Scope {
       for (const server of required) {
         const slot = this.servers.get(server);
         if (!slot) throw new Error('mcp_saved_dependency_unavailable');
+        if (slot.current) continue;
         if (slot.preparation) { preparing = true; continue; }
-        if (!slot.current) throw new Error('mcp_saved_dependency_failed');
+        throw new Error('mcp_saved_dependency_failed');
       }
       if (!preparing) {
         const result = this.snapshot(selection);
@@ -208,10 +213,12 @@ class Scope {
   }
   snapshot(selection?: McpCompositionSelection): McpAuthorityLease {
     if (this.closed) throw new Error('mcp_composition_closed');
-    const required = selection ? this.requiredServers(selection) : undefined;
+    if (selection) this.requiredServers(selection);
     const gateway = retain(this.gateway);
     const versions = selection ? new Set(selection.tools.map(tool => tool.version)) : undefined;
-    const contributions = [...this.servers].flatMap(([name, slot]) => slot.current && (!required || required.has(name)) ? [retain(slot.current)] : []);
+    // Admitted servers may be used through resources/prompts without a direct tool. Keep
+    // their exact ready contribution too, instead of substituting the current gateway.
+    const contributions = [...this.servers].flatMap(([name, slot]) => slot.current && (!selection || name in selection.provenance.servers) ? [retain(slot.current)] : []);
     const targets = new Map<string, { generation: Generation; original: McpAuthorityTool }>();
     const discovered = new Map<string, Generation>();
     const source = contributions.flatMap(owner => owner.lease.binding.tools.filter(tool => tool.exposure !== 'direct' || !versions || versions.has(tool.schemaVersion)).map(tool => ({ owner, tool })));
@@ -237,7 +244,7 @@ class Scope {
       if (original) provenance.servers[server.name] = structuredClone(original);
     }
     if (selection) provenance.servers = Object.fromEntries(Object.entries(provenance.servers).filter(([name]) => name in selection.provenance.servers));
-    const binding = Object.freeze({ ...gateway.lease.binding, provenance, tools: Object.freeze(tools), readiness, servers: readiness.servers,
+    const binding = Object.freeze({ ...gateway.lease.binding, provenance: freeze(provenance), tools: Object.freeze(tools), readiness, servers: readiness.servers,
       generation: 1 + Number.parseInt(createHash('sha256').update(JSON.stringify([gateway.lease.binding.generation,
         readiness.configErrorCount, tools.filter(tool => tool.exposure === 'direct').map(tool => [tool.name, tool.schemaVersion, tool.exposure])])).digest('hex').slice(0, 12), 16) });
     let released = false;
