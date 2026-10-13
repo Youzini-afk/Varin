@@ -71,10 +71,11 @@ substitutes a role label or records expressions, typed text, URLs with credentia
 An authenticated remote observer can read this same journal without requesting control.
 
 `computer_environment` inspects the accepted Run's frozen source and original desktop assignments.
-It explicitly reports that native placement mutation and service forwarding are unavailable.
-The existing Pi placement/forward owners require a Pi Registry session; Native work does not invent
-one or represent a still-live listener as a completed short tool. Native placement/forward Jobs
-remain separate integration work.
+It reports that this Run's file/process placement stays frozen; choosing a source for a later
+execution does not migrate accepted work. Service forwarding has its own ordinary
+`environment_forward` tools and original Host listener owner, described in
+[Harness ownership](../harness/DOCUMENTATION.md#service-forward-ownership). Computer assignment
+does not select or redirect their target, and this view does not duplicate their availability state.
 
 Managed desktop preparation and start/stop use this same service and assignment. Discovery may
 register the real configured Linux session as unprepared/unavailable, but does not install or start

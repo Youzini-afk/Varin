@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 26;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 27;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -172,6 +172,21 @@ pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
 #[derive(Clone, Debug, Deserialize)]
 #[serde(transparent)]
 pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupFilePrepareParams {
+    pub(crate) coordinator_host_id: String,
+    pub(crate) repeat: Option<varin_runtime::catalog::followups::FollowupRepeat>,
+    pub(crate) key: String,
+    pub(crate) run_id: String,
+    pub(crate) trigger: varin_runtime::catalog::followups::FollowupRegistrationTrigger,
+    pub(crate) instruction: String,
+}
+
+pub(crate) type SourceReadScopeParams = crate::source_resources::SourceReadScopeParams;
+
+pub(crate) type SourceFileObservationParams = crate::source_resources::SourceFileObservationParams;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -576,6 +591,12 @@ pub(crate) struct HostJobAcceptParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct OperationParams {
+    pub(crate) operation_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct HostJobTerminalParams {
     pub(crate) binding: varin_runtime::catalog::host_jobs::HostJobBinding,
     pub(crate) outcome: varin_runtime::Outcome,
@@ -750,7 +771,7 @@ pub(crate) struct FollowupRegisterAdmissionParams {
     pub(crate) run_id: String,
     pub(crate) trigger: varin_runtime::catalog::followups::FollowupRegistrationTrigger,
     pub(crate) instruction: String,
-    pub(crate) file_authority: Option<FollowupFileAuthority>,
+    pub(crate) file_authority: Option<crate::file_observation::Admission>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1190,12 +1211,6 @@ pub(crate) struct PermissionDecideParams {
 pub(crate) struct QuestionAnswerParams {
     pub(crate) operation_id: String,
     pub(crate) answer: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct OperationParams {
-    pub(crate) operation_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2655,12 +2670,6 @@ pub(crate) struct InitialContext {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct FollowupFileAuthority {
-    pub(crate) grant_id: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct PlanForkCaptureParams {
     pub(crate) source_thread_id: String,
     pub(crate) source_branch_id: String,
@@ -3096,6 +3105,26 @@ pub(crate) struct ContextFragment {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "runtime.followup.registration.prepare" => {
+            serde_json::from_value::<FollowupFilePrepareParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "source.authority.inspect_read_scope" => {
+            serde_json::from_value::<SourceReadScopeParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "source.authority.close_read_scope" => {
+            serde_json::from_value::<SourceReadScopeParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "source.file_observation" => {
+            serde_json::from_value::<SourceFileObservationParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.bot.scope.remove" => serde_json::from_value::<BotScopeSuspension>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
@@ -3350,6 +3379,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.host_job.pending" => serde_json::from_value::<KernelEmptyParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.host_job.acceptance" => serde_json::from_value::<OperationParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.host_job.terminal" => {

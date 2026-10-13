@@ -339,6 +339,7 @@
   }
 ],
   "runtimeExports": [
+ "FileObservationAuthority",
   "InferenceReceiptPendingParams",
   "InferenceSessionParams",
   "InferenceSessionStatus",
@@ -807,7 +808,7 @@
   "MediaReadChunk",
   "ChildSourceAuthority"
 ],
-  "protocolVersion": 26,
+  "protocolVersion": 27,
   "runtimeStructs": {"ContentCollectionReport":{"fields":{"status":{"type":"ContentCollectionStatus"},"phase":{"type":"ContentCollectionPhase"},"removedObjects":{"type":"number"},"removedBytes":{"type":"number"},"removedStagingFiles":{"type":"number"},"reason":{"type":"string | null"}}},"ModelSessionConfiguration":{"fields":{"providerId":{"type":"string","optional":true},"providerFamily":{"type":"string"},"model":{"type":"string"},"endpoint":{"type":"string"},"credentialEnvironment":{"type":"string | null"},"allowAnonymous":{"type":"boolean"},"acceptsImages":{"type":"boolean","optional":true},"configurationGeneration":{"type":"number"},"maxOutputTokens":{"type":"number | null"},"azureDeployment":{"type":"string | null","optional":true},"azureApiVersion":{"type":"string | null","optional":true},"legacyMaxTokens":{"type":"boolean","optional":true},"includeStreamUsage":{"type":"boolean","optional":true},"reasoningEffort":{"type":"string | null","optional":true},"anthropicOauth":{"type":"boolean","optional":true},"adapterId":{"type":"string","optional":true},"adapterVersion":{"type":"string","optional":true},"contextWindowTokens":{"type":"number","optional":true},"thinkingLevel":{"type":"string","optional":true},"modelOptions":{"type":"unknown","optional":true}}},"KernelWorkingResultCandidate":{"fields":{"publicationId":{"type":"string"},"candidateOperationId":{"type":"string"},"workspaceId":{"type":"string"},"branchId":{"type":"string"},"root":{"type":"string"},"baseRoot":{"type":"string"},"writeRevision":{"type":"number"},"pinId":{"type":"string"},"basePinId":{"type":"string"}}}},
   "runtimeEnums": {
     "McpInteractionMode": ["Form", "Url", "Sampling"],
@@ -1096,6 +1097,10 @@
   "response": {"v": 1, "kind": "response", "id": "request-id", "ok": true, "result": {}},
   "requestUnion": true,
   "methodParams": {
+"runtime.followup.registration.prepare":"FollowupFilePrepareParams",
+"source.authority.inspect_read_scope":"SourceReadScopeParams",
+"source.authority.close_read_scope":"SourceReadScopeParams",
+"source.file_observation":"SourceFileObservationParams",
 "runtime.bot.scope.remove":"BotScopeSuspension","runtime.bot.scope.inspect":"BotScopeParams","runtime.bot.history.read":"BotHistoryReadParams","runtime.bot.gate.publish":"BotExecutionGate","runtime.bot.thread.create":"BotThreadCreateParams","runtime.bot.scope.suspend":"BotScopeSuspension","runtime.bot.scope.status":"BotScopeSuspension","runtime.bot.scope.resume":"BotScopeSuspension",
 
 "runtime.memory_work.admit":"MemoryWorkAdmit",
@@ -1148,6 +1153,7 @@
     "runtime.host_job.accept": "HostJobAcceptParams",
     "runtime.host_job.sources": "RunParams",
     "runtime.host_job.pending": "KernelEmptyParams",
+    "runtime.host_job.acceptance":"OperationParams",
     "runtime.host_job.terminal": "HostJobTerminalParams",
     "runtime.host_job.observe": "HostJobObserveParams",
     "runtime.calendar.projects": "KernelEmptyParams",
@@ -1428,6 +1434,15 @@
 "source.resource.release": "SourceResourceControlParams"
   },
   "dto": {
+"FileObservationAuthority":{"raw": "export interface FileObservationAuthority {coordinatorHostId:string;authorityId:string;resourceEpoch:string;}"},
+"FileObservationRegistrationScope":{"raw": "export interface FileObservationRegistrationScope {coordinatorHostId:string;branchId:string;key:string;}"},
+"FileObservationRequest":{"raw": "export interface FileObservationRequest {resource_authority:FileObservationAuthority|null;registration_scope:FileObservationRegistrationScope|null;followup_id:string;source_index:number;source_run_id:string;thread_id:string;actor:FollowupActor;source:LaunchSource;path:string;condition:FileCondition;intent_ref:unknown;}", "rustType": "varin_runtime::catalog::followups::FileObservationRequest"},
+"FollowupFilePreparation":{"raw": "export type FollowupFilePreparation = {followup:Followup;authority:null;scope:null;source:null} | {followup:null;authority:FileObservationAuthority|null;scope:Extract<SourceAuthorityScope,{kind:'source_read'}>;source:LaunchSource;};"},
+"FollowupFilePrepareParams":{"fields": {"coordinatorHostId": {"type": "string"}, "repeat": {"type": "FollowupRepeat", "optional": true}, "key": {"type": "string"}, "runId": {"type": "string"}, "trigger": {"type": "FollowupRegistrationTrigger"}, "instruction": {"type": "string"}}},
+"SourceReadScopeParams":{"raw": "export interface SourceReadScopeParams {principalId:string;coordinatorHostId:string;scope:Extract<SourceAuthorityScope,{kind:'source_read'}>;source:LaunchSource;}", "rustType": "crate::source_resources::SourceReadScopeParams"},
+"SourceReadScopeResult":{"raw": "export interface SourceReadScopeResult {closed:boolean;authorities:Array<{authorityId:string;resourceEpoch:string;phase:'preparing'|'ready'|'retired'|'revoked';current:boolean}>;}"},
+"SourceFileObservationAction":{"raw": "export type SourceFileObservationAction = {kind:'accept'|'release';request:FileObservationRequest} | {kind:'observe';request:FileObservationRequest;watchId:string|null;after:FileWatchPosition|null;reopen:boolean;current:FileState|null;ready:boolean};", "rustType": "crate::source_resources::SourceFileObservationAction"},
+"SourceFileObservationParams":{"raw": "export interface SourceFileObservationParams extends SourceAuthorityAddress {requestId:string;clientCapabilities:string[];action:SourceFileObservationAction;}", "rustType": "crate::source_resources::SourceFileObservationParams"},
 "BotScopeParams":{"fields":{"botId":{"type":"string"}}},"BotHistoryReadParams":{"fields":{"botId":{"type":"string"},"threadId":{"type":"string"},"branchId":{"type":"string"},"headId":{"type":"string"},"itemId":{"type":"string"}}},"BotScopeRun":{"fields":{"threadId":{"type":"string"},"branchId":{"type":"string"},"runId":{"type":"string"},"state":{"type":"RunState"},"cancelRequested":{"type":"boolean"}}},"BotScopeView":{"fields":{"botId":{"type":"string"},"threads":{"type":"ThreadSummary[]"},"runs":{"type":"BotScopeRun[]"}}},"BotExecutionGate":{"fields":{"botId":{"type":"string"},"profileRevision":{"type":"number"},"activityOperationId":{"type":"string | null"},"permitted":{"type":"boolean"}},"rustType":"varin_runtime::catalog::bot::BotGate"},"BotScopeSuspension":{"fields":{"botId":{"type":"string"},"profileRevision":{"type":"number"},"activityOperationId":{"type":"string"}},"rustType":"varin_runtime::catalog::bot::BotSuspension"},"BotThreadCreateParams":{"fields":{"botId":{"type":"string"},"threadId":{"type":"string"},"branchId":{"type":"string"}}},"BotKernelScopeStatus":{"fields":{"suspension":{"type":"BotScopeSuspension"},"kernelEpoch":{"type":"number"},"sourceProfileRevision":{"type":"number | null"},"currentKernelWorkersDrained":{"type":"boolean"},"unprovenOperationStopIds":{"type":"string[]"},"unknownEffectOperationIds":{"type":"string[]"},"unresolvedModelRequestIds":{"type":"string[]"}},"rustType":"varin_runtime::catalog::bot::BotKernelScopeStatus"},"BotScopeResume":{"fields":{"resumedRunIds":{"type":"string[]"},"blockedRunIds":{"type":"string[]"}},"rustType":"varin_runtime::catalog::bot::BotScopeResume"},
 
 "MemoryWorkMode":{"raw":"export type MemoryWorkMode = 'automatic' | 'selection';","rustType":"varin_runtime::catalog::memory_work::MemoryWorkMode"},
@@ -1743,13 +1758,13 @@
     "FileWatchPosition": {"fields":{"sourceId":{"type":"string"},"generation":{"type":"number"},"sequence":{"type":"number"}}},
     "FileProof": {"raw":"export type FileProof = 'exists' | 'snapshot_difference' | 'targeted_invalidation' | 'managed_ready';"},
     "FollowupFileEvidence": {"fields":{"kind":{"type":"'file'"},"receipt_id":{"type":"string"},"condition":{"type":"FileCondition"},"path":{"type":"string"},"state":{"type":"FileState"},"proof":{"type":"FileProof"},"position":{"type":"FileWatchPosition | null"},"gap":{"type":"boolean"},"observed_at_ms":{"type":"number"}}},
-    "FollowupFileSourceState": {"fields":{"receipt_id":{"type":"string"},"revision":{"type":"number"},"baseline":{"type":"FileState | null"},"current":{"type":"FileState | null"},"immutable":{"type":"boolean"},"watch_id":{"type":"string | null"},"position":{"type":"FileWatchPosition | null"},"gap":{"type":"boolean"},"failure_code":{"type":"string | null"},"released":{"type":"boolean"}}},
+    "FollowupFileSourceState": {"fields":{"resource_authority":{"type":"FileObservationAuthority | null"},"receipt_id":{"type":"string"},"revision":{"type":"number"},"baseline":{"type":"FileState | null"},"current":{"type":"FileState | null"},"ready":{"type":"boolean"},"immutable":{"type":"boolean"},"watch_id":{"type":"string | null"},"position":{"type":"FileWatchPosition | null"},"gap":{"type":"boolean"},"failure_code":{"type":"string | null"},"released":{"type":"boolean"}}},
     "FollowupPendingRegistration": {"fields":{"id":{"type":"string"},"sourceRunId":{"type":"string"},"threadId":{"type":"string"},"branchId":{"type":"string"},"paths":{"type":"string[]"}}},
     "FollowupPendingParams": {"fields":{"threadId":{"type":"string"},"branchId":{"type":"string"},"after":{"type":"string","optional":true}}},
     "FollowupPendingResult": {"fields":{"registrations":{"type":"FollowupPendingRegistration[]"},"nextCursor":{"type":"string | null"}}},
     "FollowupRegistrationCancelParams": {"fields":{"key":{"type":"string"},"runId":{"type":"string"}}},
     "FollowupRegistrationCancelResult": {"fields":{"followup":{"type":"Followup | null"}}},
-    "FollowupFileAuthority": {"fields":{"grantId":{"type":"string"}}},
+    "FollowupFileAuthority": {"raw": "export type FollowupFileAuthority = {kind:'local';grantId:string} | ({kind:'managed_host'} & FileObservationAuthority);", "rustType": "crate::file_observation::Admission"},
     "FollowupRegisterAdmissionParams": {"fields":{"repeat":{"type":"FollowupRepeat","optional":true},"key":{"type":"string"},"runId":{"type":"string"},"trigger":{"type":"FollowupRegistrationTrigger"},"instruction":{"type":"string"},"fileAuthority":{"type":"FollowupFileAuthority","optional":true}}},
     "FileObservationTarget": {"fields":{"receiptId":{"type":"string"},"followupId":{"type":"string"},"sourceIndex":{"type":"number"},"sourceRunId":{"type":"string"},"threadId":{"type":"string"},"source":{"type":"LaunchSource"},"physicalRoot":{"type":"LiveRoot | null"},"path":{"type":"string"},"immutable":{"type":"boolean"}}},
     "FileObservationKey": {"fields":{"followupId":{"type":"string"},"generation":{"type":"number"},"sourceIndex":{"type":"number"},"receiptId":{"type":"string"},"observationRevision":{"type":"number"}}},
@@ -1760,9 +1775,9 @@
     "FollowupFileObserveResult": {"fields":{"accepted":{"type":"boolean"},"followup":{"type":"Followup"}}},
     "FollowupFileReleaseParams": {"fields":{"followupId":{"type":"string"},"generation":{"type":"number"},"sourceIndex":{"type":"number"},"receiptId":{"type":"string"},"observationRevision":{"type":"number"}}},
     "FollowupFileReleaseResult": {"fields":{"released":{"type":"boolean"}}},
-    "FileObservationOwnerQuery": {"raw":"export type FileObservationOwnerQuery = { action: 'open'; target: FileObservationTarget } | { action: 'begin'; target: FileObservationTarget; watchId: string; after: FileWatchPosition | null } | { action: 'finish'; target: FileObservationTarget; watchId: string; token: string; after: FileWatchPosition | null } | { action: 'close'; receiptId: string; watchId: string } | { action: 'discard'; receiptId: string; watchId: string; token: string };"},
-    "FileObservationOwnerResult": {"raw":"export type FileObservationOwnerResult = { ok: false; code: string } | { ok: true; watchId: string; position: FileWatchPosition } | { ok: true; token: string; position: FileWatchPosition } | { ok: true; position: FileWatchPosition; managedIdle: boolean; stable: boolean; gap: boolean; targetedChange: boolean } | { ok: true; closed: boolean } | { ok: true; discarded: boolean };"},
-    "FileObservationOwnerHint": {"raw":"export type FileObservationOwnerHint = {v: 1; kind: 'file-observation-invalidated'; kernelEpoch: string} & ({scope: 'root'; rootId: string; canonicalRoot: string} | {scope: 'receipt'; receiptId: string});"},
+    "FileObservationOwnerQuery": {"raw":"export type FileObservationOwnerQuery = { action: 'open'; target: FileObservationTarget } | { action: 'resume'; target: FileObservationTarget } | { action: 'release'; receiptId: string } | { action: 'begin'; target: FileObservationTarget; watchId: string; after: FileWatchPosition | null } | { action: 'finish'; target: FileObservationTarget; watchId: string; token: string; after: FileWatchPosition | null } | { action: 'close'; receiptId: string; watchId: string } | { action: 'discard'; receiptId: string; watchId: string; token: string };"},
+    "FileObservationOwnerResult": {"raw":"export type FileObservationOwnerResult = { ok: false; code: string } | { ok: true; watchId: string; position: FileWatchPosition; allocated?:boolean } | { ok: true; token: string; position: FileWatchPosition } | { ok: true; position: FileWatchPosition; managedIdle: boolean; stable: boolean; gap: boolean; targetedChange: boolean; readRequired:boolean } | { ok: true; closed: boolean } | { ok: true; discarded: boolean };"},
+    "FileObservationOwnerHint": {"raw":"export type FileObservationOwnerHint = {v: 1; kind: 'file-observation-invalidated'; kernelEpoch: string} & ({scope: 'root'; rootId: string; canonicalRoot: string} | {scope: 'receipt'; receiptId: string; revoked:boolean});"},
     "FollowupSource": {"raw":"export type FollowupSource = { kind: 'at'; at_ms: number } | { kind: 'process_stopped'; operation_id: string } | { kind: 'job_stopped'; operation_id: string } | { kind: 'file'; path: string; condition: FileCondition } | { kind: 'artifact'; operation_id: string; artifact_id?: string; name?: string } | { kind: 'collection'; operation_id: string } | { kind: 'log_literal'; operation_id: string; stream: LogStream; from_offset: number; literal_bytes: number } | { kind: 'log_end'; operation_id: string; stream: LogStream } | { kind: 'metric'; machine_id: string; metric: MetricKind; gpu_uuid?: string; predicate: MetricPredicate; threshold: number };"},
     "FollowupLeafEvidence": {"raw":"export type FollowupLeafEvidence = { kind: 'at'; at_ms: number; observed_at_ms: number } | { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string } | { kind: 'job_stopped'; binding: HostJobBinding; outcome: Outcome; effect: Effect; receipt_identity: string; receipt_epoch: string } | FollowupFileEvidence | FollowupArtifactEvidence | FollowupCollectionEvidence | FollowupLogEvidence | { kind: 'metric'; fact: FollowupMetricEvidence };"},
     "FollowupSourceObservation": {"fields":{"accepted_cursor":{"type":"number"},"trigger_cursor":{"type":"number"},"evidence":{"type":"FollowupLeafEvidence"}}},
@@ -2471,7 +2486,7 @@
       "raw": "export interface FamilyItem { threadId: string; branchId: string; runId: string | null; headId: string | null; itemId: string; format: 'conversation_json'; text: string; offset: number; nextOffset: number | null; totalBytes: number }"
     },
     "HostJobSubject": {
-      "raw": "export type HostJobSubject = {kind:'workspace';workspaceId:string;subjectId:string} | {kind:'mcp';endpoint:McpEndpoint;dispatchId:string};",
+      "raw": "export type HostJobSubject = {kind:'workspace';workspaceId:string;subjectId:string} | {kind:'mcp';endpoint:McpEndpoint;dispatchId:string} | {kind:'environment_forward';hostId:string;hostEpoch:string;target:SourceResourceOwner;serviceHost:string;servicePort:number};",
       "rustType": "varin_runtime::catalog::host_jobs::HostJobSubject"
     },
     "McpTaskStatus": {
@@ -2709,6 +2724,10 @@
 "ChildSourceDelegation": {"rustType":"varin_runtime::catalog::dispatch::ChildSourceDelegation","fields":{"work_mode":{"type":"ChildWorkMode"},"process":{"type":"boolean"},"configured_preset":{"type":"boolean"},"selection_ref":{"type":"unknown"}}}
   },
   "methods": {
+"runtime.followup.registration.prepare":"Private original file observation owner",
+"source.authority.inspect_read_scope":"Private original file observation owner",
+"source.authority.close_read_scope":"Private original file observation owner",
+"source.file_observation":"Private original file observation owner",
 "runtime.bot.scope.remove":"Private BotService deletion owner","runtime.bot.scope.inspect":"Private BotService execution projection","runtime.bot.history.read":"Private Bot provenance read","runtime.bot.gate.publish":"Private BotService execution projection","runtime.bot.thread.create":"Private BotService execution projection","runtime.bot.scope.suspend":"Private BotService execution projection","runtime.bot.scope.status":"Private BotService execution projection","runtime.bot.scope.resume":"Private BotService execution projection",
 
 "runtime.memory_work.admit":"Private original Bot memory work admit",
@@ -2761,6 +2780,7 @@
     "runtime.host_job.accept": "Trusted Host research and original job authority",
     "runtime.host_job.sources": "Accepted original Jobs readable by an actual observer Run",
     "runtime.host_job.pending": "Trusted Host research and original job authority",
+    "runtime.host_job.acceptance":"Original durable Job acceptance body",
     "runtime.host_job.terminal": "Trusted Host research and original job authority",
     "runtime.host_job.observe": "Trusted Host research and original job authority",
     "runtime.calendar.projects": "List original calendar project identities for complete asset resynchronization",

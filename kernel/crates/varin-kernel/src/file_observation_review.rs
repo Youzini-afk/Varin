@@ -221,7 +221,7 @@ impl Fixture {
         )
     }
     fn registration(&self, key: &str, condition: &str) -> Value {
-        json!({"key":key,"runId":self.run,"trigger":{"kind":"file","path":"result.txt","condition":condition},"instruction":"Read original file result","fileAuthority":{"grantId":"reader"}})
+        json!({"key":key,"runId":self.run,"trigger":{"kind":"file","path":"result.txt","condition":condition},"instruction":"Read original file result","fileAuthority":{"kind":"local","grantId":"reader"}})
     }
     fn work(&self, key: &str) -> FileObservationWork {
         let owner = self.runtime.catalog();
@@ -374,7 +374,9 @@ fn same_key_registration_handles_are_independent_and_revocation_precedes_host_be
         .prepare_registration(
             &owner,
             &mut one,
-            "reader",
+            &crate::file_observation::Admission::Local {
+                grant_id: "reader".into(),
+            },
             None,
             &CancellationToken::default(),
         )
@@ -384,7 +386,9 @@ fn same_key_registration_handles_are_independent_and_revocation_precedes_host_be
         .prepare_registration(
             &owner,
             &mut two,
-            "reader",
+            &crate::file_observation::Admission::Local {
+                grant_id: "reader".into(),
+            },
             None,
             &CancellationToken::default(),
         )
@@ -564,7 +568,9 @@ fn pending_user_fixed_acceptance_is_visible_cancelled_and_pin_released_with_dura
         .prepare_registration(
             &owner,
             &mut prepared,
-            "reader",
+            &crate::file_observation::Admission::Local {
+                grant_id: "reader".into(),
+            },
             None,
             &CancellationToken::default(),
         )
@@ -703,7 +709,9 @@ fn explicit_user_disposal_between_storage_acceptance_and_watch_stops_late_admiss
             .prepare_registration(
                 &catalog,
                 &mut prepared,
-                "reader",
+                &crate::file_observation::Admission::Local {
+                    grant_id: "reader".into(),
+                },
                 None,
                 &CancellationToken::default(),
             )
@@ -752,7 +760,9 @@ fn corrupt_pending_receipt_is_an_explicit_failure_and_not_an_empty_list() {
             .prepare_registration(
                 &owner,
                 &mut prepared,
-                "reader",
+                &crate::file_observation::Admission::Local {
+                    grant_id: "reader".into(),
+                },
                 None,
                 &CancellationToken::default(),
             )
@@ -961,8 +971,12 @@ fn original_user_file_observer_accepts_repeated_real_captures_until_cancel_and_k
     let owner = f.runtime.catalog();
     let mut db = owner.lock().unwrap();
     let d = db.followup("each-real").unwrap();
-    db.control_followup(&d.id, d.revision, varin_runtime::FollowupControlAction::Cancel)
-        .unwrap();
+    db.control_followup(
+        &d.id,
+        d.revision,
+        varin_runtime::FollowupControlAction::Cancel,
+    )
+    .unwrap();
     drop(db);
     drop(owner);
     f.invoke(

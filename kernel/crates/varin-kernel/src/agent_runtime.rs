@@ -639,7 +639,7 @@ pub(crate) fn spawn(
                                 | "runtime.input.edit"
                                 | "runtime.messages.send"
                                 | "runtime.computer.event.accept"
-                                | "runtime.followup.register"
+                                | "runtime.followup.register" | "runtime.followup.registration.prepare"
                                 | "runtime.calendar.sync"
                                 | "runtime.calendar.admit"
                                 | "runtime.calendar.prepare"
@@ -769,7 +769,7 @@ pub(crate) fn spawn(
                         }
                         if matches!(
                             method,
-                            "runtime.followup.register"
+                            "runtime.followup.register" | "runtime.followup.registration.prepare"
                                 | "runtime.followup.get"
                                 | "runtime.followup.occurrences"
                                 | "runtime.followup.occurrence"

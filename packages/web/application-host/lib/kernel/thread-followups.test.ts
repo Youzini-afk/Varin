@@ -28,7 +28,7 @@ function fixture() {
     occurrenceViews: new Map<string, FollowupOccurrenceView>(), occurrenceDetailError: false,
     occurrencePages: new Map<number | undefined, FollowupOccurrencesResult>(), occurrenceError: false,
     source: structuredClone(run), jobs: [] as HostJobSource[], registerError: false, pendingError: false, pending: [] as FollowupPendingRegistration[],
-    liveInvalid: false, launch: { selection: { source: { mode: 'materialized', workspace_id: 'workspace:original',
+    liveInvalid: false, launch: { selection: { source: { mode: 'materialized', resource_owner: { kind: 'local' as const }, workspace_id: 'workspace:original',
       execution_workspace_id: 'execution:original', branch_id: 'files:original', revision: 3, live_root: null } } } };
   const issueGrant = vi.fn(async (input: { grantId: string }) => ({ ...input }));
   const retireGrant = vi.fn(async (_grantId: string) => ({}));
@@ -304,7 +304,7 @@ it('User file follow-ups admit only original-source exact reads and retire fresh
   expect(f.retireGrant.mock.calls.map(([id]) => id)).toEqual(grants.map(grant => grant.grantId));
   expect(f.revokeGrant).not.toHaveBeenCalled();
   expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.followup.register').map(([, params]) => params))
-    .toEqual(grants.map(grant => ({ key: input.key, runId: run.id, instruction, trigger: input.trigger, fileAuthority: { grantId: grant.grantId } })));
+    .toEqual(grants.map(grant => ({ key: input.key, runId: run.id, instruction, trigger: input.trigger, fileAuthority: { kind: 'local', grantId: grant.grantId } })));
   expect(f.requests.mock.calls.some(([method]) => method.includes('start') || method.startsWith('file.'))).toBe(false);
 });
 

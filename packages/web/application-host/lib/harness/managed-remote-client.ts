@@ -304,7 +304,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     };
   };
 
-  const sourceTarget = async (owner: ManagedHostSourceOwner, signal?: AbortSignal): Promise<ManagedTarget> => {
+  const forwardTarget = async (owner: ManagedHostSourceOwner, signal?: AbortSignal): Promise<ManagedTarget> => {
     signal?.throwIfAborted();
     const connection = configuredHosts(await options.readSettings()).find(entry => entry.id === owner.connectionId);
     if (!connection || managedEndpointIdentity(connection) !== owner.endpointIdentity) {
@@ -314,6 +314,25 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     // registry's preferred machine connection for this Source's actual endpoint.
     const target = await probe(connection, signal, true);
     if (target.hostId !== owner.hostId) throw new Error('The original managed source Host identity changed');
+    return target;
+  };
+
+  /** Select only a configured connection; forwarding does not require a file workspace. */
+  const selectForwardTarget = async (targetId: string, signal?: AbortSignal): Promise<ManagedTarget> => {
+    signal?.throwIfAborted();
+    const configured = configuredHosts(await options.readSettings());
+    const direct = configured.find(connection => connection.id === targetId);
+    if (direct) { managedEndpointIdentity(direct); return probe(direct, signal, true); }
+    const results = await Promise.allSettled(configured.map(async connection => { managedEndpointIdentity(connection); return probe(connection, signal, true); }));
+    signal?.throwIfAborted();
+    const selected = results.find((result): result is PromiseFulfilledResult<ManagedTarget> =>
+      result.status === 'fulfilled' && result.value.machineId === targetId);
+    if (!selected) throw new Error('The configured service target is unavailable');
+    return selected.value;
+  };
+
+  const sourceTarget = async (owner: ManagedHostSourceOwner, signal?: AbortSignal): Promise<ManagedTarget> => {
+    const target = await forwardTarget(owner, signal);
     if (!target.identity.capabilities.includes('sources')) throw new Error('Managed source resources are unavailable on this Host');
     return target;
   };
@@ -372,6 +391,9 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
           throw error;
         } finally { signal?.removeEventListener('abort', cancel); }
       },
+      fileObservation: (input, signal) => request('fileObservation', input, signal),
+      inspectReadScope: (input, signal) => request('inspectReadScope', input, signal),
+      closeReadScope: (input, signal) => request('closeReadScope', input, signal),
       cancelService: (input, signal) => request('cancelService', input, signal),
       observe: (input, signal) => request('observe', input, signal),
       releaseReceipt: (input, signal) => request('releaseReceipt', input, signal),
@@ -711,7 +733,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     };
   };
 
-  return { refresh, resolveBackend, externalAuthority, targetFor, sourceTargets, sourceTarget, source, shellExec, shellRead, shellWrite, shellKill, setScopeSleeping, releaseScope, ownersForMachine };
+  return { refresh, resolveBackend, externalAuthority, targetFor, sourceTargets, sourceTarget, forwardTarget, selectForwardTarget, source, shellExec, shellRead, shellWrite, shellKill, setScopeSleeping, releaseScope, ownersForMachine };
 }
 
 export type ManagedRemoteTargetRegistry = ReturnType<typeof createManagedRemoteTargetRegistry>;

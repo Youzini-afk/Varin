@@ -1,3 +1,5 @@
+import { ENVIRONMENT_FORWARD_CAPABILITY, ENVIRONMENT_FORWARD_TOOL_DECLARATIONS, VARIN_BUILTIN_ENVIRONMENT_FORWARD_EXTENSION_ID } from './environment-forward-tools.js';
+export { ENVIRONMENT_FORWARD_CAPABILITY, ENVIRONMENT_FORWARD_TOOL_DECLARATIONS, VARIN_BUILTIN_ENVIRONMENT_FORWARD_EXTENSION_ID } from './environment-forward-tools.js';
 import { EXTENSION_PACKAGE_TOOL_DECLARATION, RUNTIME_CONTRACT_TOOL_DECLARATIONS, VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION_ID } from './runtime-contract-tools.js';
 export { EXTENSION_PACKAGE_TOOL_DECLARATION, RUNTIME_CONTRACT_TOOL_DECLARATIONS, VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION_ID } from './runtime-contract-tools.js';
 import { RESEARCH_DECISION_CAPABILITY, RESEARCH_DECISION_TOOL_DECLARATIONS, VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION_ID } from './research-decision-tools.js';
@@ -636,6 +638,13 @@ export const VARIN_BUILTIN_WEB_EXTENSION: VarinBuiltinExtensionDefinition = {
     capabilities: { host: [WEB_CAPABILITY] }, provides: { services: [...WEB_TOOL_DECLARATIONS] } },
 };
 
+export const VARIN_BUILTIN_ENVIRONMENT_FORWARD_EXTENSION: VarinBuiltinExtensionDefinition = {
+  enabledByDefault: true,
+  manifest: { id: VARIN_BUILTIN_ENVIRONMENT_FORWARD_EXTENSION_ID, displayName: 'Environment service forwards', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
+    entrypoints: { host: { activation: ['service-request'], file: 'host.cjs', mode: 'brokered' } },
+    capabilities: { host: [ENVIRONMENT_FORWARD_CAPABILITY] }, provides: { services: [...ENVIRONMENT_FORWARD_TOOL_DECLARATIONS] } },
+};
+
 export const VARIN_BUILTIN_COMPUTER_EXTENSION: VarinBuiltinExtensionDefinition = {
   enabledByDefault: true,
   manifest: { id: VARIN_BUILTIN_COMPUTER_EXTENSION_ID, displayName: 'Computer Use', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
@@ -736,6 +745,7 @@ export const VARIN_BUILTIN_EXTENSION_DEFINITIONS: readonly VarinBuiltinExtension
   VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION,
   VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION,
   VARIN_BUILTIN_COMPUTER_EXTENSION,
+  VARIN_BUILTIN_ENVIRONMENT_FORWARD_EXTENSION,
   VARIN_BUILTIN_WEB_EXTENSION,
   VARIN_BUILTIN_RESEARCH_DISCOVERY_EXTENSION,
   VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION,

@@ -120,6 +120,57 @@ pub(crate) struct SourceAuthorityScopeParams {
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceReadScopeParams {
+    pub principal_id: String,
+    pub coordinator_host_id: String,
+    pub scope: SourceAuthorityScope,
+    pub source: SourceSelection,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub(crate) enum SourceFileObservationAction {
+    Accept {
+        request: varin_runtime::catalog::followups::FileObservationRequest,
+    },
+    Observe {
+        request: varin_runtime::catalog::followups::FileObservationRequest,
+        watch_id: Option<String>,
+        after: Option<varin_runtime::catalog::followups::FileWatchPosition>,
+        reopen: bool,
+        current: Option<varin_runtime::catalog::followups::FileState>,
+        ready: bool,
+    },
+    Release {
+        request: varin_runtime::catalog::followups::FileObservationRequest,
+    },
+}
+impl SourceFileObservationAction {
+    fn request(&self) -> &varin_runtime::catalog::followups::FileObservationRequest {
+        match self {
+            Self::Accept { request }
+            | Self::Observe { request, .. }
+            | Self::Release { request } => request,
+        }
+    }
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceFileObservationParams {
+    pub principal_id: String,
+    pub coordinator_host_id: String,
+    pub authority_id: String,
+    pub resource_epoch: String,
+    pub request_id: String,
+    pub client_capabilities: Vec<String>,
+    pub action: SourceFileObservationAction,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SourceAuthorityScopeReleaseParams {
     pub principal_id: String,
     pub coordinator_host_id: String,
@@ -251,6 +302,7 @@ pub(crate) struct ScopeRecord {
     pub source: SourceSelection,
     pub epoch: u64,
     pub ready: bool,
+    pub closed: bool,
 }
 pub(crate) fn denied(message: &str) -> KernelError {
     KernelError::Authorization(message.into())
@@ -348,6 +400,11 @@ pub(crate) struct SourceIntegrationReceiptParams {
 /// Both the production actor and direct-owner integration fixtures use this same dispatcher.
 pub(crate) enum SourceDispatch {
     Ready(Value),
+    FileObservation {
+        address: SourceAuthorityAddress,
+        request_id: String,
+        action: SourceFileObservationAction,
+    },
     ReadObserve(crate::storage::source_read_receipts::ReadReceipt),
     InteractionObserve {
         record: AuthorityRecord,
@@ -373,6 +430,14 @@ impl SourceDispatch {
     pub fn key(&self) -> Option<String> {
         match self {
             Self::Ready(_) => None,
+            Self::FileObservation {
+                address,
+                request_id,
+                ..
+            } => Some(format!(
+                "file-observation:{}:{}",
+                address.authority_id, request_id
+            )),
             Self::ReadObserve(_) => Some(format!("source-read-observe:{}", uuid::Uuid::new_v4())),
             Self::InteractionObserve {
                 record, address, ..
@@ -403,6 +468,13 @@ impl SourceDispatch {
         };
         let value = match self {
             Self::Ready(value) => Ok(value),
+            Self::FileObservation {
+                address, action, ..
+            } => resources
+                .file_observations
+                .as_ref()
+                .ok_or_else(|| denied("Original file observation owner unavailable"))?
+                .execute_managed(address, action, &cancel),
             Self::ReadObserve(read) => read.load(),
             Self::InteractionObserve {
                 record,
@@ -485,6 +557,60 @@ pub(crate) fn prepare_request(
 ) -> Result<SourceDispatch, KernelError> {
     crate::protocol::validate_method_params(method, &params)?;
     let value = match method {
+        "source.file_observation" => {
+            let p: SourceFileObservationParams = serde_json::from_value(params)?;
+            if !matches!(p.action, SourceFileObservationAction::Release { .. })
+                && !p.client_capabilities.iter().any(|c| c == "filesystem:read")
+            {
+                return Err(denied("Current source read capability was revoked"));
+            }
+            let address = SourceAuthorityAddress {
+                principal_id: p.principal_id,
+                coordinator_host_id: p.coordinator_host_id,
+                authority_id: p.authority_id,
+                resource_epoch: p.resource_epoch,
+            };
+            let record = storage.source_authority(&address, false, epoch)?;
+            let r = p.action.request();
+            let mut source = r.source.clone();
+            if matches!(record.result.scope, SourceAuthorityScope::SourceRead { .. })
+                && source.mode == varin_runtime::SourceMode::Materialized
+            {
+                source.environment_run_id =
+                    source.environment_run_id.or(Some(r.source_run_id.clone()));
+            }
+            let expected = varin_runtime::catalog::followups::FileObservationAuthority {
+                coordinator_host_id: address.coordinator_host_id.clone(),
+                authority_id: address.authority_id.clone(),
+                resource_epoch: address.resource_epoch.clone(),
+            };
+            if r.resource_authority.as_ref() != Some(&expected)
+                || record.result.source != source
+                || record.result.scope.thread_id() != r.thread_id
+                || record
+                    .result
+                    .scope
+                    .run_id()
+                    .is_some_and(|run| run != r.source_run_id)
+                || matches!(&r.actor,varin_runtime::catalog::followups::FollowupActor::Agent{run_id,..}if record.result.scope.run_id()!=Some(run_id))
+            {
+                return Err(denied(
+                    "File observation belongs to another original source authority",
+                ));
+            }
+            return Ok(SourceDispatch::FileObservation {
+                address,
+                request_id: p.request_id,
+                action: p.action,
+            });
+        }
+        "source.authority.inspect_read_scope" | "source.authority.close_read_scope" => storage
+            .source_read_scope(
+                serde_json::from_value(params)?,
+                method == "source.authority.close_read_scope",
+                epoch,
+                host,
+            )?,
         "source.integration.receipt" => {
             storage.source_integration_receipt(serde_json::from_value(params)?)?
         }

@@ -284,6 +284,8 @@ describe("environment service access (forward)", () => {
       await bindSession(registry, thread.id, "session-1");
       const opened: Array<{ machineId: string; host: string; port: number; threadId: string | null }> = [];
       const runtime = {
+        epoch: 'controlled', owners: () => [], inspect: () => ({ state: 'absent' as const, access: null }),
+        closeOwner: async () => {}, closeRuntime: async () => {}, release: () => {}, onChanged: () => () => {},
         open: async (input: { target: { machineId: string }; host: string; port: number; threadId: string | null }) => {
           opened.push({ machineId: input.target.machineId, host: input.host, port: input.port, threadId: input.threadId });
           return {

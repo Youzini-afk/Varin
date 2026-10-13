@@ -63,6 +63,7 @@ pub(super) fn execute(
             let captured = if matches!(
                 &p.binding.subject,
                 varin_runtime::catalog::host_jobs::HostJobSubject::Mcp { .. }
+                    | varin_runtime::catalog::host_jobs::HostJobSubject::EnvironmentForward { .. }
             ) {
                 let db = owner
                     .lock()
@@ -82,15 +83,34 @@ pub(super) fn execute(
             } else {
                 None
             };
-            let frozen = captured
-                .as_ref()
-                .map(|read| read.load_mcp())
-                .transpose()
-                .map_err(domain)?;
+            let forward = matches!(
+                &p.binding.subject,
+                varin_runtime::catalog::host_jobs::HostJobSubject::EnvironmentForward { .. }
+            );
+            let invocation = if forward {
+                captured
+                    .as_ref()
+                    .map(|r| r.load())
+                    .transpose()
+                    .map_err(domain)?
+            } else {
+                None
+            };
+            let frozen = if forward {
+                None
+            } else {
+                captured
+                    .as_ref()
+                    .map(|r| r.load_mcp())
+                    .transpose()
+                    .map_err(domain)?
+            };
             let mut db = owner
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
-            let op = if let Some((snapshot, frozen)) = &frozen {
+            let op = if let Some(snapshot) = &invocation {
+                db.begin_environment_forward_job(p.binding, snapshot)
+            } else if let Some((snapshot, frozen)) = &frozen {
                 db.begin_mcp_host_job(p.binding, snapshot, frozen)
             } else {
                 db.begin_host_job(p.binding)
@@ -99,6 +119,15 @@ pub(super) fn execute(
             Ok(serde_json::to_value(
                 HostJobPending::from_operation(op).map_err(domain)?,
             )?)
+        }
+        "runtime.host_job.acceptance" => {
+            let p: OperationParams = serde_json::from_value(params)?;
+            let read = owner
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                .capture_job_acceptance(&p.operation_id)
+                .map_err(domain)?;
+            Ok(serde_json::to_value(read.load().map_err(domain)?)?)
         }
         "runtime.host_job.accept" => {
             let p: HostJobAcceptParams = serde_json::from_value(params)?;

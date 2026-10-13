@@ -193,6 +193,7 @@ import { createComputerService } from './lib/computer/computer-service.js';
 import { resolvePiComputerWork } from './lib/computer/computer-actor.js';
 import { ComputerError } from './lib/computer/computer-error.js';
 import { createComputerRuntime, COMPUTER_CAPABILITY } from './lib/kernel/computer-runtime.js';
+import { createEnvironmentForwardJobRuntime, ENVIRONMENT_FORWARD_CAPABILITY } from './lib/kernel/environment-forward-runtime.js';
 import { computerExecutionKey } from '@varin/protocol';
 import { HostSshManager } from './lib/connections/ssh-manager.js';
 import { registerConnectionRoutes } from './lib/connections/connection-routes.js';
@@ -4558,6 +4559,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const unregisterNestedToolCapability = extensionRuntime.capabilities.register(VARIN_RUNTIME_TOOLS_CAPABILITY, createNestedToolOwner(kernelClient));
   const unregisterScriptCapability = extensionRuntime.capabilities.register(SCRIPT_CAPABILITY, scriptRuntimeOwner.current.capability);
   const unregisterComputerCapability = extensionRuntime.capabilities.register(COMPUTER_CAPABILITY, computerRuntimeOwner.current.capability);
+  const environmentForwardJobs = createEnvironmentForwardJobRuntime({ kernel: kernelClient, runtime: agentRuntime,
+    forwards: harnessServiceHost.environmentForwards, targets: managedRemoteTargets,
+    onError: () => console.error('[Environment] Original service forward requires reconciliation') });
+  const unregisterEnvironmentForwardCapability = extensionRuntime.capabilities.register(ENVIRONMENT_FORWARD_CAPABILITY, environmentForwardJobs.capability);
+  environmentForwardJobs.start();
   const unregisterResearchCapability = extensionRuntime.capabilities.register(RESEARCH_CAPABILITY, researchRuntime.capability);
   researchRuntime.start();
   mcpInteractionRuntime.start();
@@ -4706,6 +4712,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     hostId, registry: threadRegistry, runtime: threadRuntime, broker: piRuntimeBroker, computers: computerService,
     agent: { runtime: agentRuntime, kernel: kernelClient, gate: botId => botService.executionGate(botId),
       continueLaunch: runId => threads.continueLaunch(runId), drainScripts: runIds => scriptRuntimeOwner.current!.drainRuns(runIds),
+      drainForwards: runIds => environmentForwardJobs.drainRuns(runIds),
       drainCollaborations: threadIds => collaboration.suspendThreads(threadIds) },
     stopSessionProcesses: harnessServiceHost.closeSessionShell,
     stopRoot: (sessionId) => botRootRuntime.cancelSession(sessionId, 'Bot sleeping'),
@@ -5093,6 +5100,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // Stop timer/watcher producers before their runtime and storage
       // dependencies begin shutting down.
       await scriptRuntimeOwner.current?.dispose();
+      await environmentForwardJobs.dispose();
       computerRuntimeOwner.current?.stop();
       runObservers.stop();
       collaboration.stop();
@@ -5106,6 +5114,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       unregisterExtensionPackageCapability();
       unregisterNestedToolCapability();
       unregisterComputerCapability();
+      unregisterEnvironmentForwardCapability();
       unregisterScriptCapability();
       unregisterResearchCapability();
       await researchRuntime.dispose();

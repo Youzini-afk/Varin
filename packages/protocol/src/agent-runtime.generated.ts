@@ -1,5 +1,7 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
 
+export interface FileObservationAuthority {coordinatorHostId:string;authorityId:string;resourceEpoch:string;}
+
 export interface InferenceReceiptPendingParams {
   operationId: string;
   executionOwner: ExecutorOwner;
@@ -839,10 +841,12 @@ export interface FollowupFileEvidence {
 }
 
 export interface FollowupFileSourceState {
+  resource_authority: FileObservationAuthority | null;
   receipt_id: string;
   revision: number;
   baseline: FileState | null;
   current: FileState | null;
+  ready: boolean;
   immutable: boolean;
   watch_id: string | null;
   position: FileWatchPosition | null;
@@ -1379,7 +1383,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 26; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 27; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -2719,7 +2723,7 @@ export interface FamilyRead {
 
 export interface FamilyItem { threadId: string; branchId: string; runId: string | null; headId: string | null; itemId: string; format: 'conversation_json'; text: string; offset: number; nextOffset: number | null; totalBytes: number }
 
-export type HostJobSubject = {kind:'workspace';workspaceId:string;subjectId:string} | {kind:'mcp';endpoint:McpEndpoint;dispatchId:string};
+export type HostJobSubject = {kind:'workspace';workspaceId:string;subjectId:string} | {kind:'mcp';endpoint:McpEndpoint;dispatchId:string} | {kind:'environment_forward';hostId:string;hostEpoch:string;target:SourceResourceOwner;serviceHost:string;servicePort:number};
 
 export type McpTaskStatus = 'working' | 'input_required' | 'completed' | 'failed' | 'cancelled';
 

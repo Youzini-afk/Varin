@@ -31,10 +31,10 @@ describe("environment service forwards (real TCP over the Host↔Host channel)",
   it("isolates sessions and closes only the sleeping session's listeners", async () => {
     const runtime = createEnvironmentForwardRuntime();
     try {
-      const first = await runtime.open({ target: targetFor(1), host: "127.0.0.1", port: 3000, threadId: "t1", sessionId: "one" });
-      const second = await runtime.open({ target: targetFor(1), host: "127.0.0.1", port: 3000, threadId: "t2", sessionId: "two" });
-      expect(runtime.list("one").map((entry) => entry.id)).toEqual([first.id]);
-      expect(await runtime.close(second.id, "one")).toBe(false);
+      const first = await runtime.open({ target: targetFor(1), host: "127.0.0.1", port: 3000, threadId: "t1", owner: { runtime: "pi", sessionId: "one" } });
+      const second = await runtime.open({ target: targetFor(1), host: "127.0.0.1", port: 3000, threadId: "t2", owner: { runtime: "pi", sessionId: "two" } });
+      expect(runtime.list({ runtime: "pi", sessionId: "one" }).map((entry) => entry.id)).toEqual([first.id]);
+      expect(await runtime.close(second.id, { runtime: "pi", sessionId: "one" })).toBe(false);
       await runtime.closeSession("one");
       expect(runtime.list().map((entry) => entry.id)).toEqual([second.id]);
       const dead = new Socket();
@@ -58,7 +58,7 @@ describe("environment service forwards (real TCP over the Host↔Host channel)",
 
     const runtime = createEnvironmentForwardRuntime();
     stops.push(() => void runtime.dispose());
-    const access = await runtime.open({ target: targetFor(httpPort), host: "127.0.0.1", port: servicePort, threadId: "t1" });
+    const access = await runtime.open({ target: targetFor(httpPort), host: "127.0.0.1", port: servicePort, threadId: "t1", owner: { runtime: "pi", sessionId: "one" } });
     expect(access.access.kind).toBe("forward");
     expect(access.service).toEqual({ machineId: "managed:target-h", host: "127.0.0.1", port: servicePort });
 
@@ -92,7 +92,7 @@ describe("environment service forwards (real TCP over the Host↔Host channel)",
 
     const runtime = createEnvironmentForwardRuntime();
     stops.push(() => void runtime.dispose());
-    const access = await runtime.open({ target: targetFor(httpPort, "target-h"), host: "127.0.0.1", port: servicePort, threadId: null });
+    const access = await runtime.open({ target: targetFor(httpPort, "target-h"), host: "127.0.0.1", port: servicePort, threadId: null, owner: { runtime: "pi", sessionId: "one" } });
     const socket = await new Promise<Socket>((resolve, reject) => {
       const s = new Socket();
       s.once("error", reject);
@@ -118,7 +118,7 @@ describe("environment service forwards (real TCP over the Host↔Host channel)",
 
     const runtime = createEnvironmentForwardRuntime();
     stops.push(() => void runtime.dispose());
-    const access = await runtime.open({ target: targetFor(httpPort), host: "127.0.0.1", port: servicePort, threadId: null });
+    const access = await runtime.open({ target: targetFor(httpPort), host: "127.0.0.1", port: servicePort, threadId: null, owner: { runtime: "pi", sessionId: "one" } });
     const socket = await new Promise<Socket>((resolve, reject) => {
       const s = new Socket();
       s.once("error", reject);

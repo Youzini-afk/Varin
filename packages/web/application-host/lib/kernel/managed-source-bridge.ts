@@ -71,6 +71,24 @@ export class ManagedSourceBridge {
     void (async () => {
       let result: { ok: boolean; value?: unknown; message?: string };
       try {
+        if(record(value.query)&&value.query.kind==='file_observation_address') {
+          const binding=value.query.binding as SourceToolBinding;
+          if(!binding?.remoteAuthority||binding.resourceOwner.kind!=='managed_host'||!this.coordinator)throw new Error('Original file source binding unavailable');
+          result={ok:true,value:{kind:'managed_host',coordinatorHostId:this.coordinator(),authorityId:binding.remoteAuthority.authorityId,resourceEpoch:binding.remoteAuthority.resourceEpoch}};
+        } else if(record(value.query)&&['file_observation','file_observation_scope_close'].includes(String(value.query.kind))) {
+          const query=value.query;
+          if(!record(query.source)||!record(query.source.resource_owner)||query.source.resource_owner.kind!=='managed_host'||!this.owner||!this.coordinator)throw new Error('Original managed observation source missing');
+          const client=await this.owner(query.source.resource_owner as unknown as ManagedHostSourceOwner);
+          const controller=new AbortController();pending.cancel=async()=>controller.abort();if(pending.cancelled)controller.abort();
+          if(query.kind==='file_observation_scope_close') {
+            if(query.coordinatorHostId!==this.coordinator())throw new Error('Original observation coordinator changed');
+            result={ok:true,value:await client.closeReadScope({coordinatorHostId:query.coordinatorHostId as string,scope:query.scope as Extract<import('./protocol.generated.js').SourceAuthorityScope,{kind:'source_read'}>,source:query.source as unknown as LaunchSource},controller.signal)};
+          } else {
+            const authority=query.authority as import('./protocol.generated.js').FileObservationAuthority;
+            if(authority?.coordinatorHostId!==this.coordinator())throw new Error('Original observation coordinator changed');
+            result={ok:true,value:await client.fileObservation({...authority,requestId:randomUUID(),action:query.action as import('./protocol.generated.js').SourceFileObservationAction},controller.signal)};
+          }
+        } else {
         if (record(value.query) && value.query.kind === 'integration_receipt') {
           const query=value.query;
           if (!record(query.source) || !record(query.source.resource_owner) || query.source.resource_owner.kind!=='managed_host' || !text(query.runId) || !text(query.threadId) || !text(query.operationId) || !this.owner || !this.coordinator) throw new Error('Invalid original Integration receipt address');
@@ -112,6 +130,7 @@ export class ManagedSourceBridge {
           finally { if (query.watchProcess) void this.observeProcess(client, query, epoch, reply as ManagedSourceReceipt | undefined); }
         } else throw new Error('Unknown closed source request');
         result = { ok: true, value: reply };
+        }
       } catch (error) { result = { ok: false, message: error instanceof Error ? error.message : String(error) }; }
       if (this.active.get(id) !== pending) return;
       this.active.delete(id); if (this.epoch() !== epoch) return;

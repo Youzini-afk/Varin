@@ -16,6 +16,7 @@ Last updated: 2026-10-13
 Sleep/Wake、Plan 与 ContextJob，并分列原 stdio、Knowledge IPC、UI 与受控模型证据。
 [Documents 草稿与来源](reviews/runtime-document-source-2026-10-12.md)接通显式内容选择、同源资源闭包、Git 选根和原固定 receipt。
 [Thread 历史导航与原文件恢复](reviews/runtime-thread-recovery-2026-10-13.md)接入原 journal、明确输入 checkpoint 和持久导航 receipt；真实执行、纯消费者与尚未跑通的多根 Host 组合分列。
+[同源 managed Host](reviews/runtime-managed-source-2026-10-13.md)与[文件跟进/服务转发](reviews/runtime-managed-observation-forward-2026-10-13.md)贯穿原资源身份、持久回执、文件条件和 Host Job；PTY、跨 Host 文件恢复及部分项目消费者仍需接入，真实双机网络未据受控组合宣称通过。
 正式安装、真实桌面/VM、实际模型权重/账号和性能证据按具体环境另验。
 用户先验收两设计能力，再自行全面迁移、切换默认和移除 Pi。
 

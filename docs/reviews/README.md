@@ -8,6 +8,9 @@ Last updated: 2026-10-13
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [Managed 文件跟进与原服务转发](runtime-managed-observation-forward-2026-10-13.md) | 原注册 scope/文件基线/撤权释放与 Host Thread Job、canonical acceptance、Bot 排空；实际资源和受控网络证据分列 |
+| [同源 managed Host 执行](runtime-managed-source-2026-10-13.md) | 原资源 owner、文件/进程/检索语言及 child、原回执交付与释放；同名目录隔离及后续消费者边界 |
+| [Computer 应用工具](runtime-computer-applications-2026-10-13.md) | 原 actor/assignment/driver、桌面生命周期、原 artifacts 与 Bot；受控效果和真实桌面验收分列 |
 | [Thread 历史导航与原文件恢复](runtime-thread-recovery-2026-10-13.md) | 原命令/输入 checkpoint、逐文件恢复和同 operation 对账；Bot/GC/后继请求关联及真实执行边界 |
 | [Documents 草稿与原生固定来源](runtime-document-source-2026-10-12.md) | 显式内容选择、同源资源闭包、Git 选根、原固定 receipt、取消与重开；各层证据与组合恢复边界 |
 | [Bot 产品入口、原记忆与摘要准备（2026-10-12）](runtime-bot-product-context-2026-10-12.md) | 实际 Bot 身份/来源/召回、产品配置、Sleep/Wake、原 Plan 与摘要基线；真实消费者与有限验证边界 |

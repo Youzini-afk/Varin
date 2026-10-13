@@ -1156,7 +1156,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .map_err(|_| KernelError::Storage("file observation owner stopped".into()))
         },
         file_observation_bridge.clone(),
-    );
+    ).with_source_bridge(source_bridge.clone());
     let resources = crate::tools::KernelResourceClient::new(
         move |call| {
             let epoch = resource_epoch
@@ -1787,7 +1787,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             let response = match handled {
                 Ok(Some(response)) => response,
                 Ok(None) => {
-                    if method.as_deref().is_some_and(|method| pending_file_worker(method)||matches!(method,"source.resource.authorize"|"source.resource.execute"|"source.service.call"|"source.resource.observe"|"source.resource.cancel")) {
+                    if method.as_deref().is_some_and(|method| pending_file_worker(method)||matches!(method,"source.resource.authorize"|"source.resource.execute"|"source.service.call"|"source.file_observation"|"source.resource.observe"|"source.resource.cancel")) {
                         continue;
                     }
                     worker_cancellations
@@ -2168,7 +2168,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 },
             );
         }
-        if request["method"].as_str().is_some_and(|m|matches!(m,"source.resource.authorize"|"source.resource.execute"|"source.service.call")) {
+        if request["method"].as_str().is_some_and(|m|matches!(m,"source.resource.authorize"|"source.resource.execute"|"source.service.call"|"source.file_observation")) {
             let request_id=request["id"].as_str().unwrap_or_default().to_string();
             let cancel={let mut active=cancellations.lock().map_err(|_|"cancellation owner poisoned")?;
                 let active=active.get_mut(&request_id).ok_or("source request lost admission")?;

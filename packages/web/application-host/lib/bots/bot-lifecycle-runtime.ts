@@ -17,7 +17,8 @@ const RESUME_TEXT = "The user woke this Bot after putting it to sleep. Continue 
 export interface BotLifecycleRuntimeOptions {
   hostId: string;
   agent?: { runtime: AgentRuntimeClient; kernel: KernelClient; gate(botId: string): Promise<BotExecutionGate>;
-    continueLaunch(runId: string): Promise<void>; drainScripts(runIds: ReadonlySet<string>): Promise<void>; drainCollaborations(threadIds: ReadonlySet<string>): Promise<void> };
+    continueLaunch(runId: string): Promise<void>; drainScripts(runIds: ReadonlySet<string>): Promise<void>;
+    drainForwards(runIds: ReadonlySet<string>): Promise<void>; drainCollaborations(threadIds: ReadonlySet<string>): Promise<void> };
   registry: ThreadRegistry;
   runtime: ThreadRuntime;
   broker: Pick<PiRuntimeBroker, "requestForSession" | "openSession" | "closeSession">;
@@ -170,7 +171,7 @@ export function createBotLifecycleRuntime(options: BotLifecycleRuntimeOptions): 
           await suspend(bot);
           const scope = await options.agent!.runtime.botScope(bot.id);
           const runIds = new Set(scope.runs.map(run => run.runId));
-          await Promise.all([options.agent!.kernel.drainRunDomains([...runIds]), options.agent!.drainScripts(runIds),
+          await Promise.all([options.agent!.kernel.drainRunDomains([...runIds]), options.agent!.drainScripts(runIds), options.agent!.drainForwards(runIds),
             options.agent!.drainCollaborations(new Set(scope.threads.map(thread => thread.thread_id)))]);
           for (const runId of runIds) await Promise.all([options.agent!.runtime.reconcileMemory(runId), options.agent!.runtime.reconcilePlan(runId)]);
         })(),

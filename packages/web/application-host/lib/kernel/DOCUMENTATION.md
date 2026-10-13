@@ -200,8 +200,14 @@ path uses the original grant owner, not a Host ACL/map of permitted old processe
 follow-up ledger is written by these native controls.
 
 `followup-source.ts` admits User file leaves with a private exact-path `storage.read` grant after
-validating the original launch/source and live Documents owner. It retires that temporary grant in
-`finally`; it does not renew a previously accepted receipt or issue process/write authority. Public
+validating the original launch/source and live Documents owner. Local admission retires that temporary
+grant after the request. For a managed source, the original Catalog registration command first saves
+its intent and exact source-read scope; B then binds that scope through its original Storage authority.
+An uncertain bind is discovered through the same scope, and an accepted definition returns immediately
+without acquiring another caller. After all leaf baselines are durable, the original scope is closed
+before Catalog admission, retiring duplicate callers and fencing late binds. Accepted observations
+retain their own original B receipts. This does not renew a previously accepted receipt or issue
+process/write authority. Public
 HTTP/tool arguments cannot carry `fileAuthority`, a physical root or a caller-chosen grant.
 
 The authenticated `followup/registrations/pending` route projects original unconfirmed User file
@@ -216,7 +222,12 @@ It shares root watchers but gives each open a separate handle. `file-observation
 only epoch-bound private owner queries and disposes cancelled allocations after the owner drains.
 `file-observation-service.ts` discovers Catalog's paged observe/paused/release bindings and coalesces
 real watcher/managed-writer/Storage-release hints. It preserves dirty hints during a read or pause,
-uses the last durably accepted position, and has no timer or persisted condition state. Root hints
+uses the last durably accepted position, and has no persisted condition state. Managed observations
+use a transport wake timer to ask their original B owner; the timer is not a file event or condition.
+Fixed successful observations stop polling, while failed observation/release acknowledgements remain
+recoverable. Independent in-flight entries prevent an unavailable target from blocking another
+source's cancellation. B reuses its original accepted file fact when watcher/readiness metadata has
+not changed instead of repeatedly hashing the same body. Root hints
 and exact receipt hints remain distinct, so fixed observers receive grant revocation without a fake
 physical watcher. A managed writer being present gates readiness; it does not erase a stable file
 snapshot needed by exists/changed. Broken source
@@ -1235,8 +1246,16 @@ durable pin, candidate and publication stay on the target, including continuatio
 recovery after the private directory disappears. Integration reads the target's original journal on
 uncertain return. Target object hashes never become coordinator content references without transfer.
 
+Managed file follow-ups use the target's original Documents watch and Storage observation receipt.
+The coordinator never opens a watcher on its similarly named local path. Release includes pending
+watch opens as well as published handles; Bot deletion retains the original address until that release
+is acknowledged. Restart resumes the original receipt and exposes a cursor gap rather than inventing
+offline changes. Target-side revocation releases its original pin/watch resources. A paused or fixed
+successful definition retains its last accepted fact; without a new observation/control request its
+remote-revocation diagnosis can be delayed. Listing that snapshot does not certify current B access.
+
 Current managed-source exclusions are actionable admission errors: cross-Host combined file recovery,
-file-followup watcher delivery, interactive PTY attachment, persistent script environments, Experiment
+interactive PTY attachment, persistent script environments, Experiment
 input capture, package staging from that source, and project-bound MCP/scheduled tasks. Their existing
 local paths remain separate. Computer assignments, Agent/Bot identity, global settings and model
 credentials remain with their original owners; selecting a file Host does not silently redirect them.

@@ -222,18 +222,18 @@ export function createEnvironmentForwardServices(
       // over the computer API expose their services through their owning
       // Host's managed target instead.
       const access = await runtime.open({ target, host: serviceHost, port, threadId: bound?.threadId ?? null,
-        sessionId: ctx.sessionId, signal: ctx.signal });
+        owner: { runtime: "pi", sessionId: ctx.sessionId }, signal: ctx.signal });
       return { access } satisfies EnvironmentForwardResult;
     },
   };
   const forwards: HarnessService<"environment.forwards"> = {
-    handle: async (_params, ctx) => ({ accesses: runtime.list(ctx.sessionId) }) satisfies EnvironmentForwardListResult,
+    handle: async (_params, ctx) => ({ accesses: runtime.list({ runtime: "pi", sessionId: ctx.sessionId }) }) satisfies EnvironmentForwardListResult,
   };
   const forwardClose: HarnessService<"environment.forwardClose"> = {
     handle: async (params, ctx) => {
       await assertWritableEnvironment(host, ctx.sessionId);
       if (typeof params.id !== "string" || !params.id) throw new HarnessServiceError("invalid-params", "environment.forwardClose requires an access id");
-      const closed = await runtime.close(params.id, ctx.sessionId);
+      const closed = await runtime.close(params.id, { runtime: "pi", sessionId: ctx.sessionId });
       return { closed } satisfies EnvironmentForwardCloseResult;
     },
   };

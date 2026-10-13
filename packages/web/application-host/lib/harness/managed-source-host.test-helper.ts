@@ -7,14 +7,16 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { Router, type Express } from 'express';
 import { KernelClient, KernelClientError } from '../kernel/kernel-client.js';
-import type { ChildSourceHandoff, DelegatedExecution, HostToolCall, KernelHandshakeResult, LaunchSource } from '../kernel/protocol.generated.js';
+import type { ChildSourceHandoff, DelegatedExecution, FileObservationBinding, FollowupFilePreparation, FollowupPendingResult, HostToolCall, KernelHandshakeResult, LaunchSource } from '../kernel/protocol.generated.js';
 import { toolOperationId } from '../kernel/protocol.generated.js';
 import { createDocumentAuthority } from '../documents/authority.js';
 import { createLiveSourceOwner } from '../kernel/live-source.js';
 import { createThreadSourcePreparer } from '../kernel/thread-sources.js';
+import { DocumentsFileObservationOwner } from '../kernel/file-observation-owner.js';
 import { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 import { KernelStorageAdapter, createKernelWorkspaceWorkingStateAccess } from '../kernel/storage-adapter.js';
 import { createManagedChildSourceService, releaseManagedUnacceptedSource, withManagedChildSource } from '../kernel/managed-source-collaboration.js';
+import { resourceThreadSource as resourceThreadSourceForFixture } from '../kernel/thread-context.js';
 import { savedSourceLaunch } from '../kernel/source-launch.js';
 import { routerTransport } from '../extensions/direct-router.test-helper.js';
 import { createManagedRemoteExecutionService } from './managed-remote-service.js';
@@ -27,6 +29,7 @@ const write = (frame: unknown) => process.stdout.write(`${JSON.stringify(frame)}
 const pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
 let serial = 0;
 let coordinatorKernel: KernelClient | undefined;
+let targetKernel: KernelClient | undefined;
 let coordinatorResult: { resolve(value: Record<string, unknown>): void; reject(error: Error): void } | undefined;
 const HOST_A = 'managed-coordinator', HOST_B = 'managed-target';
 const workspaceId = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
@@ -212,7 +215,7 @@ async function run(frame: Record<string, unknown>) {
   await writeFile(join(aRoot, 'source.txt'), 'A_PRIVATE_SOURCE\n');
   await writeFile(join(bRoot, 'source.txt'), 'B_ORIGINAL_SOURCE\n');
   const a = kernelFor('a', storageRootA, String(frame.epochA)), b = kernelFor('b', storageRootB, String(frame.epochB));
-  coordinatorKernel = a;
+  coordinatorKernel = a; targetKernel = b;
   const documents = await Promise.all(([['a', HOST_A, aRoot], ['b', HOST_B, bRoot]] as const).map(async ([name, hostId, directory]) => {
     const dataDir = join(root, `${name}-documents`);
     await mkdir(join(dataDir, 'documents'), { recursive: true });
@@ -252,8 +255,13 @@ async function run(frame: Record<string, unknown>) {
   } });
   const transport = routerTransport(router);
   let discardExecuteResponse = false;
+  let discardFileResponse = frame.scenario === 'file-followup';
   const controlledFetch = (async (url: string | URL | Request, init: RequestInit = {}) => {
     const result = await transport(new URL(String(url)), init);
+    if (discardFileResponse && String(url).endsWith('/sources/fileObservation')) {
+      discardFileResponse = false; await result.body?.cancel();
+      throw new Error('Original accepted file response was disconnected');
+    }
     if (discardExecuteResponse && String(url).endsWith('/sources/execute')) {
       discardExecuteResponse = false; await result.body?.cancel();
       throw new Error('Original accepted response was disconnected');
@@ -276,6 +284,69 @@ async function run(frame: Record<string, unknown>) {
   const binding = await service.bind({ coordinatorHostId: HOST_A, source: selected,
     scope: { kind: 'run', threadId, runId, epoch: 1 }, purpose: 'source', retention: 'run' });
   const address: ManagedSourceAddress = { coordinatorHostId: HOST_A, authorityId: binding.authorityId, resourceEpoch: binding.resourceEpoch };
+  if (frame.scenario === 'file-followup') {
+    const observer = new DocumentsFileObservationOwner(bDocuments, bLive.validate, () => {});
+    b.setFileObservationOwner(observer);
+    const fixture = <T=unknown>(method:string,params:unknown={}) => (a as unknown as {requestRaw<T>(method:string,params:unknown):Promise<T>}).requestRaw<T>(method,params);
+    await fixture('fixture.file.launch',{source: binding.source});
+    const input = {key:'managed-file',runId,repeat:'each' as const,trigger:{kind:'file' as const,path:'source.txt',condition:'changed' as const},instruction:'Explain original target change'};
+    await assert.rejects(runtime.registerFollowup(input),/disconnected|Managed|file|request/i);
+    const pending = await a.agentRuntimeRequest<FollowupPendingResult,'runtime.followup.registrations.pending'>('runtime.followup.registrations.pending',{threadId,branchId:'main'});
+    assert(JSON.stringify(pending).includes('managed-file'));
+    const handoff=await a.agentRuntimeRequest<FollowupFilePreparation,'runtime.followup.registration.prepare'>('runtime.followup.registration.prepare',{...input,coordinatorHostId:HOST_A});
+    assert(handoff.scope&&handoff.source);
+    // A concurrent caller can lose its bind reply before A adopts the first.
+    await service.bind({coordinatorHostId:HOST_A,scope:handoff.scope,source:resourceThreadSourceForFixture(handoff.source)!,purpose:'read',retention:'caller'});
+    await writeFile(join(bRoot,'source.txt'),'B_AFTER_LOST_ACCEPT\n');
+    let d=await runtime.registerFollowup(input);
+    assert.equal(d.sources[0]!.file!.baseline!.kind,'regular-file');
+    const initial=d.sources[0]!.file!.baseline;
+    const closedHandoff=await service.inspectReadScope({coordinatorHostId:HOST_A,scope:handoff.scope,source:handoff.source});
+    assert.equal(closedHandoff.closed,true);assert.equal(closedHandoff.authorities.length,2);assert(closedHandoff.authorities.every(item=>item.phase==='retired'&&!item.current));
+    const native=await fixture<{kind:string;outcome:string}>('fixture.file.native',{binding});
+    assert.equal(native.kind,'result');assert.equal(native.outcome,'succeeded');
+    assert.deepEqual(await runtime.registerFollowup(input),d,'committed prepare returns original without rebinding closed scope');
+    const key=(binding:FileObservationBinding)=>({followupId:binding.followupId,generation:binding.generation,sourceIndex:binding.sourceIndex,receiptId:binding.receiptId,observationRevision:binding.observationRevision});
+    const observe=async()=>{const binding=(await runtime.fileFollowups()).bindings.find(item=>item.followupId===input.key)!;assert.equal(binding.target!.physicalRoot,null);return runtime.observeFileFollowup({...key(binding),reopen:false});};
+    const changed=await observe(); d=changed.followup;
+    assert.notDeepEqual(d.sources[0]!.file!.current,initial,'lost first accept preserves first baseline');
+    assert(d.occurrence||d.pending_occurrences>0,'A original followup owns change occurrence');
+    const before=await fixture<{reads:number}>('fixture.file.stats');
+    await observe(); await observe();
+    assert.equal((await fixture<{reads:number}>('fixture.file.stats')).reads,before.reads,'unchanged target does not rehash');
+    d=await runtime.controlFollowup({followupId:d.id,expectedRevision:d.revision,action:'pause'});
+    await writeFile(join(bRoot,'source.txt'),'B_WHILE_PAUSED\n');
+    const paused=await fixture<{reads:number}>('fixture.file.stats'); await observe();
+    assert.equal((await fixture<{reads:number}>('fixture.file.stats')).reads,paused.reads,'paused A does not read B');
+    d=await runtime.controlFollowup({followupId:d.id,expectedRevision:d.revision,action:'resume'});
+    d=(await observe()).followup;
+    const oldWatch=d.sources[0]!.file!.watch_id; observer.reset();
+    d=(await observe()).followup;
+    assert.notEqual(d.sources[0]!.file!.watch_id,oldWatch);assert.equal(d.sources[0]!.file!.gap,true);
+    d=await runtime.controlFollowup({followupId:d.id,expectedRevision:d.revision,action:'cancel'});
+    const release=(await runtime.fileFollowups()).bindings.find(item=>item.followupId===d.id)!;
+    assert.equal((await runtime.releaseFileFollowup(key(release))).released,true);
+    assert.equal(observer.has(release.receiptId,d.sources[0]!.file!.watch_id),false);
+    assert.equal((await runtime.registerFollowup(input)).state,'cancelled');
+    // Before adoption, the original command can find and close the scope even
+    // when no register request or bind reply ever reached A.
+    const abandoned={...input,key:'abandoned-file'};
+    const prep=await a.agentRuntimeRequest<FollowupFilePreparation,'runtime.followup.registration.prepare'>('runtime.followup.registration.prepare',{...abandoned,coordinatorHostId:HOST_A});
+    assert.equal(prep.followup,null); assert(prep.scope&&prep.source);
+    const orphan=await service.bind({coordinatorHostId:HOST_A,scope:prep.scope,source:resourceThreadSourceForFixture(prep.source)!,purpose:'read',retention:'caller'});
+    await a.agentRuntimeRequest('runtime.followup.registration.cancel',{key:abandoned.key,runId});
+    const closed=await service.inspectReadScope({coordinatorHostId:HOST_A,scope:prep.scope,source:prep.source});
+    assert.equal(closed.closed,true);assert(closed.authorities.every(item=>!item.current));
+    await assert.rejects(service.bind({coordinatorHostId:HOST_A,scope:prep.scope,source:resourceThreadSourceForFixture(prep.source)!,purpose:'read',retention:'caller'}));
+    assert.equal(closed.authorities.find(item=>item.authorityId===orphan.authorityId)?.phase,'retired');
+    await runtime.registerFollowup({...input,key:'delete-file'});
+    await service.release({...address,mode:'retire'});
+    await assert.rejects(fixture('fixture.file.delete',{fail:true}),/unavailable/);
+    assert((await runtime.fileFollowups()).bindings.some(item=>item.followupId==='delete-file'&&item.action==='release'));
+    assert.deepEqual(await fixture('fixture.file.delete'),{removed:true});
+    observer.stop(); await Promise.all(documents.map(item=>item.dispose()));
+    write({kind:'fixture-result',ok:true,reads:(await fixture<{reads:number}>('fixture.file.stats')).reads});return;
+  }
   const coordinated = new Promise<Record<string, unknown>>((resolve, reject) => { coordinatorResult = { resolve, reject }; });
   write({ kind: 'fixture-coordinator-tool', binding, source: selected });
   const coordinatedResult = await coordinated;
@@ -361,6 +432,9 @@ async function run(frame: Record<string, unknown>) {
 
 createInterface({ input: process.stdin }).on('line', line => {
   const frame = JSON.parse(line) as Record<string, unknown>;
+  if (frame.kind === 'fixture-target-frame') {
+    assert(targetKernel); (targetKernel as unknown as {consumeFrame(value:unknown):void}).consumeFrame(frame.frame);return;
+  }
   if (frame.kind === 'fixture-coordinator-frame') {
     assert(coordinatorKernel);
     (coordinatorKernel as unknown as { consumeFrame(value: unknown): void }).consumeFrame(frame.frame); return;

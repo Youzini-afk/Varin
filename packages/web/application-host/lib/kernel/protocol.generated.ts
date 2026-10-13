@@ -3,7 +3,7 @@
  * Do not hand-edit the wire shapes; run `node scripts/generate-kernel-protocol.mjs`.
  */
 
-export const KERNEL_PROTOCOL_VERSION = 26 as const;
+export const KERNEL_PROTOCOL_VERSION = 27 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
 export const KERNEL_CONTROL_METHODS = ["source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status","runtime.mcp.interaction.inspect","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.source.tools","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
@@ -11,9 +11,13 @@ export const KERNEL_CONTROL_RESPONSE_METHODS = ["source.authority.release_scope"
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["process.write","process.resize","runtime.tools.invoke"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.branch.navigate":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.memory_work.admit","runtime.memory_work.read","runtime.memory_work.status","runtime.memory_work.list","runtime.memory_work.update","runtime.inference.generate","runtime.inference.admit","runtime.inference.settle","runtime.mcp.sampling.review_output","runtime.mcp.sampling.review_request","runtime.mcp.sampling.generate","runtime.mcp.interaction.open","runtime.mcp.interaction.error.open","runtime.mcp.interaction.list","runtime.mcp.interaction.read","runtime.mcp.interaction.respond","runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
-export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v26" as const;
+export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v27" as const;
 
 export type KernelMethod =
+  | "runtime.followup.registration.prepare"
+  | "source.authority.inspect_read_scope"
+  | "source.authority.close_read_scope"
+  | "source.file_observation"
   | "runtime.bot.scope.remove"
   | "runtime.bot.scope.inspect"
   | "runtime.bot.history.read"
@@ -72,6 +76,7 @@ export type KernelMethod =
   | "runtime.host_job.accept"
   | "runtime.host_job.sources"
   | "runtime.host_job.pending"
+  | "runtime.host_job.acceptance"
   | "runtime.host_job.terminal"
   | "runtime.host_job.observe"
   | "runtime.calendar.projects"
@@ -350,6 +355,31 @@ export type KernelMethod =
   | "source.authority.claim_handoff"
   | "source.integration.receipt"
   | "source.resource.release";
+
+export interface FileObservationAuthority {coordinatorHostId:string;authorityId:string;resourceEpoch:string;}
+
+export interface FileObservationRegistrationScope {coordinatorHostId:string;branchId:string;key:string;}
+
+export interface FileObservationRequest {resource_authority:FileObservationAuthority|null;registration_scope:FileObservationRegistrationScope|null;followup_id:string;source_index:number;source_run_id:string;thread_id:string;actor:FollowupActor;source:LaunchSource;path:string;condition:FileCondition;intent_ref:unknown;}
+
+export type FollowupFilePreparation = {followup:Followup;authority:null;scope:null;source:null} | {followup:null;authority:FileObservationAuthority|null;scope:Extract<SourceAuthorityScope,{kind:'source_read'}>;source:LaunchSource;};
+
+export interface FollowupFilePrepareParams {
+  coordinatorHostId: string;
+  repeat?: FollowupRepeat;
+  key: string;
+  runId: string;
+  trigger: FollowupRegistrationTrigger;
+  instruction: string;
+}
+
+export interface SourceReadScopeParams {principalId:string;coordinatorHostId:string;scope:Extract<SourceAuthorityScope,{kind:'source_read'}>;source:LaunchSource;}
+
+export interface SourceReadScopeResult {closed:boolean;authorities:Array<{authorityId:string;resourceEpoch:string;phase:'preparing'|'ready'|'retired'|'revoked';current:boolean}>;}
+
+export type SourceFileObservationAction = {kind:'accept'|'release';request:FileObservationRequest} | {kind:'observe';request:FileObservationRequest;watchId:string|null;after:FileWatchPosition|null;reopen:boolean;current:FileState|null;ready:boolean};
+
+export interface SourceFileObservationParams extends SourceAuthorityAddress {requestId:string;clientCapabilities:string[];action:SourceFileObservationAction;}
 
 export interface BotScopeParams {
   botId: string;
@@ -1443,10 +1473,12 @@ export interface FollowupFileEvidence {
 }
 
 export interface FollowupFileSourceState {
+  resource_authority: FileObservationAuthority | null;
   receipt_id: string;
   revision: number;
   baseline: FileState | null;
   current: FileState | null;
+  ready: boolean;
   immutable: boolean;
   watch_id: string | null;
   position: FileWatchPosition | null;
@@ -1483,9 +1515,7 @@ export interface FollowupRegistrationCancelResult {
   followup: Followup | null;
 }
 
-export interface FollowupFileAuthority {
-  grantId: string;
-}
+export type FollowupFileAuthority = {kind:'local';grantId:string} | ({kind:'managed_host'} & FileObservationAuthority);
 
 export interface FollowupRegisterAdmissionParams {
   repeat?: FollowupRepeat;
@@ -1565,11 +1595,11 @@ export interface FollowupFileReleaseResult {
   released: boolean;
 }
 
-export type FileObservationOwnerQuery = { action: 'open'; target: FileObservationTarget } | { action: 'begin'; target: FileObservationTarget; watchId: string; after: FileWatchPosition | null } | { action: 'finish'; target: FileObservationTarget; watchId: string; token: string; after: FileWatchPosition | null } | { action: 'close'; receiptId: string; watchId: string } | { action: 'discard'; receiptId: string; watchId: string; token: string };
+export type FileObservationOwnerQuery = { action: 'open'; target: FileObservationTarget } | { action: 'resume'; target: FileObservationTarget } | { action: 'release'; receiptId: string } | { action: 'begin'; target: FileObservationTarget; watchId: string; after: FileWatchPosition | null } | { action: 'finish'; target: FileObservationTarget; watchId: string; token: string; after: FileWatchPosition | null } | { action: 'close'; receiptId: string; watchId: string } | { action: 'discard'; receiptId: string; watchId: string; token: string };
 
-export type FileObservationOwnerResult = { ok: false; code: string } | { ok: true; watchId: string; position: FileWatchPosition } | { ok: true; token: string; position: FileWatchPosition } | { ok: true; position: FileWatchPosition; managedIdle: boolean; stable: boolean; gap: boolean; targetedChange: boolean } | { ok: true; closed: boolean } | { ok: true; discarded: boolean };
+export type FileObservationOwnerResult = { ok: false; code: string } | { ok: true; watchId: string; position: FileWatchPosition; allocated?:boolean } | { ok: true; token: string; position: FileWatchPosition } | { ok: true; position: FileWatchPosition; managedIdle: boolean; stable: boolean; gap: boolean; targetedChange: boolean; readRequired:boolean } | { ok: true; closed: boolean } | { ok: true; discarded: boolean };
 
-export type FileObservationOwnerHint = {v: 1; kind: 'file-observation-invalidated'; kernelEpoch: string} & ({scope: 'root'; rootId: string; canonicalRoot: string} | {scope: 'receipt'; receiptId: string});
+export type FileObservationOwnerHint = {v: 1; kind: 'file-observation-invalidated'; kernelEpoch: string} & ({scope: 'root'; rootId: string; canonicalRoot: string} | {scope: 'receipt'; receiptId: string; revoked:boolean});
 
 export type FollowupSource = { kind: 'at'; at_ms: number } | { kind: 'process_stopped'; operation_id: string } | { kind: 'job_stopped'; operation_id: string } | { kind: 'file'; path: string; condition: FileCondition } | { kind: 'artifact'; operation_id: string; artifact_id?: string; name?: string } | { kind: 'collection'; operation_id: string } | { kind: 'log_literal'; operation_id: string; stream: LogStream; from_offset: number; literal_bytes: number } | { kind: 'log_end'; operation_id: string; stream: LogStream } | { kind: 'metric'; machine_id: string; metric: MetricKind; gpu_uuid?: string; predicate: MetricPredicate; threshold: number };
 
@@ -2106,7 +2136,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 26; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 27; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -4760,7 +4790,7 @@ export interface FamilyRead {
 
 export interface FamilyItem { threadId: string; branchId: string; runId: string | null; headId: string | null; itemId: string; format: 'conversation_json'; text: string; offset: number; nextOffset: number | null; totalBytes: number }
 
-export type HostJobSubject = {kind:'workspace';workspaceId:string;subjectId:string} | {kind:'mcp';endpoint:McpEndpoint;dispatchId:string};
+export type HostJobSubject = {kind:'workspace';workspaceId:string;subjectId:string} | {kind:'mcp';endpoint:McpEndpoint;dispatchId:string} | {kind:'environment_forward';hostId:string;hostEpoch:string;target:SourceResourceOwner;serviceHost:string;servicePort:number};
 
 export type McpTaskStatus = 'working' | 'input_required' | 'completed' | 'failed' | 'cancelled';
 
@@ -5375,6 +5405,10 @@ export const MCP_CAPABILITIES: readonly (LaunchTool & { route: McpRoute; operati
 ];
 
 export type KernelMethodParams = {
+  "runtime.followup.registration.prepare": FollowupFilePrepareParams;
+  "source.authority.inspect_read_scope": SourceReadScopeParams;
+  "source.authority.close_read_scope": SourceReadScopeParams;
+  "source.file_observation": SourceFileObservationParams;
   "runtime.bot.scope.remove": BotScopeSuspension;
   "runtime.bot.scope.inspect": BotScopeParams;
   "runtime.bot.history.read": BotHistoryReadParams;
@@ -5433,6 +5467,7 @@ export type KernelMethodParams = {
   "runtime.host_job.accept": HostJobAcceptParams;
   "runtime.host_job.sources": RunParams;
   "runtime.host_job.pending": KernelEmptyParams;
+  "runtime.host_job.acceptance": OperationParams;
   "runtime.host_job.terminal": HostJobTerminalParams;
   "runtime.host_job.observe": HostJobObserveParams;
   "runtime.calendar.projects": KernelEmptyParams;
@@ -5714,6 +5749,42 @@ export type KernelMethodParams = {
 };
 
 export type KernelRequest =
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.registration.prepare";
+      params: FollowupFilePrepareParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "source.authority.inspect_read_scope";
+      params: SourceReadScopeParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "source.authority.close_read_scope";
+      params: SourceReadScopeParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "source.file_observation";
+      params: SourceFileObservationParams;
+      epoch?: string;
+      grantId?: string;
+    }
   | {
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
@@ -6233,6 +6304,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.host_job.pending";
       params: KernelEmptyParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.host_job.acceptance";
+      params: OperationParams;
       epoch?: string;
       grantId?: string;
     }

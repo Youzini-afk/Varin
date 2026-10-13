@@ -27,6 +27,7 @@ interface Watch {
   target: FileObservationTarget;
   subscription: Subscription;
   latestTarget: FileWatchPosition | null;
+  latestRelevant: FileWatchPosition | null;
   tokens: Map<string, ReadToken>;
 }
 interface RootWatch { controller: WorkspaceWatcher; listeners: Set<(event: WatchEvent) => void> }
@@ -40,6 +41,10 @@ function failed(code: string): never { throw Object.assign(new Error(code), { co
 export class DocumentsFileObservationOwner implements FileObservationOwner {
   private readonly watches = new Map<string, Watch>();
   private readonly roots = new Map<string, RootWatch>();
+  private readonly opening = new Set<{receiptId:string;work:Promise<Watch>}>();
+  // Epoch-local fences cover owner requests accepted before Storage released a
+  // receipt but delivered after its release query. Durable authority stays in Storage.
+  private readonly released = new Set<string>();
   private generation = 0;
   private readonly unsubscribe: () => void;
   constructor(private readonly documents: DocumentAuthority,
@@ -55,7 +60,13 @@ export class DocumentsFileObservationOwner implements FileObservationOwner {
     return watch !== undefined && watch.target.receiptId === receiptId;
   }
   invalidate(hint: FileObservationOwnerHint): void {
-    if (hint.scope === 'receipt') { this.changed(hint.receiptId); return; }
+    if (hint.scope === 'receipt') {
+      if (hint.revoked) {
+        this.released.add(hint.receiptId);
+        for (const watch of this.watches.values()) if (watch.target.receiptId === hint.receiptId) this.close(watch);
+      }
+      this.changed(hint.receiptId); return;
+    }
     for (const watch of this.watches.values()) if (watch.target.physicalRoot?.rootId === hint.rootId
       && watch.target.physicalRoot.canonicalRoot === hint.canonicalRoot) this.changed(watch.target.receiptId);
   }
@@ -93,28 +104,33 @@ export class DocumentsFileObservationOwner implements FileObservationOwner {
   private async open(target: FileObservationTarget, signal: AbortSignal): Promise<Watch> {
     const generation = this.generation;
     const work = (async () => {
+      if(this.released.has(target.receiptId))failed('cancelled');
       await this.validate(target, signal);
       const watchId = randomUUID();
       const receive = (event: WatchEvent) => {
         const watch = this.watches.get(watchId);
         if (!watch) return;
-        if (event.kind === 'reset') watch.latestTarget = null;
+        if (event.kind === 'reset') { watch.latestTarget = null; watch.latestRelevant = null; }
         const resource = event.resource?.resourceId;
         if (resource === target.path) watch.latestTarget = { sourceId: event.sourceId, generation: event.generation, sequence: event.sequence };
-        if (event.kind === 'reset' || resource === target.path || (resource && target.path.startsWith(`${resource}/`))) this.changed(target.receiptId);
+        if (event.kind === 'reset' || resource === target.path || (resource && target.path.startsWith(`${resource}/`))) {
+          watch.latestRelevant = { sourceId: event.sourceId, generation: event.generation, sequence: event.sequence };
+          this.changed(target.receiptId);
+        }
       };
       const subscription = target.source.mode === 'live_root'
         ? this.documents.watch(target.source.workspace_id, receive) : this.managedWatch(target, receive);
-      const watch: Watch = { id: watchId, target: structuredClone(target), subscription, latestTarget: null, tokens: new Map() };
+      const watch: Watch = { id: watchId, target: structuredClone(target), subscription, latestTarget: null, latestRelevant: null, tokens: new Map() };
       try {
         if (!await subscription.ready) failed('watch_unavailable');
         await this.validate(target, signal);
-        if (generation !== this.generation) failed('cancelled');
+        if (generation !== this.generation||this.released.has(target.receiptId)) failed('cancelled');
         this.watches.set(watch.id, watch);
         return watch;
       } catch (error) { subscription.close(); throw error; }
     })();
-    return work;
+    const opening={receiptId:target.receiptId,work};this.opening.add(opening);
+    try{return await work;}finally{this.opening.delete(opening);}
   }
   private bound(receiptId: string, watchId: string, target?: FileObservationTarget): Watch {
     const watch = this.watches.get(watchId);
@@ -136,12 +152,19 @@ export class DocumentsFileObservationOwner implements FileObservationOwner {
   }
   reset(): void {
     this.generation += 1;
+    this.released.clear();
     for (const watch of this.watches.values()) this.close(watch);
   }
   stop(): void { this.reset(); this.unsubscribe(); }
   async query(query: FileObservationOwnerQuery, signal: AbortSignal): Promise<FileObservationOwnerResult> {
     try {
       signal.throwIfAborted();
+      if(query.action==='release') {
+        this.released.add(query.receiptId);
+        await Promise.allSettled([...this.opening].filter(open=>open.receiptId===query.receiptId).map(open=>open.work));
+        for(const watch of this.watches.values())if(watch.target.receiptId===query.receiptId)this.close(watch);
+        return {ok:true,closed:true};
+      }
       if (query.action === 'close') {
         const watch = this.watches.get(query.watchId);
         if (watch?.target.receiptId === query.receiptId) this.close(watch);
@@ -151,11 +174,12 @@ export class DocumentsFileObservationOwner implements FileObservationOwner {
         const watch = this.watches.get(query.watchId);
         return { ok: true, discarded: watch?.target.receiptId === query.receiptId ? this.discard(watch, query.token) : false };
       }
-      if (query.action === 'open') {
-        const watch = await this.open(query.target, signal);
+      if (query.action === 'open'||query.action==='resume') {
+        const original=query.action==='resume'?[...this.watches.values()].find(watch=>isDeepStrictEqual(watch.target,query.target)):undefined;
+        const watch = original??await this.open(query.target, signal);
         const position = watch.subscription.position;
         if (!position) failed('watch_unavailable');
-        return { ok: true, watchId: watch.id, position };
+        return { ok: true, watchId: watch.id, position,allocated:!original };
       }
       const watch = this.bound(query.target.receiptId, query.watchId, query.target);
       await this.validate(watch.target, signal);
@@ -189,6 +213,7 @@ export class DocumentsFileObservationOwner implements FileObservationOwner {
         const targetedChange = !gap && watch.latestTarget !== null && sameSource(watch.latestTarget, after)
           && watch.latestTarget.sequence > after.sequence;
         return { ok: true, position, gap, targetedChange,
+          readRequired: gap || (watch.latestRelevant !== null && sameSource(watch.latestRelevant, after) && watch.latestRelevant.sequence > after.sequence),
           // A persistent managed writer is a readiness fact, not proof that this read changed.
           stable: samePosition(read.position, position) && (capture?.reasons.every(reason => reason === 'active-writer' || reason === 'maintenance') ?? true),
           managedIdle: !capture || (!capture.state.maintenance && capture.state.activeWriters.length === 0) };
