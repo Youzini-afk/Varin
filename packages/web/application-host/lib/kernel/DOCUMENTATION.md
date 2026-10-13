@@ -1313,8 +1313,12 @@ creation request before disposing its view; it cannot race a late preparation in
 configuration resolves command/environment only on B. Its stdio adapter spawns with the original
 Source grant and root, so Storage retains the process identity across Host restart. Cancellation and
 source retirement await original scoped preparations and native guardian completion, not SDK close
-alone. A lost reply remains unknown and is never replayed. The focused evidence covers adapters and
-controlled owner ports, not a full two-Host SDK/Kernel lifecycle.
+alone. Cleanup uses the persisted original address even after the grant is inactive. A native error
+response joined with its original absent process receipt proves rejection; a lost reply remains
+unknown and is never replayed. Storage records explicit no-spawn proof for setup/admission failures,
+so those failures do not wait forever for a guardian that never admitted the target. Focused evidence
+covers adapter/controlled owner ports and native pre-spawn/reopen receipts, not a full two-Host
+SDK/Kernel lifecycle.
 
 Managed MCP Tasks, persistent resource observers, finite reverse interactions and mixed-owner child
 preparation, explicit managed cold calendar starts and broader combined cross-Host file recovery

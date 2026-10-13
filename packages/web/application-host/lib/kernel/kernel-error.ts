@@ -11,3 +11,13 @@ export class KernelClientError extends Error {
     this.retryable = error.retryable ?? false;
   }
 }
+
+/** A fact about one original request, never inferred from its error code or message. */
+export class KernelRequestError extends KernelClientError {
+  constructor(error: Error | { code: string; message: string; retryable?: boolean }, readonly method: string,
+    readonly settlement: 'not_dispatched' | 'response') {
+    super(error instanceof Error && !(error instanceof KernelClientError)
+      ? { code: 'kernel-error', message: error.message } : error);
+    this.name = 'KernelRequestError';
+  }
+}

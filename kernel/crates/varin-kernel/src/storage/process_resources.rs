@@ -532,25 +532,34 @@ impl Storage {
         self.conn.execute("INSERT INTO process_records(process_id,workspace_id,execution_workspace_id,grant_id,kernel_epoch,cwd,job_name,params_hash,status_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
             params![id,workspace,root.execution_workspace_id,grant.grant_id,grant.kernel_epoch,cwd.to_string_lossy(),job_name,hash,serde_json::to_string(&record)?])?;
         let receipt_path = process::receipt_path(&self.root, id);
-        fs::create_dir_all(receipt_path.parent().ok_or_else(|| {
-            KernelError::Storage("process receipt directory is unavailable".into())
-        })?)?;
-        sync_directory(&self.root)?;
-        if let Err(error) = self.check_cancelled() {
-            let mut cancelled = record;
-            cancelled["status"] = json!("failed");
-            cancelled["writerActive"] = json!(false);
-            cancelled["reason"] = json!("process launch cancelled before native spawn");
-            self.persist_process_record(id, &cancelled)?;
-            return Err(error);
-        }
-        if let Err(error)=self.processes.spawn(id,json!({"processId":id,"kernelEpoch":grant.kernel_epoch,
-            "receiptPath":receipt_path,"jobName":job_name,"cwd":cwd,"command":command,"args":params_value["args"],
-            "windowsRawArguments":params_value["windowsRawArguments"],
-            "env":params_value["env"],"mode":mode,"cols":cols,"rows":rows,"runId":grant.run_id})){
-            let mut failed=record;
-            failed["status"]=json!("failed");failed["writerActive"]=json!(false);failed["reason"]=json!(error.to_string());
-            self.persist_process_record(id,&failed)?;
+        let spawned = (|| {
+            fs::create_dir_all(receipt_path.parent().ok_or_else(|| {
+                KernelError::Storage("process receipt directory is unavailable".into())
+            })?)?;
+            sync_directory(&self.root)?;
+            self.check_cancelled()?;
+            self.processes.spawn(id, json!({"processId":id,"kernelEpoch":grant.kernel_epoch,
+                "receiptPath":receipt_path,"jobName":job_name,"cwd":cwd,"command":command,"args":params_value["args"],
+                "windowsRawArguments":params_value["windowsRawArguments"],
+                "env":params_value["env"],"mode":mode,"cols":cols,"rows":rows,"runId":grant.run_id}))
+        })();
+        if let Err(error) = spawned {
+            let mut failed = record;
+            failed["reason"] = json!(error.to_string());
+            if self.processes.is_live(id) {
+                // A duplicate live identity can already own a target. Rejection is not its
+                // stop receipt; retain writer activity until the original tree is observed.
+                failed["status"] = json!("unknown");
+            } else {
+                // ProcessManager sends the first guardian config only after every fallible
+                // admission step. These errors prove no target was admitted, even if a
+                // guardian was created. Keep that proof in the original durable intent.
+                failed["status"] = json!("failed");
+                failed["writerActive"] = json!(false);
+                failed["treeConfirmed"] = json!(true);
+                failed["spawned"] = json!(false);
+            }
+            self.persist_process_record(id, &failed)?;
             return Err(error);
         }
         self.refresh_process_record(id)?

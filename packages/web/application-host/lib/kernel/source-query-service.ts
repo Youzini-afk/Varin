@@ -32,7 +32,7 @@ export interface SourceQueryServiceOptions {
   onError?(error: Error): void;
 }
 export type SourceQueryService = ManagedSourceServiceHandler & {
-  release(scope: ManagedSourceLocalScope): Promise<void>;
+  release(scope: Pick<ManagedSourceLocalScope, 'principal' | 'coordinatorHostId' | 'authorityId' | 'resourceEpoch'>): Promise<void>;
   cleanup(scope: ManagedSourceCleanupScope): Promise<void>;
   dispose(): Promise<void>;
 };
@@ -116,9 +116,11 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
     void work.finally(() => { if (owner.languageClosing === work) delete owner.languageClosing; }).catch(() => undefined);
     return work;
   };
-  const release = async (scope: ManagedSourceLocalScope): Promise<void> => {
-    const key = keyOf(scope), owned = services.get(key);
+  const release: SourceQueryService['release'] = async scope => {
+    const owned = [...services.values()].find(owner => owner.scope.authorityId === scope.authorityId && owner.scope.resourceEpoch === scope.resourceEpoch
+      && owner.scope.principal.principalId === scope.principal.principalId && owner.scope.coordinatorHostId === scope.coordinatorHostId);
     if (!owned) return;
+    const key = keyOf(owned.scope);
     if (!owned.closing) {
       owned.controller.abort(new DOMException('Original source authority retired', 'AbortError'));
       owned.closing = (async () => {

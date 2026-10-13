@@ -598,6 +598,78 @@ fn managed_source_two_hosts_original_storage_and_direct_router() {
 }
 
 #[test]
+fn managed_source_pre_spawn_failures_settle_original_receipt_without_guardian_output() {
+    for block_receipt_directory in [false, true] {
+        let root = std::env::temp_dir().join(format!(
+            "varin-source-pre-spawn-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let work = root.join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        let owner = Owner::new(
+            root.join("storage"),
+            "managed-target",
+            "managed-target-generation",
+            "managed-target-epoch",
+        );
+        let (address, _) = owner.bind_live(&work, "original-spawn", 1);
+        owner
+            .storage
+            .lock()
+            .unwrap()
+            .set_test_process_worker_executable(root.join("missing-guardian"));
+        if block_receipt_directory {
+            std::fs::write(owner.root.join("process-receipts"), "directory obstruction").unwrap();
+        }
+        let args = json!({"cwd":"","command":"unused-target","mode":"pipe","args":[]});
+        let failed = owner
+            .tool(&address, "process_spawn", "process", args.clone())
+            .unwrap();
+        // An execution error alone still carries no stop proof. The original owner must
+        // establish the target was never admitted, including when its reply was lost.
+        assert_eq!(failed["result"]["completion"]["effect"], "unknown", "{failed}");
+        let mut observe = address.clone();
+        observe["operationId"] = json!("request:tool:process");
+        let receipt = owner
+            .rpc("source.resource.observe", observe.clone(), None)
+            .unwrap();
+        assert_eq!(receipt["accepted"], true, "{receipt}");
+        assert_eq!(receipt["executorStopped"], true, "{receipt}");
+        assert_eq!(receipt["result"]["completion"]["outcome"], "failed", "{receipt}");
+        assert_eq!(receipt["process"]["status"], "failed", "{receipt}");
+        assert_eq!(receipt["process"]["writerActive"], false, "{receipt}");
+        assert_eq!(receipt["process"]["treeConfirmed"], true, "{receipt}");
+        assert_eq!(receipt["process"]["spawned"], false, "{receipt}");
+        assert_eq!(receipt["process"]["outputAvailable"], false, "{receipt}");
+        assert!(receipt["process"]["pid"].is_null(), "{receipt}");
+        assert!(!crate::process::receipt_path(&owner.root, "request:tool:process").exists());
+
+        // Repeating the exact command recalls its failed identity instead of spawning again.
+        owner.tool(&address, "process_spawn", "process", args).unwrap();
+        assert_eq!(
+            owner.rpc("source.resource.cancel", observe.clone(), None).unwrap(),
+            receipt
+        );
+        drop(owner);
+        let reopened = Owner::new(
+            root.join("storage"),
+            "managed-target",
+            "managed-target-generation",
+            "managed-target-reopened",
+        );
+        assert_eq!(
+            reopened.rpc("source.resource.observe", observe, None).unwrap(),
+            receipt
+        );
+        if block_receipt_directory {
+            assert!(reopened.root.join("process-receipts").is_file());
+        }
+        drop(reopened);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
 fn managed_source_interaction_recalls_original_receipt_after_reopen_without_replaying_input() {
     let root = std::env::temp_dir().join(format!("varin-source-input-{}", uuid::Uuid::new_v4()));
     let work = root.join("work");
