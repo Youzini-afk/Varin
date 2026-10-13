@@ -179,7 +179,7 @@ async function receive(frame: Record<string, unknown>) {
   } else if (frame.kind === 'fixture-initialize') {
     epoch = String(frame.epoch); storageRoot = String(frame.storageRoot); mediaMode = frame.media === true;
     if (mediaMode) prepareComputer();
-    const resolveConfiguration = await scripts.prepareConfiguration(() => null);
+    const resolveConfiguration = await scripts.prepareConfiguration(() => null, null);
     configurationIdentity = resolveConfiguration(SCRIPT_TOOL_DECLARATIONS[0])!;
     write({ kind: 'fixture-prepared', configurationIdentity,
       bindings: SCRIPT_TOOL_DECLARATIONS.map(descriptor => ({ providerKey: `script:${descriptor.id}`, extensionId: owner.extensionId, extensionVersion: owner.extensionVersion,

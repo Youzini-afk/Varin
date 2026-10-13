@@ -257,6 +257,7 @@ impl ToolExecutor for FollowupTools {
                             let binding = self.binding.as_ref().ok_or_else(|| {
                                 error("file follow-up requires the original source binding")
                             })?;
+                            if !binding.resource_owner.is_local(){return Err(error("File follow-up observation is unavailable on the selected managed Host"));}
                             let files = self
                                 .resources
                                 .as_ref()

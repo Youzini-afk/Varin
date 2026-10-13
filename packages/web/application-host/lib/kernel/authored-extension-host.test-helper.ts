@@ -154,7 +154,7 @@ async function initialize(frame: Record<string, unknown>) {
     await kernel.scoped(seed).createBranch({ operationId: 'authored-fixture-source-create', branchId: 'source:authored',
       workspaceId: identity.workspaceId, captureScopes: [], draftBasePaths: [], entries: [{ path: 'package', state: { kind: 'directory', mode: 493 } }] });
   } finally { await kernel.revokeGrant(seed.grantId); }
-  selectedSource = { mode: 'materialized', workspace_id: identity.workspaceId, execution_workspace_id: identity.workspaceId,
+  selectedSource = { resource_owner: { kind: 'local' }, mode: 'materialized', workspace_id: identity.workspaceId, execution_workspace_id: identity.workspaceId,
     branch_id: 'source:authored', revision: 0, environment_run_id: null, live_root: null };
   router = express.Router();
   const auth = (incoming: Request, response: ExpressResponse, next: () => void) => {

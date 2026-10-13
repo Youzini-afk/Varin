@@ -8,7 +8,7 @@ pub(crate) struct BlobReadRetention {
     _lifetime: Arc<()>,
 }
 impl BlobReadRoots {
-    fn retain(&mut self, hash: &str) -> BlobReadRetention {
+    pub(super) fn retain(&mut self, hash: &str) -> BlobReadRetention {
         BlobReadRetention {
             _lifetime: self.0.entry(hash.into()).or_default().clone(),
         }

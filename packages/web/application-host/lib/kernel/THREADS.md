@@ -157,13 +157,15 @@ independent of the summary job; only a successful explicit publication changes l
 
 ## Workspace source preparation
 
-The composer exposes `Prepare workspace`: select a Host workspace folder and either a
-read-only file snapshot (read, directory listing and text search) or an isolated editable copy with file and process tools. The public
-`source/prepare` route accepts the conversation identity, a stable request key, folder path
-and mode. The Host resolves and admits the folder through Documents, then uses the existing
-KernelStorageAdapter WorkingState inventory/capture and branch creation. It returns real workspace,
-branch and immutable baseline revision identities; the renderer does not invent them. Unsaved
-Document Registry buffers are explicitly excluded from this saved-file preparation.
+The composer exposes `Prepare workspace`: select this Host or a configured managed Host, then a
+folder and fixed snapshot, isolated editable copy or live source. `source/resolve` performs the original
+Documents resolution once; `source/prepare` accepts the frozen resource owner, workspace ID, stable
+key, mode and explicit content selection. It never accepts a path alias as a second preparation route.
+The selected Host uses its existing Documents and KernelStorageAdapter inventory/capture and branch
+creation. It returns actual workspace, branch and immutable baseline revision identities. Local
+snapshots can explicitly capture this window’s Document Registry drafts; managed and live sources
+use saved target files. The selected owner stays attached to later Runs and does not follow sidebar
+or connection changes.
 
 Concurrent retries join the same preparation. A successful branch creation is its durable baseline
 receipt at revision zero; a retry after completion or Host restart does not recapture changed files.
@@ -176,8 +178,10 @@ source; a newly prepared selection cannot be silently discarded into queued inpu
 Editable copies are separate working directories, not security sandboxes, and commands may have
 external effects. Changes are not automatically copied into the selected original folder. Source
 snapshots remain rooted alongside the conversation; conversation deletion and source
-release UI are not delivered by this preparation path. Remote environment mapping, dirty-buffer
-capture and work-result integration retain their separate implementation requirements.
+release UI are not delivered by this preparation path. Managed file/process/query and child-result
+operations keep that target Host throughout execution. Cross-Host combined file recovery and the
+explicit managed-source exclusions in [the owner documentation](DOCUMENTATION.md#managed-source-consumers)
+remain unavailable; selecting a target does not imply all environment capabilities have migrated.
 
 
 ## Initial trusted context

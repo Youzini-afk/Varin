@@ -22,7 +22,7 @@ async function fixture(mode: 'live_root' | 'materialized' = 'live_root', relativ
   const physicalRoot = { hostId: h.identity.hostId, rootId: 'root:original', canonicalRoot: root };
   const target: FileObservationTarget = { receiptId: 'file-observation:one:0', followupId: 'one', sourceIndex: 0,
     sourceRunId: 'original-run', threadId: 'original-thread', physicalRoot, path: relative, immutable: false,
-    source: { workspace_id: h.identity.workspaceId, execution_workspace_id: h.identity.workspaceId,
+    source: { resource_owner: { kind: 'local' as const }, workspace_id: h.identity.workspaceId, execution_workspace_id: h.identity.workspaceId,
       mode, branch_id: mode === 'live_root' ? null : 'fixed-source', revision: mode === 'live_root' ? null : 1,
       live_root: mode === 'live_root' ? physicalRoot : null } };
   cleanups.push(async () => { owner.stop(); await h.cleanup(); });

@@ -7,18 +7,20 @@ import type { DocumentAuthority } from '../documents/authority.js';
 import { inspectDocumentBytes, revisionFromBytes } from '../documents/inspect.js';
 import type { ExploreFileSnapshot } from '../harness/explore-file-reader.js';
 import { normalizePathIdentity } from '../workspace/path-safety.js';
-import type { KernelClient } from './kernel-client.js';
+import type { KernelClient, KernelGrantHandle } from './kernel-client.js';
 import type { LiveSourceResolver } from './live-source.js';
 import { runKernelCompute, type KernelComputeInput, type KernelComputeOptions, type KernelComputeResult } from './compute-runner.js';
 import type { LaunchSource, LiveRoot, KernelMaterializedView } from './protocol.generated.js';
+import type { SourceServiceOperation, SourceServiceResponse } from '../harness/managed-remote-types.js';
 import type { NativeProcessIdentity } from './process-service.js';
 import { admitMaterializedRoot, originalMaterializationLocation } from './source-launch.js';
+import { ManagedSourceDrainedError } from '../harness/managed-source-drain.js';
 
 export type SourceComputeInput = Omit<KernelComputeInput, 'workspaceId' | 'rootId' | 'branchId' | 'revision' | 'pinId' | 'objects'>;
 export interface SourceQueryAccess {
-  runId: string;
+  runId?: string;
   threadId: string;
-  grantId: string;
+  grantId?: string;
   source: LaunchSource;
   physicalRoot: LiveRoot | null;
 }
@@ -28,7 +30,11 @@ export interface PreparedLanguageSource {
   check(signal: AbortSignal): Promise<void>;
   release(): Promise<void>;
 }
+export interface ManagedSourceQueryTransport {
+  service<Operation extends SourceServiceOperation>(query: SourceQueryAccess, operation: Operation, signal?: AbortSignal): Promise<SourceServiceResponse<Operation>>;
+}
 export interface SourceQueryOwner {
+  pathScopes(query: SourceQueryAccess, signal: AbortSignal): Promise<readonly string[]>;
   prepareLanguageView(query: SourceQueryAccess, viewId: string, signal: AbortSignal): Promise<PreparedLanguageSource>;
   dispose(): Promise<void>;
   validate(query: SourceQueryAccess, signal: AbortSignal): Promise<void>;
@@ -44,8 +50,23 @@ export function createSourceQueryOwner(options: {
   kernel: KernelClient;
   documents: Pick<DocumentAuthority, 'readSnapshot' | 'admitWorkspaceRegistration'>;
   validateLiveSource: LiveSourceResolver;
+  remote?: ManagedSourceQueryTransport;
+  /** Target-only, already admitted native handle; never decoded from a query payload. */
+  targetAuthority?: { grant(query: SourceQueryAccess): KernelGrantHandle };
 }): SourceQueryOwner {
   const { kernel, documents } = options;
+  const targetQueries = options.targetAuthority !== undefined;
+  const managed = (query: SourceQueryAccess) => query.source.resource_owner.kind === 'managed_host' && !options.targetAuthority;
+  const service = async <Operation extends SourceServiceOperation>(query: SourceQueryAccess, operation: Operation, signal?: AbortSignal): Promise<SourceServiceResponse<Operation>> => {
+    if (!options.remote) throw new Error('The original managed source service is unavailable');
+    return await options.remote.service(query, operation, signal);
+  };
+  const sourceGrant = (query: SourceQueryAccess): KernelGrantHandle => {
+    if (managed(query)) throw new Error('A managed source has no local resource grant');
+    if (options.targetAuthority) return options.targetAuthority.grant(query);
+    if (!query.runId || !query.grantId) throw new Error('The original source Run authority is required');
+    return kernel.sourceGrant({ ...query, runId: query.runId, grantId: query.grantId });
+  };
   // Credentials for the Host-owned physical resource only. Run admission stays
   // separate, and these handles are never included in a Run or tool binding.
   const contexts = new Map<string, Promise<{ client: ReturnType<KernelClient['scoped']>; grantId: string }>>();
@@ -63,7 +84,8 @@ export function createSourceQueryOwner(options: {
   };
   const validate = async (query: SourceQueryAccess, signal: AbortSignal): Promise<void> => {
     signal.throwIfAborted();
-    const client = kernel.scoped(kernel.sourceGrant(query));
+    if (managed(query)) { await service(query, { kind: 'validate' }, signal); return; }
+    const client = kernel.scoped(sourceGrant(query));
     await documents.admitWorkspaceRegistration(query.source.workspace_id, signal);
     if (query.source.execution_workspace_id !== query.source.workspace_id) await documents.admitWorkspaceRegistration(query.source.execution_workspace_id, signal);
     const source = query.source, root = query.physicalRoot;
@@ -80,32 +102,56 @@ export function createSourceQueryOwner(options: {
       } else {
         const handshake = kernel.handshake;
         if (source.mode !== 'materialized' || !root || !handshake || root.hostId !== handshake.hostId) throw new Error('The original materialized source root is unavailable');
-        const location = await originalMaterializationLocation(handshake.storageRoot, source.workspace_id, source.environment_run_id ?? query.runId);
+        const location = await originalMaterializationLocation(handshake.storageRoot, source.workspace_id, source.environment_run_id ?? query.runId ?? '');
         const canonical = await admitMaterializedRoot(location.targetPath, signal);
         if (normalizePathIdentity(canonical) !== normalizePathIdentity(root.canonicalRoot)) throw new Error('The original materialized source location changed');
       }
     }
     signal.throwIfAborted();
-    kernel.sourceGrant(query);
+    sourceGrant(query);
   };
   const validateLanguage: SourceQueryOwner['validateLanguage'] = async (query, signal) => {
+    if (managed(query)) throw new Error('Managed language requests must use the original target language owner');
     await validate(query, signal);
     // Language backends may discover imports/configuration anywhere in their cwd.
     // Inspect the original issued Run handle, never the service materialization grant.
-    if (!kernel.sourceGrant(query).pathScopes.includes('')) {
+    if (!sourceGrant(query).pathScopes.includes('')) {
       const project = query.source.mode === 'fixed_branch' ? 'fixed project' : 'source project';
       throw new Error(`The selected language backend reads the entire ${project}; the current grant only allows selected paths. Use a whole-project read grant or file_read for path-scoped access.`);
     }
   };
   const compute: SourceQueryOwner['compute'] = async (query, input, options = {}) => {
-    const client = kernel.scoped(kernel.sourceGrant(query));
+    if (managed(query)) {
+      const result = await service(query, { kind: 'compute', input: { ...input, jobId: `compute:${randomUUID()}` } }, options.signal);
+      if (options.onRecords) await options.onRecords(result.records);
+      return options.collect === false ? { ...result, records: [] } : result;
+    }
+    const client = kernel.scoped(sourceGrant(query));
     const source = query.source;
-    return runKernelCompute(client, { ...input, workspaceId: source.workspace_id,
-      ...(source.mode === 'fixed_branch' ? { branchId: source.branch_id!, revision: source.revision! }
-        : { rootId: query.physicalRoot!.rootId }) }, options);
+    let drained = false;
+    try {
+      return await runKernelCompute(client, { ...input, workspaceId: source.workspace_id,
+        ...(source.mode === 'fixed_branch' ? { branchId: source.branch_id!, revision: source.revision! }
+          : { rootId: query.physicalRoot!.rootId }) }, { ...options, onDrained: () => {
+            drained = true; options.onDrained?.();
+          } });
+    } catch (error) {
+      // Only the admitted target needs an in-process drain projection. All
+      // existing local consumers retain their original exception unchanged.
+      if (targetQueries && drained) throw new ManagedSourceDrainedError(error);
+      throw error;
+    }
   };
   return {
     validate, validateLanguage, compute,
+    async pathScopes(query, signal) {
+      if (managed(query)) {
+        const result = await service(query, { kind: 'validate' }, signal);
+        if (!Array.isArray(result.pathScopes) || result.pathScopes.some(path => typeof path !== 'string')) throw new Error('Managed source returned invalid path scopes');
+        return result.pathScopes;
+      }
+      signal.throwIfAborted(); return sourceGrant(query).pathScopes;
+    },
     async prepareLanguageView(query, viewId, signal) {
       await validateLanguage(query, signal);
       if (query.source.mode !== 'fixed_branch') {
@@ -150,7 +196,8 @@ export function createSourceQueryOwner(options: {
     },
     async checkPath(query, path, signal) {
       signal.throwIfAborted();
-      const client = kernel.scoped(kernel.sourceGrant(query));
+      if (managed(query)) { await service(query, { kind: 'check_path', path }, signal); return; }
+      const client = kernel.scoped(sourceGrant(query));
       if (query.source.mode === 'fixed_branch') {
         await client.readBranch({ branchId: query.source.branch_id!, revision: query.source.revision!, paths: [path], includeEntries: false }, signal).catch(error => { throw sourceReadError(error); });
       } else {
@@ -160,16 +207,18 @@ export function createSourceQueryOwner(options: {
     },
     async routingWorkspace(query, signal) {
       signal.throwIfAborted();
-      kernel.sourceGrant(query);
-      // Configuration identity only. This directory never supplies fixed/materialized source bytes.
+      if (managed(query)) return service(query, { kind: 'routing_workspace' }, signal);
+      sourceGrant(query);
+      // Source coordinate only. Consumers choose configuration at its actual Host owner.
       const workspace = await documents.admitWorkspaceRegistration(query.source.workspace_id, signal);
       signal.throwIfAborted();
       return workspace.canonicalPath;
     },
     async read(query, path, signal) {
+      if (managed(query)) return service(query, { kind: 'read', path }, signal);
       await validate(query, signal);
       const source = query.source;
-      const client = kernel.scoped(kernel.sourceGrant(query));
+      const client = kernel.scoped(sourceGrant(query));
       const address = query.physicalRoot ? { workspaceId: source.workspace_id, rootId: query.physicalRoot.rootId, path } : null;
       const before = address ? await client.fileReadCheck(address, signal) : null;
       let result: ExploreFileSnapshot;

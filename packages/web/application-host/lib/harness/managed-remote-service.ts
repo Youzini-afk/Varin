@@ -23,6 +23,7 @@ import {
   type ManagedRemoteMaterialReceipt,
   type ManagedRemoteOutputReceipt,
   type ManagedRemoteReadReceipt,
+  type ManagedSourceService,
 } from "./managed-remote-types.js";
 
 const WORKSPACE_ID = "__varin_managed_remote__";
@@ -124,9 +125,19 @@ export interface ManagedRemoteExecutionServiceOptions {
   resources: ResourceService;
   now?: () => number;
   onError?: (error: Error) => void;
+  sourceOwner?: ManagedSourceService;
 }
 
 export function createManagedRemoteExecutionService(options: ManagedRemoteExecutionServiceOptions) {
+  let sourceOwner = options.sourceOwner;
+  const setSourceOwner = (owner: ManagedSourceService): void => {
+    if (sourceOwner && sourceOwner !== owner) throw new Error('Managed source owner is already installed');
+    sourceOwner = owner;
+  };
+  const sources = (): ManagedSourceService => {
+    if (!sourceOwner) throw new Error('Managed source owner is unavailable');
+    return sourceOwner;
+  };
   const now = options.now ?? (() => Date.now());
   const report = (error: unknown) => options.onError?.(error instanceof Error ? error : new Error(String(error)));
   let contextPromise: Promise<KernelScopedClient> | null = null;
@@ -185,7 +196,7 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
     return {
       protocolVersion: MANAGED_REMOTE_PROTOCOL_VERSION,
       hostId: options.hostId,
-      capabilities: ["materials", "process", "attach", "cancel", "logs", "outputs", "resource-admission", "remote-shell"],
+      capabilities: ["materials", "process", "attach", "cancel", "logs", "outputs", "resource-admission", "remote-shell", ...(sourceOwner ? ['sources'] : [])],
       machine,
     };
   };
@@ -936,6 +947,7 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
 
   return {
     hostId: options.hostId,
+    sources, setSourceOwner,
     identity, lifecycle, ownerForOutput, probeMaterial, putObject, commitMaterial,
     admit, observeAdmission, releaseAdmission,
     submitJob, inspectJob, readJob, killJob, releaseJob,

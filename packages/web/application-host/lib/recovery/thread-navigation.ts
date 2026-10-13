@@ -60,6 +60,12 @@ export function createThreadRecoveryNavigation(owners: Owners): RecoverySessionN
             const selected = identity(input.conversation);
             const navigation = await threads.prepareNavigation({ ...selected, entryId: input.entryId });
             const range = await runtime.recoveryRange({ threadId: selected.threadId, branchId: selected.branchId, entryId: input.entryId });
+            if (range.some(turn => turn.source?.resource_owner.kind === 'managed_host'
+                && turn.entryIds.some(id => navigation.removedEntryIds.includes(id)))) {
+                throw new RecoveryPrimitiveError('unsupported-metadata',
+                    'Combined file recovery across managed Hosts is not available yet. History-only navigation remains available; target files have not been changed.',
+                    { origin: 'storage' });
+            }
             const journalTurns: Array<{
                 workspaceId: string;
                 executionId: string;
@@ -106,6 +112,8 @@ export function createThreadRecoveryFileResolver({ runtime, storage, kernel, liv
         const source = launch?.selection.source;
         if (run.thread_id !== target.threadId || !source || source.workspace_id !== identity.workspaceId || source.execution_workspace_id !== target.executionWorkspaceId || source.mode !== target.sourceMode)
             throw new RecoveryPrimitiveError('workspace-untrusted', 'Recovery source no longer matches the original Run', { origin: 'storage' });
+        if (source.resource_owner.kind === 'managed_host')
+            throw new RecoveryPrimitiveError('unsupported-metadata', 'Managed Host files require their original remote recovery owner; no local directory was opened.', { origin: 'storage' });
         let root: string;
         if (source.mode === 'live_root') {
             if (!source.live_root)

@@ -234,7 +234,8 @@ fn process_followup_reads_real_original_output_and_rechecks_both_grants() {
     let mut tools = KernelToolExecutor::selected_schemas(&kinds);
     tools.push(crate::followup_tools::schema());
     let mut binding = ToolBinding {
-        grant_id: "source".into(),
+        resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
+grant_id: "source".into(),
         run_id: String::new(),
         thread_id: "thread".into(),
         workspace_id: "workspace".into(),
@@ -825,7 +826,8 @@ fn native_input_uses_original_model_intent_and_guardian_receipt_then_reads_same_
     ]);
     let tools = KernelToolExecutor::selected_schemas(&kinds);
     let mut binding = ToolBinding {
-        grant_id: "source".into(),
+        resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
+grant_id: "source".into(),
         run_id: String::new(),
         thread_id: "thread".into(),
         workspace_id: "workspace".into(),
@@ -1097,6 +1099,7 @@ fn native_input_uses_original_model_intent_and_guardian_receipt_then_reads_same_
     };
     let (write_context, _prepared, _contract) = admit("recover-input-step", &recover_write);
     let native = crate::storage::process_interactions::Native {
+        resource_owner:varin_runtime::catalog::launches::SourceResourceOwner::Local,
         context: write_context.clone(),
         executor: "process_write".into(),
     };

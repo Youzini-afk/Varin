@@ -3,10 +3,11 @@ import type { LiveSourceResolver } from './live-source.js';
 import type { ThreadSource } from '@varin/application-client';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { stat } from 'node:fs/promises';
 import type { KernelClient } from './kernel-client.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
-import type { LaunchIntent, RunStartReceipt } from './protocol.generated.js';
+import type { LaunchIntent, RunStartReceipt, SourceToolBinding } from './protocol.generated.js';
 import type { ExistingHostCredentialOwner } from './credential-owner.js';
 import { canonicalizePathIdentity, normalizePathIdentity } from '../workspace/path-safety.js';
 
@@ -65,13 +66,13 @@ export async function startRunFromSource(
   const signal = options.signal;
   signal?.throwIfAborted();
   if (![selection.runId, selection.workspaceId, selection.executionWorkspaceId].every(value => typeof value === 'string' && value.length > 0)) throw new Error('Launch requires complete source identity');
-  if (selection.mode === 'live_root') {
+  if (selection.mode === 'live_root' && selection.resourceOwner.kind === 'local') {
     if (!options.resolveLiveSource) throw new Error('Live source requires its Documents resource owner');
     if (!selection.liveRoot || ![selection.liveRoot.hostId, selection.liveRoot.rootId, selection.liveRoot.canonicalRoot].every(value => typeof value === 'string' && value.length > 0)
       || selection.branchId !== undefined || selection.revision !== undefined || selection.environmentRunId !== undefined) throw new Error('Live source identity is incomplete');
     await options.resolveLiveSource(selection, signal);
-  } else if ((selection.mode !== 'fixed_branch' && selection.mode !== 'materialized')
-    || typeof selection.branchId !== 'string' || !selection.branchId || !Number.isSafeInteger(selection.revision) || selection.revision < 0) {
+  } else if (selection.mode !== 'live_root' && ((selection.mode !== 'fixed_branch' && selection.mode !== 'materialized')
+    || typeof selection.branchId !== 'string' || !selection.branchId || !Number.isSafeInteger(selection.revision) || selection.revision < 0)) {
     throw new Error('Fixed source requires a complete branch revision');
   }
   const tools = [...new Set(selection.tools)];
@@ -80,7 +81,7 @@ export async function startRunFromSource(
   const saved = await runtime.launch(run.id, signal);
   if (saved) {
     const source = saved.selection.source;
-    if (!source || source.workspace_id !== selection.workspaceId || source.execution_workspace_id !== selection.executionWorkspaceId
+    if (!source || !isDeepStrictEqual(source.resource_owner, selection.resourceOwner) || source.workspace_id !== selection.workspaceId || source.execution_workspace_id !== selection.executionWorkspaceId
       || source.branch_id !== (selection.branchId ?? null) || source.revision !== (selection.revision ?? null)
       || source.mode !== selection.mode
       || source.live_root?.hostId !== selection.liveRoot?.hostId || source.live_root?.canonicalRoot !== selection.liveRoot?.canonicalRoot || source.live_root?.rootId !== selection.liveRoot?.rootId
@@ -90,7 +91,7 @@ export async function startRunFromSource(
   }
   const credentialScope = options.credentialOwner ? await options.credentialOwner.scope() : undefined;
   if (!saved) await runtime.selectLaunch({ runId: run.id,
-    source: { mode: selection.mode, liveRoot: selection.liveRoot ?? null, workspaceId: selection.workspaceId,
+    source: { resourceOwner: selection.resourceOwner, mode: selection.mode, liveRoot: selection.liveRoot ?? null, workspaceId: selection.workspaceId,
       executionWorkspaceId: selection.executionWorkspaceId, branchId: selection.branchId ?? null, revision: selection.revision ?? null,
       ...(selection.environmentRunId ? { environmentRunId: selection.environmentRunId } : {}) },
     enabledTools: tools, ...(credentialScope ? { credentialScope } : {}),
@@ -98,7 +99,7 @@ export async function startRunFromSource(
   const authority = await admitRunSourceAuthority(kernel, runtime, selection, { ...options, allowMaterialization: true });
   try {
     await runtime.reconcileRun(run.id, authority.toolBinding, signal);
-    await runtime.prepareMcp(run.id, selection, authority.canonicalRoot, signal);
+    await runtime.prepareMcp(run.id, selection, authority.kind === 'local' ? authority.canonicalRoot : undefined, signal);
     return options.credentialOwner
       ? await runtime.startRunWithCredentialOwner(run.id, options.credentialOwner, signal, authority.toolBinding)
       : await runtime.startRun(run.id, signal, authority.toolBinding);
@@ -121,7 +122,7 @@ export async function admitRunSourceAuthority(
   const run = await runtime.run(selection.runId, signal);
   const saved = await runtime.launch(run.id, signal);
   const sourceSelection = saved?.selection.source;
-  if (!sourceSelection || sourceSelection.workspace_id !== selection.workspaceId
+  if (!sourceSelection || !isDeepStrictEqual(sourceSelection.resource_owner, selection.resourceOwner) || sourceSelection.workspace_id !== selection.workspaceId
     || sourceSelection.execution_workspace_id !== selection.executionWorkspaceId
     || sourceSelection.mode !== selection.mode
     || sourceSelection.branch_id !== (selection.branchId ?? null)
@@ -132,7 +133,7 @@ export async function admitRunSourceAuthority(
     || sourceSelection.live_root?.canonicalRoot !== selection.liveRoot?.canonicalRoot) throw new SourceAdmissionError('source_changed');
   const tools = [...new Set(selection.tools)];
   if (JSON.stringify([...tools].sort()) !== JSON.stringify(sourceToolSchemas(saved.selection).map(tool => tool.name).sort())) throw new Error('Source authority cannot change the admitted tools');
-  if (selection.mode === 'live_root') {
+  if (selection.mode === 'live_root' && selection.resourceOwner.kind === 'local') {
     if (!options.resolveLiveSource) throw new Error('Live source requires its Documents resource owner');
     await options.resolveLiveSource(selection, signal);
   }
@@ -155,6 +156,31 @@ export async function admitRunSourceAuthority(
     const operation = await runtime.operation(options.operationId, signal);
     const liveCall = operation.lifetime === 'run' && operation.phase === 'running' && !operation.cancel_requested && !run.cancel_requested;
     if (operation.run_id !== run.id || (!liveCall && operation.lifetime !== 'thread' && !(operation.lifetime === 'environment' && operation.managed_process?.purpose.kind === 'script_environment')) || operation.execution_owner?.kind !== 'external') throw new Error('Caller-retained source Operation differs from its original Thread/Run owner');
+  }
+  if (selection.resourceOwner.kind === 'managed_host') {
+    const service = await runtime.managedSource(selection.resourceOwner, signal);
+    const binding = await service.bind({ coordinatorHostId: runtime.coordinatorHostId,
+      scope: { kind: 'run', threadId: run.thread_id, runId: run.id, epoch: run.epoch },
+      source: { ...selection, tools: [...selection.tools] }, purpose: options.purpose ?? 'source', retention: options.retention ?? 'run',
+      ...(options.operationId ? { operationId: options.operationId } : {}),
+    }, signal);
+    if (!isDeepStrictEqual(binding.source, sourceSelection)) throw new SourceAdmissionError('source_changed');
+    const fixed = { branchId: selection.branchId!, revision: selection.revision! };
+    const toolBinding: SourceToolBinding = {
+      resourceOwner: selection.resourceOwner, grantId: binding.authorityId, runId: run.id, threadId: run.thread_id,
+      workspaceId: selection.workspaceId, executionWorkspaceId: selection.executionWorkspaceId,
+      enabledTools: resultOnly ? [] : tools, sourceMode: selection.mode,
+      remoteAuthority: { authorityId: binding.authorityId, resourceEpoch: binding.resourceEpoch, executionOwner: binding.executionOwner },
+      ...(selection.environmentRunId ? { environmentRunId: selection.environmentRunId } : {}),
+      ...(selection.mode === 'fixed_branch' ? { fileSource: fixed } : selection.mode === 'materialized'
+        ? { ...(binding.physicalRoot ? { rootId: binding.physicalRoot.rootId } : {}), materializedSource: fixed }
+        : { ...(binding.physicalRoot ? { rootId: binding.physicalRoot.rootId } : {}), liveRoot: selection.liveRoot! }),
+    };
+    if ((options.purpose ?? 'source') === 'source' && (options.retention ?? 'run') === 'run') runtime.retainManagedSourceBinding(run.id, binding, service);
+    return { kind: 'managed' as const, binding, service, toolBinding, release: async () => {
+      await service.release({ coordinatorHostId: runtime.coordinatorHostId, authorityId: binding.authorityId,
+        resourceEpoch: binding.resourceEpoch, mode: 'retire' });
+    } };
   }
   if (selection.mode !== 'live_root') await runtime.admitSourceRegistration(selection, signal);
   // Do not use old grants from the durable selection. Each Host lifetime issues its own permit.
@@ -209,17 +235,17 @@ export async function admitRunSourceAuthority(
       rootId = registered.rootId;
       executionCwd = canonicalRoot;
     }
-    const fixed = { branchId: selection.branchId, revision: selection.revision };
-    const toolBinding = {
-      grantId: grant.grantId, runId: run.id, threadId: run.thread_id,
+    const fixed = { branchId: selection.branchId!, revision: selection.revision! };
+    const toolBinding: SourceToolBinding = {
+      resourceOwner: selection.resourceOwner, grantId: grant.grantId, runId: run.id, threadId: run.thread_id,
       workspaceId: selection.workspaceId, executionWorkspaceId: selection.executionWorkspaceId,
-      enabledTools: tools, sourceMode: selection.mode,
+      enabledTools: resultOnly ? [] : tools, sourceMode: selection.mode,
       ...(selection.environmentRunId ? { environmentRunId: selection.environmentRunId } : {}),
       ...(selection.mode === 'fixed_branch' ? { fileSource: fixed }
-        : selection.mode === 'materialized' ? { rootId, materializedSource: fixed } : { rootId, liveRoot: selection.liveRoot }),
+        : selection.mode === 'materialized' ? { ...(rootId ? { rootId } : {}), materializedSource: fixed } : { ...(rootId ? { rootId } : {}), liveRoot: selection.liveRoot! }),
     };
     if (selection.mode !== 'live_root') await runtime.admitSourceRegistration(selection, signal);
-    return { grant, client: actor, rootId, canonicalRoot: executionCwd, toolBinding,
+    return { kind: 'local' as const, grant, client: actor, rootId, canonicalRoot: executionCwd, toolBinding,
       release };
   } catch (error) {
     await release().catch(() => undefined);
@@ -234,7 +260,7 @@ export function savedSourceLaunch(
   previousRunId?: string,
 ): SourceLaunch {
   const base = {
-    runId,
+    resourceOwner: source.resource_owner, runId,
     workspaceId: source.workspace_id,
     executionWorkspaceId: source.execution_workspace_id,
     tools,

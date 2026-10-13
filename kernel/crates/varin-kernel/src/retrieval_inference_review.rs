@@ -215,7 +215,7 @@ impl Review {
             json!({"kind":"fixture-select","runId":run,"source":source,"childParent":child_parent}),
         );
         let grant = f.receive("fixture-prepared");
-        let mut value = json!({"grantId":grant["grantId"],"threadId":"thread:parent","runId":run,
+        let mut value = json!({"resourceOwner":{"kind":"local"},"grantId":grant["grantId"],"threadId":"thread:parent","runId":run,
             "workspaceId":source["workspace_id"],"executionWorkspaceId":source["execution_workspace_id"],"rootId":grant["physicalRoot"]["rootId"],
             "sourceMode":source_mode,"liveRoot":source["live_root"],"enabledTools":["code_retrieval"]});
         if source_mode != "live_root" {

@@ -3,15 +3,15 @@
  * Do not hand-edit the wire shapes; run `node scripts/generate-kernel-protocol.mjs`.
  */
 
-export const KERNEL_PROTOCOL_VERSION = 25 as const;
+export const KERNEL_PROTOCOL_VERSION = 26 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
-export const KERNEL_CONTROL_METHODS = ["runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status","runtime.mcp.interaction.inspect","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.source.tools","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
-export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.generate","runtime.inference.receipt_pending","runtime.inference.admit","runtime.inference.dispatch","runtime.inference.status","runtime.inference.settle","runtime.mcp.interaction.inspect","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.source.tools","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
+export const KERNEL_CONTROL_METHODS = ["source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status","runtime.mcp.interaction.inspect","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.source.tools","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
+export const KERNEL_CONTROL_RESPONSE_METHODS = ["source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.generate","runtime.inference.receipt_pending","runtime.inference.admit","runtime.inference.dispatch","runtime.inference.status","runtime.inference.settle","runtime.mcp.interaction.inspect","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.source.tools","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["process.write","process.resize","runtime.tools.invoke"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.branch.navigate":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.memory_work.admit","runtime.memory_work.read","runtime.memory_work.status","runtime.memory_work.list","runtime.memory_work.update","runtime.inference.generate","runtime.inference.admit","runtime.inference.settle","runtime.mcp.sampling.review_output","runtime.mcp.sampling.review_request","runtime.mcp.sampling.generate","runtime.mcp.interaction.open","runtime.mcp.interaction.error.open","runtime.mcp.interaction.list","runtime.mcp.interaction.read","runtime.mcp.interaction.respond","runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
-export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v25" as const;
+export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v26" as const;
 
 export type KernelMethod =
   | "runtime.bot.scope.remove"
@@ -333,7 +333,23 @@ export type KernelMethod =
   | "runtime.mcp.resource.pending"
   | "runtime.mcp.resource.context"
   | "runtime.mcp.resource.access"
-  | "runtime.mcp.resource.release_source";
+  | "runtime.mcp.resource.release_source"
+  | "source.authority.inspect_scope"
+  | "source.authority.release_scope"
+  | "source.service.call"
+  | "source.resource.cancel"
+  | "source.resource.observe"
+  | "source.resource.execute"
+  | "source.resource.authorize"
+  | "source.authority.release"
+  | "source.authority.inspect"
+  | "source.authority.bind"
+  | "source.authority.open"
+  | "source.capabilities"
+  | "source.authority.handoff"
+  | "source.authority.claim_handoff"
+  | "source.integration.receipt"
+  | "source.resource.release";
 
 export interface BotScopeParams {
   botId: string;
@@ -2090,7 +2106,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 25; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 26; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -2112,6 +2128,7 @@ export interface LaunchSourceParams {
   revision: number | null;
   mode: SourceMode;
   liveRoot?: LiveRoot | null;
+  resourceOwner: SourceResourceOwner;
 }
 
 export interface LaunchSelectParams {
@@ -2130,6 +2147,7 @@ export interface LaunchSource {
   revision: number | null;
   mode: SourceMode;
   live_root: LiveRoot | null;
+  resource_owner: SourceResourceOwner;
 }
 
 export interface ToolMetadata { service_id: string; service_version: number; completion: 'result' | 'job'; lifetime?: 'thread' | 'environment'; operation: 'read' | 'effect'; examples?: unknown[]; source?: {path: string; line?: number}; }
@@ -4366,12 +4384,14 @@ export interface UnacceptedChildSource {
   parent_thread_id: string;
   source: LaunchSource;
   pin_id: string;
+  parent_run_id: string;
 }
 
 export interface ChildSourceHandoff {
   operation_id: string;
   source: LaunchSource;
   root: ChildSourceRoot;
+  resource_authority: ChildSourceAuthority | null;
 }
 
 export type ChildSourceRoot = { kind: 'fixed'; pin: ChildSourcePin } | { kind: 'physical'; root: LiveRoot };
@@ -4901,6 +4921,59 @@ export interface McpEndpoint {
 export interface OperationInspectParams {
   operationId: string;
   allowMissing?: boolean;
+}
+
+export type SourceAuthorityScope = {kind:'run';threadId:string;runId:string;epoch:number} | {kind:'source_read';threadId:string;branchId:string;key:string};
+
+export interface SourceCapabilitiesParams { mode: SourceMode; enabledTools?: string[]; managed: boolean; clientCapabilities?: string[]; languageAvailable?: boolean; }
+
+export interface SourceAuthorityOpenParams { principalId:string;coordinatorHostId:string;scope:SourceAuthorityScope;source:LaunchSource;grantId:string;enabledTools:string[];purpose:'source'|'read'|'integration'|'result';operationId?:string; }
+
+export interface SourceAuthorityBindParams { principalId:string;coordinatorHostId:string;authorityId:string;resourceEpoch:string;toolBinding:SourceToolBinding|null;physicalRoot:LiveRoot|null; }
+
+export interface SourceAuthorityAddress { principalId:string;coordinatorHostId:string;authorityId:string;resourceEpoch:string; }
+
+export interface SourceAuthorityReleaseParams extends SourceAuthorityAddress { mode:'retire'|'revoke'; }
+
+export interface SourceResourceCallParams extends SourceAuthorityAddress { call:HostToolCall;journal?:RecoveryAnchor; }
+
+export interface SourceResourceControlParams extends SourceAuthorityAddress { operationId:string; }
+
+export interface SourceServiceCallParams extends SourceAuthorityAddress { requestId:string;clientCapabilities:string[];operation: {kind:'native_resource';context:{run_id:string;origin:ToolOrigin;operation_id:string};action:SourceResourceAction;authorizeOnly:boolean} | {kind:'validate'}; }
+
+export interface SourceToolBinding { resourceOwner:SourceResourceOwner;grantId:string;runId:string;threadId:string;workspaceId:string;executionWorkspaceId:string;sourceMode:SourceMode;rootId?:string;fileSource?:{branchId:string;revision:number};materializedSource?:{branchId:string;revision:number};liveRoot?:LiveRoot;environmentRunId?:string;enabledTools:string[];remoteAuthority?:{authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner}; }
+
+export interface SourceAuthorityResult { authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner;source:LaunchSource;scope:SourceAuthorityScope;phase:'preparing'|'ready'|'retired'|'revoked';purpose:'source'|'read'|'integration'|'result';operationId:string|null;grantId:string;toolBinding:SourceToolBinding|null;physicalRoot:LiveRoot|null;firstPreparation:boolean;materializationOperationId:string; }
+
+export interface SourceAuthorityScopeReleaseParams {principalId:string;coordinatorHostId:string;threadId:string;runId:string;mode:'retire'|'revoke';}
+
+export type SourceResourceOwner = {kind: 'local'} | {kind: 'managed_host'; hostId: string; connectionId: string; endpointIdentity: string};
+
+export interface SourceAuthorityScopeParams { principalId:string;coordinatorHostId:string;threadId:string;runId:string; }
+
+export type SourceResourceAction = {kind:'read';path:string;offset:number;length:number|null}
+ | {kind:'language_source';path:string;derived_view:unknown|null}
+ | {kind:'retrieval_source';paths:string[]|null}
+ | {kind:'child_source_handoff';delegation:ChildSourceDelegation}
+ | {kind:'child_storage_receipt';operation_id:string;receipt_kind:string}
+ | {kind:'child_root_idle'}
+ | {kind:'collaboration_pin';release:boolean;pin_id:string}
+ | {kind:'process_observation';source_run_id:string;lineage:{process_id:string;source_run_id:string;target_run_id:string;source:LaunchSource;target:LaunchSource;executions:string[]}|null;process_id:string;read:[number,number|null]|null}
+ | {kind:'reconcile_mutation';mutation:{action:'write';path:string;readVersion:string;content:string}|{action:'edit';path:string;readVersion:string;edits:{oldText:string;newText:string}[]};executor:string};
+
+export interface ChildSourceAuthority { authority_id:string;resource_epoch:string }
+
+export interface SourceHandoffInspectParams { principalId:string;coordinatorHostId:string;operationId:string;parentRunId:string;parentThreadId:string;source:LaunchSource; }
+
+export interface SourceHandoffClaimParams {principalId:string;coordinatorHostId:string;grantId:string;scope:SourceAuthorityScope;source:LaunchSource;handoff?:ChildSourceHandoff;continuation?:{executionId:string;previousRunId:string;root:string};}
+
+export interface SourceIntegrationReceiptParams { principalId:string;coordinatorHostId:string;source:LaunchSource;runId:string;threadId:string;operationId:string }
+
+export interface ChildSourceDelegation {
+  work_mode: ChildWorkMode;
+  process: boolean;
+  configured_preset: boolean;
+  selection_ref: unknown;
 }
 
 export type McpBuiltinOperation = "subscribe_resource" | "unsubscribe_resource" | "discover" | "call" | "start_task" | "list_resources" | "read_resource" | "list_prompts" | "get_prompt" | "task_get" | "task_wait" | "task_cancel";
@@ -5622,6 +5695,22 @@ export type KernelMethodParams = {
   "runtime.mcp.resource.context": OperationParams;
   "runtime.mcp.resource.access": McpResourceAccessParams;
   "runtime.mcp.resource.release_source": RunParams;
+  "source.capabilities": SourceCapabilitiesParams;
+  "source.authority.open": SourceAuthorityOpenParams;
+  "source.authority.bind": SourceAuthorityBindParams;
+  "source.authority.inspect": SourceAuthorityAddress;
+  "source.authority.release": SourceAuthorityReleaseParams;
+  "source.resource.authorize": SourceResourceCallParams;
+  "source.resource.execute": SourceResourceCallParams;
+  "source.resource.observe": SourceResourceControlParams;
+  "source.resource.cancel": SourceResourceControlParams;
+  "source.service.call": SourceServiceCallParams;
+  "source.authority.release_scope": SourceAuthorityScopeReleaseParams;
+  "source.authority.inspect_scope": SourceAuthorityScopeParams;
+  "source.authority.handoff": SourceHandoffInspectParams;
+  "source.authority.claim_handoff": SourceHandoffClaimParams;
+  "source.integration.receipt": SourceIntegrationReceiptParams;
+  "source.resource.release": SourceResourceControlParams;
 };
 
 export type KernelRequest =
@@ -8502,6 +8591,150 @@ export type KernelRequest =
       id: string;
       method: "runtime.mcp.resource.release_source";
       params: RunParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "source.capabilities";
+      params: SourceCapabilitiesParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "source.authority.open";
+      params: SourceAuthorityOpenParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "source.authority.bind";
+      params: SourceAuthorityBindParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "source.authority.inspect";
+      params: SourceAuthorityAddress;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "source.authority.release";
+      params: SourceAuthorityReleaseParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "source.resource.authorize";
+      params: SourceResourceCallParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "source.resource.execute";
+      params: SourceResourceCallParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "source.resource.observe";
+      params: SourceResourceControlParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "source.resource.cancel";
+      params: SourceResourceControlParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "source.service.call";
+      params: SourceServiceCallParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "source.authority.release_scope";
+      params: SourceAuthorityScopeReleaseParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "source.authority.inspect_scope";
+      params: SourceAuthorityScopeParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "source.authority.handoff";
+      params: SourceHandoffInspectParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "source.authority.claim_handoff";
+      params: SourceHandoffClaimParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "source.integration.receipt";
+      params: SourceIntegrationReceiptParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "source.resource.release";
+      params: SourceResourceControlParams;
       epoch?: string;
       grantId?: string;
     }

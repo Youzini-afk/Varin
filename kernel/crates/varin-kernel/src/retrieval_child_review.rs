@@ -356,7 +356,8 @@ pub(super) fn select_child(review: &mut Review, child: &ChildTask) -> SourceSele
         })
         .collect();
     let tool_binding = ToolBinding {
-        grant_id: ready["grantId"].as_str().unwrap().into(),
+        resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
+grant_id: ready["grantId"].as_str().unwrap().into(),
         thread_id: child.child_thread_id.clone(),
         run_id: run.clone(),
         workspace_id: source.workspace_id.clone(),

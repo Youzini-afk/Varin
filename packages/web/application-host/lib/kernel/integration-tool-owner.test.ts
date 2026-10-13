@@ -72,7 +72,7 @@ async function openHarness(options: { callback?: 'mask' | 'early' | 'tamper'; re
       bundle: true, platform: 'node', format: 'cjs', outfile: path.join(installed, 'host.cjs'),
       alias: { '@varin/extension-sdk': path.join(repository, 'packages/extension-sdk/dist/index.js') },
     });
-    const sourceBinding: LaunchSource = { workspace_id: 'workspace', execution_workspace_id: 'parent-execution',
+    const sourceBinding: LaunchSource = { resource_owner: { kind: 'local' as const }, workspace_id: 'workspace', execution_workspace_id: 'parent-execution',
       branch_id: 'parent-source', revision: 4, mode: 'materialized', live_root: null, environment_run_id: 'source-owner-run' };
     const run: Run = { id: 'later-parent-run', thread_id: 'parent-thread', branch_id: 'parent-history-branch',
       state: 'executing', revision: 1, epoch: 1, configuration: {}, cancel_requested: false, waiting_on: null };

@@ -23,7 +23,8 @@ const structs = Object.entries(schema.runtimeStructs ?? {}).map(([name, spec]) =
 }).join("\n");
 const taggedUnions = Object.entries(schema.dto ?? {}).filter(([, spec]) => spec.taggedUnion);
 const pascal = value => value.split('_').map(part => part[0].toUpperCase() + part.slice(1)).join('');
-const runtimeTaggedUnions = taggedUnions.map(([name, spec]) => `#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]\n#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]\npub enum ${name} {\n${Object.entries(spec.taggedUnion).map(([kind, fields]) => `    ${pascal(kind)}${Object.keys(fields).length ? ` { ${Object.entries(fields).map(([field, type]) => `${field}: ${type === 'string' ? 'String' : type}`).join(', ')} }` : ''},`).join('\n')}\n}\n`).join('\n');
+const rustField = field => field.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+const runtimeTaggedUnions = taggedUnions.map(([name, spec]) => `#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]\n#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]\npub enum ${name} {\n${Object.entries(spec.taggedUnion).map(([kind, fields]) => `    ${pascal(kind)}${Object.keys(fields).length ? ` { ${Object.entries(fields).map(([field, type]) => `${rustField(field) !== field ? `#[serde(rename = ${JSON.stringify(field)})] ` : ''}${rustField(field)}: ${type === 'string' ? 'String' : type}`).join(', ')} }` : ''},`).join('\n')}\n}\n`).join('\n');
 const runtimeTypesGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\nuse serde::{Deserialize, Serialize};\n\n' + Object.entries(schema.runtimeEnums ?? {}).map(([name, variants]) => `#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]\n#[serde(rename_all = "snake_case")]\npub enum ${name} {\n${variants.map(v => `    ${v},`).join('\n')}\n}\n`).join('\n') + '\n' + structs + '\n' + runtimeTaggedUnions;
 const checkOnly = process.argv.includes('--check');
 const methods = Object.keys(schema.methods).map((method) => `  | ${JSON.stringify(method)}`).join('\n');
@@ -125,6 +126,7 @@ for (let changed = true; changed;) {
 }
 const renderRustDto = (name) => {
   const spec = schema.dto[name];
+  if (spec.rustType && !spec.fields) return `pub(crate) type ${name} = ${spec.rustType};`;
   const fields = Object.entries(spec.fields ?? {}).map(([field, descriptor]) => {
     const type = rustType(descriptor.type);
     const rendered = descriptor.optional ? `Option<${type}>` : type;

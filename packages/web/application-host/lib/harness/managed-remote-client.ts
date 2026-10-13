@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
+import { threadSourceFailureMessage } from '@varin/application-client';
+import { SourceAdmissionError } from '../kernel/source-admission-error.js';
 import type { KernelClient } from "../kernel/kernel-client.js";
-import type { KernelRecordResult } from "../kernel/protocol.generated.js";
+import type { KernelRecordResult, SourceFailureCode } from "../kernel/protocol.generated.js";
 import type { ExperimentCaller, ExperimentContext } from "./experiments.js";
 import {
   ExperimentPreparationError,
@@ -21,11 +23,25 @@ import {
   type ManagedRemoteMaterialReceipt,
   type ManagedRemoteOutputReceipt,
   type ManagedRemoteReadReceipt,
+  type ManagedHostSourceOwner,
+  type ManagedSourceService,
+  type ManagedSourceServiceRequest,
+  type SourceServiceOperation,
+  type SourceServiceResponse,
 } from "./managed-remote-types.js";
+import { decodeManagedSourceCancellation, decodeManagedSourceReceiptRelease, decodeManagedSourceResponse } from './managed-source-response.js';
 
 const BASE_PATH = "/api/harness/managed-execution/v1";
 const TARGET_REFRESH_WORKSPACE = "__varin_managed_remote__";
 const digest = (...values: string[]): string => createHash("sha256").update(values.join("\0")).digest("hex");
+/** Identity of the actual managed endpoint. Credentials stay in the configured Host owner. */
+export const managedEndpointIdentity = (connection: Pick<ConfiguredHost, "apiUrl">): string => {
+  const endpoint = new URL(BASE_PATH, `${connection.apiUrl.replace(/\/$/, "")}/`);
+  if (!['https:', 'http:'].includes(endpoint.protocol) || endpoint.username || endpoint.password) {
+    throw new Error('Managed source endpoint must use a configured HTTP Host without URL credentials');
+  }
+  return `sha256-${digest(endpoint.href)}`;
+};
 const payloadOf = (record: KernelRecordResult): Record<string, unknown> => {
   try {
     const payload = JSON.parse(record.payloadJson) as unknown;
@@ -50,6 +66,13 @@ export interface ManagedTarget {
   identity: ManagedRemoteIdentity;
 }
 
+type SourceClientMethod<Method> = Method extends (principal: infer _Principal, ...args: infer Args) => infer Result
+  ? (...args: Args) => Result : never;
+/** An authenticated connection to one frozen Host. No credential is included in source metadata. */
+export type ManagedSourceClient = Omit<{ [Method in keyof ManagedSourceService]: SourceClientMethod<ManagedSourceService[Method]> }, 'service'> & {
+  service<Operation extends SourceServiceOperation>(input: Omit<ManagedSourceServiceRequest, 'operation'> & { operation: Operation }, signal?: AbortSignal): Promise<SourceServiceResponse<Operation>>;
+};
+
 export interface ManagedRemoteTargetRegistryOptions {
   coordinatorHostId: string;
   kernel: KernelClient;
@@ -63,6 +86,10 @@ export interface ManagedRemoteTargetRegistryOptions {
    */
   onTargetReachable?(workspaceId: string, machineId: string): void;
   onError?: (error: Error) => void;
+}
+
+class ManagedResponseError extends Error {
+  constructor(message: string, readonly code: unknown) { super(message); }
 }
 
 class ManagedTargetClient {
@@ -97,7 +124,7 @@ class ManagedTargetClient {
     if (!response.ok) {
       const message = responseBody && typeof responseBody === "object" && "error" in responseBody && typeof responseBody.error === "string"
         ? responseBody.error : `Managed target request failed (${response.status})`;
-      throw new Error(message);
+      throw new ManagedResponseError(message, responseBody && typeof responseBody === 'object' && 'code' in responseBody ? responseBody.code : undefined);
     }
     return responseBody as Result;
   }
@@ -146,13 +173,14 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
   let refreshPromise: Promise<void> | null = null;
   const report = (error: unknown) => options.onError?.(error instanceof Error ? error : new Error(String(error)));
 
-  const probe = async (connection: ConfiguredHost): Promise<ManagedTarget> => {
+  const probe = async (connection: ConfiguredHost, signal?: AbortSignal, fixedEndpoint = false): Promise<ManagedTarget> => {
     const headers = new Headers(connection.requestHeaders);
     headers.set("Accept", "application/json");
     if (connection.clientToken) headers.set("Authorization", `Bearer ${connection.clientToken}`);
     const response = await fetchImpl(new URL(`${BASE_PATH}/identity`, `${connection.apiUrl.replace(/\/$/, "")}/`), {
       headers,
-      signal: AbortSignal.timeout(10_000),
+      ...(fixedEndpoint ? { redirect: 'error' as const } : {}),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
     });
     const identity = await response.json().catch(() => null) as ManagedRemoteIdentity | { error?: string } | null;
     if (!response.ok || !identity || !("hostId" in identity) || typeof identity.hostId !== "string") {
@@ -195,7 +223,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
       const seenConnections = new Set(configured.map((entry) => entry.id));
       const durableManaged = (await options.resources.listMachines(workspaceId))
         .filter((machine) => machine.kind === "managed-remote" && machine.target);
-      const probed = await Promise.allSettled(configured.map(probe));
+      const probed = await Promise.allSettled(configured.map(connection => probe(connection)));
       const next = new Map<string, ManagedTarget>();
       const probedByConnection = new Map<string, ManagedTarget>();
       const failedByConnection = new Map<string, string>();
@@ -256,6 +284,102 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
   const targetFor = async (workspaceId: string, machineId: string): Promise<ManagedTarget | null> => {
     await refresh(workspaceId);
     return targets.get(machineId) ?? null;
+  };
+
+  const sourceTargets = async (signal?: AbortSignal) => {
+    signal?.throwIfAborted();
+    const connections = configuredHosts(await options.readSettings());
+    const results = await Promise.allSettled(connections.map(async connection => {
+      const endpointIdentity = managedEndpointIdentity(connection);
+      const target = await probe(connection, signal, true);
+      if (!target.identity.capabilities.includes('sources')) throw new Error('Managed source resources are unavailable on this Host');
+      return { resourceOwner: { kind: 'managed_host' as const, hostId: target.hostId, connectionId: connection.id, endpointIdentity },
+        label: connection.label, capabilities: [...target.identity.capabilities] };
+    }));
+    signal?.throwIfAborted();
+    return {
+      targets: results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []),
+      unavailable: results.flatMap((result, index) => result.status === 'rejected'
+        ? [{ connectionId: connections[index]!.id, label: connections[index]!.label, message: 'The configured Host source is unavailable' }] : []),
+    };
+  };
+
+  const sourceTarget = async (owner: ManagedHostSourceOwner, signal?: AbortSignal): Promise<ManagedTarget> => {
+    signal?.throwIfAborted();
+    const connection = configuredHosts(await options.readSettings()).find(entry => entry.id === owner.connectionId);
+    if (!connection || managedEndpointIdentity(connection) !== owner.endpointIdentity) {
+      throw new Error('The original managed source connection is unavailable');
+    }
+    // A machine may have multiple configured connections. Never substitute the
+    // registry's preferred machine connection for this Source's actual endpoint.
+    const target = await probe(connection, signal, true);
+    if (target.hostId !== owner.hostId) throw new Error('The original managed source Host identity changed');
+    if (!target.identity.capabilities.includes('sources')) throw new Error('Managed source resources are unavailable on this Host');
+    return target;
+  };
+
+  const source = async (owner: ManagedHostSourceOwner, signal?: AbortSignal): Promise<ManagedSourceClient> => {
+    const selected = await sourceTarget(owner, signal);
+    const target = { ...selected, connection: { ...selected.connection, requestHeaders: { ...selected.connection.requestHeaders } } };
+    const client = new ManagedTargetClient(target, (url, init) => fetchImpl(url, { ...init, redirect: 'error' }));
+    const request = async <Method extends keyof ManagedSourceService>(method: Method, input: Parameters<ManagedSourceService[Method]>[1], signal?: AbortSignal): Promise<Awaited<ReturnType<ManagedSourceService[Method]>>> => {
+      if (input.coordinatorHostId !== options.coordinatorHostId) throw new Error('Managed source request belongs to another coordinator');
+      const result = await client.json<Awaited<ReturnType<ManagedSourceService[Method]>>>(`/sources/${method}`, input, 'POST', signal).catch(error => {
+        if (error instanceof ManagedResponseError && typeof error.code === 'string' && threadSourceFailureMessage(error.code)) {
+          throw new SourceAdmissionError(error.code as SourceFailureCode, { cause: error });
+        }
+        throw error;
+      });
+      if (method !== 'service' && method !== 'handoff' && method !== 'integrationReceipt' && method !== 'authorize' && method !== 'release' && method !== 'inspectScope'
+        && (!result || typeof result !== 'object' || Array.isArray(result))) throw new Error('Managed source response is unconfirmed');
+      if (method === 'cancelService') decodeManagedSourceCancellation(input as Parameters<ManagedSourceService['cancelService']>[1], result);
+      if (method === 'releaseReceipt') decodeManagedSourceReceiptRelease(input as Parameters<ManagedSourceService['releaseReceipt']>[1], result);
+      return result;
+    };
+    return {
+      capabilities: (input, signal) => request('capabilities', input, signal),
+      handoff: (input, signal) => request('handoff', input, signal),
+      integrationReceipt: (input, signal) => request('integrationReceipt', input, signal),
+      resolve: (input, signal) => request('resolve', input, signal),
+      prepare: (input, signal) => request('prepare', input, signal),
+      bind: (input, signal) => request('bind', input, signal),
+      authorize: (input, signal) => request('authorize', input, signal),
+      execute: (input, signal) => request('execute', input, signal),
+      service: async (input, signal) => {
+        signal?.throwIfAborted();
+        let cancellation: Promise<Awaited<ReturnType<ManagedSourceService['cancelService']>>> | undefined;
+        const cancel = () => {
+          cancellation ??= request('cancelService', { coordinatorHostId: input.coordinatorHostId,
+            authorityId: input.authorityId, resourceEpoch: input.resourceEpoch, requestId: input.requestId });
+          // Observe rejection immediately; the original call reports it below.
+          void cancellation.catch(() => undefined);
+        };
+        signal?.addEventListener('abort', cancel, { once: true });
+        if (signal?.aborted) cancel();
+        try {
+          // Explicit cancellation has an independent control request. A lost
+          // HTTP response never substitutes for the target's drain evidence.
+          const result = await request('service', input);
+          // A completed original effect receipt wins over a late cancellation
+          // response or loss of the independent control connection.
+          if (cancellation) await cancellation.catch(() => undefined);
+          return decodeManagedSourceResponse(input.operation, result);
+        } catch (error) {
+          if (cancellation) {
+            const receipt = await cancellation;
+            if (receipt.status !== 'unknown') throw signal?.reason ?? new DOMException('Source service cancelled', 'AbortError');
+          }
+          throw error;
+        } finally { signal?.removeEventListener('abort', cancel); }
+      },
+      cancelService: (input, signal) => request('cancelService', input, signal),
+      observe: (input, signal) => request('observe', input, signal),
+      releaseReceipt: (input, signal) => request('releaseReceipt', input, signal),
+      cancel: (input, signal) => request('cancel', input, signal),
+      release: (input, signal) => request('release', input, signal),
+      inspectScope: (input, signal) => request('inspectScope', input, signal),
+      releaseScope: (input, signal) => request('releaseScope', input, signal),
+    };
   };
   const routedShellId = (machineId: string, processId: string): string => (
     `mrsh:${Buffer.from(JSON.stringify({ machineId, processId })).toString("base64url")}`
@@ -587,7 +711,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     };
   };
 
-  return { refresh, resolveBackend, externalAuthority, targetFor, shellExec, shellRead, shellWrite, shellKill, setScopeSleeping, releaseScope, ownersForMachine };
+  return { refresh, resolveBackend, externalAuthority, targetFor, sourceTargets, sourceTarget, source, shellExec, shellRead, shellWrite, shellKill, setScopeSleeping, releaseScope, ownersForMachine };
 }
 
 export type ManagedRemoteTargetRegistry = ReturnType<typeof createManagedRemoteTargetRegistry>;

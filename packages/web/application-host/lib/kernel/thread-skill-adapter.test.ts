@@ -95,7 +95,7 @@ describe('ThreadAdapter explicit skill input composition', () => {
     expect(f.a.snapshot.skills[0]?.disableModelInvocation).toBe(true);
     const original = f.checkpoint(f.a);
     f.runtime.context.mockResolvedValue(original);
-    const source: ThreadSource = { mode: 'fixed_branch', workspaceId: 'workspace:new', executionWorkspaceId: 'workspace:new',
+    const source: ThreadSource = { mode: 'fixed_branch', resourceOwner: { kind: 'local' as const }, workspaceId: 'workspace:new', executionWorkspaceId: 'workspace:new',
       branchId: 'source:new', revision: 2, tools: [] };
     expect(await f.adapter.submit({ ...request, key: 'new-source', source })).toEqual(f.submitReceipt);
     expect(f.prepareContext.forSource).toHaveBeenCalledWith(original, source);
@@ -175,7 +175,7 @@ describe('ThreadAdapter explicit skill input composition', () => {
 
 it('cold calendar admission preserves explicit skill input and transfers a successful preparation to its original Run owner', async () => {
   const f = await fixture();
-  const source: ThreadSource = { mode: 'fixed_branch', workspaceId: 'calendar-project', executionWorkspaceId: 'calendar-execution', branchId: 'calendar-source', revision: 1, tools: [] };
+  const source: ThreadSource = { mode: 'fixed_branch', resourceOwner: { kind: 'local' as const }, workspaceId: 'calendar-project', executionWorkspaceId: 'calendar-execution', branchId: 'calendar-source', revision: 1, tools: [] };
   vi.spyOn(f.adapter, 'prepareSource').mockResolvedValue({ source, path: f.root } as Awaited<ReturnType<ThreadAdapter['prepareSource']>>);
   const occurrence = { id: 'calendar:occurrence', revision: 3, thread_id: identity.threadId, branch_id: identity.branchId };
   const work = { occurrence, definition: { target: { kind: 'new_work', model, sourceMode: 'fixed_branch', goal: null } }, instruction: rawText, owner_epoch: 2 } as import('./protocol.generated.js').CalendarPreparation;

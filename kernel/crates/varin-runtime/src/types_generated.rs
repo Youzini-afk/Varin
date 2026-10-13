@@ -322,6 +322,6 @@ pub enum McpRoute {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RecoveryConversation {
-    Pi { sessionId: String },
-    Thread { threadId: String, branchId: String },
+    Pi { #[serde(rename = "sessionId")] session_id: String },
+    Thread { #[serde(rename = "threadId")] thread_id: String, #[serde(rename = "branchId")] branch_id: String },
 }

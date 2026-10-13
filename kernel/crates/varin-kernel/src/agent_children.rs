@@ -158,6 +158,7 @@ pub(super) fn execute(
     if method == "runtime.child.source.ready" {
         let p: ChildSourceReadyParams = serde_json::from_value(params)?;
         let source = varin_runtime::catalog::launches::SourceSelection {
+                        resource_owner: p.source.resource_owner,
             environment_run_id: p.source.environment_run_id,
             mode: p.source.mode,
             live_root: p.source.live_root.and_then(|root| root.0).map(|root| {

@@ -170,8 +170,16 @@ impl Storage {
             .collect();
         let views=self.conn.prepare("SELECT payload_json FROM domain_records WHERE record_type='file.materialized-view' AND json_extract(payload_json,'$.cleanupRequested')=1")?
             .query_map([],|row|row.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
-        pending+=views.len() as i64;
-        for raw in views {let view:Value=serde_json::from_str(&raw)?;if let Some(error)=view["cleanupError"].as_str(){failures.push(format!("derived view {}: {error}",view["viewId"].as_str().unwrap_or("unknown")));}}
+        pending += views.len() as i64;
+        for raw in views {
+            let view: Value = serde_json::from_str(&raw)?;
+            if let Some(error) = view["cleanupError"].as_str() {
+                failures.push(format!(
+                    "derived view {}: {error}",
+                    view["viewId"].as_str().unwrap_or("unknown")
+                ));
+            }
+        }
         Ok((pending, failures))
     }
 
@@ -216,6 +224,9 @@ impl Storage {
             .prepare("SELECT blob_hash FROM object_owners")?
             .query_map([], |row| row.get::<_, String>(0))?
         {
+            blobs.insert(row?);
+        }
+        for row in self.conn.prepare("SELECT json_extract(result_json,'$.objectHash') FROM operations WHERE kind='source.read' AND state='committed' AND json_extract(result_json,'$.released') IS NOT 1")?.query_map([], |row| row.get::<_,String>(0))? {
             blobs.insert(row?);
         }
         for row in self

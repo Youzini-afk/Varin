@@ -38,7 +38,7 @@ fn schema() -> ToolSchema {
 }
 fn source(mode: &str, branch: &str) -> SourceSelection {
     serde_json::from_value(
-        json!({"mode":mode,"workspace_id":"workspace","execution_workspace_id":"execution",
+        json!({"resource_owner":{"kind":"local"},"mode":mode,"workspace_id":"workspace","execution_workspace_id":"execution",
         "branch_id":branch,"revision":1,"live_root":null}),
     )
     .unwrap()

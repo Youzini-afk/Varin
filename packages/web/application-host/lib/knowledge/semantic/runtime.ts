@@ -1065,7 +1065,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
   };
 
 
-  /** Native live-root queries retain only an already-published immutable reader.
+  /** Native local live-root queries retain only an already-published immutable reader.
    * This path never opens a cold store, scans, probes a model, or reads Documents.
    * Its caller owns authorized current-source verification of every returned row. */
   const acquirePublishedQuery = async (scope: SemanticScopeKey, request: {
@@ -1081,7 +1081,8 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     sourceView?: SemanticSourceView;
     documentVectors?(texts: readonly string[], documents: readonly { path: string; revision: string }[], signal: AbortSignal): Promise<number[][]>;
   }) => {
-    const scopeSnapshot = options.getIndexScope?.();
+    const managedSource = request.sourceView?.resourceOwner.kind === 'managed_host';
+    const scopeSnapshot = managedSource ? undefined : options.getIndexScope?.();
     const signal = AbortSignal.any([lifecycleController.signal,
       ...(request.signal ? [request.signal] : []), ...(scopeSnapshot ? [scopeSnapshot.signal] : [])]);
     const assertAvailable = (): void => {
@@ -1095,8 +1096,8 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       if (!request.documentVectors) throw new Error('Source document inference session is unavailable');
       return acquireSourceQuery({ scope, source: request.sourceView, embedder, roots: request.roots,
         ...(scopeSnapshot ? { indexScope: scopeSnapshot } : {}),
-        ...(options.indexDirectories === undefined ? {} : { indexDirectories: options.indexDirectories }),
-        ...(options.includeIgnoredDirectories ? { includeIgnoredDirectories: options.includeIgnoredDirectories } : {}),
+        ...(managedSource || options.indexDirectories === undefined ? {} : { indexDirectories: options.indexDirectories }),
+        ...(!managedSource && options.includeIgnoredDirectories ? { includeIgnoredDirectories: options.includeIgnoredDirectories } : {}),
         structure: options.structureSource, cache: queryCache, scheduler, signal,
         store: () => storeFor(scope, embedder, false), assertAvailable, authorize: request.authorize,
         cacheAuthority: request.cacheAuthority, queryVector: request.queryVector, documentVectors: request.documentVectors });

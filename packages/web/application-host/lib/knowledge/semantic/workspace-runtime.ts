@@ -568,11 +568,12 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     sourceView?: SemanticSourceView;
   }): Promise<RetrievalSemanticLease> => {
     if (!options.runtimeInference) throw new Error('Native semantic inference owner is unavailable');
+    const cacheWorkspaceId = input.sourceView ? input.sourceView.cacheWorkspaceId : input.workspaceId;
     const signal = input.signal ?? new AbortController().signal;
     signal.throwIfAborted();
     // This admission only refreshes cheap configuration bindings. It neither
     // enrolls a folder nor starts or waits for its background index build.
-    const state = await waitWithSignal(getWorkspace(input.workspaceId, false, true, input.sourceView?.configurationRoot), signal);
+    const state = await waitWithSignal(getWorkspace(cacheWorkspaceId, false, true, input.sourceView?.configurationRoot), signal);
     const current = state.queryInference;
     if (!current) {
       return {
@@ -600,7 +601,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     let pinned: Awaited<ReturnType<typeof state.runtime.acquirePublishedQuery>> | undefined;
     const assertAvailable = (): void => {
       signal.throwIfAborted(); assertActive(); input.assertAuthorized();
-      if (released || states.get(input.workspaceId) !== state || maintenance.has(input.workspaceId)) {
+      if (released || states.get(cacheWorkspaceId) !== state || maintenance.has(cacheWorkspaceId)) {
         throw new Error('Native semantic source lease is unavailable');
       }
       pinned?.assertAvailable();
@@ -630,7 +631,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     let pinnedEmbedder: SemanticEmbedder | undefined;
     const embedder = pinnedEmbedder = makeQueryEmbedder();
     try {
-      pinned = await state.runtime.acquirePublishedQuery(workspaceScope(input.workspaceId), {
+      pinned = await state.runtime.acquirePublishedQuery(workspaceScope(cacheWorkspaceId), {
         embedder, roots: input.roots, signal, cacheAuthority: identity.cacheAuthority,
         ...(input.sourceView ? { sourceView: input.sourceView,
           documentVectors: async (texts: readonly string[], documents: readonly { path: string; revision: string }[], active: AbortSignal) => {
@@ -652,7 +653,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
         },
         assertAvailable: () => {
           signal.throwIfAborted(); assertActive(); input.assertAuthorized();
-          if (released || states.get(input.workspaceId) !== state || maintenance.has(input.workspaceId)) {
+          if (released || states.get(cacheWorkspaceId) !== state || maintenance.has(cacheWorkspaceId)) {
             throw new Error('Native semantic source lease is unavailable');
           }
         },

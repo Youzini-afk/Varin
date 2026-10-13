@@ -25,7 +25,8 @@ async function fixture() {
   const revision = (body: string) => contentHashOf(body);
   const listFiles = vi.fn(async () => ({ complete: true, files: [...files].map(([path, body]) => ({ path, revision: revision(body) })) }));
   const source: SemanticSourceView = {
-    mode: 'fixed_branch', configurationRoot: '/removed/original', listFiles,
+    mode: 'fixed_branch', resourceOwner: { kind: 'local' }, resourceRoot: '/removed/original',
+    configurationRoot: '/removed/original', cacheWorkspaceId: 'original-workspace', listFiles,
     compute: async () => { throw new Error('Not used by the focused structure port'); },
     validateDocuments: async expected => {
       if (expected.some(file => !files.has(file.path) || revision(files.get(file.path)!) !== file.revision)) throw new Error('source changed');
@@ -101,7 +102,9 @@ it('keeps an actual source change from installing source material after model pr
   expect(f.unitsFixed).toHaveBeenCalledTimes(2); expect(f.documentVectors).toHaveBeenCalledTimes(2);
 });
 
-it('intersects source configuration identities without resolving the former directory', () => {
+it('intersects source resource coordinates without resolving the former directory', () => {
   expect(sourceViewRoots('/gone/project', ['src'], ['/gone/project/src/nested'])).toEqual(['src/nested']);
   expect(sourceViewRoots('/gone/project', ['src'], ['/another/project'])).toEqual([]);
+  expect(sourceViewRoots('C:\\remote\\project', ['src'], undefined)).toEqual(['src']);
+  expect(sourceViewRoots('C:\\remote\\project', ['..'], undefined)).toEqual(['.']);
 });

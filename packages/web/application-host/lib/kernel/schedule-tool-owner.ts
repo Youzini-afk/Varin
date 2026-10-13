@@ -15,6 +15,7 @@ export function createScheduleToolOwner(options: {
       let enteredMutation = false;
       try {
         if (!authority.source) throw new Error('Scheduled tasks require the caller’s admitted project source');
+        if (authority.source.resource_owner.kind === 'managed_host') throw new Error('Project schedules belong to their original Host. Scheduling from a managed file source is not available yet; open the project on its owning Host.');
         const projectId = await options.service.resolveProjectID({ directory: await options.workspaceRoot(authority.source.workspace_id) });
         context.signal.throwIfAborted();
         const taskId = () => { if (typeof params.taskId !== 'string' || !params.taskId.trim()) throw new Error('taskId is required'); return params.taskId; };

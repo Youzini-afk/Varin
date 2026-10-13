@@ -100,7 +100,7 @@ impl Fixture {
         storage.dispatch(method, &params, Some("original"), &grant)
     }
     fn spawn(&self, id: &str, script: &str, mode: &str) -> Result<Value, KernelError> {
-        self.dispatch("process.spawn",json!({"workspaceId":"workspace","rootId":self.root_id,"processId":id,"cwd":"","command":"/bin/sh","args":["-c",script],"env":[],"mode":mode,"cols":80,"rows":24}))
+        self.dispatch("process.spawn",json!({"resourceOwner":{"kind":"local"},"workspaceId":"workspace","rootId":self.root_id,"processId":id,"cwd":"","command":"/bin/sh","args":["-c",script],"env":[],"mode":mode,"cols":80,"rows":24}))
     }
     fn write(&self, id: &str, operation: &str, bytes: Vec<u8>, eof: bool) -> Receipt {
         self.client

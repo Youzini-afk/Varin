@@ -67,7 +67,7 @@ it('real file journal settles a lost receipt after kernel restart without repeat
     const published = await actor.publishBranch({ operationId: 'publish-source', branchId: 'source', expectedRoot: branch.root, expectedWriteRevision: branch.writeRevision });
     await runtimeClient.createThread('thread', 'conversation');
     const run = await runtimeClient.submit({ key: 'input', threadId: 'thread', branchId: 'conversation', expectedHead: null, input: { text: 'write selected file' }, configuration: { providerFamily: 'openai-responses', model: 'fixture', endpoint: `http://127.0.0.1:${address.port}/responses`, allowAnonymous: true, configurationGeneration: 1, maxOutputTokens: 32 } });
-    await runtimeClient.startFromSource({ runId: run.run_id, workspaceId: 'workspace', executionWorkspaceId: 'workspace', branchId: 'source', revision: Number(published.revision), mode: 'materialized', tools: ['file_read', 'file_write'] });
+    await runtimeClient.startFromSource({ runId: run.run_id, resourceOwner: { kind: 'local' as const }, workspaceId: 'workspace', executionWorkspaceId: 'workspace', branchId: 'source', revision: Number(published.revision), mode: 'materialized', tools: ['file_read', 'file_write'] });
     await expect.poll(async () => (await runtimeClient.run(run.run_id)).state, { timeout: 10_000 }).toBe('waiting');
     expect(turn).toBe(2);
     const operation = (await runtimeClient.events(0, 256)).find(event => event.kind === 'execution.committed' && JSON.stringify(event.data).includes('tool_dispatched'));

@@ -5,10 +5,13 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 25;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 26;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
+    "source.authority.release_scope",
+    "source.resource.cancel",
+    "source.authority.release",
     "runtime.bot.scope.inspect",
     "runtime.bot.gate.publish",
     "runtime.bot.thread.create",
@@ -72,6 +75,9 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.calendar.calculation.retry",
 ];
 pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
+    "source.authority.release_scope",
+    "source.resource.cancel",
+    "source.authority.release",
     "runtime.bot.scope.inspect",
     "runtime.bot.gate.publish",
     "runtime.bot.thread.create",
@@ -948,9 +954,7 @@ pub(crate) struct HistoryBodyParams {
     pub(crate) chunk_index: i64,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct MediaReadParams {}
+pub(crate) type MediaReadParams = varin_runtime::output::MediaReadParams;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -2549,12 +2553,43 @@ pub(crate) struct McpResourceAccessParams {
     pub(crate) control: bool,
 }
 
+pub(crate) type SourceCapabilitiesParams = crate::source_resources::SourceCapabilitiesParams;
+
+pub(crate) type SourceAuthorityOpenParams = crate::source_resources::SourceAuthorityOpenParams;
+
+pub(crate) type SourceAuthorityBindParams = crate::source_resources::SourceAuthorityBindParams;
+
+pub(crate) type SourceAuthorityAddress = crate::source_resources::SourceAuthorityAddress;
+
+pub(crate) type SourceAuthorityReleaseParams =
+    crate::source_resources::SourceAuthorityReleaseParams;
+
+pub(crate) type SourceResourceCallParams = crate::source_resources::SourceResourceCallParams;
+
+pub(crate) type SourceResourceControlParams = crate::source_resources::SourceResourceControlParams;
+
+pub(crate) type SourceServiceCallParams = crate::source_resources::SourceServiceCallParams;
+
+pub(crate) type SourceAuthorityScopeReleaseParams =
+    crate::source_resources::SourceAuthorityScopeReleaseParams;
+
+pub(crate) type SourceAuthorityScopeParams = crate::source_resources::SourceAuthorityScopeParams;
+
+pub(crate) type SourceHandoffInspectParams = crate::source_resources::SourceHandoffInspectParams;
+
+pub(crate) type SourceHandoffClaimParams = crate::source_resources::SourceHandoffClaimParams;
+
+pub(crate) type SourceIntegrationReceiptParams =
+    crate::source_resources::SourceIntegrationReceiptParams;
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct HostToolErrorMarker {
     pub(crate) code: String,
     pub(crate) admission: Option<bool>,
 }
+
+pub(crate) type SourceResourceAction = crate::source_resources::SourceResourceAction;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -2660,6 +2695,7 @@ pub(crate) struct LaunchSourceParams {
     pub(crate) revision: RequiredNullable<i64>,
     pub(crate) mode: varin_runtime::SourceMode,
     pub(crate) live_root: Option<RequiredNullable<LiveRoot>>,
+    pub(crate) resource_owner: varin_runtime::catalog::launches::SourceResourceOwner,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -4363,6 +4399,82 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         }
         "runtime.mcp.resource.release_source" => {
             serde_json::from_value::<RunParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "source.capabilities" => serde_json::from_value::<SourceCapabilitiesParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "source.authority.open" => {
+            serde_json::from_value::<SourceAuthorityOpenParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "source.authority.bind" => {
+            serde_json::from_value::<SourceAuthorityBindParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "source.authority.inspect" => {
+            serde_json::from_value::<SourceAuthorityAddress>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "source.authority.release" => {
+            serde_json::from_value::<SourceAuthorityReleaseParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "source.resource.authorize" => {
+            serde_json::from_value::<SourceResourceCallParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "source.resource.execute" => {
+            serde_json::from_value::<SourceResourceCallParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "source.resource.observe" => {
+            serde_json::from_value::<SourceResourceControlParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "source.resource.cancel" => {
+            serde_json::from_value::<SourceResourceControlParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "source.service.call" => serde_json::from_value::<SourceServiceCallParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "source.authority.release_scope" => {
+            serde_json::from_value::<SourceAuthorityScopeReleaseParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "source.authority.inspect_scope" => {
+            serde_json::from_value::<SourceAuthorityScopeParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "source.authority.handoff" => {
+            serde_json::from_value::<SourceHandoffInspectParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "source.authority.claim_handoff" => {
+            serde_json::from_value::<SourceHandoffClaimParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "source.integration.receipt" => {
+            serde_json::from_value::<SourceIntegrationReceiptParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "source.resource.release" => {
+            serde_json::from_value::<SourceResourceControlParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

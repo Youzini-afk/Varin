@@ -28,7 +28,7 @@ async function fixture() {
     mode: 'agent', threadRole: 'main', projectId: 'project', sourceIdentity: 'original-source', projectTrusted: true,
     user: { reader: user, displayRoot: userRoot }, project: { reader: project, displayRoot: projectRoot, cwd: '' } });
   if (prepared.status !== 'ready') throw new Error(prepared.reason);
-  const resources: ContextResources = { snapshot: prepared.snapshot, source: { mode: 'fixed_branch', workspace_id: 'workspace',
+  const resources: ContextResources = { snapshot: prepared.snapshot, source: { mode: 'fixed_branch', resource_owner: { kind: 'local' as const }, workspace_id: 'workspace',
     execution_workspace_id: 'workspace', branch_id: 'original-source', revision: 1, live_root: null } };
   const unexpected = vi.fn(async () => { throw new Error('Skill activation must not open a source or rediscover resources'); });
   const trust = vi.fn<ThreadResourceScopeOwners['projectTrusted']>(() => true);

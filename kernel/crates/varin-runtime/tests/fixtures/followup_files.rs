@@ -297,7 +297,7 @@ fn file_ready_waits_for_real_idle_evidence_and_pause_cancel_fence_late_reads() {
 #[test]
 fn fixed_changed_stays_static_while_snapshot_ready_and_directory_exists_are_honest() {
     let mut f = Fixture::with_source(
-        json!({"mode":"fixed_branch","live_root":null,"workspace_id":"workspace","execution_workspace_id":"workspace","branch_id":"fixed","revision":3}),
+        json!({"resource_owner":{"kind":"local"},"mode":"fixed_branch","live_root":null,"workspace_id":"workspace","execution_workspace_id":"workspace","branch_id":"fixed","revision":3}),
     );
     let changed = register_file(
         &mut f,

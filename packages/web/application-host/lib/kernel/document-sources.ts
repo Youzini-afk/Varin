@@ -1,5 +1,6 @@
 /** Adapters into the original Run source and Experiment owners for PDF ingestion. */
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import type { ThreadResearchSelection } from '@varin/application-client';
@@ -11,7 +12,8 @@ import { HarnessServiceError } from '../harness/service-error.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { KernelBlobReadSource, KernelClient, KernelScopedClient } from './kernel-client.js';
 import type { LiveSourceResolver } from './live-source.js';
-import type { KernelBranchState } from './protocol.generated.js';
+import { resourceThreadSource } from './thread-context.js';
+import type { LaunchSource, LiveRoot, KernelBranchState } from './protocol.generated.js';
 import { createResearchAccess, researchCaller } from './research-access.js';
 import { admitRunSourceAuthority, savedSourceLaunch, sourceToolSchemas } from './source-launch.js';
 import type { ToolInvocationAuthority } from './tool-invocation.js';
@@ -22,7 +24,7 @@ export interface DocumentSources {
 }
 
 /** Page the original immutable reader rather than imposing a PDF size limit. */
-async function sourceBytes(client: KernelScopedClient, state: Extract<KernelBranchState, { kind: 'regular-file' }>,
+async function sourceBytes(client: Pick<KernelScopedClient, 'getBlob'>, state: Extract<KernelBranchState, { kind: 'regular-file' }>,
   source: KernelBlobReadSource, signal?: AbortSignal): Promise<Buffer> {
   const parts: Buffer[] = [];
   let offset = 0;
@@ -30,7 +32,8 @@ async function sourceBytes(client: KernelScopedClient, state: Extract<KernelBran
     signal?.throwIfAborted();
     const page = await client.getBlob(state.objectHash, source, { offset, length: 256 * 1024, signal });
     const bytes = Buffer.from(page.bytesBase64, 'base64');
-    if (page.nextOffset !== offset + bytes.byteLength || page.nextOffset > state.byteLength
+    if (page.offset !== offset || page.hash !== state.objectHash || page.byteLength !== state.byteLength
+      || page.nextOffset !== offset + bytes.byteLength || page.nextOffset > state.byteLength
       || page.eof !== (page.nextOffset === state.byteLength) || !page.eof && page.nextOffset <= offset) {
       throw new HarnessServiceError('unavailable', 'The original document bytes are incomplete');
     }
@@ -46,6 +49,41 @@ const regularFile = (state: KernelBranchState | undefined): Extract<KernelBranch
   return state;
 };
 
+/** Shared local/target reader. A target object hash remains solely inside its native owner. */
+export async function readSourceDocument(input: {
+  client: Pick<KernelScopedClient, 'readBranch' | 'fileCapture' | 'getBlob' | 'releaseBlob'>; source: LaunchSource; physicalRoot: LiveRoot | null;
+  operationId: string; path: string; signal?: AbortSignal;
+}): Promise<DocumentIngestInput> {
+  const { client, source, physicalRoot, signal } = input;
+  const hostPrefix = source.resource_owner.kind === 'managed_host' ? `/hosts/${encodeURIComponent(source.resource_owner.hostId)}` : '';
+  const provenance = `varin-source://${hostPrefix}/workspaces/${encodeURIComponent(source.workspace_id)}`;
+  let ownerId: string | undefined;
+  try {
+    signal?.throwIfAborted();
+    if (source.mode === 'fixed_branch') {
+      const branchId = source.branch_id!, revision = source.revision!;
+      const original = await client.readBranch({ branchId, revision, paths: [input.path], includeEntries: true }, signal);
+      const entry = original.entries[0];
+      const state = regularFile(entry?.state), resourcePath = entry!.path;
+      const bytes = await sourceBytes(client, state, { branchId, revision, path: resourcePath }, signal);
+      return { source: bytes, sourceUrl: `${provenance}/branches/${encodeURIComponent(branchId)}/revisions/${revision}/${resourcePath.split('/').map(encodeURIComponent).join('/')}`,
+        title: path.posix.basename(resourcePath), contentType: 'application/pdf' };
+    }
+    if (!physicalRoot) throw new HarnessServiceError('unavailable', 'The original physical document source is unavailable');
+    const captured = await client.fileCapture({ operationId: `document-source:${input.operationId}`,
+      workspaceId: source.workspace_id, rootId: physicalRoot.rootId, path: input.path, store: true }, signal);
+    if (typeof captured.ownerId === 'string') ownerId = captured.ownerId;
+    if (typeof captured.stateJson !== 'string' || typeof captured.path !== 'string') throw new Error('Document capture returned incomplete provenance');
+    const state = regularFile(JSON.parse(captured.stateJson) as KernelBranchState);
+    if (!ownerId) throw new Error('Document capture returned no byte owner');
+    const bytes = await sourceBytes(client, state, { ownerId }, signal);
+    return { source: bytes, sourceUrl: source.resource_owner.kind === 'managed_host'
+      ? `${provenance}/roots/${encodeURIComponent(physicalRoot.rootId)}/${captured.path.split('/').map(encodeURIComponent).join('/')}`
+      : pathToFileURL(path.join(physicalRoot.canonicalRoot, captured.path)).href,
+      title: path.posix.basename(captured.path), contentType: 'application/pdf' };
+  } finally { if (ownerId) await client.releaseBlob(ownerId); }
+}
+
 export function createDocumentSources(options: {
   kernel: KernelClient;
   runtime: AgentRuntimeClient;
@@ -59,38 +97,27 @@ export function createDocumentSources(options: {
     if (!launch || !isDeepStrictEqual(launch.selection.source, authority.source)) {
       throw new HarnessServiceError('forbidden', 'The document source differs from the original invocation');
     }
-    const source = await admitRunSourceAuthority(options.kernel, options.runtime,
-      savedSourceLaunch(authority.runId, authority.source, sourceToolSchemas(launch.selection).map(tool => tool.name) as Parameters<typeof savedSourceLaunch>[2]),
-      { ...(signal ? { signal } : {}), resolveLiveSource: options.resolveLiveSource });
-    let ownerId: string | undefined;
-    try {
-      signal?.throwIfAborted();
-      if (authority.source.mode === 'fixed_branch') {
-        const branchId = authority.source.branch_id!, revision = authority.source.revision!;
-        const original = await source.client.readBranch({ branchId, revision, paths: [inputPath], includeEntries: true }, signal);
-        const entry = original.entries[0];
-        const state = regularFile(entry?.state);
-        const resourcePath = entry!.path;
-        const bytes = await sourceBytes(source.client, state, { branchId, revision, path: resourcePath }, signal);
-        return { source: bytes, sourceUrl: `varin-source:///workspaces/${encodeURIComponent(authority.source.workspace_id)}/branches/${encodeURIComponent(branchId)}/revisions/${revision}/${resourcePath.split('/').map(encodeURIComponent).join('/')}`,
-          title: path.posix.basename(resourcePath), contentType: 'application/pdf' };
-      }
-      if (!source.rootId || !source.canonicalRoot) throw new HarnessServiceError('unavailable', 'The original physical document source is unavailable');
-      // Single capture uses Storage's original canonical-path/lease owner and retains
-      // it through the real worker's stop. It neither follows leaf links nor reads drafts.
-      const captured = await source.client.fileCapture({ operationId: `document-source:${authority.operationId}`,
-        workspaceId: authority.source.workspace_id, rootId: source.rootId, path: inputPath, store: true }, signal);
-      if (typeof captured.ownerId === 'string') ownerId = captured.ownerId;
-      if (typeof captured.stateJson !== 'string' || typeof captured.path !== 'string') throw new Error('Document capture returned incomplete provenance');
-      const state = regularFile(JSON.parse(captured.stateJson) as KernelBranchState);
-      if (!ownerId) throw new Error('Document capture returned no byte owner');
-      const bytes = await sourceBytes(source.client, state, { ownerId }, signal);
-      return { source: bytes, sourceUrl: pathToFileURL(path.join(source.canonicalRoot, captured.path)).href,
-        title: path.posix.basename(captured.path), contentType: 'application/pdf' };
-    } finally {
-      try { if (ownerId) await source.client.releaseBlob(ownerId); }
-      finally { await source.release(); }
+    if (authority.source.resource_owner.kind === 'managed_host') {
+      return options.runtime.withManagedSourceAuthority(authority.runId, resourceThreadSource(authority.source)!, async ({ client, binding }) => {
+        const document = await client.service({ coordinatorHostId: options.runtime.coordinatorHostId,
+          authorityId: binding.authorityId, resourceEpoch: binding.resourceEpoch, requestId: `document-read:${randomUUID()}`,
+          operation: { kind: 'document_read', operationId: authority.operationId, path: inputPath } }, signal);
+        signal?.throwIfAborted();
+        const bytes = Buffer.from(document.bytesBase64, 'base64');
+        if (bytes.byteLength !== document.byteLength) throw new HarnessServiceError('unavailable', 'The original document bytes are incomplete');
+        return { source: bytes, sourceUrl: document.sourceUrl, title: document.title, contentType: document.contentType };
+      }, signal);
     }
+    const source = await admitRunSourceAuthority(options.kernel, options.runtime,
+      savedSourceLaunch(authority.runId, authority.source, sourceToolSchemas(launch.selection).map(tool => tool.name)),
+      { ...(signal ? { signal } : {}), resolveLiveSource: options.resolveLiveSource });
+    try {
+      if (source.kind !== 'local') throw new HarnessServiceError('forbidden', 'The document resource owner changed');
+      return await readSourceDocument({ client: source.client, source: authority.source, operationId: authority.operationId,
+        physicalRoot: source.rootId && source.canonicalRoot ? { hostId: source.toolBinding.liveRoot?.hostId ?? options.kernel.handshake!.hostId,
+          rootId: source.rootId, canonicalRoot: source.canonicalRoot } : null, path: inputPath, ...(signal ? { signal } : {}) });
+    } finally { await source.release(); }
+
   };
   return {
     tool(authority) {

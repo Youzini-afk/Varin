@@ -105,7 +105,8 @@ fn boundary(revoke_before: bool, policy: bool) {
         crate::process::ProcessControlRegistry::default(),
     );
     let binding = ToolBinding {
-        grant_id: "parent".into(),
+        resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
+grant_id: "parent".into(),
         run_id: f.context.run_id.clone(),
         thread_id: "thread:parent".into(),
         workspace_id: "workspace-A".into(),

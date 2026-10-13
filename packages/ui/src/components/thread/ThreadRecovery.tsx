@@ -6,9 +6,10 @@ import type { useThreadRecovery } from './useThreadRecovery';
 
 export function ThreadRecovery({ recovery, disabled }: { recovery: ReturnType<typeof useThreadRecovery>; disabled: boolean }) {
   return <>
-    {(recovery.notice || recovery.error || recovery.unavailable || recovery.operation || recovery.canRetry || recovery.canUndo || recovery.savedOperations.length > 0) && <section aria-label="Thread recovery" className="mx-auto w-full max-w-3xl space-y-2 px-4 py-2 text-sm">
+    {(recovery.notice || recovery.error || recovery.unavailable || recovery.combinedUnavailable || recovery.operation || recovery.canRetry || recovery.canUndo || recovery.savedOperations.length > 0) && <section aria-label="Thread recovery" className="mx-auto w-full max-w-3xl space-y-2 px-4 py-2 text-sm">
       {recovery.notice && <p role="status">{recovery.notice}</p>}
       {recovery.error && <p role="alert" className="text-destructive">{recovery.error}</p>}
+      {recovery.combinedUnavailable && <p role="status">{recovery.combinedUnavailable}</p>}
       {recovery.unavailable && <p role="alert" className="text-destructive">{recovery.unavailable} Saved recovery and Undo are unavailable. Reopen this conversation to check again.</p>}
       {recovery.canChooseAfterFileFailure && <Button variant="outline" size="sm" disabled={disabled || recovery.busy} onClick={() => void recovery.chooseConversationOnly()}>Restore conversation only</Button>}
       {recovery.operation && <p>{combinedRecoveryStatus(recovery.operation)}</p>}

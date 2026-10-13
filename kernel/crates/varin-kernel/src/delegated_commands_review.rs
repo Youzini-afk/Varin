@@ -85,8 +85,8 @@ fn public_continuation_source_prepare_and_exact_run_assembly_share_one_execution
     assert_eq!(accepted["source"], Value::Null);
     assert_eq!(call("runtime.child.continuation.accept", command), accepted);
     let selected = &accepted["source_basis"]["source"];
-    let source = json!({"workspaceId":selected["workspace_id"],"executionWorkspaceId":selected["execution_workspace_id"],"mode":"fixed_branch","branchId":format!("child-source:{execution}"),"revision":0});
-    let pin_source = json!({"workspace_id":selected["workspace_id"],"execution_workspace_id":selected["execution_workspace_id"],"live_root":null,"mode":"fixed_branch","branch_id":format!("child-source:{execution}"),"revision":0});
+    let source = json!({"resourceOwner":{"kind":"local"},"workspaceId":selected["workspace_id"],"executionWorkspaceId":selected["execution_workspace_id"],"mode":"fixed_branch","branchId":format!("child-source:{execution}"),"revision":0});
+    let pin_source = json!({"resource_owner":{"kind":"local"},"workspace_id":selected["workspace_id"],"execution_workspace_id":selected["execution_workspace_id"],"live_root":null,"mode":"fixed_branch","branch_id":format!("child-source:{execution}"),"revision":0});
     call(
         "runtime.child.source.ready",
         json!({"executionId":execution,"pin":{"pin_id":format!("child-source-pin:{execution}"),"root":accepted["source_basis"]["root"],"source":pin_source},"source":source,"provenance":accepted["source_basis"]["provenance"]}),
@@ -158,7 +158,7 @@ fn public_continuation_source_prepare_and_exact_run_assembly_share_one_execution
         responses: output.into(),
         epoch: "delegated-test".into(),
     };
-    let params=serde_json::from_value(json!({"runId":run_id,"credentialScope":launch.selection.credential_scope,"toolBinding":{"grantId":"fresh-source-grant","runId":run_id,"threadId":child.child_thread_id,"workspaceId":selected["workspace_id"],"executionWorkspaceId":selected["execution_workspace_id"],"sourceMode":"fixed_branch","fileSource":{"branchId":format!("child-source:{execution}"),"revision":0},"enabledTools":[]}})).unwrap();
+    let params=serde_json::from_value(json!({"runId":run_id,"credentialScope":launch.selection.credential_scope,"toolBinding":{"resourceOwner":{"kind":"local"},"grantId":"fresh-source-grant","runId":run_id,"threadId":child.child_thread_id,"workspaceId":selected["workspace_id"],"executionWorkspaceId":selected["execution_workspace_id"],"sourceMode":"fixed_branch","fileSource":{"branchId":format!("child-source:{execution}"),"revision":0},"enabledTools":[]}})).unwrap();
     let PreparedLaunch::Start(start) = assembly
         .prepare(RunPreparation::new(params, &run).unwrap(), None, || false)
         .unwrap()

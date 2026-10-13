@@ -1585,7 +1585,7 @@ fn durable_launch_rebind_is_exact_idempotent_and_carries_no_live_credentials() {
     let f = Fixture::new();
     let mut db = f.open();
     let receipt = submit(&mut db);
-    let selection: LaunchSelection = serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"pinned-public-digest","provider_family":"fixture","model":"test-model","configuration_generation":1,"tool_schema_generation":1,"tools":[{"name":"read","version":"1","description":"Fixture tool","output_schema":null,"metadata":null,"schema":{"type":"object"}}],"policy":{"name":"agent","version":"1"},"source":{"workspace_id":"workspace","execution_workspace_id":"execution","branch_id":"branch","revision":5,"mode":"fixed_branch","live_root":null}})).unwrap();
+    let selection: LaunchSelection = serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"pinned-public-digest","provider_family":"fixture","model":"test-model","configuration_generation":1,"tool_schema_generation":1,"tools":[{"name":"read","version":"1","description":"Fixture tool","output_schema":null,"metadata":null,"schema":{"type":"object"}}],"policy":{"name":"agent","version":"1"},"source":{"resource_owner":{"kind":"local"},"workspace_id":"workspace","execution_workspace_id":"execution","branch_id":"branch","revision":5,"mode":"fixed_branch","live_root":null}})).unwrap();
     let first = db.bind_launch(&receipt.run_id, selection.clone()).unwrap();
     assert_eq!(
         first,
@@ -1708,7 +1708,7 @@ fn missing_launch_tool_content_does_not_break_source_or_cancellation_control() {
         "configuration_generation":1, "tool_schema_generation":1,
         "tools":[{"name":"read", "version":"1", "description":"Fixture tool","output_schema":null,"metadata":null,"schema":{"type":"object", "description":"large tool material".repeat(65536)}}],
         "policy":{"name":"default", "version":"1"},
-        "source":{"mode":"fixed_branch", "live_root":null, "workspace_id":"workspace", "execution_workspace_id":"workspace", "branch_id":"fixed", "revision":1}
+        "source":{"resource_owner":{"kind":"local"},"mode":"fixed_branch", "live_root":null, "workspace_id":"workspace", "execution_workspace_id":"workspace", "branch_id":"fixed", "revision":1}
     })).unwrap();
     db.select_launch(&receipt.run_id, selection.clone())
         .unwrap();
@@ -1770,6 +1770,7 @@ fn successor_environment_selection_reuses_only_its_original_thread_source() {
             version: "1".into(),
         },
         Some(SourceSelection {
+            resource_owner: crate::catalog::launches::SourceResourceOwner::Local,
             environment_run_id: None,
             mode: crate::SourceMode::Materialized,
             live_root: None,

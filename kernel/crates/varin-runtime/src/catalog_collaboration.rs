@@ -106,7 +106,11 @@ pub enum ChildSourceRoot {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+pub struct ChildSourceAuthority {pub authority_id:String,pub resource_epoch:String}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ChildSourceHandoff {
+    pub resource_authority: Option<ChildSourceAuthority>,
     pub operation_id: String,
     pub source: launches::SourceSelection,
     pub root: ChildSourceRoot,
@@ -114,6 +118,7 @@ pub struct ChildSourceHandoff {
 impl ChildSourceHandoff {
     pub fn fixed(operation_id: &str, pin: ChildSourcePin) -> Self {
         Self {
+            resource_authority:None,
             operation_id: format!("child-source-handoff:{operation_id}"),
             source: pin.source.clone(),
             root: ChildSourceRoot::Fixed { pin },
@@ -1247,6 +1252,7 @@ impl Catalog {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnacceptedChildSource {
+    pub parent_run_id:String,
     pub operation_id: String,
     pub parent_thread_id: String,
     pub source: launches::SourceSelection,
@@ -1278,6 +1284,7 @@ impl Catalog {
                 continue;
             }
             sources.push(UnacceptedChildSource {
+                parent_run_id:run.id,
                 pin_id: format!("child-pin:{}", op.id),
                 operation_id: op.id,
                 parent_thread_id: run.thread_id,
@@ -1353,11 +1360,13 @@ impl ChildSourcePreparation {
             || self.selection.branch_id.as_deref() != Some(&branch)
             || self.selection.revision != Some(0)
             || self.selection.environment_run_id.is_some()
+            || self.selection.resource_owner != base.resource_owner
             || self.selection.workspace_id != base.workspace_id
             || self.selection.execution_workspace_id != base.execution_workspace_id
             || self.pin.source.mode != SourceMode::FixedBranch
             || self.pin.source.branch_id.as_deref() != Some(&branch)
             || self.pin.source.revision != Some(0)
+            || self.pin.source.resource_owner != self.selection.resource_owner
             || self.pin.source.workspace_id != self.selection.workspace_id
             || self.pin.source.execution_workspace_id != self.selection.execution_workspace_id
             || self.pin.root.is_empty()

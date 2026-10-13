@@ -19,11 +19,18 @@ writing Pi session files or the Host harness's existing execution records.
   inspection/list serialization runs on workers, and content collection retains every launch reference.
   Policy preparation binds the actual admitted baseline supplied by its assembly owner; the runtime
   does not hard-code a kernel policy wrapper's name.
-- Catalog 65 / wire 25 retain reconstructable Host dependency graphs in the original tool/policy
+- Catalog 66 / wire 26 retain reconstructable Host dependency graphs in the original tool/policy
   binding content. Graph validation, hashing, persistence and hydration run outside Catalog. Short
   policy metadata records exact identity and a ContentStore reference; launch, selection and delegated
   execution roots participate in the same GC publication protocol. Recovery preserves the saved
   choices rather than applying current service routing.
+- Every selected Source has an explicit local or managed-Host resource owner. Launches, child
+  handoffs, continuation baselines, managed process identities and journal targets preserve it;
+  a matching workspace or path on another Host is not the same resource. The coordinating Catalog
+  remains the execution authority. Target Storage owns source grants, original tool/resource
+  execution and receipts without allocating another Agent Run. Cross-Host history navigation and
+  file recovery are separate capabilities; unavailable file recovery must not silently consult
+  coordinator-local journal objects. The current target Storage format is 16.
 - Explicit HistoryBranch navigation prepares ancestry, paired history and context content on a worker,
   then commits the expected-head CAS and original command receipt together. Command intents use the
   same ContentStore references as other commands and participate in GC. Repeating a successful key

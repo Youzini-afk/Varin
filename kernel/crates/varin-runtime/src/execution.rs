@@ -798,6 +798,10 @@ pub use policy_model::*;
 /// A selected invocation. External arguments are decoded when this handle is created, and the
 /// same implementation and typed input are retained through preparation, admission and dispatch.
 pub trait PreparedToolCall: Send {
+    /// Called only after the original durable caller receipt was committed. Delivery
+    /// cleanup must not change that receipt or make the caller await a remote owner.
+    fn receipt_persisted(&self, _context: &ToolExecutionContext) {}
+
     fn managed_process(&self) -> Option<crate::catalog::managed_process::ManagedProcessKind> {
         None
     }

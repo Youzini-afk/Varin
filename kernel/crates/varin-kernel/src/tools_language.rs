@@ -25,6 +25,7 @@ pub(super) struct LanguageQueryArgs {
     pub(super) derived_view: Option<Value>,
 }
 impl LanguageQueryArgs {
+    pub(super) fn source_descriptor(path:String,derived_view:Option<Value>)->Self{Self{path,derived_view,line:None,character:None,query:None,direction:None,method:String::new()}}
     pub fn parse(kind: ToolKind, value: &Value) -> Result<Self, ExecutionError> {
         let mut args: Self = serde_json::from_value(value.clone())
             .map_err(|error| ExecutionError::new("invalid_tool_arguments", error.to_string()))?;

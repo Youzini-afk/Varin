@@ -103,7 +103,7 @@ async function fixture(files: Record<string, string>) {
       finally { await pin.release(); }
     } };
   const scope = createThreadResourceScope(options);
-  const source: ThreadSource = { mode: 'fixed_branch', workspaceId: 'workspace', executionWorkspaceId: 'workspace', branchId: 'source', revision: 0, tools: ['file_read'] };
+  const source: ThreadSource = { resourceOwner: { kind: 'local' }, mode: 'fixed_branch', workspaceId: 'workspace', executionWorkspaceId: 'workspace', branchId: 'source', revision: 0, tools: ['file_read'] };
   const prepare = async () => captureStableSourceBaseline({ store, workspaceId: 'workspace', captureWorkspaceId: 'workspace', branchId: 'source',
     directory: root, captureScopes: [], content: { mode: 'saved-files' } }, { documents, prepareResources: scope.prepareSourceCapture,
     inspectInventory: async () => ({ kind: 'git', baseRef: 'git-base', unborn: false, paths: ['AGENTS.md', '.gitignore'], gitlinks: [] }) });

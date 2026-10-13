@@ -7,7 +7,8 @@ pub(super) const PREFIX: &str = "process-wait:";
 
 /// Ephemeral proof derived from the original delegated executions, never an ACL or stored grant.
 /// Private construction ensures that a tool argument cannot assert this source relationship.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProcessResultLineage {
     process_id: String,
     source_run_id: String,
@@ -109,6 +110,7 @@ pub(super) fn delegated_source_lineage(
             || followups::normalized_source(launch.selection.source, &run.id)
                 != followups::normalized_source(Some(selection.clone()), &run.id)
             || pin.root != basis.root()
+            || selection.resource_owner != basis.source().resource_owner
             || selection.workspace_id != basis.source().workspace_id
             || selection.execution_workspace_id != basis.source().execution_workspace_id
         {

@@ -44,7 +44,7 @@ pub(crate) const CATALOG_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS metadata (ke
      CREATE INDEX IF NOT EXISTS domain_records_thread ON domain_records(workspace_id, thread_id, record_type);
      CREATE INDEX IF NOT EXISTS domain_record_refs_hash ON domain_record_refs(object_hash);";
 
-pub(crate) const CATALOG_USER_VERSION: i64 = 15;
+pub(crate) const CATALOG_USER_VERSION: i64 = 16;
 
 pub(crate) const REQUIRED_TABLES: &[&str] = &[
     "blobs",

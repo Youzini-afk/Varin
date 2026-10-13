@@ -11,7 +11,7 @@ import { threadInput } from './thread-images.js';
 import { listThreadFollowups } from './thread-followups.js';
 import { listThreadGoals } from './thread-goals.js';
 import { createHash } from 'node:crypto';
-import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadSubmit, ThreadSource, ThreadSnapshot, ThreadHistoryPage, ThreadCompact, ThreadContextState, ThreadPrepareSource, ThreadPreparedSource, ThreadResourceRefresh, ThreadChildContinuation } from '@varin/application-client';
+import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadSubmit, ThreadSource, ThreadSnapshot, ThreadHistoryPage, ThreadCompact, ThreadContextState, ThreadPrepareSource, ThreadPreparedSource, ThreadResourceRefresh, ThreadChildContinuation, ThreadSourcesAPI } from '@varin/application-client';
 import type { InputMode, InitialContext, InputSubmitParams, InputEnqueueParams, InputResourcePreparation, ContextResources, PreparedExplicitSkill, ModelSessionConfiguration, CredentialScope, AgentRuntimeStreamEvent, PolicyResumeReceipt } from './protocol.generated.js';
 import type { ExistingHostCredentialOwner } from './credential-owner.js';
 import { isAbortError, waitWithSignal } from '../cancellation.js';
@@ -47,6 +47,19 @@ export class ThreadAdapter {
     private readonly prepareSkillInput?: ThreadSkillInputPreparer,
     private readonly processTerminals?: import('@varin/application-client').ThreadProcessesAPI,
     private readonly prepareChildProfiles?: ChildProfilePreparer) {}
+
+  private sourceDirectory?: ThreadSourcesAPI;
+  bindSourceDirectory(directory: ThreadSourcesAPI): void { this.sourceDirectory = directory; }
+  async listSourceTargets(identity: ThreadIdentity, signal?: AbortSignal) {
+    await this.requireIdentity(identity);
+    if (!this.sourceDirectory) throw new Error('Source directory is unavailable');
+    return this.sourceDirectory.list(identity, signal);
+  }
+  async resolveSource(identity: ThreadIdentity, request: Parameters<ThreadSourcesAPI['resolve']>[1], signal?: AbortSignal) {
+    await this.requireIdentity(identity);
+    if (!this.sourceDirectory) throw new Error('Source directory is unavailable');
+    return this.sourceDirectory.resolve(identity, request, signal);
+  }
 
   private recoveryReader?: (identity: ThreadIdentity) => Promise<NonNullable<ThreadSnapshot['recovery']>>;
   bindRecoveryReader(reader: (identity: ThreadIdentity) => Promise<NonNullable<ThreadSnapshot['recovery']>>): void { this.recoveryReader = reader; }
@@ -335,9 +348,10 @@ export class ThreadAdapter {
   async recoverySource(input: ThreadIdentity & { entryId: string }, signal?: AbortSignal) {
     await this.requireIdentity(input);
     const range = await this.runtime.recoveryRange({ threadId: input.threadId, branchId: input.branchId, entryId: input.entryId }, signal);
-    const selected = range.find(turn => turn.source && turn.source.mode !== 'fixed_branch') ?? range.find(turn => turn.source);
+    const selected = range.find(turn => turn.source?.resource_owner.kind === 'managed_host' && turn.source.mode !== 'fixed_branch')
+      ?? range.find(turn => turn.source && turn.source.mode !== 'fixed_branch') ?? range.find(turn => turn.source);
     if (!selected?.source) return null;
-    return { workspaceId: selected.source.workspace_id, mode: selected.source.mode, runId: selected.anchor.runId };
+    return { resourceOwner: selected.source.resource_owner, workspaceId: selected.source.workspace_id, mode: selected.source.mode, runId: selected.anchor.runId };
   }
   async prepareNavigation(input: ThreadIdentity & { entryId: string }, signal?: AbortSignal) {
     await this.requireIdentity(input);
@@ -465,7 +479,7 @@ export class ThreadAdapter {
     const identity: ThreadIdentity = { runtime: 'agent', threadId: occurrence.thread_id, branchId: occurrence.branch_id };
     await this.requireIdentity(identity);
     signal.throwIfAborted();
-    const { source } = await this.prepareSource({ ...identity, key: occurrence.id, workspaceId, mode: definition.target.sourceMode, content: { mode: 'saved-files' }, captureScopes: [] }, signal);
+    const { source } = await this.prepareSource({ ...identity, key: occurrence.id, resourceOwner: { kind: 'local' }, workspaceId, mode: definition.target.sourceMode, content: { mode: 'saved-files' }, captureScopes: [] }, signal);
     signal.throwIfAborted();
     await this.admitSource(source, identity);
     const model = await this.models.resolveModel(definition.target.model as ThreadModel);
@@ -479,8 +493,8 @@ export class ThreadAdapter {
     const receipt = await this.runtime.admitCalendar({ occurrenceId: occurrence.id, expectedRevision: occurrence.revision,
       ownerEpoch: preparation.owner_epoch, configuration: model.configuration, initialContext,
       ...(skill ? { inputPreparation: { expectedContextCheckpoint: null, skill } } : {}),
-      launch: { inheritSource: false, source: { workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId,
-        branchId: source.branchId ?? null, revision: source.revision ?? null, mode: source.mode, liveRoot: source.liveRoot ?? null },
+      launch: { inheritSource: false, source: { resourceOwner: source.resourceOwner, workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId,
+        branchId: source.branchId ?? null, revision: source.revision ?? null, mode: source.mode, liveRoot: source.liveRoot ?? null, ...(source.environmentRunId ? { environmentRunId: source.environmentRunId } : {}) },
         enabledTools: source.tools, credentialScope: await model.credentialOwner.scope(), ...(childDispatch ? { childDispatch } : {}) },
     }, signal);
     // Admission transfers ownership to the Run. Retiring this preparation must not
@@ -498,8 +512,8 @@ export class ThreadAdapter {
     const command: InputSubmitParams = { key: input.key, threadId: input.threadId, branchId: input.branchId,
       expectedHead: input.expectedHead, input: threadInput(input.text, input.images), configuration: model.configuration,
       launch: { inheritSource: input.source === undefined, source: input.source ? {
-        workspaceId: input.source.workspaceId, executionWorkspaceId: input.source.executionWorkspaceId,
-        branchId: input.source.branchId ?? null, revision: input.source.revision ?? null, mode: input.source.mode, liveRoot: input.source.liveRoot ?? null,
+        resourceOwner: input.source.resourceOwner, workspaceId: input.source.workspaceId, executionWorkspaceId: input.source.executionWorkspaceId,
+        branchId: input.source.branchId ?? null, revision: input.source.revision ?? null, mode: input.source.mode, liveRoot: input.source.liveRoot ?? null, ...(input.source.environmentRunId ? { environmentRunId: input.source.environmentRunId } : {}),
       } : null, enabledTools: input.source?.tools ?? [], credentialScope: await model.credentialOwner.scope() },
     };
     let initialContext: InitialContext | undefined;
@@ -527,10 +541,10 @@ export class ThreadAdapter {
             const previous = latest ? await this.runtime.launch(latest.id) : null;
             const inherited = previous?.selection.source;
             if (inherited) {
-              const base = { workspaceId: inherited.workspace_id, executionWorkspaceId: inherited.execution_workspace_id, tools: [] };
+              const base = { resourceOwner: inherited.resource_owner, workspaceId: inherited.workspace_id, executionWorkspaceId: inherited.execution_workspace_id, tools: [] };
               if (inherited.mode === 'live_root' && inherited.live_root) source = { ...base, mode: 'live_root', liveRoot: inherited.live_root };
               else if (inherited.mode !== 'live_root' && inherited.branch_id && inherited.revision !== null) source = {
-                ...base, branchId: inherited.branch_id, revision: inherited.revision, mode: inherited.mode,
+                ...base, branchId: inherited.branch_id, revision: inherited.revision, mode: inherited.mode, ...(inherited.environment_run_id ? { environmentRunId: inherited.environment_run_id } : {}),
               };
             }
           }
@@ -817,8 +831,8 @@ export class ThreadAdapter {
       if (run.thread_id.startsWith('thread:')) await this.refreshContext(identity, signal);
       const source = launch.selection.source;
       if (source && source.mode !== 'live_root' && source.branch_id !== null && source.revision !== null) {
-        const admission = this.admitSource({ mode: source.mode, workspaceId: source.workspace_id,
-          executionWorkspaceId: source.execution_workspace_id, branchId: source.branch_id, revision: source.revision, tools: [] }, identity, run.id, signal);
+        const admission = this.admitSource({ resourceOwner: source.resource_owner, mode: source.mode, workspaceId: source.workspace_id,
+          executionWorkspaceId: source.execution_workspace_id, branchId: source.branch_id, revision: source.revision, tools: [], ...(source.environment_run_id ? { environmentRunId: source.environment_run_id } : {}) }, identity, run.id, signal);
         await waitWithSignal(admission, signal);
       }
       // live_root is validated by rebindLaunch's existing LiveSource owner.

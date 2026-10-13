@@ -23,6 +23,7 @@ pub(crate) struct Context {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct Native {
+    pub resource_owner: varin_runtime::catalog::launches::SourceResourceOwner,
     pub context: ToolExecutionContext,
     pub executor: String,
 }
@@ -454,6 +455,8 @@ impl Storage {
             &params,
         )?;
         if let Some(binding) = &context.binding {
+            if let Some(authority)=&binding.target_authority {self.validate_source_resource(authority,binding,epoch,true)?;self.validate_source_process_access(binding,&address.process_id,epoch,None)?;}
+            else if !binding.resource_owner.is_local(){return Err(KernelError::Authorization("Managed interaction requires actual target authority".into()));}
             if grant.run_id.as_deref() != Some(binding.run_id.as_str())
                 || grant.thread_id.as_deref() != Some(binding.thread_id.as_str())
                 || grant.owning_workspace.as_deref() != Some(binding.workspace_id.as_str())

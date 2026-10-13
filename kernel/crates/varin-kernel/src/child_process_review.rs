@@ -354,7 +354,7 @@ impl Harness {
         }
         self.invoke(&preparation_grant, "branch.create.finish", finish);
         let pinned = self.invoke(&preparation_grant, "branch.pin", json!({"operationId":format!("pin-{name}"),"branchId":source_branch,"revision":0,"pinId":format!("child-source-pin:{}",child.operation_id)}));
-        let source: varin_runtime::catalog::launches::SourceSelection = serde_json::from_value(json!({"mode":"materialized","live_root":null,"workspace_id":"workspace","execution_workspace_id":"workspace","branch_id":source_branch,"revision":0})).unwrap();
+        let source: varin_runtime::catalog::launches::SourceSelection = serde_json::from_value(json!({"resource_owner":{"kind":"local"},"mode":"materialized","live_root":null,"workspace_id":"workspace","execution_workspace_id":"workspace","branch_id":source_branch,"revision":0})).unwrap();
         let mut pin_source: varin_runtime::catalog::launches::SourceSelection = source.clone();
         pin_source.mode = SourceMode::FixedBranch;
         let preparation = owner
@@ -427,7 +427,8 @@ impl Harness {
             operation: Some(child.operation_id),
             cwd,
             binding: ToolBinding {
-                grant_id: name.into(),
+                resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
+grant_id: name.into(),
                 run_id: run,
                 thread_id: child.child_thread_id,
                 workspace_id: "workspace".into(),
@@ -619,7 +620,8 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
         }],
     };
     let mut binding = ToolBinding {
-        grant_id: "parent".into(),
+        resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
+grant_id: "parent".into(),
         run_id: String::new(),
         thread_id: "parent".into(),
         workspace_id: "workspace".into(),
@@ -1093,9 +1095,9 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
         "revision":0,"pinId":format!("child-source-pin:{execution_id}")}),
     );
     assert_eq!(next_pin["root"], candidate["root"]);
-    let source = json!({"workspaceId":"workspace","executionWorkspaceId":"workspace","mode":"materialized","branchId":next_branch,"revision":0});
+    let source = json!({"resourceOwner":{"kind":"local"},"workspaceId":"workspace","executionWorkspaceId":"workspace","mode":"materialized","branchId":next_branch,"revision":0});
     let attached = child_commands::execute(h.runtime.clone(), h.resources.clone(), "runtime.child.source.ready", json!({"executionId":execution_id,
-        "source":source,"pin":{"pin_id":next_pin["pinId"],"root":next_pin["root"],"source":{"workspace_id":"workspace","execution_workspace_id":"workspace",
+        "source":source,"pin":{"pin_id":next_pin["pinId"],"root":next_pin["root"],"source":{"resource_owner":{"kind":"local"},"workspace_id":"workspace","execution_workspace_id":"workspace",
             "mode":"fixed_branch","branch_id":next_branch,"revision":0,"live_root":null}},"provenance":continued["source_basis"]["provenance"]}), &AtomicBool::new(false)).unwrap();
     assert_eq!(attached["source"]["handoff"], Value::Null);
     let current_context = {

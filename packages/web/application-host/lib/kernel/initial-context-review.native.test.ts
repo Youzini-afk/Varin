@@ -110,7 +110,7 @@ it('initial context preserves pinned AGENTS and request roles while current pers
   await f.personalization.saveNote({ scope: { kind: 'session', id: identity.threadId }, content: 'THIS SESSION NOTE' });
   await f.personalization.saveNote({ scope: { kind: 'project', id: 'unrelated-project' }, content: 'MUST NOT LEAK OTHER PROJECT' });
   await fs.writeFile(path.join(f.workspace, 'AGENTS.md'), 'PINNED WORKSPACE INSTRUCTIONS');
-  const prepared = await f.api.prepareSource({ ...identity, key: 'initial-context-source', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
+  const prepared = await f.api.prepareSource({ ...identity, key: 'initial-context-source', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   await fs.writeFile(path.join(f.workspace, 'AGENTS.md'), 'LATER DISK INSTRUCTIONS');
   const request = { ...identity, key: 'initial-context-input', expectedHead: null, text: 'USER TEXT MUST STAY USER', model, source: prepared.source };
   await expect(f.api.submit({ ...request, expectedHead: 'wrong-head' })).rejects.toMatchObject({ status: 409 });

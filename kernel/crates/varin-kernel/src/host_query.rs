@@ -119,6 +119,14 @@ impl OwnerChannel {
         query: Value,
         cancel: &CancellationToken,
     ) -> Result<Value, ExecutionError> {
+        self.query_inner(query, cancel, false)
+    }
+    /// A mutating resource request retains its waiter until the original owner replies.
+    /// Cancellation is a control request; losing the transport is still uncertainty.
+    pub(crate) fn query_draining(&self, query: Value, cancel: &CancellationToken) -> Result<Value, ExecutionError> {
+        self.query_inner(query, cancel, true)
+    }
+    fn query_inner(&self, query: Value, cancel: &CancellationToken, drain: bool) -> Result<Value, ExecutionError> {
         if cancel.is_cancelled() {
             return Err(self.failed("cancelled"));
         }
@@ -142,11 +150,13 @@ impl OwnerChannel {
             self.send(
                 json!({"v":1,"kind":format!("{}-request",self.namespace),"id":id,"kernelEpoch":epoch,"query":query}),
             )?;
+            let mut cancellation_sent = false;
             loop {
-                if cancel.is_cancelled() {
+                if cancel.is_cancelled() && !cancellation_sent {
                     // Cancellation ends this waiter. The domain receipt, not transport state, determines any mutation effect.
                     self.send(json!({"v":1,"kind":format!("{}-cancel",self.namespace),"id":id,"kernelEpoch":epoch}))?;
-                    return Err(self.failed("cancelled"));
+                    cancellation_sent = true;
+                    if !drain { return Err(self.failed("cancelled")); }
                 }
                 match rx.try_recv() {
                     Ok(reply) => return Ok(reply.result),

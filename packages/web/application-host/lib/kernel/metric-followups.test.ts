@@ -4,7 +4,7 @@ import type { FollowupMetricObserveParams, FollowupMetricWork, FollowupMetricSta
 import type { KernelClient } from './kernel-client.js';
 import { createResourceService, type ResourceService, type ResourceSample } from '../harness/resources.js';
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(yes => { resolve = yes; }); return { promise, resolve }; };
-const source = { workspace_id: 'workspace', execution_workspace_id: 'execution', mode: 'fixed_branch' as const, branch_id: 'source', revision: 1, live_root: null };
+const source = { resource_owner: { kind: 'local' as const }, workspace_id: 'workspace', execution_workspace_id: 'execution', mode: 'fixed_branch' as const, branch_id: 'source', revision: 1, live_root: null };
 const initial = (): FollowupMetricState => ({ identity: null, sample_revision: null, observed_at_ms: null, status: 'missing', failure_code: 'sample_pending', holding: null, value: null, gap: true });
 const work = (): FollowupMetricWork => ({ key: { followupId: 'metric', generation: 1, sourceIndex: 0, definitionRevision: 1, ownerEpoch: 1 },
   observer: { rootThreadId: 'root', threadId: 'root', branchId: 'branch', sourceRunId: 'run', source, canSubmit: true, readThreadIds: ['root'], controlThreadIds: ['root'] },

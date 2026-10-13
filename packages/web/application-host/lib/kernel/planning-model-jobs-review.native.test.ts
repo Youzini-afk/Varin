@@ -226,7 +226,7 @@ async function submitBundledExample(f: Fixture, key: string) {
   await fs.writeFile(path.join(f.workspace, 'planning-context.md'), 'Candidate evidence: first.txt and second.txt. Only read the file selected by the plan.');
   await fs.writeFile(path.join(f.workspace, 'first.txt'), 'IMMUTABLE_FIRST_FINDING');
   await fs.writeFile(path.join(f.workspace, 'second.txt'), 'IMMUTABLE_SECOND_FINDING');
-  const source = await f.api.prepareSource({ ...identity, key: 'source', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
+  const source = await f.api.prepareSource({ ...identity, key: 'source', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   await fs.writeFile(path.join(f.workspace, 'first.txt'), 'MUTATED_LIVE_FIRST');
   await fs.writeFile(path.join(f.workspace, 'second.txt'), 'MUTATED_LIVE_SECOND');
   const run = await f.api.submit({ ...identity, key: `input-${key}`, expectedHead: null, text: 'Find the selected evidence', model: mainSelection, source: source.source });

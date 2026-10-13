@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDocumentAuthorityHarness } from '../documents/contract-fixtures.js';
 import { createLanguageSupervisor } from '../lsp/supervisor.js';
+import type { SourceQueryAccess } from './source-query.js';
 import { createLanguageOwner } from './language-owner.js';
 import { createControlledLanguagePeer, deferred, testRange } from './language.test-helper.js';
 
@@ -24,7 +25,7 @@ async function fixture(options: { capabilities?: Record<string, unknown>; prepar
   if (options.provider !== false) supervisor.registerProvider({ providerId: 'test-language',
     command: 'controlled-test-peer', languageIds: ['typescript'], source: 'builtin' });
   await fs.writeFile(path.join(documents.workspaceRoot, 'main.ts'), 'const value = 1;\n');
-  const validateSource = vi.fn(async (_query?: Pick<Query, 'grantId'>) => {});
+  const validateSource = vi.fn(async (_query?: Pick<SourceQueryAccess, 'grantId'>) => {});
   const owner = createLanguageOwner({ documents: documents.authority, supervisor, sources: {
     validateLanguage: validateSource,
     prepareLanguageView: async query => ({ root: query.physicalRoot!.canonicalRoot, check: async () => {}, release: async () => {} }),
@@ -40,7 +41,7 @@ async function fixture(options: { capabilities?: Record<string, unknown>; prepar
   } });
   const liveRoot = { hostId: '11111111-1111-4111-8111-111111111111', canonicalRoot: documents.workspaceRoot, rootId: 'live-test-root' };
   const query = (overrides: Partial<Query> = {}): Query => ({ runId: 'run-a', threadId: 'thread-a',
-    grantId: 'grant-a', source: { mode: 'live_root', workspace_id: documents.identity.workspaceId, execution_workspace_id: documents.identity.workspaceId, branch_id: null, revision: null, live_root: liveRoot }, physicalRoot: liveRoot,
+    grantId: 'grant-a', source: { resource_owner: { kind: 'local' }, mode: 'live_root', workspace_id: documents.identity.workspaceId, execution_workspace_id: documents.identity.workspaceId, branch_id: null, revision: null, live_root: liveRoot }, physicalRoot: liveRoot,
     method: 'definition', path: 'main.ts',
     ...(!overrides.method || ['definition', 'references', 'hover', 'call_hierarchy'].includes(overrides.method) ? { line: 0, character: 6 } : {}), ...overrides });
   const invoke = (overrides: Partial<Query> = {}, signal = new AbortController().signal) => owner(query(overrides), signal);
@@ -519,7 +520,7 @@ it('shares fixed-tree preparation after one waiter cancels and releases its phys
       return { workspaceId, executionWorkspaceId: workspaceId, canonicalRoot: view!.root }; },
   } });
   const query = (runId: string): Query => ({ runId, threadId: runId, grantId: `grant:${runId}`, source: {
-    mode: 'fixed_branch', workspace_id: workspaceId, execution_workspace_id: workspaceId, branch_id: 'fixed', revision: 0, live_root: null },
+    resource_owner: { kind: 'local' }, mode: 'fixed_branch', workspace_id: workspaceId, execution_workspace_id: workspaceId, branch_id: 'fixed', revision: 0, live_root: null },
     physicalRoot: null, method: 'definition', path: 'main.ts', line: 0, character: 6 });
   const cancelled = new AbortController();
   const a = owner(query('a'), cancelled.signal);

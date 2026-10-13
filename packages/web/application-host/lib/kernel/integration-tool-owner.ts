@@ -1,8 +1,9 @@
 /** Ordinary tool entry into the existing Integration authority. No Pi session or second journal. */
 import type { JsonValue } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
+import { isDeepStrictEqual } from 'node:util';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
-import type { LaunchIntent, LaunchSource } from './protocol.generated.js';
+import type { DelegatedExecution, LaunchIntent, LaunchSource } from './protocol.generated.js';
 import type { IntegrationCoordinator, IntegrationPlanInput, IntegrationOperationReceipt } from '../harness/working-state/integration-coordinator.js';
 import type { WorkspaceWorkingStateRootAccess } from '../harness/working-state/types.js';
 import { runToolDomainCall, type ToolInvocationAuthority } from './tool-invocation.js';
@@ -26,6 +27,7 @@ export interface IntegrationToolOwnerOptions {
   onCleanupError(operationId: string, error: unknown): void;
   /** Re-admit the original physical source and bind actual file/journal ports to its fresh grant. */
   openTarget(authority: ToolInvocationAuthority, launch: LaunchIntent, signal: AbortSignal): Promise<IntegrationTargetScope>;
+  mergeManaged?(authority: ToolInvocationAuthority, launch: LaunchIntent, child: DelegatedExecution, signal: AbortSignal): Promise<ToolExecutionReceipt>;
 }
 function readInput(value: JsonValue): { childOperationId: string; executionId: string; publicationId: string } {
   if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -37,7 +39,7 @@ function readInput(value: JsonValue): { childOperationId: string; executionId: s
   }
   return { childOperationId: value.childOperationId, executionId: value.executionId, publicationId: value.publicationId };
 }
-const completion = (result: IntegrationOperationReceipt): ToolExecutionReceipt => {
+export const integrationCompletion = (result: IntegrationOperationReceipt): ToolExecutionReceipt => {
   if (!result.receipt || !result.effect || typeof result.executorStopped !== 'boolean' || result.recoveryCoverage !== 'files-only') {
     throw new Error('Integration did not return its original journal evidence');
   }
@@ -64,10 +66,15 @@ export function createIntegrationToolOwner(options: IntegrationToolOwnerOptions)
           || child.child_operation_id !== input.childOperationId || child.execution_id !== input.executionId
           || child.parent_thread_id !== authority.threadId || child.parent_branch_id !== run.branch_id
           || child.code_result.kind !== 'published' || child.code_result.result.publication_id !== input.publicationId
-          || child.code_result.result.workspace_id !== authority.source.workspace_id) {
+          || child.code_result.result.workspace_id !== authority.source.workspace_id
+          || child.source?.kind !== 'ready' || !isDeepStrictEqual(child.source.selection.resource_owner, authority.source.resource_owner)) {
           throw new Error('Fixed child result is unavailable for this parent source');
         }
         context.signal.throwIfAborted();
+        if (authority.source.resource_owner.kind === 'managed_host') {
+          if (!options.mergeManaged) throw new Error('The original managed Integration owner is unavailable');
+          return options.mergeManaged(authority, launch, child, context.signal);
+        }
         target = await options.openTarget(authority, launch, context.signal);
         const result = child.code_result.result;
         const operationBinding = { kind: 'runtime_operation' as const, operationId: authority.operationId,
@@ -82,7 +89,7 @@ export function createIntegrationToolOwner(options: IntegrationToolOwnerOptions)
           parentAuthority: { kind: 'directory', directory: target.directory, workspaceId: target.documentWorkspaceId } };
         context.signal.throwIfAborted();
         enteredCoordinator = true;
-        return completion(await options.coordinator.mergeResult(admitted));
+        return integrationCompletion(await options.coordinator.mergeResult(admitted));
       } catch (error) {
         if (enteredCoordinator && admitted) {
           // A failed response may have followed the original journal's successful terminal commit.
@@ -90,7 +97,7 @@ export function createIntegrationToolOwner(options: IntegrationToolOwnerOptions)
             const inspection = { ...admitted };
             delete inspection.signal;
             const original = await options.coordinator.inspectIntegration(inspection);
-            if (original) return completion(original);
+            if (original) return integrationCompletion(original);
           } catch { /* Preserve unknown rather than inventing rollback or replay. */ }
           return { completion: { kind: 'result', outcome: 'indeterminate', effect: 'unknown',
             content: { data: { status: 'needs-attention', operationId: admitted.operationId, error: error instanceof Error ? error.message : String(error) }, parts: [] } }, executor_stopped: error instanceof UnconfirmedIntegrationCommitError && error.executorStopped };
@@ -110,7 +117,7 @@ export function createIntegrationToolOwner(options: IntegrationToolOwnerOptions)
 }
 
 /** Compose existing source, Storage, Documents and journal owners without minting maintenance authority. */
-export function createIntegrationTargetOpener(options: {
+export interface IntegrationTargetOwners {
   kernel: import('./kernel-client.js').KernelClient;
   runtime: AgentRuntimeClient;
   storage: import('./storage-adapter.js').KernelStorageAdapter;
@@ -119,13 +126,33 @@ export function createIntegrationTargetOpener(options: {
   resolveLiveSource: import('./live-source.js').LiveSourceResolver;
   documents: { resolveWorkspace(input: { path: string }): Promise<{ workspaceId: string }>;
     inspectWorkspace(workspaceId: string): Promise<{ root: string }> };
-}): IntegrationToolOwnerOptions['openTarget'] {
+}
+
+export function createIntegrationTargetOpener(options: IntegrationTargetOwners): IntegrationToolOwnerOptions['openTarget'] {
   return async (invocation, launch, signal) => {
     const selected = physicalSourceLaunch(invocation.runId, launch);
     if (selected.mode === "fixed_branch") throw new Error("Integration requires its original physical source");
     const admitted = await admitRunSourceAuthority(options.kernel, options.runtime, selected,
       { signal, resolveLiveSource: options.resolveLiveSource, purpose: 'integration', operationId: invocation.operationId });
     try {
+      if (admitted.kind !== 'local') throw new Error('Managed Integration requires its target owner');
+      const anchor = await options.runtime.journalAnchor(invocation.operationId, signal);
+      return await openScopedIntegrationTarget(options, invocation, selected, admitted, anchor, admitted.release, signal);
+    } catch (error) { await admitted.release(); throw error; }
+  };
+}
+
+/** Compose the same physical/journal ports on the actual resource Host. */
+export async function openScopedIntegrationTarget(
+  options: Pick<IntegrationTargetOwners, 'kernel' | 'storage' | 'documents' | 'recovery' | 'metadataReader'>,
+  invocation: ToolInvocationAuthority,
+  selected: SourceLaunch,
+  admitted: { grant: import('./kernel-client.js').KernelGrantHandle; rootId: string | undefined; canonicalRoot: string | undefined },
+  anchor: import('./protocol.generated.js').RecoveryAnchor,
+  release: () => Promise<void>,
+  signal: AbortSignal,
+): Promise<IntegrationTargetScope> {
+      if (selected.mode === 'fixed_branch') throw new Error('Integration requires its original physical source');
       if (!admitted.rootId || !admitted.canonicalRoot) throw new Error('Physical source was not admitted');
       const documentWorkspace = await options.documents.resolveWorkspace({ path: admitted.canonicalRoot });
       if ((await options.documents.inspectWorkspace(documentWorkspace.workspaceId)).root !== admitted.canonicalRoot) {
@@ -137,7 +164,6 @@ export function createIntegrationTargetOpener(options: {
       if (authority.rootId !== admitted.rootId) throw new Error('Integration file root changed');
       const bindings = createScopedKernelRecoveryBindings(options.storage, { authority, threadId: invocation.threadId,
         runId: invocation.runId, storageRoot: options.kernel.handshake!.storageRoot, metadataReader: options.metadataReader });
-      const anchor = await options.runtime.journalAnchor(invocation.operationId, signal);
       if (anchor.runId !== invocation.runId || anchor.threadId !== invocation.threadId) throw new Error('Integration checkpoint belongs to another Run');
       await bindings.durableRecoveryStore.recordTurnStart({ workspaceId:selected.workspaceId, conversation:{kind:'thread',threadId:anchor.threadId,branchId:anchor.branchId}, executionId:anchor.executionId, runId:anchor.runId, userEntryId:anchor.entryId, workerId:'kernel',runtimeGeneration:anchor.epoch,activeWriterScopes:[],provenance:'caused-by',
         fileTarget:{kind:'physical',workspaceId:selected.workspaceId,threadId:anchor.threadId,runId:anchor.runId,rootId:authority.rootId,canonicalRoot:authority.canonicalRoot,executionWorkspaceId:selected.executionWorkspaceId,sourceMode:selected.mode} });
@@ -155,15 +181,13 @@ export function createIntegrationTargetOpener(options: {
       };
       signal.throwIfAborted();
       return { executionId: anchor.executionId, directory: admitted.canonicalRoot, documentWorkspaceId: documentWorkspace.workspaceId,
-        workingStates, release: admitted.release };
-    } catch (error) { await admitted.release(); throw error; }
-  };
+        workingStates, release: release };
 }
 
 function physicalSourceLaunch(runId: string, launch: LaunchIntent): SourceLaunch {
   const source = launch.selection.source;
   if (!source || source.mode === 'fixed_branch') throw new Error('Integration requires the parent physical source');
-  const common = { runId, workspaceId: source.workspace_id,
+  const common = { runId, resourceOwner: source.resource_owner, workspaceId: source.workspace_id,
     executionWorkspaceId: source.execution_workspace_id,
     tools: sourceToolSchemas(launch.selection).map(tool => tool.name) as SourceLaunch['tools'] };
   if (source.mode === 'live_root') {

@@ -10,7 +10,7 @@ import type { ExperimentCaller } from '../harness/research-identity.js';
 import type { SourceService } from '../harness/sources.js';
 import type { ResourceService } from '../harness/resources.js';
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(yes => { resolve = yes; }); return { promise, resolve }; };
-const source = { workspace_id: 'observer-workspace', execution_workspace_id: 'observer-execution', mode: 'fixed_branch' as const, branch_id: 'fixed', revision: 3, live_root: null };
+const source = { resource_owner: { kind: 'local' as const }, workspace_id: 'observer-workspace', execution_workspace_id: 'observer-execution', mode: 'fixed_branch' as const, branch_id: 'fixed', revision: 3, live_root: null };
 const binding = { operationId: 'original-job', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, domain: 'research.experiment', domainVersion: 1, subject: { kind: 'workspace', workspaceId: 'target-workspace', subjectId: 'attempt' } } satisfies HostJobBinding;
 const observer: FollowupResearchWork['observer'] = { rootThreadId: 'parent', threadId: 'child', branchId: 'child-branch', sourceRunId: 'child-source', source, canSubmit: true, readThreadIds: ['parent', 'child'], controlThreadIds: ['child'] };
 const work = (kind: 'artifact' | 'collection'): FollowupResearchWork => ({ key: { followupId: kind, generation: 1, sourceIndex: 0, definitionRevision: 1, ownerEpoch: 1 }, binding, observer, log: null, source: { kind, operation_id: binding.operationId } });

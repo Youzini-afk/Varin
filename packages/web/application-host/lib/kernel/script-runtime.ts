@@ -40,7 +40,7 @@ interface Cell {
   callbacks: Set<Promise<unknown>>; computerCancellations: Set<(reason: unknown) => void>; desktops: Set<string>; output: OutputPart<IncomingMedia>[];
   completed: ReturnType<typeof deferred<CellResult>>;
 }
-type SourceAuthority = Awaited<ReturnType<typeof admitRunSourceAuthority>>;
+type SourceAuthority = Extract<Awaited<ReturnType<typeof admitRunSourceAuthority>>, { kind: 'local' }>;
 interface Environment {
   id: string; runId: string; threadId: string; owner: ToolInvocationAuthority['executorOwner']; node: NodeBinding;
   source: SourceAuthority; process: KernelManagedProcess; ready: ReturnType<typeof deferred<void>>;
@@ -80,9 +80,12 @@ export function createScriptRuntime(options: {
   const sourceFor = async (operation: Operation): Promise<SourceAuthority> => {
     const launch = await runtime.launch(operation.run_id);
     if (!launch?.selection.source || launch.selection.source.mode === 'fixed_branch') throw new Error('Original physical script source is unavailable');
-    return admitRunSourceAuthority(kernel, runtime, savedSourceLaunch(operation.run_id, launch.selection.source,
+    if (launch.selection.source.resource_owner.kind === 'managed_host') throw new Error('The target Host has no admitted persistent-script evaluator binding');
+    const admitted = await admitRunSourceAuthority(kernel, runtime, savedSourceLaunch(operation.run_id, launch.selection.source,
       sourceToolSchemas(launch.selection).map(tool => tool.name) as Parameters<typeof savedSourceLaunch>[2]),
       { operationId: operation.id, retention: 'caller', resolveLiveSource: options.resolveLiveSource });
+    if (admitted.kind !== 'local') { await admitted.release(); throw new Error('Script source owner changed during admission'); }
+    return admitted;
   };
   const fence = (environment: Environment, reason: unknown) => {
     environment.accepting = false;
@@ -189,6 +192,7 @@ export function createScriptRuntime(options: {
     await recovering;
     signal.throwIfAborted();
     if (environments.has(authority.operationId)) throw new Error('script_environment_already_open');
+    if (authority.source?.resource_owner.kind === 'managed_host') throw new Error('The target Host has no admitted persistent-script evaluator binding');
     const node = await nodeBinding();
     if (node.configuration_identity !== authority.configurationIdentity) throw new Error('script_binding_changed');
     await rpc('runtime.managed_process.begin', { operationId: authority.operationId, executionOwner: authority.executorOwner, node }, signal);
@@ -200,6 +204,7 @@ export function createScriptRuntime(options: {
     let enteredProcess = false;
     try {
       signal.throwIfAborted();
+      if (source.kind !== 'local') throw new Error('The target Host has no admitted persistent-script evaluator binding');
       enteredProcess = true;
       const initial = await source.client.processSpawn({ processId: authority.operationId, workspaceId: selection.workspaceId, rootId: source.rootId!, cwd: typeof params.cwd === 'string' ? params.cwd : '',
         command: node.executable, args: ['--experimental-repl-await', node.worker_path], mode: 'pipe', cols: 80, rows: 24,
@@ -348,8 +353,10 @@ export function createScriptRuntime(options: {
 
   return {
     capability,
-    async prepareConfiguration(fallback: NonNullable<ExtensionToolOwnerOptions['configurationIdentity']>): Promise<NonNullable<ExtensionToolOwnerOptions['configurationIdentity']>> {
-      const captured = await nodeBinding().then(value => ({ value }), error => ({ error }));
+    async prepareConfiguration(fallback: NonNullable<ExtensionToolOwnerOptions['configurationIdentity']>, source: import('./protocol.generated.js').LaunchSource | null): Promise<NonNullable<ExtensionToolOwnerOptions['configurationIdentity']>> {
+      const captured = source?.resource_owner.kind === 'managed_host'
+        ? { error: new Error('The target Host has no admitted persistent-script evaluator binding') }
+        : await nodeBinding().then(value => ({ value }), error => ({ error }));
       return (descriptor, original) => {
         if (!SCRIPT_TOOL_DECLARATIONS.some(entry => entry.id === descriptor.id && entry.version === descriptor.version)) return fallback(descriptor, original);
         if ('error' in captured) throw captured.error;

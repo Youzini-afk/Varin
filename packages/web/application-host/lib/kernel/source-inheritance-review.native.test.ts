@@ -94,14 +94,14 @@ it('public completed-turn continuation preserves edited disk while explicit sour
   const overrideRevision = await publishSource(f.kernel, 'source-b', 'explicit source B');
   const identity = await f.api.create('inherited-source-thread');
   const model = { providerId: 'fixture-provider', modelId: 'fixture-model' };
-  const initial = await f.api.submit({ ...identity, key: 'edit-source', expectedHead: null, text: 'edit source', model, source: { workspaceId: 'source-workspace', executionWorkspaceId: 'source-workspace', branchId: 'source-a', revision, mode: 'materialized', tools: ['file_read', 'file_write'] } });
+  const initial = await f.api.submit({ ...identity, key: 'edit-source', expectedHead: null, text: 'edit source', model, source: { resourceOwner: { kind: 'local' as const }, workspaceId: 'source-workspace', executionWorkspaceId: 'source-workspace', branchId: 'source-a', revision, mode: 'materialized', tools: ['file_read', 'file_write'] } });
   await expect.poll(async () => (await f.api.run(initial.run_id)).state, { timeout: 10_000 }).toBe('completed');
   const nextRequest = { ...identity, key: 'continue-source', expectedHead: (await f.api.snapshot(identity)).historyPage.head, text: 'read persisted working edits', model };
   const next = await f.api.submit(nextRequest);
   await expect.poll(async () => (await f.api.run(next.run_id)).state, { timeout: 10_000 }).toBe('completed');
   expect(outputs[4]).toContain('persisted working edit');
   expect((await f.runtime.launch(next.run_id))?.selection.source).toMatchObject({ branch_id: 'source-a', environment_run_id: initial.run_id, mode: 'materialized', live_root: null });
-  const changed = await f.api.submit({ ...identity, key: 'override-source', expectedHead: (await f.api.snapshot(identity)).historyPage.head, text: 'read explicitly selected other source', model, source: { workspaceId: 'source-workspace', executionWorkspaceId: 'source-workspace', branchId: 'source-b', revision: overrideRevision, mode: 'materialized', tools: ['file_read'] } });
+  const changed = await f.api.submit({ ...identity, key: 'override-source', expectedHead: (await f.api.snapshot(identity)).historyPage.head, text: 'read explicitly selected other source', model, source: { resourceOwner: { kind: 'local' as const }, workspaceId: 'source-workspace', executionWorkspaceId: 'source-workspace', branchId: 'source-b', revision: overrideRevision, mode: 'materialized', tools: ['file_read'] } });
   await expect.poll(async () => (await f.api.run(changed.run_id)).state, { timeout: 10_000 }).toBe('completed');
   expect(outputs[6]).toContain('explicit source B');
   expect((await f.runtime.launch(changed.run_id))?.selection.source).toMatchObject({ branch_id: 'source-b', environment_run_id: null });

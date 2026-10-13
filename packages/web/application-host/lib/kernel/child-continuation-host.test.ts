@@ -12,7 +12,7 @@ import { registerThreadRoutes } from './thread-routes.js';
 import type { DelegatedExecution, LaunchSource } from './protocol.generated.js';
 
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:child', branchId: 'branch:child' };
-const source: LaunchSource = { mode: 'fixed_branch', workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'old-result', revision: 7, live_root: null };
+const source: LaunchSource = { mode: 'fixed_branch', resource_owner: { kind: 'local' as const }, workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'old-result', revision: 7, live_root: null };
 function execution(): DelegatedExecution {
   return { execution_id: 'execution:new', child_operation_id: 'original-dispatch', parent_run_id: 'original-parent-run', parent_thread_id: 'thread:parent', parent_branch_id: 'branch:parent',
     origin: { kind: 'model_step', request_id: 'original-request' }, call_id: 'original-call', child_thread_id: identity.threadId, child_branch_id: identity.branchId, project_id: null,
@@ -137,7 +137,7 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
     children: async () => [], childExecutions: async () => [structuredClone(child)], unacceptedChildSources: async () => [], status: async () => ({ eventCursor: 7 }), events: async () => [],
     context: vi.fn(async () => checkpoint), childExecution: async () => structuredClone(child),
     readyChildSource: vi.fn(async (input: Parameters<AgentRuntimeClient['readyChildSource']>[0]) => {
-      child.source = { kind: 'ready', handoff: null, pin: input.pin, selection: { mode: input.source.mode, workspace_id: input.source.workspaceId,
+      child.source = { kind: 'ready', handoff: null, pin: input.pin, selection: { mode: input.source.mode, resource_owner: input.source.resourceOwner, workspace_id: input.source.workspaceId,
         execution_workspace_id: input.source.executionWorkspaceId, branch_id: input.source.branchId, revision: input.source.revision, live_root: null }, provenance: input.provenance };
       return structuredClone(child);
     }),
@@ -182,7 +182,7 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
     expect(scoped.readBranch.mock.calls.every(([input]) => input.includeEntries === false)).toBe(true);
     expect(runtime.readyChildSource).toHaveBeenCalledOnce();
     expect(runtime.readyChildSource).toHaveBeenCalledWith({ executionId: child.execution_id,
-      source: { mode: 'materialized', liveRoot: null, workspaceId: 'workspace', executionWorkspaceId: 'workspace', branchId: 'child-source:execution:new', revision: 0 },
+      source: { mode: 'materialized', liveRoot: null, resourceOwner: { kind: 'local' as const }, workspaceId: 'workspace', executionWorkspaceId: 'workspace', branchId: 'child-source:execution:new', revision: 0 },
       pin: { pin_id: 'child-source-pin:execution:new', root: 'fixed-result-root', source: { ...source, branch_id: 'child-source:execution:new', revision: 0 } },
       provenance: child.source_basis!.provenance }, expect.any(AbortSignal));
     expect(runtime.prepareChild).toHaveBeenCalledWith(expect.objectContaining({ executionId: child.execution_id,

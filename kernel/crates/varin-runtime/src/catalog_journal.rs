@@ -26,17 +26,17 @@ fn is_input(source: HistorySource) -> bool {
     )
 }
 impl Catalog {
-    pub fn recovery_workspaces(&self, thread: &str, branch: &str) -> Result<Vec<String>> {
+    pub fn recovery_workspaces(&self, thread: &str, branch: &str) -> Result<Vec<launches::SourceSelection>> {
         if self.branch_thread_id(branch)? != thread {
             return Err(RuntimeError::Conflict(
                 "recovery branch owner differs".into(),
             ));
         }
-        let mut query = self.db.prepare("SELECT DISTINCT json_extract(l.body,'$.selection.source.workspace_id') FROM run_launches l JOIN runs r ON r.id=l.id WHERE json_extract(r.body,'$.thread_id')=?1 AND json_extract(l.body,'$.selection.source.workspace_id') IS NOT NULL ORDER BY 1")?;
+        let mut query = self.db.prepare("SELECT DISTINCT json_extract(l.body,'$.selection.source') FROM run_launches l JOIN runs r ON r.id=l.id WHERE json_extract(r.body,'$.thread_id')=?1 AND json_extract(l.body,'$.selection.source.workspace_id') IS NOT NULL ORDER BY 1")?;
         let rows = query
             .query_map([thread], |row| row.get(0))?
             .collect::<std::result::Result<Vec<String>, _>>()?;
-        Ok(rows)
+        rows.into_iter().map(|body:String|serde_json::from_str(&body).map_err(Into::into)).collect()
     }
     pub fn capture_journal_anchor(
         &self,

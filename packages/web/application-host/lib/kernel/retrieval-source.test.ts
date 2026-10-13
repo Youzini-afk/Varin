@@ -46,7 +46,7 @@ async function fixture(input: { bytes?: Buffer; stalled?: boolean; corruptOffset
     capabilities: ['storage.read'], pathScopes: ['allowed'] });
   const query: RetrievalQuery = { runId: 'run', threadId: 'thread', grantId: grant.grantId, projectId: null,
     inferenceOwner: { kind: 'external', identity: 'retrieval', epoch: 'owner-epoch' }, invocation: { kind: 'model_step', requestId: 'step', toolCallId: 'call' },
-    question: 'tailNeedle', source: { mode: 'fixed_branch', workspace_id: 'workspace', execution_workspace_id: 'execution',
+    question: 'tailNeedle', source: { resource_owner: { kind: 'local' }, mode: 'fixed_branch', workspace_id: 'workspace', execution_workspace_id: 'execution',
       branch_id: 'original-branch', revision: 3, live_root: null }, physicalRoot: null };
   const readSnapshot = vi.fn(async () => { throw new Error('Fixed source must not read Documents disk or draft'); });
   const validateLiveSource = vi.fn(async () => { throw new Error('Fixed source must not validate a live directory'); });

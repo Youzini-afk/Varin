@@ -51,21 +51,24 @@ pub(crate) fn reconcile(
                                 "process interaction resource identity missing".into(),
                             )
                         })?;
-                        let target: Vec<String> = serde_json::from_str(&claim.key)?;
+                        let target: Vec<Value> = serde_json::from_str(&claim.key)?;
                         let expected = if operation.executor.as_deref() == Some("process_write") {
                             "process-input"
                         } else {
                             "process-size"
                         };
-                        if target.len() != 3
+                        if target.len() != 4
                             || target[0] != expected
-                            || target[1] != binding.execution_workspace_id
+                            || target[1] != serde_json::to_value(&binding.resource_owner)?
+                            || target[2] != binding.execution_workspace_id
                         {
                             return Err(KernelError::Authorization(
                                 "process interaction resource identity changed".into(),
                             ));
                         }
-                        let process_id = target[2].as_str();
+                        let process_id = target[3].as_str().ok_or_else(|| {
+                            KernelError::Authorization("Process resource identity missing".into())
+                        })?;
                         {
                             let owner = runtime.catalog();
                             let catalog = owner
@@ -80,10 +83,52 @@ pub(crate) fn reconcile(
                                 ));
                             }
                         }
+                        if !binding.resource_owner.is_local() {
+                            let value = resources
+                                .remote_operation_receipt(&operation.id, "observe")?
+                                .ok_or_else(|| {
+                                    KernelError::Authorization(
+                                        "Managed interaction lost its original owner".into(),
+                                    )
+                                })?;
+                            let observed: varin_runtime::execution::ToolExecutionReceipt =
+                                serde_json::from_value(value["result"].clone())?;
+                            if let varin_runtime::execution::ToolCompletion::Result {
+                                content,
+                                ..
+                            } = observed.completion
+                            {
+                                if let Ok(receipt) = serde_json::from_value::<
+                                    crate::process::interaction::Receipt,
+                                >(content.data)
+                                {
+                                    let native = crate::storage::process_interactions::Native {
+                                        resource_owner: binding.resource_owner.clone(),
+                                        context: varin_runtime::execution::ToolExecutionContext {
+                                            run_id: operation.run_id.clone(),
+                                            operation_id: operation.id.clone(),
+                                            origin: invocation.origin().clone(),
+                                        },
+                                        executor: operation.executor.clone().unwrap(),
+                                    };
+                                    crate::agent_runtime::record_process_interaction(
+                                        &runtime.catalog(),
+                                        &native,
+                                        &receipt,
+                                        observed.executor_stopped,
+                                    )?;
+                                    if observed.executor_stopped {
+                                        reconciled.push(operation.id.clone());
+                                    }
+                                }
+                            }
+                            continue;
+                        }
                         let client = resources.interactions.as_ref().ok_or_else(|| {
                             KernelError::Storage("process input owner unavailable".into())
                         })?;
                         let native = crate::storage::process_interactions::Native {
+                            resource_owner: binding.resource_owner.clone(),
                             context: varin_runtime::execution::ToolExecutionContext {
                                 run_id: operation.run_id.clone(),
                                 operation_id: operation.id.clone(),
@@ -115,6 +160,11 @@ pub(crate) fn reconcile(
                             )?;
                             reconciled.push(operation.id.clone());
                         }
+                    }
+                }
+                for operation in &operations {
+                    if reconcile_managed_read(&runtime.catalog(), &resources, operation)? {
+                        reconciled.push(operation.id.clone());
                     }
                 }
                 let reads = {
@@ -172,4 +222,71 @@ pub(crate) fn reconcile(
         })
         .map_err(|error| KernelError::Operation(error.to_string()))?;
     Ok(())
+}
+
+pub(crate) fn is_managed_read(operation: &varin_runtime::OperationMetadata) -> bool {
+    operation
+        .executor
+        .as_deref()
+        .is_some_and(crate::tools::managed_read_receipt_tool)
+        && matches!(operation.execution_owner.as_ref(),Some(varin_runtime::ExecutorOwner::External{identity,..}) if identity.starts_with("source:"))
+}
+
+pub(crate) fn reconcile_managed_read(
+    catalog: &Arc<std::sync::Mutex<varin_runtime::Catalog>>,
+    resources: &KernelResourceClient,
+    operation: &varin_runtime::OperationMetadata,
+) -> Result<bool, KernelError> {
+    if !is_managed_read(operation) {
+        return Ok(false);
+    }
+    let value = resources
+        .remote_operation_receipt(&operation.id, "observe")?
+        .ok_or_else(|| {
+            KernelError::Authorization("Managed read lost its original execution owner".into())
+        })?;
+    let observed: varin_runtime::execution::ToolExecutionReceipt =
+        serde_json::from_value(value["result"].clone())?;
+    if !observed.executor_stopped {
+        return Ok(false);
+    }
+    let (outcome, effect, result) = match observed.completion {
+        varin_runtime::execution::ToolCompletion::Result {
+            outcome,
+            effect,
+            content,
+        } => (outcome, effect, content),
+        varin_runtime::execution::ToolCompletion::NotDispatched { reason } => (
+            varin_runtime::Outcome::Failed,
+            varin_runtime::Effect::None,
+            json!({"reason":reason}).into(),
+        ),
+        _ => {
+            return Err(KernelError::Authorization(
+                "Read receipt cannot start a process Job".into(),
+            ));
+        }
+    };
+    let receipt = varin_runtime::ExternalReceipt {
+        executor: operation.executor.clone().expect("read tool"),
+        identity: operation.id.clone(),
+        epoch: value["resourceEpoch"]
+            .as_str()
+            .ok_or_else(|| {
+                KernelError::Authorization("Original read receipt epoch missing".into())
+            })?
+            .into(),
+        outcome,
+        effect,
+        result,
+    };
+    varin_runtime::catalog::result_content::record_external_receipt(
+        catalog,
+        &operation.id,
+        receipt,
+        true,
+    )
+    .map_err(|error| KernelError::Operation(error.to_string()))?;
+    resources.schedule_read_receipt_release(operation.id.clone());
+    Ok(true)
 }

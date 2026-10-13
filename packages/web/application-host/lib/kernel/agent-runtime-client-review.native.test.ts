@@ -219,7 +219,7 @@ it.each([false,true])('model choice preserves the dispatched exchange and never 
   });
   await f.runtimeClient.createThread('model-choice-thread','model-choice-branch');
   const run = await f.runtimeClient.submit({key:'model-choice-input',threadId:'model-choice-thread',branchId:'model-choice-branch',expectedHead:null,input:{text:'read then answer'},configuration:{...old.configuration,allowAnonymous:false}});
-  await f.runtimeClient.startFromSource({runId:run.run_id,workspaceId:'source-workspace',executionWorkspaceId:'source-workspace',branchId:'model-choice-source',revision,mode:'fixed_branch',tools:['file_read']},{credentialOwner:owner(old.configuration.endpoint,'old')});
+  await f.runtimeClient.startFromSource({runId:run.run_id,resourceOwner: { kind: 'local' as const }, workspaceId:'source-workspace',executionWorkspaceId:'source-workspace',branchId:'model-choice-source',revision,mode:'fixed_branch',tools:['file_read']},{credentialOwner:owner(old.configuration.endpoint,'old')});
   await expect.poll(()=>old.requests.length).toBe(1);
   const configuration = {...replacement.configuration,credentialEnvironment:null,allowAnonymous:false,model:'replacement',configurationGeneration:2,...(invalid?{modelOptions:{protocol:{unknown_option:true}}}:{})};
   const choice = await f.runtimeClient.selectModel(run.run_id,'model-choice',configuration,owner(replacement.configuration.endpoint,'new'));
@@ -628,7 +628,7 @@ it('source launch reads shell changes from materialized disk while fixed-branch 
     const branchId = `source-${mode}-conversation`;
     await f.runtimeClient.createThread(threadId, branchId);
     const run = await f.runtimeClient.submit({ key: `source-${mode}-input`, threadId, branchId, expectedHead: null, input: { text: 'read selected source' }, configuration: { ...provider.configuration, model: mode === 'fixed_branch' ? 'fixed-source-model' : 'materialized-source-model' } });
-    await f.runtimeClient.startFromSource({ runId: run.run_id, workspaceId: 'source-workspace', executionWorkspaceId: 'source-workspace', branchId: 'selected-source', revision, mode, tools: mode === 'materialized' ? ['file_read', 'process_spawn', 'process_inspect'] : ['file_read'] });
+    await f.runtimeClient.startFromSource({ runId: run.run_id, resourceOwner: { kind: 'local' as const }, workspaceId: 'source-workspace', executionWorkspaceId: 'source-workspace', branchId: 'selected-source', revision, mode, tools: mode === 'materialized' ? ['file_read', 'process_spawn', 'process_inspect'] : ['file_read'] });
     await expect.poll(async () => (await f.runtimeClient.run(run.run_id)).state, { timeout: 10_000 }).toBe('completed');
     expect((await f.runtimeClient.launch(run.run_id))?.selection.source).toMatchObject({ branch_id: 'selected-source', revision, mode, live_root: null });
   }
@@ -653,10 +653,10 @@ it('queued source launch survives kernel loss and rebinds fresh authority to the
   });
   await f.runtimeClient.createThread('rebind-thread', 'rebind-conversation');
   const predecessor = await f.runtimeClient.submit({ key: 'rebind-predecessor', threadId: 'rebind-thread', branchId: 'rebind-conversation', expectedHead: null, input: { text: 'held predecessor' }, configuration: provider.configuration });
-  await f.runtimeClient.startFromSource({runId: predecessor.run_id, workspaceId: 'source-workspace', executionWorkspaceId: 'source-workspace', branchId: 'rebind-source', revision, mode: 'fixed_branch', tools: ['file_read']});
+  await f.runtimeClient.startFromSource({runId: predecessor.run_id, resourceOwner: { kind: 'local' as const }, workspaceId: 'source-workspace', executionWorkspaceId: 'source-workspace', branchId: 'rebind-source', revision, mode: 'fixed_branch', tools: ['file_read']});
   await expect.poll(() => provider.requests.length).toBe(1);
   const next = await f.runtimeClient.enqueue({ key: 'rebind-next', threadId: 'rebind-thread', branchId: 'rebind-conversation', mode: 'next_run', input: { text: 'queued source request' } });
-  const selection = { runId: next.run_id, workspaceId: 'source-workspace', executionWorkspaceId: 'source-workspace', branchId: 'rebind-source', revision, mode: 'fixed_branch' as const, tools: ['file_read'] as const };
+  const selection = { runId: next.run_id, resourceOwner: { kind: 'local' as const }, workspaceId: 'source-workspace', executionWorkspaceId: 'source-workspace', branchId: 'rebind-source', revision, mode: 'fixed_branch' as const, tools: ['file_read'] as const };
   await f.runtimeClient.startFromSource(selection);
   const oldEpoch = f.host.kernelEpoch;
   await f.crash();
@@ -710,7 +710,7 @@ it('file write and edit return real applied receipts while a stale read version 
   });
   await f.runtimeClient.createThread('mutation-thread', 'mutation-conversation');
   const run = await f.runtimeClient.submit({ key: 'mutation-input', threadId: 'mutation-thread', branchId: 'mutation-conversation', expectedHead: null, input: { text: 'update selected source' }, configuration: provider.configuration });
-  await f.runtimeClient.startFromSource({ runId: run.run_id, workspaceId: 'source-workspace', executionWorkspaceId: 'source-workspace', branchId: 'mutation-source', revision, mode: 'materialized', tools: ['file_read', 'file_write', 'file_edit'] });
+  await f.runtimeClient.startFromSource({ runId: run.run_id, resourceOwner: { kind: 'local' as const }, workspaceId: 'source-workspace', executionWorkspaceId: 'source-workspace', branchId: 'mutation-source', revision, mode: 'materialized', tools: ['file_read', 'file_write', 'file_edit'] });
   await expect.poll(async () => (await f.runtimeClient.run(run.run_id)).state, { timeout: 10_000 }).toMatch(/completed|failed/);
   expect((await f.runtimeClient.run(run.run_id)).state, JSON.stringify({ receipts, events: (await f.runtimeClient.events(0, 100)).slice(-10) })).toBe('completed');
   expect(receipts).toHaveLength(6);

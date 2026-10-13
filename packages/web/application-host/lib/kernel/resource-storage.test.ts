@@ -23,7 +23,7 @@ function fixture() {
   const resolveWorkspaceRoot = vi.fn(async () => { throw new Error('Resource reader must not reopen a physical root'); });
   const adapter = new KernelStorageAdapter({ client: client as unknown as KernelClient, hostId: 'host', storageRoot: '/unused', resolveWorkspaceRoot });
   const input: ResourceSourceReadInput = { identity: { runtime: 'agent', threadId: 'fork', branchId: 'fork-conversation' }, runId: 'new-run',
-    source: { mode: 'fixed_branch', workspaceId: 'original', executionWorkspaceId: 'original-execution', branchId: 'source', revision: 7, tools: [] },
+    source: { mode: 'fixed_branch', resourceOwner: { kind: 'local' as const }, workspaceId: 'original', executionWorkspaceId: 'original-execution', branchId: 'source', revision: 7, tools: [] },
     paths: ['.pi/skills/review'] };
   return { adapter, client, scoped, resolveWorkspaceRoot, input, file };
 }

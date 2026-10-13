@@ -92,7 +92,7 @@ fn configuration() -> Value {
     json!({"providerId":"fixture","providerFamily":"fixture","model":"fixture","endpoint":"https://fixture.invalid","credentialEnvironment":null,"allowAnonymous":true,"configurationGeneration":1,"maxOutputTokens":100})
 }
 fn launch() -> launches::LaunchSelection {
-    serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"fixture","provider_family":"fixture","model":"fixture","configuration_generation":1,"tool_schema_generation":1,"tools":[],"policy":{"name":"default","version":"1"},"source":{"mode":"live_root","live_root":{"hostId":"host","canonicalRoot":"/fixture","rootId":"root"},"workspace_id":"workspace","execution_workspace_id":"workspace","branch_id":null,"revision":null}})).unwrap()
+    serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"fixture","provider_family":"fixture","model":"fixture","configuration_generation":1,"tool_schema_generation":1,"tools":[],"policy":{"name":"default","version":"1"},"source":{"resource_owner":{"kind":"local"},"mode":"live_root","live_root":{"hostId":"host","canonicalRoot":"/fixture","rootId":"root"},"workspace_id":"workspace","execution_workspace_id":"workspace","branch_id":null,"revision":null}})).unwrap()
 }
 fn context(
     o: &OccurrenceView,

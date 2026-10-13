@@ -4,9 +4,9 @@ import { agentScopeKey, personalizeAgentSystemPrompt, renderAgentSystemPrompt,
   type AgentMemoryNote, type AgentMemoryScope, type AgentPersonalizationContext } from '@varin/protocol';
 import type { ThreadIdentity, ThreadSource, ContextCheckpoint } from '@varin/application-client';
 import type { AgentPersonalization } from '../memory/agent-personalization.js';
-import { createAgentResourceAuthority, type PreparedAgentResources } from '../agent-resources/authority.js';
+import { type PreparedAgentResources } from '../agent-resources/authority.js';
 import { resourceSections } from '../agent-resources/render.js';
-import { ResourceScopeError, type ThreadResourceScope, type ThreadResourceScopeOptions } from './thread-resource-scope.js';
+import type { ThreadResourceScope, ThreadResourceScopeOptions } from './thread-resource-scope.js';
 import type { InitialContext, ContextPersonalization, ContextResources, LaunchSource, ChildSelectedProfile } from './protocol.generated.js';
 
 interface ContextOwners {
@@ -14,7 +14,7 @@ interface ContextOwners {
   botForThread?(threadId: string): Promise<{ id: string; name: string; instructions: string | null; revision: number } | null>;
   resources: ThreadResourceScope;
   personalization: Pick<AgentPersonalization, 'catalog'>;
-  projectForWorkspace(workspaceId: string): Promise<string | undefined>;
+  projectForWorkspace(workspaceId: string, source: ThreadSource): Promise<string | undefined>;
 }
 /** Trusted Host admission, never model or renderer supplied scope. */
 export interface AdmittedContextScope {
@@ -35,7 +35,7 @@ export type ResourceRefreshOptions = Pick<ThreadResourceScopeOptions, 'instructi
 /** Resource views do not acquire file/process tools from the launch selection. */
 export function resourceThreadSource(source: LaunchSource | null): ThreadSource | null {
   if (!source) return null;
-  const base = { workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id, tools: [] };
+  const base = { resourceOwner: source.resource_owner, workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id, tools: [] };
   if (source.mode === 'live_root') {
     if (!source.live_root) throw new Error('Resource source has no admitted live root');
     return { ...base, mode: 'live_root', liveRoot: source.live_root };
@@ -43,11 +43,11 @@ export function resourceThreadSource(source: LaunchSource | null): ThreadSource 
   if (!source.branch_id || source.revision === null || !Number.isSafeInteger(source.revision) || source.revision < 0) {
     throw new Error('Resource source has no fixed branch revision');
   }
-  return { ...base, mode: source.mode, branchId: source.branch_id, revision: source.revision };
+  return { ...base, mode: source.mode, branchId: source.branch_id, revision: source.revision, ...(source.environment_run_id ? { environmentRunId: source.environment_run_id } : {}) };
 }
 export function resourceSource(source: ThreadSource | null): LaunchSource | null {
-  return source ? { workspace_id: source.workspaceId, execution_workspace_id: source.executionWorkspaceId,
-    branch_id: source.branchId ?? null, revision: source.revision ?? null, mode: source.mode, live_root: source.liveRoot ?? null } : null;
+  return source ? { resource_owner: source.resourceOwner, workspace_id: source.workspaceId, execution_workspace_id: source.executionWorkspaceId,
+    branch_id: source.branchId ?? null, revision: source.revision ?? null, mode: source.mode, live_root: source.liveRoot ?? null, ...(source.environmentRunId ? { environment_run_id: source.environmentRunId } : {}) } : null;
 }
 // Catalog persistence may reorder object keys. Provenance identifies the value, not the
 // insertion order of its JSON representation; array order remains semantically significant.
@@ -60,7 +60,6 @@ const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(va
  * personalization catalog remains the sole writable authority for ordinary notes and profiles.
  */
 export function createThreadContext(owners: ContextOwners): ContextPreparer {
-  const authority = createAgentResourceAuthority();
   const render = async (basis: ContextPersonalization, resources: ContextResources | undefined, updateMemory = false, signal?: AbortSignal): Promise<InitialContext> => {
     signal?.throwIfAborted();
     const bot = await owners.botForThread?.(basis.sessionId) ?? null;
@@ -86,7 +85,7 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
     // projectRoot is the original admitted configuration namespace, never the execution cwd.
     const composition = owners.composition ? await owners.composition({ sessionId: basis.sessionId,
       ...(basis.projectId ? { projectId: basis.projectId } : {}),
-      ...(resources?.snapshot.scope.projectRoot ? { workspaceId: resources.snapshot.scope.projectRoot } : {}) }, signal) : basis.contextComposition;
+      ...(resources?.source?.resource_owner.kind !== 'managed_host' && resources?.snapshot.scope.projectRoot ? { workspaceId: resources.snapshot.scope.projectRoot } : {}) }, signal) : basis.contextComposition;
     signal?.throwIfAborted();
     const { contextComposition: _oldComposition, ...provenance } = basis;
     const { runtime_identity: _profileIdentity, child_profile: _profileChild, ...personalized } = personalizeAgentSystemPrompt(original, context);
@@ -108,12 +107,8 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
     ...[snapshot.system, snapshot.appendSystem, ...snapshot.instructions].filter(entry => entry !== null)
       .map(entry => `agent.resource:${JSON.stringify({ origin: entry.origin, kind: entry.kind, reference: entry.reference })}`),
   ];
-  const prepareResources = async (identity: ThreadIdentity, source: ThreadSource | null, admitted: AdmittedContextScope,
-    options?: ResourceRefreshOptions): Promise<PreparedAgentResources> => owners.resources.withScope(identity, source, admitted, async ({ admittedScope }) => {
-    const prepared = await authority.prepare(admittedScope, options?.signal);
-    if (prepared.status !== 'ready') throw new ResourceScopeError(prepared);
-    return prepared.snapshot;
-  }, options);
+  const prepareResources = (identity: ThreadIdentity, source: ThreadSource | null, admitted: AdmittedContextScope,
+    options?: ResourceRefreshOptions): Promise<PreparedAgentResources> => owners.resources.prepare(identity, source, admitted, options);
   const initial = async (identity: ThreadIdentity, source: ThreadSource | null, admitted: AdmittedContextScope, signal?: AbortSignal): Promise<InitialContext> => {
     const snapshot = await prepareResources(identity, source, admitted, signal ? { signal } : undefined);
     return render({ memorySnapshot: { revision: 0, memories: [] }, configurationDigest: '', mode: admitted.mode,
@@ -154,7 +149,7 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
     async main(identity: ThreadIdentity, source: ThreadSource | null, signal?: AbortSignal): Promise<InitialContext> {
       const bot = await owners.botForThread?.(identity.threadId) ?? null;
       return initial(identity, source, { mode: bot ? 'bot' : 'agent', threadRole: 'main',
-        projectId: source ? await owners.projectForWorkspace(source.workspaceId) ?? null : null }, signal);
+        projectId: source ? await owners.projectForWorkspace(source.workspaceId, source) ?? null : null }, signal);
     },
     async compact(checkpoint: ContextCheckpoint, signal?: AbortSignal): Promise<InitialContext> {
       if (!checkpoint.personalization) throw new Error('Context has no frozen personalization provenance');

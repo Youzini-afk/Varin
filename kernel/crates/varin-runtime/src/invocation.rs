@@ -195,6 +195,12 @@ impl<P: Persistence + ?Sized + 'static> InvocationRunner<P> {
         } else {
             Ok(completion)
         };
+        if durable && settled.is_ok() {
+            let _ = guarded("receipt_cleanup_panicked", || {
+                bound.receipt_persisted(context);
+                Ok(())
+            });
+        }
         // Only original executor completion/stop evidence releases dispatched occupancy.
         if let Some(lease) = lease {
             if settled.is_err() || !executor_stopped {
@@ -260,7 +266,9 @@ impl<P: Persistence + ?Sized + 'static> InvocationRunner<P> {
             ));
         }
         reservation.resolve(&contract.resources)?;
-        let durable = !contract.read_only || contract.completion == CompletionKind::Job;
+        let durable = !contract.read_only
+            || contract.completion == CompletionKind::Job
+            || !matches!(bound.executor_owner(), ExecutorOwner::Kernel);
         let tool = AdmittedTool {
             call: call.as_ref().clone(),
             contract,

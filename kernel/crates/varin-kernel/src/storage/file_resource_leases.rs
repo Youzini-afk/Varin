@@ -78,7 +78,7 @@ impl Storage {
             .absolute
             .to_str()
             .ok_or_else(|| KernelError::Authorization("file resource path is not UTF-8".into()))?;
-        Ok(serde_json::to_string(&["file", absolute])?)
+        Ok(serde_json::to_string(&["file", grant.host_id.as_str(), absolute])?)
     }
     pub(super) fn canonical_lease_resources(
         &self,

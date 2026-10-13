@@ -278,7 +278,7 @@ fn fixed_resource_read_uses_real_blob_worker_and_original_reply() {
         Some("writer"),
     );
     f.short("authority.grant.issue", json!({"grantId":"fixed-reader","hostGeneration":GENERATION,"capabilities":["storage.read"],"pathScopes":[""],"storageIdentity":fs::canonicalize(f.directory.0.join("store")).unwrap(),"owningWorkspace":"workspace","executionWorkspace":"workspace","runId":"run","threadId":"thread"}), None);
-    let binding: tools::ToolBinding = serde_json::from_value(json!({"grantId":"fixed-reader","runId":"run","threadId":"thread","workspaceId":"workspace","executionWorkspaceId":"workspace","rootId":null,"fileSource":{"branchId":"fixed","revision":branch["headRevision"]},"sourceMode":"fixed_branch","materializedSource":null,"liveRoot":null,"environmentRunId":null,"enabledTools":["file_read"]})).unwrap();
+    let binding: tools::ToolBinding = serde_json::from_value(json!({"resourceOwner":{"kind":"local"},"grantId":"fixed-reader","runId":"run","threadId":"thread","workspaceId":"workspace","executionWorkspaceId":"workspace","rootId":null,"fileSource":{"branchId":"fixed","revision":branch["headRevision"]},"sourceMode":"fixed_branch","materializedSource":null,"liveRoot":null,"environmentRunId":null,"enabledTools":["file_read"]})).unwrap();
     let cancel = varin_runtime::execution::CancellationToken::default();
     let (call, reply) = tools::fixed_read_fixture(binding, "body", cancel);
     let task = match tools::prepare_resource(

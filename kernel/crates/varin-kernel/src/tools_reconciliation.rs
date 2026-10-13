@@ -2,7 +2,7 @@
 //! never invokes execute(), reconstructs edited text, or uses the original grant
 //! as current authority. It returns only facts proved by the Storage owner.
 use super::*;
-use varin_runtime::execution::ToolInvocation;
+use varin_runtime::execution::{ToolExecutionReceipt, ToolInvocation};
 use varin_runtime::{ExternalReceipt, Operation};
 
 impl KernelResourceClient {
@@ -33,10 +33,58 @@ impl KernelResourceClient {
                 ));
             }
             let context = ToolExecutionContext {
-                run_id: operation.run_id.clone(), origin: admitted.origin.clone(), operation_id: operation.id.clone(),
+                run_id: operation.run_id.clone(),
+                origin: admitted.origin.clone(),
+                operation_id: operation.id.clone(),
             };
             if context.operation_id != context.origin.operation_id(&admitted.call.call_id) {
-                return Err(KernelError::Authorization("mutation identity differs from its durable origin".into()));
+                return Err(KernelError::Authorization(
+                    "mutation identity differs from its durable origin".into(),
+                ));
+            }
+            if !binding.resource_owner.is_local() {
+                if !matches!(admitted.call.name.as_str(), "file_write" | "file_edit") {
+                    return Err(KernelError::Authorization(
+                        "Managed receipt is not a text mutation".into(),
+                    ));
+                }
+                let value = self
+                    .remote_operation_receipt(&operation.id, "observe")?
+                    .ok_or_else(|| {
+                        KernelError::Authorization(
+                            "Managed mutation lost its original owner".into(),
+                        )
+                    })?;
+                let observed: ToolExecutionReceipt =
+                    serde_json::from_value(value["result"].clone())?;
+                if observed.executor_stopped {
+                    if let ToolCompletion::Result {
+                        outcome,
+                        effect,
+                        content,
+                    } = observed.completion
+                    {
+                        receipts.push((
+                            operation.id.clone(),
+                            ExternalReceipt {
+                                executor: admitted.call.name,
+                                identity: operation.id,
+                                epoch: value["resourceEpoch"]
+                                    .as_str()
+                                    .ok_or_else(|| {
+                                        KernelError::Authorization(
+                                            "Original mutation epoch missing".into(),
+                                        )
+                                    })?
+                                    .into(),
+                                outcome,
+                                effect,
+                                result: content,
+                            },
+                        ));
+                    }
+                }
+                continue;
             }
             let original = executor
                 .operation(Some(&context), &admitted.call)

@@ -1151,8 +1151,8 @@ test("typed recovery turn reads honor actor session identity", { timeout: 30_000
   const owner = await makeActor("recovery-owner", "session-owner");
   const other = await makeActor("recovery-other", "session-other");
   await owner.recoveryTurnStart({ operationId: "recovery-actor-turn", workspaceId: "recovery-actor-workspace", executionId: "recovery-actor-execution", conversation: { kind: "pi", sessionId: "session-owner" }, userEntryId: "entry-owner", workerId: "worker", runtimeGeneration: 1, activeWriterScopes: [], provenance: "caused-by" });
-  await assert.rejects(other.recoveryTurnGet({ workspaceId: "recovery-actor-workspace", executionId: "recovery-actor-execution", sessionId: "session-owner" }), /actor|authorization|session/i);
-  assert.deepEqual((await owner.recoveryTurnGet({ workspaceId: "recovery-actor-workspace", executionId: "recovery-actor-execution", sessionId: "session-owner" }))?.conversation, { kind: "pi", sessionId: "session-owner" });
+  await assert.rejects(other.recoveryTurnGet({ workspaceId: "recovery-actor-workspace", executionId: "recovery-actor-execution", conversation: { kind: "pi", sessionId: "session-owner" } }), /actor|authorization|session/i);
+  assert.deepEqual((await owner.recoveryTurnGet({ workspaceId: "recovery-actor-workspace", executionId: "recovery-actor-execution", conversation: { kind: "pi", sessionId: "session-owner" } }))?.conversation, { kind: "pi", sessionId: "session-owner" });
 });
 
 test("branch creation streams a normal input larger than one control frame", { timeout: 60_000 }, async (t) => {

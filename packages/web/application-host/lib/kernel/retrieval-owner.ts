@@ -72,18 +72,18 @@ export function createRetrievalOwner({ sources, kernel, pipelines, preparePipeli
       signal.throwIfAborted();
       binding.assertAvailable?.();
       await waitWithSignal(sources.validate(query, signal), signal);
-      const grant = kernel.sourceGrant(query);
+      const pathScopes = await sources.pathScopes(query, signal);
       const validateBinding = async (): Promise<void> => {
         signal.throwIfAborted();
         binding.assertAvailable?.();
-        kernel.sourceGrant(query);
+        await sources.validate(query, signal);
         if (binding.validateAvailable) await waitWithSignal(binding.validateAvailable(signal), signal);
         signal.throwIfAborted();
         binding.assertAvailable?.();
-        kernel.sourceGrant(query);
+        await sources.validate(query, signal);
       };
       await validateBinding();
-      const grantedRoots = grant.pathScopes.map(relative);
+      const grantedRoots = pathScopes.map(relative);
       const roots = query.paths ? query.paths.map(relative) : grantedRoots;
       if (!roots.length || roots.some(root => !within(root, grantedRoots))) throw new Error('Retrieval roots are outside the Run grant');
       const focuses = new Map<string, Set<number>>();
@@ -299,7 +299,7 @@ export function createRetrievalOwner({ sources, kernel, pipelines, preparePipeli
           }
         }
         binding.assertAvailable?.();
-        kernel.sourceGrant(query);
+        await sources.validate(query, signal);
         if (binding.model?.kind === 'snippets' && result.snippets.length) {
           // Recheck the exact permit immediately before sending any source to a selected model.
           for (const path of new Set(result.snippets.map(item => item.path))) {

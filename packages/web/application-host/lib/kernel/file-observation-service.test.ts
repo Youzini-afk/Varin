@@ -10,7 +10,7 @@ it('retains in-flight invalidations, pauses without losing them, and cancels onl
     receiptId: 'receipt', failureCode: null, observationRevision: 1, definitionRevision: 1, action: 'observe', watchId: 'watch', position: null,
     target: { receiptId: 'receipt', followupId: 'definition', sourceIndex: 0, sourceRunId: 'source', threadId: 'thread',
       path: 'result.txt', immutable: false, physicalRoot: { hostId: 'host', canonicalRoot: '/original', rootId: 'root' },
-      source: { mode: 'materialized', workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'branch', revision: 1, live_root: null } } };
+      source: { mode: 'materialized', resource_owner: { kind: 'local' as const }, workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'branch', revision: 1, live_root: null } } };
   let event: (event: AgentRuntimeStreamEvent) => void = () => undefined;
   let listed = true; let cursor = 1;
   const reads: Array<{ signal: AbortSignal; resolve: (value: { accepted: boolean; followup: Followup }) => void }> = [];

@@ -2618,6 +2618,39 @@ impl Catalog {
 }
 
 impl Catalog {
+    /// Delivery is proven by original durable content and actual executor-stop evidence.
+    /// Phase alone (especially cancellation or Unknown) is not an acknowledgement.
+    pub fn external_delivery_persisted(&self, id: &str) -> Result<bool> {
+        let op = self.operation(id)?;
+        let Some(owner @ ExecutorOwner::External { .. }) = &op.execution_owner else {
+            return Ok(false);
+        };
+        if op.phase != OperationPhase::Terminal
+            || op.outcome.is_none()
+            || op.outcome == Some(Outcome::Indeterminate)
+        {
+            return Ok(false);
+        }
+        if op.external_receipt.as_ref().is_some_and(|receipt| {
+            receipt.executor_stopped && receipt.outcome != Outcome::Indeterminate
+        }) {
+            return Ok(true);
+        }
+        let completed = matches!(
+            &op.call_completion,
+            Some(ToolCompletionMetadata::NotDispatched { .. })
+        ) || matches!(&op.call_completion,Some(ToolCompletionMetadata::Result{outcome,..}) if *outcome!=Outcome::Indeterminate);
+        if !completed {
+            return Ok(false);
+        }
+        let owner = serde_json::to_value(owner)?;
+        Ok(self.db.query_row("SELECT EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='operation.invocation_executor_stopped' AND json_extract(data,'$.operationEpoch')=?2 AND json_extract(data,'$.executionOwner.kind')='external' AND json_extract(data,'$.executionOwner.identity')=?3 AND json_extract(data,'$.executionOwner.epoch')=?4)",params![id,sql_number(op.epoch)?,owner["identity"].as_str(),owner["epoch"].as_str()],|row|row.get(0))?)
+    }
+    pub fn delivered_external_operations(&self) -> Result<Vec<Operation>> {
+        let mut statement=self.db.prepare("SELECT body FROM operations WHERE json_extract(body,'$.execution_owner.kind')='external' AND json_extract(body,'$.phase')='terminal' AND json_extract(body,'$.outcome')!='indeterminate' ORDER BY id")?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
+    }
     /// Resource recovery queries only the jobs whose facts are still unresolved.
     pub fn pending_run_operations(&self, run_id: &str) -> Result<Vec<Operation>> {
         let mut statement=self.db.prepare("SELECT body FROM operations WHERE run_id=?1 AND (json_extract(body,'$.phase')!='terminal' OR json_extract(body,'$.outcome')='indeterminate') ORDER BY id")?;

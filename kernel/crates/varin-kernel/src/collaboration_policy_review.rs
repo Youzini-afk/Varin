@@ -347,7 +347,7 @@ fn run_sequence(cancel_before_park: bool, pause_before_observation: bool) {
     let identity = policy_identity(sequence.identity());
     let mut launch: LaunchSelection = serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"frozen-connection","provider_family":"openai-responses","model":"fixture-model",
         "configuration_generation":2,"tool_schema_generation":1,"tools":tools,"policy":identity,
-        "source":{"mode":"fixed_branch","live_root":null,"workspace_id":"workspace-A","execution_workspace_id":"workspace-A","branch_id":"fixed-parent","revision":0},
+        "source":{"resource_owner":{"kind":"local"},"mode":"fixed_branch","live_root":null,"workspace_id":"workspace-A","execution_workspace_id":"workspace-A","branch_id":"fixed-parent","revision":0},
         "credential_scope":{"reference":"credential-ref","authority":"credential-owner","account":"account-A","generation":3}})).unwrap();
     let configuration = json!({"providerFamily":"openai-responses","endpoint":"http://127.0.0.1:1/model","allowAnonymous":false,"model":"fixture-model","configurationGeneration":2});
     let model = varin_runtime::catalog::dispatch::ChildModelBinding { configuration: serde_json::from_value(configuration.clone()).unwrap(), credential_scope: launch.credential_scope.clone() };
@@ -424,7 +424,8 @@ fn run_sequence(cancel_before_park: bool, pause_before_observation: bool) {
         crate::process::ProcessControlRegistry::default(),
     );
     let binding = ToolBinding {
-        grant_id: "parent".into(),
+        resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
+grant_id: "parent".into(),
         run_id: run.clone(),
         thread_id: "parent".into(),
         workspace_id: "workspace-A".into(),

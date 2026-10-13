@@ -195,7 +195,7 @@ it.each(['none', 'original', 'current'] as const)('durable wait resumes with exa
   })().catch(error => { failures.push(error); response.writeHead(500); response.end('fixture assertion failed'); }); });
   await fs.writeFile(path.join(f.workspace, 'source.txt'), 'parallel read completed');
   const identity = await f.api.create(`process-wait-${revoked}`);
-  const prepared = await f.api.prepareSource({ ...identity, key: 'capture', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'materialized' });
+  const prepared = await f.api.prepareSource({ ...identity, key: 'capture', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'materialized' });
   const receipt = await f.api.submit({ ...identity, key: 'spawn-and-observe', expectedHead: null, text: 'wait for the process', model, source: prepared.source });
   try {
     await expect.poll(async () => (await f.runtime.run(receipt.run_id)).state, { timeout: 15_000 }).toBe('waiting');
@@ -204,6 +204,7 @@ it.each(['none', 'original', 'current'] as const)('durable wait resumes with exa
     expect((await f.runtime.operation(processId)).phase).not.toBe('terminal');
     // Same Run cannot use observation delegation to swap its admitted immutable source.
     await expect(f.runtime.startFromSource({ mode: 'materialized', runId: receipt.run_id,
+      resourceOwner: prepared.source.resourceOwner,
       workspaceId: prepared.source.workspaceId, executionWorkspaceId: prepared.source.executionWorkspaceId, tools: prepared.source.tools,
       branchId: 'invented-different-source', revision: 0 })).rejects.toThrow(/durable source selection/);
     await fs.writeFile(path.join(f.root, 'release-process'), 'release');
@@ -232,7 +233,7 @@ it('original research log bytes and drained stderr jointly resume one new Run an
   const f = await fixture((body, response) => { inputs.push(JSON.stringify(body.input)); done(response); }, undefined, true);
   const identity = await f.api.create('research-log-continuation');
   await fs.writeFile(path.join(f.workspace, 'input.txt'), 'original experiment source');
-  const prepared = await f.api.prepareSource({ ...identity, key: 'research-log-source', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'materialized' });
+  const prepared = await f.api.prepareSource({ ...identity, key: 'research-log-source', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'materialized' });
   const original = await f.api.submit({ ...identity, key: 'research-log-owner', expectedHead: null,
     text: 'Prepare this work for a later log condition.', model, source: prepared.source });
   await expect.poll(async () => (await f.runtime.run(original.run_id)).state, { timeout: 15_000 }).toBe('completed');
@@ -314,7 +315,7 @@ it('samples a registered machine condition without opening resources and resumes
   const f = await fixture((body, response) => { inputs.push(JSON.stringify(body.input)); done(response); },
     undefined, true, { probeLocal, sampleIntervalMs: 20 });
   const identity = await f.api.create('automatic-resource-condition');
-  const prepared = await f.api.prepareSource({ ...identity, key: 'metric-source', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'materialized' });
+  const prepared = await f.api.prepareSource({ ...identity, key: 'metric-source', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'materialized' });
   const original = await f.api.submit({ ...identity, key: 'metric-owner', expectedHead: null,
     text: 'Prepare this work for an original machine observation.', model, source: prepared.source });
   await expect.poll(async () => (await f.runtime.run(original.run_id)).state, { timeout: 15_000 }).toBe('completed');
@@ -371,7 +372,7 @@ it('reopens a parked wait after kernel shutdown and delivers the original stoppe
     }
   });
   const identity = await f.api.create('reopen-process-wait');
-  const prepared = await f.api.prepareSource({ ...identity, key: 'capture', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'materialized' });
+  const prepared = await f.api.prepareSource({ ...identity, key: 'capture', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'materialized' });
   const receipt = await f.api.submit({ ...identity, key: 'observe', expectedHead: null, text: 'wait across restart', model, source: prepared.source });
   let reopened: ReturnType<typeof createKernelClient> | undefined;
   let collaboration: ThreadCollaboration | undefined;
@@ -444,7 +445,7 @@ it('rebuilds only Host continuation service while its kernel keeps the original 
     else { readResult = responsesMetadataText(last?.output); done(response); }
   });
   const identity = await f.api.create('host-service-process-wait');
-  const prepared = await f.api.prepareSource({ ...identity, key: 'capture', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'materialized' });
+  const prepared = await f.api.prepareSource({ ...identity, key: 'capture', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'materialized' });
   const receipt = await f.api.submit({ ...identity, key: 'observe', expectedHead: null, text: 'wait through Host service reopen', model, source: prepared.source });
   let replacement: ThreadCollaboration | undefined;
   try {
@@ -501,7 +502,7 @@ it.each(['process_stopped', 'at', 'any', 'all'] as const)('admits one %s follow-
     } catch (error) { failures.push(error); response.writeHead(500); response.end('fixture assertion failed'); }
   });
   const identity = await f.api.create('process-followup-once');
-  const prepared = await f.api.prepareSource({ ...identity, key: 'capture', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'materialized' });
+  const prepared = await f.api.prepareSource({ ...identity, key: 'capture', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'materialized' });
   const source = await f.api.submit({ ...identity, key: 'original-work', expectedHead: null,
     text: 'Continue this work once after its process ends and inspect the result.', model, source: prepared.source });
   let replacement: ThreadCollaboration | undefined;
@@ -582,7 +583,7 @@ it('resumes one original materialized file condition through real watcher recove
   const f = await fixture((body, response) => { inputs.push(JSON.stringify(body.input)); done(response); });
   await fs.writeFile(path.join(f.workspace, 'result.txt'), 'original baseline');
   const identity = await f.api.create('file-followup-original-source');
-  const prepared = await f.api.prepareSource({ ...identity, key: 'capture', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'materialized' });
+  const prepared = await f.api.prepareSource({ ...identity, key: 'capture', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'materialized' });
   const source = await f.api.submit({ ...identity, key: 'original-work', expectedHead: null,
     text: 'Finish this first round.', model, source: prepared.source });
   await expect.poll(async () => (await f.runtime.run(source.run_id)).state, { timeout: 15_000 }).toBe('completed');

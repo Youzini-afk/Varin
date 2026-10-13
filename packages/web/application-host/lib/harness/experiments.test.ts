@@ -503,7 +503,7 @@ it('installed ordinary research tools hand original model and policy invocations
   type Pending = import('../kernel/protocol.generated.js').HostJobPending;
   type Call = import('../kernel/protocol.generated.js').HostToolCall;
   const f=await fixture();
-  const source={workspace_id:'ws',execution_workspace_id:'exec',mode:'live_root' as const,branch_id:null,revision:null,live_root:{hostId:'fixture-host',canonicalRoot:f.root,rootId:'source-root'}};
+  const source={resource_owner: { kind: 'local' as const }, workspace_id:'ws',execution_workspace_id:'exec',mode:'live_root' as const,branch_id:null,revision:null,live_root:{hostId:'fixture-host',canonicalRoot:f.root,rootId:'source-root'}};
   const sourceAuthority:import("../kernel/research-source.js").ResearchSourceAuthority={
     async admit(_caller,cwd){return {kind:'physical',selection:source,canonicalRoot:f.root,cwd:cwd??''};},
     async capture(caller,admitted,options){assert.equal(admitted.kind,'physical');return prepareExperimentInput(f.client,caller,f.root,options);},
@@ -625,6 +625,7 @@ it("publishes drained execution before slow collection and preserves its reader 
   f.service.detachObservers();
   const { prepareExperimentInput } = await import("./experiment-workspace.js");
   const source = {
+    resource_owner: { kind: "local" as const },
     workspace_id: "ws", execution_workspace_id: "exec", mode: "live_root" as const,
     branch_id: null, revision: null,
     live_root: { hostId: "fixture-host", canonicalRoot: f.root, rootId: "source-root" },
@@ -738,7 +739,7 @@ it("does not report collection done when both output capture and its failure rec
 async function nativeArtifactFixture() {
   const f = await fixture();
   const { prepareExperimentInput } = await import('./experiment-workspace.js');
-  const source = { workspace_id: 'ws', execution_workspace_id: 'exec', mode: 'live_root' as const,
+  const source = { resource_owner: { kind: 'local' as const }, workspace_id: 'ws', execution_workspace_id: 'exec', mode: 'live_root' as const,
     branch_id: null, revision: null, live_root: { hostId: 'fixture-host', canonicalRoot: f.root, rootId: 'source-root' } };
   const caller: ExperimentCaller = { workspaceId: 'ws', executionWorkspaceId: 'exec', threadId: 'thread', runId: 'run', workspaceScope: [],
     owner: { runtime: 'agent', actor: { kind: 'user', key: 'artifacts' }, rootThreadId: 'thread', threadId: 'thread', branchId: 'branch', runId: 'run', operationId: 'artifact-job', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, source },
@@ -820,7 +821,7 @@ it('records not_started only after original unspawned cancellation drains its ca
 it('reads only the original published log byte boundary, including raw UTF-8 splits, EOF and family authority', async () => {
   const { prepareExperimentInput } = await import('./experiment-workspace.js');
   const f = await fixture();
-  const source = { workspace_id: 'ws', execution_workspace_id: 'exec', mode: 'live_root' as const, branch_id: null, revision: null, live_root: { hostId: 'fixture-host', canonicalRoot: f.root, rootId: 'source-root' } };
+  const source = { resource_owner: { kind: 'local' as const }, workspace_id: 'ws', execution_workspace_id: 'exec', mode: 'live_root' as const, branch_id: null, revision: null, live_root: { hostId: 'fixture-host', canonicalRoot: f.root, rootId: 'source-root' } };
   const caller: ExperimentCaller = { workspaceId: 'ws', executionWorkspaceId: 'exec', threadId: 'thread', runId: 'run', workspaceScope: [],
     owner: { runtime: 'agent', actor: { kind: 'user', key: 'log-owner' }, rootThreadId: 'thread', threadId: 'thread', branchId: 'branch', runId: 'run', operationId: 'log-operation', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'log-owner' }, source },
     access: { kind: 'family', readThreadIds: ['thread'], controlThreadIds: ['thread'] } };

@@ -233,7 +233,7 @@ function researchFixture(artifacts: ExperimentArtifactView[] = [originalArtifact
   const api = {
     scopes: vi.fn(async () => ['run:original', 'run:other'].map(sourceRunId => ({ sourceRunId,
       workspaceId: `workspace:${sourceRunId}`, executionWorkspaceId: `workspace:${sourceRunId}`, canSubmit: false,
-      source: { workspace_id: `workspace:${sourceRunId}`, execution_workspace_id: `workspace:${sourceRunId}`,
+      source: { resource_owner: { kind: 'local' as const }, workspace_id: `workspace:${sourceRunId}`, execution_workspace_id: `workspace:${sourceRunId}`,
         branch_id: `source:${sourceRunId}`, revision: 1, mode: 'fixed_branch' as const, live_root: null },
     }))),
     list: vi.fn(async () => ({ attempts: [originalAttempt], text: '' })),
@@ -381,6 +381,7 @@ function artifactConversationFixture() {
     list: unused, create: unused, mediaRead: unused, listMcpInteractions: async () => ({ items: [], nextCursor: null }),
     readMcpInteraction: unused, respondMcpInteraction: unused, reviewMcpSamplingRequest: unused, reviewMcpSamplingOutput: unused,
     snapshot, submit, enqueue: unused, editInput: unused, cancelInput: unused, cancelRun: unused,
+    sources: { list: async () => ({ targets: [{ resourceOwner: { kind: 'local' }, label: 'This Host', capabilities: [] }], unavailable: [] }), resolve: unused },
     prepareNavigation: unused, recoverySource: unused, navigate: unused, navigationReceipt: unused,
     inspectTools: unused, inspectPolicy: unused, restartPolicy: unused, cancelPolicyUpdate: unused, selectModel: unused,
     decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused,

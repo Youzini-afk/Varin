@@ -64,9 +64,39 @@ pub fn valid_preparation_failure(code: &str) -> bool {
     ) || SourceFailureCode::parse(code).is_some()
 }
 
+/// Location identity, never an endpoint credential or a live permission. A managed source
+/// retains the exact configured connection as well as the authenticated target Host.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SourceResourceOwner {
+    Local,
+    ManagedHost {
+        #[serde(rename = "hostId")]
+        host_id: String,
+        #[serde(rename = "connectionId")]
+        connection_id: String,
+        #[serde(rename = "endpointIdentity")]
+        endpoint_identity: String,
+    },
+}
+impl SourceResourceOwner {
+    pub fn validate(&self) -> bool {
+        match self {
+            Self::Local => true,
+            Self::ManagedHost { host_id, connection_id, endpoint_identity } =>
+                [host_id, connection_id, endpoint_identity].iter().all(|value| !value.trim().is_empty()),
+        }
+    }
+    pub fn is_local(&self) -> bool { matches!(self, Self::Local) }
+    pub fn host_id(&self) -> Option<&str> {
+        match self { Self::Local => None, Self::ManagedHost { host_id, .. } => Some(host_id) }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SourceSelection {
+    pub resource_owner: SourceResourceOwner,
     #[serde(default)]
     pub environment_run_id: Option<String>,
     pub mode: crate::SourceMode,
@@ -97,7 +127,10 @@ impl SourceSelection {
         let live = self.live_root.as_ref().is_some_and(|root| {
             !root.host_id.is_empty() && !root.root_id.is_empty() && !root.canonical_root.is_empty()
         });
-        if self.workspace_id.is_empty()
+        if !self.resource_owner.validate()
+            || self.live_root.as_ref().is_some_and(|root|
+                self.resource_owner.host_id().is_some_and(|host| host != root.host_id))
+            || self.workspace_id.is_empty()
             || self.execution_workspace_id.is_empty()
             || match self.mode {
                 crate::SourceMode::LiveRoot => {

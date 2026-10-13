@@ -3,7 +3,7 @@ import { languageIdForPath } from '@varin/protocol';
 import type { DocumentAuthority } from '../documents/authority.js';
 import { createLanguageViewBinder } from '../lsp/language-view.js';
 import type { createLanguageSupervisor } from '../lsp/supervisor.js';
-import type { SourceQueryOwner } from './source-query.js';
+import type { SourceQueryOwner, ManagedSourceQueryTransport } from './source-query.js';
 import type { LanguageQuery, LaunchSource, LiveRoot, KernelMaterializedView } from './protocol.generated.js';
 
 
@@ -32,14 +32,22 @@ const failure = (status: LanguageResult['status'], message?: string): LanguageRe
  * Captured project files resolve through the derived tree for fixed sources; provider
  * libraries and explicit external configuration retain their real environment semantics.
  */
-export function createLanguageOwner({ documents, supervisor, sources }: {
+export function createLanguageOwner({ documents, supervisor, sources, remote, targetAuthority }: {
   documents: Pick<DocumentAuthority, 'readSnapshot' | 'readAgentInputSnapshot'>;
   supervisor: ReturnType<typeof createLanguageSupervisor>;
   sources: Pick<SourceQueryOwner, 'validateLanguage' | 'read' | 'processAdmission' | 'prepareLanguageView' | 'dispose'>;
+  remote?: ManagedSourceQueryTransport;
+  /** Target execution uses a real admitted resource grant, without a local Catalog Run. */
+  targetAuthority?: true;
 }): LanguageToolOwner {
   const owner: LanguageToolOwner = async (query, signal) => {
     try {
     signal.throwIfAborted();
+    if (query.source.resource_owner.kind === 'managed_host' && !targetAuthority) {
+      if (!remote) return failure('unavailable', 'The original managed language service is unavailable');
+      const { runId: _runId, threadId: _threadId, grantId: _grantId, source: _source, physicalRoot: _physicalRoot, ...request } = query;
+      return await remote.service(query, { kind: 'language', query: request }, signal);
+    }
     await sources.validateLanguage(query, signal);
     const languageId = languageIdForPath(query.path);
     if (!languageId) return failure('unsupported', 'No language is known for this file');
@@ -48,7 +56,7 @@ export function createLanguageOwner({ documents, supervisor, sources }: {
     // Same actual environment across Runs shares one service. Provider/configuration generations
     // remain solely in the supervisor; neither Run identity nor grant ID enters this view key.
     const view = `agent:source:${createHash('sha256').update(JSON.stringify([
-      query.source.mode, query.source.workspace_id, query.source.execution_workspace_id,
+      query.source.resource_owner, query.source.mode, query.source.workspace_id, query.source.execution_workspace_id,
       ...(query.source.mode === 'fixed_branch' ? [query.source.branch_id, query.source.revision]
         : [query.physicalRoot?.hostId, query.physicalRoot?.rootId, query.physicalRoot?.canonicalRoot]),
     ])).digest('hex')}` as const;

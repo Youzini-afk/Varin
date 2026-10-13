@@ -22,10 +22,14 @@ selection validation and object cleanup; the UI sends a frozen branch/revision s
 referenced by a version and bytes actually removed by cleanup are distinct fields. These DTOs do not
 add an Agent tool or a second state store.
 
-`ThreadsAPI.prepareSource` takes a Documents-resolved `workspaceId`, stable key, source mode,
+`ThreadsAPI.sources` lists configured source Hosts and resolves a folder through the selected Host’s
+Documents owner. The returned `resourceOwner` freezes the Host, configured connection and non-secret
+endpoint identity. `ThreadsAPI.prepareSource` takes that owner, a Documents-resolved `workspaceId`, stable key, source mode,
 explicit saved-files or surface-drafts content, and capture scopes. A draft context belongs to the
 exact Thread/branch consumer. The picker preserves that entire intent for an uncertain retry; it
-does not resolve the folder again or capture newer editor bytes under the same key. The Host owns
+does not resolve the folder again or capture newer editor bytes under the same key. Managed sources
+use saved target files; this window’s editor drafts remain on their original Host. A materialized
+source retains its original `environmentRunId` through Context and continuation. The Host owns
 durable preparation receipts and resource cleanup. Cancelling one observer does not cancel another
 observer of the same preparation; the last cancellation waits for that preparation's work to drain.
 

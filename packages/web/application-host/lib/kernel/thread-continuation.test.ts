@@ -385,7 +385,7 @@ it.each(['child_revision', 'process_receipt'] as const)('%s observed during an a
     input: { task: 'Read source', workMode: 'read_only' }, selected_profile: {preset_id:null, catalog_identity:null, work_mode:'read_only', tools:[], instructions:''}, configuration: {}, launch: f.launch.selection,
     state: 'ready', revision: 1, cursor: 1, receipt: { key: 'child-input', run_id: f.run.id, input_id: 'child-input', branch_id: 'child-branch', thread_id: 'child-thread', cursor: 1 },
     report: null, resources_released: true, code_result: { kind: 'no_changes' },
-    source: { kind: 'pending', handoff: { operation_id: 'handoff', source: { mode: 'fixed_branch', workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null }, root: { kind: 'fixed', pin: { pin_id: 'pin', root: 'root', source: { mode: 'fixed_branch', workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null } } } } },
+    source: { kind: 'pending', handoff: { resource_authority: null, operation_id: 'handoff', source: { mode: 'fixed_branch', resource_owner: { kind: 'local' as const }, workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null }, root: { kind: 'fixed', pin: { pin_id: 'pin', root: 'root', source: { mode: 'fixed_branch', resource_owner: { kind: 'local' as const }, workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null } } } } },
   } as import('./protocol.generated.js').DelegatedExecution;
   const children = vi.fn(async () => [structuredClone(child)]);
   const events: RuntimeEvent[] = [];
@@ -510,7 +510,7 @@ it('public source failure projection accepts typed owners and rejects forged res
     return Response.json(output, { status });
   });
   const api = createThreadsHttpAPI();
-  const request = { ...identity, key: 'source', workspaceId: 'workspace', mode: 'fixed_branch' as const,
+  const request = { ...identity, key: 'source', resourceOwner: { kind: 'local' as const }, workspaceId: 'workspace', mode: 'fixed_branch' as const,
     content: { mode: 'saved-files' as const }, captureScopes: [] };
   prepare.mockRejectedValueOnce(new DocumentWorkspaceUnregisteredError());
   await expect(api.prepareSource(request)).rejects.toMatchObject({ status: 404, code: 'source_registration_missing',

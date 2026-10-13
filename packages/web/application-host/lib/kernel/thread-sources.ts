@@ -1,4 +1,4 @@
-import { parseAgentInputContext } from '@varin/protocol';
+import { parseAgentInputContext, type SourceResourceOwner } from '@varin/protocol';
 import { waitWithSignal } from '../cancellation.js';
 import { normalizeWorkspaceRelativePath } from '../workspace/path-safety.js';
 import { readSourceDrafts } from '../harness/working-state/source-drafts.js';
@@ -9,8 +9,53 @@ import { SourceAdmissionError } from './source-admission-error.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { LiveSourceOwner } from './live-source.js';
 import { createHash } from 'node:crypto';
-import type { ThreadIdentity, ThreadSource, ThreadPrepareSource, ThreadPreparedSource } from '@varin/application-client';
+import { isDeepStrictEqual } from 'node:util';
+import type { ThreadIdentity, ThreadSource, ThreadPrepareSource, ThreadPreparedSource, ThreadSourcesAPI } from '@varin/application-client';
 import type { WorkspaceWorkingStateRootAccess } from '../harness/working-state/types.js';
+
+export interface ThreadSourceRemoteOwner {
+  list: ThreadSourcesAPI['list'];
+  resolve: ThreadSourcesAPI['resolve'];
+  prepare(input: ThreadPrepareSource, signal?: AbortSignal): Promise<ThreadPreparedSource>;
+  admit(source: ThreadSource, identity: ThreadIdentity, runId?: string, signal?: AbortSignal): Promise<void>;
+}
+
+/** Untrusted API identity is decoded once; no obsolete shape or local-owner fallback. */
+export function parseSourceResourceOwner(value: unknown): SourceResourceOwner {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Explicit source resource owner is required');
+  const owner = value as Record<string, unknown>;
+  if (owner.kind === 'local' && Object.keys(owner).length === 1) return { kind: 'local' };
+  if (owner.kind === 'managed_host' && Object.keys(owner).length === 4
+    && ['hostId', 'connectionId', 'endpointIdentity'].every(key => typeof owner[key] === 'string' && owner[key].length > 0)) {
+    return { kind: 'managed_host', hostId: owner.hostId as string, connectionId: owner.connectionId as string, endpointIdentity: owner.endpointIdentity as string };
+  }
+  throw new Error('Source resource owner is malformed');
+}
+
+export function createThreadSourceDirectory(options: {
+  documents: Pick<DocumentAuthority, 'resolveWorkspace' | 'admitWorkspaceRegistration'>;
+  remote?: Pick<ThreadSourceRemoteOwner, 'list' | 'resolve'>;
+}): ThreadSourcesAPI {
+  return {
+    async list(identity, signal) {
+      signal?.throwIfAborted();
+      const remote = await options.remote?.list(identity, signal);
+      return { targets: [{ resourceOwner: { kind: 'local' }, label: 'This Host', capabilities: [] }, ...(remote?.targets ?? [])],
+        unavailable: remote?.unavailable ?? [] };
+    },
+    async resolve(identity, request, signal) {
+      const resourceOwner = parseSourceResourceOwner(request.resourceOwner);
+      signal?.throwIfAborted();
+      if (resourceOwner.kind === 'managed_host') {
+        if (!options.remote) throw new SourceAdmissionError('source_unavailable');
+        return options.remote.resolve(identity, { ...request, resourceOwner }, signal);
+      }
+      const workspace = await options.documents.resolveWorkspace({ path: request.path });
+      const registration = await options.documents.admitWorkspaceRegistration(workspace.workspaceId, signal);
+      return { resourceOwner, workspaceId: workspace.workspaceId, path: registration.canonicalPath };
+    },
+  };
+}
 
 interface SourcePreparationOwners {
   documents: SourceCaptureDocuments & Pick<DocumentAuthority, 'admitWorkspaceRegistration' | 'cloneInputSnapshot'>;
@@ -18,6 +63,7 @@ interface SourcePreparationOwners {
   inspectInventory: StableSourcePreparationOwners['inspectInventory'];
   workingStates: WorkspaceWorkingStateRootAccess;
   liveSources?: LiveSourceOwner;
+  remote?: Pick<ThreadSourceRemoteOwner, 'prepare'>;
   sourceTools(mode: ThreadSource['mode']): Promise<string[]>;
 }
 
@@ -53,6 +99,7 @@ export function normalizeThreadSourcePreparation(input: ThreadPrepareSource): Th
     || typeof input.workspaceId !== 'string' || !input.workspaceId || !Array.isArray(input.captureScopes)
     || input.captureScopes.some(scope => typeof scope !== 'string')
     || !['fixed_branch', 'materialized', 'live_root'].includes(input.mode)) throw new Error('Source preparation request is malformed');
+  const resourceOwner = parseSourceResourceOwner(input.resourceOwner);
   const captureScopes = [...new Set(input.captureScopes.map(scope => normalizeWorkspaceRelativePath(scope) || '.'))].sort();
   let content: ThreadPrepareSource['content'];
   if (input.content?.mode === 'saved-files') content = { mode: 'saved-files' };
@@ -68,15 +115,20 @@ export function normalizeThreadSourcePreparation(input: ThreadPrepareSource): Th
   if (input.mode === 'live_root' && (content.mode !== 'saved-files' || captureScopes.length)) {
     throw new Error('Live workspace access uses saved files and does not capture editor drafts or copy scopes');
   }
-  return { runtime: 'agent', threadId: input.threadId, branchId: input.branchId, key: input.key,
+  if (resourceOwner.kind === 'managed_host' && content.mode !== 'saved-files') throw new Error('Editor drafts belong to this Host; select saved files for a managed source');
+  return { runtime: 'agent', resourceOwner, threadId: input.threadId, branchId: input.branchId, key: input.key,
     workspaceId: input.workspaceId, mode: input.mode, content, captureScopes };
 }
 
 /** Documents supplies original drafts; WorkingState's branch-create receipt owns the fixed source. */
-export function createThreadSourcePreparer({ documents, workingStates, liveSources, prepareResources, inspectInventory, sourceTools }: SourcePreparationOwners) {
+export function createThreadSourcePreparer({ documents, workingStates, liveSources, prepareResources, inspectInventory, sourceTools, remote }: SourcePreparationOwners) {
   const preparing = new Map<string, SourcePreparationFlight>();
   const prepare = async (input: ThreadPrepareSource, key: string, captureIdentity: string, signal: AbortSignal): Promise<ThreadPreparedSource> => {
     signal.throwIfAborted();
+    if (input.resourceOwner.kind === 'managed_host') {
+      if (!remote) throw new SourceAdmissionError('source_unavailable');
+      return remote.prepare(input, signal);
+    }
     // A saved registration is a namespace, not authority to read a physical directory.
     // Look up the durable receipt before reopening a now-moved directory or expired draft.
     const workspaceId = input.workspaceId;
@@ -86,7 +138,7 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
     if (input.mode === 'live_root') {
       if (!liveSources) throw new Error('Live workspace access is unavailable');
       const liveRoot = await liveSources.prepare(workspaceId, workspaceId, input.threadId, signal);
-      return { path: registration.canonicalPath, source: { workspaceId, executionWorkspaceId: workspaceId, mode: 'live_root', liveRoot, tools } };
+      return { path: registration.canonicalPath, source: { resourceOwner: input.resourceOwner, workspaceId, executionWorkspaceId: workspaceId, mode: 'live_root', liveRoot, tools } };
     }
     return workingStates.withBranchStore(workspaceId, 'source-prepare', async store => {
       const branchId = `source:${key}`;
@@ -101,7 +153,7 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
             throw new SourceAdmissionError('source_changed');
           }
         } finally { await pin.release(); }
-        return { path: registration.canonicalPath, source: { workspaceId, executionWorkspaceId: workspaceId,
+        return { path: registration.canonicalPath, source: { resourceOwner: input.resourceOwner, workspaceId, executionWorkspaceId: workspaceId,
           branchId, revision: 0, mode: input.mode, tools }, provenance: restored.provenance } as ThreadPreparedSource;
       }
       if (await store.getBranchRoot(branchId, { signal })) throw new Error('Source preparation has no original receipt');
@@ -114,7 +166,7 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
           editorDrafts: capturedDraft.editorDrafts, signal,
           content: input.content.mode === 'saved-files' ? { mode: 'saved-files' } : { mode: 'fixed-draft-baseline' } },
         { documents, inspectInventory, ...(prepareResources ? { prepareResources } : {}) });
-        return { path: root, source: { workspaceId, executionWorkspaceId: workspaceId,
+        return { path: root, source: { resourceOwner: input.resourceOwner, workspaceId, executionWorkspaceId: workspaceId,
           branchId: captured.branch.branchId, revision: 0, mode: input.mode, tools }, provenance: captured.provenance } as ThreadPreparedSource;
     }, 'shared', { threadId: input.threadId });
   };
@@ -143,14 +195,29 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
 }
 
 /** Submission and every continuation re-admit the same Host source authority. */
-export function createThreadSourceAdmission({ documents, withSourceRead, liveSources, runtime }: {
+export function createThreadSourceAdmission({ documents, withSourceRead, liveSources, runtime, remote }: {
   documents: Pick<DocumentAuthority, 'admitWorkspaceRegistration'>;
   withSourceRead: ThreadResourceScopeOwners['withSourceRead'];
   liveSources?: LiveSourceOwner;
   runtime: AgentRuntimeClient;
+  remote?: Pick<ThreadSourceRemoteOwner, 'admit'>;
 }) {
   return async (source: ThreadSource, identity: ThreadIdentity, runId?: string, signal?: AbortSignal): Promise<void> => {
     signal?.throwIfAborted();
+    const resourceOwner = parseSourceResourceOwner(source.resourceOwner);
+    const relation = source.mode === 'live_root' ? null : await runtime.childForThread(identity.threadId, signal);
+    const child = relation && runId ? await runtime.childExecutionForRun(runId, signal) : null;
+    if (relation && (!runId || !child || child.child_thread_id !== identity.threadId || child.child_branch_id !== identity.branchId
+      || child.source?.kind !== 'ready' || !isDeepStrictEqual(child.source.selection.resource_owner, resourceOwner)
+      || (child.source.selection.environment_run_id ?? undefined) !== source.environmentRunId || child.source.selection.workspace_id !== source.workspaceId
+      || child.source.selection.execution_workspace_id !== source.executionWorkspaceId
+      || child.source.selection.branch_id !== source.branchId || child.source.selection.revision !== source.revision
+      || child.source.selection.mode !== source.mode)) throw new SourceAdmissionError('source_changed');
+    if (resourceOwner.kind === 'managed_host') {
+      if (!remote) throw new SourceAdmissionError('source_unavailable');
+      await remote.admit(source, identity, runId, signal);
+      return;
+    }
     if (source.mode === 'live_root') {
       if (!liveSources) throw new SourceAdmissionError('source_unavailable');
       await liveSources.admit(source, identity.threadId, signal);
@@ -161,13 +228,6 @@ export function createThreadSourceAdmission({ documents, withSourceRead, liveSou
       if (source.executionWorkspaceId !== source.workspaceId) await documents.admitWorkspaceRegistration(source.executionWorkspaceId, signal);
     };
     await admitRegistrations();
-    const relation = await runtime.childForThread(identity.threadId, signal);
-    const child = relation && runId ? await runtime.childExecutionForRun(runId, signal) : null;
-    if (relation && (!runId || !child || child.child_thread_id !== identity.threadId || child.child_branch_id !== identity.branchId
-      || child.source?.kind !== 'ready' || child.source.selection.workspace_id !== source.workspaceId
-      || child.source.selection.execution_workspace_id !== source.executionWorkspaceId
-      || child.source.selection.branch_id !== source.branchId || child.source.selection.revision !== source.revision
-      || child.source.selection.mode !== source.mode)) throw new SourceAdmissionError('source_changed');
     await withSourceRead({ identity, source, paths: [''], ...(runId ? { runId } : {}), ...(signal ? { signal } : {}) }, async ({ pin }) => {
       if (pin.workspaceId !== source.workspaceId || pin.branchId !== source.branchId || pin.view !== 'revision'
         || pin.revision !== source.revision || child?.source?.kind === 'ready' && pin.root !== child.source.pin.root) {

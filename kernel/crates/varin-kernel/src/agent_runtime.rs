@@ -56,6 +56,8 @@ mod input_commands;
 mod child_commands;
 #[path = "agent_controls.rs"]
 mod control_commands;
+#[path = "agent_bot_scope.rs"]
+mod bot_scope_commands;
 #[path = "agent_operations.rs"]
 mod operation_commands;
 
@@ -202,6 +204,7 @@ pub(crate) enum Command {
     AdvanceRuns,
     Stop,
     ProcessTerminal(crate::process::ProcessTerminal),
+    SourceProcessTerminal(crate::source_resources::SourceProcessTerminal),
     ProcessInteraction {
         intent: crate::storage::process_interactions::Intent,
         receipt: crate::process::interaction::Receipt,
@@ -246,7 +249,7 @@ pub(crate) fn spawn(
     commands: mpsc::Receiver<Command>,
     self_sender: mpsc::Sender<Command>,
     control: AgentControl,
-    resources: crate::tools::KernelResourceClient,
+    mut resources: crate::tools::KernelResourceClient,
     credential_bridge: crate::credential_bridge::CredentialBridge,
     mcp_bridge: crate::host_tools::ToolBridge,
     language_bridge: crate::language::LanguageBridge,
@@ -352,6 +355,17 @@ pub(crate) fn spawn(
                         let _=responses.send(json!({"v":1,"kind":"host-tool-receipt-ack","id":id,"kernelEpoch":epoch,"accepted":accepted}));
                     }));
                 }
+                Command::SourceProcessTerminal(frame)=>{
+                    if opening {waiting.push_back(Command::SourceProcessTerminal(frame));continue;}
+                    if frame.v!=1||frame.kind!="source-process-terminal"||identity.as_ref().is_none_or(|(_,epoch)|epoch!=&frame.kernel_epoch){continue;}
+                    if let Some(runtime)=runtime.as_ref(){let runtime=runtime.clone();thread::spawn(move||{
+                        let verified=(||->Result<(),KernelError>{let catalog=runtime.catalog();let catalog=catalog.lock().map_err(|_|KernelError::Storage("Catalog unavailable".into()))?;
+                            let op=catalog.operation(&frame.process_id()).map_err(domain)?;
+                            let source=catalog.launch_metadata(&op.run_id).map_err(domain)?.and_then(|l|l.selection.source);
+                            if source.as_ref()!=Some(&frame.source)||op.execution_owner.as_ref()!=Some(&frame.execution_owner){return Err(KernelError::Authorization("Managed terminal belongs to another source or executor".into()));}Ok(())})();
+                        if verified.is_ok(){let fact=crate::process::ProcessTerminal{process_id:frame.process_id(),kernel_epoch:frame.process["kernelEpoch"].as_str().unwrap_or_default().into(),receipt:frame.process};let _=apply_process_terminal(&runtime,&fact);}
+                    });}
+                }
                 Command::ProcessTerminal(fact) => {
                     if opening {
                         waiting.push_back(Command::ProcessTerminal(fact));
@@ -452,6 +466,7 @@ pub(crate) fn spawn(
                     let result: Result<(), KernelError> = (|| {
                         let catalog = result?;
                         let owner = Arc::new(RunSupervisor::new(catalog));
+                        resources=resources.clone().with_journal_catalog(owner.catalog());
                         let (notify, notifications) = mpsc::sync_channel(1);
                         let (continuation_notify, continuation_wakes) =
                             crate::continuation_wake::channel()?;
@@ -539,6 +554,7 @@ pub(crate) fn spawn(
                                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
                             catalog.pending_managed_processes().map_err(domain)?
                         };
+                        resources.replay_read_receipt_releases()?;
                         if let Err(error) = resources.replay_process_terminals(pending) {
                             let catalog = owner.catalog();
                             if let Ok(mut catalog) = catalog.lock() {
@@ -652,6 +668,31 @@ pub(crate) fn spawn(
                         runtime
                             .reap()
                             .map_err(|e| KernelError::Operation(e.to_string()))?;
+                        if method == "runtime.bot.scope.remove" {
+                            let catalog = runtime.catalog();
+                            let resources = resources.clone();
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            let cancelled = cancellation.clone();
+                            thread::Builder::new()
+                                .name("bot-scope-removal".into())
+                                .spawn(move || {
+                                    let result = serde_json::from_value(params)
+                                        .map_err(KernelError::from)
+                                        .and_then(|suspension| {
+                                            bot_scope_commands::remove(&catalog, &resources, suspension, &cancelled)
+                                        });
+                                    let response = match result {
+                                        Ok(value) => response_ok(&response_id, value),
+                                        Err(error) => response_error(&response_id, &error),
+                                    };
+                                    done(&response_id);
+                                    let _ = response_sender.send(response);
+                                })?;
+                            deferred = true;
+                            return Ok(Value::Null);
+                        }
                         if method == "runtime.content.collect" {
                             // This admission is metadata-only. Maintenance never enters Storage or
                             // the ordinary history/receipt content queue, and does not own a Run.
@@ -2315,7 +2356,7 @@ pub(crate) fn spawn(
                                                     | "process_write"
                                                     | "process_resize"
                                             )
-                                        )
+                                        ) || crate::reconcile::is_managed_read(operation)
                                     })
                                     .collect::<Vec<_>>()
                             };
@@ -2464,11 +2505,6 @@ pub(crate) fn live_mcp_binding(
     })
 }
 fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value, KernelError> {
-    if method == "runtime.bot.scope.remove" {
-        let p: varin_runtime::catalog::bot::BotSuspension = serde_json::from_value(params)?;
-        catalog.remove_bot_scope(&p).map_err(domain)?;
-        return Ok(json!({"removed":true}));
-    }
     if method == "runtime.bot.scope.inspect" {
         let p: BotScopeParams = serde_json::from_value(params)?;
         return catalog.inspect_bot_scope(&p.bot_id).map_err(domain);
@@ -2640,7 +2676,8 @@ pub(crate) fn record_process_interaction(
         let claim = intent.contract().resources.first().ok_or_else(|| {
             KernelError::Authorization("process input resource identity missing".into())
         })?;
-        let target: Vec<String> = serde_json::from_str(&claim.key)?;
+        let target: Vec<Value> = serde_json::from_str(&claim.key)?;
+        let source=catalog.launch_metadata(&operation.run_id).map_err(domain)?.and_then(|l|l.selection.source).ok_or_else(||KernelError::Authorization("Original process source missing".into()))?;
         let (expected_key, expected_method) = match native.executor.as_str() {
             "process_write" => ("process-input", "process.write"),
             "process_resize" => ("process-size", "process.resize"),
@@ -2652,9 +2689,12 @@ pub(crate) fn record_process_interaction(
         };
         if !receipt.valid()
             || receipt.method() != expected_method
-            || target.len() != 3
+            || target.len() != 4
             || target[0] != expected_key
-            || target[2] != receipt.identity().process_id
+            || target[1] != serde_json::to_value(&source.resource_owner)?
+            || native.resource_owner != source.resource_owner
+            || target[2] != source.execution_workspace_id
+            || target[3] != receipt.identity().process_id
             || receipt.identity().operation_id != operation.id
             || operation.run_id != native.context.run_id
             || intent.origin() != &native.context.origin
@@ -3286,3 +3326,7 @@ mod context_budget_review;
 #[cfg(test)]
 #[path = "bot_gate_host_review.rs"]
 mod bot_gate_host_review;
+
+#[cfg(test)]
+#[path = "managed_source_review.rs"]
+mod managed_source_review;

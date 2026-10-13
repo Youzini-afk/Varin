@@ -570,6 +570,7 @@ it('source start, saved rebind and successor continuation preserve ordinary and 
     };
     f.mcpLeases.push(mcp);
     f.launch.selection.source = {
+      resource_owner: { kind: 'local' as const },
       workspace_id: 'workspace',
       execution_workspace_id: 'execution',
       mode: 'fixed_branch',
@@ -590,6 +591,7 @@ it('source start, saved rebind and successor continuation preserve ordinary and 
     if (entry === 'start')
       await f.runtime.startFromSource({
         runId: 'run',
+        resourceOwner: { kind: 'local' as const },
         workspaceId: 'workspace',
         executionWorkspaceId: 'execution',
         mode: 'fixed_branch',

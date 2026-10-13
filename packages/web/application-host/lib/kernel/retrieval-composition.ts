@@ -205,7 +205,8 @@ export function createRetrievalComposition(runtime: ApplicationExtensionRuntime,
         // Query resources never enter the shared publication. Each query captures and owns its
         // real backend/reader lease, including independently acquired refs for identical plans.
         const semanticStage = semantic?.stage;
-        const sourceLimited = !!scope.query && scope.query.source.mode !== 'live_root';
+        const sourceLimited = !!scope.query && (scope.query.source.mode !== 'live_root'
+          || scope.query.source.resource_owner.kind === 'managed_host');
         const syntax = sourceLimited && state.current.declaration.structure === 'builtin' ? options.syntax : undefined;
         const sourceStages = sourceLimited ? Object.freeze(pipeline.plan.stages.map(stage => {
           if (stage.kind === 'structure' && stage.status !== 'disabled') return Object.freeze({ ...stage,

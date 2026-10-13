@@ -34,6 +34,7 @@ export function useThreadRecovery({ api, identity, host, disabled, snapshot, onR
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const ownerRecovery = snapshot?.recovery;
   const unavailable = ownerRecovery?.unavailable;
+  const combinedUnavailable = ownerRecovery?.combinedUnavailable;
   const head = snapshot?.historyPage.head;
   const currentReceipt = unavailable ? null : ownerRecovery ? ownerRecovery.navigation : receipt;
   const savedOperations = unavailable ? [] : ownerRecovery?.operations.map(item => item.id === operation?.id ? operation : item).filter(item => item.id !== combined?.plan.id
@@ -123,6 +124,7 @@ export function useThreadRecovery({ api, identity, host, disabled, snapshot, onR
       const source = await api.recoverySource({ ...identity, entryId });
       if (!current()) return;
       if (!source || source.mode === 'fixed_branch') { setNavigation(intent); await navigate(intent); return; }
+      if (source.resourceOwner.kind === 'managed_host') throw new Error('File recovery for this managed Host is not available yet. You can restore the conversation only; the remote files will stay unchanged.');
       const recovery = getWorkspaceRecoveryAPI();
       const { plan } = requireWorkspaceRecoveryResult(await recovery.prepareCombinedRecovery({
         workspaceId: source.workspaceId, conversation: { kind: 'thread', threadId: identity.threadId, branchId: identity.branchId }, entryId,
@@ -212,7 +214,7 @@ export function useThreadRecovery({ api, identity, host, disabled, snapshot, onR
     await callback.current({});
   });
   return {
-    busy, blocked: busy || savedPending || Boolean(navigation || combined), error, unavailable, notice, operation, combined, dialogOpen, savedOperations, head, undoIncludesFiles,
+    busy, blocked: busy || savedPending || Boolean(navigation || combined), error, unavailable, combinedUnavailable, notice, operation, combined, dialogOpen, savedOperations, head, undoIncludesFiles,
     recover, retry, undo, closeDialog, acceptCombined, cancelCombined,
     undoSaved, checkSaved, cancelSaved,
     canChooseAfterFileFailure: Boolean(conversationAlternative) && !navigation && !combined && !savedPending,

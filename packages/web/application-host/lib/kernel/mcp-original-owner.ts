@@ -27,6 +27,8 @@ export function createMcpOriginalOwnerRecovery(options: McpOriginalOwnerOptions)
         if (!server || server.definition_version !== endpoint.configurationVersion || server.resource_key !== endpoint.resourceKey
             || configuration.agent_dir !== options.agentDir)
             throw new McpAuthorityError('mcp_original_endpoint_changed');
+        if (original.execution_scope === 'workspace' && context.source?.resource_owner.kind === 'managed_host')
+            throw new McpAuthorityError('mcp_original_execution_view_unavailable');
         const workspace = original.execution_scope === 'workspace' && context.source
             ? await options.admitWorkspaceRegistration(context.source.workspace_id, signal) : undefined;
         const revalidate = async () => {

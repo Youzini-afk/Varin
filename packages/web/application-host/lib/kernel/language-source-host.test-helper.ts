@@ -89,7 +89,7 @@ async function initialize(frame: Record<string, unknown>) {
     source = saved;
   } else if (frame.mode === 'live_root') {
     const liveRoot = await live.prepare(identity.workspaceId, identity.workspaceId, 'thread:language');
-    source = { mode: 'live_root', workspace_id: identity.workspaceId, execution_workspace_id: identity.workspaceId,
+    source = { resource_owner: { kind: 'local' }, mode: 'live_root', workspace_id: identity.workspaceId, execution_workspace_id: identity.workspaceId,
       branch_id: null, revision: null, live_root: liveRoot };
   } else {
     const liveRoot = await live.prepare(identity.workspaceId, identity.workspaceId, 'thread:language');
@@ -108,7 +108,7 @@ async function initialize(frame: Record<string, unknown>) {
     await actor.pinBranch({ operationId: 'language-source:pin', branchId: 'source:language', revision: 0, pinId: 'language-source:original' });
     for (const entry of entries) if (entry.ownerId) await actor.releaseBlob(entry.ownerId);
     await kernel.revokeGrant(seed.grantId);
-    source = { mode: frame.mode === 'fixed_branch' ? 'fixed_branch' : 'materialized', workspace_id: identity.workspaceId, execution_workspace_id: identity.workspaceId,
+    source = { resource_owner: { kind: 'local' }, mode: frame.mode === 'fixed_branch' ? 'fixed_branch' : 'materialized', workspace_id: identity.workspaceId, execution_workspace_id: identity.workspaceId,
       branch_id: 'source:language', revision: 0, live_root: null };
     // Conflicting unopened dependencies and project configuration remain in the old Documents root.
     await writeFile(join(workspace, 'main.ts'), main('WRONG_LIVE_A'));

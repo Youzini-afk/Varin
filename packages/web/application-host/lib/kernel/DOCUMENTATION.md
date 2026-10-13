@@ -1190,3 +1190,53 @@ cold preparations to that original receipt; unrelated errors remain failures. Na
 may become a current blocking Wait at its waterline. An accepted extension's explicit background mode
 is preserved. Neither case creates another generation. Manual compaction explicitly stores its own
 native/manual recipe and does not select an automatic extension.
+
+
+## Managed source consumers
+
+`thread-sources.ts` resolves an explicit source Host through Documents once, then prepares by the
+frozen resource owner and workspace identity. Local and managed fixed, materialized and live views
+share the same mandatory owner contract. `managed-source-consumers.ts` borrows the original Run
+binding for ongoing queries; pre-Run Context reads have a separate native `source_read` authority,
+which drains and retires after use. They do not create a target Catalog Run or model ToolCall.
+
+`source-query-service.ts` executes the closed read, compute, language and Context-resource services
+on the target’s existing Documents, Storage and language owners. Its target grant is explicitly
+injected, never reconstructed from a coordinator path. Context snapshots transfer captured text;
+target object hashes are not coordinator ContentStore references. `source-query.ts` and retrieval
+consumers route reads and path checks through that original owner. A missing target language provider
+is unavailable, and never starts a same-path language process on the coordinator. Releasing service
+references is separate from the native process/root-stop evidence.
+
+The source picker keeps the exact owner/workspace/key/content for uncertain preparation retries.
+Managed-source file recovery is currently diagnosed before the local Recovery API is called;
+conversation-only navigation remains an explicit available choice.
+
+The coordinator's Catalog remains the only Agent execution owner. The target keeps source scopes
+and grants in its existing Storage domain records and executes through the existing KernelToolExecutor,
+resource worker and process guardian. It never creates a shadow Catalog Run. `source.resource` carries
+the original tool origin and operation; `source.service` is a closed set of source reads, captures,
+child preparation and Integration operations, not an arbitrary kernel-method tunnel. Original target
+receipts answer uncertain outcomes; transport request IDs are not new effect identities.
+Managed tool reads retain their original completed receipt in target Storage operations and blobs
+so a lost reply does not require reading changed files again. This durability is confined to the
+remote execution boundary; local reads keep their existing fast path. Retiring a grant is not a
+delivery acknowledgment and must not delete a receipt still needed for reconciliation.
+
+New Run epochs fence dispatch without withdrawing an accepted Thread-lifetime process's original
+authority. Observation, cancellation and cleanup retain the authenticated principal, coordinator,
+source authority, resource epoch and original operation even after current access is withdrawn.
+Host service cancellation joins the actual admitted work. Process stop additionally needs the
+guardian's confirmed tree stop; an HTTP response or local callback finishing is not that evidence.
+Run retirement preserves caller-retained authorities; explicit revocation still drains the full scope.
+
+Child source preparation claims the target's original handoff or predecessor result. Its branch,
+durable pin, candidate and publication stay on the target, including continuation cleanup and result
+recovery after the private directory disappears. Integration reads the target's original journal on
+uncertain return. Target object hashes never become coordinator content references without transfer.
+
+Current managed-source exclusions are actionable admission errors: cross-Host combined file recovery,
+file-followup watcher delivery, interactive PTY attachment, persistent script environments, Experiment
+input capture, package staging from that source, and project-bound MCP/scheduled tasks. Their existing
+local paths remain separate. Computer assignments, Agent/Bot identity, global settings and model
+credentials remain with their original owners; selecting a file Host does not silently redirect them.

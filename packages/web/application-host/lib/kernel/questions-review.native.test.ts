@@ -176,7 +176,7 @@ it('pending question survives Host/kernel reopen and answer resumes its original
   const f = await fixture(reply);
   await fs.writeFile(path.join(f.workspace, 'source.txt'), 'pinned before asking');
   const identity = await f.api.create('restart-question');
-  const prepared = await f.api.prepareSource({ ...identity, key: 'question-source', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
+  const prepared = await f.api.prepareSource({ ...identity, key: 'question-source', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   const receipt = await f.api.submit({ ...identity, key: 'restart-question-input', expectedHead: null, text: 'ask before reading', model, source: prepared.source });
   await expect.poll(async () => (await f.api.run(receipt.run_id)).state).toBe('waiting');
   const operation = (await f.api.snapshot(identity)).operations.find(op => op.executor === 'ask_user')!;

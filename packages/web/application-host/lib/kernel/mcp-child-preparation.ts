@@ -29,6 +29,8 @@ export function createChildMcpPreparer(owners: {
       );
     const configuration = selection.provenance.configuration;
     const needsWorkspace = selection.provenance.execution_scope === 'workspace';
+    if (needsWorkspace && input.source?.resourceOwner.kind === 'managed_host')
+      throw new Error('Project MCP requires its original target Host execution owner. Managed file sources currently support coordinator-global MCP only.');
     if (needsWorkspace && (!input.source || !input.executionCwd))
       throw new Error(
         'Child MCP requires an execution view matching its fixed source',

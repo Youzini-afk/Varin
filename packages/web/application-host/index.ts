@@ -40,7 +40,12 @@ import { createRetrievalComposition } from './lib/kernel/retrieval-composition.j
 import { createLanguageOwner } from './lib/kernel/language-owner.js';
 import { createSourceQueryOwner } from './lib/kernel/source-query.js';
 import { createLiveSourceOwner } from './lib/kernel/live-source.js';
-import { createThreadSourcePreparer, createThreadSourceAdmission } from './lib/kernel/thread-sources.js';
+import { createThreadSourcePreparer, createThreadSourceAdmission, createThreadSourceDirectory } from './lib/kernel/thread-sources.js';
+import { createManagedSourceConsumers } from './lib/kernel/managed-source-consumers.js';
+import { createSourceQueryService } from './lib/kernel/source-query-service.js';
+import { createManagedSourceService } from './lib/harness/managed-source-service.js';
+import { createManagedChildSourceService } from './lib/kernel/managed-source-collaboration.js';
+import { createManagedIntegrationService, createManagedIntegrationOwner } from './lib/kernel/managed-source-integration.js';
 import { createThreadContext } from './lib/kernel/thread-context.js';
 import { createThreadResourceScope } from './lib/kernel/thread-resource-scope.js';
 import { createThreadSkillInputPreparer } from './lib/kernel/thread-skill-input.js';
@@ -3082,8 +3087,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return selection;
   };
   const liveSources = createLiveSourceOwner({ documents: documentsAuthority, kernel: kernelClient });
-  kernelClient.setLanguageOwner(createLanguageOwner({ documents: documentsAuthority, supervisor: languageSupervisor,
-    sources: createSourceQueryOwner({ kernel: kernelClient, documents: documentsAuthority, validateLiveSource: liveSources.validate }) }));
   const prepareChildMcp = createChildMcpPreparer({ authority: mcpAuthority, tasks:()=>mcpTaskRuntime, resources:()=>mcpResourceRuntime, kernel: kernelClient, agentDir: mcpAgentDir, hostId,
     admitWorkspaceRegistration: (id, signal) => documentsAuthority.admitWorkspaceRegistration(id, signal),
     projectTrusted: cwd => mcpHostProjectTrusted(mcpAgentDir, cwd),
@@ -3093,11 +3096,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     if (input.fixed) return prepareChildMcp(input, signal);
     // A read-only fixed branch has no executable filesystem view. Global MCP capabilities run
     // in the neutral Host scope; they must not borrow the mutable project directory.
-    const workspace = input.source && input.executionCwd
+    const workspace = input.source?.resourceOwner.kind === 'local' && input.executionCwd
       ? await documentsAuthority.admitWorkspaceRegistration(input.source.workspaceId, signal) : undefined;
     const configCwd = workspace?.canonicalPath ?? mcpAgentDir;
     const scope = {
-      agentDir: mcpAgentDir, configCwd, executionCwd: input.executionCwd ?? mcpAgentDir,
+      agentDir: mcpAgentDir, configCwd, executionCwd: workspace ? input.executionCwd! : mcpAgentDir,
       environmentId: workspace ? `${hostId}:${input.source!.executionWorkspaceId}` : `${hostId}:global`,
       executionScope: workspace ? 'workspace' as const : 'global' as const,
       projectTrusted: Boolean(workspace) && mcpHostProjectTrusted(mcpAgentDir, configCwd),
@@ -3124,7 +3127,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const lease = input.requiredBinding?await owner.restore(input.requiredBinding,signal):owner.snapshot();
     try { return createMcpLease({ lease, kernel: kernelClient, tasks:mcpTaskRuntime,resources:mcpResourceRuntime,
       ...(input.requiredBinding ? { selection: input.requiredBinding } : {}),
-      ...(input.source && !input.executionCwd ? { unavailableWorkspaceScope: {
+      ...(input.source && !workspace ? { unavailableWorkspaceScope: {
         workspaceId: input.source.workspaceId,
         reason: 'Project MCP capabilities require a prepared execution environment matching the pinned source. Only global Host MCP capabilities are available for this read-only source.',
       } } : {}),
@@ -3151,26 +3154,35 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     if (!researchDecisionOwner.current) throw new Error('Research decision tool preparation is unavailable');
     return researchDecisionOwner.current.prepareConfiguration(run, required, await researchDiscoveryOwner.current.prepareConfiguration(run, required,
       await webRuntimeOwner.current.prepareConfiguration(run, required,
-        await scriptRuntimeOwner.current.prepareConfiguration(await computerRuntimeOwner.current.prepareConfiguration(run, required)))));
+        await scriptRuntimeOwner.current.prepareConfiguration(await computerRuntimeOwner.current.prepareConfiguration(run, required), run.source))));
   },currentPolicy:async runId=>{
     const launch=await kernelClient.agentRuntimeRequest<import('./lib/kernel/protocol.generated.js').LaunchIntent|null,'runtime.launch.inspect'>('runtime.launch.inspect',{runId});
-    const workspace=launch?.selection.source?await documentsAuthority.admitWorkspaceRegistration(launch.selection.source.workspace_id):undefined;
+    const workspace=launch?.selection.source?.resource_owner.kind === 'local'?await documentsAuthority.admitWorkspaceRegistration(launch.selection.source.workspace_id):undefined;
     const cwd=workspace?.canonicalPath??mcpAgentDir;
     return readMcpHostPermissionPolicy(mcpAgentDir,cwd,Boolean(workspace)&&mcpHostProjectTrusted(mcpAgentDir,cwd));
   }}), documentsAuthority.admitWorkspaceRegistration);
+  agentRuntime.bindManagedSources(managedRemoteTargets);
+  kernelClient.setManagedSourceOwner(owner => agentRuntime.managedSource(owner), () => agentRuntime.coordinatorHostId);
+  const managedSourceConsumers = createManagedSourceConsumers({ coordinatorHostId: () => agentRuntime.coordinatorHostId,
+    registry: managedRemoteTargets, withRunAuthority: (runId, source, consume, signal) =>
+      agentRuntime.withManagedSourceAuthority(runId, source, consume, signal) });
+  kernelClient.setLanguageOwner(createLanguageOwner({ documents: documentsAuthority, supervisor: languageSupervisor,
+    remote: managedSourceConsumers.query,
+    sources: createSourceQueryOwner({ kernel: kernelClient, documents: documentsAuthority,
+      validateLiveSource: liveSources.validate, remote: managedSourceConsumers.query }) }));
   webRuntimeOwner.current = createWebRuntime({ runtime: agentRuntime, webFetch: webFetchService, documentReader, materials: webMaterials,
     collections: materialCollectionsService,
     documentSources: createDocumentSources({ kernel: kernelClient, runtime: agentRuntime,
       resolveLiveSource: liveSources.validate, experiments: experimentService }),
     fetch: egressRuntime.fetch as typeof globalThis.fetch, readAuth: readPiAuthFile,
     settings: async source => {
-      const root = source ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
+      const root = source?.resource_owner.kind === 'local' ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
       return readHostSettingsSnapshot(mcpAgentDir, root, root !== undefined && mcpHostProjectTrusted(mcpAgentDir, root));
     },
   });
   researchDiscoveryOwner.current = createResearchDiscoveryRuntime({ service: researchSearchService,
     settings: async source => {
-      const root = source ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
+      const root = source?.resource_owner.kind === 'local' ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
       return readHostSettingsSnapshot(mcpAgentDir, root, root !== undefined && mcpHostProjectTrusted(mcpAgentDir, root));
     },
   });
@@ -3207,13 +3219,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return { threadIds: [...associated], runIds: scope.runs.filter(run => associated.has(run.threadId)).map(run => run.runId) };
   };
   const threadWorkingStates = createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter);
-  const threadResources = createThreadResourceScope({
+  const threadResourceOwners: Parameters<typeof createThreadResourceScope>[0] = {
     agentDir: mcpAgentDir, documents: documentsAuthority, workingStates: threadWorkingStates, resolvePrimaryWorktreeRoot,
     validateLiveSource: liveSources.validate,
     projectTrusted: root => mcpHostProjectTrusted(mcpAgentDir, root),
     configuration: root => readAgentResourceConfiguration({ agentDir: mcpAgentDir, ...(root ? { cwd: root } : {}) }),
     withSourceRead: (input, consume) => kernelStorageAdapter.withResourceRead(input, consume),
-  });
+  };
+  const threadResources = createThreadResourceScope({ ...threadResourceOwners, remote: managedSourceConsumers.resources });
   const threadContext = createThreadContext({ personalization: agentPersonalization,
       botForThread: async threadId => {
         const botId = (await agentRuntime.thread(threadId)).bot_id;
@@ -3224,7 +3237,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       },
       resources: threadResources,
       composition: createContextComposition(extensionRuntime),
-      projectForWorkspace: async workspaceId => {
+      projectForWorkspace: async (workspaceId, source) => {
+        if (source.resourceOwner.kind === 'managed_host') return undefined;
         const { canonicalPath: root } = await documentsAuthority.admitWorkspaceRegistration(workspaceId);
         const projects = sanitizeProjects((await readSettingsFromDisk()).projects) ?? [];
         return projects.find(project => projectContainsPath(project, root))?.id;
@@ -3237,7 +3251,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       knowledge: input => knowledgeContextRuntime.knowledgeForThread(input) }) }));
   const contextService=new ContextService(agentRuntime,threadContext,async(run,launch,signal)=>{
     const source=launch?.selection.source;
-    const root=source ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
+    const root=source?.resource_owner.kind === 'local' ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
     const admitted=await agentRuntime.contextScope(run.id,signal);
     const model=run.configuration as {providerId?:string;model:string};
     const policy=await readContextPolicy({agentDir:mcpAgentDir,...(root?{projectRoot:root}:{}),projectTrusted:root!==undefined && mcpHostProjectTrusted(mcpAgentDir,root),
@@ -3245,12 +3259,16 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return {policy,scope:{sessionId:run.thread_id,...(admitted?.projectId?{projectId:admitted.projectId}:{}),...(root?{workspaceId:root}:{})}};
   },(runId,signal)=>threads.continueLaunch(runId,{signal}),createContextBudget(extensionRuntime));
   kernelClient.setContextOwner(contextService);
+  const prepareThreadSource = createThreadSourcePreparer({
+    inspectInventory: (directory, signal) => threadWorktreeRuntime.inspectGitBaselineInventory(directory, signal),
+    sourceTools: mode => agentRuntime.sourceTools(mode), documents: documentsAuthority, liveSources,
+    workingStates: threadWorkingStates, prepareResources: threadResources.prepareSourceCapture, remote: managedSourceConsumers.threads });
   const threads = new ThreadAdapter(agentRuntime,
-    modelAuthority, createThreadSourceAdmission({ documents: documentsAuthority, liveSources,
+    modelAuthority, createThreadSourceAdmission({ documents: documentsAuthority, liveSources, remote: managedSourceConsumers.threads,
       withSourceRead: (input, consume) => kernelStorageAdapter.withResourceRead(input, consume), runtime: agentRuntime }), (runId, _error) => {
       // Durable launch remains inspectable/resumable. Never log credentials or provider responses.
       console.error('[Thread] Launch preparation requires attention:', runId);
-    }, createThreadSourcePreparer({ inspectInventory: (directory, signal) => threadWorktreeRuntime.inspectGitBaselineInventory(directory, signal), sourceTools: mode => agentRuntime.sourceTools(mode),  documents: documentsAuthority, liveSources, workingStates: threadWorkingStates, prepareResources: threadResources.prepareSourceCapture }),
+    }, prepareThreadSource,
     threadContext, new PlanService(agentRuntime, getUserKnowledgeStore), createThreadSkillInputPreparer(threadResources), createThreadProcesses({ runtime: agentRuntime, kernel: kernelClient,
       terminal: () => terminalRuntime, resolveLiveSource: liveSources.validate,
       onError: () => console.error('[Thread] Original process terminal requires attention'),
@@ -3258,19 +3276,45 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       settings: () => hostCredentialAuthority.readGlobalInferenceSettings(),
       capabilities: signal => agentRuntime.childCapabilities(signal),
     }));
+  threads.bindSourceDirectory(createThreadSourceDirectory({ documents: documentsAuthority, remote: managedSourceConsumers.threads }));
+  const targetSourceQuery = createSourceQueryService({ kernel: kernelClient, documents: documentsAuthority,
+    validateLiveSource: liveSources.validate, storage: kernelStorageAdapter,
+    resourceOwners: threadResourceOwners, languageSupervisor, structureSource: () => structureSource });
+  const targetChildSources = createManagedChildSourceService({ storage: kernelStorageAdapter,
+    capture: { documents: documentsAuthority, prepareResources: threadResources.prepareSourceCapture,
+      inspectInventory: (directory, signal) => threadWorktreeRuntime.inspectGitBaselineInventory(directory, signal) } });
+  const targetIntegrations = createManagedIntegrationService({ kernel: kernelClient, storage: kernelStorageAdapter,
+    documents: documentsAuthority, recovery: foundationalRecoveryEngine, metadataReader: kernelRecoveryStore,
+    coordinator: threadIntegrationCoordinator });
+  managedRemoteExecution.setSourceOwner(createManagedSourceService({ kernel: kernelClient, hostId,
+    documents: documentsAuthority, validateLiveSource: liveSources.validate, prepareSource: prepareThreadSource,
+    languageAvailable: true, releaseSource: targetSourceQuery.release,
+    serviceOperation: (scope, operation, signal) => {
+      switch (operation.kind) {
+        case 'child_prepare': case 'child_result_prepare': case 'child_result_publish': case 'child_result_read': case 'child_release': case 'child_unaccepted_release':
+          return targetChildSources(scope, operation, signal);
+        case 'integration': return targetIntegrations(scope, operation, signal);
+        default: return targetSourceQuery(scope, operation, signal);
+      }
+    },
+  }));
   const threadRecoveryOwners = { threads, runtime: agentRuntime, store: kernelRecoveryStore, storage: kernelStorageAdapter, kernel: kernelClient, liveSources };
   threadRecoveryNavigation = createThreadRecoveryNavigation(threadRecoveryOwners);
   kernelRecoveryContentStore.bindTargetResources(createThreadRecoveryFileResolver(threadRecoveryOwners));
   threads.bindRecoveryReader(async identity => {
     try {
-    const workspaces = await agentRuntime.recoveryWorkspaces(identity);
+    const sources = await agentRuntime.recoveryWorkspaces(identity);
+    const receipt = await agentRuntime.navigationReceipt(identity);
+    const combinedUnavailable = sources.some(source => source.resource_owner.kind === 'managed_host')
+      ? 'Combined file recovery for managed sources is unavailable. Conversation history and recovery on the coordinating Host remain available.' : undefined;
+    const workspaces = [...new Set(sources.filter(source => source.resource_owner.kind === 'local').map(source => source.workspace_id))];
     const operations = (await Promise.all(workspaces.map(async workspaceId => {
       const result = await foundationalRecoveryEngine.listCombinedOperations(workspaceId);
       if (result.status !== 'ready') throw new Error('Recovery status unavailable');
       return result.operations.map(({editorText: _text,editorImages: _images,...operation}) => operation).filter(operation => operation.conversation.kind === 'thread' && operation.conversation.threadId === identity.threadId && operation.conversation.branchId === identity.branchId);
     }))).flat();
-    const receipt = await agentRuntime.navigationReceipt(identity);
-    return { navigation: receipt && !operations.some(operation => operation.id === receipt.key) ? receipt : null, operations };
+    return { navigation: receipt && !operations.some(operation => operation.id === receipt.key) ? receipt : null, operations,
+      ...(combinedUnavailable ? { combinedUnavailable } : {}) };
     } catch { return {navigation:null,operations:[],unavailable:"Recovery status is unavailable; conversation history remains readable"}; }
   });
   threadRecoveryReady = true;
@@ -3307,7 +3351,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   scriptRuntimeOwner.current = createScriptRuntime({ kernel: kernelClient, runtime: agentRuntime, resolveLiveSource: liveSources.validate, onError: () => console.error('[Script] Original environment requires reconciliation') });
   computerRuntimeOwner.current = createComputerRuntime({ kernel: kernelClient, runtime: agentRuntime, computers: computerService, enabled: async runId => {
     const launch = await kernelClient.agentRuntimeRequest<import('./lib/kernel/protocol.generated.js').LaunchIntent | null, 'runtime.launch.inspect'>('runtime.launch.inspect', { runId });
-    const workspace = launch?.selection.source ? await documentsAuthority.admitWorkspaceRegistration(launch.selection.source.workspace_id) : undefined;
+    const workspace = launch?.selection.source?.resource_owner.kind === 'local' ? await documentsAuthority.admitWorkspaceRegistration(launch.selection.source.workspace_id) : undefined;
     const cwd = workspace?.canonicalPath ?? mcpAgentDir;
     return readHostHarnessSettings(mcpAgentDir, cwd, Boolean(workspace) && mcpHostProjectTrusted(mcpAgentDir, cwd)).tools?.computer !== false;
   } });
@@ -3866,7 +3910,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   researchDecisionOwner.current = createResearchDecisionRuntime({ inference: semanticInference, materials: webRuntimeOwner.current,
     settings: async source => {
-      const root = source ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
+      const root = source?.resource_owner.kind === 'local' ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
       return readHostSettingsSnapshot(mcpAgentDir, root, root !== undefined && mcpHostProjectTrusted(mcpAgentDir, root));
     },
   });
@@ -3913,7 +3957,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (error) => console.error('[HarnessKnowledge] Semantic runtime failed:', errorMessage(error)),
   });
   semanticRuntimeHolder.current = semanticRuntime;
-  const retrievalSources = createRetrievalSourceOwner({ kernel: kernelClient, documents: documentsAuthority, validateLiveSource: liveSources.validate });
+  const retrievalSources = createRetrievalSourceOwner({ kernel: kernelClient, documents: documentsAuthority,
+    validateLiveSource: liveSources.validate, remote: managedSourceConsumers.query });
   const retrievalModel = createRetrievalModelStage({ inference: semanticInference, models: modelAuthority,
     readGlobalSettings: () => hostCredentialAuthority.readGlobalInferenceSettings(), kernel: kernelClient, sources: retrievalSources });
   const retrievalComposition = createRetrievalComposition(extensionRuntime, {
@@ -3931,26 +3976,26 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           || value.split('/').includes('..')) throw new Error('Invalid native semantic root');
         return value.split('/').filter(part => part && part !== '.').join('/');
       };
-      const grant = kernelClient.sourceGrant(query);
-      const roots = (query.paths ?? grant.pathScopes).map(relative);
+      const roots = (query.paths ?? await retrievalSources.pathScopes(query, active)).map(relative);
       const authorize = async (requestSignal: AbortSignal): Promise<void> => {
         requestSignal.throwIfAborted();
         await retrievalSources.validate(query, requestSignal);
-        const current = kernelClient.sourceGrant(query);
-        const granted = current.pathScopes.map(relative);
+        const granted = (await retrievalSources.pathScopes(query, requestSignal)).map(relative);
         if (!roots.length || roots.some(root => !granted.some(parent => !parent || root === parent || root.startsWith(`${parent}/`)))) {
           throw new Error('Native semantic roots are outside the Run grant');
         }
       };
       await authorize(active);
       return semanticRuntime.acquireQuery({ workspaceId: query.source.workspace_id, inference: scope.inference, roots, signal: active, authorize,
-        ...(query.source.mode === 'live_root' ? {} : { sourceView: await retrievalSources.semanticView(query, active) }),
-        assertAuthorized: () => { kernelClient.sourceGrant(query); } });
+        ...(query.source.mode === 'live_root' && query.source.resource_owner.kind === 'local' ? {}
+          : { sourceView: await retrievalSources.semanticView(query, active) }),
+        assertAuthorized: () => { active.throwIfAborted(); if (query.source.resource_owner.kind === 'local') kernelClient.sourceGrant(query); } });
     },
   });
   kernelClient.setRetrievalOwner(createRetrievalOwner({ sources: retrievalSources, kernel: kernelClient, inferenceRequests: semanticInference.requests!,
     preparePipeline: async (query, signal, inference) => retrievalComposition.prepare({ threadId: query.threadId, query, inference,
-      workspaceId: await retrievalSources.routingWorkspace(query, signal), ...(query.projectId ? { projectId: query.projectId } : {}) }, signal),
+      ...(query.source.resource_owner.kind === 'local' ? { workspaceId: await retrievalSources.routingWorkspace(query, signal) } : {}),
+      ...(query.projectId ? { projectId: query.projectId } : {}) }, signal),
   }));
 
   const indexDirectories = createIndexDirectoryManager({
@@ -4523,6 +4568,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const unregisterChildIntegrationCapability = extensionRuntime.capabilities.register(CHILD_INTEGRATION_CAPABILITY,
     createIntegrationToolOwner({ runtime: agentRuntime, coordinator: threadIntegrationCoordinator,
       onCleanupError: (_operationId, _error) => console.error('[Integration] Source grant cleanup requires attention'),
+      mergeManaged: createManagedIntegrationOwner({ kernel: kernelClient, runtime: agentRuntime,
+        resolveLiveSource: liveSources.validate,
+        onCleanupError: (_operationId, _error) => console.error('[Integration] Managed source cleanup requires attention') }),
       openTarget: createIntegrationTargetOpener({ kernel: kernelClient, runtime: agentRuntime, storage: kernelStorageAdapter,
         recovery: foundationalRecoveryEngine, metadataReader: kernelRecoveryStore, resolveLiveSource: liveSources.validate,
         documents: documentsAuthority }) }));
@@ -5108,7 +5156,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // Stop producers and drain their receipts while process grants are valid.
       // One refused exit must not prevent the other domains from shutting down.
       const processShutdown = await Promise.allSettled([
-        threadWaitRuntime?.dispose(), agentRootRuntime.dispose(), researchRootRuntime.dispose(), botRootRuntime.dispose(), threadRuntime.dispose(), terminalRuntime?.shutdown(), languageSupervisor.dispose(), managedLanguageServers.dispose(), runRuntime.dispose(),
+        threadWaitRuntime?.dispose(), agentRootRuntime.dispose(), researchRootRuntime.dispose(), botRootRuntime.dispose(), threadRuntime.dispose(), terminalRuntime?.shutdown(), targetSourceQuery.dispose(), languageSupervisor.dispose(), managedLanguageServers.dispose(), runRuntime.dispose(),
         // Release every supervised native driver so no synthesized input is
         // left held down when the Host exits.
         computerService.dispose(),

@@ -175,7 +175,7 @@ async function initialize(frame: Record<string, unknown>) {
   editorResources = draftResources.map(resource => ({ ...resource, localEditRevision: 2, content: 'LATER_UNSAVED_DRAFT\n',
     bufferHash: `sha256-${createHash('sha256').update('LATER_UNSAVED_DRAFT\n').digest('hex')}` }));
   await publishDrafts();
-  const fixedRequest = { ...identity, key: 'baseline', workspaceId, mode: frame.sourceMode as 'fixed_branch' | 'materialized',
+  const fixedRequest = { ...identity, resourceOwner: { kind: 'local' as const }, key: 'baseline', workspaceId, mode: frame.sourceMode as 'fixed_branch' | 'materialized',
     content: { mode: 'surface-drafts' as const, context }, captureScopes: [] };
   const prepared = await api.prepareSource(fixedRequest);
   sourceRequest = fixedRequest; preparedSource = prepared;

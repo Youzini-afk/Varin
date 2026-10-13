@@ -1379,7 +1379,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 25; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 26; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -1397,6 +1397,7 @@ export interface LaunchSourceParams {
   revision: number | null;
   mode: SourceMode;
   liveRoot?: LiveRoot | null;
+  resourceOwner: SourceResourceOwner;
 }
 
 export interface LaunchSelectParams {
@@ -1415,6 +1416,7 @@ export interface LaunchSource {
   revision: number | null;
   mode: SourceMode;
   live_root: LiveRoot | null;
+  resource_owner: SourceResourceOwner;
 }
 
 export interface ToolMetadata { service_id: string; service_version: number; completion: 'result' | 'job'; lifetime?: 'thread' | 'environment'; operation: 'read' | 'effect'; examples?: unknown[]; source?: {path: string; line?: number}; }
@@ -2341,12 +2343,14 @@ export interface UnacceptedChildSource {
   parent_thread_id: string;
   source: LaunchSource;
   pin_id: string;
+  parent_run_id: string;
 }
 
 export interface ChildSourceHandoff {
   operation_id: string;
   source: LaunchSource;
   root: ChildSourceRoot;
+  resource_authority: ChildSourceAuthority | null;
 }
 
 export type ChildSourceRoot = { kind: 'fixed'; pin: ChildSourcePin } | { kind: 'physical'; root: LiveRoot };
@@ -2872,3 +2876,7 @@ export interface McpEndpoint {
   configurationVersion: string;
   credentialVersion: string;
 }
+
+export type SourceResourceOwner = {kind: 'local'} | {kind: 'managed_host'; hostId: string; connectionId: string; endpointIdentity: string};
+
+export interface ChildSourceAuthority { authority_id:string;resource_epoch:string }

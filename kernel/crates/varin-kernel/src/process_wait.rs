@@ -221,6 +221,7 @@ impl ProcessWaitTools {
             binding: Some(self.binding.clone()),
         };
         let native = crate::storage::process_interactions::Native {
+            resource_owner: self.binding.resource_owner.clone(),
             context: c.clone(),
             executor: call.name.clone(),
         };
@@ -305,6 +306,67 @@ impl ProcessWaitTools {
     }
 }
 impl ToolExecutor for ProcessWaitTools {
+    fn bind_call(
+        self: Arc<Self>,
+        call: &ToolCall,
+        frozen: &FrozenToolContext,
+        _: &CancellationToken,
+    ) -> Result<Box<dyn PreparedToolCall>, ExecutionError> {
+        Ok(Box::new(ProcessCall {
+            owner: self,
+            call: call.clone(),
+            frozen: frozen.clone(),
+        }))
+    }
+    fn execute_receipt(
+        &self,
+        c: &ToolExecutionContext,
+        call: &ToolCall,
+        contract: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> ToolExecutionReceipt {
+        if interacts(&call.name) && self.binding.remote_authority.is_some() {
+            let result = (|| -> Result<ToolExecutionReceipt, ExecutionError> {
+                self.validate_contract(c, call, contract)?;
+                self.interaction_input(c, call)?;
+                let executor = crate::tools::KernelToolExecutor::new(
+                    self.binding.clone(),
+                    self.resources.clone(),
+                )?;
+                let result = executor.remote_tool("execute", c, call, cancel)?;
+                let receipt: ToolExecutionReceipt =
+                    serde_json::from_value(result["result"].clone()).map_err(error)?;
+                if let ToolCompletion::Result { content, .. } = &receipt.completion {
+                    if let Ok(actual) = serde_json::from_value::<crate::process::interaction::Receipt>(
+                        content.data.clone(),
+                    ) {
+                        let native = crate::storage::process_interactions::Native {
+                            resource_owner: self.binding.resource_owner.clone(),
+                            context: c.clone(),
+                            executor: call.name.clone(),
+                        };
+                        crate::agent_runtime::record_process_interaction(
+                            &self.catalog,
+                            &native,
+                            &actual,
+                            receipt.executor_stopped,
+                        )
+                        .map_err(error)?;
+                    }
+                }
+                Ok(receipt)
+            })();
+            return result.unwrap_or_else(|e| ToolExecutionReceipt {
+                completion: ToolCompletion::Result {
+                    outcome: Outcome::Indeterminate,
+                    effect: Effect::Unknown,
+                    content: json!({"error":"source_unavailable","message":e.to_string()}).into(),
+                },
+                executor_stopped: false,
+            });
+        }
+        ToolExecutionReceipt::local(self.execute(c, call, contract, cancel), contract)
+    }
     fn watch_admission(
         &self,
         c: &ToolExecutionContext,
@@ -383,6 +445,21 @@ impl ToolExecutor for ProcessWaitTools {
             }
             self.validate_contract(c, call, contract)?;
             let (id, _) = self.interaction_input(c, call)?;
+            if self.binding.remote_authority.is_some() {
+                return crate::tools::KernelToolExecutor::new(
+                    self.binding.clone(),
+                    self.resources.clone(),
+                )?
+                .remote_tool("authorize", c, call, cancel)
+                .and_then(|value| {
+                    let actual: ToolContract = serde_json::from_value(value).map_err(error)?;
+                    if &actual == contract {
+                        Ok(())
+                    } else {
+                        Err(error("Managed process contract changed"))
+                    }
+                });
+            }
             return self
                 .resources
                 .interactions
@@ -468,5 +545,62 @@ impl ToolExecutor for ProcessWaitTools {
             effect: Effect::None,
             content: json!({"error":e.code,"message":e.message}).into(),
         })
+    }
+}
+
+struct ProcessCall {
+    owner: Arc<ProcessWaitTools>,
+    call: ToolCall,
+    frozen: FrozenToolContext,
+}
+impl PreparedToolCall for ProcessCall {
+    fn executor_owner(&self) -> varin_runtime::ExecutorOwner {
+        if interacts(&self.call.name) {
+            if let Some(remote) = &self.owner.binding.remote_authority {
+                return remote.execution_owner.clone();
+            }
+        }
+        varin_runtime::ExecutorOwner::Kernel
+    }
+    fn plan(&self, cancel: &CancellationToken) -> Result<ToolPreparation, ExecutionError> {
+        self.owner.plan(&self.call, &self.frozen, cancel)
+    }
+    fn prepare(&self, cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> {
+        self.owner.prepare(&self.call, &self.frozen, cancel)
+    }
+    fn execution_class(
+        &self,
+        contract: &ToolContract,
+    ) -> varin_runtime::execution_capacity::ExecutionClass {
+        self.owner.execution_class(&self.call, contract)
+    }
+    fn watch_admission(
+        &self,
+        c: &ToolExecutionContext,
+        contract: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> Result<Option<varin_runtime::execution_capacity::AdmissionControlGuard>, ExecutionError>
+    {
+        self.owner.watch_admission(c, &self.call, contract, cancel)
+    }
+    fn supports_policy_read(&self, contract: &ToolContract) -> bool {
+        self.owner
+            .supports_policy_read(&self.frozen, &self.call, contract)
+    }
+    fn authorize(
+        &self,
+        c: &ToolExecutionContext,
+        contract: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> Result<(), ExecutionError> {
+        self.owner.authorize(c, &self.call, contract, cancel)
+    }
+    fn execute(
+        &self,
+        c: &ToolExecutionContext,
+        contract: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> ToolExecutionReceipt {
+        self.owner.execute_receipt(c, &self.call, contract, cancel)
     }
 }

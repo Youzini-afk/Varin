@@ -167,6 +167,7 @@ pub(super) fn selected_launch(
         .0
         .map(|source| {
             Ok::<_, KernelError>(varin_runtime::catalog::launches::SourceSelection {
+                resource_owner: source.resource_owner,
                 environment_run_id: source.environment_run_id,
                 mode: source.mode,
                 live_root: source.live_root.and_then(|root| root.0).map(|root| {
@@ -465,6 +466,7 @@ fn prepare_child_input(
         .0
         .map(|source| {
             Ok::<_, KernelError>(varin_runtime::catalog::launches::SourceSelection {
+                resource_owner: source.resource_owner,
                 environment_run_id: source.environment_run_id,
                 mode: source.mode,
                 live_root: source.live_root.and_then(|root| root.0).map(|root| {
