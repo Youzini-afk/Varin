@@ -3160,8 +3160,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const localLease = localSelection ? await owner.restore(localSelection, signal) : owner.snapshot();
     let lease = localLease;
     let targetReady = false;
+    let targetLease: import('./lib/kernel/managed-mcp-lease.js').ManagedMcpLease | undefined;
     if (managed) {
-      let targetLease: import('@varin/pi-host/mcp-authority').McpAuthorityLease | undefined;
       try {
         targetLease = await managedMcpOwner.current!.prepare(input, signal);
         if (targetLease) {
@@ -3175,7 +3175,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         } else lease = composeMcpAuthorityLeases([{ lease: localLease, servers: Object.keys(localLease.binding.provenance.servers) }]);
       } catch (error) { localLease.release(); targetLease?.release(); throw error; }
     }
+    const originalTarget = targetLease;
     try { return createMcpLease({ lease, kernel: kernelClient, tasks:mcpTaskRuntime,resources:mcpResourceRuntime,
+      ...(originalTarget ? { retainChild: (binding: import('./lib/kernel/protocol.generated.js').SourceMcpChildBinding,
+        selection: import('./lib/kernel/protocol.generated.js').McpBinding) => {
+        const selected = selectMcpServers(selection, owner => owner.kind === 'managed_host');
+        if (!Object.keys(selected.provenance.servers).length) return Promise.resolve({ release: async () => {} });
+        return originalTarget.retainChild(binding, selected);
+      } } : {}),
       ...(input.requiredBinding ? { selection: input.requiredBinding } : {}),
       ...(input.source && !workspace && (!managed || !targetReady) ? { unavailableWorkspaceScope: {
         workspaceId: input.source.workspaceId,
@@ -3354,6 +3361,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     mcpTaskContinuation: (scope, action, signal) => targetMcpService.taskContinuation(scope, action, signal),
     mcpResourceContinuation: (scope, action, signal) => targetMcpService.resourceContinuation(scope, action, signal),
     mcpInteractionContinuation: (scope, action, signal) => targetMcpService.interactionContinuation(scope, action, signal),
+    mcpChildContinuation: (scope, action, signal) => targetMcpService.childContinuation(scope, action, signal),
     languageAvailable: true, releaseSource: async (scope, retention) => {
       const [, mcp] = await Promise.all([targetSourceQuery.release(scope), targetMcpService.release(scope, retention)]);
       return { mcpExecutorStopped: mcp.executorStopped, mcpTaskControlsDrained: mcp.taskControlsDrained };

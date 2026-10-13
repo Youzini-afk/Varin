@@ -1068,6 +1068,7 @@ pub(crate) fn spawn(
                         if matches!(
                             method,
                             "runtime.child.list"
+                                | "runtime.child.dependencies.pending"
                                 | "runtime.child.continuation.accept"
                                 | "runtime.child.execution.list"
                                 | "runtime.child.execution.inspect"
@@ -2560,13 +2561,10 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
     }
 
     match method {
-        "runtime.child.sources.pending" => Ok(serde_json::to_value(
-            catalog.unaccepted_child_sources().map_err(domain)?,
-        )?),
-        "runtime.child.sources.release" => {
+        "runtime.child.dependencies.release" => {
             let p: OperationParams = serde_json::from_value(params)?;
             catalog
-                .mark_unaccepted_child_source_released(&p.operation_id)
+                .mark_unaccepted_child_dependencies_released(&p.operation_id)
                 .map_err(domain)?;
             Ok(json!({}))
         }

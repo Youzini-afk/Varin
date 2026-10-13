@@ -36,7 +36,7 @@ function fixture() {
       const params = input as SourceAuthorityOpenParams;
       state.authority = { authorityId: 'authority', resourceEpoch: 'target-epoch', executionOwner: { kind: 'external', identity: 'source', epoch: 'target-epoch' },
         source: params.source, scope: params.scope, phase: 'preparing', purpose: params.purpose, operationId: params.operationId ?? null, grantId: params.grantId,
-        toolBinding: null, physicalRoot: null, firstPreparation: true, materializationOperationId: 'materialize', mcpHolders: [], mcpDeliveries: [] };
+        toolBinding: null, physicalRoot: null, firstPreparation: true, materializationOperationId: 'materialize', mcpHolders: [], mcpDeliveries: [], mcpChildren: [] };
       return state.authority;
     }
     if (method === 'source.authority.bind') {
@@ -45,7 +45,7 @@ function fixture() {
       return state.authority;
     }
     if (method === 'source.authority.inspect') return state.authority;
-    if (method === 'source.authority.seal') { state.authority = { ...state.authority!, phase: (state.authority!.mcpHolders.some(holder => !holder.released) || state.authority!.mcpDeliveries.some(delivery => !delivery.released)) ? 'retaining' : 'draining' }; return state.authority; }
+    if (method === 'source.authority.seal') { state.authority = { ...state.authority!, phase: (state.authority!.mcpHolders.some(holder => !holder.released) || state.authority!.mcpDeliveries.some(delivery => !delivery.released) || state.authority!.mcpChildren.some(child => !child.released)) ? 'retaining' : 'draining' }; return state.authority; }
     if (method === 'source.authority.inspect_scope') return [state.authority];
     if (method === 'source.service.call') return { pathScopes: ['allowed'] };
     if (method === 'source.authority.release') return { authorityId: 'authority', phase: 'retired', grantIds: ['private-grant'] };

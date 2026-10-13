@@ -93,6 +93,13 @@ Per-scope definition identities are captured from the original configuration sna
 child may derive its execution scope from an exact still-live original definition after ordinary
 configuration replacement, including a deferred server that was not yet connected. Source identity,
 selected server set, current trust and credential/declaration checks remain with this authority.
+Managed dispatch retention captures an authority-branded definition token from its original
+composition snapshot, including deferred definitions. Tokens keep that original scope alive through
+ordinary parent retirement until exact child dependency release. A proof-authorized child can derive
+independent execution resources from those tokens; the separate explicit-continuation path accepts
+only exact current definition versions and configuration identity. Neither API accepts serialized
+tokens or changes ordinary acquisition's complete owner-equality check. Disable/removal and credential
+withdrawal revoke retained definitions and derived connections.
 After the last original scope is gone, unavailable historical configuration is an explicit failure;
 there is no persisted configuration copy or latest-definition fallback.
 

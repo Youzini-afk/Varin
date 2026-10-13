@@ -12,6 +12,7 @@ import type {
   ExtensionToolBinding,
   McpBinding,
   HostToolErrorMarker,
+  SourceMcpChildBinding,
 } from './protocol.generated.js';
 export type HostToolSchema = LaunchTool;
 export interface HostToolBinding {
@@ -52,6 +53,11 @@ export interface HostToolLease {
     signal: AbortSignal,
     owner: ExecutorOwner,
   ): Promise<ToolExecutionReceipt>;
+  /** Retain the exact original dispatch's selected MCP definitions before native admission. */
+  retainChild?(
+    binding: SourceMcpChildBinding,
+    selection: McpBinding,
+  ): Promise<{ release(): Promise<void> }>;
   release(): void;
   /** End a current Run/candidate selection context while accepted exchanges retain this exact lease. */
   releaseSelection?(): void;
@@ -125,9 +131,24 @@ interface OwnerEntry {
   // The Host composition owns a candidate across kernel select/ready holder changes.
   retained: boolean;
   holders: Set<string>;
-  childHolders: Map<string, string>;
+  childHolders: Map<string, ChildHolder>;
   active: Map<string, AbortController>;
   calls: Map<string, CallEntry>;
+}
+/** Live acquisition/release duties only. Catalog owns durable child dependency facts. */
+interface ChildHolder {
+  epoch: string;
+  binding: SourceMcpChildBinding;
+  mcp: McpBinding | null;
+  extensions: ExtensionToolBinding[];
+  owners: { key: string; entry: OwnerEntry }[];
+  requests: Set<string>;
+  accepted: boolean;
+  releaseRequested: boolean;
+  handles: Set<{ release(): Promise<void> }>;
+  acquiring?: Promise<void>;
+  retained?: Promise<boolean>;
+  releasing?: Promise<void>;
 }
 const record = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -199,6 +220,9 @@ export class ToolBridge {
     private readonly send: (response: PrivateToolFrame) => Promise<void>,
     private readonly transportFailed: () => void,
     private readonly released: (runId: string) => void = () => {},
+    private readonly childReleaseFailed: (error: unknown) => void = () => {
+      console.error('host_tool_child_release_failed');
+    },
   ) {}
   register(
     runId: string,
@@ -379,6 +403,9 @@ export class ToolBridge {
       entry.retained = false;
       entry.lease.releaseSelection?.();
       entry.holders.clear();
+      for (const holder of entry.childHolders.values())
+        if (!holder.accepted && !holder.releaseRequested)
+          this.#observeChildRelease(this.#releaseChildHolder(holder));
       for (const c of entry.active.values()) c.abort();
       this.#collect(runId, key, entry);
     }
@@ -388,8 +415,12 @@ export class ToolBridge {
     for (const run of this.#owners.keys()) this.unregister(run);
   }
   close(): void {
+    const holders = new Set<ChildHolder>();
     for (const entries of this.#owners.values())
-      for (const entry of entries.values()) entry.childHolders.clear();
+      for (const entry of entries.values())
+        for (const holder of entry.childHolders.values()) holders.add(holder);
+    for (const holder of holders)
+      this.#observeChildRelease(this.#releaseChildHolder(holder));
     this.reset();
   }
   reconnect(): void {
@@ -399,75 +430,182 @@ export class ToolBridge {
         for (const call of owner.calls.values())
           void this.#publishReceipt(run, key, owner, call);
   }
-  releaseChild(parentRunId: string, childOperationId: string): void {
-    for (const [key, entry] of this.#owners.get(parentRunId) ?? []) {
-      entry.childHolders.delete(childOperationId);
-      this.#collect(parentRunId, key, entry);
+  #observeChildRelease(pending: Promise<void>): Promise<void> {
+    // Existing control-frame callers cannot await. Report failure without replacing
+    // the shared channel, and leave the original live handle available for retry.
+    void pending.catch(error => this.childReleaseFailed(error));
+    return pending;
+  }
+  #releaseChildHolder(holder: ChildHolder): Promise<void> {
+    holder.releaseRequested = true;
+    if (holder.releasing) return holder.releasing;
+    const detach = () => {
+      for (const { key, entry } of holder.owners) {
+        if (entry.childHolders.get(holder.binding.operationId) === holder)
+          entry.childHolders.delete(holder.binding.operationId);
+        this.#collect(holder.binding.parentRunId, key, entry);
+      }
+    };
+    // Preserve the synchronous fast path for purely local, already acquired owners.
+    if (!holder.acquiring && !holder.handles.size) {
+      detach();
+      return Promise.resolve();
     }
+    const release = async () => {
+      // Cancellation/channel change is not completion of an outstanding retain.
+      // A late original handle still owes its own release.
+      await holder.acquiring?.catch(() => {});
+      const failures: unknown[] = [];
+      await Promise.all([...holder.handles].map(async handle => {
+        try {
+          await handle.release();
+          holder.handles.delete(handle);
+        } catch (error) { failures.push(error); }
+      }));
+      if (failures.length) throw new AggregateError(failures, 'host_tool_child_release_failed');
+      detach();
+    };
+    const pending = release();
+    holder.releasing = pending;
+    void pending.then(
+      () => { if (holder.releasing === pending) delete holder.releasing; },
+      () => { if (holder.releasing === pending) delete holder.releasing; },
+    );
+    return pending;
+  }
+  releaseChild(parentRunId: string, childOperationId: string): Promise<void> {
+    const holders = new Set<ChildHolder>();
+    for (const entry of this.#owners.get(parentRunId)?.values() ?? []) {
+      const holder = entry.childHolders.get(childOperationId);
+      if (holder) holders.add(holder);
+    }
+    return this.#observeChildRelease(Promise.all(
+      [...holders].map(holder => this.#releaseChildHolder(holder)),
+    ).then(() => {}));
   }
   reconcileChildren(
     children: readonly { operation_id: string; report: unknown }[],
   ): void {
     const facts = new Map(children.map((child) => [child.operation_id, child]));
-    for (const [run, entries] of this.#owners)
-      for (const [key, entry] of entries) {
-        for (const [operation, epoch] of entry.childHolders) {
+    const releasing = new Set<ChildHolder>();
+    for (const entries of this.#owners.values())
+      for (const entry of entries.values())
+        for (const [operation, holder] of entry.childHolders) {
           const child = facts.get(operation);
           // An uncommitted current-epoch handoff may be between ACK and Catalog accept.
-          if (child?.report || (!child && epoch !== this.currentEpoch()))
-            entry.childHolders.delete(operation);
+          if (child?.report || (!child && holder.epoch !== this.currentEpoch()))
+            releasing.add(holder);
         }
-        this.#collect(run, key, entry);
-      }
+    for (const holder of releasing)
+      this.#observeChildRelease(this.#releaseChildHolder(holder));
   }
-  #retainChild(
-    parentRunId: string,
-    childOperationId: string,
+  async #retainChild(
+    requestId: string,
+    binding: SourceMcpChildBinding,
     mcp: McpBinding | null,
     extensions: ExtensionToolBinding[],
-  ): boolean {
-    const entries = [...(this.#owners.get(parentRunId)?.values() ?? [])].filter(
-      (entry) => !entry.closing && entry.epoch === this.currentEpoch(),
-    );
-    const selected: OwnerEntry[] = [];
+  ): Promise<boolean> {
+    const epoch = this.currentEpoch();
+    if (!epoch) return false;
+    const entries = [...(this.#owners.get(binding.parentRunId)?.entries() ?? [])]
+      .map(([key, entry]) => ({ key, entry }))
+      .filter(({ entry }) => !entry.closing && entry.epoch === epoch);
+    const selected: ChildHolder['owners'] = [];
+    let mcpOwner: OwnerEntry | undefined;
     if (mcp) {
-      const entry = entries.find((candidate) => {
-        const binding = candidate.binding as McpBinding;
+      const owner = entries.find(({ entry: candidate }) => {
+        const original = candidate.binding as McpBinding;
         return (
           (candidate.lease.slot ?? 'mcp') === 'mcp' &&
-          binding.reference === mcp.reference &&
-          binding.generation === mcp.generation &&
+          original.reference === mcp.reference &&
+          original.generation === mcp.generation &&
           Object.entries(mcp.provenance.servers).every(([name, server]) =>
-            isDeepStrictEqual(binding.provenance.servers[name], server),
+            isDeepStrictEqual(original.provenance.servers[name], server),
           ) &&
           Object.entries(mcp.resources).every(
-            ([name, resource]) => binding.resources[name] === resource,
+            ([name, resource]) => original.resources[name] === resource,
           ) &&
-          record(mcp.routes) && record(binding.routes) &&
+          record(mcp.routes) && record(original.routes) &&
           Object.keys(mcp.routes).length === mcp.tools.length &&
-          mcp.tools.every(tool => isDeepStrictEqual(binding.routes[tool.name], mcp.routes[tool.name])) &&
+          mcp.tools.every(tool => isDeepStrictEqual(original.routes[tool.name], mcp.routes[tool.name])) &&
           mcp.tools.every(
             (tool) =>
-              binding.tools.some((value) => isDeepStrictEqual(value, tool)) &&
+              original.tools.some((value) => isDeepStrictEqual(value, tool)) &&
               candidate.lease.available(tool),
           )
         );
       });
-      if (!entry) return false;
-      selected.push(entry);
-    }
-    for (const binding of extensions) {
-      const entry = entries.find(
-        (candidate) =>
-          isDeepStrictEqual(candidate.lease.extensionBinding, binding) &&
-          candidate.lease.available(binding.tool),
+      if (!owner) return false;
+      mcpOwner = owner.entry;
+      const managed = Object.values(mcp.provenance.servers).some(
+        server => server.owner.resource_owner.kind === 'managed_host',
       );
-      if (!entry) return false;
-      selected.push(entry);
+      if (managed && !mcpOwner.lease.retainChild) return false;
+      selected.push(owner);
     }
-    for (const entry of selected)
-      entry.childHolders.set(childOperationId, this.currentEpoch()!);
-    return true;
+    for (const extension of extensions) {
+      const owner = entries.find(
+        ({ entry }) =>
+          isDeepStrictEqual(entry.lease.extensionBinding, extension) &&
+          entry.lease.available(extension.tool),
+      );
+      if (!owner) return false;
+      if (!selected.some(value => value.entry === owner.entry)) selected.push(owner);
+    }
+    const previous = selected.map(({ entry }) => entry.childHolders.get(binding.operationId));
+    const live = new Set([...this.#owners.get(binding.parentRunId)?.values() ?? []]
+      .map(entry => entry.childHolders.get(binding.operationId)).filter(value => value !== undefined));
+    const existing = [...live][0];
+    if (existing) {
+      if (live.size !== 1 || existing.epoch !== epoch
+        || previous.some(value => value !== existing) || existing.releaseRequested
+        || !isDeepStrictEqual(existing.binding, binding)
+        || !isDeepStrictEqual(existing.mcp, mcp)
+        || !isDeepStrictEqual(existing.extensions, extensions)) return false;
+      existing.requests.add(requestId);
+      return existing.retained ?? existing.accepted;
+    }
+    const holder: ChildHolder = {
+      epoch, binding: structuredClone(binding), mcp: structuredClone(mcp),
+      extensions: structuredClone(extensions), owners: selected, requests: new Set([requestId]),
+      accepted: false, releaseRequested: false, handles: new Set(),
+    };
+    // Pin every exact selected lease before any asynchronous definition retention.
+    for (const { entry } of selected) entry.childHolders.set(binding.operationId, holder);
+    if (!mcpOwner?.lease.retainChild || !mcp) {
+      holder.accepted = true;
+      return true;
+    }
+    const lease = mcpOwner.lease;
+    holder.acquiring = Promise.resolve().then(async () => {
+      const handle = await lease.retainChild!(structuredClone(binding), structuredClone(mcp));
+      if (!handle || typeof handle.release !== 'function')
+        throw new Error('host_tool_child_retention_invalid');
+      holder.handles.add(handle);
+    });
+    holder.retained = (async () => {
+      let failure: unknown, valid = false;
+      try {
+        await holder.acquiring;
+        valid = !holder.releaseRequested && epoch === this.currentEpoch()
+          && selected.every(({ entry }) => !entry.closing)
+          && mcp!.tools.every(tool => mcpOwner!.lease.available(tool))
+          && extensions.every(extension => selected.some(({ entry }) =>
+            isDeepStrictEqual(entry.lease.extensionBinding, extension) && entry.lease.available(extension.tool)));
+      } catch (error) { failure = error; }
+      if (!valid) {
+        try { await this.#releaseChildHolder(holder); }
+        catch (cleanup) {
+          this.childReleaseFailed(cleanup);
+          throw new AggregateError(failure ? [failure, cleanup] : [cleanup], 'host_tool_child_release_failed');
+        }
+        if (failure) throw failure;
+        return false;
+      }
+      holder.accepted = true;
+      return true;
+    })();
+    return holder.retained;
   }
   consume(v: unknown): boolean {
     if (
@@ -507,6 +645,13 @@ export class ToolBridge {
         !text(v.id) ||
         !text(v.parentRunId) ||
         !text(v.childOperationId) ||
+        !generation(v.executionEpoch) ||
+        !record(v.executionOwner) ||
+        !(v.executionOwner.kind === 'kernel'
+          ? exact(v.executionOwner, ['kind'])
+          : v.executionOwner.kind === 'external'
+            && exact(v.executionOwner, ['kind', 'identity', 'epoch'])
+            && text(v.executionOwner.identity) && text(v.executionOwner.epoch)) ||
         !Array.isArray(v.extensionBindings) ||
         !v.extensionBindings.every(record) ||
         (v.mcpBinding !== null && !record(v.mcpBinding)) ||
@@ -517,27 +662,28 @@ export class ToolBridge {
           'kernelEpoch',
           'parentRunId',
           'childOperationId',
+          'executionOwner',
+          'executionEpoch',
           'mcpBinding',
           'extensionBindings',
         ])
       )
         return true;
-      let ok = false;
-      try {
-        ok = this.#retainChild(
-          v.parentRunId,
-          v.childOperationId,
-          v.mcpBinding as McpBinding | null,
-          v.extensionBindings as unknown as ExtensionToolBinding[],
-        );
-      } catch {
-        /* Malformed or unavailable original bindings cannot establish a handoff. */
-      }
-      void this.#reply(
-        { id: v.id, kernelEpoch: String(v.kernelEpoch) },
-        ok
+      const request = { id: v.id, kernelEpoch: String(v.kernelEpoch) };
+      void this.#retainChild(
+        v.id,
+        { parentRunId: v.parentRunId, operationId: v.childOperationId,
+          executionOwner: structuredClone(v.executionOwner) as ExecutorOwner,
+          executionEpoch: v.executionEpoch as number },
+        structuredClone(v.mcpBinding) as McpBinding | null,
+        structuredClone(v.extensionBindings) as unknown as ExtensionToolBinding[],
+      ).then(
+        ok => this.#reply(request, ok
           ? { ok }
-          : { ok, error: { code: 'child_tool_original_owner_unavailable' } },
+          : { ok, error: { code: 'child_tool_original_owner_unavailable' } }),
+        error => this.#reply(request, { ok: false,
+          error: { code: error instanceof AggregateError && error.message === 'host_tool_child_release_failed'
+            ? 'host_tool_child_release_failed' : 'child_tool_original_owner_unavailable' } }),
       );
       return true;
     }
@@ -621,8 +767,12 @@ export class ToolBridge {
         text(v.runId) &&
         exact(v, ['v', 'kind', 'id', 'kernelEpoch', 'runId'])
       )
-        for (const e of this.#owners.get(v.runId)?.values() ?? [])
+        for (const e of this.#owners.get(v.runId)?.values() ?? []) {
           e.active.get(v.id)?.abort();
+          for (const holder of e.childHolders.values())
+            if (!holder.accepted && holder.requests.has(v.id) && !holder.releaseRequested)
+              this.#observeChildRelease(this.#releaseChildHolder(holder));
+        }
       return true;
     }
     if (

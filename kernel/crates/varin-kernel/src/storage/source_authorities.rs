@@ -224,6 +224,7 @@ impl Storage {
             materialization_operation_id: format!("source-materialize:{key}"),
             mcp_holders: Vec::new(),
             mcp_deliveries: Vec::new(),
+            mcp_children: Vec::new(),
         };
         let record = AuthorityRecord {
             principal_id: p.principal_id,
@@ -449,8 +450,10 @@ impl Storage {
                     .filter(|holder| !holder.released).cloned().collect();
                 let deliveries: Vec<_> = record.result.mcp_deliveries.iter()
                     .filter(|delivery| !delivery.released).cloned().collect();
+                let children: Vec<_> = record.result.mcp_children.iter()
+                    .filter(|child| !child.released).cloned().collect();
                 return Ok(json!({"authorityId":address.authority_id,"phase":"retaining","grantIds":[],
-                    "receipt":{"retainedMcpHolders":retained,"retainedMcpDeliveries":deliveries}}));
+                    "receipt":{"retainedMcpHolders":retained,"retainedMcpDeliveries":deliveries,"retainedMcpChildren":children}}));
             }
         }
         let receipt = match mode {
@@ -494,7 +497,8 @@ impl Storage {
         }
         record.result.phase = if record.purpose == "mcp_owner"
             && (record.result.mcp_holders.iter().any(|holder| !holder.released)
-                || record.result.mcp_deliveries.iter().any(|delivery| !delivery.released))
+                || record.result.mcp_deliveries.iter().any(|delivery| !delivery.released)
+                || record.result.mcp_children.iter().any(|child| !child.released))
         {
             "retaining"
         } else {
@@ -583,6 +587,7 @@ impl Storage {
             if record.result.phase == "retaining"
                 && record.result.mcp_holders.iter().all(|holder| holder.released)
                 && record.result.mcp_deliveries.iter().all(|delivery| delivery.released)
+                && record.result.mcp_children.iter().all(|child| child.released)
             {
                 record.result.phase = "draining".into();
             }

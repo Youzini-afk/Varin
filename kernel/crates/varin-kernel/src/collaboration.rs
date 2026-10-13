@@ -328,8 +328,22 @@ impl ToolExecutor for CollaborationTools {
                     if cancel.is_cancelled() {
                         return Err(error("collaboration cancelled"));
                     }
+                    // Catalog's metadata read preserves the original dispatch's real owner;
+                    // a Host lease is a dependency, never a replacement executor identity.
+                    let operation = self.catalog.lock().map_err(error)?
+                        .operation(&c.operation_id).map_err(error)?;
+                    if operation.id != c.operation_id || operation.run_id != c.run_id {
+                        return Err(error("dispatch operation identity changed"));
+                    }
+                    let child_binding = crate::source_resources::SourceMcpChildBinding {
+                        operation_id: operation.id,
+                        parent_run_id: operation.run_id,
+                        execution_owner: operation.execution_owner
+                            .ok_or_else(|| error("dispatch operation owner missing"))?,
+                        execution_epoch: operation.epoch,
+                    };
                     let retained = self.host.retain_child(
-                        c,
+                        &child_binding,
                         resolved.mcp_binding.as_ref(),
                         &resolved.extension_bindings,
                         cancel,

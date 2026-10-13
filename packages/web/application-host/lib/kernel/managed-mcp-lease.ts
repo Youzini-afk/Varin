@@ -7,12 +7,16 @@ import { compileToolJsonSchema } from '@varin/pi-host/tool-schema';
 import type { ManagedSourceAccess } from './managed-source-consumers.js';
 import { createManagedMcpTaskLease } from './managed-mcp-task-lease.js';
 import { createManagedMcpResourceObserver, requestManagedMcpResource } from './managed-mcp-resource-observer.js';
-import type { McpBinding, McpEndpoint, SourceResourceOwner } from './protocol.generated.js';
+import type { McpBinding, McpEndpoint, SourceResourceOwner, SourceMcpChildBinding, SourceMcpChildResult } from './protocol.generated.js';
 import type { ManagedMcpAction, ManagedMcpSnapshot, ManagedMcpRevocations } from '../harness/managed-mcp-contract.js';
 import { isManagedMcpRevocations } from '../harness/managed-mcp-contract.js';
+import { releaseManagedChildReference } from './managed-mcp-child-retention.js';
 
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const fail = (code: string): never => { throw new McpAuthorityError(code); };
+export interface ManagedMcpLease extends McpAuthorityLease {
+  retainChild(binding: SourceMcpChildBinding, selection: McpBinding): Promise<{ release(): Promise<void> }>;
+}
 export async function createManagedMcpLease(input: {
   access: ManagedSourceAccess;
   interactions?: Pick<import('./managed-mcp-interactions.js').ManagedMcpInteractions, 'ensure'>;
@@ -22,7 +26,7 @@ export async function createManagedMcpLease(input: {
   lifetime: AbortSignal;
   observeRevocations(handleId: string, receive: (facts: ManagedMcpRevocations) => void): () => void;
   signal?: AbortSignal;
-}): Promise<{ lease: McpAuthorityLease; snapshot: ManagedMcpSnapshot }> {
+}): Promise<{ lease: ManagedMcpLease; snapshot: ManagedMcpSnapshot }> {
   const { access } = input;
   const handleId = `mcp-view:${randomUUID()}`;
   const creationRequestId = `mcp-prepare:${randomUUID()}`;
@@ -126,7 +130,26 @@ export async function createManagedMcpLease(input: {
       authorityId: access.binding.authorityId, resourceEpoch: access.binding.resourceEpoch }, origin,
       server: { ...selected, server }, ...(endpoint ? { endpoint } : {}) });
   };
-  const lease: McpAuthorityLease = {
+  const lease: ManagedMcpLease = {
+    async retainChild(binding, selection) {
+      assertLive();
+      const address = { coordinatorHostId: input.coordinatorHostId,
+        authorityId: access.binding.authorityId, resourceEpoch: access.binding.resourceEpoch };
+      const release = () => releaseManagedChildReference(access.client, address, binding);
+      try {
+        const retained = await call<SourceMcpChildResult & { live: boolean }>({ kind: 'child_retain', handleId, binding, selection });
+        if (retained?.live !== true || retained.reference?.released !== false
+          || !isDeepStrictEqual(retained.reference.binding, binding)) throw new Error('mcp_child_original_definition_unavailable');
+        return { release };
+      } catch (error) {
+        // Original acceptance may be durable despite a lost reply. Retire that
+        // exact reference; the Catalog's original dispatch duty retries a failure.
+        try { await release(); } catch (cleanup) {
+          throw new AggregateError([error, cleanup], 'Original MCP child retention cleanup failed');
+        }
+        throw error;
+      }
+    },
     binding: snapshot.binding, implementationIdentity: `${snapshot.incarnation}:${snapshot.implementationIdentity}`,
     inspect: () => { assertLive(); return snapshot.binding.readiness; },
     discover: async (server, signal) => admitTools(await call({ kind: 'discover', handleId, server }, signal)),

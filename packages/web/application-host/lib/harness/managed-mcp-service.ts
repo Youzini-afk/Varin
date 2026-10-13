@@ -1,14 +1,15 @@
 /** Target-side contribution views over the existing MCP authority. Catalog stays on A. */
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import type { McpAuthorityLease, McpAuthorityScope, McpAuthorityTool, McpAuthorityService, McpTransport, McpInteractionRequest, McpErrorInteraction } from '@varin/pi-host/mcp-authority';
+import type { McpCompositionSnapshot, McpAuthorityScope, McpAuthorityTool, McpAuthorityService, McpTransport, McpInteractionRequest, McpErrorInteraction } from '@varin/pi-host/mcp-authority';
 import type { McpCompositions, McpCompositionScope } from '@varin/pi-host/mcp-authority';
 import type { ManagedSourceLocalScope, ManagedSourceCleanupScope } from './managed-remote-types.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
 import { createManagedMcpTasks, mcpTaskFailure } from './managed-mcp-tasks.js';
+import { createManagedMcpChildren } from './managed-mcp-children.js';
 import { createManagedMcpResources } from './managed-mcp-resources.js';
 import { createManagedMcpInteractions } from './managed-mcp-interactions.js';
-import { isManagedMcpTaskContinuation, isManagedMcpResourceContinuation, isManagedMcpInteractionContinuation } from './managed-mcp-contract.js';
+import { isManagedMcpChildContinuation, isManagedMcpTaskContinuation, isManagedMcpResourceContinuation, isManagedMcpInteractionContinuation } from './managed-mcp-contract.js';
 import type { ManagedMcpAction, ManagedMcpReply, ManagedMcpSnapshot, ManagedMcpRevocations } from './managed-mcp-contract.js';
 class ManagedMcpAdmissionError extends Error {
   readonly dispatched = false;
@@ -16,8 +17,8 @@ class ManagedMcpAdmissionError extends Error {
 }
 
 interface View {
-  work: Promise<McpAuthorityLease>;
-  lease?: McpAuthorityLease;
+  work: Promise<McpCompositionSnapshot>;
+  lease?: McpCompositionSnapshot;
   selection: string;
   creationRequestId: string;
   tools: Map<string, McpAuthorityTool>;
@@ -103,6 +104,7 @@ export function createManagedMcpService(options: {
     };
     await beforeDispatch(); return { lease: await view.work, beforeDispatch };
   };
+  const children = options.kernel ? createManagedMcpChildren({ kernel: options.kernel, view: originalView }) : undefined;
   const tasks = options.kernel ? createManagedMcpTasks({ kernel: options.kernel, view: originalView }) : undefined;
   const resources = options.kernel ? createManagedMcpResources({ kernel: options.kernel, view: originalView }) : undefined;
   const interactions = options.kernel ? createManagedMcpInteractions({ kernel: options.kernel,
@@ -117,7 +119,10 @@ export function createManagedMcpService(options: {
   };
   const release = async (scope: Address, options?: { retainMcpHolders: boolean }) => {
     const key = keyOf(scope), owner = owners.get(key);
-    if (!owner) return { executorStopped: false, taskControlsDrained: true };
+    if (!owner) {
+      if (!options?.retainMcpHolders) await children?.close(scope);
+      return { executorStopped: false, taskControlsDrained: true };
+    }
     if (owner.closing) return owner.closing;
     owner.sealed = true;
     if (options?.retainMcpHolders) {
@@ -134,7 +139,7 @@ export function createManagedMcpService(options: {
     const views = [...owner.views.values()]; owner.views.clear();
     owner.closing = (async () => {
       const interactionClosing = interactions?.close(scope);
-      await Promise.all([tasks?.close(scope), resources?.close(scope)]);
+      await Promise.all([tasks?.close(scope), resources?.close(scope), children?.close(scope)]);
       await Promise.allSettled(views.map(async view => (await view.work).release()));
       // Native processes carry their own Storage tree receipts even if SDK close swallows an error.
       const results = await Promise.allSettled([owner.composition.then(composition => composition.releaseAndDrain(), error => {
@@ -162,6 +167,11 @@ export function createManagedMcpService(options: {
     // A view release carries no new effect authority. Source retirement also calls release().
     if (action.kind === 'release') {
       await releaseView(scope, action); return null;
+    }
+    if (isManagedMcpChildContinuation(action)) return continueChild(scope, action, signal);
+    if (action.kind === 'child_retain') {
+      if (!children) throw new ManagedMcpAdmissionError('mcp_child_source_unavailable');
+      return children.retain(scope, action, signal);
     }
     if (isManagedMcpTaskContinuation(action)) return continueTask(scope, action, signal);
     if (isManagedMcpResourceContinuation(action)) return continueResource(scope, action, signal);
@@ -281,6 +291,10 @@ export function createManagedMcpService(options: {
     const project = await options.admitWorkspaceRegistration(authority.source.workspace_id, signal);
     if (!options.projectTrusted(project.canonicalPath)) throw new ManagedMcpAdmissionError('mcp_source_authority_denied');
   };
+  const continueChild = async (scope: Address, action: Extract<ManagedMcpAction, { kind: 'child_inspect' | 'child_release' }>, signal: AbortSignal) => {
+    if (!children) throw new ManagedMcpAdmissionError('mcp_child_source_unavailable');
+    return action.kind === 'child_inspect' ? children.inspect(scope, action.binding, signal) : children.release(scope, action.binding);
+  };
   const continueResource = async (scope: Address, action: Extract<ManagedMcpAction, { kind: 'resource_inspect' | 'resource_watch' | 'resource_release' }>, signal: AbortSignal) => {
     if (!resources) throw new ManagedMcpAdmissionError('mcp_resource_source_unavailable');
     if (action.kind === 'resource_inspect') return resources.inspect(scope, action.binding, action.fenceUnstarted, signal);
@@ -342,6 +356,10 @@ export function createManagedMcpService(options: {
       });
     },
     release, releaseView,
+    childContinuation(scope: ManagedSourceCleanupScope,
+      action: Extract<ManagedMcpAction, { kind: 'child_inspect' | 'child_release' }>, signal?: AbortSignal) {
+      return reply(() => continueChild(scope, action, signal ?? new AbortController().signal));
+    },
     close: () => Promise.allSettled([...owners.values()].map(owner => release(owner.scope))),
     taskContinuation(scope: ManagedSourceCleanupScope,
       action: Extract<ManagedMcpAction, { kind: 'task_inspect' | 'task_get' | 'task_result' | 'task_cancel' | 'task_release' }>, signal?: AbortSignal) {

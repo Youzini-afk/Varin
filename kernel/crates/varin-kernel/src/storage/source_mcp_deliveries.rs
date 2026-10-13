@@ -316,6 +316,7 @@ impl Storage {
                 .mcp_deliveries
                 .iter()
                 .all(|delivery| delivery.released)
+            && record.result.mcp_children.iter().all(|child| child.released)
         {
             record.result.phase = "draining".into();
             changed = true;

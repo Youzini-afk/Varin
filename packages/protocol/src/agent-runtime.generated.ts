@@ -1391,7 +1391,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 35; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 36; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -2362,12 +2362,19 @@ export interface KernelWorkingResultCandidate {
   basePinId: string;
 }
 
-export interface UnacceptedChildSource {
-  operation_id: string;
-  parent_thread_id: string;
+export interface UnacceptedChildSourcePin {
   source: LaunchSource;
   pin_id: string;
+}
+
+export interface UnacceptedChildDependencies {
+  operation_id: string;
+  parent_thread_id: string;
   parent_run_id: string;
+  execution_owner: ExecutorOwner;
+  execution_epoch: number;
+  source_pin: UnacceptedChildSourcePin | null;
+  mcp_binding: McpBinding | null;
 }
 
 export interface ChildSourceHandoff {
@@ -2910,6 +2917,8 @@ export interface McpEndpoint {
   configurationVersion: string;
   credentialVersion: string;
 }
+
+export interface SourceMcpCreationError { code:string;dispatched:boolean;settlement:'unknown'|'session_expired'|'rpc_response';taskKind?:'protocol'|'transport'|'unsupported'|'owner';rpcCode?:number;protocolError?:Record<string,unknown>;interactionProblem?:string; }
 
 export type SourceResourceOwner = {kind: 'local'} | {kind: 'managed_host'; hostId: string; connectionId: string; endpointIdentity: string};
 

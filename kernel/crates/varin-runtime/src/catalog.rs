@@ -1547,7 +1547,10 @@ impl Catalog {
                 let preserve_dispatch_epoch = matches!(
                     op.effect,
                     Effect::Dispatched | Effect::Partial | Effect::Unknown
-                );
+                ) || op.phase == OperationPhase::Running && op.execution_owner.is_some();
+                // Recovery terminates an already running read-only executor too.
+                // Its original dependency/stop receipts still bind this epoch;
+                // Effect::None does not mean it may be readmitted under a new one.
                 // A live user's one-action decision cannot survive its authorizing owner.
                 if op.effect == Effect::None && op.result.as_ref().is_some_and(|v| matches!(v, OperationResultMetadata::Control { value } if value.get("permission").is_some())) {
                     if let Some(wait_id) = &op.waiting_on {

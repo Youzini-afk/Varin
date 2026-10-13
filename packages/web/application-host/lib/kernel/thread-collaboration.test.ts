@@ -49,7 +49,7 @@ function fixture(owner: 'local' | 'managed' = 'managed') {
   };
   const runtime = {
     coordinatorHostId: 'coordinator-A', onEvent: () => () => {}, onExit: () => () => {}, onReady: () => () => {},
-    reconcileObservations: async () => [], children: async () => [], unacceptedChildSources: async () => [],
+    reconcileObservations: async () => [], children: async () => [], unacceptedChildDependencies: async () => [],
     childExecutions: async () => [structuredClone(child)], childExecution: async () => structuredClone(child),
     status: async () => ({ eventCursor: 0 }), events: async () => [],
     managedSource: vi.fn(async () => service), releaseMcpResourceSource: vi.fn(async () => { trace.push('observers-released'); }),

@@ -214,13 +214,16 @@ impl ToolBridge {
     /// Transfer only live retention from this request's original owners. No service is prepared here.
     pub(crate) fn retain_child(
         &self,
-        context: &ToolExecutionContext,
+        binding: &crate::source_resources::SourceMcpChildBinding,
         mcp: Option<&McpBinding>,
         extensions: &[varin_runtime::catalog::launches::ExtensionToolBinding],
         cancel: &CancellationToken,
     ) -> Result<Option<ChildHostRetention>, ExecutionError> {
         if mcp.is_none() && extensions.is_empty() {
             return Ok(None);
+        }
+        if !binding.validate() {
+            return Err(failed("child_retention_binding_invalid"));
         }
         if cancel.is_cancelled() {
             return Err(failed("child_retention_cancelled"));
@@ -246,14 +249,15 @@ impl ToolBridge {
         let retained = ChildHostRetention {
             bridge: self.clone(),
             epoch: epoch.clone(),
-            parent_run_id: context.run_id.clone(),
-            operation_id: context.operation_id.clone(),
+            parent_run_id: binding.parent_run_id.clone(),
+            operation_id: binding.operation_id.clone(),
             armed: true,
         };
         let result = (|| {
             self.send(
                 json!({"v":1,"kind":"host-tool-child-retain","id":id,"kernelEpoch":epoch,
-                "parentRunId":context.run_id,"childOperationId":context.operation_id,
+                "parentRunId":binding.parent_run_id,"childOperationId":binding.operation_id,
+                "executionOwner":binding.execution_owner,"executionEpoch":binding.execution_epoch,
                 "mcpBinding":mcp,"extensionBindings":extensions}),
             )?;
             loop {
@@ -1101,8 +1105,14 @@ mod tests {
             let worker_bridge = bridge.clone();
             let (done, result) = mpsc::channel();
             std::thread::spawn(move || {
+                let binding = crate::source_resources::SourceMcpChildBinding {
+                    operation_id: context.operation_id,
+                    parent_run_id: context.run_id,
+                    execution_owner: ExecutorOwner::Kernel,
+                    execution_epoch: 37,
+                };
                 let retained =
-                    worker_bridge.retain_child(&context, None, &[original], &worker_cancel);
+                    worker_bridge.retain_child(&binding, None, &[original], &worker_cancel);
                 let ok = retained.is_ok();
                 if outcome == "accepted" {
                     retained.unwrap().unwrap().handoff();
@@ -1115,6 +1125,8 @@ mod tests {
             assert_eq!(request["kind"], "host-tool-child-retain");
             assert_eq!(request["parentRunId"], "original-parent");
             assert_eq!(request["childOperationId"], "request:tool:dispatch");
+            assert_eq!(request["executionOwner"], json!({"kind":"kernel"}));
+            assert_eq!(request["executionEpoch"], 37);
             assert!(request["mcpBinding"].is_null());
             assert_eq!(request["extensionBindings"].as_array().unwrap().len(), 1);
             assert!(
@@ -1162,7 +1174,17 @@ mod tests {
         };
         assert!(
             bridge
-                .retain_child(&context, None, &[], &CancellationToken::default())
+                .retain_child(
+                    &crate::source_resources::SourceMcpChildBinding {
+                        operation_id: context.operation_id,
+                        parent_run_id: context.run_id,
+                        execution_owner: ExecutorOwner::Kernel,
+                        execution_epoch: 37,
+                    },
+                    None,
+                    &[],
+                    &CancellationToken::default(),
+                )
                 .unwrap()
                 .is_none(),
             "native dispatch needs no Host channel"
