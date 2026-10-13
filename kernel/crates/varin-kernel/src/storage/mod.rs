@@ -53,6 +53,7 @@ pub(crate) mod process_interactions;
 mod process_resources;
 mod records;
 mod recovery;
+mod recovery_journal;
 pub(crate) mod result_publication;
 mod state_tree;
 

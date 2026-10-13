@@ -106,7 +106,7 @@ describe('Web Application Host workspace recovery service', () => {
       executionId: 'service-execution-1',
       provenance: 'caused-by',
       runtimeGeneration: 1,
-      sessionId: 'service-session-1',
+      conversation: { kind: 'pi', sessionId: 'service-session-1' },
       userEntryId: 'service-user-1',
       workerId: 'worker-1',
       workspaceId: activeHarness.identity.workspaceId,
@@ -137,7 +137,7 @@ describe('Web Application Host workspace recovery service', () => {
     expect(settled).toMatchObject({ status: 'ready', binding: { status: 'ready' } });
     expect(await api.resolveEntry({
       entryId: 'service-assistant-1',
-      sessionId: 'service-session-1',
+      conversation: { kind: 'pi', sessionId: 'service-session-1' },
       workspaceId: activeHarness.identity.workspaceId,
     })).toMatchObject({ position: 'after', status: 'ready' });
     const checkpoint = await api.createCheckpoint({
@@ -163,7 +163,7 @@ describe('Web Application Host workspace recovery service', () => {
       .toMatchObject({ status: 'ready', retention: { workspaceId: activeHarness.identity.workspaceId } });
     const combined = await api.prepareCombinedRecovery({
       entryId: 'service-user-1',
-      sessionId: 'service-session-1',
+      conversation: { kind: 'pi', sessionId: 'service-session-1' },
       workspaceId: activeHarness.identity.workspaceId,
     });
     expect(combined).toMatchObject({

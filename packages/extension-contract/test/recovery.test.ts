@@ -25,7 +25,7 @@ const checkpoint = () => ({
   executionId: "execution-1",
   id: "checkpoint-1",
   sequence: 1,
-  sessionId: "session-1",
+  conversation: { kind: "pi", sessionId: "session-1" },
   source: "turn",
   state: "ready",
   workspaceId: "workspace-1",
@@ -33,7 +33,7 @@ const checkpoint = () => ({
 
 test("owns the affected-file journal service version", () => {
   assert.equal(VARIN_WORKSPACE_RECOVERY_SERVICE_ID, "varin.workspace-recovery");
-  assert.equal(VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION, 5);
+  assert.equal(VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION, 6);
   assert.equal(parseWorkspaceRecoveryCheckpointSummary(checkpoint()).changedPathCount, 1);
 });
 
@@ -125,7 +125,7 @@ test("keeps mutation boundaries, turn binding coverage, and entry binding explic
     provenance: "caused-by",
     runtimeGeneration: 1,
     runtimeKey: "worker-1@1",
-    sessionId: "session-1",
+    conversation: { kind: "pi", sessionId: "session-1" },
     startedAt: "2026-08-30T00:00:00.000Z",
     status: "ready",
     unrecordedResourceIds: [],
@@ -155,7 +155,7 @@ test("plans only affected paths and keeps conflict handling explicit", () => {
     id: "operation-1",
     removedEntryIds: ["user-1", "assistant-1"],
     revision: `sha256-${"a".repeat(64)}`,
-    sessionId: "session-1",
+    conversation: { kind: "pi", sessionId: "session-1" },
     targetLeafId: "leaf-1",
     uncoveredPaths: [],
     uncoveredReasons: [],
@@ -185,7 +185,7 @@ test("plans only affected paths and keeps conflict handling explicit", () => {
   }), WorkspaceRecoveryContractError);
 });
 
-test("browser-safe API invokes only the v5 checkpoint method", async () => {
+test("browser-safe API invokes the v6 checkpoint method", async () => {
   const requests: unknown[] = [];
   const api = createWorkspaceRecoveryAPI(async (request) => {
     requests.push(request);
@@ -197,6 +197,6 @@ test("browser-safe API invokes only the v5 checkpoint method", async () => {
     args: [{ workspaceId: "workspace-1" }],
     method: "listCheckpoints",
     serviceId: "varin.workspace-recovery",
-    version: 5,
+    version: 6,
   }]);
 });

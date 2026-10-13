@@ -14,6 +14,7 @@ import { UnconfirmedIntegrationCommitError } from '../recovery/durable-file-oper
 
 export const CHILD_INTEGRATION_CAPABILITY = 'collaboration.integrations';
 export interface IntegrationTargetScope {
+  executionId: string;
   directory: string;
   documentWorkspaceId: string;
   workingStates: WorkspaceWorkingStateRootAccess;
@@ -77,7 +78,7 @@ export function createIntegrationToolOwner(options: IntegrationToolOwnerOptions)
             root: result.root, publicationId: result.publication_id }, target: authority.source as LaunchSource };
         admitted = { operationId: `integration:${authority.operationId}`, workspaceId: result.workspace_id,
           threadId: child.child_thread_id, branchId: result.branch_id, resultRevision: result.result_revision,
-          operationBinding, scopedWorkingStates: target.workingStates, signal: context.signal,
+          operationBinding, executionId: target.executionId, requireTurnBinding: true, scopedWorkingStates: target.workingStates, signal: context.signal,
           parentAuthority: { kind: 'directory', directory: target.directory, workspaceId: target.documentWorkspaceId } };
         context.signal.throwIfAborted();
         enteredCoordinator = true;
@@ -121,6 +122,7 @@ export function createIntegrationTargetOpener(options: {
 }): IntegrationToolOwnerOptions['openTarget'] {
   return async (invocation, launch, signal) => {
     const selected = physicalSourceLaunch(invocation.runId, launch);
+    if (selected.mode === "fixed_branch") throw new Error("Integration requires its original physical source");
     const admitted = await admitRunSourceAuthority(options.kernel, options.runtime, selected,
       { signal, resolveLiveSource: options.resolveLiveSource, purpose: 'integration', operationId: invocation.operationId });
     try {
@@ -135,6 +137,10 @@ export function createIntegrationTargetOpener(options: {
       if (authority.rootId !== admitted.rootId) throw new Error('Integration file root changed');
       const bindings = createScopedKernelRecoveryBindings(options.storage, { authority, threadId: invocation.threadId,
         runId: invocation.runId, storageRoot: options.kernel.handshake!.storageRoot, metadataReader: options.metadataReader });
+      const anchor = await options.runtime.journalAnchor(invocation.operationId, signal);
+      if (anchor.runId !== invocation.runId || anchor.threadId !== invocation.threadId) throw new Error('Integration checkpoint belongs to another Run');
+      await bindings.durableRecoveryStore.recordTurnStart({ workspaceId:selected.workspaceId, conversation:{kind:'thread',threadId:anchor.threadId,branchId:anchor.branchId}, executionId:anchor.executionId, runId:anchor.runId, userEntryId:anchor.entryId, workerId:'kernel',runtimeGeneration:anchor.epoch,activeWriterScopes:[],provenance:'caused-by',
+        fileTarget:{kind:'physical',workspaceId:selected.workspaceId,threadId:anchor.threadId,runId:anchor.runId,rootId:authority.rootId,canonicalRoot:authority.canonicalRoot,executionWorkspaceId:selected.executionWorkspaceId,sourceMode:selected.mode} });
       const context = await options.storage.contextFromGrant({ grant: admitted.grant,
         owningWorkspaceId: selected.workspaceId, executionWorkspaceId: selected.executionWorkspaceId,
         rootId: admitted.rootId, canonicalRoot: admitted.canonicalRoot, ...bindings });
@@ -148,7 +154,7 @@ export function createIntegrationTargetOpener(options: {
         },
       };
       signal.throwIfAborted();
-      return { directory: admitted.canonicalRoot, documentWorkspaceId: documentWorkspace.workspaceId,
+      return { executionId: anchor.executionId, directory: admitted.canonicalRoot, documentWorkspaceId: documentWorkspace.workspaceId,
         workingStates, release: admitted.release };
     } catch (error) { await admitted.release(); throw error; }
   };

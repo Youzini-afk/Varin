@@ -806,6 +806,24 @@ export class AgentRuntimeClient {
       signal,
     );
   }
+  journalAnchor(operationId: string, signal?: AbortSignal): Promise<import('./protocol.generated.js').RecoveryAnchor> {
+    return this.kernel.agentRuntimeRequest('runtime.operation.recovery.anchor', { operationId }, signal);
+  }
+  recoveryWorkspaces(input: { threadId: string; branchId: string }, signal?: AbortSignal): Promise<string[]> {
+    return this.kernel.agentRuntimeRequest('runtime.branch.recovery.workspaces', input, signal);
+  }
+  recoveryRange(input: import('./protocol.generated.js').NavigationSelectParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').RecoveryRangeTurn[]> {
+    return this.kernel.agentRuntimeRequest('runtime.branch.recovery.range', input, signal);
+  }
+  prepareNavigation(input: import('./protocol.generated.js').NavigationSelectParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').NavigationSelection> {
+    return this.kernel.agentRuntimeRequest('runtime.branch.navigation.prepare', input, signal);
+  }
+  navigate(input: import('./protocol.generated.js').NavigationParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').NavigationReceipt> {
+    return this.kernel.agentRuntimeRequest('runtime.branch.navigate', input, signal);
+  }
+  navigationReceipt(input: import('./protocol.generated.js').NavigationReceiptParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').NavigationReceipt | null> {
+    return this.kernel.agentRuntimeRequest('runtime.branch.navigation.receipt', input, signal);
+  }
   forkBranch(
     sourceBranchId: string,
     branchId: string,

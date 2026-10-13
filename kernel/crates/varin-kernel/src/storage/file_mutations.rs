@@ -106,10 +106,7 @@ fn edit_original(text: &str, edits: &[TextEdit]) -> Result<String, KernelError> 
     result.push_str(&text[cursor..]);
     Ok(result)
 }
-fn edit_preserving_line_endings(
-    text: &str,
-    edits: &[TextEdit],
-) -> Result<String, KernelError> {
+fn edit_preserving_line_endings(text: &str, edits: &[TextEdit]) -> Result<String, KernelError> {
     match edit_original(text, edits) {
         Ok(value) => Ok(value),
         Err(original_error) => {
@@ -145,6 +142,8 @@ impl Storage {
         operation_id: &str,
         mutation: &TextMutation,
         grant: &Grant,
+        journal: Option<&varin_runtime::catalog::journal::JournalAnchor>,
+        source_mode: varin_runtime::SourceMode,
         execute: bool,
         dispatched: &mut bool,
     ) -> Result<Value, KernelError> {
@@ -190,12 +189,7 @@ impl Storage {
                 ));
             }
             if prior["state"] == "committed" {
-                return self.mutation_receipt(
-                    receipt.clone(),
-                    grant,
-                    root_id,
-                    &resource.path,
-                );
+                return self.mutation_receipt(receipt.clone(), grant, root_id, &resource.path);
             }
             // Existing file.apply intents retain the exact expected/target states
             // and object owner. Reuse them, never calculate an edit a second time.
@@ -232,7 +226,7 @@ impl Storage {
                 _ => {
                     return Err(KernelError::Operation(
                         "text mutation requires a regular file or a missing write target".into(),
-                    ))
+                    ));
                 }
             };
             let previous_text = if matches!(expected, FileState::RegularFile { .. }) {
@@ -297,28 +291,95 @@ impl Storage {
                     return Err(error);
                 }
             };
-            let owner = stored["ownerId"].as_str().ok_or_else(|| {
-                KernelError::Storage("content upload omitted owner".into())
-            })?;
+            let owner = stored["ownerId"]
+                .as_str()
+                .ok_or_else(|| KernelError::Storage("content upload omitted owner".into()))?;
             let target = FileState::RegularFile {
                 object_hash: stored["hash"]
                     .as_str()
-                    .ok_or_else(|| {
-                        KernelError::Storage("content upload omitted hash".into())
-                    })?
+                    .ok_or_else(|| KernelError::Storage("content upload omitted hash".into()))?
                     .into(),
                 byte_length: content.len() as u64,
                 mode,
             };
-            let params = json!({"workspaceId":workspace_id,"operationId":operation_id,"rootId":root_id,"path":resource.path,
+            let mut before_owner = None;
+            let prepared = (|| {
+                let turn = journal
+                    .map(|anchor| {
+                        self.prepare_journal_turn(workspace_id, root_id, anchor, source_mode, grant)
+                    })
+                    .transpose()?;
+                if turn.is_some() {
+                    if let Some(text) = &previous_text {
+                        let stream = format!("journal-before-{}", Uuid::new_v4());
+                        let upload = json!({"workspaceId":workspace_id,"operationId":format!("journal-before:{operation_id}"),"streamId":stream,"byteLength":text.len()});
+                        self.begin_blob_stream(&upload, &grant.grant_id)?;
+                        let uploaded = (|| {
+                            for (sequence, bytes) in text.as_bytes().chunks(65536).enumerate() {
+                                self.stream_blob_bytes(
+                                    &stream,
+                                    sequence as u64,
+                                    bytes,
+                                    &grant.grant_id,
+                                )?;
+                            }
+                            self.finish_blob_stream(&upload, &grant.grant_id)
+                        })();
+                        let stored = match uploaded {
+                            Ok(value) => value,
+                            Err(error) => {
+                                let _ = self.abort_blob_stream(&upload, &grant.grant_id);
+                                return Err(error);
+                            }
+                        };
+                        before_owner = stored["ownerId"].as_str().map(str::to_string);
+                        if serde_json::to_value(&expected)?["objectHash"] != stored["hash"] {
+                            return Err(KernelError::Storage(
+                                "captured journal before-image differs".into(),
+                            ));
+                        }
+                    }
+                }
+                self.check_cancelled()?;
+                Ok(turn)
+            })();
+            let journal_turn = match prepared {
+                Ok(turn) => turn,
+                Err(error) => {
+                    for owner in [Some(owner), before_owner.as_deref()].into_iter().flatten() {
+                        let _ = self.release_object_owner(
+                            &json!({"ownerId":owner}),
+                            Some(workspace_id),
+                            &grant.grant_id,
+                        );
+                    }
+                    return Err(error);
+                }
+            };
+            let mut params = json!({"workspaceId":workspace_id,"operationId":operation_id,"rootId":root_id,"path":resource.path,
                 "leaseId":lease_id,"targetJson":serde_json::to_string(&target)?,"expectedJson":serde_json::to_string(&expected)?,
                 "ownerId":owner,"__nativeRequestHash":request_hash,"__nativeGrantId":grant.grant_id,"__nativeEpoch":grant.kernel_epoch});
+            if let Some(turn) = journal_turn {
+                params["__recoveryTurn"] = turn;
+                params["__recoveryBeforeOwner"] = json!(before_owner);
+                params["__recoveryTool"] = json!(match mutation {
+                    TextMutation::Write(_) => "file_write",
+                    TextMutation::Edit(_) => "file_edit",
+                });
+            }
             if let Err(error) = self.check_cancelled() {
                 let _ = self.release_object_owner(
                     &json!({"ownerId":owner}),
                     Some(workspace_id),
                     &grant.grant_id,
                 );
+                if let Some(before_owner) = &before_owner {
+                    let _ = self.release_object_owner(
+                        &json!({"ownerId":before_owner}),
+                        Some(workspace_id),
+                        &grant.grant_id,
+                    );
+                }
                 return Err(error);
             }
             *dispatched = true;
@@ -333,6 +394,20 @@ impl Storage {
                     Some(workspace_id),
                     &grant.grant_id,
                 );
+            }
+            // The journal consumes this owner with its before-image reference. A pre-intent failure owns no durable reference.
+            if applied.is_err()
+                && self
+                    .operation_get(&json!({"operationId":operation_id}))?
+                    .is_null()
+            {
+                if let Some(before_owner) = &before_owner {
+                    let _ = self.release_object_owner(
+                        &json!({"ownerId":before_owner}),
+                        Some(workspace_id),
+                        &grant.grant_id,
+                    );
+                }
             }
             self.mutation_receipt(applied?, grant, root_id, &resource.path)
         })();

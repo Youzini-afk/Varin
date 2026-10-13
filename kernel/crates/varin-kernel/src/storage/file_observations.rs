@@ -82,7 +82,7 @@ fn denied(message: &str) -> KernelError {
     KernelError::Authorization(message.into())
 }
 impl Storage {
-    fn observation_process_idle(&mut self, target: &Path) -> Result<bool, KernelError> {
+    pub(super) fn observation_process_idle(&mut self, target: &Path) -> Result<bool, KernelError> {
         self.ensure_recovered_process_receipt_wake();
         let rows = {
             let mut query = self

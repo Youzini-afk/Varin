@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 24;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 25;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -136,6 +136,7 @@ pub(crate) const KERNEL_DEFERRED_RESPONSE_METHODS: &[&str] =
 pub(crate) const KERNEL_INPUT_ORDER_PARAMS: &[(&str, &str)] = &[
     ("runtime.thread.create", "branchId"),
     ("runtime.branch.fork", "branchId"),
+    ("runtime.branch.navigate", "branchId"),
     ("runtime.input.submit", "branchId"),
     ("runtime.input.enqueue", "branchId"),
     ("runtime.input.edit", "inputId"),
@@ -842,6 +843,40 @@ pub(crate) struct FollowupControlParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NavigationSelectParams {
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) entry_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NavigationParams {
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) key: String,
+    pub(crate) expected_head_id: RequiredNullable<String>,
+    pub(crate) target_head_id: RequiredNullable<String>,
+    pub(crate) undo_of: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NavigationReceiptParams {
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) key: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct OperationInspectParams {
+    pub(crate) operation_id: String,
+    pub(crate) allow_missing: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct BranchForkParams {
     pub(crate) source_branch_id: String,
     pub(crate) branch_id: String,
@@ -1151,13 +1186,6 @@ pub(crate) struct PermissionDecideParams {
 pub(crate) struct QuestionAnswerParams {
     pub(crate) operation_id: String,
     pub(crate) answer: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct OperationInspectParams {
-    pub(crate) operation_id: String,
-    pub(crate) allow_missing: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1511,6 +1539,7 @@ pub(crate) struct KernelFileCaptureBatchParams {
 pub(crate) struct KernelFileApplyParams {
     pub(crate) operation_id: String,
     pub(crate) workspace_id: String,
+    pub(crate) reservation_operation_id: Option<String>,
     pub(crate) root_id: String,
     pub(crate) path: String,
     pub(crate) target_json: String,
@@ -2011,7 +2040,9 @@ pub(crate) struct KernelRecoveryTurnStartParams {
     pub(crate) operation_id: String,
     pub(crate) workspace_id: String,
     pub(crate) execution_id: String,
-    pub(crate) session_id: String,
+    pub(crate) conversation: RecoveryConversation,
+    pub(crate) file_target: Option<std::collections::BTreeMap<String, Value>>,
+    pub(crate) run_id: Option<String>,
     pub(crate) user_entry_id: String,
     pub(crate) worker_id: String,
     pub(crate) runtime_generation: i64,
@@ -2025,7 +2056,7 @@ pub(crate) struct KernelRecoveryTurnStartParams {
 pub(crate) struct KernelRecoveryTurnGetParams {
     pub(crate) workspace_id: String,
     pub(crate) execution_id: String,
-    pub(crate) session_id: Option<String>,
+    pub(crate) conversation: Option<RecoveryConversation>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2065,7 +2096,7 @@ pub(crate) struct KernelRecoveryCheckpointListParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelRecoveryEntryResolveParams {
     pub(crate) workspace_id: String,
-    pub(crate) session_id: String,
+    pub(crate) conversation: RecoveryConversation,
     pub(crate) entry_id: String,
 }
 
@@ -2074,7 +2105,7 @@ pub(crate) struct KernelRecoveryEntryResolveParams {
 pub(crate) struct KernelRecoveryChangeBeforeParams {
     pub(crate) operation_id: String,
     pub(crate) workspace_id: String,
-    pub(crate) session_id: String,
+    pub(crate) conversation: RecoveryConversation,
     pub(crate) execution_id: String,
     pub(crate) checkpoint_id: String,
     pub(crate) path: String,
@@ -2096,7 +2127,7 @@ pub(crate) struct KernelRecoveryChangeGetParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelRecoveryChangeListParams {
     pub(crate) workspace_id: String,
-    pub(crate) session_id: Option<String>,
+    pub(crate) conversation: Option<RecoveryConversation>,
     pub(crate) execution_id: Option<String>,
     pub(crate) entry_ids: Option<Vec<String>>,
 }
@@ -2106,7 +2137,7 @@ pub(crate) struct KernelRecoveryChangeListParams {
 pub(crate) struct KernelRecoveryChangeAfterParams {
     pub(crate) operation_id: String,
     pub(crate) workspace_id: String,
-    pub(crate) session_id: String,
+    pub(crate) conversation: RecoveryConversation,
     pub(crate) execution_id: String,
     pub(crate) checkpoint_id: String,
     pub(crate) path: String,
@@ -2818,6 +2849,10 @@ pub(crate) struct KernelBranchChange {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct RecoveryConversation {}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelRecoveryReference {
     pub(crate) slot: String,
     pub(crate) object_hash: String,
@@ -3432,6 +3467,34 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         }
         "runtime.followup.control" => {
             serde_json::from_value::<FollowupControlParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.branch.recovery.range" => {
+            serde_json::from_value::<NavigationSelectParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.branch.navigation.prepare" => {
+            serde_json::from_value::<NavigationSelectParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.branch.navigate" => serde_json::from_value::<NavigationParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.branch.navigation.receipt" => {
+            serde_json::from_value::<NavigationReceiptParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.branch.recovery.workspaces" => {
+            serde_json::from_value::<NavigationReceiptParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.operation.recovery.anchor" => {
+            serde_json::from_value::<OperationInspectParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

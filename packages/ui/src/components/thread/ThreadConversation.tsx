@@ -20,6 +20,8 @@ import { ThreadPermission } from './ThreadPermission';
 import { ThreadQuestion } from './ThreadQuestion';
 import { ThreadMcpInteractions } from './ThreadMcpInteraction';
 import { ThreadSourcePicker } from './ThreadSourcePicker';
+import { useThreadRecovery } from './useThreadRecovery';
+import { ThreadRecovery } from './ThreadRecovery';
 import type { ImageAttachment, InferenceBinding, InferenceReceipt } from '@varin/protocol';
 import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachmentStrip';
 import { fileToImageAttachment } from '@/components/chat/composer/imageAttachments';
@@ -159,6 +161,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const [preparedSource, setPreparedSource] = React.useState<ThreadPreparedSource | null>(null);
   const [preparingSource, setPreparingSource] = React.useState(false);
   const [snapshotState, setSnapshot] = React.useState<ThreadSnapshot>();
+  const snapshotHost = React.useRef<number | undefined>(undefined);
   const [historyView, setHistoryView] = React.useState<ThreadHistoryPage | null>(null);
   const [historyLoading, setHistoryLoading] = React.useState(false);
   const historyGeneration = React.useRef(0);
@@ -185,7 +188,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   }, [api, host]);
   const [error, setError] = React.useState<string>();
   const [inputMode, setInputMode] = React.useState<'boundary' | 'interrupt' | 'next_run'>('boundary');
-  const [pending, setPending] = React.useState(false);
+  const [actionPending, setPending] = React.useState(false);
   const pendingAction = React.useRef<object | null>(null);
   const pendingInput = React.useRef<{ fingerprint: string; send(): Promise<unknown> } | undefined>(undefined);
   const projection = React.useRef<ThreadProjection | undefined>(undefined);
@@ -195,11 +198,11 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     setPreparedSource(null); setPreparingSource(false);
     pendingAction.current = null; setPending(false); setError(undefined);
     setSnapshot(undefined); setProgress(''); setImages([]); setReadingFiles(false); pendingInput.current = undefined; fileReadGeneration.current += 1;
-    const view = new ThreadProjection(api, identity, setSnapshot, value => setError(value instanceof Error ? value.message : 'Thread unavailable'), setProgress);
+    const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; setSnapshot(value); }, value => setError(value instanceof Error ? value.message : 'Thread unavailable'), setProgress);
     projection.current = view; view.start();
     return () => { identityGeneration.current += 1; historyGeneration.current += 1; fileReadGeneration.current += 1; view.close(); };
   }, [api, identity, host]);
-  const snapshot = snapshotState?.identity.threadId === identity.threadId && snapshotState?.identity.branchId === identity.branchId ? snapshotState : undefined;
+  const snapshot = snapshotHost.current === host && snapshotState?.identity.threadId === identity.threadId && snapshotState?.identity.branchId === identity.branchId ? snapshotState : undefined;
   const workRevision = snapshot ? JSON.stringify([snapshot.activeRun?.id, snapshot.activeRun?.state,
     snapshot.children?.map(child => [child.child_thread_id, child.state])]) : null;
   React.useEffect(() => { if (workRevision) onWorkChanged?.(); }, [workRevision, onWorkChanged]);
@@ -288,6 +291,13 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     messageInput.current?.focus();
   };
   const returnToLatest = () => { historyGeneration.current += 1; setHistoryView(null); setHistoryLoading(false); };
+  const recovery = useThreadRecovery({ api, identity, host, snapshot, disabled: readOnly || active || actionPending, onRecovered: async editor => {
+    returnToLatest(); pendingInput.current = undefined; setPreparedSource(null);
+    if (editor.editorText !== undefined) setText(editor.editorText);
+    if (editor.editorImages !== undefined) setImages(editor.editorImages);
+    await projection.current?.refresh();
+  } });
+  const pending = actionPending || recovery.blocked;
   const loadEarlier = async () => {
     if (!snapshot) return;
     const current = historyView ?? { ...snapshot.historyPage, items: snapshot.history };
@@ -350,6 +360,10 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         <div className="mb-1 text-xs text-muted-foreground">{item.source}</div>
         <ThreadContent api={api} identity={identity} holder={{ kind: 'history', itemId: item.id }} parts={historyParts(item.content, item.source)} messageId={item.id} />
         <ThreadSkillMaterials content={item.content} />
+        {!readOnly && (item.source === 'user' || item.source === 'assistant') && <Button variant="ghost" size="sm"
+          disabled={pending || active || !snapshot} title={active ? 'Stop the current run before restoring conversation history.' : undefined} onClick={() => void recovery.recover(item.id)}>
+          {item.source === 'user' ? 'Restore before this message' : 'Restore through this message'}
+        </Button>}
         {!readOnly && snapshot?.thread.bot_id && memorySelection && memoryHead && threadMemorySourceText(item) && <ThreadMemorySelection
           api={memorySelection} identity={{ ...identity, headId: memoryHead }} itemId={item.id} text={threadMemorySourceText(item)} />}
         <details className="mt-2 text-xs text-muted-foreground">
@@ -417,6 +431,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         onSave={(text, images) => act(() => images === undefined ? api.editInput(input.id, input.revision, text) : api.editInput(input.id, input.revision, text, images))}
         onCancel={() => act(() => api.cancelInput(input.id, input.revision), true)} />)}
     </div>
+    {!readOnly && <ThreadRecovery recovery={recovery} disabled={active || actionPending} />}
     {snapshot && <ThreadMemory key={identity.threadId} identity={identity} botId={snapshot.thread.bot_id} basis={snapshot.context.checkpoint?.personalization} />}
     {!readOnly && snapshot?.context.checkpoint && <ThreadResources checkpoint={snapshot.context.checkpoint} pending={pending}
       onAddSkill={addSkill}
@@ -448,7 +463,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     {readOnly && error && <p role="alert" className="px-4 text-sm text-destructive">{error}</p>}
     {!readOnly && <form className="mx-auto w-full max-w-3xl space-y-2 p-4" onSubmit={event => {
       event.preventDefault();
-      if (preparingSource || sourceCannotBeApplied) return;
+      if (preparingSource || sourceCannotBeApplied || recovery.blocked) return;
       const generation = identityGeneration.current;
       void act(async () => {
         const fingerprint = submissionFingerprint();

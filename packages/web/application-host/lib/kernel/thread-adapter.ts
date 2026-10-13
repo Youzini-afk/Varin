@@ -48,6 +48,9 @@ export class ThreadAdapter {
     private readonly processTerminals?: import('@varin/application-client').ThreadProcessesAPI,
     private readonly prepareChildProfiles?: ChildProfilePreparer) {}
 
+  private recoveryReader?: (identity: ThreadIdentity) => Promise<NonNullable<ThreadSnapshot['recovery']>>;
+  bindRecoveryReader(reader: (identity: ThreadIdentity) => Promise<NonNullable<ThreadSnapshot['recovery']>>): void { this.recoveryReader = reader; }
+
   private async skillInput(identity: ThreadIdentity, resources: ContextResources | undefined, text: string, signal?: AbortSignal): Promise<PreparedExplicitSkill | null> {
     if (!parseExplicitSkillCommand(text)) return null;
     if (!this.prepareSkillInput) throw Object.assign(new Error('Skill input preparation is unavailable'), { code: 'resource-unavailable' });
@@ -321,6 +324,54 @@ export class ThreadAdapter {
     await this.requireIdentity(input);
     if (!this.plans) throw new Error('Plan owner is unavailable');
     return this.plans.update(input, signal);
+  }
+  private async recoveryEntry(input: ThreadIdentity & { entryId: string }, signal?: AbortSignal) {
+    await this.requireIdentity(input);
+    const page = await this.runtime.historyPage({ branchId: input.branchId, headId: input.entryId, limit: 1 }, signal);
+    const selected = page.items.find(item => item.id === input.entryId);
+    if (!selected) throw new Error('Selected history entry is unavailable');
+    return selected;
+  }
+  async recoverySource(input: ThreadIdentity & { entryId: string }, signal?: AbortSignal) {
+    await this.requireIdentity(input);
+    const range = await this.runtime.recoveryRange({ threadId: input.threadId, branchId: input.branchId, entryId: input.entryId }, signal);
+    const selected = range.find(turn => turn.source && turn.source.mode !== 'fixed_branch') ?? range.find(turn => turn.source);
+    if (!selected?.source) return null;
+    return { workspaceId: selected.source.workspace_id, mode: selected.source.mode, runId: selected.anchor.runId };
+  }
+  async prepareNavigation(input: ThreadIdentity & { entryId: string }, signal?: AbortSignal) {
+    await this.requireIdentity(input);
+    const selection = await this.runtime.prepareNavigation({ threadId: input.threadId, branchId: input.branchId, entryId: input.entryId }, signal);
+    const reference = await this.recoveryEntry(input, signal);
+    if (reference.source !== 'user') return selection;
+    const selected = await this.runtime.historyItem(reference, signal);
+    const attachments = (selected.content as { attachments?: import('@varin/protocol').StoredMedia[] }).attachments;
+    if (!attachments?.length) return { ...selection, editorImages: [] as ImageAttachment[] };
+    const editorImages: ImageAttachment[] = [];
+    for (const [partIndex, media] of attachments.entries()) {
+      if (!media.media_type.startsWith('image/')) continue;
+      const chunks: Buffer[] = []; let count = 1; let total = 0;
+      for (let chunkIndex = 0; chunkIndex < count; chunkIndex++) {
+        const chunk = await this.runtime.mediaRead({ threadId: input.threadId, branchId: input.branchId,
+          holder: { kind: 'history', itemId: input.entryId }, partIndex, chunkIndex, expectedContentRef: media.content_ref.content_object }, signal);
+        if (chunk.partIndex !== partIndex || chunk.chunkIndex !== chunkIndex || chunk.media.content_ref.content_object !== media.content_ref.content_object
+          || chunk.media.media_type !== media.media_type || chunk.chunkCount < 1 || chunkIndex > 0 && (chunk.chunkCount !== count || chunk.totalBytes !== total)) throw new Error('Original input media changed');
+        count = chunk.chunkCount; total = chunk.totalBytes; chunks.push(Buffer.from(chunk.bytesBase64, 'base64'));
+      }
+      const bytes = Buffer.concat(chunks);
+      if (bytes.length !== total) throw new Error('Original input media is incomplete');
+      editorImages.push({ mimeType: media.media_type, data: bytes.toString('base64') });
+    }
+    return { ...selection, editorImages };
+  }
+  async navigate(input: ThreadIdentity & { key: string; expectedHeadId: string | null; targetHeadId: string | null; undoOf?: string }, signal?: AbortSignal) {
+    await this.requireIdentity(input);
+    const { runtime: _, ...command } = input;
+    return this.runtime.navigate(command, signal);
+  }
+  async navigationReceipt(input: ThreadIdentity & { key: string }, signal?: AbortSignal) {
+    await this.requireIdentity(input);
+    return this.runtime.navigationReceipt({ threadId: input.threadId, branchId: input.branchId, key: input.key }, signal);
   }
   async fork(input: ThreadIdentity & { key: string; headId: string | null }, signal?: AbortSignal): Promise<ThreadIdentity> {
     await this.requireIdentity(input);
@@ -691,7 +742,8 @@ export class ThreadAdapter {
     const launch = shownRun ? await this.runtime.launch(shownRun.id) : null;
     const modelSelection = shownRun ? await this.runtime.modelSelections(shownRun.id) : {desired:null,active:null};
     const policySelection = shownRun && launch ? await this.runtime.inspectPolicy(shownRun.id) : null;
-    return { identity, eventCursor, thread, activeRun, history, historyPage: { head: page.head, previous: page.previous }, inputs,
+    const recovery = this.recoveryReader ? await this.recoveryReader(identity) : undefined;
+    return { identity, ...(recovery ? { recovery } : {}), eventCursor, thread, activeRun, history, historyPage: { head: page.head, previous: page.previous }, inputs,
       operations: [...operations.values()], followups, goals, launch, modelSelection, policySelection, context, children: await this.children(identity), delegatedExecutions: await this.childExecutions(identity) };
   }
 

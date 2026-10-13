@@ -127,6 +127,10 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'goal/list': ['runtime', 'threadId', 'branchId'],
     'plan/read': ['runtime', 'threadId', 'branchId'],
     'plan/update': ['runtime', 'threadId', 'branchId', 'key', 'expectedHeadId', 'expectedRef', 'content'],
+    'recovery/source': ['runtime', 'threadId', 'branchId', 'entryId'],
+    'navigation/prepare': ['runtime', 'threadId', 'branchId', 'entryId'],
+    navigate: ['runtime', 'threadId', 'branchId', 'key', 'expectedHeadId', 'targetHeadId', 'undoOf'],
+    'navigation/receipt': ['runtime', 'threadId', 'branchId', 'key'],
     fork: ['runtime', 'threadId', 'branchId', 'key', 'headId'],
     'tools/inspect':['runtime','threadId','branchId','runId'],
     'policy/inspect': ['runtime','threadId','branchId','runId'],
@@ -343,6 +347,10 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('model/select',body=>adapter.selectModel({...identity(body),runId:text(body.runId),key:text(body.key),model:modelSelection(body.model)}));
   post('list', async () => (await adapter.runtime.threads()).filter(thread => thread.thread_id.startsWith('thread:')));
   post('create', body => adapter.create(text(body.key)));
+  post('recovery/source', (body, signal) => adapter.recoverySource({ ...identity(body), entryId: text(body.entryId) }, signal));
+  post('navigation/prepare', (body, signal) => adapter.prepareNavigation({ ...identity(body), entryId: text(body.entryId) }, signal));
+  post('navigation/receipt', (body, signal) => adapter.navigationReceipt({ ...identity(body), key: text(body.key) }, signal));
+  post('navigate', (body, signal) => adapter.navigate({ ...identity(body), key: text(body.key), expectedHeadId: body.expectedHeadId === null ? null : text(body.expectedHeadId), targetHeadId: body.targetHeadId === null ? null : text(body.targetHeadId), ...(body.undoOf === undefined ? {} : { undoOf: text(body.undoOf) }) }, signal));
   post('fork', (body, signal) => adapter.fork({ ...identity(body), key: text(body.key), headId: body.headId === null ? null : text(body.headId) }, signal));
   post('source/prepare', (body, signal) => {
     if (body.mode !== 'fixed_branch' && body.mode !== 'materialized' && body.mode !== 'live_root') throw new Error('Invalid source mode');

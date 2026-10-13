@@ -126,7 +126,7 @@ it.skipIf(!hasReleaseKernel)("runs combined recovery and undo across a Rust-kern
   });
   await runtime.engine.recordTurnStart({
     activeWriterScopes: [], executionId: "execution-1", provenance: "caused-by", runtimeGeneration: 1,
-    sessionId, userEntryId: "user-1", workerId: "worker-1", workspaceId,
+    conversation: { kind: "pi", sessionId }, userEntryId: "user-1", workerId: "worker-1", workspaceId,
   });
   const mutation = {
     executionId: "execution-1", mutationId: "mutation-1", path: note, toolCallId: "tool-1",
@@ -155,7 +155,7 @@ it.skipIf(!hasReleaseKernel)("runs combined recovery and undo across a Rust-kern
   expect(history.lastActivityAt).not.toBeNull();
   expect(await runtime.engine.cleanupStorage({ workspaceId })).toMatchObject({ status: "ready", result: { status: "complete" } });
 
-  const prepared = await runtime.engine.prepareCombinedRecovery({ entryId: "user-1", sessionId, workspaceId });
+  const prepared = await runtime.engine.prepareCombinedRecovery({ entryId: "user-1", conversation: { kind: "pi", sessionId }, workspaceId });
   expect(prepared).toMatchObject({ status: "ready", plan: { affectedPaths: ["note.txt"], coverage: "ready" } });
   if (prepared.status !== "ready") throw new Error("combined recovery was not prepared");
   const applied = await runtime.engine.applyCombinedRecovery({

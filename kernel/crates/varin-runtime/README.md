@@ -19,11 +19,21 @@ writing Pi session files or the Host harness's existing execution records.
   inspection/list serialization runs on workers, and content collection retains every launch reference.
   Policy preparation binds the actual admitted baseline supplied by its assembly owner; the runtime
   does not hard-code a kernel policy wrapper's name.
-- Catalog 65 / wire 24 retain reconstructable Host dependency graphs in the original tool/policy
+- Catalog 65 / wire 25 retain reconstructable Host dependency graphs in the original tool/policy
   binding content. Graph validation, hashing, persistence and hydration run outside Catalog. Short
   policy metadata records exact identity and a ContentStore reference; launch, selection and delegated
   execution roots participate in the same GC publication protocol. Recovery preserves the saved
   choices rather than applying current service routing.
+- Explicit HistoryBranch navigation prepares ancestry, paired history and context content on a worker,
+  then commits the expected-head CAS and original command receipt together. Command intents use the
+  same ContentStore references as other commands and participate in GC. Repeating a successful key
+  returns its original receipt without rewinding later work. Undo to a removed descendant requires
+  that receipt. Navigation does not modify old Run/effect/usage facts or resume a cancelled Goal.
+  Advancing the context revision fences old summary candidates. Crossing the current summary boundary
+  removes that summary's Bot baseline, not actual MemoryState or Knowledge; the next Run can therefore
+  project unchanged memories that are no longer represented by a retained summary. Journal reads bind
+  controlled file effects to the original invocation's input and source rather than a synthetic
+  model-request identifier.
 - Bot memory organization and explicit selection preview have a genuine background `MemoryWork`
   Run and decision/generation stages, separate from conversation tools, queries and Goals. The private
   Host registry admits the owner; Catalog retains exact source-range claims and the original inference

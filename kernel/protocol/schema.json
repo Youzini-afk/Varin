@@ -600,6 +600,7 @@
     "RetrievalInvocation",
     "RetrievalQuery",
     "LanguageQuery",
+    "RecoveryRangeTurn", "RecoveryAnchor", "NavigationSelectParams", "NavigationParams", "NavigationReceiptParams", "NavigationSelection", "NavigationReceipt",
     "HistoryPageParams",
     "HistoryBodyParams",
     "HistoryReference",
@@ -786,7 +787,7 @@
     "MediaReadParams",
     "MediaReadChunk"
   ],
-  "protocolVersion": 24,
+  "protocolVersion": 25,
   "runtimeStructs": {"ContentCollectionReport":{"fields":{"status":{"type":"ContentCollectionStatus"},"phase":{"type":"ContentCollectionPhase"},"removedObjects":{"type":"number"},"removedBytes":{"type":"number"},"removedStagingFiles":{"type":"number"},"reason":{"type":"string | null"}}},"ModelSessionConfiguration":{"fields":{"providerId":{"type":"string","optional":true},"providerFamily":{"type":"string"},"model":{"type":"string"},"endpoint":{"type":"string"},"credentialEnvironment":{"type":"string | null"},"allowAnonymous":{"type":"boolean"},"acceptsImages":{"type":"boolean","optional":true},"configurationGeneration":{"type":"number"},"maxOutputTokens":{"type":"number | null"},"azureDeployment":{"type":"string | null","optional":true},"azureApiVersion":{"type":"string | null","optional":true},"legacyMaxTokens":{"type":"boolean","optional":true},"includeStreamUsage":{"type":"boolean","optional":true},"reasoningEffort":{"type":"string | null","optional":true},"anthropicOauth":{"type":"boolean","optional":true},"adapterId":{"type":"string","optional":true},"adapterVersion":{"type":"string","optional":true},"contextWindowTokens":{"type":"number","optional":true},"thinkingLevel":{"type":"string","optional":true},"modelOptions":{"type":"unknown","optional":true}}},"KernelWorkingResultCandidate":{"fields":{"publicationId":{"type":"string"},"candidateOperationId":{"type":"string"},"workspaceId":{"type":"string"},"branchId":{"type":"string"},"root":{"type":"string"},"baseRoot":{"type":"string"},"writeRevision":{"type":"number"},"pinId":{"type":"string"},"basePinId":{"type":"string"}}}},
   "runtimeEnums": {
     "McpInteractionMode": ["Form", "Url", "Sampling"],
@@ -947,7 +948,7 @@
     "runtime.mcp.interaction.complete",
     "runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.source.tools","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"],
   "deferredResponseMethods": ["process.write", "process.resize", "runtime.tools.invoke"],
-  "inputOrderParams": {"runtime.thread.create": "branchId", "runtime.branch.fork": "branchId", "runtime.input.submit": "branchId", "runtime.input.enqueue": "branchId", "runtime.input.edit": "inputId"},
+  "inputOrderParams": {"runtime.thread.create": "branchId", "runtime.branch.fork": "branchId", "runtime.branch.navigate": "branchId", "runtime.input.submit": "branchId", "runtime.input.enqueue": "branchId", "runtime.input.edit": "inputId"},
   "runtimeDataMethods": ["runtime.memory_work.admit","runtime.memory_work.read","runtime.memory_work.status","runtime.memory_work.list","runtime.memory_work.update","runtime.inference.generate","runtime.inference.admit","runtime.inference.settle",
     "runtime.mcp.sampling.review_output",
     "runtime.mcp.sampling.review_request",
@@ -1050,6 +1051,12 @@
     "runtime.followup.occurrences": "FollowupOccurrencesParams",
     "runtime.followup.occurrence": "FollowupOccurrenceGetParams",
     "runtime.followup.control": "FollowupControlParams",
+    "runtime.branch.recovery.range": "NavigationSelectParams",
+    "runtime.branch.navigation.prepare": "NavigationSelectParams",
+    "runtime.branch.navigate": "NavigationParams",
+    "runtime.branch.navigation.receipt": "NavigationReceiptParams",
+    "runtime.branch.recovery.workspaces": "NavigationReceiptParams",
+    "runtime.operation.recovery.anchor": "OperationInspectParams",
     "runtime.branch.fork": "BranchForkParams",
     "runtime.plan.view": "PlanViewParams",
     "runtime.plan.contains": "PlanContainsParams",
@@ -1665,6 +1672,13 @@
     "KernelFileReadCheckParams": {"fields":{"workspaceId":{"type":"string"},"rootId":{"type":"string"},"path":{"type":"string"}}},
     "KernelFileReadCheckResult": {"fields":{"resourceKey":{"type":"string"}}},
     "LanguageQuery": {"fields":{"runId":{"type":"string"},"threadId":{"type":"string"},"grantId":{"type":"string"},"source":{"type":"LaunchSource"},"physicalRoot":{"type":"LiveRoot | null"},"method":{"type":"\"definition\" | \"references\" | \"diagnostics\" | \"hover\" | \"workspace_symbols\" | \"document_symbols\" | \"call_hierarchy\""},"path":{"type":"string"},"line":{"type":"number","optional":true},"character":{"type":"number","optional":true},"query":{"type":"string","optional":true},"direction":{"type":"\"incoming\" | \"outgoing\"","optional":true}}},
+    "RecoveryAnchor": {"fields":{"executionId":{"type":"string"},"threadId":{"type":"string"},"branchId":{"type":"string"},"runId":{"type":"string"},"entryId":{"type":"string"},"epoch":{"type":"number"}}},
+    "RecoveryRangeTurn": {"fields":{"anchor":{"type":"RecoveryAnchor"},"entryIds":{"type":"string[]"},"source":{"type":"LaunchSource | null"},"uncovered":{"type":"boolean"},"settled":{"type":"boolean"}}},
+    "NavigationSelectParams": {"fields":{"threadId":{"type":"string"},"branchId":{"type":"string"},"entryId":{"type":"string"}}},
+    "NavigationParams": {"fields":{"threadId":{"type":"string"},"branchId":{"type":"string"},"key":{"type":"string"},"expectedHeadId":{"type":"string | null"},"targetHeadId":{"type":"string | null"},"undoOf":{"type":"string","optional":true}}},
+    "NavigationReceiptParams": {"fields":{"threadId":{"type":"string"},"branchId":{"type":"string"},"key":{"type":"string","optional":true}}},
+    "NavigationSelection": {"fields":{"expectedHeadId":{"type":"string | null"},"targetHeadId":{"type":"string | null"},"removedEntryIds":{"type":"string[]"},"editorText":{"type":"string","optional":true}}},
+    "NavigationReceipt": {"fields":{"threadId":{"type":"string"},"branchId":{"type":"string"},"key":{"type":"string"},"previousHeadId":{"type":"string | null"},"headId":{"type":"string | null"},"alreadyApplied":{"type":"boolean"}}},
     "HistoryPageParams": {"fields":{"branchId":{"type":"string"},"headId":{"type":"string","optional":true},"beforeId":{"type":"string","optional":true},"limit":{"type":"number"}}},
     "HistoryBodyParams": {"fields":{"itemId":{"type":"string"},"chunkIndex":{"type":"number"}}},
     "HistoryReference": {"fields": {"id": {"type": "string"}, "thread_id": {"type": "string"}, "parent": {"type": "string | null"}, "source": {"type": "HistorySource"}, "content_ref": {"type": "string"}, "run_id": {"type": "string"}}},
@@ -1947,7 +1961,7 @@
       "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "paths": {"type": "string[]"}, "store": {"type": "boolean"}, "leaseId": {"type": "string"}
     }},
     "KernelFileApplyParams": {"fields": {
-      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}, "targetJson": {"type": "string"}, "expectedJson": {"type": "string", "optional": true}, "ownerId": {"type": "string", "optional": true}, "leaseId": {"type": "string", "optional": true}
+      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "reservationOperationId": {"type":"string","optional":true}, "rootId": {"type": "string"}, "path": {"type": "string"}, "targetJson": {"type": "string"}, "expectedJson": {"type": "string", "optional": true}, "ownerId": {"type": "string", "optional": true}, "leaseId": {"type": "string", "optional": true}
     }},
     "KernelFileMkdirParams": {"fields": {
       "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}, "recursive": {"type": "boolean"}, "leaseId": {"type": "string", "optional": true}
@@ -2086,24 +2100,25 @@
     "KernelBranchObjectsParams": {"fields": {"branchId": {"type": "string"}, "includeRevisions": {"type": "boolean", "optional": true}, "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}}},
     "KernelBranchDeleteParams": {"fields": {"operationId": {"type": "string"}, "branchId": {"type": "string"}}},
     "KernelPinReadParams": {"fields": {"pinId": {"type": "string"}, "paths": {"type": "string[]", "optional": true}, "roots": {"type": "string[]", "optional": true}, "includeEntries": {"type": "boolean", "optional": true}, "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}}},
+    "RecoveryConversation": {"taggedUnion":{"pi":{"sessionId":"string"},"thread":{"threadId":"string","branchId":"string"}}},
     "KernelRecoveryReference": {"fields": {"slot": {"type": "string"}, "objectHash": {"type": "string"}, "ownerId": {"type": "string", "optional": true}}},
     "KernelRecoveryTurnStartParams": {"fields": {
-      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "executionId": {"type": "string"}, "sessionId": {"type": "string"}, "userEntryId": {"type": "string"}, "workerId": {"type": "string"}, "runtimeGeneration": {"type": "number"}, "activeWriterScopes": {"type": "string[]"}, "provenance": {"type": "string"}, "failure": {"type": "boolean", "optional": true}
+      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "executionId": {"type": "string"}, "conversation": {"type": "RecoveryConversation"}, "fileTarget": {"type": "Record<string, unknown>", "optional": true}, "runId": {"type": "string", "optional": true}, "userEntryId": {"type": "string"}, "workerId": {"type": "string"}, "runtimeGeneration": {"type": "number"}, "activeWriterScopes": {"type": "string[]"}, "provenance": {"type": "string"}, "failure": {"type": "boolean", "optional": true}
     }},
-    "KernelRecoveryTurnGetParams": {"fields": {"workspaceId": {"type": "string"}, "executionId": {"type": "string"}, "sessionId": {"type": "string", "optional": true}}},
+    "KernelRecoveryTurnGetParams": {"fields": {"workspaceId": {"type": "string"}, "executionId": {"type": "string"}, "conversation": {"type": "RecoveryConversation", "optional": true}}},
     "KernelRecoveryTurnSettleParams": {"fields": {
       "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "executionId": {"type": "string"}, "expectedRevision": {"type": "number"}, "status": {"type": "string"}, "observedResourceIds": {"type": "string[]"}, "unrecordedResourceIds": {"type": "string[]"}, "observationComplete": {"type": "boolean"}, "activeWriterScopes": {"type": "string[]"}, "provenance": {"type": "string"}, "assistantEntryId": {"type": "string", "optional": true}, "failureJson": {"type": "string", "optional": true}
     }},
     "KernelRecoveryCheckpointCreateParams": {"fields": {"operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "label": {"type": "string"}}},
     "KernelRecoveryCheckpointListParams": {"fields": {"workspaceId": {"type": "string"}, "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}}},
-    "KernelRecoveryEntryResolveParams": {"fields": {"workspaceId": {"type": "string"}, "sessionId": {"type": "string"}, "entryId": {"type": "string"}}},
+    "KernelRecoveryEntryResolveParams": {"fields": {"workspaceId": {"type": "string"}, "conversation": {"type": "RecoveryConversation"}, "entryId": {"type": "string"}}},
     "KernelRecoveryChangeBeforeParams": {"fields": {
-      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "sessionId": {"type": "string"}, "executionId": {"type": "string"}, "checkpointId": {"type": "string"}, "path": {"type": "string"}, "toolName": {"type": "string"}, "mutationId": {"type": "string"}, "beforeJson": {"type": "string"}, "references": {"type": "KernelRecoveryReference[]"}
+      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "conversation": {"type": "RecoveryConversation"}, "executionId": {"type": "string"}, "checkpointId": {"type": "string"}, "path": {"type": "string"}, "toolName": {"type": "string"}, "mutationId": {"type": "string"}, "beforeJson": {"type": "string"}, "references": {"type": "KernelRecoveryReference[]"}
     }},
     "KernelRecoveryChangeGetParams": {"fields": {"workspaceId": {"type": "string"}, "checkpointId": {"type": "string"}, "path": {"type": "string"}}},
-    "KernelRecoveryChangeListParams": {"fields": {"workspaceId": {"type": "string"}, "sessionId": {"type": "string", "optional": true}, "executionId": {"type": "string", "optional": true}, "entryIds": {"type": "string[]", "optional": true}}},
+    "KernelRecoveryChangeListParams": {"fields": {"workspaceId": {"type": "string"}, "conversation": {"type": "RecoveryConversation", "optional": true}, "executionId": {"type": "string", "optional": true}, "entryIds": {"type": "string[]", "optional": true}}},
     "KernelRecoveryChangeAfterParams": {"fields": {
-      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "sessionId": {"type": "string"}, "executionId": {"type": "string"}, "checkpointId": {"type": "string"}, "path": {"type": "string"}, "afterJson": {"type": "string"}, "succeeded": {"type": "boolean"}, "expectedRevision": {"type": "number"}, "references": {"type": "KernelRecoveryReference[]"}
+      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "conversation": {"type": "RecoveryConversation"}, "executionId": {"type": "string"}, "checkpointId": {"type": "string"}, "path": {"type": "string"}, "afterJson": {"type": "string"}, "succeeded": {"type": "boolean"}, "expectedRevision": {"type": "number"}, "references": {"type": "KernelRecoveryReference[]"}
     }},
     "KernelRecoveryOperationFile": {"fields": {
       "path": {"type": "string"}, "expectedJson": {"type": "string", "optional": true}, "targetJson": {"type": "string", "optional": true}, "safetyJson": {"type": "string", "optional": true}, "phase": {"type": "string", "optional": true}, "references": {"type": "KernelRecoveryReference[]", "optional": true}
@@ -2600,6 +2615,12 @@
     "recovery.operation.conflicts": "Read overlapping original Integration reservations for the admitted physical root and paths",
     "runtime.host_tool.reconcile": "Refine the original Host Tool Operation from a verified original domain journal receipt",
     "source.handoff.claim": "Consume an accepted child source handoff with a fresh bounded preparation grant",
+    "runtime.branch.recovery.range": "Read original input and effect coverage for the selected recovery ancestry",
+    "runtime.branch.navigation.prepare": "Select an existing history boundary without changing execution",
+    "runtime.branch.navigate": "Conditionally move history head with a durable idempotent receipt",
+    "runtime.branch.navigation.receipt": "Read the original navigation receipt",
+    "runtime.branch.recovery.workspaces": "Read original recovery workspace owners for a branch",
+    "runtime.operation.recovery.anchor": "Read the original tool input checkpoint identity",
     "runtime.branch.fork": "Fork immutable conversation ancestry into a new native branch",
     "runtime.plan.view": "Resolve native plan fixed identity and creation basis without plan bodies",
     "runtime.plan.contains": "Check fixed plan history visibility with bounded authenticated continuation",

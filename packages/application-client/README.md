@@ -29,6 +29,14 @@ does not resolve the folder again or capture newer editor bytes under the same k
 durable preparation receipts and resource cleanup. Cancelling one observer does not cancel another
 observer of the same preparation; the last cancellation waits for that preparation's work to drain.
 
+`ThreadsAPI.prepareNavigation` reads the original ancestry and editable input. `navigate` submits a
+stable key, expected head and target head to Catalog; `navigationReceipt` resolves an uncertain result
+without replaying an old input. Only an original receipt can authorize undo to a removed descendant.
+`recoverySource` discovers sources across the affected history range. `ThreadSnapshot.recovery`
+projects standalone navigation and the original combined file/history operations separately, including
+after reopen. Combined recovery uses the versioned workspace-recovery service and its operation
+revision; it must not be presented as a conversation-only undo.
+
 `DocumentsAPI.resolveResourceIdentity(resource, { withinWorkspaceId })` scopes alias discovery to a
 selected registered root. A `null` result means the Host proved the registered roots disjoint;
 unavailable or untrusted overlapping roots still fail. Calling without a scope returns the ordinary

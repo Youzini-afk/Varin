@@ -2,6 +2,34 @@
 use super::*;
 
 impl Storage {
+    pub(super) fn recovery_conversation(params: &Value) -> Result<Value, KernelError> {
+        let value = params
+            .get("conversation")
+            .ok_or_else(|| KernelError::Operation("recovery conversation is required".into()))?;
+        let object = value
+            .as_object()
+            .ok_or_else(|| KernelError::Operation("recovery conversation must be tagged".into()))?;
+        let fields: &[&str] = match value["kind"].as_str() {
+            Some("pi") => &["kind", "sessionId"],
+            Some("thread") => &["kind", "threadId", "branchId"],
+            _ => {
+                return Err(KernelError::Operation(
+                    "invalid recovery conversation kind".into(),
+                ));
+            }
+        };
+        if object.len() != fields.len()
+            || fields
+                .iter()
+                .any(|field| value[*field].as_str().is_none_or(str::is_empty))
+        {
+            return Err(KernelError::Operation(
+                "incomplete recovery conversation identity".into(),
+            ));
+        }
+        Ok(value.clone())
+    }
+
     pub(super) fn recovery_workspace(
         &self,
         params_value: &Value,
@@ -214,7 +242,7 @@ impl Storage {
                 _ => {
                     return Err(KernelError::Operation(format!(
                         "{field} kind is unsupported"
-                    )))
+                    )));
                 }
             }
         }
@@ -330,13 +358,13 @@ impl Storage {
         id: &str,
     ) -> Result<Option<Value>, KernelError> {
         let row: Option<(String, String, i64, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, i64, i64, i64)> = self.conn.query_row(
-            "SELECT id, workspace_id, sequence, source, state, created_at, label, session_id, entry_id, execution_id, changed_path_count, byte_length, revision FROM recovery_checkpoints WHERE workspace_id = ?1 AND id = ?2",
+            "SELECT id, workspace_id, sequence, source, state, created_at, label, conversation_json, entry_id, execution_id, changed_path_count, byte_length, revision FROM recovery_checkpoints WHERE workspace_id = ?1 AND id = ?2",
             params![workspace_id, id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?, row.get(12)?)),
         ).optional()?;
-        Ok(row.map(|(id, workspace_id, sequence, source, state, created_at, label, session_id, entry_id, execution_id, changed_path_count, byte_length, revision)| json!({
+        Ok(row.map(|(id, workspace_id, sequence, source, state, created_at, label, conversation_json, entry_id, execution_id, changed_path_count, byte_length, revision)| json!({
             "id": id, "workspaceId": workspace_id, "sequence": sequence, "source": source, "state": state, "createdAt": created_at,
-            "label": label, "sessionId": session_id, "entryId": entry_id, "executionId": execution_id,
+            "label": label, "conversation": conversation_json.and_then(|value| serde_json::from_str::<Value>(&value).ok()), "entryId": entry_id, "executionId": execution_id,
             "changedPathCount": changed_path_count, "byteLength": byte_length, "revision": revision,
         })))
     }
@@ -347,7 +375,7 @@ impl Storage {
         execution_id: &str,
     ) -> Result<Option<Value>, KernelError> {
         let row: Option<(String, String, String, i64, String, String, String, Option<String>, String, String, String, String, String, String, Option<String>, String, Option<String>, i64)> = self.conn.query_row(
-            "SELECT execution_id, workspace_id, runtime_key, runtime_generation, worker_id, session_id, user_entry_id, assistant_entry_id, checkpoint_id, active_writer_scopes_json, provenance, status, observed_resource_ids_json, unrecorded_resource_ids_json, failure_json, started_at, settled_at, revision FROM recovery_turns WHERE workspace_id = ?1 AND execution_id = ?2",
+            "SELECT execution_id, workspace_id, runtime_key, runtime_generation, worker_id, conversation_json, user_entry_id, assistant_entry_id, checkpoint_id, active_writer_scopes_json, provenance, status, observed_resource_ids_json, unrecorded_resource_ids_json, failure_json, started_at, settled_at, revision FROM recovery_turns WHERE workspace_id = ?1 AND execution_id = ?2",
             params![workspace_id, execution_id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?, row.get(12)?, row.get(13)?, row.get(14)?, row.get(15)?, row.get(16)?, row.get(17)?)),
         ).optional()?;
@@ -374,9 +402,12 @@ impl Storage {
         else {
             return Ok(None);
         };
+        let (run_id,file_target):(Option<String>,Option<String>)=self.conn.query_row("SELECT run_id,file_target_json FROM recovery_turns WHERE workspace_id=?1 AND execution_id=?2",params![workspace_id,execution_id],|row|Ok((row.get(0)?,row.get(1)?)))?;
         Ok(Some(json!({
+            "runId":run_id,"fileTarget":file_target.map(|value|serde_json::from_str::<Value>(&value)).transpose()?,
             "executionId": execution_id, "workspaceId": workspace_id, "runtimeKey": runtime_key, "runtimeGeneration": runtime_generation,
-            "workerId": worker_id, "sessionId": session_id, "userEntryId": user_entry_id, "assistantEntryId": assistant_entry_id,
+            "workerId": worker_id, "conversation": serde_json::from_str::<Value>(&session_id)?,
+            "sessionId": serde_json::from_str::<Value>(&session_id)?.get("sessionId"), "userEntryId": user_entry_id, "assistantEntryId": assistant_entry_id,
             "checkpointId": checkpoint_id, "activeWriterScopes": serde_json::from_str::<Value>(&active_writer_scopes_json)?, "provenance": provenance,
             "status": status, "observedResourceIds": serde_json::from_str::<Value>(&observed_resource_ids_json)?, "unrecordedResourceIds": serde_json::from_str::<Value>(&unrecorded_resource_ids_json)?,
             "failure": failure_json.and_then(|value| serde_json::from_str::<Value>(&value).ok()), "startedAt": started_at, "settledAt": settled_at, "revision": revision,
@@ -394,11 +425,15 @@ impl Storage {
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
             .ok_or_else(|| KernelError::Operation("executionId is required".to_string()))?;
-        let session_id = params_value
-            .get("sessionId")
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| KernelError::Operation("sessionId is required".to_string()))?;
+        let conversation = Self::recovery_conversation(params_value)?;
+        let session_id = conversation.get("sessionId").and_then(Value::as_str);
+        self.require_recovery_owner(
+            grant_id,
+            session_id,
+            conversation.get("threadId").and_then(Value::as_str),
+            params_value.get("runId").and_then(Value::as_str),
+        )?;
+        let conversation_json = serde_json::to_string(&conversation)?;
         let operation_id = params_value
             .get("operationId")
             .and_then(Value::as_str)
@@ -448,8 +483,8 @@ impl Storage {
             self.operation_begin(operation_id, "recovery.turn.start", &identity_hash)?;
             self.record_operation_workspace(operation_id, Some(&workspace_id))?;
             recovery_fault("turn-intent")?;
-            self.conn.execute("INSERT INTO recovery_checkpoints(id, workspace_id, sequence, source, state, created_at, session_id, entry_id, execution_id, revision) VALUES (?1, ?2, ?3, 'turn', ?4, ?5, ?6, ?7, ?8, 1)", params![checkpoint_id, workspace_id, sequence, status, now, session_id, params_value.get("userEntryId").and_then(Value::as_str), execution_id])?;
-            self.conn.execute("INSERT INTO recovery_turns(execution_id, workspace_id, runtime_key, runtime_generation, worker_id, session_id, user_entry_id, checkpoint_id, active_writer_scopes_json, provenance, status, observed_resource_ids_json, unrecorded_resource_ids_json, started_at, revision) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, '[]', '[]', ?12, 1)", params![execution_id, workspace_id, runtime_key, runtime_generation, params_value.get("workerId").and_then(Value::as_str).unwrap_or(""), session_id, params_value.get("userEntryId").and_then(Value::as_str).unwrap_or(""), checkpoint_id, active, params_value.get("provenance").and_then(Value::as_str).unwrap_or("caused-by"), status, now])?;
+            self.conn.execute("INSERT INTO recovery_checkpoints(id, workspace_id, sequence, source, state, created_at, session_id, conversation_json, entry_id, execution_id, revision) VALUES (?1, ?2, ?3, 'turn', ?4, ?5, ?6, ?9, ?7, ?8, 1)", params![checkpoint_id, workspace_id, sequence, status, now, session_id, params_value.get("userEntryId").and_then(Value::as_str), execution_id, conversation_json])?;
+            self.conn.execute("INSERT INTO recovery_turns(execution_id, workspace_id, runtime_key, runtime_generation, worker_id, session_id, conversation_json, run_id, file_target_json, user_entry_id, checkpoint_id, active_writer_scopes_json, provenance, status, observed_resource_ids_json, unrecorded_resource_ids_json, started_at, revision) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?13, ?14, ?15, ?7, ?8, ?9, ?10, ?11, '[]', '[]', ?12, 1)", params![execution_id, workspace_id, runtime_key, runtime_generation, params_value.get("workerId").and_then(Value::as_str).unwrap_or(""), session_id, params_value.get("userEntryId").and_then(Value::as_str).unwrap_or(""), checkpoint_id, active, params_value.get("provenance").and_then(Value::as_str).unwrap_or("caused-by"), status, now, conversation_json, params_value.get("runId").and_then(Value::as_str), params_value.get("fileTarget").map(serde_json::to_string).transpose()?])?;
             let value = self
                 .recovery_turn_value(&workspace_id, execution_id)?
                 .ok_or_else(|| {
@@ -480,9 +515,27 @@ impl Storage {
             .get("executionId")
             .and_then(Value::as_str)
             .ok_or_else(|| KernelError::Operation("executionId is required".to_string()))?;
-        Ok(self
+        let turn = self
             .recovery_turn_value(&workspace_id, execution_id)?
-            .unwrap_or(Value::Null))
+            .unwrap_or(Value::Null);
+        if !turn.is_null() {
+            let conversation = Self::recovery_conversation(&turn)?;
+            self.require_recovery_owner(
+                grant_id,
+                conversation["sessionId"].as_str(),
+                conversation["threadId"].as_str(),
+                turn["runId"].as_str(),
+            )?;
+            if params_value
+                .get("conversation")
+                .is_some_and(|requested| requested != &conversation)
+            {
+                return Err(KernelError::Authorization(
+                    "recovery conversation differs from stored turn".into(),
+                ));
+            }
+        }
+        Ok(turn)
     }
 
     pub(super) fn recovery_turn_settle(
@@ -697,15 +750,19 @@ impl Storage {
         grant_id: &str,
     ) -> Result<Value, KernelError> {
         let workspace_id = self.recovery_workspace(params_value, grant_id)?;
-        let session_id = params_value
-            .get("sessionId")
-            .and_then(Value::as_str)
-            .ok_or_else(|| KernelError::Operation("sessionId is required".to_string()))?;
+        let conversation = Self::recovery_conversation(params_value)?;
+        self.require_recovery_owner(
+            grant_id,
+            conversation.get("sessionId").and_then(Value::as_str),
+            conversation.get("threadId").and_then(Value::as_str),
+            None,
+        )?;
+        let conversation_json = serde_json::to_string(&conversation)?;
         let entry_id = params_value
             .get("entryId")
             .and_then(Value::as_str)
             .ok_or_else(|| KernelError::Operation("entryId is required".to_string()))?;
-        let row: Option<(String, String, String)> = self.conn.query_row("SELECT execution_id, checkpoint_id, status FROM recovery_turns WHERE workspace_id = ?1 AND session_id = ?2 AND (user_entry_id = ?3 OR assistant_entry_id = ?3) ORDER BY started_at DESC LIMIT 1", params![workspace_id, session_id, entry_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).optional()?;
+        let row: Option<(String, String, String)> = self.conn.query_row("SELECT execution_id, checkpoint_id, status FROM recovery_turns WHERE workspace_id = ?1 AND conversation_json = ?2 AND (user_entry_id = ?3 OR assistant_entry_id = ?3) ORDER BY started_at DESC LIMIT 1", params![workspace_id, conversation_json, entry_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).optional()?;
         let Some((execution_id, checkpoint_id, status)) = row else {
             return Ok(json!({"status": "unbound", "reason": "entry-unbound"}));
         };
@@ -738,11 +795,8 @@ impl Storage {
             .get("executionId")
             .and_then(Value::as_str)
             .ok_or_else(|| KernelError::Operation("executionId is required".to_string()))?;
-        let session_id = params_value
-            .get("sessionId")
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| KernelError::Operation("sessionId is required".to_string()))?;
+        let conversation = Self::recovery_conversation(params_value)?;
+        let conversation_json = serde_json::to_string(&conversation)?;
         let raw_path = params_value
             .get("path")
             .and_then(Value::as_str)
@@ -752,7 +806,7 @@ impl Storage {
             })?;
         let path = Self::validate_path(raw_path)?.join("/");
         let turn: Option<(String, String)> = self.conn.query_row(
-            "SELECT checkpoint_id, session_id FROM recovery_turns WHERE workspace_id = ?1 AND execution_id = ?2",
+            "SELECT checkpoint_id, conversation_json FROM recovery_turns WHERE workspace_id = ?1 AND execution_id = ?2",
             params![workspace_id, execution_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         ).optional()?;
@@ -761,12 +815,17 @@ impl Storage {
                 "recovery turn is not found".to_string(),
             ));
         };
-        if turn_checkpoint != checkpoint_id || turn_session != session_id {
+        if turn_checkpoint != checkpoint_id || turn_session != conversation_json {
             return Err(KernelError::Authorization(
                 "recovery change does not belong to the actor turn".to_string(),
             ));
         }
-        self.require_recovery_owner(grant_id, Some(session_id), None, None)?;
+        self.require_recovery_owner(
+            grant_id,
+            conversation.get("sessionId").and_then(Value::as_str),
+            conversation.get("threadId").and_then(Value::as_str),
+            None,
+        )?;
         let references = self.recovery_references(params_value, &workspace_id, grant_id)?;
         Self::require_recovery_state_reference(&before, "beforeJson", &references)?;
         let now = format!("{}", chrono_like_now());
@@ -818,11 +877,20 @@ impl Storage {
             return Ok(Value::Null);
         };
         let session_id: Option<String> = self.conn.query_row(
-            "SELECT session_id FROM recovery_turns WHERE workspace_id = ?1 AND execution_id = ?2 AND checkpoint_id = ?3",
+            "SELECT conversation_json FROM recovery_turns WHERE workspace_id = ?1 AND execution_id = ?2 AND checkpoint_id = ?3",
             params![workspace_id, execution_id, checkpoint_id],
             |row| row.get(0),
         ).optional()?;
-        self.require_recovery_owner(grant_id, session_id.as_deref(), None, None)?;
+        let conversation = session_id
+            .as_deref()
+            .map(serde_json::from_str::<Value>)
+            .transpose()?;
+        self.require_recovery_owner(
+            grant_id,
+            conversation.as_ref().and_then(|v| v["sessionId"].as_str()),
+            conversation.as_ref().and_then(|v| v["threadId"].as_str()),
+            None,
+        )?;
         Ok(
             json!({"workspaceId": workspace_id, "checkpointId": checkpoint_id, "path": path, "executionId": execution_id, "before": serde_json::from_str::<Value>(&before_json)?, "after": after_json.and_then(|value| serde_json::from_str::<Value>(&value).ok()), "state": state, "updatedAt": updated_at, "revision": revision}),
         )
@@ -834,7 +902,6 @@ impl Storage {
         grant_id: &str,
     ) -> Result<Value, KernelError> {
         let workspace_id = self.recovery_workspace(params_value, grant_id)?;
-        let requested_session = params_value.get("sessionId").and_then(Value::as_str);
         let requested_execution = params_value.get("executionId").and_then(Value::as_str);
         let requested_entries = params_value
             .get("entryIds")
@@ -846,10 +913,28 @@ impl Storage {
                     .collect::<BTreeSet<_>>()
             })
             .unwrap_or_default();
-        self.require_recovery_owner(grant_id, requested_session, None, None)?;
+        let conversation = params_value
+            .get("conversation")
+            .map(|_| Self::recovery_conversation(params_value))
+            .transpose()?;
+        self.require_recovery_owner(
+            grant_id,
+            conversation
+                .as_ref()
+                .and_then(|value| value.get("sessionId"))
+                .and_then(Value::as_str),
+            conversation
+                .as_ref()
+                .and_then(|value| value.get("threadId"))
+                .and_then(Value::as_str),
+            None,
+        )?;
+        let conversation_json = conversation
+            .map(|value| serde_json::to_string(&value))
+            .transpose()?;
 
         let mut statement = self.conn.prepare(
-            "SELECT t.execution_id, t.checkpoint_id, c.sequence, t.status, t.session_id, t.user_entry_id, t.assistant_entry_id, t.active_writer_scopes_json, t.unrecorded_resource_ids_json, t.failure_json FROM recovery_turns t JOIN recovery_checkpoints c ON c.workspace_id = t.workspace_id AND c.id = t.checkpoint_id WHERE t.workspace_id = ?1 ORDER BY c.sequence ASC",
+            "SELECT t.execution_id, t.checkpoint_id, c.sequence, t.status, t.conversation_json, t.user_entry_id, t.assistant_entry_id, t.active_writer_scopes_json, t.unrecorded_resource_ids_json, t.failure_json FROM recovery_turns t JOIN recovery_checkpoints c ON c.workspace_id = t.workspace_id AND c.id = t.checkpoint_id WHERE t.workspace_id = ?1 ORDER BY c.sequence ASC",
         )?;
         let rows = statement
             .query_map(params![workspace_id], |row| {
@@ -870,7 +955,9 @@ impl Storage {
         let selected = rows
             .into_iter()
             .filter(|row| {
-                requested_session.is_none_or(|session| row.4 == session)
+                conversation_json
+                    .as_ref()
+                    .is_none_or(|conversation| &row.4 == conversation)
                     && requested_execution.is_none_or(|execution| row.0 == execution)
                     && (requested_entries.is_empty()
                         || requested_entries.contains(row.5.as_str())
@@ -896,12 +983,17 @@ impl Storage {
             failure_json,
         ) in selected
         {
+            let file_target: Option<String> = self.conn.query_row("SELECT file_target_json FROM recovery_turns WHERE workspace_id=?1 AND execution_id=?2", params![workspace_id, execution_id], |row| row.get(0))?;
+            let file_target = file_target
+                .map(|value| serde_json::from_str::<Value>(&value))
+                .transpose()?;
             turns.push(json!({
+                "fileTarget": file_target,
                 "executionId": execution_id,
                 "checkpointId": checkpoint_id,
                 "sequence": sequence,
                 "status": status,
-                "sessionId": session_id,
+                "conversation": serde_json::from_str::<Value>(&session_id)?,
                 "userEntryId": user_entry_id,
                 "assistantEntryId": assistant_entry_id,
                 "activeWriterScopes": serde_json::from_str::<Value>(&active_json)?,
@@ -930,6 +1022,7 @@ impl Storage {
                 changes.push(json!({
                     "workspaceId": workspace_id,
                     "checkpointId": checkpoint_id,
+                    "fileTarget": file_target,
                     "executionId": execution_id,
                     "sequence": sequence,
                     "path": path,
@@ -961,11 +1054,8 @@ impl Storage {
             .get("executionId")
             .and_then(Value::as_str)
             .ok_or_else(|| KernelError::Operation("executionId is required".to_string()))?;
-        let session_id = params_value
-            .get("sessionId")
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| KernelError::Operation("sessionId is required".to_string()))?;
+        let conversation = Self::recovery_conversation(params_value)?;
+        let conversation_json = serde_json::to_string(&conversation)?;
         let raw_path = params_value
             .get("path")
             .and_then(Value::as_str)
@@ -983,13 +1073,20 @@ impl Storage {
                 "recovery before-image is missing".to_string(),
             ));
         };
-        let turn_session: Option<String> = self.conn.query_row("SELECT session_id FROM recovery_turns WHERE workspace_id = ?1 AND execution_id = ?2 AND checkpoint_id = ?3", params![workspace_id, execution_id, checkpoint_id], |row| row.get(0)).optional()?;
-        if stored_execution != execution_id || turn_session.as_deref() != Some(session_id) {
+        let turn_session: Option<String> = self.conn.query_row("SELECT conversation_json FROM recovery_turns WHERE workspace_id = ?1 AND execution_id = ?2 AND checkpoint_id = ?3", params![workspace_id, execution_id, checkpoint_id], |row| row.get(0)).optional()?;
+        if stored_execution != execution_id
+            || turn_session.as_deref() != Some(conversation_json.as_str())
+        {
             return Err(KernelError::Authorization(
                 "recovery change does not belong to the actor turn".to_string(),
             ));
         }
-        self.require_recovery_owner(grant_id, Some(session_id), None, None)?;
+        self.require_recovery_owner(
+            grant_id,
+            conversation.get("sessionId").and_then(Value::as_str),
+            conversation.get("threadId").and_then(Value::as_str),
+            None,
+        )?;
         if revision != expected {
             return Err(KernelError::Operation(
                 "recovery change revision conflict".to_string(),
@@ -1366,9 +1463,24 @@ impl Storage {
         }
         let kind = params_value.get("kind").and_then(Value::as_str);
         let (sql, values) = if let Some(kind) = kind {
-            ("SELECT operation_id, kind, state, data_json, revision, session_id, thread_id, run_id, created_at, updated_at FROM recovery_operations WHERE workspace_id = ?1 AND kind = ?2 ORDER BY created_at DESC LIMIT ?3 OFFSET ?4", vec![Value::String(workspace_id.clone()), Value::String(kind.to_string()), Value::from(page_size + 1), Value::from(cursor)])
+            (
+                "SELECT operation_id, kind, state, data_json, revision, session_id, thread_id, run_id, created_at, updated_at FROM recovery_operations WHERE workspace_id = ?1 AND kind = ?2 ORDER BY created_at DESC LIMIT ?3 OFFSET ?4",
+                vec![
+                    Value::String(workspace_id.clone()),
+                    Value::String(kind.to_string()),
+                    Value::from(page_size + 1),
+                    Value::from(cursor),
+                ],
+            )
         } else {
-            ("SELECT operation_id, kind, state, data_json, revision, session_id, thread_id, run_id, created_at, updated_at FROM recovery_operations WHERE workspace_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3", vec![Value::String(workspace_id.clone()), Value::from(page_size + 1), Value::from(cursor)])
+            (
+                "SELECT operation_id, kind, state, data_json, revision, session_id, thread_id, run_id, created_at, updated_at FROM recovery_operations WHERE workspace_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
+                vec![
+                    Value::String(workspace_id.clone()),
+                    Value::from(page_size + 1),
+                    Value::from(cursor),
+                ],
+            )
         };
         let mut statement = self.conn.prepare(sql)?;
         let mut rows = if kind.is_some() {
@@ -1436,9 +1548,14 @@ impl Storage {
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
             .ok_or_else(|| KernelError::Operation("operationId is required".to_string()))?;
-        self.read_recovery_operation(&workspace_id,operation_id,Some(grant_id))
+        self.read_recovery_operation(&workspace_id, operation_id, Some(grant_id))
     }
-    pub(super) fn read_recovery_operation(&self,workspace_id:&str,operation_id:&str,grant_id:Option<&str>)->Result<Value,KernelError>{
+    pub(super) fn read_recovery_operation(
+        &self,
+        workspace_id: &str,
+        operation_id: &str,
+        grant_id: Option<&str>,
+    ) -> Result<Value, KernelError> {
         let typed: Option<(String, String, String, Option<String>, Option<String>, Option<String>, String, Option<String>, Option<String>, i64)> = self.conn.query_row(
             "SELECT kind, state, data_json, session_id, thread_id, run_id, created_at, result_json, failure_json, revision FROM recovery_operations WHERE workspace_id = ?1 AND operation_id = ?2",
             params![workspace_id, operation_id],
@@ -1459,13 +1576,13 @@ impl Storage {
         else {
             return Ok(Value::Null);
         };
-        if let Some(grant_id)=grant_id {
-        self.require_recovery_owner(
-            grant_id,
-            session_id.as_deref(),
-            thread_id.as_deref(),
-            run_id.as_deref(),
-        )?;
+        if let Some(grant_id) = grant_id {
+            self.require_recovery_owner(
+                grant_id,
+                session_id.as_deref(),
+                thread_id.as_deref(),
+                run_id.as_deref(),
+            )?;
         }
         let mut files = Vec::new();
         let mut files_statement = self.conn.prepare("SELECT path, expected_json, target_json, safety_json, phase, observed_fingerprint, revision FROM recovery_operation_files WHERE workspace_id = ?1 AND operation_id = ?2 ORDER BY ordinal")?;
@@ -1502,38 +1619,99 @@ impl Storage {
 impl Storage {
     /// A scoped physical overlap query. It discloses only reservations intersecting the
     /// caller's authorized target, including aliases owned by another workspace identity.
-    pub(super) fn recovery_operation_conflicts(&self,params_value:&Value,grant:&Grant)->Result<Value,KernelError>{
-        let workspace=self.recovery_workspace(params_value,&grant.grant_id)?;
-        let root_id=params_value["rootId"].as_str().ok_or_else(||KernelError::Authorization("reservation root missing".into()))?;
-        let paths=params_value["paths"].as_array().ok_or_else(||KernelError::Operation("reservation paths missing".into()))?.iter().map(|value|{
-            let path=value.as_str().ok_or_else(||KernelError::Operation("reservation path malformed".into()))?;
-            Ok(FileLeaseResource{path:path.into(),subtree:true})
-        }).collect::<Result<Vec<_>,KernelError>>()?;
-        let requested=self.canonical_lease_resources(root_id,&paths,grant)?;
-        let except=params_value.get("exceptOperationId").and_then(Value::as_str);
+    pub(super) fn recovery_operation_conflicts(
+        &self,
+        params_value: &Value,
+        grant: &Grant,
+    ) -> Result<Value, KernelError> {
+        let workspace = self.recovery_workspace(params_value, &grant.grant_id)?;
+        let root_id = params_value["rootId"]
+            .as_str()
+            .ok_or_else(|| KernelError::Authorization("reservation root missing".into()))?;
+        let paths = params_value["paths"]
+            .as_array()
+            .ok_or_else(|| KernelError::Operation("reservation paths missing".into()))?
+            .iter()
+            .map(|value| {
+                let path = value
+                    .as_str()
+                    .ok_or_else(|| KernelError::Operation("reservation path malformed".into()))?;
+                Ok(FileLeaseResource {
+                    path: path.into(),
+                    subtree: true,
+                })
+            })
+            .collect::<Result<Vec<_>, KernelError>>()?;
+        let requested = self.canonical_lease_resources(root_id, &paths, grant)?;
+        let except = params_value
+            .get("exceptOperationId")
+            .and_then(Value::as_str);
         let mut statement=self.conn.prepare("SELECT workspace_id,operation_id,state,revision,COALESCE(json_extract(result_json,'$.reservedResources.canonicalRoot'),json_extract(data_json,'$.reservedResources.canonicalRoot'),json_extract(result_json,'$.applyCanonicalRoot'),json_extract(data_json,'$.applyCanonicalRoot')),COALESCE(json_extract(result_json,'$.reservedResources.paths'),json_extract(data_json,'$.reservedResources.paths')),COALESCE(json_extract(result_json,'$.targets'),json_extract(data_json,'$.targets')) FROM recovery_operations WHERE kind='integration' AND COALESCE(json_extract(result_json,'$.parentBranchId'),json_extract(data_json,'$.parentBranchId')) IS NULL AND state NOT IN ('complete','conflict','compensated','aborted','undone') ORDER BY workspace_id,operation_id")?;
-        let mut rows=statement.query([])?;let mut operations=Vec::new();
-        while let Some(row)=rows.next()? {
-            let owning:String=row.get(0)?;let operation:String=row.get(1)?;
-            if owning==workspace && except==Some(operation.as_str()){continue;}
-            let directory=row.get::<_,Option<String>>(4)?.ok_or_else(||KernelError::Operation(format!("unresolved Integration reservation root: {owning}/{operation}")))?;
-            let paths:Vec<String>=if let Some(raw)=row.get::<_,Option<String>>(5)?{serde_json::from_str(&raw)?}
-                else if let Some(raw)=row.get::<_,Option<String>>(6)?{serde_json::from_str::<Value>(&raw)?.as_object().ok_or_else(||KernelError::Storage("Integration targets are malformed".into()))?.keys().cloned().collect()}
-                else{return Err(KernelError::Operation(format!("unresolved Integration reservation paths: {owning}/{operation}")));};
-            let directory_path=PathBuf::from(&directory);
-            if !directory_path.is_absolute(){return Err(KernelError::Storage("Integration reservation root is not canonical".into()));}
-            let physical=paths.iter().map(|path|{
-                let resolved=super::file_resources::resolve_scoped_resource(&directory_path,path,true,true,|_|true)?;
-                super::file_resource_leases::canonical_lease_path(resolved.absolute)
-            }).collect::<Result<Vec<_>,KernelError>>()?;
-            let overlap=requested.iter().any(|left|physical.iter().any(|right|physical_paths_overlap(&left.absolute,right)));
-            if overlap{operations.push(json!({"operationId":operation,"workspaceId":owning,"state":row.get::<_,String>(2)?,"revision":row.get::<_,i64>(3)?,"canonicalRoot":directory,"paths":paths}));}
+        let mut rows = statement.query([])?;
+        let mut operations = Vec::new();
+        while let Some(row) = rows.next()? {
+            let owning: String = row.get(0)?;
+            let operation: String = row.get(1)?;
+            if owning == workspace && except == Some(operation.as_str()) {
+                continue;
+            }
+            let directory = row.get::<_, Option<String>>(4)?.ok_or_else(|| {
+                KernelError::Operation(format!(
+                    "unresolved Integration reservation root: {owning}/{operation}"
+                ))
+            })?;
+            let paths: Vec<String> = if let Some(raw) = row.get::<_, Option<String>>(5)? {
+                serde_json::from_str(&raw)?
+            } else if let Some(raw) = row.get::<_, Option<String>>(6)? {
+                serde_json::from_str::<Value>(&raw)?
+                    .as_object()
+                    .ok_or_else(|| {
+                        KernelError::Storage("Integration targets are malformed".into())
+                    })?
+                    .keys()
+                    .cloned()
+                    .collect()
+            } else {
+                return Err(KernelError::Operation(format!(
+                    "unresolved Integration reservation paths: {owning}/{operation}"
+                )));
+            };
+            let directory_path = PathBuf::from(&directory);
+            if !directory_path.is_absolute() {
+                return Err(KernelError::Storage(
+                    "Integration reservation root is not canonical".into(),
+                ));
+            }
+            let physical = paths
+                .iter()
+                .map(|path| {
+                    let resolved = super::file_resources::resolve_scoped_resource(
+                        &directory_path,
+                        path,
+                        true,
+                        true,
+                        |_| true,
+                    )?;
+                    super::file_resource_leases::canonical_lease_path(resolved.absolute)
+                })
+                .collect::<Result<Vec<_>, KernelError>>()?;
+            let overlap = requested.iter().any(|left| {
+                physical
+                    .iter()
+                    .any(|right| physical_paths_overlap(&left.absolute, right))
+            });
+            if overlap {
+                operations.push(json!({"operationId":operation,"workspaceId":owning,"state":row.get::<_,String>(2)?,"revision":row.get::<_,i64>(3)?,"canonicalRoot":directory,"paths":paths}));
+            }
         }
         Ok(json!({"operations":operations}))
     }
 }
-fn physical_paths_overlap(left:&Path,right:&Path)->bool{
+fn physical_paths_overlap(left: &Path, right: &Path) -> bool {
     #[cfg(windows)]
-    let (left,right)=(PathBuf::from(left.to_string_lossy().to_lowercase()),PathBuf::from(right.to_string_lossy().to_lowercase()));
-    left.starts_with(&right)||right.starts_with(&left)
+    let (left, right) = (
+        PathBuf::from(left.to_string_lossy().to_lowercase()),
+        PathBuf::from(right.to_string_lossy().to_lowercase()),
+    );
+    left.starts_with(&right) || right.starts_with(&left)
 }

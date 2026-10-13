@@ -63,3 +63,6 @@ mod process_interaction_review;
 #[cfg(test)]
 #[path = "../../varin-runtime/tests/fixtures/service_composition.rs"]
 mod service_composition_fixture;
+
+#[cfg(test)]
+mod thread_recovery_review;

@@ -643,6 +643,7 @@ pub(crate) struct ResourceCall {
     pub admission_key: Option<String>,
     pub binding: ToolBinding,
     pub context: ToolExecutionContext,
+    journal: Option<varin_runtime::catalog::journal::JournalAnchor>,
     operation: ResourceOperation,
     authorize_only: bool,
     expected_resource_key: Option<String>,
@@ -659,6 +660,7 @@ pub(crate) fn fixed_read_fixture(
     (
         ResourceCall {
             admission_key: Some("fixture-read-admission".into()),
+            journal: None,
             context: ToolExecutionContext {
                 run_id: binding.run_id.clone(),
                 operation_id: "fixture-read".into(),
@@ -708,6 +710,7 @@ pub(crate) struct KernelResourceClient {
     replay: Arc<dyn Fn(Vec<String>) -> Result<(), KernelError> + Send + Sync>,
     controls: crate::process::ProcessControlRegistry,
     admission_control: Option<Arc<AdmissionControl>>,
+    journal_catalog: Option<Arc<std::sync::Mutex<varin_runtime::Catalog>>>,
 }
 impl KernelResourceClient {
     pub(crate) fn new(
@@ -723,8 +726,10 @@ impl KernelResourceClient {
             replay: Arc::new(replay),
             controls,
             admission_control: None,
+            journal_catalog: None,
         }
     }
+    pub(crate) fn with_journal_catalog(mut self, catalog: Arc<std::sync::Mutex<varin_runtime::Catalog>>) -> Self { self.journal_catalog=Some(catalog); self }
     pub(crate) fn with_file_observations(
         mut self,
         client: crate::file_observation::Client,
@@ -961,7 +966,14 @@ impl KernelResourceClient {
         let _cancel_wait = wake
             .as_ref()
             .map(|(sender, _)| cancellation.wake_on_cancel(sender.clone()));
+        let journal = if !authorize_only && matches!(operation,ResourceOperation::FileMutation(_) | ResourceOperation::ProcessSpawn(_)) {
+            self.journal_catalog.as_ref().map(|catalog| {
+                let read = catalog.lock().map_err(|_|KernelError::Storage("journal owner unavailable".into()))?.capture_journal_anchor(context).map_err(|error|KernelError::Operation(error.to_string()))?;
+                read.load().map_err(|error|KernelError::Operation(error.to_string()))
+            }).transpose().map_err(|error|ResourceFailure {error,dispatched:false})?
+        } else {None};
         (self.send)(ResourceCall {
+            journal,
             admission_key: None,
             binding: binding.clone(),
             context: context.clone(),
@@ -2206,6 +2218,8 @@ fn serve_resource_immediate(
                 &request.context.operation_id,
                 mutation,
                 &grant,
+                request.journal.as_ref(),
+                request.binding.source_mode,
                 !request.authorize_only,
                 &mut dispatched,
             );

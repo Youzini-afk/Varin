@@ -324,7 +324,7 @@ impl RunAssembly {
                 .run_project_id(&p.run_id)
                 .map_err(domain)?;
             let collaboration_binding = binding.clone();
-            let tools = crate::tools::KernelToolExecutor::new(binding, resources.clone())
+            let tools = crate::tools::KernelToolExecutor::new(binding, resources.clone().with_journal_catalog(runtime.catalog()))
                 .map_err(|e| KernelError::Authorization(e.to_string()))?
                 .with_language(language_bridge.clone())
                 .with_retrieval(

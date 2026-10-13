@@ -1,13 +1,14 @@
 # 验收与证据
 
 Status: evidence navigation — 区分当前边界、当时的验证结果和待评估候选。
-Last updated: 2026-10-12
+Last updated: 2026-10-13
 
 [当前状态](../status.md)引用这里的结论，不复制长篇验证记录。每份记录以自身的基线和场景为准；
 本目录的存在不意味着本次文档整理重新运行了全部产品验收。
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [Thread 历史导航与原文件恢复](runtime-thread-recovery-2026-10-13.md) | 原命令/输入 checkpoint、逐文件恢复和同 operation 对账；Bot/GC/后继请求关联及真实执行边界 |
 | [Documents 草稿与原生固定来源](runtime-document-source-2026-10-12.md) | 显式内容选择、同源资源闭包、Git 选根、原固定 receipt、取消与重开；各层证据与组合恢复边界 |
 | [Bot 产品入口、原记忆与摘要准备（2026-10-12）](runtime-bot-product-context-2026-10-12.md) | 实际 Bot 身份/来源/召回、产品配置、Sleep/Wake、原 Plan 与摘要基线；真实消费者与有限验证边界 |
 | [私有 Bot 身份与可恢复暂停基础（2026-10-12）](runtime-bot-suspension-foundation-2026-10-12.md) | 原来源 gate、实际 worker 排空、保留等待与单一路径恢复；完整 Bot 产品链仍待接入 |

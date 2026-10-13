@@ -55,7 +55,7 @@ export const createWorkspaceRecoveryCapabilityHandler =
     if (method === 'recordMutationAfter') {
       return engine.recordMutationAfter(parseWorkspaceRecoveryMutationAfterInput(params));
     }
-    if (method === 'recordTurnStart') return engine.recordTurnStart(parseWorkspaceRecoveryTurnStartInput(params));
+    if (method === 'recordTurnStart') { const input = parseWorkspaceRecoveryTurnStartInput(params); if (input.conversation.kind !== 'pi' || input.fileTarget || input.runId) throw new Error('Native recovery anchors are supplied only by the original runtime owner'); return engine.recordTurnStart(input); }
     if (method === 'recordTurnSettled') return engine.recordTurnSettled(parseWorkspaceRecoveryTurnSettledInput(params));
     if (method === 'resolveEntry') return engine.resolveEntry(parseWorkspaceRecoveryEntryTarget(params));
     if (method === 'prepareCombinedRecovery') {

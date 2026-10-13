@@ -1,5 +1,8 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { isDeepStrictEqual } from "node:util";
 import { randomUUID } from "node:crypto";
 import type {
+  RecoveryConversation,
   WorkspaceRecoveryCheckpointSummary,
   WorkspaceRecoveryEntryBindingResult,
   WorkspaceRecoveryEntryTarget,
@@ -16,6 +19,7 @@ import type {
   RecoveryIdentity,
   RecoveryState,
 } from "../recovery/journal-files.js";
+import { parseRecoveryConversation, parseRecoveryFileTarget } from "@varin/extension-contract";
 import { normalizeResourceId, parseRecoveryState, sameState } from "../recovery/journal-files.js";
 import type {
   DurableRecoveryChangeSelection,
@@ -51,6 +55,10 @@ const recoveryIdentity = (workspaceId: string, canonicalRoot: string): RecoveryI
 });
 
 export class KernelRecoveryContentStore implements RecoveryFileStore {
+  private targetResources?: (identity: RecoveryIdentity) => Promise<KernelFileResourceBackend>;
+  bindTargetResources(resolve: (identity: RecoveryIdentity) => Promise<KernelFileResourceBackend>): void { this.targetResources = resolve; }
+  private readonly resourceScope = new AsyncLocalStorage<{ key: string; backend: KernelFileResourceBackend }>();
+  private async resources(identity: RecoveryIdentity): Promise<KernelFileResourceBackend> { const active = this.resourceScope.getStore(); if (active?.key === JSON.stringify(identity)) return active.backend; return identity.fileTarget ? (this.targetResources ? this.targetResources(identity) : Promise.reject(new Error("Recovery source owner is unavailable"))) : this.fileResources; }
   private readonly owners = new Map<string, Set<string>>();
   private readonly sources = new Map<string, Array<{ workspaceId: string; recordId: string; slot: string }>>();
   readonly fileResources: KernelFileResourceBackend;
@@ -147,7 +155,7 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
     if (this.scopedActor && (identity.workspaceId !== this.scopedActor.identity.workspaceId || _sessionId)) {
       throw new Error("Recovery capture does not match its admitted actor");
     }
-    const captured = await this.fileResources.captureDetailed(
+    const captured = await (await this.resources(identity)).captureDetailed(
       identity,
       inputPath,
       options,
@@ -173,8 +181,8 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
     return { path: captured.path, state: captured.state };
   }
 
-  async applyState(identity: RecoveryIdentity, _root: string, relativePath: string, state: RecoveryState): Promise<void> {
-    const result = await this.fileResources.applyStateDetailed(identity, relativePath, state);
+  async applyState(identity: RecoveryIdentity, _root: string, relativePath: string, state: RecoveryState, options: {reservationOperationId?:string} = {}): Promise<void> {
+    const result = await (await this.resources(identity)).applyStateDetailed(identity, relativePath, state, options);
     if (result.status === "conflict") {
       throw new Error(`Kernel file apply conflicted after resource admission: ${relativePath}`);
     }
@@ -192,7 +200,16 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
     recoveryIdentity(input.workspaceId, input.canonicalRoot), input.paths, input.exceptOperationId);
 
   resourceOperationGate(identity: RecoveryIdentity): HostResourceOperationGate {
-    return this.fileResources.gateFor(identity);
+    return { run: (resources, callback, options) => this.resources(identity).then(backend => backend.gateFor(identity).run(resources, () => this.resourceScope.run({ key: JSON.stringify(identity), backend }, callback), options)) };
+  }
+
+  async adoptState(sourceWorkspace: string, destinationWorkspace: string, state: RecoveryState): Promise<void> {
+    if (sourceWorkspace === destinationWorkspace || state.kind !== "regular-file") return;
+    const bytes = await this.objectBytes(sourceWorkspace, state.objectHash);
+    const destination = await this.adapter.context(destinationWorkspace, "recovery-maintenance", { owningWorkspace: destinationWorkspace, executionWorkspace: destinationWorkspace, pathScopes: [""], capabilities: ["recovery.maintenance"] });
+    const stored = await destination.client.putBlob(bytes, `recovery-transfer:${randomUUID()}`);
+    if (stored.hash !== state.objectHash || stored.byteLength !== state.byteLength) throw new Error("Recovery content transfer changed its identity");
+    this.registerObjectOwner(destinationWorkspace, stored.hash, stored.ownerId);
   }
 
   async verifyObject(_root: string, state: RecoveryState): Promise<void> {
@@ -274,7 +291,7 @@ export class KernelRecoveryStore {
       state: value.state as WorkspaceRecoveryCheckpointSummary["state"],
       createdAt: String(value.createdAt),
       ...(typeof value.label === "string" ? { label: value.label } : {}),
-      ...(typeof value.sessionId === "string" ? { sessionId: value.sessionId } : {}),
+      ...(value.conversation ? { conversation: parseRecoveryConversation(value.conversation) } : {}),
       ...(typeof value.entryId === "string" ? { entryId: value.entryId } : {}),
       ...(typeof value.executionId === "string" ? { executionId: value.executionId } : {}),
       changedPathCount: Number(value.changedPathCount ?? 0),
@@ -290,7 +307,9 @@ export class KernelRecoveryStore {
       provenance: payload.provenance as WorkspaceRecoveryTurnBinding["provenance"],
       runtimeGeneration: Number(payload.runtimeGeneration),
       runtimeKey: String(payload.runtimeKey),
-      sessionId: String(payload.sessionId),
+      conversation: parseRecoveryConversation(payload.conversation),
+      ...(payload.fileTarget ? { fileTarget: parseRecoveryFileTarget(payload.fileTarget) } : {}),
+      ...(typeof payload.runId === "string" ? { runId: payload.runId } : {}),
       startedAt: String(payload.startedAt),
       status: payload.status as WorkspaceRecoveryTurnBinding["status"],
       unrecordedResourceIds: Array.isArray(payload.unrecordedResourceIds) ? payload.unrecordedResourceIds as string[] : [],
@@ -304,12 +323,21 @@ export class KernelRecoveryStore {
   }
 
   async recordTurnStart(input: WorkspaceRecoveryTurnStartInput): Promise<WorkspaceRecoveryTurnBinding> {
-    const context = await this.context(input.workspaceId, input.sessionId);
+    const context = await this.context(input.workspaceId, input.conversation.kind === "pi" ? input.conversation.sessionId : undefined, input.conversation.kind === "thread");
+    if (input.conversation.kind === "thread") {
+      const existing = await context.client.recoveryTurnGet({workspaceId:input.workspaceId,executionId:input.executionId});
+      if (existing) {
+        if (!isDeepStrictEqual(existing.conversation,input.conversation) || existing.userEntryId !== input.userEntryId || existing.runId !== input.runId || (input.fileTarget && !isDeepStrictEqual(existing.fileTarget,input.fileTarget))) throw new Error("Original recovery checkpoint identity changed");
+        return this.turn(existing);
+      }
+    }
     const value = await context.client.recoveryTurnStart({
       operationId: `recovery-turn-start:${input.workspaceId}:${input.executionId}`,
       workspaceId: input.workspaceId,
       executionId: input.executionId,
-      sessionId: input.sessionId,
+      conversation: input.conversation,
+      ...(input.fileTarget ? { fileTarget: input.fileTarget } : {}),
+      ...(input.runId ? { runId: input.runId } : {}),
       userEntryId: input.userEntryId,
       workerId: input.workerId,
       runtimeGeneration: input.runtimeGeneration,
@@ -348,17 +376,17 @@ export class KernelRecoveryStore {
   }
 
   async resolveEntry(input: WorkspaceRecoveryEntryTarget): Promise<WorkspaceRecoveryEntryBindingResult> {
-    const context = await this.context(input.workspaceId, input.sessionId);
+    const context = await this.context(input.workspaceId, input.conversation.kind === "pi" ? input.conversation.sessionId : undefined, input.conversation.kind === "thread");
     const value = await context.client.recoveryEntryResolve({
       workspaceId: input.workspaceId,
-      sessionId: input.sessionId,
+      conversation: input.conversation,
       entryId: input.entryId,
     });
     if (typeof value.executionId !== "string") return value as unknown as WorkspaceRecoveryEntryBindingResult;
     const turn = await context.client.recoveryTurnGet({
       workspaceId: input.workspaceId,
       executionId: value.executionId,
-      sessionId: input.sessionId,
+      conversation: input.conversation,
     });
     const binding = turn ? this.turn(turn) : undefined;
     const checkpointValue = value.checkpoint;
@@ -372,7 +400,8 @@ export class KernelRecoveryStore {
     const lookup = await this.context(input.workspaceId, undefined, true);
     const turn = await lookup.client.recoveryTurnGet({ workspaceId: input.workspaceId, executionId: input.executionId });
     if (!turn || typeof turn.sessionId !== "string") return false;
-    const context = await this.context(input.workspaceId, turn.sessionId);
+    const conversation = parseRecoveryConversation(turn.conversation);
+    const context = await this.context(input.workspaceId, conversation.kind === "pi" ? conversation.sessionId : undefined, conversation.kind === "thread");
     const captured = await this.content.captureState(
       recoveryIdentity(input.workspaceId, context.identity.canonicalRoot),
       context.root,
@@ -390,7 +419,7 @@ export class KernelRecoveryStore {
       const result = await context.client.recoveryChangeBefore({
         operationId: `recovery-before:${input.executionId}:${input.mutationId}:${captured.path}`,
         workspaceId: input.workspaceId,
-        sessionId: turn.sessionId,
+        conversation: parseRecoveryConversation(turn.conversation),
         executionId: input.executionId,
         checkpointId: String(turn.checkpointId),
         path: captured.path,
@@ -416,7 +445,8 @@ export class KernelRecoveryStore {
     const lookup = await this.context(input.workspaceId, undefined, true);
     const turn = await lookup.client.recoveryTurnGet({ workspaceId: input.workspaceId, executionId: input.executionId });
     if (!turn || typeof turn.sessionId !== "string") return false;
-    const context = await this.context(input.workspaceId, turn.sessionId);
+    const conversation = parseRecoveryConversation(turn.conversation);
+    const context = await this.context(input.workspaceId, conversation.kind === "pi" ? conversation.sessionId : undefined, conversation.kind === "thread");
     const checkpointId = String(turn.checkpointId);
     const captured = await this.content.captureState(
       recoveryIdentity(input.workspaceId, context.identity.canonicalRoot),
@@ -444,7 +474,7 @@ export class KernelRecoveryStore {
       await context.client.recoveryChangeAfter({
         operationId,
         workspaceId: input.workspaceId,
-        sessionId: turn.sessionId,
+        conversation: parseRecoveryConversation(turn.conversation),
         executionId: input.executionId,
         checkpointId,
         path: captured.path,
@@ -467,7 +497,7 @@ export class KernelRecoveryStore {
       await context.client.recoveryChangeAfter({
         operationId,
         workspaceId: input.workspaceId,
-        sessionId: turn.sessionId,
+        conversation: parseRecoveryConversation(turn.conversation),
         executionId: input.executionId,
         checkpointId,
         path: captured.path,
@@ -496,8 +526,9 @@ export class KernelRecoveryStore {
   }): Promise<boolean> {
     const lookup = await this.context(input.workspaceId, undefined, true);
     const turn = await lookup.client.recoveryTurnGet({ workspaceId: input.workspaceId, executionId: input.executionId });
-    if (!turn || (turn.status !== "pending" && turn.status !== "ready") || typeof turn.sessionId !== "string" || typeof turn.checkpointId !== "string") return false;
-    const context = await this.context(input.workspaceId, turn.sessionId);
+    if (!turn || (turn.status !== "pending" && turn.status !== "ready" && turn.status !== "incomplete") || !turn.conversation || typeof turn.checkpointId !== "string") return false;
+    const conversation = parseRecoveryConversation(turn.conversation);
+    const context = await this.context(input.workspaceId, conversation.kind === "pi" ? conversation.sessionId : undefined, conversation.kind === "thread");
     const checkpointId = turn.checkpointId;
     if (turn.status === "ready") {
       for (const [rawPath, states] of Object.entries(input.changes)) {
@@ -517,7 +548,7 @@ export class KernelRecoveryStore {
       const beforeResult = await context.client.recoveryChangeBefore({
         operationId: `integration-before:${input.operationId}:${path}`,
         workspaceId: input.workspaceId,
-        sessionId: turn.sessionId,
+        conversation: parseRecoveryConversation(turn.conversation),
         executionId: input.executionId,
         checkpointId,
         path,
@@ -532,10 +563,15 @@ export class KernelRecoveryStore {
         ? parseRecoveryState(prior.after)
         : undefined;
       if (priorAfter && sameState(priorAfter, states.after)) continue;
+      if (priorAfter && !sameState(priorAfter,states.before)) {
+        const current = await context.client.recoveryTurnGet({workspaceId:input.workspaceId,executionId:input.executionId});
+        if (!current) throw new Error("Integration input checkpoint disappeared");
+        await context.client.recoveryTurnSettle({operationId:`integration-gap:${input.operationId}:${path}`,workspaceId:input.workspaceId,executionId:input.executionId,expectedRevision:Number(current.revision),status:"incomplete",observedResourceIds:[],unrecordedResourceIds:[...new Set([...(Array.isArray(current.unrecordedResourceIds) ? current.unrecordedResourceIds as string[] : []),path])],observationComplete:false,activeWriterScopes:[],provenance:"caused-by",failureJson:JSON.stringify({code:"checkpoint-incomplete",message:"Integration observed an external change inside the input checkpoint",retryable:false})});
+      }
       await context.client.recoveryChangeAfter({
         operationId: `integration-after:${input.operationId}:${path}`,
         workspaceId: input.workspaceId,
-        sessionId: turn.sessionId,
+        conversation: parseRecoveryConversation(turn.conversation),
         executionId: input.executionId,
         checkpointId,
         path,
@@ -554,12 +590,13 @@ export class KernelRecoveryStore {
   async recordTurnSettled(input: WorkspaceRecoveryTurnSettledInput): Promise<WorkspaceRecoveryTurnBinding> {
     const lookup = await this.context(input.workspaceId, undefined, true);
     const row = await lookup.client.recoveryTurnGet({ workspaceId: input.workspaceId, executionId: input.executionId });
-    if (!row || typeof row.sessionId !== "string") throw new Error("checkpoint-missing");
-    const context = await this.context(input.workspaceId, row.sessionId);
+    if (!row) throw new Error("checkpoint-missing");
+    const conversation = parseRecoveryConversation(row.conversation);
+    const context = await this.context(input.workspaceId, conversation.kind === "pi" ? conversation.sessionId : undefined, conversation.kind === "thread");
     const listed = await context.client.recoveryChangeList({
       workspaceId: input.workspaceId,
       executionId: input.executionId,
-      sessionId: row.sessionId,
+      conversation,
     });
     const changes = Array.isArray(listed.changes) ? listed.changes : [];
     const recorded = changes.flatMap((value) => {
@@ -571,7 +608,7 @@ export class KernelRecoveryStore {
     const observed = [...new Set(input.observedResourceIds
       .map(normalizeResourceId)
       .filter((value): value is string => Boolean(value) && !/\.varin-(?:tmp|restore|recovery)-/u.test(value)))].sort();
-    const unrecorded = observed.filter((value) => !recordedKeys.has(comparison(value)));
+    const unrecorded = [...new Set([...observed.filter((value) => !recordedKeys.has(comparison(value))), ...(Array.isArray(row.unrecordedResourceIds) ? row.unrecordedResourceIds as string[] : [])])];
     const retainedFailure = row.status === "incomplete" && row.failure && typeof row.failure === "object"
       ? row.failure as Record<string, unknown>
       : undefined;
@@ -608,7 +645,7 @@ export class KernelRecoveryStore {
 
   async listChanges(input: {
     workspaceId: string;
-    sessionId?: string;
+    conversation?: RecoveryConversation;
     executionId?: string;
     entryIds?: string[];
   }): Promise<DurableRecoveryChangeSelection> {
@@ -630,6 +667,7 @@ export class KernelRecoveryStore {
         path: String(item.path),
         sequence: Number(item.sequence),
         toolName: String(item.toolName),
+        ...(item.fileTarget ? { fileTarget: parseRecoveryFileTarget(item.fileTarget) } : {}),
       };
     });
     const turns = (Array.isArray(raw.turns) ? raw.turns : []).map((value) => {
@@ -640,6 +678,7 @@ export class KernelRecoveryStore {
         executionId: String(item.executionId),
         sequence: Number(item.sequence),
         status: String(item.status),
+        ...(item.fileTarget ? { fileTarget: parseRecoveryFileTarget(item.fileTarget) } : {}),
         unrecordedResourceIds: Array.isArray(item.unrecordedResourceIds) ? item.unrecordedResourceIds as string[] : [],
         ...(item.failure && typeof item.failure === "object" ? { failure: item.failure as Record<string, unknown> } : {}),
       };
@@ -826,8 +865,8 @@ export class KernelRecoveryStore {
   }
 
   async getOperation(workspaceId: string, operationId: string, _sessionId?: string): Promise<Record<string, unknown> | null> {
-    const context = await this.context(workspaceId, undefined, true);
-    const operation = await context.client.recoveryOperationGet({ workspaceId, operationId });
+    const client = this.scopedActor?.client ?? await this.adapter.recoveryMetadataClient(workspaceId);
+    const operation = await client.recoveryOperationGet({ workspaceId, operationId });
     if (operation) this.registerOperationSources(workspaceId, operation);
     return operation;
   }
@@ -839,11 +878,11 @@ export class KernelRecoveryStore {
       }
       return this.scopedActor.metadataReader.listOperations(workspaceId, kind);
     }
-    const context = await this.context(workspaceId, undefined, true);
+    const client = await this.adapter.recoveryMetadataClient(workspaceId);
     const output: Record<string, unknown>[] = [];
     let cursor: number | undefined;
     do {
-      const value = await context.client.recoveryOperationList({
+      const value = await client.recoveryOperationList({
         workspaceId,
         ...(kind ? { kind } : {}),
         pageSize: 512,

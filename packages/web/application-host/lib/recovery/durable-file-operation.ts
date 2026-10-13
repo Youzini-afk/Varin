@@ -143,7 +143,7 @@ export interface HostFileResourceBackend {
     identity: RecoveryIdentity,
     relativePath: string,
     state: RecoveryState,
-    options?: { expected?: RecoveryState; ownerId?: string; operationId?: string },
+    options?: { expected?: RecoveryState; ownerId?: string; operationId?: string; reservationOperationId?: string },
   ): Promise<{ status: "applied" | "conflict"; state: RecoveryState }>;
   writeBytes(
     identity: RecoveryIdentity,
@@ -402,10 +402,10 @@ class AcknowledgedIntegrationFileFailure extends Error {
 
 const applyFile = async (context: DurableFileOperationContext, operationId: string, file: string,
   target: RecoveryState, expected: RecoveryState, phase: "apply" | "compensate" | "undo"): Promise<void> => {
-  if (!context.fileResources) return context.fileStore.applyState(context.identity, context.root, file, target);
+  if (!context.fileResources) return context.fileStore.applyState(context.identity, context.root, file, target, {reservationOperationId:operationId});
   const identity = createHash("sha256").update(JSON.stringify([operationId, file, phase])).digest("hex");
   const applied = await context.fileResources.applyStateDetailed(context.identity, file, target, {
-    expected, operationId: `integration-file:${identity}`,
+    expected, operationId: `integration-file:${identity}`, reservationOperationId:operationId,
   });
   if (applied.status === "conflict" || (applied.status === "applied" && !sameState(applied.state, target))) {
     throw new AcknowledgedIntegrationFileFailure(`Integration ${phase} conflicted: ${file}`, applied.status === "conflict" ? "none" : "unknown");
@@ -435,7 +435,7 @@ const applyKernelDurableFileOperation = async (
     const selection = await durable.listChanges({ workspaceId: spec.workspaceId, executionId: spec.executionId });
     const binding = selection.turns.find((turn) => turn.executionId === spec.executionId);
     if (!binding) throw new Error("Parent turn recovery binding is unavailable for integration");
-    if (spec.requireTurnBinding && binding.status !== "pending") {
+    if (spec.requireTurnBinding && !["pending","incomplete"].includes(binding.status)) {
       throw new Error(`Parent turn recovery binding is not active for integration (${binding.status})`);
     }
     if (spec.requireTurnBinding && !durable.recordIntegrationChanges) {

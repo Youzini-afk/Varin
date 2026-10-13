@@ -14,12 +14,19 @@
 - 推理用途接入不等于每个用途都有本地推理包。已有提供商 decision/rerank/embedding 的配置、真实消费者与原生执行合同仍需保留/接通；本地包当前只有已有 Bekko。用户本轮明确暂缓 native 图像生成，不计剩余交付范围；旧 Pi 的 `models.generateImages()` 基础不等于 native 已实现。§18.1/§24 的建议/评估限定已有配置的辅助请求，不能扩成默认模型链；没有另设独立“材料 rerank”产品的任务。此前清单混用用途、消费者和本地包，现以这些明确边界纠正，历史台账不充当新需求。
 - 已有本地嵌入是 `bekko-embedding-v1-a8m` 的 `local-semantic` ONNX 组件。下述增量已将其原安装/校验/worker 接入 native query 和前台文档向量，HTTP 仍是显式配置的另一执行器。HTTP 或受控本地模型的执行验证不代表用户配置了外部服务，也不代表实际 ONNX 权重、硬件质量/性能已验收；当前组件协议需按原 builder 构建 v3 包后导入。
 
+## 2026-10-13 增量：Thread 历史导航与原文件恢复
+
+- 原 HistoryBranch 使用锁外祖先/上下文准备、head CAS 与持久命令 receipt；原 key 的未知重试不回退后来新输入，Undo 只沿原 receipt。Run、用量、效果、Goal 取消和当前来源保留，跨摘要范围时只清摘要专属 Bot baseline。
+- 真实工具冻结的输入范围进入原 affected-file journal；同 Run 的 Boundary 输入各自绑定 checkpoint。物理目标、原来源和多根同名路径分别核对；条件写入、safety、补偿、当前 writer/reservation 和原 Storage 引用保持同一 owner。fork、旧根离线及重开投影不由当前 sidebar 推断。
+- Thread 与 Pi 原恢复消费者同步使用 v6 tagged conversation；未知结果保同一 operation/revision，启动发现与导航 owner 就绪分开。元数据读取不要求物理根在线，失败明确投影；脏缓冲仍需先保存/丢弃。Catalog **65**、Storage **15**、wire **25**。
+- [本轮记录](../reviews/runtime-thread-recovery-2026-10-13.md)分列真实 RunAssembly/文件写入/后继请求、Catalog/Storage、Bot Context/GC、原纯 journal saga 和 React/Router 证据。被拒的 Unix listener 探针保持停止，Rust/Host 多物理根组合恢复、实际产品 IPC 与跨平台恢复未计通过。本增量实现原恢复接线，不恢复 Git index，也不将全部两设计或平台验收标为完成。
+
 ## 2026-10-12 增量：Documents 草稿与固定来源
 
 - 原 Source picker/client/认证 Router 用一次 Documents 注册后的 workspaceId，显式选择 saved-files/surface-drafts/captureScopes，并冻结完整重试意图。Thread 快照不可变，Pi 原 own-write 消费保持；BOM/行尾、文档实例/修订经原 provenance 引用保存，正文进入既有 WorkingState root。
 - 设置/指令/skills 与文件正文消费同一草稿覆盖视图。Git 子目录的 inventory/hash 使用真实选定根，原 index identity 参与稳定性判断；原 branch-create receipt 先读，移根/过期快照重试仍返回同一固定来源，当前信任及物理执行准入不混用。
 - 共享准备取消只在最后观察者退出时排空原作业，未转移对象沿原 owner 释放。fixed child 继承原 pin/baseRef 与来源关系，没有第二草稿库。[本轮记录](../reviews/runtime-document-source-2026-10-12.md)区分 UI/Documents、受控树、真实 Rust/Host 与构建证据。Catalog **65**、wire **24**保持。
-- 对话回退与组合文件恢复另沿原 affected-file journal/HistoryBranch 实现中；本片捕获不等于恢复 Git index、外部修改或编辑器缓冲。
+- 本片捕获不等于恢复 Git index、外部修改或编辑器缓冲。其后对话回退与组合文件恢复的实现及未验范围见上方增量。
 
 ## 2026-10-12 增量：Bot 产品与原记忆/Plan、摘要准备
 
@@ -813,23 +820,23 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 
 ## 完整设计对照与剩余工程范围
 
-2026-10-12 按两份设计、当前源码和本文件最新增量重新核对。此表替代早期仍把 Goal、策略子任务、MCP Tasks、Computer 或自动容量压缩列为未实现的中间对照；各历史阶段的原始验证记录仍保留。decision 已完成 TypeSafe/Cloudflare/llama.cpp 与 research_decide 有限片；dedicated rerank、原渐进 fast-decision、Explore LLM 和 query embedding 已接原推理回执及固定/物化/live_root code_retrieval。这些是既有可选调用路径的接线证据，不代表用户启用了相应模型；已有 Bekko 已接 native 查询、文档向量与主/child 生命周期，受控模型证据与实际 ONNX 包/硬件验收分开；scoped 冻结依赖和成功 usage 校准也已接通原消费者。实现、真实产品组合与外部平台验证分别判断，不按提交数、测试数或条目数估计完成比例。
+2026-10-13 按两份设计、当前源码和本文件最新增量重新核对。此表替代早期仍把 Goal、策略子任务、MCP Tasks、Computer 或自动容量压缩列为未实现的中间对照；各历史阶段的原始验证记录仍保留。decision 已完成 TypeSafe/Cloudflare/llama.cpp 与 research_decide 有限片；dedicated rerank、原渐进 fast-decision、Explore LLM 和 query embedding 已接原推理回执及固定/物化/live_root code_retrieval。这些是既有可选调用路径的接线证据，不代表用户启用了相应模型；已有 Bekko 已接 native 查询、文档向量与主/child 生命周期，受控模型证据与实际 ONNX 包/硬件验收分开；scoped 冻结依赖和成功 usage 校准也已接通原消费者。实现、真实产品组合与外部平台验证分别判断，不按提交数、测试数或条目数估计完成比例。
 
 以下顺序是 decision/rerank 后的工程优先级；可独立交付的领域可以并行。默认 runtime 切换、Pi 删除与全面用户资产迁移由用户验收后执行，我们负责迁移前能力、验收入口和交接清单。
 
 | 设计要求 / 剩余类别 | 已有实际能力，不再作为从零缺口 | 仍需实现或闭合的实际路径 | 验收重点 |
 | --- | --- | --- | --- |
 | 总设 §15–17：来源、语言与检索 | 固定/物化/live_root 来源、隔离可写 child 与逐项结果集成；三类来源的定义/引用/诊断/hover/symbols/call hierarchy、关键词/结构/显式语义、dedicated rerank、渐进 fast-decision 与 Explore LLM；原 immutable reader、撤权和推理账本；固定工程派生视图及实际 child 消费；已有 Bekko 本地执行器的 query/文档向量、真实 worker 归属 | 其余编辑器语言/编辑候选与跨文件计算版本证据；远端文件/语言/检索同源映射；已有 Bekko 实际 ONNX 包/硬件与质量性能验收；更多 provider/工程规模下的来源合同验证 | 固定捕获树不能悄悄读 live 配置，目录外 provider environment 明确标识；同名远端路径不串源；旧 reader/配置切代与取消恢复；正常可选缺失不吞选定实现失败 |
-| 总设 §12–13、§18、§24：推理用途、记忆与 Bot | 多 API 家族原生适配及原 credential owner；规划模型、embedding、TypeSafe/Cloudflare/llama.cpp decision 与真实 research_decide；自动容量水位、可替换预算 Decision/冻结摘要配方、分段摘要、普通 notes/计划和稳定 memory checkpoint；同绑定成功 usage 校准；Goal/预算/暂停/各种持久触发 | 现有实际模型配置与协议特定回执、服务器工作续接；原 Bot 自动整理/选文提取及 Bot 独立知识/身份/睡眠恢复/长期任务。图像生成按用户本轮指令暂缓；不另设建议/评估新产品、材料重排产品或其他用途本地包 | 每次实际外发按用途、原凭据、来源和 Goal 受理；未知 usage 不变成零；不重放潜在收费请求；原记忆 revision 和祖先压缩边界保持 |
+| 总设 §12–13、§18、§24：推理用途、记忆与 Bot | 多 API 家族原生适配及原 credential owner；规划模型、embedding、TypeSafe/Cloudflare/llama.cpp decision 与真实 research_decide；自动容量水位、可替换预算 Decision/冻结摘要配方、分段摘要、普通 notes/计划和稳定 memory checkpoint；同绑定成功 usage 校准；Goal/预算/暂停/各种持久触发；原 Bot 自动整理/选文、native 主入口/身份/召回/Plan/Sleep，冻结摘要基线与原自适应准备水位 | 现有实际模型配置、协议特定回执、长期睡眠恢复及产品组合的外部验收；发现具体未接消费者时沿原 owner 补齐，不重复列为从零开发。图像生成按用户本轮指令暂缓；不另设建议/评估新产品、材料重排产品或其他用途本地包 | 每次实际外发按用途、原凭据、来源和 Goal 受理；未知 usage 不变成零；不重放潜在收费请求；原记忆 revision 和祖先压缩边界保持 |
 | 扩设 §4–9：完整能力组合与作者接口 | Provider/Transform/Decision/Observer 已有真实切片；ToolGraph、直接 child、Deliver/Pause、运行中策略换绑；SDK tools.invoke；原冻结tools.list/describe与普通runtime_contract、同源service/method/event/UI slot/props/准备状态及精确不可变包源码有限查询；Agent产包/原授权候选/实际工作台挂载释放、显式Host/Surface就绪组；有序纯Context Transform、同名来源隔离与未变成员复用；唯一 scoped 选择、冻结依赖 DAG、同图实例共享及实际 Surface lease | 其余当前异构 service 的元数据声明、完整API/更广UI贡献查询；更广领域Provider/Transform和结构化patch冲突合同、更多实际作用域组合验证；trusted-native不能并存实例的热交接仍需沿原owner实现 | 不另养能力名单或第二安装器；失败候选保留旧实例；旧调用保留真实绑定；关闭 UI 不取消后台业务；仅依赖自己的工作等待准备 |
-| 总设 §14–16、§21、§24：文件与产品工作流 | 原文件工具/CAS/捕获、child 报告与 WorkingResult、family 消息/读取/Wait、历史引用与分支、Storage 与 Catalog GC 锁外准备 | 未保存编辑器草稿、Documents/Git/overview 与工作源的关联；历史/磁盘组合恢复；完整 IDE/Research/Bot 模式、通知等产品消费者接同一身份/revision/cursor | 草稿不是聊天回滚副作用；重开保留真实副本与效果；报告和代码集成各有事实；各视图不能有第二份状态权威 |
-| 总设 §19–20、§22：环境、Computer 与 MCP | Computer 原操作、精确 stop、source-less child request/Wait/handback、持久 async 脚本；MCP tools/content/Tasks/resource observers/有限交互和两次审阅 sampling；typed media 的存储与跨层消费 | 真实远端/VM 环境的一致资源映射及平台组件缺口；支持范围内 provider/server/无 UI 生命周期的实际产品组合。Wayland 可靠截图/坐标输入仍需正式会话组件；macOS JXA 已有实现但缺真实机证据。typed media 不代表全部模型音视频/image 用途已实现 | 同物理桌面共享占用、独立桌面并行；失联不证明停止；旧 epoch 不续发；MCP 可选音频/toolChoice 等明确有限支持不自动扩成整份协议实现任务；实际配置与权限流程不能被省略 |
+| 总设 §14–16、§21、§24：文件与产品工作流 | 原文件工具/CAS/捕获、child 报告与 WorkingResult、family 消息/读取/Wait、历史引用与分支、Storage 与 Catalog GC 锁外准备；Documents 草稿/BOM/行尾与同源资源闭包、Git 子目录捕获；原输入 checkpoint、Thread 导航和原 journal 组合恢复 | Rust/Host 多物理来源组合恢复及跨平台文件行为的实际验收；现有 IDE/Research/Bot 视图、Documents/Git/overview/通知的组合消费核对。可确认脏缓冲恢复等原设计目标仍未实现；Git index 恢复不是聊天回退的隐含能力 | 草稿不是聊天回滚副作用；重开保留真实副本与效果；报告和代码集成各有事实；各视图不能有第二份状态权威 |
+| 总设 §19–20、§22：环境、Computer 与 MCP | Computer 原本地/远端操作、assignment/精确 stop、source-less child request/Wait/handback、持久 async 脚本；MCP tools/content/Tasks/resource observers/有限交互和两次审阅 sampling；typed media 的存储与跨层消费 | 同一 native 协调 Host 下指向另一个执行 Host 的文件/进程/搜索/语言一致来源映射；已有 Computer open/put/browser/office/evidence/environment/forward 的 native 工具消费者；平台组件缺口及支持范围内 provider/server/无 UI 生命周期的实际产品组合。Wayland 可靠截图/坐标输入仍需正式会话组件；macOS JXA 已有实现但缺真实机证据。typed media 不代表全部模型音视频/image 用途已实现 | 同物理桌面共享占用、独立桌面并行；失联不证明停止；旧 epoch 不续发；MCP 可选音频/toolChoice 等明确有限支持不自动扩成整份协议实现任务；实际配置与权限流程不能被省略 |
 | 总设 §7–9、§23、§27–28，扩设 §10–12：全局组合与发行实证 | 跨 Run 原子资源/FIFO、FileSearch 任务族公平、事件背压、正文/回执 ContentStore、锁外捕获/GC、分层产品投影已各有真实纵切 | 其余资源分类/provider 配额与全域共享准备；大内容请求成本、原始控制隔离的组合负载；Web/Electron/Mobile/无 UI Host 的完整后端寿命、安装升级/数据保留；代表性冷/热/并发/更新成本 | 只跑源码或受控 stdio 不称产品 IPC/真机/真账号通过；不预设性能倍数或任意门槛；未用扩展不增加热路径扫描；旧世代按实际引用释放；验证中发现的产品缺陷仍需修复 |
 
 ### 实现与验证的边界
 
 - 现有 Goal、follow-up、时区日历、Job/文件/日志/指标触发、family 协作、Web/PDF/材料分享/科研作业/学术发现不是剩余从零实现项；仍须保持真实消费者及取消恢复的组合证据。
-- Worker 已有隔离可写 child、WorkingResult、逐项集成与报告；剩余的是未保存编辑器草稿、Documents/Git/历史恢复和产品界面之间的完整组合，不能将“完整产品交付待验”误记为这些原语尚未实现。
+- Worker 已有隔离可写 child、WorkingResult、逐项集成与报告；Documents 草稿与历史/journal 恢复已分别接入。剩余组合与外部验收仍须具体到真实消费者，不能将“完整产品交付待验”误记为这些原语尚未实现。
 - 当前已适配的模型家族不能由早期 provider README 中的局部清单推断为缺失。具体字段、认证/网络、服务器续接和多模态能力逐项以实际配置与可执行 adapter 为准；真实账号/平台验证仍单列。
 - 既有平台组件不等于真实平台已验；反过来，缺真实机证据也不等于该平台完全没有实现。完整产品验证可能发现接线问题，不能提前把全部余项称为“只剩测试”。
 - 完整能力交付后提供用户验收方法、明确支持边界及迁移前清单；不擅自切默认 runtime、删除 Pi 或做全面资产迁移。

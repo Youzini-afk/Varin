@@ -14,12 +14,20 @@ Varin message recovery is an operation journal, not a workspace archive.
 5. Repeated writes preserve the first before-image and last after-image. Settlement compares actual
    watcher observations with the journal; uncontrolled shell/Git/external writes remain uncovered.
 
+Thread tools use the same Storage checkpoint/change tables. The original invocation's frozen history
+range binds a write to its latest real input; Environment/Agent input is not relabelled as a user or
+model request. `file.apply` commits its before-image intent and eventual receipt references with the
+same file-operation transaction. Current-format restart reconciliation completes that original record.
+Physical targets retain their original workspace, root, Run and execution workspace. The public
+conversation discriminator chooses Pi session navigation or Thread HistoryBranch navigation; neither
+owner is reconstructed from the other's identifier.
+
 New sessions, ordinary prompts, and unchanged turns therefore perform no recursive scan. Work scales
 with the files actually written by the journalled tools.
 
 ## Restore path
 
-Conversation navigation reports the entry IDs that will leave the active Pi branch. Varin loads the
+Conversation navigation reports the entry IDs that will leave the selected branch. Varin loads the
 turn checkpoints bound to those entries and folds their path operations into:
 
 - the expected current state for each affected path;
@@ -32,10 +40,14 @@ The proposed confirmable dirty-buffer/per-surface fallback is not implemented. B
 write, Varin stores the current version of the affected paths as the redo/compensation state. It does
 not create a whole-workspace safety checkpoint or enter global maintenance mode.
 
-The durable operation/file record is owned by the Rust kernel. If file application or Pi navigation
-fails, Varin compensates only paths already changed by that operation. Startup resolves an interrupted
-operation from those recorded paths; it never leaves the workspace locked while waiting for a conversation
-step. The former local SQLite recovery engine is test-fixture code only and is not a production fallback.
+The durable operation/file record is owned by the Rust kernel. If file application or a definite
+navigation rejection occurs, Varin compensates only paths already changed by that operation. A lost
+Thread navigation response is resolved using the original Catalog command receipt, not current-head
+equality and not automatic compensation. Startup discovery is separate from owner-ready resumption:
+planned operations remain inert, while interrupted operations continue or compensate from their exact
+stored phases. Reopened UI reads the original operation and revision. It never creates a new attempt
+merely because an earlier response was lost. The former local SQLite recovery engine is test-fixture
+code only and is not a production fallback.
 
 Thread result integration uses the same selected storage, content objects, exact path-state capture,
 conditional apply/compensation phases, and workspace lease through a trusted Host-only adapter. Its
@@ -88,7 +100,7 @@ retention controls. A zero-reclaim result is distinct from cleanup failure. GC r
 deleted object-file lengths from both prior/orphan cleanup and the committed release pass; the
 Host propagates physical deletion failures instead of reporting successful zero-byte cleanup.
 
-The public recovery v5 contract still permits replacement providers to implement application-data,
+The public recovery v6 contract still permits replacement providers to implement application-data,
 workspace-local, workspace-adjacent, or custom locations. For those providers, transfer and cleanup semantics
 remain provider-owned. They do not grant direct access to the built-in kernel catalog.
 

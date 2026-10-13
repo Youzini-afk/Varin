@@ -48,6 +48,9 @@ pub(super) fn parse_file_params<T: DeserializeOwned>(
         object.remove("__nativeRequestHash");
         object.remove("__nativeGrantId");
         object.remove("__nativeEpoch");
+        object.remove("__recoveryTurn");
+        object.remove("__recoveryBeforeOwner");
+        object.remove("__recoveryTool");
     }
     Ok(serde_json::from_value(value)?)
 }
@@ -638,6 +641,7 @@ impl Storage {
         self.conn.execute_batch("BEGIN IMMEDIATE")?;
         let outcome = (|| {
             self.operation_begin(operation_id, kind, &params_hash)?;
+            self.journal_file_intent(operation_id, &identity_params)?;
             self.record_operation_workspace(
                 operation_id,
                 params_value.get("workspaceId").and_then(Value::as_str),
@@ -685,6 +689,7 @@ impl Storage {
             params![operation_id],
             |row| row.get(0),
         )?;
+        let journal_intent = intent.as_ref().map(|value| serde_json::from_str::<Value>(value)).transpose()?.and_then(|value| value.get("intent").cloned());
         if let Some(intent) = intent {
             let envelope: Value = serde_json::from_str(&intent)?;
             for field in ["__nativeRequestHash", "__nativeGrantId", "__nativeEpoch"] {
@@ -696,6 +701,7 @@ impl Storage {
         self.conn.execute_batch("BEGIN IMMEDIATE")?;
         let outcome = (|| {
             self.operation_finish(operation_id, &durable_result)?;
+            if let Some(intent)=&journal_intent { self.journal_file_receipt(operation_id,intent,result)?; }
             if let (Some(owner_id), Some(workspace_id)) = (owner_id, workspace_id) {
                 self.conn.execute(
                     "DELETE FROM object_owners WHERE owner_id = ?1 AND workspace_id = ?2",
@@ -1266,6 +1272,11 @@ impl Storage {
                 "file apply requires an exact object owner or Host maintenance authority"
                     .to_string(),
             ));
+        }
+        if grant.capabilities.contains("recovery.maintenance") {
+            if !self.observation_process_idle(&resource.absolute)? { return Err(KernelError::Operation("affected resource still has an active process writer".into())); }
+            let conflicts = self.recovery_operation_conflicts(&json!({"workspaceId":params.workspace_id,"rootId":params.root_id,"paths":[resource.path],"exceptOperationId":params.reservation_operation_id}), grant)?;
+            if conflicts["operations"].as_array().is_some_and(|values|!values.is_empty()) { return Err(KernelError::Operation("affected resource has an unfinished Integration".into())); }
         }
         let current = self.observe_state(&resource)?;
         if Self::file_state_matches(&current, &target) {

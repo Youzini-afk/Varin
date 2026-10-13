@@ -13,7 +13,7 @@ const plan = (input: Partial<WorkspaceCombinedRecoveryPlan> = {}): WorkspaceComb
   id: 'operation-1',
   removedEntryIds: ['user-1'],
   revision: `sha256-${'a'.repeat(64)}`,
-  sessionId: 'session-1',
+  conversation: { kind: 'pi', sessionId: 'session-1' },
   targetLeafId: 'leaf-1',
   uncoveredPaths: [],
   uncoveredReasons: [],

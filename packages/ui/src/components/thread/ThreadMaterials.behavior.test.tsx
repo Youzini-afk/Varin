@@ -381,6 +381,7 @@ function artifactConversationFixture() {
     list: unused, create: unused, mediaRead: unused, listMcpInteractions: async () => ({ items: [], nextCursor: null }),
     readMcpInteraction: unused, respondMcpInteraction: unused, reviewMcpSamplingRequest: unused, reviewMcpSamplingOutput: unused,
     snapshot, submit, enqueue: unused, editInput: unused, cancelInput: unused, cancelRun: unused,
+    prepareNavigation: unused, recoverySource: unused, navigate: unused, navigationReceipt: unused,
     inspectTools: unused, inspectPolicy: unused, restartPolicy: unused, cancelPolicyUpdate: unused, selectModel: unused,
     decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused,
     cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused,
