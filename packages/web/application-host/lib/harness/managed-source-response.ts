@@ -1,4 +1,5 @@
 import type { ManagedSourceReceiptRelease, ManagedSourceServiceCancelReceipt, SourceServiceOperation, SourceServiceResponse } from './managed-remote-types.js';
+import { parseExtensionSourceSnapshot } from '../kernel/extension-source.js';
 
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown): value is string => typeof value === 'string';
@@ -34,6 +35,13 @@ export function decodeManagedSourceResponse<Operation extends SourceServiceOpera
       && (value.status !== 'ready' || text(value.content) && text(value.revision) && text(value.source)); break;
     case 'document_read': valid = record(value) && text(value.bytesBase64) && Number.isSafeInteger(value.byteLength)
       && Number(value.byteLength) >= 0 && text(value.sourceUrl) && text(value.title) && value.contentType === 'application/pdf'; break;
+    case 'package_capture':
+      if (record(value) && value.captureId === operation.captureId) {
+        return { captureId: operation.captureId, snapshot: parseExtensionSourceSnapshot(value.snapshot) } as SourceServiceResponse<Operation>;
+      }
+      break;
+    case 'package_read': valid = record(value) && text(value.bytesBase64) && text(value.hash) && Number.isSafeInteger(value.byteLength)
+      && Number(value.byteLength) >= 0 && value.offset === operation.offset && Number.isSafeInteger(value.nextOffset) && typeof value.eof === 'boolean'; break;
     case 'routing_workspace': valid = text(value); break;
     case 'language': valid = record(value) && text(value.status) && Array.isArray(value.items) && record(value.omissions); break;
     case 'resources_prepare': valid = record(value) && text(value.id) && record(value.scope)

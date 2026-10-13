@@ -83,6 +83,8 @@ export type SourceServiceOperation =
   | { kind: 'validate' }
   | { kind: 'read'; path: string }
   | { kind: 'document_read'; path: string; operationId: string }
+  | { kind: 'package_capture'; captureId: string; operationId: string; packagePath: string }
+  | { kind: 'package_read'; captureId: string; path: string; offset: number; length: number }
   | { kind: 'check_path'; path: string }
   | { kind: 'routing_workspace' }
   | { kind: 'resources_prepare'; identity: import('@varin/application-client').ThreadIdentity;
@@ -156,6 +158,8 @@ export interface SourceServiceResults {
   validate: { pathScopes: string[] };
   read: import('./explore-file-reader.js').ExploreFileSnapshot;
   document_read: { bytesBase64: string; byteLength: number; sourceUrl: string; title: string; contentType: 'application/pdf' };
+  package_capture: { captureId: string; snapshot: import('../kernel/extension-source.js').ExtensionSourceSnapshot };
+  package_read: import('../kernel/protocol.generated.js').KernelObjectSlice;
 
   check_path: void;
   routing_workspace: string;

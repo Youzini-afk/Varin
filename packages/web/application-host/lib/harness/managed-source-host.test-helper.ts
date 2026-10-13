@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { Router, type Express } from 'express';
+import { ApplicationExtensionRuntime } from '@varin/extension-host';
 import { KernelClient, KernelClientError } from '../kernel/kernel-client.js';
 import type { ChildSourceHandoff, DelegatedExecution, FileObservationBinding, FollowupFilePreparation, FollowupPendingResult, HostToolCall, KernelHandshakeResult, LaunchSource } from '../kernel/protocol.generated.js';
 import { toolOperationId } from '../kernel/protocol.generated.js';
@@ -18,6 +19,9 @@ import { KernelStorageAdapter, createKernelWorkspaceWorkingStateAccess } from '.
 import { createManagedChildSourceService, releaseManagedUnacceptedSource, withManagedChildSource } from '../kernel/managed-source-collaboration.js';
 import { resourceThreadSource as resourceThreadSourceForFixture } from '../kernel/thread-context.js';
 import { savedSourceLaunch } from '../kernel/source-launch.js';
+import { captureExtensionPackage } from '../kernel/extension-package-owner.js';
+import { createSourceQueryService } from '../kernel/source-query-service.js';
+import type { ToolInvocationAuthority } from '../kernel/tool-invocation.js';
 import { routerTransport } from '../extensions/direct-router.test-helper.js';
 import { createManagedRemoteExecutionService } from './managed-remote-service.js';
 import { createManagedRemoteTargetRegistry, type ManagedSourceClient } from './managed-remote-client.js';
@@ -34,6 +38,8 @@ let coordinatorResult: { resolve(value: Record<string, unknown>): void; reject(e
 const HOST_A = 'managed-coordinator', HOST_B = 'managed-target';
 const workspaceId = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
 const threadId = 'thread:managed-review';
+const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
+let packageReadBarrier: { entered: ReturnType<typeof deferred>; release: ReturnType<typeof deferred> } | undefined;
 
 function kernelFor(target: 'a' | 'b', storageRoot: string, epoch: string): KernelClient {
   const hostId = target === 'a' ? HOST_A : HOST_B;
@@ -47,11 +53,16 @@ function kernelFor(target: 'a' | 'b', storageRoot: string, epoch: string): Kerne
     options: { grant?: { grantId: string }; signal?: AbortSignal } = {}) => {
     options.signal?.throwIfAborted();
     const id = `managed:${target}:${++serial}`;
-    return new Promise((resolve, reject) => {
+    const work = new Promise((resolve, reject) => {
       pending.set(id, { resolve, reject });
       write({ kind: 'fixture-request', target, id, method, params,
         ...(options.grant ? { grantId: options.grant.grantId } : {}) });
     });
+    if (target === 'b' && method === 'storage.getBlob' && packageReadBarrier) {
+      const held = packageReadBarrier;
+      return work.then(async result => { held.entered.resolve(); await held.release.promise; return result; });
+    }
+    return work;
   } });
   Object.defineProperty(kernel, 'write', { value: async (value: unknown) => write({ kind: 'fixture-frame', target, frame: value }) });
   return kernel;
@@ -65,6 +76,107 @@ function data(receipt: ManagedSourceReceipt): Record<string, unknown> {
   const body = original.completion?.content?.data;
   assert(body && typeof body === 'object' && !Array.isArray(body), JSON.stringify(receipt));
   return body as Record<string, unknown>;
+}
+
+async function extensionPackages(input: {
+  root: string; aRoot: string; bRoot: string; a: KernelClient; b: KernelClient;
+  runtime: AgentRuntimeClient; storage: KernelStorageAdapter; source: LaunchSource;
+  service: ManagedSourceClient; owner: import('./managed-remote-types.js').ManagedHostSourceOwner;
+  captures: Array<{ authorityId: string; hashes: string[] }>; cancelEntered: ReturnType<typeof deferred>;
+  setAfterCapture(action: (() => Promise<void>) | undefined): void;
+}) {
+  const { root, aRoot, bRoot, a, runtime, storage, source, service, owner, captures, cancelEntered } = input;
+  const fixture = <T>(method: string, params: unknown = {}) => (a as unknown as {
+    requestRaw<T>(method: string, params: unknown): Promise<T> }).requestRaw<T>(method, params);
+  let activations = 0;
+  const extensions = await ApplicationExtensionRuntime.create({ dataDir: join(root, 'extension-data'), varinVersion: '0.9.25',
+    brokerScript: 'never-spawned', transportFactory: () => ({ forceTerminate() {}, terminate: async () => {}, async request(method) {
+      if (method === 'activate') { activations++; return { provisions: [] }; } return null;
+    } }) });
+  const artifactText = async (slot: 'selected' | 'candidate', artifactIntegrity: string, file: string) => {
+    let offset = 0, text = '';
+    for (;;) {
+      const page = await extensions.packages.readSource({ action: 'read', kind: 'source', extensionId: 'example.managed',
+        slot, artifactIntegrity, path: file, offset, maxBytes: 64 * 1024 });
+      assert.equal(page.status, 'found');
+      text += page.page.text; if (page.page.nextOffset === null) return text; offset = page.page.nextOffset;
+    }
+  };
+  const manifest = (capabilities: string[] = []) => JSON.stringify({ id: 'example.managed', schemaVersion: 1, version: '1.0.0',
+    engines: { varin: '*' }, capabilities: { host: capabilities }, entrypoints: { host: { mode: 'brokered', file: 'host.js' } } });
+  const packagePath = 'same-package';
+  const writePackage = async (directory: string, text: string, capabilities: string[] = []) => {
+    await mkdir(join(directory, packagePath), { recursive: true });
+    await writeFile(join(directory, packagePath, 'varin.extension.json'), manifest(capabilities));
+    await writeFile(join(directory, packagePath, 'host.js'), `export default { activate() { return ${JSON.stringify(text)}; } };`);
+    await writeFile(join(directory, packagePath, 'payload.txt'), text.repeat(20_000));
+  };
+  const stage = async (selected: LaunchSource, expectedRevision: number, signal = new AbortController().signal) => {
+    const authority = await fixture<ToolInvocationAuthority>('fixture.package.begin', { source: selected, packagePath, expectedRevision });
+    const result = await captureExtensionPackage({ kernel: a, runtime, storage,
+      resolveLiveSource: async () => { throw new Error('A must not resolve B as a local live root'); } }, authority, packagePath, signal,
+    (directory, provenance) => extensions.stageCapturedPackage(directory, provenance, expectedRevision, signal));
+    return { result, authority };
+  };
+  const gc = (hashes: string[]) => fixture<{ present: boolean[] }>('fixture.package.gc', { hashes });
+  try {
+    await writePackage(aRoot, 'A_PRIVATE_TRAP'); await writePackage(bRoot, 'B_FROZEN_ORIGINAL');
+    input.setAfterCapture(async () => { await writePackage(bRoot, 'B_CHANGED_AFTER_CAPTURE'); });
+    const first = await stage(source, 0);
+    assert.equal(first.result.outcome, 'installed_disabled'); assert.equal(first.result.applicationRequested, false);
+    assert.equal(activations, 0); assert.equal(extensions.services.getSnapshot().providers.length, 0);
+    let entry = (await extensions.catalog.snapshot()).extensions[0]!;
+    assert.equal(entry.desired.enabled, false); assert.equal(entry.source.kind, 'source_view');
+    if (entry.source.kind !== 'source_view') throw new Error('Missing original Source provenance');
+    assert(entry.source.provenance);
+    assert.deepEqual(entry.source.provenance.resourceOwner, owner);
+    assert.equal(entry.source.provenance.runId, first.authority.runId);
+    assert.equal(entry.source.provenance.operationId, first.authority.operationId);
+    assert.equal(entry.source.provenance.rootId, source.live_root!.rootId);
+    assert.equal(await artifactText('selected', first.result.artifactIntegrity, 'payload.txt'), 'B_FROZEN_ORIGINAL'.repeat(20_000));
+    assert(!(await artifactText('selected', first.result.artifactIntegrity, 'host.js')).includes('A_PRIVATE_TRAP'));
+    assert((await gc(captures.at(-1)!.hashes)).present.every(value => !value), 'Original B capture owners release after the actual compilation');
+    const enabled = await extensions.setEnabled(first.result.extensionId, true, first.result.catalogRevision);
+    assert.equal(activations, 1);
+
+    // The second Source is fixed by B's original working-state owner, not A's path.
+    await writePackage(bRoot, 'B_FIXED_ORIGINAL', ['varin.runtime.demo']);
+    const prepared = await service.prepare({ coordinatorHostId: HOST_A, input: { runtime: 'agent', threadId,
+      branchId: 'main', key: 'managed-extension-fixed', resourceOwner: owner, workspaceId, mode: 'fixed_branch',
+      content: { mode: 'saved-files' }, captureScopes: [] } });
+    assert(prepared.source.branchId !== undefined && prepared.source.revision !== undefined);
+    const fixed: LaunchSource = { resource_owner: owner, workspace_id: prepared.source.workspaceId,
+      execution_workspace_id: prepared.source.executionWorkspaceId, mode: 'fixed_branch', branch_id: prepared.source.branchId,
+      revision: prepared.source.revision, live_root: null };
+    input.setAfterCapture(async () => { await writePackage(bRoot, 'B_CHANGED_AGAIN'); });
+    const update = await stage(fixed, enabled.revision);
+    entry = (await extensions.catalog.snapshot()).extensions[0]!;
+    assert.equal(entry.integrity, first.result.artifactIntegrity);
+    assert.equal(entry.candidate!.integrity, update.result.artifactIntegrity);
+    assert.equal(await artifactText('candidate', update.result.artifactIntegrity, 'payload.txt'), 'B_FIXED_ORIGINAL'.repeat(20_000));
+    await assert.rejects(extensions.applyPackageCandidate({ extensionId: first.result.extensionId,
+      candidateIntegrity: update.result.artifactIntegrity, expectedRevision: update.result.catalogRevision }), /capability_review_required/);
+    assert.equal((await extensions.catalog.snapshot()).extensions[0]!.integrity, first.result.artifactIntegrity);
+    assert.equal(activations, 1, 'Staging and denied application never activate the new capability');
+
+    input.setAfterCapture(undefined); await writePackage(bRoot, 'B_CANCELLED_CAPTURE');
+    packageReadBarrier = { entered: deferred(), release: deferred() };
+    const controller = new AbortController(); let settled = false;
+    const cancelled = stage(source, update.result.catalogRevision, controller.signal).then(
+      () => { settled = true; throw new Error('Cancelled staging unexpectedly committed'); }, error => { settled = true; return error; });
+    await packageReadBarrier.entered.promise;
+    controller.abort(new DOMException('Original managed stage cancelled', 'AbortError'));
+    await cancelEntered.promise; await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(settled, false, 'Cancellation must join the original B reader before capture retirement');
+    assert((await gc(captures.at(-1)!.hashes)).present.every(Boolean), 'Original frozen bytes stay retained while their reader callback is held');
+    packageReadBarrier.release.resolve(); packageReadBarrier = undefined;
+    assert.match(String(await cancelled), /cancelled|AbortError/);
+    assert((await gc(captures.at(-1)!.hashes)).present.every(value => !value));
+    const final = await extensions.catalog.snapshot();
+    assert.equal(final.revision, update.result.catalogRevision);
+    assert.equal(final.extensions[0]!.candidate!.integrity, update.result.artifactIntegrity);
+    return { captures: captures.length, installed: first.result.artifactIntegrity, candidate: update.result.artifactIntegrity };
+  } finally { packageReadBarrier?.release.resolve(); packageReadBarrier = undefined; await extensions.stop(); }
 }
 
 async function childSources(runtime: AgentRuntimeClient, service: ManagedSourceClient,
@@ -241,8 +353,14 @@ async function run(frame: Record<string, unknown>) {
     workingStates: createKernelWorkspaceWorkingStateAccess(storage), inspectInventory: capture.inspectInventory,
     sourceTools: async mode => (await b.sourceRequest<ManagedSourceCapabilities>('source.capabilities', { mode, managed: false })).tools.map(tool => tool.name),
   });
+  const packageQueries = frame.scenario === 'extension-package' ? createSourceQueryService({ kernel: b, documents: bDocuments,
+    validateLiveSource: bLive.validate, storage, resourceOwners: { agentDir: join(root, 'target-agent'), homeDir: root } as never }) : undefined;
+  const childService = createManagedChildSourceService({ storage, capture });
   const sourceOwner = createManagedSourceService({ kernel: b, hostId: HOST_B, documents: bDocuments,
-    validateLiveSource: bLive.validate, prepareSource: localPreparer, serviceOperation: createManagedChildSourceService({ storage, capture }) });
+    validateLiveSource: bLive.validate, prepareSource: localPreparer,
+    serviceOperation: (scope, operation, signal) => packageQueries && ['package_capture', 'package_read', 'language_release'].includes(operation.kind)
+      ? packageQueries(scope, operation, signal) : childService(scope, operation, signal),
+    ...(packageQueries ? { releaseSource: packageQueries.release } : {}) });
   const remote = createManagedRemoteExecutionService({ hostId: HOST_B, client: b, sourceOwner,
     resources: { getMachine: async () => ({ machineId: 'local', kind: 'local', state: 'available' }) } as never });
   const permissions = ['filesystem:read', 'filesystem:write', 'terminal:use', 'process:control'];
@@ -254,10 +372,25 @@ async function run(frame: Record<string, unknown>) {
     return { type: 'client', clientId, client: { id: clientId, capabilities: [...permissions] } };
   } });
   const transport = routerTransport(router);
+  const packageCaptures: Array<{ authorityId: string; hashes: string[] }> = [];
+  const cancelEntered = deferred();
+  let afterPackageCapture: (() => Promise<void>) | undefined;
   let discardExecuteResponse = false;
   let discardFileResponse = frame.scenario === 'file-followup';
   const controlledFetch = (async (url: string | URL | Request, init: RequestInit = {}) => {
+    const body = init.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
+    if (frame.scenario === 'extension-package' && String(url).endsWith('/sources/cancelService')) cancelEntered.resolve();
     const result = await transport(new URL(String(url)), init);
+    if (frame.scenario === 'extension-package' && String(url).endsWith('/sources/service')
+      && (body.operation as { kind?: string } | undefined)?.kind === 'package_capture' && result.ok) {
+      const captured = await result.clone().json() as { snapshot: { entries: Array<{ state: { kind: string; objectHash?: string } }> } };
+      packageCaptures.push({ authorityId: String(body.authorityId), hashes: [...new Set(captured.snapshot.entries
+        .flatMap(entry => entry.state.kind === 'regular-file' ? [entry.state.objectHash!] : []))] });
+      const language = await transport(new URL(String(url)), { ...init, body: JSON.stringify({ ...body,
+        requestId: randomUUID(), operation: { kind: 'language_release' } }) });
+      assert.equal(language.status, 200, await language.text());
+      await afterPackageCapture?.();
+    }
     if (discardFileResponse && String(url).endsWith('/sources/fileObservation')) {
       discardFileResponse = false; await result.body?.cancel();
       throw new Error('Original accepted file response was disconnected');
@@ -284,6 +417,13 @@ async function run(frame: Record<string, unknown>) {
   const binding = await service.bind({ coordinatorHostId: HOST_A, source: selected,
     scope: { kind: 'run', threadId, runId, epoch: 1 }, purpose: 'source', retention: 'run' });
   const address: ManagedSourceAddress = { coordinatorHostId: HOST_A, authorityId: binding.authorityId, resourceEpoch: binding.resourceEpoch };
+  if (frame.scenario === 'extension-package') {
+    const result = await extensionPackages({ root, aRoot, bRoot, a, b, runtime, storage, source: binding.source,
+      service, owner, captures: packageCaptures, cancelEntered, setAfterCapture: action => { afterPackageCapture = action; } });
+    await service.release({ ...address, mode: 'retire' });
+    await packageQueries!.dispose(); await storage.dispose(); await Promise.all(documents.map(value => value.dispose()));
+    write({ kind: 'fixture-result', ok: true, result }); return;
+  }
   if (frame.scenario === 'file-followup') {
     const observer = new DocumentsFileObservationOwner(bDocuments, bLive.validate, () => {});
     b.setFileObservationOwner(observer);

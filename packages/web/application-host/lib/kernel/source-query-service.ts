@@ -14,8 +14,10 @@ import { createThreadResourceScope, type ThreadResourceScope, type ThreadResourc
 import { resourceThreadSource, resourceSource } from './thread-context.js';
 import { KernelWorkingStateRootStore, type KernelStorageAdapter } from './storage-adapter.js';
 import { readSourceDocument } from './document-sources.js';
+import { captureExtensionSource, type ExtensionSourceCapture } from './extension-source.js';
 import { resourceFailure } from '../agent-resources/source-reader.js';
 import { ManagedSourceDrainedError } from '../harness/managed-source-drain.js';
+import { waitWithSignal } from '../cancellation.js';
 
 export interface SourceQueryServiceOptions {
   kernel: KernelClient;
@@ -30,7 +32,9 @@ export interface SourceQueryServiceOptions {
 export type SourceQueryService = ManagedSourceServiceHandler & { release(scope: ManagedSourceLocalScope): Promise<void>; dispose(): Promise<void> };
 
 export function createSourceQueryService(options: SourceQueryServiceOptions): SourceQueryService {
-  type Services = { scope: ManagedSourceLocalScope; sources: SourceQueryOwner; resources: ThreadResourceScope; language?: LanguageToolOwner; controller: AbortController; pending: Set<Promise<unknown>>; closing?: Promise<void> };
+  type Services = { scope: ManagedSourceLocalScope; sources: SourceQueryOwner; resources: ThreadResourceScope; language?: LanguageToolOwner;
+    packages: Map<string, Promise<ExtensionSourceCapture>>; controller: AbortController; pending: Set<Promise<unknown>>;
+    languageController: AbortController; languagePending: Set<Promise<unknown>>; languageClosing?: Promise<void>; closing?: Promise<void> };
   // These are live service handles only. Native Storage retains authority/effect facts.
   const services = new Map<string, Services>();
   const keyOf = (scope: ManagedSourceLocalScope) => JSON.stringify([scope.authorityId, scope.resourceEpoch, scope.grant.grantId]);
@@ -86,7 +90,23 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
     } });
     const language = options.languageSupervisor ? createLanguageOwner({ documents: options.documents, supervisor: options.languageSupervisor,
       sources, targetAuthority: true }) : undefined;
-    const value: Services = { scope, sources, resources, controller: new AbortController(), pending: new Set(), ...(language ? { language } : {}) }; services.set(key, value); return value;
+    const value: Services = { scope, sources, resources, packages: new Map(), controller: new AbortController(), pending: new Set(),
+      languageController: new AbortController(), languagePending: new Set(), ...(language ? { language } : {}) }; services.set(key, value); return value;
+  };
+  const releaseLanguage = (owner: Services): Promise<void> => {
+    if (owner.languageClosing) return owner.languageClosing;
+    owner.languageController.abort(new DOMException('Original language source released', 'AbortError'));
+    const work = (async () => {
+      // Include queries still preparing a view, before the language supervisor has
+      // seen them. Other source services have independent cancellation and drain.
+      await Promise.allSettled([...owner.languagePending]);
+      await owner.language?.releaseSource?.({ ...(owner.scope.scope.kind === 'run' ? { runId: owner.scope.scope.runId } : {}),
+        grantId: owner.scope.grant.grantId });
+      owner.languageController = new AbortController();
+    })();
+    owner.languageClosing = work;
+    void work.finally(() => { if (owner.languageClosing === work) delete owner.languageClosing; }).catch(() => undefined);
+    return work;
   };
   const release = async (scope: ManagedSourceLocalScope): Promise<void> => {
     const key = keyOf(scope), owned = services.get(key);
@@ -96,7 +116,12 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
       owned.closing = (async () => {
         // Wait for readers/captures to leave their real owners before withdrawing service references.
         await Promise.allSettled([...owned.pending]);
-        await owned.language?.releaseSource?.({ ...(scope.scope.kind === 'run' ? { runId: scope.scope.runId } : {}), grantId: scope.grant.grantId });
+        for (const [captureId, work] of owned.packages) {
+          const capture = await work;
+          await capture.release();
+          owned.packages.delete(captureId);
+        }
+        await releaseLanguage(owned);
         await owned.sources.dispose(); services.delete(key);
       })();
       void owned.closing.catch(() => { delete owned.closing; });
@@ -159,6 +184,50 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
         return { bytesBase64: document.source.toString('base64'), byteLength: document.source.byteLength,
           sourceUrl: document.sourceUrl, title: document.title, contentType: document.contentType };
       }
+      case 'package_capture': {
+        if (scope.scope.kind !== 'run' || scope.grant.operationId !== operation.operationId || !operation.captureId) {
+          throw new ManagedSourceDrainedError(new Error('Package capture requires its original caller-owned Source operation'));
+        }
+        await owner.sources.validate(query, active);
+        if (owner.packages.has(operation.captureId)) throw new ManagedSourceDrainedError(new Error('Package capture already exists'));
+        const runId = scope.scope.runId;
+        const work = (async () => {
+          const common = { grant: scope.grant, owningWorkspaceId: scope.source.workspace_id, executionWorkspaceId: scope.source.execution_workspace_id };
+          if (scope.source.mode !== 'fixed_branch' && !scope.physicalRoot) throw new Error('The original physical package source is unavailable');
+          const context = scope.source.mode === 'fixed_branch' ? await options.storage.contextFromBranchGrant(common)
+            : await options.storage.contextFromSourceGrant({ ...common, rootId: scope.physicalRoot!.rootId,
+              canonicalRoot: scope.physicalRoot!.canonicalRoot });
+          return captureExtensionSource({ store: new KernelWorkingStateRootStore(context), client: options.kernel.scoped(scope.grant),
+            source: scope.source, physicalRoot: scope.physicalRoot, runId,
+            operationId: operation.operationId, packagePath: operation.packagePath, signal: active });
+        })();
+        owner.packages.set(operation.captureId, work);
+        void work.catch(error => {
+          // captureExtensionSource has already joined and released a failed
+          // capture. Keep only uncertain cleanup, not a permanently rejected reader.
+          if (!(error instanceof AggregateError) && owner.packages.get(operation.captureId) === work) owner.packages.delete(operation.captureId);
+        });
+        try {
+          const capture = await work;
+          await owner.sources.validate(query, active);
+          return { captureId: operation.captureId, snapshot: capture.snapshot };
+        } catch (error) {
+          // A successfully captured but undelivered result is still owned here;
+          // authority retirement releases it without recapturing mutable files.
+          if (error instanceof AggregateError) throw error;
+          if (options.kernel.isReady && options.kernel.kernelEpoch === scope.resourceEpoch) throw new ManagedSourceDrainedError(error);
+          throw error;
+        }
+      }
+      case 'package_read': {
+        const work = owner.packages.get(operation.captureId);
+        if (!work) throw new ManagedSourceDrainedError(new Error('Original package capture is unavailable'));
+        try { return await (await work).read(operation.path, operation.offset, operation.length, active); }
+        catch (error) {
+          if (options.kernel.isReady && options.kernel.kernelEpoch === scope.resourceEpoch) throw new ManagedSourceDrainedError(error);
+          throw error;
+        }
+      }
       case 'check_path': await metadata(signal => owner.sources.checkPath(query, operation.path, signal)); return { checked: true };
       case 'routing_workspace': return metadata(signal => owner.sources.routingWorkspace(query, signal));
       case 'compute': {
@@ -205,14 +274,23 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
     if (operation.kind === 'language_release') {
       if (scope.scope.kind !== 'run') throw new Error('Language release requires its actual coordinator Run');
       const selected = scope.scope;
+      // Child settlement drains language writers. Other services retain their
+      // own scopes, including an independently held package capture.
       return Promise.all([...services.values()].filter(({ scope: original }) => original.principal.principalId === scope.principal.principalId
         && original.coordinatorHostId === scope.coordinatorHostId && original.scope.kind === 'run'
         && original.scope.threadId === selected.threadId && original.scope.runId === selected.runId
-        && original.scope.epoch <= selected.epoch).map(owner => release(owner.scope))).then(() => undefined);
+        && original.scope.epoch <= selected.epoch).map(releaseLanguage)).then(() => undefined);
     }
     const owner = get(scope);
     const active = signal ? AbortSignal.any([signal, owner.controller.signal]) : owner.controller.signal;
-    const work = Promise.resolve().then(() => execute(owner, scope, operation, active));
+    const work = Promise.resolve().then(async () => {
+      if (operation.kind !== 'language') return execute(owner, scope, operation, active);
+      if (owner.languageClosing) await waitWithSignal(owner.languageClosing, active);
+      active.throwIfAborted();
+      const query = execute(owner, scope, operation, AbortSignal.any([active, owner.languageController.signal]));
+      owner.languagePending.add(query);
+      try { return await query; } finally { owner.languagePending.delete(query); }
+    });
     owner.pending.add(work);
     return work.finally(() => { owner.pending.delete(work); });
   };

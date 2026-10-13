@@ -3,8 +3,13 @@ import { parseVarinPackageSourcePath } from './runtime-source.js';
 
 export const VARIN_EXTENSION_PACKAGES_CAPABILITY = 'runtime.extension-packages';
 
+export type VarinExtensionSourceResourceOwner = { kind: 'local' } | {
+  kind: 'managed_host'; hostId: string; connectionId: string; endpointIdentity: string;
+};
+
 /** Attribution of the bytes captured by the original Source owner. Never a path grant. */
 export interface VarinExtensionSourceViewProvenance {
+  resourceOwner: VarinExtensionSourceResourceOwner;
   workspaceId: string;
   executionWorkspaceId: string;
   runId: string;
@@ -61,8 +66,16 @@ export function parseVarinExtensionPackageRequest(value: unknown): VarinExtensio
 }
 export function parseVarinExtensionSourceViewProvenance(value: unknown): VarinExtensionSourceViewProvenance {
   const v = object(value);
+  const owner = object(v.resourceOwner);
+  let resourceOwner: VarinExtensionSourceResourceOwner;
+  if (owner.kind === 'local') resourceOwner = { kind: 'local' };
+  else if (owner.kind === 'managed_host') resourceOwner = { kind: 'managed_host', hostId: text(owner.hostId),
+    connectionId: text(owner.connectionId), endpointIdentity: text(owner.endpointIdentity) };
+  else throw new Error('Invalid package source resource owner');
+  if (Object.keys(owner).some(key => !(key in resourceOwner))) throw new Error('Unsupported package source resource owner field');
   if (!['fixed_branch', 'materialized', 'live_root'].includes(String(v.mode))) throw new Error('Invalid package SourceView mode');
   const result: VarinExtensionSourceViewProvenance = {
+    resourceOwner,
     workspaceId: text(v.workspaceId), executionWorkspaceId: text(v.executionWorkspaceId),
     runId: text(v.runId), operationId: text(v.operationId), mode: v.mode as VarinExtensionSourceViewProvenance['mode'],
     packagePath: parseVarinExtensionPackagePath(v.packagePath), captureIntegrity: integrity(v.captureIntegrity),

@@ -710,6 +710,317 @@ fn managed_source_interaction_recalls_original_receipt_after_reopen_without_repl
     std::fs::remove_dir_all(root).unwrap();
 }
 
+/// The compiler and candidate Catalog are on A; frozen content and its actual
+/// Source grants/pins are on B. Only transport delivery and model choices vary.
+#[test]
+fn managed_extension_package_uses_original_capture_and_releases_after_reader_drain() {
+    let root = std::env::temp_dir().join(format!("varin-managed-package-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let a = Owner::new(
+        root.join("storage-a"),
+        "managed-coordinator",
+        "managed-coordinator-generation",
+        "managed-coordinator-epoch",
+    );
+    let b = Owner::new(
+        root.join("storage-b"),
+        "managed-target",
+        "managed-target-generation",
+        "managed-target-epoch",
+    );
+    let mut db = Catalog::open(root.join("catalog")).unwrap();
+    db.create_thread("thread:managed-review", "main").unwrap();
+    let admission = db
+        .prepare_submission(
+            SubmitInput {
+                key: "managed-package-source".into(),
+                thread_id: "thread:managed-review".into(),
+                branch_id: "main".into(),
+                expected_head: None,
+                input: json!("prepare target Source"),
+                configuration: json!({}),
+            },
+            None,
+            None,
+        )
+        .unwrap();
+    let submitted = db
+        .admit_submission(admission.load(None, false).unwrap())
+        .unwrap();
+    let catalog = Arc::new(Mutex::new(db));
+    let mut host = Host::with_script(
+        "packages/web/application-host/lib/harness/managed-source-host.test-helper.ts",
+    );
+    host.send(json!({"kind":"fixture-init","scenario":"extension-package","root":root,"storageRootA":a.root,
+        "storageRootB":b.root,"epochA":a.epoch,"epochB":b.epoch,"runId":submitted.run_id}));
+    let (send, completed) = mpsc::channel();
+    let deadline = Instant::now() + Duration::from_secs(90);
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "managed extension package helper timed out"
+        );
+        while let Ok(response) = completed.try_recv() {
+            host.send(response);
+        }
+        let Some(frame) = host.next_frame(Duration::from_millis(5)) else {
+            continue;
+        };
+        match frame["kind"].as_str().unwrap_or("") {
+            "fixture-request" => {
+                let owner = if frame["target"] == "b" {
+                    b.clone()
+                } else {
+                    a.clone()
+                };
+                let target = b.clone();
+                let catalog = catalog.clone();
+                let send = send.clone();
+                std::thread::spawn(move || {
+                    let result = (|| -> Result<Value, KernelError> {
+                        let method = frame["method"].as_str().unwrap();
+                        let params = frame["params"].clone();
+                        if method == "fixture.package.begin" {
+                            return begin_package_call(&mut catalog.lock().unwrap(), params);
+                        }
+                        if method == "fixture.package.gc" {
+                            let grant = format!("package-gc:{}", uuid::Uuid::new_v4());
+                            target.rpc("authority.grant.issue", json!({"grantId":grant,"hostGeneration":target.generation,
+                                "storageIdentity":target.root,"sessionId":null,"owningWorkspace":"aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
+                                "executionWorkspace":"aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa","capabilities":["storage.admin"],"pathScopes":[""]}), None)?;
+                            target.rpc("storage.gc", json!({"operationId":format!("package-gc:{}",uuid::Uuid::new_v4())}), Some(&grant))?;
+                            return Ok(
+                                json!({"present":params["hashes"].as_array().unwrap().iter().map(|hash|
+                                crate::protocol::object_path(&target.root,hash.as_str().unwrap()).unwrap().exists()).collect::<Vec<_>>()}),
+                            );
+                        }
+                        if method == "runtime.run.inspect" {
+                            return Ok(serde_json::to_value(
+                                catalog
+                                    .lock()
+                                    .unwrap()
+                                    .run(params["runId"].as_str().unwrap())
+                                    .map_err(super::domain)?,
+                            )?);
+                        }
+                        if method == "runtime.operation.inspect" {
+                            return Ok(serde_json::to_value(
+                                catalog
+                                    .lock()
+                                    .unwrap()
+                                    .operation(params["operationId"].as_str().unwrap())
+                                    .map_err(super::domain)?,
+                            )?);
+                        }
+                        if method == "runtime.launch.inspect" {
+                            let read = catalog
+                                .lock()
+                                .unwrap()
+                                .capture_launch(params["runId"].as_str().unwrap())
+                                .map_err(super::domain)?;
+                            return Ok(serde_json::to_value(
+                                read.map(|r| r.load()).transpose().map_err(super::domain)?,
+                            )?);
+                        }
+                        owner.rpc(method, params, frame["grantId"].as_str())
+                    })();
+                    let response = match result {
+                        Ok(value) => {
+                            json!({"kind":"fixture-response","id":frame["id"],"ok":true,"result":value})
+                        }
+                        Err(error) => {
+                            json!({"kind":"fixture-response","id":frame["id"],"ok":false,"error":error.to_string()})
+                        }
+                    };
+                    let _ = send.send(response);
+                });
+            }
+            "fixture-result" => {
+                assert_eq!(frame["ok"], true);
+                assert_eq!(frame["result"]["captures"], 3);
+                break;
+            }
+            _ => panic!("original managed package Host failed: {frame}"),
+        }
+    }
+    assert!(a.tasks.lock().unwrap().is_empty());
+    assert!(b.tasks.lock().unwrap().is_empty());
+    drop(host);
+    drop(catalog);
+    drop(a);
+    drop(b);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+fn begin_package_call(db: &mut Catalog, params: Value) -> Result<Value, KernelError> {
+    let fail = super::domain;
+    let serial = uuid::Uuid::new_v4().to_string();
+    let thread = format!("thread:package:{serial}");
+    let branch = format!("branch:package:{serial}");
+    db.create_thread(&thread, &branch).map_err(fail)?;
+    let admission = db
+        .prepare_submission(
+            SubmitInput {
+                key: serial.clone(),
+                thread_id: thread.clone(),
+                branch_id: branch.clone(),
+                expected_head: None,
+                input: json!("stage this original Source package"),
+                configuration: json!({}),
+            },
+            None,
+            None,
+        )
+        .map_err(fail)?;
+    let submitted = db
+        .admit_submission(admission.load(None, false).map_err(fail)?)
+        .map_err(fail)?;
+    let schema = ToolSchema {
+        name: "extension_package".into(),
+        version: "1".into(),
+        description: String::new(),
+        schema: json!({"type":"object"}),
+        requirements: None,
+        output_schema: None,
+        metadata: None,
+    };
+    let binding = RequestBinding {
+        child_dispatch: None,
+        goal: None,
+        resource_activations: vec![],
+        resource_checkpoint_id: None,
+        connection_identity: "fixture".into(),
+        provider_family: "fixture".into(),
+        model: "fixture".into(),
+        credential_ref: None,
+        configuration_generation: 1,
+        tool_schema_generation: 1,
+        tools: vec![schema],
+        instruction_sources: vec![],
+        memory_checkpoint: None,
+        attachment_refs: vec![],
+        environment_cursor: 0,
+        history_range: HistoryRange {
+            branch_id: branch,
+            ancestor_id: None,
+            leaf_id: Some(submitted.input_id),
+        },
+    };
+    let source = serde_json::from_value(params["source"].clone())?;
+    let policy = PolicyIdentity {
+        name: "fixture".into(),
+        version: "1".into(),
+    };
+    db.bind_launch(
+        &submitted.run_id,
+        varin_runtime::catalog::launches::LaunchSelection::from_binding(
+            &binding,
+            policy.clone(),
+            Some(source),
+        ),
+    )
+    .map_err(fail)?;
+    let epoch = db
+        .prepare_execution(&submitted.run_id, binding.clone(), policy, Value::Null)
+        .map_err(fail)?
+        .owner_generation;
+    let request_id = format!("package-request:{serial}");
+    let call = ToolCall {
+        call_id: "stage".into(),
+        name: "extension_package".into(),
+        schema_version: "1".into(),
+        arguments: json!({"action":"stage","packagePath":params["packagePath"],"expectedRevision":params["expectedRevision"]}),
+    };
+    let origin = ToolOrigin::ModelStep {
+        request_id: request_id.clone(),
+    };
+    let context = ToolExecutionContext {
+        run_id: submitted.run_id.clone(),
+        operation_id: origin.operation_id(&call.call_id),
+        origin: origin.clone(),
+    };
+    let owner = varin_runtime::ExecutorOwner::External {
+        identity: "extension-package@1".into(),
+        epoch: "managed-package-host".into(),
+    };
+    for record in [
+        ExecutionRecord::StateChanged {
+            state: RunState::Runnable,
+            waiting_on: None,
+        },
+        ExecutionRecord::RequestPrepared {
+            snapshot: RequestSnapshot {
+                view: RequestView {
+                    request_id: request_id.clone(),
+                    run_id: submitted.run_id.clone(),
+                    origin: RequestOrigin::Conversation {
+                        step: 1,
+                        history_range: binding.history_range.clone(),
+                    },
+                    binding,
+                    history: vec![],
+                },
+                serialized: json!({"fixture":true}),
+            }
+            .into(),
+        },
+        ExecutionRecord::ModelDispatched {
+            request_id: request_id.clone(),
+        },
+        ExecutionRecord::ModelFinished {
+            request_id,
+            outcome: ModelOutcome::Completed,
+            finish_reason: Some(FinishReason::ToolCalls),
+            items: vec![ProviderItem {
+                id: "package-call".into(),
+                content: Content::ToolCall { call: call.clone() },
+                opaque: None,
+            }],
+            interrupted_deltas: vec![],
+            usage: UsageReceipt::default(),
+            failure: None,
+        },
+        ExecutionRecord::ToolAdmitted {
+            context: context.clone(),
+            tool: AdmittedTool {
+                call: call.clone(),
+                contract: ToolContract {
+                    name: call.name.clone(),
+                    schema_version: "1".into(),
+                    read_only: false,
+                    completion: CompletionKind::Result,
+                    lifetime: varin_runtime::Lifetime::Run,
+                    resources: vec![],
+                },
+            },
+        },
+        ExecutionRecord::ToolDispatched {
+            context: context.clone(),
+            executor_owner: owner.clone(),
+        },
+    ] {
+        db.commit_execution(&submitted.run_id, epoch, &record)
+            .map_err(fail)?;
+    }
+    assert_eq!(
+        db.operation(&context.operation_id).map_err(fail)?.phase,
+        varin_runtime::OperationPhase::Running
+    );
+    let selected = db
+        .capture_launch(&submitted.run_id)
+        .map_err(fail)?
+        .unwrap()
+        .load()
+        .map_err(fail)?
+        .selection
+        .source;
+    Ok(
+        json!({"invocationId":serial,"runId":submitted.run_id,"threadId":thread,"operationId":context.operation_id,
+        "callId":call.call_id,"executorOwner":owner,"origin":origin,"source":selected,"toolName":call.name,
+        "operation":"effect","completion":"result","arguments":call.arguments}),
+    )
+}
+
 fn coordinator_read(
     catalog: Arc<Mutex<Catalog>>,
     resources: KernelResourceClient,

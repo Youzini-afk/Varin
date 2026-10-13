@@ -1231,6 +1231,19 @@ consumers route reads and path checks through that original owner. A missing tar
 is unavailable, and never starts a same-path language process on the coordinator. Releasing service
 references is separate from the native process/root-stop evidence.
 
+`extension-source.ts` captures package inputs through that same source owner. Fixed views retain
+their original pin; physical views compare complete captured inventories before publishing a manifest.
+Local and managed staging use this one capture implementation. The target retains object references;
+`package_read` pages only captured file paths into the coordinator's derived compiler tree and verifies
+lengths and hashes. Target object addresses never become coordinator Storage references. Package
+provenance includes the exact resource owner, Run, Operation and source revision/root.
+
+Managed package captures belong to the caller-retained source authority. Cancelling one service
+request joins its reader; authority retirement also closes all completed or undelivered captures.
+Language release only withdraws language references. Neither action substitutes for the original
+package catalog receipt. Compilation and installation continue through `stageCapturedPackage`:
+first installation is disabled, and updates remain candidates for the existing capability review.
+
 The source picker keeps the exact owner/workspace/key/content for uncertain preparation retries.
 Managed-source file recovery is currently diagnosed before the local Recovery API is called;
 conversation-only navigation remains an explicit available choice.

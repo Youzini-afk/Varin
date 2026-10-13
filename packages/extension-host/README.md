@@ -159,6 +159,12 @@ public installation source specifiers cannot create a `source_view`. Its first i
 real selected artifact but is always disabled, even when it requests no capabilities. Further edits
 stage the existing candidate slot and preserve enablement and capability decisions. The ordinary
 `extension_package` effect tool never enables a package or creates capability decisions.
+Source provenance includes its local or managed Host resource owner as well as the original Run,
+Operation and revision/root. Remote captures use the same compiler seam after source-owned byte
+transfer; their paths and object hashes do not grant coordinator-local filesystem access.
+Withdrawing a candidate cancels its exact pending preparation even before a ready group exists.
+Generic reconciliation signals cancellation; explicit discard also joins that original preparation.
+Selected versions and other consumers of shared dependencies retain their owners.
 
 `applyPackageCandidate` consumes the exact authorized tool request, existing enablement and reviewed
 candidate, then records the ordinary `applyRequested` intent before preparing/publishing. Results
