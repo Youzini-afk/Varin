@@ -107,6 +107,50 @@ test('actual service preparation and its exact method query share the original d
   } finally { await h.close(); }
 });
 
+test('installed retrieval plans expose callable describe contracts before and after actual broker SDK registration', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'varin-retrieval-contract-'));
+  const runtime = await ApplicationExtensionRuntime.create({ dataDir: join(root, 'data'), varinVersion: '1.2.3',
+    brokerScript: fileURLToPath(new URL('../broker/broker-child.mjs', import.meta.url)) });
+  try {
+    await runtime.start();
+    for (const [variant, structure, semantic] of [
+      ['structured', 'builtin', 'disabled'], ['semantic', 'builtin', 'builtin'], ['keyword', 'disabled', 'disabled'],
+    ] as const) {
+      const extensionId = `varin.builtin.retrieval-${variant}`;
+      const serviceId = 'varin.retrieval.plan';
+      const providerKey = `${extensionId}:host:${serviceId}@1`;
+      const routing = { projectId: 'retrieval-contract' };
+      await runtime.upsertServiceRoutingRule({ expectedRevision: (await runtime.routing.read()).document.revision,
+        rule: { scope: routing, serviceId, version: 1, providerKeys: [providerKey], allowFallback: false } });
+      const request = { action: 'describe', kind: 'service', serviceId, version: 1, extensionId,
+        member: { kind: 'method', name: 'describe' } } as const;
+      // This is the same query owner used by runtime_contract, before the selected worker starts.
+      const cold = parseVarinRuntimeContractResult(await runtime.queryContracts(request, { routing }));
+      assert.ok(cold.action === 'describe' && cold.kind === 'service');
+      assert.equal(cold.status, 'found');
+      assert.equal(cold.service?.implementations.find(implementation => implementation.extensionId === extensionId)?.registration, 'declared');
+      assert.ok(cold.member?.kind === 'method');
+      assert.deepEqual(cold.member?.contract.inputSchema, { type: 'array', maxItems: 0 });
+      assert.equal(runtime.services.getSnapshot().providers.some(provider => provider.extensionId === extensionId), false);
+
+      const binding = await runtime.prepareService({ serviceId, version: 1, method: 'describe', args: [], routing });
+      try {
+        const plan = await binding.invoke('describe', []);
+        assert.ok(plan !== null && typeof plan === 'object' && !Array.isArray(plan));
+        assert.equal(typeof plan.configurationId, 'string');
+        assert.equal(plan.structure, structure);
+        assert.equal(plan.semantic, semantic);
+        const registered = parseVarinRuntimeContractResult(await runtime.queryContracts(request, { routing }));
+        assert.ok(registered.action === 'describe' && registered.kind === 'service');
+        assert.equal(registered.status, 'found');
+        assert.equal(registered.service?.implementations.find(implementation => implementation.extensionId === extensionId)?.registration, 'registered');
+        assert.deepEqual(registered.service?.selection.providerIds, [binding.providerId]);
+        assert.deepEqual(registered.member?.contract, cold.member?.contract);
+      } finally { binding.release(); }
+    }
+  } finally { await runtime.stop(); await rm(root, { recursive: true, force: true }); }
+});
+
 test('undeclared metadata, disabled declarations and failed activation stay distinct without executing query callbacks', async () => {
   const h = await fixture();
   try {

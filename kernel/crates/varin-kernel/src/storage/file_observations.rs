@@ -879,6 +879,7 @@ impl Storage {
         if let Some(id) = active.lease_id {
             self.retained_file_leases.remove(&id);
             self.file_leases.remove(&id);
+            self.notify_file_lease_waiters();
         }
         if self
             .observation_receipt(&task.request)

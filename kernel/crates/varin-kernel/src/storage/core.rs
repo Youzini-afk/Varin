@@ -201,6 +201,8 @@ impl Storage {
             observation_reads: HashMap::new(),
             observation_hints: None,
             file_leases: HashMap::new(),
+            file_lease_waiters: Default::default(),
+            file_lease_notify: None,
             retained_file_leases: HashMap::new(),
             materializations: HashMap::new(),
             result_publications: BTreeSet::new(),

@@ -1,5 +1,8 @@
 //! Actual single and batch Kernel capture admission/worker/publication over the original storage.
 use super::*;
+
+#[path = "runtime_file_lease_review.rs"]
+mod file_lease_review;
 use crate::storage::capture_resources::{CapturePhase, CaptureTask, CapturedBatch};
 use base64::Engine;
 use sha2::{Digest, Sha256};

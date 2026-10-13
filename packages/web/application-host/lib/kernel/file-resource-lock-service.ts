@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { PathLockResource, PathLockService } from "../harness/path-lock.js";
-import type { KernelScopedClient } from "./kernel-client.js";
+import { KernelClientError, type KernelScopedClient } from "./kernel-client.js";
 import type { KernelStorageAdapter } from "./storage-adapter.js";
 
 interface KernelLockBinding {
@@ -13,7 +13,6 @@ interface KernelLockBinding {
 export interface KernelPathLockServiceOptions {
   resolveOwningWorkspaceId(ownerId: string, executionWorkspaceId: string): Promise<string>;
   resolveWorkspaceRoot(workspaceId: string): Promise<string>;
-  retryDelayMs?: number;
 }
 
 const normalizedResourceId = (resource: PathLockResource): string => {
@@ -28,59 +27,54 @@ const normalizedResourceId = (resource: PathLockResource): string => {
  */
 export class KernelPathLockService implements PathLockService {
   private readonly leases = new Map<string, KernelLockBinding>();
-  private readonly retryDelayMs: number;
+  private readonly pending = new Map<string, { ownerId: string; controller: AbortController; settled: Promise<void> }>();
   private disposed = false;
 
   constructor(
     private readonly adapter: KernelStorageAdapter,
     private readonly options: KernelPathLockServiceOptions,
-  ) {
-    this.retryDelayMs = options.retryDelayMs ?? 5;
-  }
+  ) {}
 
   async acquire(ownerId: string, resource: PathLockResource, timeoutMs = 30_000): Promise<string> {
     if (this.disposed) throw new Error("Path lock service is disposed");
-    const executionWorkspaceId = resource.workspaceId;
-    const owningWorkspaceId = await this.options.resolveOwningWorkspaceId(ownerId, executionWorkspaceId);
-    const canonicalRoot = await this.options.resolveWorkspaceRoot(executionWorkspaceId);
-    const resourceId = normalizedResourceId(resource);
-    const authority = await this.adapter.fileAuthorityContext({
-      owningWorkspaceId,
-      executionWorkspaceId,
-      canonicalRoot,
-      purpose: "file-writer-lock",
-      actor: {
-        owningWorkspace: owningWorkspaceId,
-        executionWorkspace: executionWorkspaceId,
-        sessionId: ownerId,
-        pathScopes: [resourceId],
-      },
-    });
     const leaseId = `file-lock:${randomUUID()}`;
-    const deadline = Date.now() + timeoutMs;
-    for (;;) {
-      if (this.disposed) throw new Error("Path lock service is disposed");
-      const result = await authority.client.fileLeaseAcquire({
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let finish!: () => void;
+    const settled = new Promise<void>(resolve => { finish = resolve; });
+    this.pending.set(leaseId, { ownerId, controller, settled });
+    try {
+      const executionWorkspaceId = resource.workspaceId;
+      const owningWorkspaceId = await this.options.resolveOwningWorkspaceId(ownerId, executionWorkspaceId);
+      const canonicalRoot = await this.options.resolveWorkspaceRoot(executionWorkspaceId);
+      const resourceId = normalizedResourceId(resource);
+      controller.signal.throwIfAborted();
+      const authority = await this.adapter.fileAuthorityContext({
+        owningWorkspaceId, executionWorkspaceId, canonicalRoot, purpose: "file-writer-lock",
+        actor: { owningWorkspace: owningWorkspaceId, executionWorkspace: executionWorkspaceId,
+          sessionId: ownerId, pathScopes: [resourceId] },
+      });
+      controller.signal.throwIfAborted();
+      timer = setTimeout(() => controller.abort(new Error(`Lock timeout after ${timeoutMs}ms for resource: ${resource.canonicalResourceId}`)), timeoutMs);
+      const result = await authority.client.fileLeaseWait({
         workspaceId: owningWorkspaceId,
         rootId: authority.rootId,
         leaseId,
         resources: [{ path: resourceId, scope: "exact" }],
+      }, controller.signal);
+      if (result.status !== "acquired") throw new Error("Kernel returned an invalid file lease result");
+      if (controller.signal.aborted) {
+        await authority.client.fileLeaseRelease({ workspaceId: owningWorkspaceId, rootId: authority.rootId, leaseId });
+        controller.signal.throwIfAborted();
+      }
+      this.leases.set(leaseId, {
+        ownerId, workspaceId: owningWorkspaceId, rootId: authority.rootId, client: authority.client,
       });
-      if (result.status === "acquired") {
-        this.leases.set(leaseId, {
-          ownerId,
-          workspaceId: owningWorkspaceId,
-          rootId: authority.rootId,
-          client: authority.client,
-        });
-        return leaseId;
-      }
-      if (result.status !== "busy") throw new Error("Kernel returned an invalid file lease result");
-      if (Date.now() >= deadline) {
-        throw new Error(`Lock timeout after ${timeoutMs}ms for resource: ${resource.canonicalResourceId}`);
-      }
-      await new Promise((resolve) => setTimeout(resolve, Math.min(this.retryDelayMs, Math.max(1, deadline - Date.now()))));
-    }
+      return leaseId;
+    } catch (error) {
+      if (controller.signal.aborted && error instanceof KernelClientError && error.code === "cancelled") throw controller.signal.reason;
+      throw error;
+    } finally { clearTimeout(timer); this.pending.delete(leaseId); finish(); }
   }
 
   async release(ownerId: string, leaseId: string): Promise<boolean> {
@@ -96,6 +90,9 @@ export class KernelPathLockService implements PathLockService {
   }
 
   async dropSession(ownerId: string): Promise<void> {
+    const pending = [...this.pending.values()].filter(wait => wait.ownerId === ownerId);
+    for (const wait of pending) wait.controller.abort(new Error("Path lock owner was dropped"));
+    await Promise.all(pending.map(wait => wait.settled));
     const leaseIds = [...this.leases.entries()]
       .filter(([, binding]) => binding.ownerId === ownerId)
       .map(([leaseId]) => leaseId);
@@ -105,6 +102,9 @@ export class KernelPathLockService implements PathLockService {
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
+    const pending = [...this.pending.values()];
+    for (const wait of pending) wait.controller.abort(new Error("Path lock service is disposed"));
+    await Promise.all(pending.map(wait => wait.settled));
     const entries = [...this.leases.entries()];
     await Promise.all(entries.map(([leaseId, binding]) => (
       this.release(binding.ownerId, leaseId).catch(() => false)

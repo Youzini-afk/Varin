@@ -238,6 +238,7 @@ impl Storage {
                 | "file.capture"
                 | "file.captureBatch"
                 | "file.lease.acquire"
+                | "file.lease.wait"
                 | "file.lease.check"
                 | "file.lease.release"
                 | "compute.start"
