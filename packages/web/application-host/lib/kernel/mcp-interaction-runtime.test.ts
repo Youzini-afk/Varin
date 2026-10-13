@@ -16,13 +16,14 @@ function fixture(){
     attempts.push(method);const view=records.get('interactionId' in p ? p.interactionId : '');
     switch(method){
       case'runtime.mcp.interaction.open':{
-        const record:McpInteractionRecord={id:p.id,revision:1,binding:p.binding,runId:'run',threadId:p.binding.operationId,branchId:'branch',mode:p.mode,availability:'live',choice:null,delivery:'not_started',completionReported:false,problem:null};
+        await heldOpen?.();
+        const record:McpInteractionRecord={id:p.id,revision:1,binding:p.binding,runId:'run',threadId:p.binding.operationId,branchId:'branch',mode:p.mode,availability:'live',choice:null,delivery:'not_started',completionReported:false,deliveryReleased:true,problem:null};
         records.set(p.id,{record,request:p.request,presentation:p.presentation,response:null});if(openReplyLost){openReplyLost=false;throw new Error('Open committed; response lost');}return structuredClone(record);
       }
       case'runtime.mcp.interaction.error.open':{
         await heldOpen?.();
         const result=p.items.map(item=>{
-          const record:McpInteractionRecord={id:item.id,revision:1,binding:item.binding,runId:'finished-run',threadId:item.binding.operationId,branchId:'branch',mode:'url',availability:'live',choice:null,delivery:null,completionReported:false,problem:null};
+          const record:McpInteractionRecord={id:item.id,revision:1,binding:item.binding,runId:'finished-run',threadId:item.binding.operationId,branchId:'branch',mode:'url',availability:'live',choice:null,delivery:null,completionReported:false,deliveryReleased:true,problem:null};
           records.set(item.id,{record,request:p.request,presentation:item.presentation,response:null});return structuredClone(record);
         });return result;
       }

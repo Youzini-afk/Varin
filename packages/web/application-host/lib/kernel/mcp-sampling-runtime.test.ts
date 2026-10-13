@@ -15,7 +15,7 @@ function fixture() {
   const request = vi.fn(async (method: string, p: Record<string, unknown>) => {
     reads.push(method);
     if (method === 'runtime.mcp.interaction.open') {
-      const record = {id:p.id, binding:p.binding, mode:'sampling', revision:1,runId:'run',threadId:'thread',branchId:'branch',availability:'live',choice:null,delivery:'not_started',completionReported:false,problem:null,sampling:{generationOperationId:null,review:'request'}} as McpInteractionRecord;
+      const record = {id:p.id, binding:p.binding, mode:'sampling', revision:1,runId:'run',threadId:'thread',branchId:'branch',availability:'live',choice:null,delivery:'not_started',completionReported:false,deliveryReleased:true,problem:null,sampling:{generationOperationId:null,review:'request'}} as McpInteractionRecord;
       view = {record,request:p.request as Record<string,unknown>,presentation:{mode:'sampling',message:'Review'},response:null};
       return structuredClone(record);
     }

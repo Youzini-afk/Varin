@@ -18,7 +18,7 @@ const original = (): McpInteractionView => ({ record: {
     executionOwner: { kind: 'external', identity: 'original-owner', epoch: 'original-epoch' }, connectionId: 'original-connection',
     endpoint: { server: 'original-server', resourceKey: 'resource', configurationVersion: 'configuration', credentialVersion: 'grant' },
     source: { kind: 'server_request', requestId: 0, relation: { kind: 'task', taskId: 'remote-task' } } }, runId: 'run:finished', threadId: identity.threadId, branchId: identity.branchId,
-  mode: 'form', availability: 'rpc_closed', choice: 'accept', delivery: 'sent', completionReported: false, problem: null },
+  mode: 'form', availability: 'rpc_closed', choice: 'accept', delivery: 'sent', completionReported: false, deliveryReleased: true, problem: null },
   request: { message: 'Private original server request' }, presentation: { mode: 'form', message: 'Private original server request', fields: [] },
   response: { action: 'accept', content: { boolean: false, number: 0, empty: '', selected: [] } },
 });
