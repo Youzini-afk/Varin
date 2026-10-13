@@ -208,6 +208,7 @@ impl Storage {
                     }
                     false
                 });
+                self.notify_file_lease_waiters();
                 let process_stop = self.revoke_processes_for_grant(grant_id).unwrap_or_else(|error| {
                     json!({"pendingProcesses": [], "processStopFailures": [{"reason": error.to_string()}]})
                 });
@@ -349,6 +350,7 @@ impl Storage {
                 false
             }
         });
+        self.notify_file_lease_waiters();
         Ok(json!({"grantId":id,"state":"retired"}))
     }
 

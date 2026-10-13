@@ -1,5 +1,6 @@
 /** A declarative stage selection, not permission to read files, query an index or call a model.
  * The retrieval owner supplies and authorizes the selected stage implementations. */
+import type { JsonObject } from './types.js';
 export const VARIN_RETRIEVAL_PLAN_SERVICE_ID = 'varin.retrieval.plan';
 export const VARIN_RETRIEVAL_PLAN_VERSION = 1 as const;
 export const VARIN_RETRIEVAL_PLAN_METHOD = 'describe' as const;
@@ -12,18 +13,31 @@ export interface VarinRetrievalPlan {
   semantic?: 'builtin' | 'disabled';
 }
 
+const outputSchema = {
+  type: 'object', additionalProperties: false, required: ['configurationId', 'structure'],
+  properties: {
+    configurationId: { type: 'string', minLength: 1, pattern: '\\S' },
+    structure: { enum: ['builtin', 'disabled'] },
+    semantic: { enum: ['builtin', 'disabled'] },
+  },
+} satisfies JsonObject;
+
 export const VARIN_RETRIEVAL_PLAN_CONTRACT = {
   id: VARIN_RETRIEVAL_PLAN_SERVICE_ID,
   version: VARIN_RETRIEVAL_PLAN_VERSION,
   participation: 'transform',
   method: VARIN_RETRIEVAL_PLAN_METHOD,
   inputSchema: { type: 'array', maxItems: 0 },
-  outputSchema: {
-    type: 'object', additionalProperties: false, required: ['configurationId', 'structure'],
-    properties: {
-      configurationId: { type: 'string', minLength: 1, pattern: '\\S' },
-      structure: { enum: ['builtin', 'disabled'] },
-      semantic: { enum: ['builtin', 'disabled'] },
+  outputSchema,
+} as const;
+
+/** Discovery and activation publish the same method schema as the authoring SDK. */
+export const VARIN_RETRIEVAL_PLAN_SERVICE = {
+  id: VARIN_RETRIEVAL_PLAN_SERVICE_ID, version: VARIN_RETRIEVAL_PLAN_VERSION, multiple: true,
+  contract: {
+    participation: VARIN_RETRIEVAL_PLAN_CONTRACT.participation,
+    methods: {
+      describe: { inputSchema: VARIN_RETRIEVAL_PLAN_CONTRACT.inputSchema, outputSchema: VARIN_RETRIEVAL_PLAN_CONTRACT.outputSchema },
     },
   },
 } as const;

@@ -1,7 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { waitWithSignal } from "../cancellation.js";
 import type {
   CapturedState,
@@ -28,7 +27,6 @@ export interface KernelFileResourceBackendOptions {
   resolveExecutionRoot?: (canonicalRoot: string, owningWorkspaceId: string) => Promise<KernelExecutionRoot>;
   authorityPurpose?: string;
   authorityCapabilities?: string[];
-  busyRetryMs?: number;
 }
 
 interface BoundFileContext extends KernelFileAuthorityContext {
@@ -77,7 +75,6 @@ const parseCaptured = (value: Record<string, unknown>): CapturedState => {
 export class KernelFileResourceBackend implements RecoveryFileStore {
   private readonly helper = createRecoveryFileReader();
   private readonly leaseContext = new AsyncLocalStorage<LeaseContext>();
-  private readonly busyRetryMs: number;
 
   constructor(
     private readonly adapter: KernelStorageAdapter,
@@ -86,7 +83,6 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     if (options.authority && (options.resolveExecutionRoot || options.authorityPurpose || options.authorityCapabilities)) {
       throw new Error("A scoped file backend cannot also resolve a different authority");
     }
-    this.busyRetryMs = options.busyRetryMs ?? 5;
   }
 
   private async bind(identity: RecoveryIdentity): Promise<BoundFileContext> {
@@ -143,20 +139,14 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
       path: this.translated(context, resource.resourceId),
       scope: resource.scope,
     }));
-    for (;;) {
-      signal?.throwIfAborted();
-      // Receive the acquire result even if cancellation races it. Otherwise
-      // an acquired native lease could outlive its caller without a receipt.
-      const result = await context.client.fileLeaseAcquire({
+    const result = await context.client.fileLeaseWait({
         workspaceId: context.owningWorkspaceId,
         rootId: context.rootId,
         leaseId,
         resources: translated,
-      });
-      if (result.status === "acquired") return leaseId;
-      if (result.status !== "busy") throw new Error("Kernel returned an invalid file lease result");
-      await delay(this.busyRetryMs, undefined, { signal });
-    }
+    }, signal);
+    if (result.status !== "acquired") throw new Error("Kernel returned an invalid file lease result");
+    return leaseId;
   }
 
   gateFor(identity: RecoveryIdentity): HostResourceOperationGate {

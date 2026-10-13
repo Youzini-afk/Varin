@@ -49,6 +49,7 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "file.root.register"
         | "file.operation.reconcile"
         | "file.lease.acquire"
+        | "file.lease.wait"
         | "file.lease.check"
         | "file.lease.release"
         | "file.capture"

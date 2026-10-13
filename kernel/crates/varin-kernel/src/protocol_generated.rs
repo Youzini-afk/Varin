@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 27;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 28;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -137,8 +137,12 @@ pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "runtime.calendar.occurrence.control",
     "runtime.calendar.calculation.retry",
 ];
-pub(crate) const KERNEL_DEFERRED_RESPONSE_METHODS: &[&str] =
-    &["process.write", "process.resize", "runtime.tools.invoke"];
+pub(crate) const KERNEL_DEFERRED_RESPONSE_METHODS: &[&str] = &[
+    "process.write",
+    "process.resize",
+    "runtime.tools.invoke",
+    "file.lease.wait",
+];
 pub(crate) const KERNEL_INPUT_ORDER_PARAMS: &[(&str, &str)] = &[
     ("runtime.thread.create", "branchId"),
     ("runtime.branch.fork", "branchId"),
@@ -3913,6 +3917,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
+        "file.lease.wait" => serde_json::from_value::<KernelFileLeaseAcquireParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "file.lease.check" => {
             serde_json::from_value::<KernelFileLeaseAcquireParams>(params.clone())
                 .map(|_| ())

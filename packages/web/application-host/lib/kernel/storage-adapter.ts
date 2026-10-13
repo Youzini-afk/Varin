@@ -329,18 +329,13 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       throw new Error(`Managed materialization target must be below its admitted root: ${directory}`);
     }
     const leaseId = `materialize-lease:${randomUUID()}`;
-    for (;;) {
-      signal?.throwIfAborted();
-      const lease = await root.client.fileLeaseAcquire({
+    const lease = await root.client.fileLeaseWait({
         workspaceId: this.context.identity.workspaceId,
         rootId: root.rootId,
         leaseId,
         resources: [{ path: relativePath, scope: "subtree" }],
-      }, signal);
-      if (lease.status === "acquired") break;
-      if (lease.status !== "busy") throw new Error("Kernel returned an invalid materialization lease result");
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
+    }, signal);
+    if (lease.status !== "acquired") throw new Error("Kernel returned an invalid materialization lease result");
     try {
       const result = await root.client.fileMaterialize({
         operationId,
@@ -1402,18 +1397,13 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
         const batch = uniqueFiles.slice(offset, offset + batchSize);
         const paths = batch.map(file => root.basePath ? `${root.basePath}/${file}` : file);
         const leaseId = `capture-lease:${randomUUID()}`;
-        for (;;) {
-          options?.signal?.throwIfAborted();
-          // Admission receipts are not abandoned on cancellation. The kernel also
-          // retains exclusion if release arrives before a capture actually stops.
-          const lease = await this.context.client.fileLeaseAcquire({
+        // Wait and cancellation share the native lease owner. An acquired receipt is
+        // retained even when cancel races it; the capture's finally releases that lease.
+        const lease = await this.context.client.fileLeaseWait({
             workspaceId: this.context.identity.workspaceId, rootId: root.rootId, leaseId,
             resources: paths.map(path => ({ path, scope: "exact" })),
-          });
-          if (lease.status === "acquired") break;
-          if (lease.status !== "busy") throw new Error("Kernel returned an invalid capture lease result");
-          await new Promise(resolve => setTimeout(resolve, 5));
-        }
+        }, options?.signal);
+        if (lease.status !== "acquired") throw new Error("Kernel returned an invalid capture lease result");
         const value = await this.context.client.fileCaptureBatch({
           operationId: `working-capture:${randomUUID()}`,
           workspaceId: this.context.identity.workspaceId,

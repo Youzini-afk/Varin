@@ -26,6 +26,13 @@ storage owner, file body or tool request. See [Documents observation](../documen
 
 ## Immutable object reader settlement
 
+File-resource waits use `file.lease.wait`: Storage keeps the original request queued and grants its
+whole resource set when earlier conflicting holders or waiters settle. Disjoint work proceeds;
+waiters hold no partial leases and consume no transport credit while queued. Release, revoke,
+retained worker completion and cancellation wake the owner directly. `file.lease.acquire` remains
+the immediate busy probe. Abort racing a granted receipt still returns that receipt so its original
+consumer can release it; an abort does not mean a retained file worker has drained.
+
 The unchanged `getBlob` API uses the original scoped source and byte-range DTO. Abort sends the
 existing cancellation control frame and keeps the caller Promise pending until the native response,
 so input-transfer `close()` and resource-reader `finally` cannot mistake an abort signal for stopped

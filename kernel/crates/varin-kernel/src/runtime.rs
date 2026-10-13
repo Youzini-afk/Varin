@@ -48,6 +48,7 @@ enum WorkerRequest {
     FileObservation(crate::file_observation::Command),
     FileWriterStopped(String),
     RecheckRecoveredProcessReceipts,
+    FileLeasesChanged,
     Interaction(crate::storage::process_interactions::Command),
     ReplayProcessTerminals(Vec<String>),
     IntegrationReceipt(crate::tools::IntegrationReceiptRead),
@@ -197,6 +198,7 @@ fn pending_file_worker(method: &str) -> bool {
     matches!(
         method,
         "storage.getBlob"
+            | "file.lease.wait"
             | "file.capture"
             | "file.captureBatch"
             | "file.scan"
@@ -536,6 +538,10 @@ impl Kernel {
             method,
             &params_value,
         )?;
+        if method == "file.lease.wait" {
+            return storage.wait_file_lease(id, &params_value, &authorized_grant, cancellation)
+                .map(|result| result.map(|value| response_ok(id, value)));
+        }
         if method == "storage.getBlob" {
             let task =
                 storage.prepare_blob_read(&authorized_params, &authorized_grant, cancellation)?;
@@ -1346,6 +1352,12 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     for (cancel, _) in &kernel.file_workers {
                         cancel.store(true, Ordering::Release);
                     }
+                    if let Some(storage) = kernel.storage.as_mut() {
+                        for id in storage.cancel_file_lease_waiters() {
+                            if let Ok(mut active) = worker_cancellations.lock() { active.remove(&id); }
+                            let _ = worker_response_tx.send(response_error(&id, &KernelError::Cancelled));
+                        }
+                    }
                     if let Some(storage) = kernel.storage.as_ref() {
                         storage.cancel_file_observation_reads();
                     }
@@ -1685,6 +1697,18 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     continue;
                 }
+                WorkerRequest::FileLeasesChanged => {
+                    if let Some(storage) = kernel.storage.as_mut() {
+                        let completed = storage.settle_file_lease_waiters(&kernel.epoch,
+                            kernel.host_id.as_deref().unwrap_or_default(), kernel.host_generation.as_deref().unwrap_or_default());
+                        for (id, result) in completed {
+                            if let Ok(mut active) = worker_cancellations.lock() { active.remove(&id); }
+                            let response = match result { Ok(value) => response_ok(&id, value), Err(error) => response_error(&id, &error) };
+                            if worker_response_tx.send(response).is_err() { worker_writer_failed.store(true, Ordering::Release); break; }
+                        }
+                    }
+                    continue;
+                }
                 WorkerRequest::FileWriterStopped(id) => {
                     if let Some(storage) = kernel.storage.as_mut() {
                         let _ = storage.observe_file_writer_stopped(&id);
@@ -1787,6 +1811,9 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             let response = match handled {
                 Ok(Some(response)) => response,
                 Ok(None) => {
+                    if method.as_deref() == Some("file.lease.wait") {
+                        release_request_credit(&worker_cancellations, &worker_response_tx, &id, "file.lease.wait");
+                    }
                     if method.as_deref().is_some_and(|method| pending_file_worker(method)||matches!(method,"source.resource.authorize"|"source.resource.execute"|"source.service.call"|"source.file_observation"|"source.resource.observe"|"source.resource.cancel")) {
                         continue;
                     }
@@ -1829,6 +1856,8 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 let _ = output.send(value);
                             }
                         });
+                        let commands = capture_completions.clone();
+                        storage.set_file_lease_notify(move || { let _ = commands.send(WorkerRequest::FileLeasesChanged); });
                         storage.set_process_terminal_sender(process_terminals.clone());
                         let commands = capture_completions.clone();
                         storage.set_recovered_process_receipt_wake(move || {
@@ -1898,6 +1927,14 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             let shutdown = method.as_deref() == Some("kernel.shutdown");
+            if shutdown {
+                if let Some(storage) = kernel.storage.as_mut() {
+                    for id in storage.cancel_file_lease_waiters() {
+                        if let Ok(mut active) = worker_cancellations.lock() { active.remove(&id); }
+                        let _ = worker_response_tx.send(response_error(&id, &KernelError::Cancelled));
+                    }
+                }
+            }
             // Retire execution ownership before its response becomes observable, so a client
             // using its returned credit cannot race a stale in-flight entry at admission.
             worker_cancellations
@@ -2072,6 +2109,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                         && request.grant_id.as_deref() == cancel_grant
                     {
                         request.cancel();
+                        let _ = request_tx.send(WorkerRequest::FileLeasesChanged);
                         if request.pending_body && !request.body_cancel_receipt {
                             request.body_cancel_receipt = true;
                             request.wire_lane = None;

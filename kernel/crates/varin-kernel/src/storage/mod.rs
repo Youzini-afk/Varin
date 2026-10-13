@@ -205,6 +205,8 @@ pub(crate) struct Storage {
     observation_reads: HashMap<String, file_observations::ActiveRead>,
     observation_hints: Option<Arc<dyn Fn(file_observations::Hint) + Send + Sync>>,
     file_leases: HashMap<String, FileLease>,
+    file_lease_waiters: std::collections::VecDeque<file_resource_leases::FileLeaseWaiter>,
+    file_lease_notify: Option<Arc<dyn Fn() + Send + Sync>>,
     retained_file_leases: HashMap<String, file_resource_leases::RetainedFileLease>,
     materializations: HashMap<String, materialization::ActiveMaterialization>,
     result_publications: BTreeSet<String>,

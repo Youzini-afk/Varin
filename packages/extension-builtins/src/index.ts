@@ -49,6 +49,7 @@ import {
   VARIN_WORKBENCH_SLOTS,
   VARIN_RETRIEVAL_PLAN_SERVICE_ID,
   VARIN_RETRIEVAL_PLAN_VERSION,
+  VARIN_RETRIEVAL_PLAN_SERVICE,
 } from "@varin/extension-contract";
 
 export interface VarinBuiltinExtensionDefinition {
@@ -667,7 +668,7 @@ const retrievalPlanDefinition = (id: string, displayName: string): VarinBuiltinE
   manifest: {
     id, displayName, version: "1.0.0", schemaVersion: 1, engines: { varin: "*" },
     entrypoints: { host: { activation: ["service-request"], file: "host.cjs", mode: "brokered" } },
-    provides: { services: [{ id: VARIN_RETRIEVAL_PLAN_SERVICE_ID, version: VARIN_RETRIEVAL_PLAN_VERSION, multiple: true }] },
+    provides: { services: [parseVarinExtensionServiceProvision(VARIN_RETRIEVAL_PLAN_SERVICE)] },
   },
 });
 

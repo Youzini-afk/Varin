@@ -1602,7 +1602,6 @@ test("R2 production fs.lock delegates overlap admission to the Rust file lease a
   const locks = new KernelPathLockService(adapter, {
     resolveOwningWorkspaceId: async (_sessionId, executionWorkspaceId) => executionWorkspaceId,
     resolveWorkspaceRoot: async () => workspace,
-    retryDelayMs: 1,
   });
   const resource = {
     authorityId: "path-lock-host",

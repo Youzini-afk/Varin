@@ -18,7 +18,7 @@ const fixture = async () => {
   roots.push(root);
   const state = { kind: 'missing' };
   const client = {
-    fileLeaseAcquire: vi.fn(async () => ({ status: 'acquired' })),
+    fileLeaseWait: vi.fn(async () => ({ status: 'acquired' })),
     fileLeaseCheck: vi.fn(async () => ({})),
     fileLeaseRelease: vi.fn(async () => ({})),
     fileCapture: vi.fn(async () => ({ path: 'a.txt', stateJson: JSON.stringify(state) })),
@@ -49,7 +49,7 @@ it('keeps file capture, apply and original journal receipt on the admitted actor
     await h.fileStore.applyState(h.identity, h.root, 'a.txt', { kind: 'missing' });
   });
   expect(h.entered).toHaveBeenCalledOnce();
-  expect(h.client.fileLeaseAcquire).toHaveBeenCalledOnce();
+  expect(h.client.fileLeaseWait).toHaveBeenCalledOnce();
   expect(h.client.fileCapture).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: 'owning', rootId: 'admitted-root', path: 'a.txt' }), undefined);
   expect(h.client.fileApply).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: 'owning', rootId: 'admitted-root', expectedJson: '{"kind":"missing"}' }));
   await h.durableRecoveryStore.createOperation({ operationId: 'operation', workspaceId: 'owning', kind: 'integration', state: 'planned', data: {}, targets: {} });
