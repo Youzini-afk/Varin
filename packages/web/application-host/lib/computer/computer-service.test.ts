@@ -1437,7 +1437,7 @@ describe("computer service (EE open + file write)", () => {
     const { service } = makeService(driver);
     await service.ensureLocal();
     const result = await service.open({ desktopId: "local-console", url: "http://localhost:3000/" });
-    expect(result).toEqual({ accepted: true, pid: 4711 });
+    expect(result).toEqual({ accepted: true, pid: 4711, inputWriterStopped: true, receipt: { effect: 'dispatched' } });
     expect(driver.calls).toContainEqual(expect.objectContaining({ tool: "open", url: "http://localhost:3000/" }));
     await service.dispose();
   });
@@ -1484,13 +1484,13 @@ describe("computer service (EE open + file write)", () => {
       createDriver: () => makeDriver(async () => okResponse()), remoteHosts: async () => [remoteHost],
       fetch: remoteFetch((url, init) => {
         if (url.endsWith("/api/computers?local=1")) return jsonResponse(remoteCatalog);
-        if (url.endsWith("/open")) { seen.body = JSON.parse(String(init.body)); return jsonResponse({ result: { accepted: true, pid: 99 } }); }
+        if (url.endsWith("/open")) { seen.body = JSON.parse(String(init.body)); return jsonResponse({ result: { accepted: true, pid: 99, inputWriterStopped: true, receipt: { effect: 'dispatched' } } }); }
         return jsonResponse({ error: "unexpected" }, 404);
       }),
     });
     await service.list();
     const result = await service.open({ desktopId: "remote:r1:remote-h:d0", url: "http://localhost:8080/app" });
-    expect(result).toEqual({ accepted: true, pid: 99 });
+    expect(result).toEqual({ accepted: true, pid: 99, inputWriterStopped: true, receipt: { effect: 'dispatched' } });
     // localhost must reach the remote Host untouched — rewriting it here
     // would silently point at the coordinator's own loopback.
     expect(seen.body).toEqual({ url: "http://localhost:8080/app" });
@@ -1686,7 +1686,7 @@ describe("browser bridge (EE §7.2)", () => {
         if (url.endsWith("/browser") && init.method === "POST") {
           const body = JSON.parse(String(init.body)) as { op: string };
           if (body.op === "act") throw new TypeError("fetch failed");
-          return jsonResponse({ ok: true, tabs: [{ id: "t1", title: "Doc", url: "https://d/" }] });
+          return jsonResponse({ ok: true, inputWriterStopped: true, receipt: { effect: 'none' }, tabs: [{ id: "t1", title: "Doc", url: "https://d/" }] });
         }
         return jsonResponse({});
       }),

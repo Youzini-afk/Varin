@@ -1,14 +1,15 @@
 import type { OutputPart, IncomingMedia } from './protocol.generated.js';
-import type { ComputerObservation } from '@varin/protocol';
+import type { ComputerObservation, ComputerBrowserParams, ComputerOfficeParams, ComputerOpenParams, ComputerFileWriteParams, ComputerInstallSoftwareParams } from '@varin/protocol';
 /** Native callers use the original Computer owner. Catalog owns identity and ToolCall settlement. */
 import { randomUUID } from 'node:crypto';
 import { COMPUTER_CAPABILITY, COMPUTER_TOOL_DECLARATIONS } from '@varin/extension-builtins';
 import { parseVarinToolJson } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
 import type { ThreadComputerAPI, ThreadIdentity } from '@varin/application-client';
-import { computerWorkKey, parseComputerWorkRef, type ComputerActParams, type ComputerObserveParams, type ComputerWorkRef, type ComputerActor, type ComputerAccessRequest, type ComputerExecutionRef, type ComputerWorkScope } from '@varin/protocol';
+import { computerWorkKey, sameComputerExecution, parseComputerWorkRef, type ComputerActParams, type ComputerObserveParams, type ComputerWorkRef, type ComputerActor, type ComputerAccessRequest, type ComputerExecutionRef, type ComputerWorkScope } from '@varin/protocol';
 import { compileToolJsonSchema } from '@varin/pi-host/tool-schema';
-import type { ComputerService } from '../computer/computer-service.js';
+import { ComputerEffectError, type ComputerService, type ComputerExecutionEvidence } from '../computer/computer-service.js';
+import { HarnessServiceError } from '../harness/service-error.js';
 import type { PendingComputerControlEvent, PendingComputerControlCancellation } from '../computer/computer-records.js';
 import { ComputerError, ComputerReleaseUnconfirmed } from '../computer/computer-error.js';
 import type { ComputerWorkResolution } from '../computer/computer-actor.js';
@@ -43,6 +44,10 @@ function observationOutput(observation: ComputerObservation, parts: OutputPart<I
   const partIndex = parts.length;
   parts.push({ kind: 'media', media: { media_type: screenshot.mime, data_base64: base64 } });
   return { ...metadata, screenshot: { ...imageMetadata, partIndex } };
+}
+function applicationResult(data: unknown, evidence: ComputerExecutionEvidence, accepted: boolean, cancelled = false, parts: OutputPart<IncomingMedia>[] = []) {
+  const effect = evidence.receipt.effect === 'verified' ? 'confirmed' : evidence.receipt.effect;
+  return result(data, effect, evidence.inputWriterStopped, effect === 'unknown' ? 'indeterminate' : cancelled ? 'cancelled' : accepted ? 'succeeded' : 'failed', parts);
 }
 
 export function createComputerRuntime({ kernel, runtime, computers, enabled }: { kernel: KernelClient; runtime: AgentRuntimeClient; computers: ComputerService; enabled(runId: string): Promise<boolean> }) {
@@ -217,6 +222,10 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
         if (method === 'list') return await computers.automation.authorize(work, 'observe', undefined, async () => result(await computers.list()), execution);
         const params = input as Record<string, unknown>;
         if (method === 'access') return result(await computers.automation.snapshot(work));
+        if (method === 'environment') return result({ source: original.source, defaultDesktopId: configured.defaultDesktopId,
+          assignment: await computers.automation.snapshot(work),
+          placementChanges: { available: false, detail: 'This Run keeps its accepted source/environment. Select a source for a new execution to change file/process placement. Desktop assignments do not change that source.' },
+          serviceForwards: { available: false, detail: 'Native service forwards require an execution-owned forward Job; the Pi session forwarding owner cannot authorize this Run.' } });
         if (method === 'wait') {
           const accepted = await rpc<Operation, 'runtime.computer.request.wait'>('runtime.computer.request.wait', { operationId: original.operationId, requestId: String(params.requestId) });
           return { executor_stopped: false, completion: await runtime.inlineCompletion(accepted) };
@@ -251,17 +260,61 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
           context.signal.throwIfAborted();
           const admission = computers.automation.context.getStore();
           if (!admission) throw new Error('computer_admission_unavailable');
-          const releaseScriptDispatch = noteInvocationComputerUse(context, desktopId, reason => admission.cancel(reason));
+          // Closing an ancestor script must reach this actual dispatch before any Catalog
+          // cancellation round trip. Keep its original assignment live for the stop channel;
+          // aborting that authority first would prevent the owner from releasing its own input.
+          const dispatch = new AbortController();
+          const signal = AbortSignal.any([context.signal, dispatch.signal]);
+          const releaseScriptDispatch = noteInvocationComputerUse(context, desktopId, reason => dispatch.abort(reason));
           try { switch (method) {
             case 'apps': return result({ apps: await computers.listApps(desktopId) });
+            case 'control': {
+              // authorize(control) has already awaited this exact local/peer reservation.
+              // Reading the projection cannot undo the accepted assignment if it fails.
+              const assignment = admission.lease;
+              if (!assignment || assignment.access !== 'control') throw new ComputerError('computer-owner-unavailable', 'The original control assignment is unavailable');
+              try { return result({ assignment, control: await computers.control(desktopId) }, 'confirmed'); }
+              catch (error) { return result({ assignment, error: { code: 'computer-owner-unavailable', message: error instanceof Error ? error.message : String(error) } }, 'confirmed', true, 'failed'); }
+            }
+            case 'evidence': return result(await computers.evidence({ ...params, desktopId, signal }));
+            case 'open': {
+              const opened = await computers.open({ ...params as unknown as ComputerOpenParams, desktopId, signal });
+              return applicationResult({ result: opened }, opened, opened.accepted, opened.cancelled);
+            }
+            case 'browser_read':
+            case 'browser': {
+              const browser = await computers.browser({ ...params as unknown as ComputerBrowserParams, desktopId, signal });
+              const parts: OutputPart<IncomingMedia>[] = [];
+              const { image, ...metadata } = browser;
+              let imageMetadata: { partIndex: number; mediaType: string } | undefined;
+              if (image !== undefined) {
+                const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/]*={0,2})$/u.exec(image);
+                if (!match) return applicationResult({ result: metadata, error: { code: 'computer-owner-unavailable', message: 'The original browser returned an invalid screenshot payload; request a fresh screenshot.' } }, browser, false, browser.cancelled);
+                parts.push({ kind: 'media', media: { media_type: match[1]!, data_base64: match[2]! } });
+                imageMetadata = { partIndex: 0, mediaType: match[1]! };
+              }
+              return applicationResult({ result: { ...metadata, ...(imageMetadata ? { image: imageMetadata } : {}) } }, browser, browser.ok, browser.cancelled, parts);
+            }
+            case 'office_read':
+            case 'office': {
+              const office = await computers.office({ ...params as unknown as ComputerOfficeParams, desktopId, signal });
+              return applicationResult({ result: office }, office, office.ok, office.cancelled);
+            }
+            case 'put': return result(await computers.fileWrite({ ...params as unknown as ComputerFileWriteParams, desktopId, signal }), 'confirmed');
+            case 'install': {
+              const installed = await computers.installSoftware({ ...params as unknown as ComputerInstallSoftwareParams, desktopId, signal });
+              const complete = installed.results.every(entry => entry.state === 'installed');
+              const partial = installed.results.some(entry => entry.state === 'installed');
+              return result(installed, complete ? 'confirmed' : partial ? 'partial' : 'unknown', true, complete ? 'succeeded' : partial ? 'failed' : 'indeterminate');
+            }
             case 'observe': {
               const parts: OutputPart<IncomingMedia>[] = [];
-              const observation = observationOutput(await computers.observe({ ...params as unknown as ComputerObserveParams, desktopId, signal: context.signal }), parts);
+              const observation = observationOutput(await computers.observe({ ...params as unknown as ComputerObserveParams, desktopId, signal }), parts);
               return result({ observation }, 'none', true, 'succeeded', parts);
             }
             case 'act': {
               inputCallStarted = true;
-              const action = await computers.act({ ...params as unknown as ComputerActParams, desktopId, signal: context.signal });
+              const action = await computers.act({ ...params as unknown as ComputerActParams, desktopId, signal });
               const effect = action.receipt?.effect === 'verified' ? 'confirmed' : action.receipt?.effect ?? 'unknown';
               const parts: OutputPart<IncomingMedia>[] = [];
               const data = { ...action, ...(action.observation ? { observation: observationOutput(action.observation, parts) } : {}) };
@@ -270,10 +323,22 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
             }
             default: throw new ComputerError('computer-request-invalid', 'The selected Computer method is unavailable');
           } } finally { releaseScriptDispatch(); }
-        }, execution);
+        }, execution).catch(async error => {
+          if (method !== 'control') throw error;
+          // A lost reservation ACK followed by an unconfirmed drop is owned by the
+          // original assignment cleanup. It is not a pre-dispatch application failure.
+          const state = await computers.automation.snapshot(work).catch(evidenceError => { throw new ComputerEffectError(evidenceError, false); });
+          if (state.cleanups.some(cleanup => cleanup.desktopId === desktopId && sameComputerExecution(cleanup.execution, execution))) {
+            throw new ComputerEffectError(error, false);
+          }
+          const assignment = state.leases.find(lease => lease.desktopId === desktopId && lease.access === 'control' && sameComputerExecution(lease.actor.execution, execution));
+          if (assignment) return result({ assignment, error: { code: 'computer-owner-unavailable', message: error instanceof Error ? error.message : String(error) } }, 'confirmed', true, context.signal.aborted ? 'cancelled' : 'failed');
+          throw error;
+        });
       } catch (error) {
+        if (error instanceof ComputerEffectError) return result({ error: { code: error.harnessCode, message: error.message } }, 'unknown', error.inputWriterStopped, 'indeterminate');
         if (inputCallStarted) throw error;
-        return result({ error: { code: error instanceof ComputerError ? error.computerCode : 'computer-request-invalid',
+        return result({ error: { code: error instanceof ComputerError ? error.computerCode : error instanceof HarnessServiceError ? error.harnessCode : 'computer-request-invalid',
           message: error instanceof Error ? error.message : String(error) } }, 'none', true, context.signal.aborted ? 'cancelled' : 'failed');
       }
     });

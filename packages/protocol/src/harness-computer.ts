@@ -775,6 +775,8 @@ export interface ComputerEvidenceEntry {
   at: string;
   /** Session that issued the step, when known. */
   sessionId?: string;
+  /** Original admitted work and Run; labels and caller-provided session IDs never replace it. */
+  execution?: ComputerExecutionRef;
   lane: "observe" | "action";
   /** Service funnel: observe | act | open | fileWrite | browser | office | control. */
   tool: string;

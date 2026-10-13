@@ -17,7 +17,9 @@ kind is `discussion`. Retrieval presets and ordinary discussion children receive
 The caller cannot supply a parent, Run or role to the model-facing API.
 
 Native calls use the shipped `varin.builtin.computer` ordinary extension. Its single declaration
-owns the eleven `computer_list/apps/observe/act/cancel/release/request/access/grant/deny/wait` tools,
+owns `computer_list/apps/observe/act/cancel/release/request/access/grant/deny/wait`,
+`computer_control/open/put/install`, `computer_browser_read/browser`, `computer_office_read/office`,
+`computer_evidence` and `computer_environment`,
 their schemas, completion modes and read/effect classification.
 The original extension capability review, immutable binding and ToolInvocationAuthority remain in
 force. `computer.use` dispatches through this service, not a separate desktop backend. Actual global
@@ -27,6 +29,52 @@ sidebar selection or default. Explicit desktop selection and actual assignments 
 An invalid captured Computer default makes that service candidate unavailable through the existing
 tool-preparation projection. Unrelated tools can still prepare, even when the Computer provider was
 already active. Required saved Computer bindings remain exact; errors do not become a null default.
+
+Application adaptation uses the original ComputerService, driver and remote assignment token.
+Browser status/tabs/snapshot/screenshot and Office status/docs/read have read-only schemas;
+launch/navigation/evaluate/click/type and Office open/write/insert/save/export have effect schemas.
+Even an expression described as read-only requires the browser effect tool. Child labels, script
+nesting and a read assignment cannot upgrade these permissions. Target resolution and actual
+assignment admission precede the existing physical lane. The returned application automation epoch
+can be supplied on later input; a changed epoch or a handback requiring a fresh scene rejects old work.
+For input-ready observations, `computer_control` first awaits the existing control reservation,
+including its owning remote peer, then returns the original assignment/control state without sending
+application input. A child still needs its root's control grant. The first effect can also upgrade a
+root's observation assignment; that new peer assignment invalidates the old read epoch. Its rejection
+has a no-input receipt and directs the caller to read a fresh scene. No old observation is relabelled.
+Only a successful fresh scene read by the current controller can clear its handback fence; another
+observer cannot satisfy that requirement. The owner compares the original actor identity, including
+peer origin and assignment, rather than a tool label or an observer lease ID. A lost control-reservation
+ACK with an unconfirmed drop retains the original assignment cleanup and an unknown result.
+
+`computer_put` returns the stored managed-home file revision. `computer_install` preserves each
+package result, including failure. A non-managed desktop reports its actual unavailable capability.
+The original application driver receipt separates effect and input-writer completion; loss of a
+response remains unknown. Aborting open/browser/office input joins the original lane's physical
+release and callback drain rather than treating the observer promise as a stopped writer. A normal
+driver response ends that call, not the assignment or the application's own asynchronous work.
+Remote application receipts must contain the owning Host's execution evidence; missing evidence
+does not become success. File-write/install failures after entering the external writer retain
+unknown effects and unconfirmed writer status when the original backend supplies no stronger proof.
+The target's own pre-dispatch failure type carries no-input/stopped evidence through the existing
+authenticated route; the source preserves it instead of guessing from an HTTP status or turning a
+safe stale-epoch rejection into an unresolved writer. The same proof covers a revoked peer token
+rejected before entering the endpoint. Managed installer and file helpers retain their exact completion
+phase: validation before spawn proves no dispatch; a helper that exited proves stopped even when its
+response is malformed or rejected. Exit status alone does not prove that no file/package effects occurred.
+
+Browser screenshot data URLs are decoded by their producer adapter into typed media parts with the
+reported image MIME type. JSON keeps only its part index and other result metadata. The original
+evidence journal now retains the admitted work/Run as well as legacy Pi session association; it never
+substitutes a role label or records expressions, typed text, URLs with credentials or file bytes.
+An authenticated remote observer can read this same journal without requesting control.
+
+`computer_environment` inspects the accepted Run's frozen source and original desktop assignments.
+It explicitly reports that native placement mutation and service forwarding are unavailable.
+The existing Pi placement/forward owners require a Pi Registry session; Native work does not invent
+one or represent a still-live listener as a completed short tool. Native placement/forward Jobs,
+desktop prepare/start/stop and artifact registration remain separate integration work; the existing
+product/Pi capabilities are unchanged.
 
 Native child tasks, with or without a file source, request a desktop through their real ModelStep or PolicyAction
 Operation. Catalog owns the request, original decision and durable Wait; reasons and notification
@@ -54,7 +102,8 @@ per-tool invocation policy; Pi keeps its own read-only role rules. Neither adds 
 Source-less pure-capability children use the original ChildTask admission with explicit absent file
 authority and no applicable file result. They retain their own Run, selected capabilities and original
 Computer permissions. Trusted handback uses the original execution/input path described below;
-persistent Native Computer scripts remain unfinished.
+persistent scripts invoke these same ordinary Computer tools through the original tools.invoke permission
+and dispatch scope. Closing their original script call triggers the same physical stop and drain path.
 These limits are independent of the existing Pi capabilities below; selected tools alone never grant
 a desktop assignment.
 
@@ -235,6 +284,10 @@ an app. Other desktops prepare when selected or used.
 Focused tests exercise actual Registry identities, local/peer exclusivity, observer isolation, event
 waits, cancellation and epoch fences, real HTTP routing between simulated Hosts, sleeping native Node
 REPL revocation, progress correlation, negative-origin feedback mapping and compact overview stopping.
+The ordinary-application Node tests drive the original authenticated Router directly (without a
+listener), the shipped extension broker over child IPC, and controlled driver/VmExec responses. They
+cover peer reservation/re-observation, pre-dispatch rejection, original cancellation/drain, typed media
+and unknown effects independently of stopped input.
 The Windows targeting fixture invokes production functions with fake controls/input and checks visual
 events without desktop access. Those results do not establish real Windows overlay placement or
 Linux/macOS desktop input, VM installation, or an installed release's visual acceptance.
