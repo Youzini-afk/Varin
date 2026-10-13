@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { ComputerEvidenceEntry, ComputerEvidenceParams, ComputerEvidenceResult } from '@varin/protocol';
+import { parseComputerExecutionRef } from '@varin/protocol';
 import type { KernelScopedClient } from '../kernel/kernel-client.js';
 import { HarnessServiceError } from '../harness/service-error.js';
 
@@ -58,6 +59,10 @@ export function createComputerEvidence(options: {
         if (entry.seq !== seq || typeof entry.at !== 'string' || !['observe', 'action'].includes(entry.lane)
           || typeof entry.tool !== 'string' || !['ok', 'error', 'cancelled', 'unknown', 'rejected'].includes(entry.outcome)) {
           throw new HarnessServiceError('unavailable', `Invalid computer evidence at sequence ${seq}`);
+        }
+        if (entry.execution !== undefined) {
+          try { entry.execution = parseComputerExecutionRef(entry.execution); }
+          catch { throw new HarnessServiceError('unavailable', `Invalid computer execution evidence at sequence ${seq}`); }
         }
         if (params.sessionId === undefined || entry.sessionId === params.sessionId) entries.push(entry);
       }

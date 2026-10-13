@@ -1,6 +1,6 @@
 import type { Express, Request, RequestHandler, Response } from "express";
 import { HarnessServiceError } from "../harness/service-error.js";
-import type { ComputerService } from "./computer-service.js";
+import { ComputerBeforeDispatchError, ComputerEffectError, type ComputerService } from "./computer-service.js";
 import { computerWorkKey, parseComputerActor, type ComputerAccess } from '@varin/protocol';
 import { ComputerError } from './computer-error.js';
 
@@ -23,7 +23,9 @@ const sendError = (response: Response, error: unknown, fallback: string): void =
       : error.harnessCode === "not-found" ? 404
         : error.harnessCode === "forbidden" || error.harnessCode === "denied" ? 409
           : 500;
-    response.status(status).json({ code: error.harnessCode, error: error.message });
+    response.status(status).json({ code: error.harnessCode, error: error.message,
+      ...(error instanceof ComputerBeforeDispatchError ? { computerExecution: { inputWriterStopped: true, receipt: { effect: 'none' } } }
+        : error instanceof ComputerEffectError ? { computerExecution: { inputWriterStopped: error.inputWriterStopped, receipt: { effect: 'unknown' } } } : {}) });
     return;
   }
   response.status(500).json({ error: error instanceof Error ? error.message : fallback });
@@ -104,14 +106,16 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
     const automatic = request.method === 'POST' && ['observe', 'act', 'open', 'cancel', 'release', 'browser', 'office', 'software', 'artifacts/write'].includes(operation);
     const token = request.get('X-Varin-Computer-Lease');
     if (!automatic && !token) { next(); return; }
-    if (!token) { sendError(response, new HarnessServiceError('forbidden', 'Automatic input requires a Host desktop assignment'), 'Assignment required'); return; }
+    if (!token) { sendError(response, new ComputerBeforeDispatchError(new HarnessServiceError('forbidden', 'Automatic input requires a Host desktop assignment')), 'Assignment required'); return; }
     const body = request.body;
-    const read = request.method === 'GET' || operation === 'observe'
+    const read = request.method === 'GET' || operation === 'observe' || operation === 'evidence'
       || operation === 'browser' && (['status', 'tabs', 'snapshot'].includes(body?.op) || body?.op === 'act' && body?.act?.kind === 'screenshot')
       || operation === 'office' && (['status', 'docs'].includes(body?.op) || body?.op === 'act' && body?.act?.kind === 'read');
+    let entered = false;
     void computers.automation.delegated(token, String(request.params.desktopId), read ? 'observe' : 'control', () => new Promise<void>(resolve => {
+      entered = true;
       response.once('finish', resolve); response.once('close', resolve); next();
-    })).catch(error => { if (!response.headersSent) sendError(response, error, 'Desktop assignment ended'); });
+    })).catch(error => { if (!response.headersSent) sendError(response, entered ? error : new ComputerBeforeDispatchError(error), 'Desktop assignment ended'); });
   });
 
   const sendArtifact = (response: Response, source: Awaited<ReturnType<ComputerService["openDesktopArtifact"]>>) => {

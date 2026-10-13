@@ -28,6 +28,13 @@ export interface LinuxSoftwareResult {
   packages?: string[];
 }
 
+/** The installer owner, rather than its caller, knows whether its original helper exited. */
+export class LinuxSoftwareError extends HarnessServiceError {
+  constructor(error: unknown, readonly phase: 'before-dispatch' | 'unknown' | 'stopped') {
+    super(error instanceof HarnessServiceError ? error.harnessCode : 'unavailable', error instanceof Error ? error.message : String(error));
+  }
+}
+
 export function createLinuxDesktop(options: { dataDir: string; driverDir: string; platform: string; exec?: VmExec }) {
   const data = join(options.dataDir, 'computer-desktop');
   const script = join(options.driverDir, 'linux', 'desktop.py');
@@ -117,6 +124,7 @@ export function createLinuxDesktop(options: { dataDir: string; driverDir: string
       }
       // Serialize apt, but each request installs its own components.
       const previous = installOperation;
+      let phase: 'before-dispatch' | 'unknown' | 'stopped' = 'before-dispatch';
       const pending = (async (): Promise<LinuxSoftwareResult[]> => {
         await previous?.catch(() => undefined);
         spec.signal?.throwIfAborted();
@@ -128,27 +136,29 @@ export function createLinuxDesktop(options: { dataDir: string; driverDir: string
         spec.signal?.addEventListener('abort', abort, { once: true });
         if (spec.signal?.aborted) abort();
         try {
-        const args = [installer, '--data-dir', data,
-          '--cancel-file', cancelFile,
-          ...groups.flatMap((group) => ['--group', group]),
-          ...packages.flatMap((pkg) => ['--package', pkg])];
-        const result = await execute('/usr/bin/python3', args);
-        // The script acknowledges exit only after its apt subprocess stops.
-        spec.signal?.throwIfAborted();
-        const lastLine = result.stdout.trim().split(/\r?\n/u).at(-1);
-        let payload: { ok?: boolean; error?: string; results?: LinuxSoftwareResult[] } | undefined;
-        try { payload = JSON.parse(lastLine ?? '') as typeof payload; } catch { /* detail below */ }
-        if (!payload?.results?.length || !payload.results.every((entry) => typeof entry.id === 'string'
-          && ['installed', 'failed'].includes(entry.state))) {
-          throw new HarnessServiceError('unavailable', payload?.error || result.stderr.trim() || 'Component installer returned no result');
-        }
-        return payload.results;
+          const args = [installer, '--data-dir', data,
+            '--cancel-file', cancelFile,
+            ...groups.flatMap((group) => ['--group', group]),
+            ...packages.flatMap((pkg) => ['--package', pkg])];
+          phase = 'unknown';
+          const result = await execute('/usr/bin/python3', args);
+          // The script acknowledges exit only after its apt subprocess stops.
+          phase = 'stopped';
+          spec.signal?.throwIfAborted();
+          const lastLine = result.stdout.trim().split(/\r?\n/u).at(-1);
+          let payload: { ok?: boolean; error?: string; results?: LinuxSoftwareResult[] } | undefined;
+          try { payload = JSON.parse(lastLine ?? '') as typeof payload; } catch { /* detail below */ }
+          if (!payload?.results?.length || !payload.results.every((entry) => typeof entry.id === 'string'
+            && ['installed', 'failed'].includes(entry.state))) {
+            throw new HarnessServiceError('unavailable', payload?.error || result.stderr.trim() || 'Component installer returned no result');
+          }
+          return payload.results;
         } finally {
           spec.signal?.removeEventListener('abort', abort);
           await cancellation;
           await rm(cancelFile, { force: true });
         }
-      })();
+      })().catch(error => { throw new LinuxSoftwareError(error, phase); });
       installOperation = pending;
       try { return await pending; } finally { if (installOperation === pending) installOperation = undefined; }
     },

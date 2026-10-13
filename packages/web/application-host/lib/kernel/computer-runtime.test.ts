@@ -3,13 +3,21 @@ import { test } from 'node:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { EventEmitter } from 'node:events';
+import { resolve } from 'node:path';
+import { ApplicationExtensionRuntime } from '@varin/extension-host';
+import express, { type Express, type Request, type Response as ExpressResponse } from 'express';
 import { parseVarinToolJson } from '@varin/extension-contract';
-import { COMPUTER_TOOL_DECLARATIONS } from '@varin/extension-builtins';
-import { createComputerService } from '../computer/computer-service.js';
-import type { ComputerDriverSession, DriverResponse } from '../computer/driver-host.js';
+import { COMPUTER_CAPABILITY, COMPUTER_TOOL_DECLARATIONS, VARIN_BUILTIN_COMPUTER_EXTENSION_ID } from '@varin/extension-builtins';
+import { createComputerService, type ComputerServiceOptions } from '../computer/computer-service.js';
+import { registerComputerRoutes } from '../computer/computer-routes.js';
+import type { ComputerDriverSession, DriverResponse, DriverRequest } from '../computer/driver-host.js';
 import { parseComputerAutomationInvalidation, type ComputerWorkRef, type ComputerAutomationInvalidation } from '@varin/protocol';
 import { createComputerRuntime } from './computer-runtime.js';
-import { withToolInvocation } from './tool-invocation.js';
+import { withScriptCell, withToolInvocation } from './tool-invocation.js';
+import { retainExtensionTool, type ExtensionToolLease } from './extension-tool-owner.js';
+import type { KernelClient } from './kernel-client.js';
+import { toolOperationId, type HostToolCall } from './protocol.generated.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
 import type { KernelRecordResult, ToolOrigin, ComputerRequestRecord, ComputerEventCommand, ComputerEventCancellation } from './protocol.generated.js';
 
@@ -17,7 +25,7 @@ const work = (threadId = 'root'): ComputerWorkRef => ({ runtime: 'agent', thread
 const owner = { extensionId: 'varin.builtin.computer', extensionVersion: '1.0.0', entrypointId: 'host', instanceKey: 'computer-runtime-fixture', generation: 1 };
 const response = (extra: Partial<DriverResponse> = {}): DriverResponse => ({ id: 'controlled', ok: true, ...extra });
 const deferred = <T>() => { let resolve!: (value: T) => void, reject!: (reason: Error) => void; const promise = new Promise<T>((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
-async function fixture(records = new Map<string, KernelRecordResult>()) {
+async function fixture(records = new Map<string, KernelRecordResult>(), remote: Partial<Pick<ComputerServiceOptions, 'hostId' | 'remoteHosts' | 'fetch' | 'platform' | 'vmExec'>> = {}) {
   const dataDir = await mkdtemp(join(tmpdir(), 'varin-computer-domain-'));
   let enabled = true, releases = 0, failClear = false, blockInput = false, idle = false, deliveries = 0, terminal = false, releaseSucceeds = true, failList = false;
   const failedRuns = new Set<string>();
@@ -29,14 +37,17 @@ async function fixture(records = new Map<string, KernelRecordResult>()) {
   const observe = <T>(set: Set<T>, listener: T) => { set.add(listener); return () => { set.delete(listener); }; };
   const input = deferred<DriverResponse>(), started = deferred<void>();
   const calls: string[] = [];
+  const requests: Array<Omit<DriverRequest, 'id'>> = [];
+  let applicationReply: ((op: Omit<DriverRequest, 'id'>) => Promise<DriverResponse>) | undefined;
   const driver: ComputerDriverSession = { capabilities: null, alive: () => true, cancel: () => true, dispose: () => {},
     interrupt: async () => { releases++; input.reject(new Error('original input interrupted without a final action response')); return { released: releaseSucceeds }; },
     async request(op, dispatch) {
-      dispatch?.beforeDispatch?.(); calls.push(String(op.tool));
+      dispatch?.beforeDispatch?.(); calls.push(String(op.tool)); requests.push(structuredClone(op));
       if (op.tool === 'capabilities') return response({ capabilities: { platform: 'windows', driver: 'controlled', status: 'ready' } });
       if (op.tool === 'get_app_state') return response({ snapshot: { app: { name: 'editor', pid: 3, windowTitle: 'Controlled' },
         windowBounds: { x: 0, y: 0, width: 100, height: 100 }, treeLines: ['0 Edit'], elements: [{ index: 0, name: 'Edit', controlType: 'Edit' }] } });
       if (op.tool === 'type_text' && blockInput) { started.resolve(); return input.promise; }
+      if (['open', 'browser', 'office'].includes(String(op.tool)) && applicationReply) return applicationReply(op);
       return response({ receipt: { effect: 'dispatched' } });
     } };
   void input.promise.catch(() => undefined);
@@ -88,7 +99,7 @@ async function fixture(records = new Map<string, KernelRecordResult>()) {
   const runtime = { onReady: (listener: () => void) => observe(ready, listener), onEvent: (listener: (event: { stream: 'durable'; cursor: number }) => void) => observe(events, listener),
     run: async (id: string) => { const run = runRecord(id); if (terminal) for (const listener of toolReleased) listener(); return run; } };
 
-  const computers = createComputerService({ client: kernel as never, hostId: 'host', platform: 'windows', dataDir, createDriver: () => driver,
+  const computers = createComputerService({ client: kernel as never, hostId: 'host', platform: 'windows', dataDir, createDriver: () => driver, ...remote,
     onControlEvent: async event => { await computer.acceptControlEvent(event); },
     onControlEventCancel: command => computer.cancelControlEvents(command),
     onAutomationInvalidated: event => { invalidations.push(parseComputerAutomationInvalidation(event)); },
@@ -97,20 +108,23 @@ async function fixture(records = new Map<string, KernelRecordResult>()) {
     resolveScope: async ref => ref.runtime === 'agent' ? (await computer.resolve(ref)).scope : null,
   });
   const computer = createComputerRuntime({ kernel: kernel as never, runtime: runtime as never, computers, enabled: async () => enabled });
-  async function invoke(method: string, args: Record<string, unknown>, threadId = 'root', policy = false, signal = new AbortController().signal) {
+  async function invoke(method: string, args: Record<string, unknown>, threadId = 'root', policy = false, signal = new AbortController().signal, parentOperationId?: string) {
     const declaration = COMPUTER_TOOL_DECLARATIONS.find(value => value.id === `varin.computer.${method}`)!;
     const runId = `${threadId}-run`;
     const config = await computer.prepareConfiguration({ runId, threadId, source: null }, []);
-    const origin: ToolOrigin = policy ? { kind: 'policy_action', action_id: `policy-${method}`, node_id: 'input' } : { kind: 'model_step', request_id: `model-${method}` };
+    const origin: ToolOrigin = parentOperationId ? { kind: 'nested_call', parent_operation_id: parentOperationId }
+      : policy ? { kind: 'policy_action', action_id: `policy-${method}`, node_id: 'input' } : { kind: 'model_step', request_id: `model-${method}` };
     let receipt!: ToolExecutionReceipt;
     const content = await withToolInvocation({ owner, signal, authority: { callId: 'input', executorOwner: { kind: 'kernel' }, invocationId: 'controlled-invocation', runId, threadId,
-      operationId: policy ? `policy-${method}:node:input` : `model-${method}:tool:input`, origin, source: null,
+      operationId: toolOperationId(origin, 'input'), origin, source: null,
       completion: declaration.tool!.completion, toolName: declaration.tool!.name, operation: declaration.tool!.operation, arguments: args, configurationIdentity: config(declaration) },
       onEffectReceipt: result => { receipt = result; },
     }, async invocation => computer.capability(method, parseVarinToolJson(args), { owner, signal, invocation }));
     return { content, receipt };
   }
-  return { computer, computers, calls, records, invoke, started, dataDir, releases: () => releases,
+  return { computer, computers, kernel, calls, requests, records, invoke, started, dataDir, releases: () => releases,
+    applicationReply: (reply: NonNullable<typeof applicationReply>) => { applicationReply = reply; },
+    blockApplication: () => { applicationReply = async () => { started.resolve(); return input.promise; }; },
     controlFacts, controlCancels,
     failTransfer: (value = true) => { transferFailure = value; }, loseAck: (value = true) => { ackLoss = value; }, failCancel: (value = true) => { cancelFailure = value; },
     requestFacts, invalidations, failRequestBody: () => { requestBodyFailure = true; }, requestBodyReads: () => requestBodyReads,
@@ -533,4 +547,447 @@ test('reopened idle Thread Stop captures returned handoff after ACK without touc
     assert.ok(second.controlCancels.some(command => command.pendingEventIds.includes(id)));
     assert.equal(records.get('computer.desktop:unrelated'), unrelated);
   } finally { await second.cleanup(); }
+});
+
+test('ordinary application tools preserve original driver input, actor evidence, epochs and typed screenshot bytes', async () => {
+  const f = await fixture();
+  try {
+    f.applicationReply(async op => op.tool === 'browser' && (op.act as { kind?: string } | undefined)?.kind === 'screenshot'
+      ? { ...response(), image: 'data:image/jpeg;base64,YWJj' } as DriverResponse : response({ receipt: { effect: 'dispatched' } }));
+    const snapshot = await f.invoke('browser_read', { desktopId: 'local-console', op: 'snapshot', tabId: 'tab' });
+    const epoch = (snapshot.content as { result: { automationEpoch: string } }).result.automationEpoch;
+    assert.ok(epoch);
+    const navigation = await f.invoke('browser', { desktopId: 'local-console', op: 'act', tabId: 'tab', automationEpoch: epoch, act: { kind: 'navigate', url: 'https://example.test/path?private=secret' } }, 'root', true);
+    assert.equal(navigation.receipt.executor_stopped, true);
+    if (navigation.receipt.completion.kind === 'result') assert.equal(navigation.receipt.completion.effect, 'dispatched');
+    assert.deepEqual(f.requests.at(-1)?.act, { kind: 'navigate', url: 'https://example.test/path?private=secret' });
+    const shot = await f.invoke('browser_read', { desktopId: 'local-console', op: 'act', tabId: 'tab', act: { kind: 'screenshot' } });
+    assert.equal(shot.receipt.completion.kind, 'result');
+    if (shot.receipt.completion.kind === 'result') {
+      assert.equal(shot.receipt.completion.effect, 'none');
+      assert.deepEqual(shot.receipt.completion.content?.parts, [{ kind: 'media', media: { media_type: 'image/jpeg', data_base64: 'YWJj' } }]);
+      assert.equal(JSON.stringify(shot.receipt.completion.content?.data).includes('YWJj'), false);
+    }
+    await f.invoke('office_read', { desktopId: 'local-console', op: 'act', act: { kind: 'read', doc: 'unsaved', range: 'A1:B2' } });
+    await f.invoke('office', { desktopId: 'local-console', op: 'act', act: { kind: 'write', doc: 'unsaved', range: 'A1', values: [['x']] } });
+    await f.invoke('open', { desktopId: 'local-console', command: 'editor', args: ['target.txt'] });
+    const journal = await f.invoke('evidence', { desktopId: 'local-console' });
+    const entries = (journal.content as { entries: Array<{ execution: unknown; tool: string; lane: string }> }).entries;
+    assert.ok(entries.some(entry => entry.tool === 'office' && entry.lane === 'observe'));
+    assert.ok(entries.some(entry => entry.tool === 'browser' && entry.lane === 'action'));
+    assert.ok(entries.every(entry => JSON.stringify(entry.execution) === JSON.stringify({ work: work(), runId: 'root-run' })));
+    assert.equal(JSON.stringify(journal.content).includes('private=secret'), false);
+  } finally { await f.cleanup(); }
+});
+
+test('read schemas reject nested browser evaluation and Office writes before the driver; child labels never upgrade an observer assignment', async () => {
+  const f = await fixture();
+  try {
+    for (const [method, args] of [
+      ['browser_read', { op: 'act', act: { kind: 'evaluate', expression: 'document.title' } }],
+      ['office_read', { op: 'act', act: { kind: 'write', values: [['x']] } }],
+      ['browser_read', { op: 'launch' }],
+    ] as const) await assert.rejects(f.invoke(method, { desktopId: 'local-console', ...args }), /selected Computer capability/);
+    assert.equal(f.calls.length, 0);
+    await f.computers.automation.grantRequest({ work: work('child'), runId: 'child-run' }, work(), { work: work(), runId: 'root-run' }, 'local-console', 'observe', 'observer');
+    f.computers.automation.confirmRequest('observer');
+    await f.invoke('browser_read', { op: 'tabs' }, 'child');
+    await f.invoke('office_read', { op: 'docs' }, 'child');
+    for (const [method, args] of [
+      ['browser', { op: 'act', act: { kind: 'evaluate', expression: 'document.title' } }],
+      ['office', { op: 'act', act: { kind: 'save' } }],
+      ['control', {}],
+      ['open', { command: 'editor' }],
+      ['put', { relativePath: 'x', contentBase64: 'eA==' }],
+      ['install', { groups: ['docs'] }],
+    ] as const) {
+      const denied = await f.invoke(method, { ...args }, 'child');
+      if (denied.receipt.completion.kind === 'result') { assert.equal(denied.receipt.completion.effect, 'none'); assert.equal(denied.receipt.completion.outcome, 'failed'); }
+      assert.equal(denied.receipt.executor_stopped, true);
+    }
+    assert.equal(f.requests.filter(op => ['open', 'browser', 'office'].includes(String(op.tool))).length, 2);
+  } finally { await f.cleanup(); }
+});
+
+for (const method of ['open', 'browser', 'office'] as const) test(`${method} cancellation preserves Unknown effect until exact original input drain`, async () => {
+  const f = await fixture();
+  try {
+    f.blockApplication();
+    const cancel = new AbortController();
+    const args = method === 'open' ? { command: 'editor' } : { op: 'act', act: method === 'browser' ? { kind: 'type', text: 'x' } : { kind: 'insert', text: 'x' } };
+    const pending = f.invoke(method, { desktopId: 'local-console', ...args }, 'root', false, cancel.signal);
+    await f.started.promise;
+    cancel.abort();
+    const { receipt } = await pending;
+    assert.equal(receipt.executor_stopped, true);
+    if (receipt.completion.kind === 'result') { assert.equal(receipt.completion.effect, 'unknown'); assert.equal(receipt.completion.outcome, 'indeterminate'); }
+    assert.equal(f.releases(), 1);
+    assert.equal(JSON.parse(f.records.get('computer.desktop:local-console')!.payloadJson).physicalControl, null);
+  } finally { await f.cleanup(); }
+});
+
+test('lost application response never proves stopped input; unsupported managed operations remain actionable and undispatched', async () => {
+  const f = await fixture();
+  try {
+    for (const [method, args] of [['put', { relativePath: 'x.txt', contentBase64: 'eA==' }], ['install', { groups: ['docs'] }]] as const) {
+      const unavailable = await f.invoke(method, { desktopId: 'local-console', ...args });
+      assert.match(JSON.stringify(unavailable.content), /managed Linux/);
+      assert.equal(unavailable.receipt.executor_stopped, true);
+      if (unavailable.receipt.completion.kind === 'result') assert.equal(unavailable.receipt.completion.effect, 'none');
+    }
+    f.applicationReply(async () => { throw new Error('original browser response lost'); });
+    const lost = await f.invoke('browser', { desktopId: 'local-console', op: 'act', act: { kind: 'evaluate', expression: '1' } });
+    assert.equal(lost.receipt.executor_stopped, false);
+    if (lost.receipt.completion.kind === 'result') assert.equal(lost.receipt.completion.effect, 'unknown');
+    assert.ok(JSON.parse(f.records.get('computer.desktop:local-console')!.payloadJson).physicalControl);
+    const environment = await f.invoke('environment', {});
+    assert.equal((environment.content as { source: unknown }).source, null);
+    assert.equal((environment.content as { serviceForwards: { available: boolean } }).serviceForwards.available, false);
+    assert.equal(f.calls.filter(call => call === 'browser').length, 1);
+  } finally { await f.cleanup(); }
+});
+
+test('application handback invalidates an old epoch and requires a fresh scene before input', async () => {
+  const f = await fixture();
+  try {
+    const initial = await f.invoke('browser_read', { desktopId: 'local-console', op: 'snapshot' });
+    const oldEpoch = (initial.content as { result: { automationEpoch: string } }).result.automationEpoch;
+    await f.invoke('browser', { desktopId: 'local-console', op: 'act', act: { kind: 'type', text: 'before' } });
+    await f.computers.automation.grantRequest({ work: work('child'), runId: 'child-run' }, work(), { work: work(), runId: 'root-run' }, 'local-console', 'observe', 'handback-observer');
+    f.computers.automation.confirmRequest('handback-observer');
+    await f.computers.takeover({ desktopId: 'local-console', holderId: 'viewer' });
+    await f.computers.handback({ desktopId: 'local-console', holderId: 'viewer' });
+    for (const [method, args] of [['observe', { app: 'editor' }], ['browser_read', { op: 'snapshot' }], ['office_read', { op: 'docs' }]] as const) {
+      await f.invoke(method, { desktopId: 'local-console', ...args }, 'child');
+      const unread = await f.invoke('browser', { desktopId: 'local-console', op: 'act', act: { kind: 'type', text: 'not yet observed by controller' } });
+      if (unread.receipt.completion.kind === 'result') assert.equal(unread.receipt.completion.effect, 'none', method);
+      assert.match(JSON.stringify(unread.content), /Observe.*after handback/);
+    }
+    const count = f.calls.filter(call => call === 'browser').length;
+    const stale = await f.invoke('browser', { desktopId: 'local-console', automationEpoch: oldEpoch, op: 'act', act: { kind: 'type', text: 'stale' } });
+    if (stale.receipt.completion.kind === 'result') assert.equal(stale.receipt.completion.effect, 'none');
+    assert.equal(f.calls.filter(call => call === 'browser').length, count);
+    const scene = await f.invoke('browser_read', { desktopId: 'local-console', op: 'snapshot' });
+    const epoch = (scene.content as { result: { automationEpoch: string } }).result.automationEpoch;
+    assert.notEqual(epoch, oldEpoch);
+    await f.invoke('browser', { desktopId: 'local-console', automationEpoch: epoch, op: 'act', act: { kind: 'type', text: 'after' } });
+    assert.equal(f.calls.filter(call => call === 'browser').length, count + 2);
+  } finally { await f.cleanup(); }
+});
+
+/** Original authenticated Router, driven directly; never opens a listener or a network socket. */
+function computerRouter(computers: ReturnType<typeof createComputerService>) {
+  const router = express.Router();
+  registerComputerRoutes(router as unknown as Express, { computers, hostId: 'host', requireAuth: (request, response, next) => {
+    if (request.get('authorization') !== 'Bearer controlled-peer') { response.status(401).json({ error: 'unauthorized' }); return; }
+    next();
+  } });
+  return (operation: string, body: unknown, token?: string, authenticated = true, method = 'POST'): Promise<{ status: number; body: unknown; headers: Record<string, string> }> => new Promise((resolve, reject) => {
+    const headers: Record<string, string> = {};
+    const response = Object.assign(new EventEmitter(), { statusCode: 200, writableEnded: false, headersSent: false,
+      status(code: number) { this.statusCode = code; return this; }, setHeader(name: string, value: string) { headers[name] = value; return this; },
+      json(value: unknown) { this.writableEnded = true; this.headersSent = true; resolve({ status: this.statusCode, body: value, headers }); response.emit('finish'); return this; } });
+    const incoming = Object.assign(new EventEmitter(), { method, url: operation.startsWith('/api/') ? operation : `/api/computers/desktops/local-console/${operation}`, body,
+      headers: { ...(authenticated ? { authorization: 'Bearer controlled-peer' } : {}), ...(token ? { 'x-varin-computer-lease': token } : {}) },
+      get(name: string) { return (this.headers as Record<string, string>)[name.toLowerCase()]; } });
+    Object.defineProperty(incoming, 'path', { get: () => new URL(incoming.url, 'http://controlled.invalid').pathname });
+    Object.defineProperty(incoming, 'query', { get: () => Object.fromEntries(new URL(incoming.url, 'http://controlled.invalid').searchParams) });
+    (router as unknown as { handle(request: Request, response: ExpressResponse, next: (error?: unknown) => void): void })
+      .handle(incoming as unknown as Request, response as unknown as ExpressResponse, error => reject(error ?? new Error('Unmatched Computer route')));
+  });
+}
+
+test('authenticated peer Router uses the same observer assignment for nested reads and evidence while rejecting nested writes', async () => {
+  const f = await fixture();
+  try {
+    await f.computers.ensureLocal();
+    const actor = (await f.computer.resolve(work('child'))).actor!;
+    const token = await f.computers.claimDesktop('peer-host:original', 'peer-observer', actor, 'local-console', 'observe');
+    const call = computerRouter(f.computers);
+    assert.equal((await call('browser', { op: 'tabs' }, token, false)).status, 401);
+    assert.equal((await call('browser', { op: 'tabs' })).status, 409);
+    assert.equal((await call('browser', { op: 'act', act: { kind: 'screenshot' } }, token)).status, 200);
+    assert.equal((await call('office', { op: 'act', act: { kind: 'read' } }, token)).status, 200);
+    const evidence = await call('evidence', {}, token);
+    assert.equal(evidence.status, 200);
+    assert.ok((evidence.body as { entries: unknown[] }).entries.length >= 2);
+    for (const [operation, body] of [
+      ['browser', { op: 'act', act: { kind: 'evaluate', expression: '1' } }],
+      ['office', { op: 'act', act: { kind: 'save' } }], ['open', { command: 'editor' }],
+    ] as const) assert.equal((await call(operation, body, token)).status, 409);
+    assert.equal(f.calls.filter(tool => tool === 'browser' || tool === 'office').length, 2);
+    await f.computers.dropDesktopClaim('peer-host:original', 'peer-observer', actor, 'local-console', 'observe');
+    assert.equal((await call('browser', { op: 'tabs' }, token)).status, 409);
+  } finally { await f.cleanup(); }
+});
+
+test('shipped Computer broker binds application declarations, keeps frozen defaults and enforces original permissions for nested calls', async () => {
+  const f = await fixture();
+  let extensions: ApplicationExtensionRuntime | undefined;
+  const retained: ExtensionToolLease[] = [];
+  let invocation: HostToolCall;
+  let permission: 'allow' | 'deny' = 'allow';
+  const executionOwner = { kind: 'external' as const, identity: 'original-broker-computer', epoch: 'original-tool-owner' };
+  try {
+    await f.computers.ensureLocal(); await f.computers.setDefaultDesktop('local-console');
+    const captured = await f.computer.prepareConfiguration({ runId: 'root-run', threadId: 'root', source: null }, []);
+    extensions = await ApplicationExtensionRuntime.create({ dataDir: join(f.dataDir, 'extensions'), varinVersion: '0.9.25',
+      brokerScript: resolve('packages/extension-host/broker/broker-child.mjs') });
+    extensions.capabilities.register(COMPUTER_CAPABILITY, f.computer.capability);
+    await extensions.start();
+    await extensions.activateExtension(VARIN_BUILTIN_COMPUTER_EXTENSION_ID);
+    const kernel = { ...f.kernel, async agentRuntimeRequest(method: string, params: never) {
+      if (method === 'runtime.operation.inspect') return { id: invocation.operationId, run_id: invocation.runId, phase: 'running', cancel_requested: false, execution_owner: executionOwner,
+        intent: { origin: invocation.origin, call: { call_id: invocation.callId, name: invocation.name, schema_version: invocation.schemaVersion, arguments: invocation.arguments } } };
+      if (method === 'runtime.launch.inspect') return { run_id: invocation.runId, selection: { source: null } };
+      return f.kernel.agentRuntimeRequest(method, params);
+    } } as unknown as KernelClient;
+    for (const method of ['control', 'browser_read', 'browser', 'office_read', 'office', 'open', 'evidence', 'environment']) {
+      const selected = await extensions.prepareService({ serviceId: `varin.computer.${method}`, version: 1, method: 'execute', args: [], routing: { sessionId: 'root' } });
+      retained.push(await retainExtensionTool({ runtime: extensions, kernel, configurationIdentity: captured,
+        currentPolicy: async () => ({ mode: 'normal', rules: [{ tool: `computer_${method}`, decision: permission }] }) }, selected));
+    }
+    const desktop = f.records.get('computer.desktop:local-console')!;
+    f.records.set('computer.desktop:other-desktop', { ...desktop, recordId: 'computer.desktop:other-desktop', payloadJson: JSON.stringify({ ...JSON.parse(desktop.payloadJson), id: 'other-desktop' }) });
+    await f.computers.setDefaultDesktop('other-desktop');
+    let call = 0;
+    const execute = async (method: string, args: Record<string, unknown>, nested = false) => {
+      const selected = retained.find(entry => entry.binding.serviceId === `varin.computer.${method}`)!;
+      const origin: ToolOrigin = nested ? { kind: 'nested_call', parent_operation_id: 'original-parent:tool:cell' } : { kind: 'model_step', request_id: 'broker-model' };
+      const callId = `call-${++call}`;
+      invocation = { runId: 'root-run', origin, operationId: toolOperationId(origin, callId), callId, name: selected.binding.tool.name, schemaVersion: selected.binding.tool.version, arguments: args };
+      await selected.lease.authorize(invocation, new AbortController().signal);
+      return selected.lease.execute(invocation, new AbortController().signal, executionOwner);
+    };
+    const control = await execute('control', {}, true);
+    if (control.completion.kind === 'result') assert.equal(control.completion.effect, 'confirmed');
+    const read = await execute('browser_read', { op: 'snapshot' }, true);
+    assert.equal(read.completion.kind, 'result');
+    if (read.completion.kind === 'result') assert.equal(read.completion.effect, 'none');
+    const opened = await execute('open', { command: 'editor' });
+    if (opened.completion.kind === 'result') assert.equal(opened.completion.effect, 'dispatched');
+    await execute('office_read', { op: 'docs' }, true);
+    await execute('office', { op: 'act', act: { kind: 'save' } }, true);
+    const count = f.calls.length;
+    permission = 'deny';
+    await assert.rejects(execute('browser', { op: 'act', act: { kind: 'evaluate', expression: '1' } }, true), /permission_changed/);
+    assert.equal(f.calls.length, count);
+    permission = 'allow';
+    await assert.rejects(execute('browser_read', { op: 'act', act: { kind: 'evaluate', expression: '1' } }, true), /input_schema/);
+    const environment = await execute('environment', {});
+    if (environment.completion.kind === 'result') assert.equal((environment.completion.content?.data as { defaultDesktopId: string }).defaultDesktopId, 'local-console');
+    assert.equal(f.calls.filter(tool => tool === 'open').length, 1);
+  } finally {
+    for (const entry of retained) entry.lease.release();
+    await extensions?.stop(); await f.cleanup();
+  }
+});
+
+for (const method of ['act', 'open', 'browser', 'office'] as const) test(`ancestor script cancellation reaches ${method} physical stop before any Catalog cancellation`, async () => {
+  const f = await fixture();
+  try {
+    const signal = new AbortController().signal;
+    const parentOperationId = 'script-model:tool:cell';
+    await withToolInvocation({ owner, signal, authority: { invocationId: 'script-parent', runId: 'root-run', threadId: 'root', operationId: parentOperationId,
+      callId: 'cell', executorOwner: { kind: 'kernel' }, origin: { kind: 'model_step', request_id: 'script-model' }, source: null,
+      toolName: 'script_run', operation: 'effect', completion: 'result', arguments: {} } }, async invocation => {
+      let cancelDispatch: ((reason: unknown) => void) | undefined;
+      await withScriptCell({ owner, signal, invocation }, { environmentId: 'original-script', computerUsed() {}, usesComputer: () => true,
+        computerCancellation(cancel) { cancelDispatch = cancel; return () => { cancelDispatch = undefined; }; } }, async () => {
+        if (method === 'act') f.block(); else f.blockApplication();
+        const args = method === 'act' ? { action: { kind: 'type', app: 'editor', text: 'x' } }
+          : method === 'open' ? { command: 'editor' }
+          : { op: 'act', act: method === 'browser' ? { kind: 'type', text: 'x' } : { kind: 'insert', text: 'x' } };
+        const pending = f.invoke(method, { desktopId: 'local-console', ...args }, 'root', false, signal, parentOperationId);
+        await f.started.promise;
+        assert.ok(cancelDispatch);
+        cancelDispatch(new Error('original script close'));
+        const { receipt } = await pending;
+        assert.equal(signal.aborted, false, 'the Catalog/tool cancellation has not happened');
+        assert.equal(f.releases(), 1);
+        assert.equal(receipt.executor_stopped, true);
+        if (receipt.completion.kind === 'result') assert.equal(receipt.completion.effect, 'unknown');
+      });
+    });
+  } finally { await f.cleanup(); }
+});
+
+test('explicit driver Unknown survives a normal cancellation response independently of stopped input', async () => {
+  const f = await fixture();
+  try {
+    f.applicationReply(async () => ({ ...response(), ok: false, cancelled: true, outcome: 'unknown', error: 'Application bridge cancellation acknowledgement' } as DriverResponse));
+    for (const method of ['browser', 'office'] as const) {
+      const completed = await f.invoke(method, { desktopId: 'local-console', op: 'act', act: method === 'browser' ? { kind: 'type', text: 'x' } : { kind: 'insert', text: 'x' } });
+      assert.equal(completed.receipt.executor_stopped, true);
+      if (completed.receipt.completion.kind === 'result') { assert.equal(completed.receipt.completion.effect, 'unknown'); assert.equal(completed.receipt.completion.outcome, 'indeterminate'); }
+      assert.equal((completed.content as { result: { outcome: string } }).result.outcome, 'unknown');
+    }
+  } finally { await f.cleanup(); }
+});
+
+test('invalid application screenshot encoding cannot erase original dispatched or Unknown effects', async () => {
+  const f = await fixture();
+  try {
+    for (const effect of ['dispatched', 'unknown'] as const) {
+      f.applicationReply(async () => ({ ...response({ receipt: { effect } }), image: 'not-an-image-data-url' } as DriverResponse));
+      const completed = await f.invoke('browser', { desktopId: 'local-console', op: 'act', act: { kind: 'evaluate', expression: '1' } });
+      assert.equal(completed.receipt.executor_stopped, true);
+      if (completed.receipt.completion.kind === 'result') {
+        assert.equal(completed.receipt.completion.effect, effect);
+        assert.equal(completed.receipt.completion.outcome, effect === 'unknown' ? 'indeterminate' : 'failed');
+        assert.deepEqual(completed.receipt.completion.content?.parts, []);
+      }
+      assert.match(JSON.stringify(completed.content), /invalid screenshot payload/);
+    }
+  } finally { await f.cleanup(); }
+});
+
+async function remoteFixture(target: Awaited<ReturnType<typeof fixture>>, intercept?: (url: URL, body: Record<string, unknown>, send: () => Promise<Response>) => Promise<Response>) {
+  const call = computerRouter(target.computers);
+  const directFetch: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    // The control subscription carries no test events. All identity/admission/action calls
+    // use the real target Router; no product HTTP listener or external socket is involved.
+    if (url.pathname.endsWith('/stream')) {
+      const body = new ReadableStream<Uint8Array>({ start(controller) { init?.signal?.addEventListener('abort', () => { try { controller.close(); } catch {} }, { once: true }); } });
+      return new Response(body, { headers: { 'content-type': 'text/event-stream', 'x-varin-computer-host': 'host' } });
+    }
+    const headers = new Headers(init?.headers);
+    const body: Record<string, unknown> = init?.body ? JSON.parse(String(init.body)) : {};
+    const send = async () => {
+      const response = await call(url.pathname + url.search, body,
+        headers.get('x-varin-computer-lease') ?? undefined, headers.get('authorization') === 'Bearer controlled-peer', init?.method ?? 'GET');
+      return new Response(JSON.stringify(response.body), { status: response.status, headers: response.headers });
+    };
+    return intercept ? intercept(url, body, send) : send();
+  };
+  return fixture(undefined, { hostId: 'source', remoteHosts: async () => [{ id: 'peer', label: 'Original target', apiUrl: 'http://controlled.invalid', clientToken: 'controlled-peer' }], fetch: directFetch });
+}
+
+test('remote original-owner preflight proof crosses authenticated routes without turning rejection into Unknown input', async () => {
+  const target = await fixture();
+  let source: Awaited<ReturnType<typeof fixture>> | undefined;
+  try {
+    source = await remoteFixture(target);
+    await source.invoke('list', {});
+    const desktopId = 'remote:peer:host:local-console';
+    const before = target.calls.length;
+    for (const [method, args] of [
+      ['browser', { op: 'act', automationEpoch: 'old-epoch', act: { kind: 'evaluate', expression: '1' } }],
+      ['office', { op: 'act', automationEpoch: 'old-epoch', act: { kind: 'save' } }],
+      ['open', { automationEpoch: 'old-epoch', command: 'editor' }],
+      ['put', { relativePath: 'x', contentBase64: 'eA==' }],
+      ['install', { groups: ['docs'] }],
+    ] as const) {
+      const rejected = await source.invoke(method, { desktopId, ...args });
+      assert.equal(rejected.receipt.executor_stopped, true, method);
+      if (rejected.receipt.completion.kind === 'result') { assert.equal(rejected.receipt.completion.effect, 'none', method); assert.equal(rejected.receipt.completion.outcome, 'failed', method); }
+    }
+    assert.equal(target.calls.length, before);
+    const fresh = await source.invoke('browser_read', { desktopId, op: 'snapshot' });
+    const epoch = (fresh.content as { result: { automationEpoch: string } }).result.automationEpoch;
+    const written = await source.invoke('browser', { desktopId, op: 'act', automationEpoch: epoch, act: { kind: 'type', text: 'fresh scene' } });
+    assert.equal(written.receipt.executor_stopped, true);
+    if (written.receipt.completion.kind === 'result') assert.equal(written.receipt.completion.effect, 'dispatched', JSON.stringify(written.content));
+  } finally { await source?.cleanup(); await target.cleanup(); }
+});
+
+test('remote observer promotion requires a fresh scene; explicit control reserves the peer before reading', async () => {
+  for (const explicitControl of [false, true]) {
+    const target = await fixture();
+    let source: Awaited<ReturnType<typeof fixture>> | undefined;
+    try {
+      source = await remoteFixture(target);
+      await source.invoke('list', {});
+      const desktopId = 'remote:peer:host:local-console';
+      if (explicitControl) {
+        const prepared = await source.invoke('control', { desktopId });
+        if (prepared.receipt.completion.kind === 'result') assert.equal(prepared.receipt.completion.effect, 'confirmed');
+        assert.ok(target.computers.automation.controller('local-console'));
+        assert.equal(target.requests.filter(request => ['browser', 'office', 'open', 'type_text'].includes(String(request.tool))).length, 0, 'control reserves the original peer without application input');
+      }
+      const read = async () => {
+        const observed = await source!.invoke('browser_read', { desktopId, op: 'snapshot' });
+        return (observed.content as { result: { automationEpoch: string } }).result.automationEpoch;
+      };
+      const act = (automationEpoch: string) => source!.invoke('browser', { desktopId, automationEpoch, op: 'act', act: { kind: 'type', text: 'visible scene' } });
+      const first = await act(await read());
+      if (!explicitControl) {
+        assert.equal(first.receipt.executor_stopped, true);
+        if (first.receipt.completion.kind === 'result') assert.equal(first.receipt.completion.effect, 'none');
+        assert.match(JSON.stringify(first.content), /fresh scene/);
+        const recovered = await act(await read());
+        if (recovered.receipt.completion.kind === 'result') assert.equal(recovered.receipt.completion.effect, 'dispatched');
+      } else if (first.receipt.completion.kind === 'result') assert.equal(first.receipt.completion.effect, 'dispatched');
+      assert.equal(target.requests.filter(request => request.tool === 'browser' && request.op === 'act').length, 1);
+    } finally { await source?.cleanup(); await target.cleanup(); }
+  }
+});
+
+test('remote revoked assignment rejects before the endpoint and keeps target no-input proof', async () => {
+  const target = await fixture();
+  let source: Awaited<ReturnType<typeof fixture>> | undefined;
+  let claim: Record<string, unknown> | undefined;
+  try {
+    source = await remoteFixture(target, async (url, body, send) => {
+      if (url.pathname.endsWith('/assignment') && body.op === 'claim' && body.access === 'control') claim = body;
+      return send();
+    });
+    await source.invoke('list', {});
+    const desktopId = 'remote:peer:host:local-console';
+    await source.invoke('control', { desktopId });
+    assert.ok(claim);
+    const dropped = await computerRouter(target.computers)('/api/computers/desktops/local-console/assignment', { ...claim, op: 'drop' });
+    assert.equal(dropped.status, 200);
+    const count = target.calls.length;
+    const rejected = await source.invoke('browser', { desktopId, op: 'act', act: { kind: 'evaluate', expression: '1' } });
+    assert.equal(rejected.receipt.executor_stopped, true);
+    if (rejected.receipt.completion.kind === 'result') assert.equal(rejected.receipt.completion.effect, 'none');
+    assert.equal(target.calls.length, count);
+  } finally { await source?.cleanup(); await target.cleanup(); }
+});
+
+test('lost control reservation ACK with unconfirmed drop remains original assignment Unknown', async () => {
+  const target = await fixture();
+  let source: Awaited<ReturnType<typeof fixture>> | undefined;
+  let disconnect = true;
+  try {
+    source = await remoteFixture(target, async (url, body, send) => {
+      if (!disconnect || !url.pathname.endsWith('/assignment')) return send();
+      if (body.op === 'claim') await send();
+      throw new Error('Original claim ACK or drop delivery lost');
+    });
+    await source.invoke('list', {});
+    const uncertain = await source.invoke('control', { desktopId: 'remote:peer:host:local-console' });
+    assert.equal(uncertain.receipt.executor_stopped, false);
+    if (uncertain.receipt.completion.kind === 'result') { assert.equal(uncertain.receipt.completion.effect, 'unknown'); assert.equal(uncertain.receipt.completion.outcome, 'indeterminate'); }
+    assert.ok(target.computers.automation.controller('local-console'));
+    assert.equal(target.requests.filter(request => ['browser', 'office', 'open', 'type_text'].includes(String(request.tool))).length, 0);
+    const state = await source.computers.automation.snapshot(work());
+    assert.ok(state.cleanups.some(cleanup => cleanup.desktopId === 'remote:peer:host:local-console'));
+  } finally { disconnect = false; await source?.cleanup(); await target.cleanup(); }
+});
+
+test('managed Linux helper rejection retains known exit while unavailable file helper proves no dispatch', async () => {
+  const commands: string[] = [];
+  const f = await fixture(undefined, { platform: 'linux', vmExec: async (_command, args) => {
+    commands.push(args[0]!);
+    assert.ok(args[0]?.endsWith('install-components.py'), 'only the injected installer response is requested');
+    return { code: 2, stdout: JSON.stringify({ ok: false, error: 'unknown component groups: unknown-recipe' }), stderr: '' };
+  } });
+  try {
+    await f.computers.ensureLocal();
+    const record = f.records.get('computer.desktop:local-console')!;
+    f.records.set('computer.desktop:managed-linux', { ...record, recordId: 'computer.desktop:managed-linux',
+      payloadJson: JSON.stringify({ ...JSON.parse(record.payloadJson), id: 'managed-linux', managed: 'linux-xvnc' }) });
+    const installed = await f.invoke('install', { desktopId: 'managed-linux', groups: ['unknown-recipe'] });
+    assert.equal(installed.receipt.executor_stopped, true);
+    if (installed.receipt.completion.kind === 'result') { assert.equal(installed.receipt.completion.effect, 'unknown'); assert.equal(installed.receipt.completion.outcome, 'indeterminate'); }
+    assert.match(JSON.stringify(installed.content), /unknown component groups/);
+    const written = await f.invoke('put', { desktopId: 'managed-linux', relativePath: 'x', contentBase64: 'eA==' });
+    assert.equal(written.receipt.executor_stopped, true);
+    if (written.receipt.completion.kind === 'result') assert.equal(written.receipt.completion.effect, 'none');
+    assert.match(JSON.stringify(written.content), /file access is unavailable/);
+    assert.equal(commands.length, 1);
+  } finally { await f.cleanup(); }
 });

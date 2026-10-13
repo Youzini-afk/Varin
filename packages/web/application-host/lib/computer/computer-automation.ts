@@ -445,6 +445,13 @@ export function createComputerAutomation(options: {
       await cancelWork(actor, desktopId);
     },
     controller: (desktopId: string) => owner(desktopId)?.actor ?? null,
+    isController(desktopId: string) {
+      const admission = context.getStore();
+      const controller = owner(desktopId);
+      if (!admission || !controller) return false;
+      admission.assert();
+      return actorKey(admission.actor) === actorKey(controller.actor);
+    },
     acceptedExecutions(): ComputerExecutionRef[] {
       const actors = [...cleanupLeases(), ...controllers.values(), ...(options.pendingReleases?.() ?? [])].map(entry => entry.actor);
       return [...new Map(actors.filter(actor => !originFor(actor)).map(actor => [computerExecutionKey(actor.execution), actor.execution])).values()];

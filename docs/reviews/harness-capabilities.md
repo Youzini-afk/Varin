@@ -108,6 +108,7 @@ D-339 的既有行为与真实 Rust CAS/重启回执只覆盖其对应场景，�
 
 ## Bot、电脑、环境与研究
 
+- Native Computer 应用工具已沿原 builtin/broker/actor/assignment、应用 driver 和回执接入，显式 control 后再观察可用于远端输入；只读 browser/Office 不授予写权限。原手动交还、取消与未知效果、helper 真正退出、认证目标前置拒绝见[应用能力证据](runtime-computer-applications-2026-10-13.md)。native placement/forward Job、desktop lifecycle 与 artifact registration 仍缺相应接入；受控 driver/direct Router 不代表真实桌面或双机网络验收。
 - BC0–BC9 的阶段事实、平台实现缺口和未测环境由 [BC 验收](bot-computer-use.md)维护
 - EE1–EE6 的环境绑定、资源与应用桥及剩余合同由 [EE 验收](execution-environments.md)维护
 - D-300 的完整研究资源管理合同仍未全部交付；本地/受管远程已有切片，Slurm 延后，见[科研设计](../design/research-cluster-design.md)

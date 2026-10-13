@@ -29,6 +29,7 @@ import type {
   ComputerActivityEntry,
   ComputerArtifact,
   ComputerActionResult,
+  ComputerActionReceipt,
   ComputerAppDescriptor,
   ComputerCapabilities,
   ComputerControlState,
@@ -74,8 +75,8 @@ import { createLibvirtProvider } from "./libvirt-provider.js";
 import { createDesktopDriverPool } from "./desktop-drivers.js";
 import { createComputerEvidence } from "./computer-evidence.js";
 import { createComputerAutomation } from './computer-automation.js';
-import { createLinuxDesktop, type LinuxDesktopState, type LinuxSoftwareResult } from "./linux-desktop.js";
-import { inspectDesktopFile, openDesktopFile, writeDesktopFile, type DesktopArtifactVersion } from "./desktop-artifact-files.js";
+import { createLinuxDesktop, LinuxSoftwareError, type LinuxDesktopState, type LinuxSoftwareResult } from "./linux-desktop.js";
+import { inspectDesktopFile, openDesktopFile, writeDesktopFile, DesktopFileWriteError, type DesktopArtifactVersion } from "./desktop-artifact-files.js";
 import { prepareVmGuestSeed } from "./vm-guest-seed.js";
 import { resolveDebianCloudImage, downloadDebianCloudImage } from "./vm-guest-image.js";
 import { forgetVmGuestPassword, probeVmGuest, vmGuestBootstrapStatus, vmGuestIpv4, vmGuestPassword } from "./vm-guest-connection.js";
@@ -472,6 +473,43 @@ export interface ComputerServiceOptions {
   controlWindows?: (() => number[]) | undefined;
 }
 
+/** Original Computer owner evidence, independent of application success and assignment lifetime. */
+export interface ComputerExecutionEvidence {
+  inputWriterStopped: boolean;
+  receipt: ComputerActionReceipt;
+}
+export type ComputerEffectResult<T> = T & ComputerExecutionEvidence;
+/** A writer was entered, so a normal validation error can no longer prove no effect. */
+export class ComputerEffectError extends HarnessServiceError {
+  constructor(error: unknown, readonly inputWriterStopped: boolean) {
+    super(error instanceof HarnessServiceError ? error.harnessCode : 'unavailable', error instanceof Error ? error.message : String(error));
+  }
+}
+/** Created only by an owning adapter after excluding every submitted/uncertain path. */
+export class ComputerBeforeDispatchError extends HarnessServiceError {
+  constructor(error: unknown) {
+    super(error instanceof HarnessServiceError ? error.harnessCode : 'unavailable', error instanceof Error ? error.message : String(error));
+  }
+}
+const applicationFailure = (error: unknown): never => {
+  if (error instanceof ComputerEffectError || error instanceof ComputerBeforeDispatchError) throw error;
+  throw new ComputerBeforeDispatchError(error);
+};
+const responseEvidence = (response: DriverResponse, writes = true): ComputerExecutionEvidence => {
+  const receipt = writes ? actionResult(response).receipt! : { effect: 'none' as const };
+  // Application adapters may have lost the external app's acknowledgement even though
+  // the driver returned normally. Cancellation alone cannot strengthen Unknown to partial.
+  const outcome = (response as DriverResponse & { outcome?: unknown }).outcome;
+  const effect = !writes ? 'none' : outcome === 'unknown' ? 'unknown'
+    : outcome === 'partial' && receipt.effect !== 'unknown' ? 'partial' : receipt.effect;
+  return { inputWriterStopped: true, receipt: { ...receipt, effect } };
+};
+const unknownEvidence = (): ComputerExecutionEvidence => ({ inputWriterStopped: false, receipt: { effect: 'unknown', recovery: 'observe' } });
+const undispatchedEvidence = (): ComputerExecutionEvidence => ({ inputWriterStopped: true, receipt: { effect: 'none' } });
+const hasExecutionEvidence = (value: unknown): value is ComputerExecutionEvidence => isObject(value)
+  && typeof value.inputWriterStopped === 'boolean' && isObject(value.receipt)
+  && ['none', 'dispatched', 'partial', 'verified', 'unknown'].includes(String(value.receipt.effect));
+
 export interface ComputerService {
   /** The existing physical owner generation, never a replacement runtime identity. */
   controlOwnerEpoch: string;
@@ -526,7 +564,7 @@ export interface ComputerService {
    * resolves where the desktop runs — `localhost` and file paths mean that
    * machine, never the caller's. Same control gate as `act`.
    */
-  open(params: { desktopId?: string; url?: string; path?: string; command?: string; args?: string[]; automationEpoch?: string; signal?: AbortSignal; sessionId?: string }): Promise<ComputerOpenResult>;
+  open(params: { desktopId?: string; url?: string; path?: string; command?: string; args?: string[]; automationEpoch?: string; signal?: AbortSignal; sessionId?: string }): Promise<ComputerEffectResult<ComputerOpenResult>>;
   /**
    * EE: one-shot file write into a managed desktop user's home, returning the
    * stored revision. No sync relationship is created.
@@ -544,12 +582,12 @@ export interface ComputerService {
    * launch/act write to the same real scene and hold the same human-control
    * gate as `open`/`act`.
    */
-  browser(params: ComputerBrowserParams & { signal?: AbortSignal; sessionId?: string }): Promise<ComputerBrowserResult>;
+  browser(params: ComputerBrowserParams & { signal?: AbortSignal; sessionId?: string }): Promise<ComputerEffectResult<ComputerBrowserResult>>;
   /**
    * EE §7.2: LibreOffice bridge — attach to the live soffice instance on the
    * same desktop scene (open documents carry their unsaved state).
    */
-  office(params: ComputerOfficeParams & { signal?: AbortSignal; sessionId?: string }): Promise<ComputerOfficeResult>;
+  office(params: ComputerOfficeParams & { signal?: AbortSignal; sessionId?: string }): Promise<ComputerEffectResult<ComputerOfficeResult>>;
   /**
    * EE6 (§10): durable review of the steps this Host executed on a desktop —
    * who issued them, the target, and the real outcome. Remote desktops are
@@ -808,7 +846,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
 
   const journalErrorOutcome = (error: unknown): ComputerEvidenceEntry["outcome"] => {
     if (error instanceof CancelledActionError) return "cancelled";
-    if (error instanceof RemoteTransportError || error instanceof Error && error.name === "AbortError") return "unknown";
+    if (error instanceof RemoteTransportError || error instanceof ComputerEffectError || error instanceof Error && error.name === "AbortError") return "unknown";
     if (error instanceof HarnessServiceError && (error.harnessCode === "forbidden" || error.harnessCode === "invalid-params")) return "rejected";
     return "error";
   };
@@ -828,6 +866,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       ...(summary.op !== undefined ? { op: evidenceOps[summary.tool]?.includes(summary.op) ? summary.op : 'invalid' } : {}),
       ...(summary.target !== undefined ? { target: evidenceTarget(summary.target) } : {}),
       ...(sessionId ? { sessionId } : {}),
+      ...(automation.context.getStore()?.actor.execution ? { execution: automation.context.getStore()!.actor.execution } : {}),
     };
     try {
       const result = await run({ ...params, desktopId: id });
@@ -1154,7 +1193,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
 
   const remoteJson = async <T>(connection: ComputerRemoteHost, method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> => {
     const response = await remoteFetch(connection, method, path, body, signal);
-    let payload: (T & { code?: string; error?: string }) | null;
+    let payload: (T & { code?: string; error?: string; computerExecution?: unknown }) | null;
     try { payload = await response.json() as typeof payload; }
     catch { throw new RemoteTransportError("Remote Host response was lost or malformed; submitted input may have executed"); }
     if (!isObject(payload)) throw new RemoteTransportError("Remote Host returned no usable response");
@@ -1162,10 +1201,15 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       const code = payload && typeof payload.code === "string" && ["invalid-params", "not-found", "forbidden", "denied", "unavailable"].includes(payload.code)
         ? payload.code as HarnessServiceError["harnessCode"]
         : "failed";
-      throw new HarnessServiceError(
+      const error = new HarnessServiceError(
         code,
         payload && typeof payload.error === "string" ? payload.error : `Remote computer request failed (${response.status})`,
       );
+      // This is the original target adapter's proof, not an inference from an HTTP code.
+      if (hasExecutionEvidence(payload.computerExecution) && payload.computerExecution.inputWriterStopped
+        && payload.computerExecution.receipt.effect === 'none') throw new ComputerBeforeDispatchError(error);
+      if (hasExecutionEvidence(payload.computerExecution)) throw new ComputerEffectError(error, payload.computerExecution.inputWriterStopped);
+      throw error;
     }
     return payload as T;
   };
@@ -1883,7 +1927,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       const observation = observationOf(response.snapshot, desktop);
       if (generation === laneGeneration(id) && !laneFor(id).transitioning) {
         rememberObservation(observation);
-        if (laneFor(id).control.owner === "agent") laneFor(id).needsObservation = false;
+        if (laneFor(id).control.owner === "agent" && automation.isController(id)) laneFor(id).needsObservation = false;
       }
       return observationPage(observation, params);
     });
@@ -2296,22 +2340,23 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     if (remote) {
       try {
         await recordUsage(id, params.sessionId).catch(() => undefined);
-        const payload = await remoteJson<{ result?: ComputerOpenResult }>(
+        const payload = await remoteJson<{ result?: ComputerEffectResult<ComputerOpenResult> }>(
           remote.connection, "POST", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/open`,
           { ...(params.url !== undefined ? { url: params.url } : {}),
             ...(params.path !== undefined ? { path: params.path } : {}),
             ...(params.command !== undefined ? { command: params.command } : {}),
             ...(params.args !== undefined ? { args: params.args } : {}), automationEpoch: params.automationEpoch, sessionId: params.sessionId }, params.signal,
         );
-        if (!payload.result || typeof payload.result.accepted !== "boolean") throw new RemoteTransportError("Remote Host returned no valid open receipt");
+        if (!payload.result || typeof payload.result.accepted !== "boolean" || !hasExecutionEvidence(payload.result)) throw new RemoteTransportError("Remote Host returned no valid open receipt");
         return payload.result;
       } catch (error) {
+        if (error instanceof ComputerBeforeDispatchError || error instanceof ComputerEffectError) throw error;
         if (error instanceof RemoteTransportError) {
           // The open may have crossed the wire — never replay; report the
           // effect as unknown and let the caller verify on the desktop.
-          return { accepted: false, outcome: "unknown", detail: error instanceof Error ? error.message : String(error) };
+          return { ...unknownEvidence(), accepted: false, outcome: "unknown", detail: error instanceof Error ? error.message : String(error) };
         }
-        throw error;
+        throw new ComputerEffectError(error, false);
       }
     }
     // A desktop under human control rejects automated opens — same gate as
@@ -2323,7 +2368,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       const lane = laneFor(id);
       if (generation !== lane.generation) throw new CancelledActionError();
       if (lane.control.owner !== "agent" || lane.transitioning) throw new HarnessServiceError("forbidden", "Desktop control is changing or held by a human");
-      if (params.automationEpoch !== undefined && params.automationEpoch !== modelEpoch(id)) throw new HarnessServiceError('forbidden', 'This open belongs to an earlier control generation');
+      if (params.automationEpoch !== undefined && params.automationEpoch !== modelEpoch(id)) throw new HarnessServiceError('forbidden', 'This open belongs to an earlier control assignment or generation; call computer_control and take a fresh observation before retrying');
     };
     assertAdmission();
     let submitted = false;
@@ -2344,20 +2389,17 @@ export function createComputerService(options: ComputerServiceOptions): Computer
           ...(params.path !== undefined ? { path: params.path } : {}),
           ...(params.command !== undefined ? { command: params.command } : {}),
           ...(params.args !== undefined ? { args: params.args } : {}),
-        }, params.signal);
+        }, params.signal, { beforeDispatch: assertAdmission }, false);
       }, generation);
-      if (!response.ok) {
-        if (response.cancelled) return { accepted: false, cancelled: true };
-        throw new HarnessServiceError("failed", response.error ?? "Open failed");
-      }
-      const result: ComputerOpenResult = { accepted: true };
+      const result: ComputerEffectResult<ComputerOpenResult> = { ...responseEvidence(response), accepted: response.ok,
+        ...(response.cancelled ? { cancelled: true } : {}), ...(response.error ? { detail: response.error } : {}) };
       if (typeof response.pid === "number" && Number.isSafeInteger(response.pid) && response.pid > 0) result.pid = response.pid;
       if (laneGeneration(id) !== generation) result.cancelled = true;
       return result;
     } catch (error) {
-      if (error instanceof CancelledActionError) return { accepted: false, cancelled: true };
+      if (error instanceof CancelledActionError) return { ...undispatchedEvidence(), accepted: false, cancelled: true };
       if (submitted) {
-        return { accepted: false, outcome: "unknown", detail: error instanceof Error ? error.message : String(error) };
+        return { ...unknownEvidence(), accepted: false, outcome: "unknown", detail: error instanceof Error ? error.message : String(error) };
       }
       throw error;
     }
@@ -2380,12 +2422,13 @@ export function createComputerService(options: ComputerServiceOptions): Computer
           { relativePath: params.relativePath, contentBase64: params.contentBase64, sessionId: params.sessionId }, params.signal);
         return { version: artifactVersion(result.version) };
       } catch (error) {
+        if (error instanceof ComputerBeforeDispatchError || error instanceof ComputerEffectError) throw error;
         if (error instanceof RemoteTransportError) {
           // The bytes may already have landed on the target — the caller must
           // re-inspect the stored revision instead of re-sending blindly.
-          throw new HarnessServiceError("unavailable", `${error.message} — re-inspect the target file before retrying`);
+          throw new ComputerEffectError(new Error(`${error.message} — re-inspect the target file before retrying`), false);
         }
-        throw error;
+        throw new ComputerEffectError(error, false);
       }
     }
     const { desktop } = await desktopRecord(id);
@@ -2395,8 +2438,13 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       assertAutomation(id, generation);
       await recordUsage(id, params.sessionId).catch(() => undefined);
       assertAutomation(id, generation);
+      const state = await linuxDesktop.status();
       return externalOperation(id, params.signal, async (signal) =>
-        writeDesktopFile(await linuxDesktop.status(), params.relativePath, content, signal));
+        writeDesktopFile(state, params.relativePath, content, signal))
+        .catch(error => {
+          if (error instanceof DesktopFileWriteError && error.phase === 'before-dispatch') throw new ComputerBeforeDispatchError(error);
+          throw new ComputerEffectError(error, error instanceof DesktopFileWriteError && error.phase === 'stopped');
+        });
     }, generation);
     await recordUsage(id, params.sessionId).catch(() => undefined);
     return { version };
@@ -2458,9 +2506,11 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     if (remote) {
       const result = await remoteJson<{ results?: ComputerSoftwareResult[] }>(remote.connection, "POST",
         `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/software`,
-        { groups, packages, sessionId: params.sessionId }, params.signal);
-      if (!Array.isArray(result.results)) {
-        throw new HarnessServiceError("unavailable", "Remote Host returned no install results");
+        { groups, packages, sessionId: params.sessionId }, params.signal)
+        .catch(error => { if (error instanceof ComputerBeforeDispatchError || error instanceof ComputerEffectError) throw error; throw new ComputerEffectError(error, false); });
+      if (!Array.isArray(result.results) || !result.results.length || !result.results.every(entry => isObject(entry)
+        && typeof entry.id === 'string' && ['installed', 'failed'].includes(String(entry.state)))) {
+        throw new ComputerEffectError(new Error("Remote Host returned no install results"), false);
       }
       return { results: result.results };
     }
@@ -2473,7 +2523,11 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       assertAutomation(id, generation);
       await recordUsage(id, params.sessionId).catch(() => undefined);
       assertAutomation(id, generation);
-      return externalOperation(id, params.signal, (signal) => linuxDesktop.install({ groups, packages, signal }));
+      return externalOperation(id, params.signal, (signal) => linuxDesktop.install({ groups, packages, signal }))
+        .catch(error => {
+          if (error instanceof LinuxSoftwareError && error.phase === 'before-dispatch') throw new ComputerBeforeDispatchError(error);
+          throw new ComputerEffectError(error, error instanceof LinuxSoftwareError && error.phase === 'stopped');
+        });
     }, generation);
     // The reported state is the install's real outcome — failed entries stay
     // visible instead of collapsing into success.
@@ -2488,7 +2542,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     if (generation !== lane.generation) throw new CancelledActionError();
     if (lane.control.owner !== "agent" || lane.transitioning) throw new HarnessServiceError("forbidden", "Desktop control is changing or held by a human");
     automation.context.getStore()?.assert();
-    if (epoch !== undefined && epoch !== modelEpoch(id)) throw new HarnessServiceError("forbidden", "This operation belongs to an earlier control generation");
+    if (epoch !== undefined && epoch !== modelEpoch(id)) throw new HarnessServiceError("forbidden", "This operation belongs to an earlier control assignment or generation; call computer_control and read a fresh scene before retrying");
     if (needsScene && lane.needsObservation) throw new HarnessServiceError("invalid-params", "Observe the current scene after handback before resuming input");
   };
 
@@ -2500,11 +2554,11 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     finally { if (lane.externalAbort === controller) delete lane.externalAbort; }
   };
 
-  const applicationBridge = async <R extends ComputerBrowserResult | ComputerOfficeResult>(
+  const applicationBridge = async (
     params: { desktopId?: string; op: string; automationEpoch?: string; signal?: AbortSignal; sessionId?: string },
     tool: "browser" | "office", writes: boolean, observesScene: boolean,
     body: Record<string, unknown>, driverBody: Record<string, unknown>,
-  ): Promise<R> => {
+  ): Promise<ComputerEffectResult<ComputerBrowserResult & ComputerOfficeResult>> => {
     params.signal?.throwIfAborted();
     const id = await resolveDesktopId(params.desktopId);
     const generation = laneGeneration(id);
@@ -2512,16 +2566,17 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     if (remote) {
       try {
         await recordUsage(id, params.sessionId).catch(() => undefined);
-        const payload = await remoteJson<R>(remote.connection, "POST",
+        const payload = await remoteJson<ComputerEffectResult<ComputerBrowserResult & ComputerOfficeResult>>(remote.connection, "POST",
           `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/${tool}`,
           { ...body, op: params.op, sessionId: params.sessionId, automationEpoch: params.automationEpoch }, params.signal);
-        if (typeof payload?.ok !== "boolean") throw new RemoteTransportError(`Remote Host returned no valid ${tool} receipt`);
+        if (typeof payload?.ok !== "boolean" || !hasExecutionEvidence(payload)) throw new RemoteTransportError(`Remote Host returned no valid ${tool} receipt`);
         return payload;
       } catch (error) {
+        if (error instanceof ComputerBeforeDispatchError || error instanceof ComputerEffectError) throw error;
         if (error instanceof RemoteTransportError) {
-          return { ok: false, outcome: "unknown", error: error.message } as R;
+          return { ...unknownEvidence(), ok: false, outcome: "unknown", error: error.message };
         }
-        throw error;
+        throw new ComputerEffectError(error, false);
       }
     }
     const assertAdmission = () => {
@@ -2538,17 +2593,18 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         assertAdmission();
         if (writes) { await markInputOwner(id, driver); assertAdmission(); }
         submitted = true;
-        return requestWithAbort(driver, { ...driverBody, tool, op: params.op }, params.signal);
+        return requestWithAbort(driver, { ...driverBody, tool, op: params.op }, params.signal, { beforeDispatch: assertAdmission }, !writes);
       }, generation);
       const { id: _rid, ...result } = response as DriverResponse & Record<string, unknown>;
-      if (response.ok && observesScene && generation === laneGeneration(id) && !laneFor(id).transitioning) {
+      if (response.ok && observesScene && generation === laneGeneration(id) && !laneFor(id).transitioning
+        && laneFor(id).control.owner === 'agent' && automation.isController(id)) {
         laneFor(id).needsObservation = false;
       }
       if (generation !== laneGeneration(id)) result.cancelled = true;
-      return { ...result, automationEpoch: scopedEpoch(`${controlEpoch}:${generation}`) } as unknown as R;
+      return { ...result, ...responseEvidence(response, writes), automationEpoch: scopedEpoch(`${controlEpoch}:${generation}`) };
     } catch (error) {
-      if (error instanceof CancelledActionError) return { ok: false, cancelled: true, error: "Cancelled before dispatch" } as unknown as R;
-      if (submitted) return { ok: false, outcome: "unknown", error: error instanceof Error ? error.message : String(error) } as R;
+      if (error instanceof CancelledActionError) return { ...undispatchedEvidence(), ok: false, cancelled: true, error: "Cancelled before dispatch" };
+      if (submitted) return { ...unknownEvidence(), ok: false, outcome: "unknown", error: error instanceof Error ? error.message : String(error) };
       throw error;
     }
   };
@@ -2560,7 +2616,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       ...(params.profile !== undefined ? { profile: params.profile } : {}),
       ...(params.act !== undefined ? { act: structuredClone(params.act) } : {}),
       ...(params.limit !== undefined ? { limit: params.limit } : {}) };
-    return applicationBridge<ComputerBrowserResult>(params, "browser", writes, params.op === "snapshot", {
+    return applicationBridge(params, "browser", writes, params.op === "snapshot", {
       ...fields, ...(params.tabId !== undefined ? { tabId: params.tabId } : {}), ...(params.port !== undefined ? { port: params.port } : {}),
     }, { ...fields, ...(params.tabId !== undefined ? { tab: params.tabId } : {}), ...(params.port !== undefined ? { cdp_port: params.port } : {}) });
   };
@@ -2571,7 +2627,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const writes = params.op === "launch" || params.op === "open" || (params.op === "act" && !readsDocument);
     const fields = { ...(params.path !== undefined ? { path: params.path } : {}),
       ...(params.url !== undefined ? { url: params.url } : {}), ...(params.act !== undefined ? { act: structuredClone(params.act) } : {}) };
-    return applicationBridge<ComputerOfficeResult>(params, "office", writes, params.op === "docs" || readsDocument, fields, fields);
+    return applicationBridge(params, "office", writes, params.op === "docs" || readsDocument, fields, fields);
   };
 
   // --- BC5: control ownership ---------------------------------------------
@@ -3576,44 +3632,51 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   // Remote desktops are journaled by their owning Host; queries forward there.
   const observe: ComputerService["observe"] = (params) =>
     journaledOp(params, params.sessionId, { lane: "observe", tool: "observe", op: "observe", target: params.app }, observeImpl);
+  // Join only the original lane's input receipt. A replacement helper or a resolved
+  // HTTP observer cannot establish that a previously submitted writer stopped.
+  const joinInputLifetime = async <P extends { desktopId?: string; signal?: AbortSignal }, R extends { inputWriterStopped: boolean }>(
+    selected: P, execute: (params: P) => Promise<R>,
+  ): Promise<R> => {
+    const id = selected.desktopId!;
+    const generation = laneGeneration(id), admission = automation.context.getStore();
+    let stopping: ReturnType<typeof cancelImpl> | undefined;
+    const onAbort = () => {
+      if (generation !== laneGeneration(id)) return;
+      try { admission?.assert(); } catch { return; }
+      stopping ??= admission ? automation.context.run(admission, () => cancelImpl(id)) : cancelImpl(id);
+      void stopping.catch(() => undefined);
+    };
+    selected.signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+      const result = await execute(selected);
+      const released = await stopping?.catch(() => undefined);
+      const physical = laneFor(id).inputStop;
+      if (!result.inputWriterStopped && physical && physical.generation > generation) await physical.done.catch(() => undefined);
+      if (released?.released || physical && physical.generation > generation && physical.writerStopped) result.inputWriterStopped = true;
+      return result;
+    } finally { selected.signal?.removeEventListener('abort', onAbort); await stopping?.catch(() => undefined); }
+  };
   const act: ComputerService["act"] = (params) =>
-    journaledOp(params, params.sessionId, { lane: "action", tool: "act", op: params.action.kind, target: params.action.app }, async selected => {
-      const id = selected.desktopId!;
-      const generation = laneGeneration(id), admission = automation.context.getStore();
-      let stopping: ReturnType<typeof cancelImpl> | undefined;
-      const onAbort = () => {
-        if (generation !== laneGeneration(id)) return;
-        try { admission?.assert(); } catch { return; }
-        stopping ??= admission ? automation.context.run(admission, () => cancelImpl(id)) : cancelImpl(id);
-        void stopping.catch(() => undefined);
-      };
-      selected.signal?.addEventListener('abort', onAbort, { once: true });
-      try {
-        const result = await actImpl(selected);
-        // The original owner joins this call and its captured lane drain. Unknown effects stay unknown.
-        const released = await stopping?.catch(() => undefined);
-        const physical = laneFor(id).inputStop;
-        if (!result.inputWriterStopped && physical && physical.generation > generation) await physical.done.catch(() => undefined);
-        if (released?.released || physical && physical.generation > generation && physical.writerStopped) result.inputWriterStopped = true;
-        return result;
-      } finally { selected.signal?.removeEventListener('abort', onAbort); await stopping?.catch(() => undefined); }
-    });
+    journaledOp(params, params.sessionId, { lane: "action", tool: "act", op: params.action.kind, target: params.action.app },
+      selected => joinInputLifetime(selected, actImpl));
   const open: ComputerService["open"] = (params) =>
     journaledOp(params, params.sessionId, { lane: "action", tool: "open", op: "open",
-      target: params.path ?? urlEvidenceTarget(params.url) ?? params.command }, openImpl);
+      target: params.path ?? urlEvidenceTarget(params.url) ?? params.command }, selected => joinInputLifetime(selected, openImpl)).catch(applicationFailure);
   const fileWrite: ComputerService["fileWrite"] = (params) =>
-    journaledOp(params, params.sessionId, { lane: "action", tool: "fileWrite", op: "fileWrite", target: params.relativePath }, fileWriteImpl);
+    journaledOp(params, params.sessionId, { lane: "action", tool: "fileWrite", op: "fileWrite", target: params.relativePath }, fileWriteImpl).catch(applicationFailure);
   const installSoftware: ComputerService["installSoftware"] = (params) =>
     journaledOp(params, params.sessionId, { lane: "action", tool: "installSoftware", op: "install",
-      target: [...(params.groups ?? []), ...(params.packages ?? [])].join(",") || undefined }, installSoftwareImpl);
+      target: [...(params.groups ?? []), ...(params.packages ?? [])].join(",") || undefined }, installSoftwareImpl).catch(applicationFailure);
   const browser: ComputerService["browser"] = (params) =>
-    journaledOp(params, params.sessionId, { lane: params.op === "status" || params.op === "tabs" || params.op === "snapshot" ? "observe" : "action",
+    journaledOp(params, params.sessionId, { lane: params.op === "status" || params.op === "tabs" || params.op === "snapshot" || params.op === "act" && params.act?.kind === "screenshot" ? "observe" : "action",
       tool: "browser", op: params.op,
-      target: params.tabId ?? (params.act ? [params.act.kind, urlEvidenceTarget(params.act.url)].filter(Boolean).join(" ") : undefined) }, browserImpl);
+      target: params.tabId ?? (params.act ? [params.act.kind, urlEvidenceTarget(params.act.url)].filter(Boolean).join(" ") : undefined) }, selected => selected.op === "launch" || selected.op === "act" && selected.act?.kind !== "screenshot"
+      ? joinInputLifetime(selected, browserImpl) : browserImpl(selected)).catch(applicationFailure);
   const office: ComputerService["office"] = (params) =>
-    journaledOp(params, params.sessionId, { lane: params.op === "status" || params.op === "docs" ? "observe" : "action",
+    journaledOp(params, params.sessionId, { lane: params.op === "status" || params.op === "docs" || params.op === "act" && params.act?.kind === "read" ? "observe" : "action",
       tool: "office", op: params.op,
-      target: params.act?.doc ?? params.path ?? params.act?.range ?? params.url }, officeImpl);
+      target: params.act?.doc ?? params.path ?? params.act?.range ?? params.url }, selected => selected.op === "launch" || selected.op === "open" || selected.op === "act" && selected.act?.kind !== "read"
+      ? joinInputLifetime(selected, officeImpl) : officeImpl(selected)).catch(applicationFailure);
   const takeover: ComputerService["takeover"] = (params) =>
     journaledOp(params, undefined, { lane: "action", tool: "control", op: "takeover", target: params.holderId }, takeoverImpl, boundLocalDesktop(params.desktopId));
   const handback: ComputerService["handback"] = (params) =>
