@@ -36,6 +36,9 @@ pub(super) fn remove(
         }
         resources.release_delivered_read_receipt(&id)?;
     }
+    if let Some(files) = &resources.file_observations {
+        files.drain_bot_scope(catalog, &suspension, cancel)?;
+    }
     if cancel.load(Ordering::Acquire) {
         return Err(KernelError::Cancelled);
     }

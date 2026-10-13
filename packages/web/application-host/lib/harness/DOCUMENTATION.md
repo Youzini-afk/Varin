@@ -315,6 +315,28 @@ domain acceptance/cancellation is reconciled back through that same association.
 Full desktop restart and real-model research quality require their own evidence. D-301/7G request preparation and D-302/7H tool execution
 use the shared context and shell paths described below.
 
+### Service-forward ownership
+
+`environment-forwards.ts` owns each live listener, opening/closing work and its streams for both
+Pi sessions and Agent operations. The owner is typed; Agent work does not invent a Pi session.
+`kernel/environment-forward-runtime.ts` connects the ordinary builtin tools to the original
+Catalog HostJob. A local address creates no listener. A managed target is selected once from an
+explicit configured connection or the accepted source owner; source-less work defaults to local.
+The durable Job stores the credential-free target identity and the actual coordinating Host epoch.
+Credentials remain with the original configured connection and its live owner.
+
+Remote acceptance means the coordinating Host listener is ready, not that the service on the target
+has answered. Inspection, family reads, subtree cancellation and durable Wait consume the original
+Job. Closing it drains the exact listener and streams, not the remote service process. Lost replies
+are reconciled against that owner without opening a replacement. A different Host epoch alone does
+not prove the old listener stopped; an unavailable original owner stays explicitly unconfirmed.
+
+Bot Sleep includes these original Jobs in its existing scope drain, and wake never recreates a
+closed forward automatically. Host shutdown closes Agent listeners before disposing their receipt
+adapter. Pi session teardown continues through the same typed listener owner. Controlled listener
+tests exercise this lifecycle without opening sockets; real network forwarding and deployment
+require separate platform evidence.
+
 ### HarnessServiceHost (`service-host.ts`)
 
 Global singleton that owns:

@@ -70,6 +70,8 @@ export interface ManagedSourceControlRequest extends ManagedSourceAddress { oper
 export interface ManagedSourceReleaseRequest extends ManagedSourceAddress { mode: 'retire' | 'revoke' }
 export interface ManagedSourceScopeRequest { coordinatorHostId: string; threadId: string; runId: string }
 export interface ManagedSourceScopeReleaseRequest extends ManagedSourceScopeRequest { mode: 'retire' | 'revoke' }
+export interface ManagedSourceReadScopeRequest { coordinatorHostId:string;scope:Extract<SourceAuthorityScope,{kind:'source_read'}>;source:LaunchSource }
+export interface ManagedFileObservationRequest extends ManagedSourceAddress { requestId:string;action:import('../kernel/protocol.generated.js').SourceFileObservationAction }
 export interface ManagedSourceInspection { scope: SourceAuthorityScope; phase: 'preparing' | 'ready' | 'retired' | 'revoked'; purpose: 'source' | 'read' | 'integration' | 'result'; operationId: string | null; binding: ManagedSourceBinding }
 
 /** Closed, non-model source services. A command cannot name an arbitrary kernel method,
@@ -128,6 +130,9 @@ export type ManagedSourceServiceHandler = (scope: ManagedSourceLocalScope, opera
 /** The target Host composes its existing Documents, WorkingState and native resource owners.
  * Network routes only supply authenticated principal and the closed request. */
 export interface ManagedSourceService {
+  inspectReadScope(principal:ManagedSourcePrincipal,input:ManagedSourceReadScopeRequest,signal?:AbortSignal):Promise<import('../kernel/protocol.generated.js').SourceReadScopeResult>;
+  closeReadScope(principal:ManagedSourcePrincipal,input:ManagedSourceReadScopeRequest,signal?:AbortSignal):Promise<import('../kernel/protocol.generated.js').SourceReadScopeResult>;
+  fileObservation(principal:ManagedSourcePrincipal,input:ManagedFileObservationRequest,signal?:AbortSignal):Promise<unknown>;
   capabilities(principal: ManagedSourcePrincipal, input: ManagedSourceCapabilityRequest, signal?: AbortSignal): Promise<ManagedSourceCapabilities>;
   integrationReceipt(principal: ManagedSourcePrincipal, input: ManagedSourceIntegrationReceiptRequest, signal?: AbortSignal): Promise<unknown>;
   handoff(principal: ManagedSourcePrincipal, input: ManagedSourceHandoffRequest, signal?: AbortSignal): Promise<ChildSourceHandoff | null>;

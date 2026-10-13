@@ -140,6 +140,27 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
 
   return {
     capabilities,
+    async inspectReadScope(principal,input,signal) {
+      requirePrincipal(principal,input.coordinatorHostId);await kernel.start();
+      return kernel.sourceRequest('source.authority.inspect_read_scope',{...input,principalId:principal.principalId},signal);
+    },
+    async closeReadScope(principal,input,signal) {
+      requirePrincipal(principal,input.coordinatorHostId);await kernel.start();
+      return kernel.sourceRequest('source.authority.close_read_scope',{...input,principalId:principal.principalId},signal);
+    },
+    async fileObservation(principal,input,signal) {
+      requirePrincipal(principal,input.coordinatorHostId);
+      if(input.action.kind!=='release') {
+        requireReadPrincipal(principal,input.coordinatorHostId);
+        // This checks current Documents trust, not the caller grant's lifetime.
+        // An already accepted observer survives normal Run/caller retirement.
+        const authority=await inspect(principal,input,signal);
+        await registration(authority.source,signal);
+      }
+      await kernel.start();
+      return kernel.sourceRequest('source.file_observation',{...address(principal,input),requestId:input.requestId,
+        clientCapabilities:[...principal.capabilities],action:input.action},signal);
+    },
     async handoff(principal, input, signal) {
       requirePrincipal(principal, input.coordinatorHostId);
       await kernel.start();

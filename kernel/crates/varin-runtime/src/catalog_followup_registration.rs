@@ -448,6 +448,8 @@ pub struct FollowupRegistrationPreparation {
     actor: FollowupActor,
     epoch: u64,
     existing: Option<Value>,
+    accepted: bool,
+    pending_files: Vec<FileObservationRequest>,
     invocation: Option<(ToolInvocationRead, ToolCall, ToolSchema)>,
     operation: Option<Operation>,
     source: Option<launches::SourceSelection>,
@@ -467,6 +469,8 @@ pub struct PreparedFollowupRegistration {
     completion: Option<(ToolCompletion, result_content::ToolCompletionMetadata)>,
     source: Option<launches::SourceSelection>,
     files: Vec<PreparedFileObservation>,
+    file_authority: Option<FileObservationAuthority>,
+    registration_scope: Option<FileObservationRegistrationScope>,
     already_accepted: bool,
     _publication: crate::content::ContentPublication,
 }
@@ -542,7 +546,11 @@ impl Catalog {
                 r.get(0)
             })
             .optional()?;
+        let accepted = optional_record::<Definition>(&self.db, "followups", &id)?.is_some();
+        let pending_files = self.pending_file_registration(&id)?;
         Ok(FollowupRegistrationPreparation {
+            accepted,
+            pending_files,
             id,
             run: self.run(run)?,
             input,
@@ -625,11 +633,13 @@ impl Catalog {
                     "follow-up key has different original intent".into(),
                 ));
             }
-            return Ok(FollowupRegistrationAdmission {
-                followup: self.followup(&p.id)?,
-                accepted: false,
-                completion: p.completion.map(|v| v.0),
-            });
+            if optional_record::<Definition>(&self.db, "followups", &p.id)?.is_some() {
+                return Ok(FollowupRegistrationAdmission {
+                    followup: self.followup(&p.id)?,
+                    accepted: false,
+                    completion: p.completion.map(|v| v.0),
+                });
+            }
         }
         self.authorize_followup_registration(&p)?;
         let tx = self.db.transaction()?;
@@ -684,11 +694,11 @@ impl Catalog {
             finish_tool(&tx, &mut op, completion, p.input.wait.is_some())?;
         }
         tx.execute(
-            "INSERT INTO commands(id,intent,receipt) VALUES(?1,?2,?3)",
+            "INSERT INTO commands(id,intent,receipt) VALUES(?1,?2,?3) ON CONFLICT(id) DO UPDATE SET receipt=excluded.receipt",
             params![
                 key(&d.id),
                 encode(&p.intent)?,
-                encode(&json!({"followup_id":d.id}))?
+                encode(&json!({"followup_id":d.id,"run_id":d.source_run_id}))?
             ],
         )?;
         let result = project(&tx, d)?;
@@ -771,7 +781,15 @@ impl FollowupRegistrationPreparation {
             completion,
             source: self.source,
             files: Vec::new(),
-            already_accepted: self.existing.is_some(),
+            file_authority: self
+                .pending_files
+                .first()
+                .and_then(|r| r.resource_authority.clone()),
+            registration_scope: self
+                .pending_files
+                .first()
+                .and_then(|r| r.registration_scope.clone()),
+            already_accepted: self.accepted,
             _publication: self.publication,
         })
     }
@@ -1114,6 +1132,20 @@ impl FollowupControlPreparation {
 }
 
 impl PreparedFollowupRegistration {
+    pub fn preparation_view(&self) -> Result<Value> {
+        let scope = self.registration_scope.as_ref().ok_or_else(|| {
+            RuntimeError::Invalid("original file registration scope missing".into())
+        })?;
+        let mut source = self
+            .source
+            .clone()
+            .ok_or_else(|| RuntimeError::Invalid("original source missing".into()))?;
+        if source.mode == crate::SourceMode::Materialized && source.environment_run_id.is_none() {
+            source.environment_run_id = Some(self.run.id.clone());
+        }
+        Ok(json!({"followup":null,"authority":self.file_authority,
+            "scope":{"kind":"source_read","threadId":self.run.thread_id,"branchId":scope.branch_id,"key":scope.key},"source":source}))
+    }
     pub fn already_accepted(&self) -> bool {
         self.already_accepted
     }
@@ -1137,6 +1169,8 @@ impl PreparedFollowupRegistration {
                             )
                         })
                         .map(|source| FileObservationRequest {
+                            resource_authority: self.file_authority.clone(),
+                            registration_scope: self.registration_scope.clone(),
                             followup_id: self.id.clone(),
                             source_index,
                             source_run_id: self.run.id.clone(),
@@ -1157,16 +1191,182 @@ impl PreparedFollowupRegistration {
     ) -> Result<()> {
         let requests = self.file_requests()?;
         if requests.len() != observations.len()
-            || requests
-                .iter()
-                .zip(&observations)
-                .any(|(r, o)| r.source_index != o.source_index || r.receipt_id() != o.receipt_id)
+            || requests.iter().zip(&observations).any(|(r, o)| {
+                r.source_index != o.source_index
+                    || r.receipt_id() != o.receipt_id
+                    || r.resource_authority != o.resource_authority
+                    || (!r.source.resource_owner.is_local() && r.resource_authority.is_none())
+            })
         {
             return Err(RuntimeError::Conflict(
                 "file observation preparation changed source binding".into(),
             ));
         }
         self.files = observations;
+        Ok(())
+    }
+}
+
+impl Catalog {
+    /// The original command owns the pre-bind handoff and later exact receipt.
+    /// Only its intent reference and bounded resource addresses enter this transaction.
+    pub fn stage_file_registration(
+        &mut self,
+        p: &mut PreparedFollowupRegistration,
+        coordinator: Option<&str>,
+        authority: Option<FileObservationAuthority>,
+    ) -> Result<Option<Followup>> {
+        self.authorize_followup_registration(p)?;
+        if p.source
+            .as_ref()
+            .is_none_or(|s| s.resource_owner.is_local())
+        {
+            return Err(RuntimeError::Invalid(
+                "managed file registration requires its original source".into(),
+            ));
+        }
+        if let Some(d) = optional_record::<Definition>(&self.db, "followups", &p.id)? {
+            p.already_accepted = true;
+            return project(&self.db, d).map(Some);
+        }
+        let existing = self.pending_file_registration(&p.id)?;
+        p.file_authority = existing
+            .first()
+            .and_then(|r| r.resource_authority.clone())
+            .or(p.file_authority.clone())
+            .or(authority);
+        p.registration_scope = existing
+            .first()
+            .and_then(|r| r.registration_scope.clone())
+            .or(p.registration_scope.clone());
+        if p.actor == FollowupActor::User && p.registration_scope.is_none() {
+            let coordinator = coordinator
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| RuntimeError::Invalid("original coordinator missing".into()))?;
+            p.registration_scope = Some(FileObservationRegistrationScope {
+                coordinator_host_id: coordinator.into(),
+                branch_id: p.run.branch_id.clone(),
+                key: format!("file-followup:{}", p.id),
+            });
+        }
+        if let Some(a) = &p.file_authority {
+            if a.coordinator_host_id.is_empty()
+                || a.authority_id.is_empty()
+                || a.resource_epoch.is_empty()
+                || p.registration_scope
+                    .as_ref()
+                    .is_some_and(|s| s.coordinator_host_id != a.coordinator_host_id)
+            {
+                return Err(RuntimeError::Invalid(
+                    "original file authority is incomplete".into(),
+                ));
+            }
+        } else if p.registration_scope.is_none() {
+            return Err(RuntimeError::Invalid(
+                "original file admission missing".into(),
+            ));
+        }
+        let requests = p.file_requests()?;
+        if requests.is_empty() {
+            return Err(RuntimeError::Invalid(
+                "file registration has no file source".into(),
+            ));
+        }
+        if !existing.is_empty() {
+            let mut previous = existing.clone();
+            for r in &mut previous {
+                r.resource_authority = p.file_authority.clone();
+            }
+            if previous != requests {
+                return Err(RuntimeError::Conflict(
+                    "original file registration changed".into(),
+                ));
+            }
+        }
+        let tx = self.db.transaction()?;
+        let original: Option<String> = tx
+            .query_row(
+                "SELECT intent FROM commands WHERE id=?1",
+                [key(&p.id)],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if original
+            .as_ref()
+            .map(|s| serde_json::from_str::<Value>(s))
+            .transpose()?
+            .is_some_and(|intent| intent != p.intent)
+        {
+            return Err(RuntimeError::Conflict(
+                "original registration intent changed".into(),
+            ));
+        }
+        tx.execute("INSERT INTO commands(id,intent,receipt) VALUES(?1,?2,?3) ON CONFLICT(id) DO UPDATE SET receipt=excluded.receipt",params![key(&p.id),encode(&p.intent)?,encode(&json!({"followup_id":p.id,"run_id":p.run.id,"file_requests":requests}))?])?;
+        if existing.is_empty() {
+            event(
+                &tx,
+                &p.id,
+                1,
+                "followup.registration_pending",
+                json!({"source_run_id":p.run.id,"thread_id":p.run.thread_id,"branch_id":p.run.branch_id}),
+            )?;
+        }
+        tx.commit()?;
+        Ok(None)
+    }
+    pub fn pending_file_registration(&self, id: &str) -> Result<Vec<FileObservationRequest>> {
+        let raw: Option<String> = self
+            .db
+            .query_row("SELECT receipt FROM commands WHERE id=?1", [key(id)], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        let Some(raw) = raw else {
+            return Ok(Vec::new());
+        };
+        let value: Value = serde_json::from_str(&raw)?;
+        value
+            .get("file_requests")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map(|v| v.unwrap_or_default())
+            .map_err(Into::into)
+    }
+    pub fn pending_file_registration_page(
+        &self,
+        after: Option<&str>,
+    ) -> Result<(Vec<FileObservationRequest>, Option<String>)> {
+        let after = after
+            .map(str::parse::<i64>)
+            .transpose()
+            .map_err(|_| RuntimeError::Invalid("invalid file registration cursor".into()))?
+            .unwrap_or(0);
+        if after < 0 {
+            return Err(RuntimeError::Invalid(
+                "invalid file registration cursor".into(),
+            ));
+        }
+        let mut q=self.db.prepare("SELECT rowid,receipt FROM commands WHERE rowid>?1 AND json_array_length(receipt,'$.file_requests')>0 ORDER BY rowid LIMIT 65")?;
+        let rows = q
+            .query_map([after], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let next = (rows.len() > 64).then(|| rows[63].0.to_string());
+        let mut requests = Vec::new();
+        for (_, raw) in rows.into_iter().take(64) {
+            let value: Value = serde_json::from_str(&raw)?;
+            requests.extend(serde_json::from_value::<Vec<FileObservationRequest>>(
+                value["file_requests"].clone(),
+            )?);
+        }
+        Ok((requests, next))
+    }
+    pub fn confirm_pending_file_released(&mut self, r: &FileObservationRequest) -> Result<()> {
+        let mut requests = self.pending_file_registration(&r.followup_id)?;
+        requests.retain(|v| v != r);
+        self.db.execute("UPDATE commands SET receipt=?2 WHERE id=?1 AND json_type(receipt,'$.file_requests')='array'",params![key(&r.followup_id),encode(&json!({"followup_id":r.followup_id,"run_id":r.source_run_id,"file_requests":requests}))?])?;
         Ok(())
     }
 }

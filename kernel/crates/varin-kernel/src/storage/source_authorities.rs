@@ -54,6 +54,7 @@ impl Storage {
                 .source_record("source.scope", &record.scope_id)?
                 .ok_or_else(|| denied("Source scope is unavailable"))?;
             if scope.epoch != record.result.scope.epoch()
+                || scope.closed
                 || scope.source != record.result.source
                 || record.result.resource_epoch != epoch
                 || matches!(record.result.phase.as_str(), "retired" | "revoked")
@@ -152,8 +153,9 @@ impl Storage {
                     source: p.source.clone(),
                     epoch: p.scope.epoch(),
                     ready: false,
+                    closed: false,
                 });
-        if scope.source != p.source || scope.epoch > p.scope.epoch() {
+        if scope.source != p.source || scope.epoch > p.scope.epoch() || scope.closed {
             return Err(denied("Source scope or coordinator epoch changed"));
         }
         scope.epoch = p.scope.epoch();
@@ -227,6 +229,90 @@ impl Storage {
             &record,
         )?;
         Ok(serde_json::to_value(record.result)?)
+    }
+    /// Metadata-only handoff discovery and cancellation for one original caller
+    /// scope. The scope fence is durable before any grant is retired.
+    pub(crate) fn source_read_scope(
+        &mut self,
+        p: SourceReadScopeParams,
+        close: bool,
+        epoch: &str,
+        host: &str,
+    ) -> Result<Value, KernelError> {
+        if p.principal_id.is_empty()
+            || p.coordinator_host_id.is_empty()
+            || !p.scope.validate()
+            || !matches!(p.scope, SourceAuthorityScope::SourceRead { .. })
+            || p.source.resource_owner.host_id() != Some(host)
+        {
+            return Err(denied("Original source-read scope is incomplete"));
+        }
+        p.source.validate().map_err(|e| denied(&e.to_string()))?;
+        let id = format!(
+            "source-scope:{}",
+            hash_json(&json!([
+                p.principal_id,
+                p.coordinator_host_id,
+                p.scope.identity()
+            ]))?
+        );
+        let mut scope = self
+            .source_record::<ScopeRecord>("source.scope", &id)?
+            .unwrap_or(ScopeRecord {
+                source: p.source.clone(),
+                epoch: 0,
+                ready: false,
+                closed: false,
+            });
+        if scope.source != p.source {
+            return Err(denied("Original source-read scope changed"));
+        }
+        if close {
+            scope.closed = true;
+            self.save_source_record(
+                "source.scope",
+                &id,
+                &p.source.workspace_id,
+                "closed",
+                &scope,
+            )?;
+        }
+        let records = {
+            let mut q = self.conn.prepare(
+                "SELECT payload_json FROM domain_records WHERE record_type='source.authority'",
+            )?;
+            let rows = q
+                .query_map([], |r| r.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+        let mut authorities = Vec::new();
+        for body in records {
+            let record: AuthorityRecord = serde_json::from_str(&body)?;
+            if record.scope_id != id {
+                continue;
+            }
+            if record.principal_id != p.principal_id
+                || record.coordinator_host_id != p.coordinator_host_id
+                || record.result.scope != p.scope
+                || record.result.source != p.source
+            {
+                return Err(denied("Original source-read authority changed"));
+            }
+            let address = SourceAuthorityAddress {
+                principal_id: p.principal_id.clone(),
+                coordinator_host_id: p.coordinator_host_id.clone(),
+                authority_id: record.result.authority_id.clone(),
+                resource_epoch: record.result.resource_epoch.clone(),
+            };
+            if close && record.result.phase != "revoked" {
+                self.release_source_authority(&address, "retire", host, epoch)?;
+            }
+            authorities.push(json!({"authorityId":record.result.authority_id,"resourceEpoch":record.result.resource_epoch,
+                "phase":if close && record.result.phase!="revoked" {"retired"}else{record.result.phase.as_str()},
+                "current":!scope.closed && record.result.resource_epoch==epoch && record.result.phase=="ready"}));
+        }
+        Ok(json!({"closed":scope.closed,"authorities":authorities}))
     }
     pub(crate) fn source_authority_bind(
         &mut self,
@@ -304,6 +390,7 @@ impl Storage {
             .source_record("source.scope", &record.scope_id)?
             .ok_or_else(|| denied("Source scope is unavailable"))?;
         let scope = ScopeRecord {
+            closed: prior.closed,
             source: record.result.source.clone(),
             epoch: record.result.scope.epoch(),
             ready: prior.ready || record.purpose != "result",

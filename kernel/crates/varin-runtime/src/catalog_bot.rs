@@ -171,14 +171,89 @@ pub(super) fn run_permitted(db: &Connection, run: &Run) -> Result<bool> {
 }
 
 impl Catalog {
+    pub fn prepare_bot_file_release(
+        &mut self,
+        suspension: &BotSuspension,
+        local: &[followups::FileObservationRequest],
+    ) -> Result<(
+        Vec<followups::FileObservationWork>,
+        Vec<followups::FileObservationRequest>,
+    )> {
+        self.check_bot_scope_gate(suspension, Some(false))?;
+        let runs = self.bot_scope_run_ids(&suspension.bot_id)?;
+        let ids = {
+            let mut q=self.db.prepare("SELECT id FROM followups WHERE source_run_id IN (SELECT value FROM json_each(?1)) AND EXISTS(SELECT 1 FROM json_each(body,'$.sources') s WHERE json_type(s.value,'$.file')='object')")?;
+            let rows = q
+                .query_map([encode(&runs)?], |r| r.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            rows
+        };
+        for id in ids {
+            let d = self.followup(&id)?;
+            self.control_followup(&id, d.revision, crate::FollowupControlAction::Cancel)?;
+        }
+        let mut pending = local
+            .iter()
+            .filter(|r| runs.contains(&r.source_run_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut after = None;
+        loop {
+            let (page, next) = self.pending_file_registration_page(after.as_deref())?;
+            pending.extend(page.into_iter().filter(|r| runs.contains(&r.source_run_id)));
+            after = next;
+            if after.is_none() {
+                break;
+            }
+        }
+        pending.retain(|r| self.followup(&r.followup_id).is_err());
+        let mut user =
+            std::collections::BTreeMap::<String, Vec<followups::FileObservationRequest>>::new();
+        for r in &pending {
+            if r.actor == followups::FollowupActor::User {
+                user.entry(r.followup_id.clone())
+                    .or_default()
+                    .push(r.clone());
+            }
+        }
+        for (id, requests) in user {
+            self.cancel_user_followup_registration(&id, &requests[0].source_run_id, &requests)?;
+        }
+        for r in &pending {
+            if !self.file_acceptance_may_release(r)? {
+                return Err(RuntimeError::Conflict(
+                    "Bot still has an active file registration executor".into(),
+                ));
+            }
+        }
+        let mut work = Vec::new();
+        let mut after = None;
+        loop {
+            let (page, next) = self.followup_file_works(after.as_deref())?;
+            work.extend(
+                page.into_iter()
+                    .filter(|r| runs.contains(&r.request.source_run_id)),
+            );
+            after = next;
+            if after.is_none() {
+                break;
+            }
+        }
+        Ok((work, pending))
+    }
     /// Product discovery uses the same relationship indexes as execution admission.
     pub fn inspect_bot_scope(&self, bot_id: &str) -> Result<Value> {
         let mut query = self.db.prepare("WITH RECURSIVE scope(thread_id) AS (
             SELECT thread_id FROM bot_thread_bindings WHERE bot_id=?1
             UNION SELECT c.child_thread_id FROM child_tasks c JOIN scope s ON json_extract(c.body,'$.parent_thread_id')=s.thread_id
         ) SELECT thread_id FROM scope ORDER BY thread_id")?;
-        let ids = query.query_map([bot_id], |r| r.get::<_, String>(0))?.collect::<std::result::Result<Vec<_>, _>>()?;
-        let threads = ids.iter().map(|id| self.inspect_thread(id)).collect::<Result<Vec<_>>>()?;
+        let ids = query
+            .query_map([bot_id], |r| r.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let threads = ids
+            .iter()
+            .map(|id| self.inspect_thread(id))
+            .collect::<Result<Vec<_>>>()?;
         let runs = self.bot_scope_run_ids(bot_id)?.iter().map(|id| {
             let run = self.run(id)?;
             Ok(json!({"threadId":run.thread_id,"branchId":run.branch_id,"runId":run.id,"state":run.state,"cancelRequested":run.cancel_requested}))
@@ -198,34 +273,59 @@ impl Catalog {
             }
         }
         let mut threads = std::collections::BTreeSet::new();
-        let mut query = self.db.prepare("SELECT thread_id FROM bot_thread_bindings WHERE bot_id=?1")?;
-        for id in query.query_map([&suspension.bot_id], |row| row.get::<_,String>(0))? { threads.insert(id?); }
+        let mut query = self
+            .db
+            .prepare("SELECT thread_id FROM bot_thread_bindings WHERE bot_id=?1")?;
+        for id in query.query_map([&suspension.bot_id], |row| row.get::<_, String>(0))? {
+            threads.insert(id?);
+        }
         drop(query);
-        for id in &runs { threads.insert(self.run(id)?.thread_id); }
+        for id in &runs {
+            threads.insert(self.run(id)?.thread_id);
+        }
         // Empty children are real work too, even if no Run was admitted yet.
         loop {
             let keys = encode(&threads)?;
             let mut query = self.db.prepare("SELECT child_thread_id FROM child_tasks WHERE json_extract(body,'$.parent_thread_id') IN (SELECT value FROM json_each(?1))")?;
-            let children = query.query_map([keys], |row|row.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
-            let before = threads.len(); threads.extend(children); if threads.len() == before { break; }
+            let children = query
+                .query_map([keys], |row| row.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let before = threads.len();
+            threads.extend(children);
+            if threads.len() == before {
+                break;
+            }
         }
         let threads = encode(&threads)?;
         let runs = encode(&runs)?;
         let unreleased: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM delegated_executions WHERE (run_id IN (SELECT value FROM json_each(?1)) OR child_operation_id IN (SELECT id FROM operations WHERE run_id IN (SELECT value FROM json_each(?1)))) AND json_extract(body,'$.resources_released')=0)", [&runs], |row|row.get(0))?;
-        if unreleased { return Err(RuntimeError::Conflict("Bot child work retains its original handoff or source. Release that work through its original owner, then retry Delete; no history was removed.".into())); }
+        if unreleased {
+            return Err(RuntimeError::Conflict("Bot child work retains its original handoff or source. Release that work through its original owner, then retry Delete; no history was removed.".into()));
+        }
         let tx = self.db.transaction()?;
+        let file_resources:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM followups f,json_each(f.body,'$.sources') s WHERE f.source_run_id IN (SELECT value FROM json_each(?1)) AND json_extract(s.value,'$.file.released')=0) OR EXISTS(SELECT 1 FROM commands c,json_each(c.receipt,'$.file_requests') r WHERE json_extract(r.value,'$.source_run_id') IN (SELECT value FROM json_each(?1)))",[&runs],|r|r.get(0))?;
+        if file_resources {
+            return Err(RuntimeError::Conflict("Bot file observations still retain their original resource owners. Confirm their release before deleting this scope.".into()));
+        }
         // Cycles between Runs, checkpoints and history are removed atomically, never disabled.
         tx.execute_batch("PRAGMA defer_foreign_keys=ON")?;
         let retained: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM run_launches WHERE id NOT IN (SELECT value FROM json_each(?1)) AND json_extract(body,'$.selection.source.environment_run_id') IN (SELECT value FROM json_each(?1)))", [&runs], |row|row.get(0))?;
-        if retained { return Err(RuntimeError::Conflict("Another Run retains this Bot's original execution environment. Release that source reference, then retry Delete; its workspace is preserved.".into())); }
+        if retained {
+            return Err(RuntimeError::Conflict("Another Run retains this Bot's original execution environment. Release that source reference, then retry Delete; its workspace is preserved.".into()));
+        }
         let shared_history: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM branches b JOIN history h ON h.id=b.head WHERE b.thread_id NOT IN (SELECT value FROM json_each(?1)) AND h.thread_id IN (SELECT value FROM json_each(?1)))", [&threads], |row|row.get(0))?;
-        if shared_history { return Err(RuntimeError::Conflict("Another Thread branch retains this Bot's original history. Remove that branch's reference before retrying Delete; no records were removed.".into())); }
+        if shared_history {
+            return Err(RuntimeError::Conflict("Another Thread branch retains this Bot's original history. Remove that branch's reference before retrying Delete; no records were removed.".into()));
+        }
         let r = "IN (SELECT value FROM json_each(?1))";
         let b = "IN (SELECT id FROM branches WHERE thread_id IN (SELECT value FROM json_each(?2)))";
         let op = format!("IN (SELECT id FROM operations WHERE run_id {r})");
         let requests = format!("IN (SELECT id FROM model_steps WHERE run_id {r})");
-        let goals = format!("IN (SELECT id FROM goals WHERE thread_id IN (SELECT value FROM json_each(?2)))");
+        let goals = format!(
+            "IN (SELECT id FROM goals WHERE thread_id IN (SELECT value FROM json_each(?2)))"
+        );
         let statements = vec![
+            format!("DELETE FROM commands WHERE id IN (SELECT 'followup-register:'||id FROM followups WHERE source_run_id {r} UNION SELECT 'followup-register-cancel:'||id FROM followups WHERE source_run_id {r}) OR (json_extract(receipt,'$.run_id') {r} AND (id LIKE 'followup-register:%' OR id LIKE 'followup-register-cancel:%'))"),
             format!("DELETE FROM policy_graph_dependencies WHERE action_id {op}"),
             format!("DELETE FROM policy_graph_nodes WHERE action_id {op}"),
             format!("DELETE FROM mcp_interactions WHERE operation_id {op}"),
@@ -267,13 +367,33 @@ impl Catalog {
         ];
         for statement in statements {
             // Numbered slots preserve both immutable scope sets, including statements using only ?2.
-            let statement = if statement.contains("?2") { statement } else { format!("{statement} AND ?2 IS NOT NULL") };
-            let statement = if statement.contains("?1") { statement } else { format!("{statement} AND ?1 IS NOT NULL") };
-            tx.execute(&statement, params![runs,threads])?;
+            let statement = if statement.contains("?2") {
+                statement
+            } else {
+                format!("{statement} AND ?2 IS NOT NULL")
+            };
+            let statement = if statement.contains("?1") {
+                statement
+            } else {
+                format!("{statement} AND ?1 IS NOT NULL")
+            };
+            tx.execute(&statement, params![runs, threads])?;
         }
-        let retained: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM pragma_foreign_key_check)", [], |row|row.get(0))?;
-        if retained { return Err(RuntimeError::Conflict("Bot history is retained by another original runtime owner (shared branch, context, calendar or execution). Release that owner's reference, then retry Delete. No records were removed.".into())); }
-        event(&tx, &suspension.bot_id, suspension.profile_revision, "bot.scope_deleted", Value::Null)?;
+        let retained: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_foreign_key_check)",
+            [],
+            |row| row.get(0),
+        )?;
+        if retained {
+            return Err(RuntimeError::Conflict("Bot history is retained by another original runtime owner (shared branch, context, calendar or execution). Release that owner's reference, then retry Delete. No records were removed.".into()));
+        }
+        event(
+            &tx,
+            &suspension.bot_id,
+            suspension.profile_revision,
+            "bot.scope_deleted",
+            Value::Null,
+        )?;
         tx.commit()?;
         Ok(())
     }

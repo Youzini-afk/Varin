@@ -10,15 +10,16 @@ const position = (value: unknown): boolean => value === null || record(value) &&
   && Number.isSafeInteger(value.generation) && Number(value.generation) > 0 && Number.isSafeInteger(value.sequence) && Number(value.sequence) >= 0;
 function validQuery(value: unknown): value is FileObservationOwnerQuery {
   if (!record(value)) return false;
+  if(value.action==='release')return text(value.receiptId);
   if (value.action === 'close' || value.action === 'discard') return text(value.receiptId) && text(value.watchId)
     && (value.action === 'close' || text(value.token));
   const target = value.target;
-  if (!['open', 'begin', 'finish'].includes(String(value.action)) || !record(target)
+  if (!['open','resume', 'begin', 'finish'].includes(String(value.action)) || !record(target)
     || !text(target.receiptId) || !text(target.followupId) || !text(target.sourceRunId) || !text(target.threadId)
     || !Number.isSafeInteger(target.sourceIndex) || Number(target.sourceIndex) < 0
     || !text(target.path) || typeof target.immutable !== 'boolean' || !record(target.source)
     || !text(target.source.workspace_id) || !text(target.source.execution_workspace_id)) return false;
-  if (value.action === 'open') return true;
+  if (value.action === 'open'||value.action==='resume') return true;
   return text(value.watchId) && position(value.after) && (value.action === 'begin' || text(value.token));
 }
 
@@ -42,7 +43,7 @@ export class FileObservationBridge {
     if (value.v !== 1 || !text(value.kernelEpoch) || value.kernelEpoch !== this.currentEpoch()) return true;
     if (value.kind === 'file-observation-invalidated') {
       if (value.scope === 'root' && text(value.rootId) && text(value.canonicalRoot)
-        || value.scope === 'receipt' && text(value.receiptId)) this.owner?.invalidate(value as unknown as FileObservationOwnerHint);
+        || value.scope === 'receipt' && text(value.receiptId) && typeof value.revoked === 'boolean') this.owner?.invalidate(value as unknown as FileObservationOwnerHint);
       return true;
     }
     if (!text(value.id)) return true;
@@ -60,7 +61,7 @@ export class FileObservationBridge {
         // before Rust received that handle. Release only this query's resource.
         const query = value.query;
         const cleanup = new AbortController().signal;
-        if (query.action === 'open' && 'watchId' in result) await this.owner.query({ action: 'close',
+        if ((query.action === 'open'||query.action==='resume'&&'allocated'in result&&result.allocated) && 'watchId' in result) await this.owner.query({ action: 'close',
           receiptId: query.target.receiptId, watchId: result.watchId }, cleanup);
         if (query.action === 'begin' && 'token' in result) await this.owner.query({ action: 'discard',
           receiptId: query.target.receiptId, watchId: query.watchId, token: result.token }, cleanup);

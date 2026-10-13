@@ -44,7 +44,7 @@ async function handle(frame:Record<string,unknown>) {
       (_runId, error) => launchErrors.push(String(error)));
     const nativeLifecycle = (frame.nativeWake || frame.nativeMemory) ? createBotLifecycleRuntime({ hostId: 'web-domain-host',
       agent: { runtime, kernel, gate: id => bots.executionGate(id),
-        continueLaunch: async id => { continuations.push(id); await threads.continueLaunch(id); }, drainScripts: async () => {}, drainCollaborations: async () => {} },
+        continueLaunch: async id => { continuations.push(id); await threads.continueLaunch(id); }, drainScripts: async () => {}, drainForwards: async () => {}, drainCollaborations: async () => {} },
       registry: {} as never, runtime: {} as never, broker: {} as never,
       computers: { list: async () => ({ desktops: [] }), listVms: async () => [], finishExecution: async () => {} } as never,
       stopSessionProcesses: unexpected, stopRemoteScope: async () => {}, resumeRemoteScope: async () => {},

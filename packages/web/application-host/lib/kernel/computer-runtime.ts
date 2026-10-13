@@ -224,8 +224,7 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
         if (method === 'access') return result(await computers.automation.snapshot(work));
         if (method === 'environment') return result({ source: original.source, defaultDesktopId: configured.defaultDesktopId,
           assignment: await computers.automation.snapshot(work),
-          placementChanges: { available: false, detail: 'This Run keeps its accepted source/environment. Select a source for a new execution to change file/process placement. Desktop assignments do not change that source.' },
-          serviceForwards: { available: false, detail: 'Native service forwards require an execution-owned forward Job; the Pi session forwarding owner cannot authorize this Run.' } });
+          placementChanges: { available: false, detail: 'This Run keeps its accepted source/environment. Select a source for a new execution to change file/process placement. Desktop assignments do not change that source.' } });
         if (method === 'wait') {
           const accepted = await rpc<Operation, 'runtime.computer.request.wait'>('runtime.computer.request.wait', { operationId: original.operationId, requestId: String(params.requestId) });
           return { executor_stopped: false, completion: await runtime.inlineCompletion(accepted) };

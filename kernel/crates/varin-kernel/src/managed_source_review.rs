@@ -1307,3 +1307,729 @@ impl AgentPolicy for ReadPolicy {
         })
     }
 }
+
+#[test]
+fn managed_file_followup_original_catalog_storage_documents_and_lost_accept() {
+    use crate::host_query::OwnerChannel;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let root = std::env::temp_dir().join(format!("varin-managed-file-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let mut a = Owner::new(
+        root.join("storage-a"),
+        "managed-coordinator",
+        "managed-coordinator-generation",
+        "managed-coordinator-epoch",
+    );
+    let mut b = Owner::new(
+        root.join("storage-b"),
+        "managed-target",
+        "managed-target-generation",
+        "managed-target-epoch",
+    );
+    let mut db = Catalog::open(root.join("catalog")).unwrap();
+    db.publish_bot_gate(varin_runtime::catalog::bot::BotGate {
+        bot_id: "file-bot".into(),
+        profile_revision: 1,
+        activity_operation_id: Some("active".into()),
+        permitted: true,
+    })
+    .unwrap();
+    db.create_bot_thread("thread:managed-review", "main", "file-bot")
+        .unwrap();
+    let p = db
+        .prepare_submission(
+            SubmitInput {
+                key: "file-source".into(),
+                thread_id: "thread:managed-review".into(),
+                branch_id: "main".into(),
+                expected_head: None,
+                input: json!("observe selected target"),
+                configuration: json!({}),
+            },
+            None,
+            None,
+        )
+        .unwrap()
+        .load(None, false)
+        .unwrap();
+    let run = db.admit_submission(p).unwrap().run_id;
+    db.commit_execution(
+        &run,
+        db.epoch(),
+        &ExecutionRecord::StateChanged {
+            state: RunState::Runnable,
+            waiting_on: None,
+        },
+    )
+    .unwrap();
+    let runtime = Arc::new(varin_runtime::supervisor::RunSupervisor::new(db));
+    let (source_tx, source_rx) = mpsc::sync_channel(32);
+    let source = OwnerChannel::new("source-resource", source_tx);
+    source.initialize(a.epoch);
+    let (watch_tx, watch_rx) = mpsc::sync_channel(32);
+    let watch = OwnerChannel::new("file-observation", watch_tx);
+    watch.initialize(b.epoch);
+    let (local_tx, _local_rx) = mpsc::sync_channel(32);
+    let local = OwnerChannel::new("file-observation", local_tx);
+    local.initialize(a.epoch);
+    let a_storage = a.storage.clone();
+    let b_storage = b.storage.clone();
+    let a_files = crate::file_observation::Client::new(
+        move |c| {
+            c.serve(
+                Some(&mut a_storage.lock().unwrap()),
+                "managed-coordinator-epoch",
+                "managed-coordinator",
+                "managed-coordinator-generation",
+            );
+            Ok(())
+        },
+        local.clone(),
+    )
+    .with_source_bridge(source.clone());
+    let reads = Arc::new(AtomicUsize::new(0));
+    let read_count = reads.clone();
+    let b_files = crate::file_observation::Client::new(
+        move |c| {
+            if matches!(&c, crate::file_observation::Command::Prepare { .. }) {
+                read_count.fetch_add(1, Ordering::SeqCst);
+            }
+            c.serve(
+                Some(&mut b_storage.lock().unwrap()),
+                "managed-target-epoch",
+                "managed-target",
+                "managed-target-generation",
+            );
+            Ok(())
+        },
+        watch.clone(),
+    );
+    a.resources = a.resources.clone().with_file_observations(a_files);
+    b.resources = b.resources.clone().with_file_observations(b_files);
+    let mut host = Host::with_script(
+        "packages/web/application-host/lib/harness/managed-source-host.test-helper.ts",
+    );
+    host.send(json!({"kind":"fixture-init","scenario":"file-followup","root":root,"storageRootA":a.root,"storageRootB":b.root,"epochA":a.epoch,"epochB":b.epoch,"runId":run}));
+    let reject_release = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (send, completed) = mpsc::channel();
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        assert!(Instant::now() < deadline, "managed file helper timed out");
+        while let Ok(frame) = completed.try_recv() {
+            host.send(frame);
+        }
+        while let Ok(frame) = source_rx.try_recv() {
+            if frame["query"]["action"]["kind"] == "release"
+                && reject_release.swap(false, Ordering::SeqCst)
+            {
+                source.receive(json!({"v":1,"kind":"source-resource-response","id":frame["id"],"kernelEpoch":a.epoch,"result":{"ok":false,"message":"original B temporarily unavailable"}}));
+            } else {
+                host.send(json!({"kind":"fixture-coordinator-frame","frame":frame}));
+            }
+        }
+        while let Ok(frame) = watch_rx.try_recv() {
+            host.send(json!({"kind":"fixture-target-frame","frame":frame}));
+        }
+        let Some(frame) = host.next_frame(Duration::from_millis(5)) else {
+            continue;
+        };
+        match frame["kind"].as_str().unwrap_or("") {
+            "fixture-frame" => {
+                if frame["target"] == "b" {
+                    watch.receive(frame["frame"].clone())
+                } else {
+                    source.receive(frame["frame"].clone())
+                }
+            }
+            "fixture-request" => {
+                let owner = if frame["target"] == "b" {
+                    b.clone()
+                } else {
+                    a.clone()
+                };
+                let runtime = runtime.clone();
+                let run = run.clone();
+                let reads = reads.clone();
+                let reject_release = reject_release.clone();
+                let send = send.clone();
+                std::thread::spawn(move || {
+                    let result = (|| -> Result<Value, KernelError> {
+                        let method = frame["method"].as_str().unwrap();
+                        let params = frame["params"].clone();
+                        if method == "fixture.file.stats" {
+                            return Ok(json!({"reads":reads.load(Ordering::SeqCst)}));
+                        }
+                        if method == "fixture.file.launch" {
+                            let launch = serde_json::from_value(
+                                json!({"extension_bindings":[],"connection_identity":"fixture","provider_family":"fixture","model":"fixture","configuration_generation":1,"tool_schema_generation":1,"tools":[crate::followup_tools::schema()],"policy":{"name":"fixture","version":"1"},"source":params["source"]}),
+                            )?;
+                            runtime
+                                .catalog()
+                                .lock()
+                                .unwrap()
+                                .bind_launch(&run, launch)
+                                .map_err(super::domain)?;
+                            return Ok(json!({"bound":true}));
+                        }
+                        if method == "fixture.file.native" {
+                            return native_file_followup(
+                                runtime.catalog(),
+                                owner.resources.clone(),
+                                &run,
+                                &params["binding"],
+                            )
+                            .map_err(|e| KernelError::Operation(e.to_string()));
+                        }
+                        if method == "fixture.file.delete" {
+                            let suspension = varin_runtime::catalog::bot::BotSuspension {
+                                bot_id: "file-bot".into(),
+                                profile_revision: 2,
+                                activity_operation_id: "delete-file-bot".into(),
+                            };
+                            {
+                                let catalog = runtime.catalog();
+                                let mut db = catalog.lock().unwrap();
+                                db.publish_bot_gate(varin_runtime::catalog::bot::BotGate {
+                                    bot_id: suspension.bot_id.clone(),
+                                    profile_revision: 2,
+                                    activity_operation_id: Some(
+                                        suspension.activity_operation_id.clone(),
+                                    ),
+                                    permitted: false,
+                                })
+                                .map_err(super::domain)?;
+                                db.suspend_bot_scope(suspension.clone())
+                                    .map_err(super::domain)?;
+                            }
+                            reject_release.store(params["fail"] == true, Ordering::SeqCst);
+                            return super::bot_scope_commands::remove(
+                                &runtime.catalog(),
+                                &owner.resources,
+                                suspension,
+                                &std::sync::atomic::AtomicBool::new(false),
+                            );
+                        }
+                        if method == "runtime.run.inspect" {
+                            return Ok(serde_json::to_value(
+                                runtime
+                                    .catalog()
+                                    .lock()
+                                    .unwrap()
+                                    .run(&run)
+                                    .map_err(super::domain)?,
+                            )?);
+                        }
+                        if method == "runtime.launch.inspect" {
+                            let r = runtime
+                                .catalog()
+                                .lock()
+                                .unwrap()
+                                .capture_launch(&run)
+                                .map_err(super::domain)?;
+                            return Ok(serde_json::to_value(
+                                r.map(|r| r.load()).transpose().map_err(super::domain)?,
+                            )?);
+                        }
+                        if method == "runtime.followup.control" {
+                            return Ok(serde_json::to_value(
+                                runtime
+                                    .catalog()
+                                    .lock()
+                                    .unwrap()
+                                    .control_followup(
+                                        params["followupId"].as_str().unwrap(),
+                                        params["expectedRevision"].as_u64().unwrap(),
+                                        serde_json::from_value(params["action"].clone())?,
+                                    )
+                                    .map_err(super::domain)?,
+                            )?);
+                        }
+                        if method.starts_with("runtime.followup.") {
+                            crate::protocol::validate_method_params(method, &params)?;
+                            let cancel = CancellationToken::default();
+                            return super::followup_commands::execute(
+                                runtime,
+                                owner.resources.clone(),
+                                method,
+                                params,
+                                &cancel.shared_flag(),
+                                Some(cancel.clone()),
+                            );
+                        }
+                        owner.rpc(method, params, frame["grantId"].as_str())
+                    })();
+                    let response = match result {
+                        Ok(value) => {
+                            json!({"kind":"fixture-response","id":frame["id"],"ok":true,"result":value})
+                        }
+                        Err(e) => {
+                            json!({"kind":"fixture-response","id":frame["id"],"ok":false,"error":e.to_string()})
+                        }
+                    };
+                    let _ = send.send(response);
+                });
+            }
+            "fixture-result" => {
+                assert_eq!(frame["ok"], true);
+                break;
+            }
+            _ => panic!("managed file Host failed {frame}"),
+        }
+    }
+    assert!(reads.load(Ordering::SeqCst) >= 4);
+    assert!(matches!(
+        runtime.catalog().lock().unwrap().run(&run),
+        Err(varin_runtime::RuntimeError::NotFound(_))
+    ));
+    let persisted = rusqlite::Connection::open_with_flags(
+        root.join("catalog/conversation.sqlite"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let leftovers:i64=persisted.query_row("SELECT count(*) FROM commands WHERE id LIKE 'followup-register:%' OR id LIKE 'followup-register-cancel:%'",[],|r|r.get(0)).unwrap();
+    assert_eq!(
+        leftovers, 0,
+        "deleted Bot leaves no registration ContentStore root"
+    );
+    drop(persisted);
+    source.close();
+    watch.close();
+    local.close();
+    drop(host);
+    drop(a);
+    drop(b);
+    drop(runtime);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn environment_forward_canonical_acceptance_survives_unknown_and_terminal_host_receipts() {
+    use varin_runtime::{Effect, ExecutorOwner, Lifetime, Outcome};
+    let root =
+        std::env::temp_dir().join(format!("varin-forward-acceptance-{}", uuid::Uuid::new_v4()));
+    let mut db = Catalog::open(&root).unwrap();
+    db.create_thread("forward-thread", "forward-main").unwrap();
+    let submitted = db
+        .prepare_submission(
+            SubmitInput {
+                key: "forward".into(),
+                thread_id: "forward-thread".into(),
+                branch_id: "forward-main".into(),
+                expected_head: None,
+                input: json!("forward selected service"),
+                configuration: json!({}),
+            },
+            None,
+            None,
+        )
+        .unwrap()
+        .load(None, false)
+        .unwrap();
+    let submitted = db.admit_submission(submitted).unwrap();
+    let run = submitted.run_id;
+    let schema:ToolSchema=serde_json::from_value(json!({"name":"environment_forward","version":"1","description":"Forward a selected service","schema":{"type":"object"},"metadata":{"service_id":"environment.forward","service_version":1,"completion":"job","operation":"effect","lifetime":"thread"}})).unwrap();
+    let binding = RequestBinding {
+        child_dispatch: None,
+        goal: None,
+        resource_activations: vec![],
+        resource_checkpoint_id: None,
+        connection_identity: "fixture".into(),
+        provider_family: "fixture".into(),
+        model: "fixture".into(),
+        credential_ref: None,
+        configuration_generation: 1,
+        tool_schema_generation: 1,
+        tools: vec![schema],
+        instruction_sources: vec![],
+        memory_checkpoint: None,
+        attachment_refs: vec![],
+        environment_cursor: 0,
+        history_range: HistoryRange {
+            branch_id: "forward-main".into(),
+            ancestor_id: None,
+            leaf_id: Some(submitted.input_id),
+        },
+    };
+    let policy = PolicyIdentity {
+        name: "fixture".into(),
+        version: "1".into(),
+    };
+    db.bind_launch(
+        &run,
+        varin_runtime::catalog::launches::LaunchSelection::from_binding(
+            &binding,
+            policy.clone(),
+            None,
+        ),
+    )
+    .unwrap();
+    let epoch = db
+        .prepare_execution(&run, binding.clone(), policy, Value::Null)
+        .unwrap()
+        .owner_generation;
+    db.commit_execution(
+        &run,
+        epoch,
+        &ExecutionRecord::StateChanged {
+            state: RunState::Runnable,
+            waiting_on: None,
+        },
+    )
+    .unwrap();
+    let call = ToolCall {
+        call_id: "forward-call".into(),
+        name: "environment_forward".into(),
+        schema_version: "1".into(),
+        arguments: json!({"port":8123}),
+    };
+    db.commit_execution(
+        &run,
+        epoch,
+        &ExecutionRecord::RequestPrepared {
+            snapshot: RequestSnapshot {
+                view: RequestView {
+                    request_id: "forward-request".into(),
+                    run_id: run.clone(),
+                    origin: RequestOrigin::Conversation {
+                        step: 1,
+                        history_range: binding.history_range.clone(),
+                    },
+                    binding,
+                    history: vec![],
+                },
+                serialized: json!({"fixture":true}),
+            },
+        },
+    )
+    .unwrap();
+    db.commit_execution(
+        &run,
+        epoch,
+        &ExecutionRecord::ModelDispatched {
+            request_id: "forward-request".into(),
+        },
+    )
+    .unwrap();
+    db.commit_execution(
+        &run,
+        epoch,
+        &ExecutionRecord::ModelFinished {
+            request_id: "forward-request".into(),
+            outcome: ModelOutcome::Completed,
+            finish_reason: Some(FinishReason::ToolCalls),
+            items: vec![ProviderItem {
+                id: "forward-item".into(),
+                content: Content::ToolCall { call: call.clone() },
+                opaque: None,
+            }],
+            interrupted_deltas: vec![],
+            usage: UsageReceipt::default(),
+            failure: None,
+        },
+    )
+    .unwrap();
+    let origin = ToolOrigin::ModelStep {
+        request_id: "forward-request".into(),
+    };
+    let context = ToolExecutionContext {
+        run_id: run.clone(),
+        operation_id: origin.operation_id(&call.call_id),
+        origin: origin.clone(),
+    };
+    db.commit_execution(
+        &run,
+        epoch,
+        &ExecutionRecord::ToolAdmitted {
+            context: context.clone(),
+            tool: AdmittedTool {
+                call: call.clone(),
+                contract: ToolContract {
+                    name: call.name.clone(),
+                    schema_version: "1".into(),
+                    read_only: false,
+                    completion: CompletionKind::Job,
+                    lifetime: Lifetime::Thread,
+                    resources: vec![],
+                },
+            },
+        },
+    )
+    .unwrap();
+    let owner = ExecutorOwner::External {
+        identity: "environment.forward@1".into(),
+        epoch: "forward-owner".into(),
+    };
+    db.commit_execution(
+        &run,
+        epoch,
+        &ExecutionRecord::ToolDispatched {
+            context: context.clone(),
+            executor_owner: owner.clone(),
+        },
+    )
+    .unwrap();
+    let runtime = Arc::new(varin_runtime::supervisor::RunSupervisor::new(db));
+    let catalog = runtime.catalog();
+    let host_binding = json!({"operationId":context.operation_id,"executionOwner":owner,"domain":"environment.forward","domainVersion":1,"subject":{"kind":"environment_forward","hostId":"coordinator","hostEpoch":"forward-owner","target":{"kind":"local"},"serviceHost":"127.0.0.1","servicePort":8123}});
+    let invoke = |method: &str, params: Value| {
+        super::host_job_commands::execute(
+            runtime.clone(),
+            method,
+            params,
+            &std::sync::atomic::AtomicBool::new(false),
+        )
+    };
+    let mut forged = host_binding.clone();
+    forged["subject"]["servicePort"] = json!(9999);
+    assert!(invoke("runtime.host_job.begin", json!({"binding":forged})).is_err());
+    invoke("runtime.host_job.begin", json!({"binding":host_binding})).unwrap();
+    catalog
+        .commit(
+            &run,
+            epoch,
+            &ExecutionRecord::ToolSettled {
+                context: context.clone(),
+                completion: ToolCompletion::Result {
+                    outcome: Outcome::Indeterminate,
+                    effect: Effect::Unknown,
+                    content: json!({"unknown":"transport"}).into(),
+                },
+                executor_stopped: false,
+            },
+        )
+        .unwrap();
+    invoke("runtime.host_job.accept",json!({"binding":host_binding,"content":{"data":{"state":"live","targetHost":"B"},"parts":[]}})).unwrap();
+    let original = invoke(
+        "runtime.host_job.acceptance",
+        json!({"operationId":context.operation_id}),
+    )
+    .unwrap();
+    assert_eq!(original["kind"], "job_accepted");
+    assert_eq!(original["content"]["data"]["state"], "live");
+    {
+        let prep = catalog.lock().unwrap().prepare_result_content();
+        let receipt = prep
+            .write_external_receipt(varin_runtime::ExternalReceipt {
+                executor: call.name.clone(),
+                identity: context.operation_id.clone(),
+                epoch: "forward-owner".into(),
+                outcome: Outcome::Succeeded,
+                effect: Effect::Confirmed,
+                result: json!({"state":"stopped"}).into(),
+            })
+            .unwrap();
+        catalog
+            .lock()
+            .unwrap()
+            .record_host_job_terminal(
+                &serde_json::from_value(host_binding.clone()).unwrap(),
+                receipt,
+                true,
+            )
+            .unwrap();
+    }
+    let recalled = invoke(
+        "runtime.host_job.acceptance",
+        json!({"operationId":context.operation_id}),
+    )
+    .unwrap();
+    assert_eq!(recalled, original);
+    let late = |completion: Value| {
+        serde_json::from_value::<crate::host_tools::LateReceipt>(json!({"v":1,"kind":"host-tool-late-receipt","id":"late","kernelEpoch":"transport","executionOwner":owner,"call":{"runId":run,"operationId":context.operation_id,"origin":origin,"callId":call.call_id,"name":call.name,"schemaVersion":call.schema_version,"arguments":call.arguments},"receipt":{"completion":completion,"executor_stopped":false}})).unwrap().apply(&catalog)
+    };
+    let mut current = original.clone();
+    current["content"]["data"]["state"] = json!("stopped");
+    assert!(late(current).is_err());
+    late(recalled).unwrap();
+    let historical = catalog
+        .lock()
+        .unwrap()
+        .capture_call_completion(&context.operation_id)
+        .unwrap()
+        .load()
+        .unwrap();
+    assert!(matches!(
+        historical,
+        ToolCompletion::Result {
+            outcome: Outcome::Indeterminate,
+            ..
+        }
+    ));
+    drop(runtime);
+    drop(catalog);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+fn native_file_followup(
+    catalog: Arc<Mutex<Catalog>>,
+    resources: KernelResourceClient,
+    run: &str,
+    remote: &Value,
+) -> Result<Value, Box<dyn std::error::Error>> {
+    let source: varin_runtime::catalog::launches::SourceSelection =
+        serde_json::from_value(remote["source"].clone())?;
+    let binding: crate::tools::ToolBinding = serde_json::from_value(
+        json!({"resourceOwner":source.resource_owner,"grantId":remote["authorityId"],"runId":run,"threadId":"thread:managed-review","workspaceId":source.workspace_id,"executionWorkspaceId":source.execution_workspace_id,"rootId":remote["physicalRoot"]["rootId"],"sourceMode":"live_root","liveRoot":source.live_root,"enabledTools":["file_read","file_write","file_search","process_spawn","process_read","process_inspect"],"remoteAuthority":{"authorityId":remote["authorityId"],"resourceEpoch":remote["resourceEpoch"],"executionOwner":remote["executionOwner"]}}),
+    )?;
+    let schema = crate::followup_tools::schema();
+    let request = RequestBinding {
+        child_dispatch: None,
+        goal: None,
+        resource_activations: vec![],
+        resource_checkpoint_id: None,
+        connection_identity: "fixture".into(),
+        provider_family: "fixture".into(),
+        model: "fixture".into(),
+        credential_ref: None,
+        configuration_generation: 1,
+        tool_schema_generation: 1,
+        tools: vec![schema.clone()],
+        instruction_sources: vec![],
+        memory_checkpoint: None,
+        attachment_refs: vec![],
+        environment_cursor: 0,
+        history_range: HistoryRange {
+            branch_id: "main".into(),
+            ancestor_id: None,
+            leaf_id: catalog.lock().unwrap().head("main")?,
+        },
+    };
+    let epoch = catalog
+        .lock()
+        .unwrap()
+        .prepare_execution(
+            run,
+            request.clone(),
+            PolicyIdentity {
+                name: "fixture".into(),
+                version: "1".into(),
+            },
+            Value::Null,
+        )?
+        .owner_generation;
+    catalog.commit(
+        run,
+        epoch,
+        &ExecutionRecord::StateChanged {
+            state: RunState::Runnable,
+            waiting_on: None,
+        },
+    )?;
+    let call = ToolCall {
+        call_id: "native-file".into(),
+        name: schema.name.clone(),
+        schema_version: schema.version.clone(),
+        arguments: json!({"action":"register","trigger":{"kind":"file","path":"source.txt","condition":"changed"},"instruction":"Original native file continuation"}),
+    };
+    catalog.commit(
+        run,
+        epoch,
+        &ExecutionRecord::RequestPrepared {
+            snapshot: RequestSnapshot {
+                view: RequestView {
+                    request_id: "native-file-request".into(),
+                    run_id: run.into(),
+                    origin: RequestOrigin::Conversation {
+                        step: 1,
+                        history_range: request.history_range.clone(),
+                    },
+                    binding: request,
+                    history: vec![],
+                },
+                serialized: json!({"fixture":true}),
+            },
+        },
+    )?;
+    catalog.commit(
+        run,
+        epoch,
+        &ExecutionRecord::ModelDispatched {
+            request_id: "native-file-request".into(),
+        },
+    )?;
+    catalog.commit(
+        run,
+        epoch,
+        &ExecutionRecord::ModelFinished {
+            request_id: "native-file-request".into(),
+            outcome: ModelOutcome::Completed,
+            finish_reason: Some(FinishReason::ToolCalls),
+            items: vec![ProviderItem {
+                id: "native-file-item".into(),
+                content: Content::ToolCall { call: call.clone() },
+                opaque: None,
+            }],
+            interrupted_deltas: vec![],
+            usage: UsageReceipt::default(),
+            failure: None,
+        },
+    )?;
+    let origin = ToolOrigin::ModelStep {
+        request_id: "native-file-request".into(),
+    };
+    let context = ToolExecutionContext {
+        run_id: run.into(),
+        operation_id: origin.operation_id(&call.call_id),
+        origin: origin.clone(),
+    };
+    let frozen = FrozenToolContext {
+        child_dispatch: None,
+        resource_activations: vec![],
+        resource_checkpoint_id: None,
+        run_id: run.into(),
+        origin,
+        tool_schema_generation: 1,
+        tools: Arc::new(vec![schema]),
+        source: Some(source),
+    };
+    let directory = Arc::new(varin_runtime::composition::tools::ToolDirectory::assemble(
+        vec![crate::followup_tools::declaration(
+            catalog.clone(),
+            Some(binding),
+            Some(resources),
+        )],
+    )?);
+    let cancel = CancellationToken::default();
+    let mut denied = frozen.clone();
+    denied.tools = Arc::new(vec![]);
+    assert!(
+        directory
+            .clone()
+            .bind_call(&call, &denied, &cancel)
+            .is_err(),
+        "missing selected original tool never admits a managed observer"
+    );
+    let bound = directory.bind_call(&call, &frozen, &cancel)?;
+    let contract = bound.prepare(&cancel)?;
+    catalog.commit(
+        run,
+        epoch,
+        &ExecutionRecord::ToolAdmitted {
+            context: context.clone(),
+            tool: AdmittedTool {
+                call: call.clone(),
+                contract: contract.clone(),
+            },
+        },
+    )?;
+    bound.authorize(&context, &contract, &cancel)?;
+    catalog.commit(
+        run,
+        epoch,
+        &ExecutionRecord::ToolDispatched {
+            context: context.clone(),
+            executor_owner: bound.executor_owner(),
+        },
+    )?;
+    let receipt = bound.execute(&context, &contract, &cancel);
+    catalog.commit(
+        run,
+        epoch,
+        &ExecutionRecord::ToolSettled {
+            context,
+            completion: receipt.completion.clone(),
+            executor_stopped: receipt.executor_stopped,
+        },
+    )?;
+    Ok(serde_json::to_value(receipt.completion)?)
+}

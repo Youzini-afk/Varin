@@ -108,8 +108,8 @@ export function registerManagedRemoteRoutes(
     response.json(await service.identity());
   }));
 
-  const sourceMethods = ['capabilities', 'handoff', 'integrationReceipt', 'resolve', 'prepare', 'bind', 'authorize', 'execute', 'service', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope'] as const;
-  const receiptMethods: ReadonlySet<string> = new Set(['handoff', 'integrationReceipt', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope']);
+  const sourceMethods = ['capabilities', 'handoff', 'integrationReceipt', 'resolve', 'prepare', 'bind', 'authorize', 'execute', 'service', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation'] as const;
+  const receiptMethods: ReadonlySet<string> = new Set(['handoff', 'integrationReceipt', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation']);
   for (const method of sourceMethods) {
     app.post(`${base}/sources/${method}`, requireAuth, receiptMethods.has(method) ? requireReceiptAuth : requireSourceAuth, route(async (request, response) => {
       const body = value(request.body);

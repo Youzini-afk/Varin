@@ -140,7 +140,7 @@ impl Catalog {
                 params![
                     cancel_key(id),
                     encode(&identity)?,
-                    encode(&json!({"followup_id":id,"cancelled":true}))?
+                    encode(&json!({"followup_id":id,"run_id":run_id,"cancelled":true}))?
                 ],
             )?;
             event(

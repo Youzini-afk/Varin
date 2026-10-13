@@ -48,10 +48,12 @@ pub struct FileWatchPosition {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct FollowupFileSourceState {
+    pub resource_authority: Option<FileObservationAuthority>,
     pub receipt_id: String,
     pub revision: u64,
     pub baseline: Option<FileState>,
     pub current: Option<FileState>,
+    pub ready: bool,
     pub immutable: bool,
     pub watch_id: Option<String>,
     pub position: Option<FileWatchPosition>,
@@ -70,6 +72,8 @@ pub struct FileObservationKey {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FileObservationRequest {
+    pub resource_authority: Option<FileObservationAuthority>,
+    pub registration_scope: Option<FileObservationRegistrationScope>,
     pub followup_id: String,
     pub source_index: usize,
     pub source_run_id: String,
@@ -91,11 +95,27 @@ impl FileObservationRequest {
     pub fn authorization_identity(&self) -> Value {
         json!({"operationId":self.receipt_id(),"workspaceId":self.source.workspace_id,
             "followupId":self.followup_id,"sourceIndex":self.source_index,"sourceRunId":self.source_run_id,
-            "threadId":self.thread_id,"actor":self.actor,"source":self.source,"path":self.path,"intentRef":self.intent_ref})
+            "threadId":self.thread_id,"actor":self.actor,"source":self.source,"path":self.path,"intentRef":self.intent_ref,
+            "resourceAuthority":self.resource_authority})
     }
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FileObservationAuthority {
+    pub coordinator_host_id: String,
+    pub authority_id: String,
+    pub resource_epoch: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FileObservationRegistrationScope {
+    pub coordinator_host_id: String,
+    pub branch_id: String,
+    pub key: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreparedFileObservation {
+    pub resource_authority: Option<FileObservationAuthority>,
     pub source_index: usize,
     pub receipt_id: String,
     pub state: Option<FileState>,
@@ -186,10 +206,12 @@ pub(super) fn bind_registration(
             ));
         }
         d.sources[index].file = Some(FollowupFileSourceState {
+            resource_authority: file.resource_authority.clone(),
             receipt_id: file.receipt_id.clone(),
             revision: 1,
             baseline: file.state.clone(),
             current: file.state.clone(),
+            ready: file.ready,
             immutable: file.immutable,
             watch_id: file.watch_id.clone(),
             position: file.position.clone(),
@@ -285,7 +307,8 @@ pub(super) fn observe_registration(
     Ok(())
 }
 fn release_required(db: &Connection, d: &Definition, index: usize) -> Result<bool> {
-    Ok(sources::exhausted(db, d)? || d.state == FollowupState::Cancelled
+    Ok(sources::exhausted(db, d)?
+        || d.state == FollowupState::Cancelled
         || (d.repeat == FollowupRepeat::Once && d.wait.state != NextRunWaitState::Waiting)
         || (d.sources[index].observed.is_some()
             && !(d.repeat == FollowupRepeat::Each && d.trigger.sources()[index].repeatable()))
@@ -327,6 +350,8 @@ fn work(db: &Connection, d: &Definition, index: usize, epoch: u64) -> Result<Fil
             observation_revision: file.revision,
         },
         request: FileObservationRequest {
+            resource_authority: file.resource_authority.clone(),
+            registration_scope: None,
             followup_id: d.id.clone(),
             source_index: index,
             source_run_id: d.source_run_id.clone(),
@@ -501,6 +526,7 @@ impl Catalog {
             }
             f.current = Some(state);
         }
+        f.ready = update.ready;
         f.watch_id = update.watch_id;
         f.position = update.position;
         f.gap |= update.gap;

@@ -127,6 +127,6 @@ it('private channel cancellation drains its owner query and drops old-epoch repl
   await Promise.resolve(); await Promise.resolve(); expect(replies).toEqual([]);
   bridge.consume({ v: 1, kind: 'file-observation-invalidated', scope: 'root', kernelEpoch: 'first', rootId: 'root', canonicalRoot: '/old' });
   expect(invalidate).not.toHaveBeenCalled(); expect(reset).toHaveBeenCalledOnce();
-  bridge.consume({ v: 1, kind: 'file-observation-invalidated', scope: 'receipt', kernelEpoch: 'second', receiptId: 'fixed-without-root' });
-  expect(invalidate).toHaveBeenCalledExactlyOnceWith({ v: 1, kind: 'file-observation-invalidated', scope: 'receipt', kernelEpoch: 'second', receiptId: 'fixed-without-root' });
+  bridge.consume({ v: 1, kind: 'file-observation-invalidated', scope: 'receipt', kernelEpoch: 'second', receiptId: 'fixed-without-root', revoked: false });
+  expect(invalidate).toHaveBeenCalledExactlyOnceWith({ v: 1, kind: 'file-observation-invalidated', scope: 'receipt', kernelEpoch: 'second', receiptId: 'fixed-without-root', revoked: false });
 });

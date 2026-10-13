@@ -12,6 +12,41 @@ pub(super) fn execute(
         return Err(KernelError::Cancelled);
     }
     match method {
+        "runtime.followup.registration.prepare" => {
+            let p: FollowupFilePrepareParams = serde_json::from_value(params)?;
+            let capture = runtime
+                .catalog()
+                .lock()
+                .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+                .prepare_followup_registration(
+                    &p.key,
+                    &p.run_id,
+                    varin_runtime::catalog::followups::FollowupRegistration {
+                        repeat: p.repeat.unwrap_or_default(),
+                        trigger: p.trigger,
+                        instruction: p.instruction,
+                        wait: None,
+                    },
+                )
+                .map_err(domain)?;
+            let mut prepared = capture.load().map_err(domain)?;
+            if cancel.load(Ordering::Acquire) {
+                return Err(KernelError::Cancelled);
+            }
+            let existing = runtime
+                .catalog()
+                .lock()
+                .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+                .stage_file_registration(&mut prepared, Some(&p.coordinator_host_id), None)
+                .map_err(domain)?;
+            if let Some(followup) = existing {
+                Ok(
+                    serde_json::json!({"followup":followup,"authority":null,"scope":null,"source":null}),
+                )
+            } else {
+                prepared.preparation_view().map_err(domain)
+            }
+        }
         "runtime.followup.register" => {
             let p: FollowupRegisterAdmissionParams = serde_json::from_value(params)?;
             let processes = p.trigger.process_operation_ids();
@@ -42,7 +77,7 @@ pub(super) fn execute(
                 Some(files.prepare_registration(
                     &runtime.catalog(),
                     &mut prepared,
-                    &authority.grant_id,
+                    &authority,
                     None,
                     wake_cancel.as_ref().ok_or(KernelError::Cancelled)?,
                 )?)
@@ -113,6 +148,9 @@ pub(super) fn execute(
                     wake_cancel.as_ref().ok_or(KernelError::Cancelled)?,
                 )
             } else {
+                if key.generation == 0 {
+                    return Ok(json!({"released":files.release_pending(&runtime.catalog(),&key)?}));
+                }
                 let work = runtime
                     .catalog()
                     .lock()
@@ -133,20 +171,28 @@ pub(super) fn execute(
         }
         "runtime.followup.metrics" => {
             let p: FollowupMetricWorksParams = serde_json::from_value(params)?;
-            let (works, next) = runtime.catalog().lock()
+            let (works, next) = runtime
+                .catalog()
+                .lock()
                 .map_err(|_| KernelError::Storage("Catalog owner failed".into()))?
-                .followup_metric_works(p.after.as_deref()).map_err(domain)?;
+                .followup_metric_works(p.after.as_deref())
+                .map_err(domain)?;
             Ok(json!({"works":works,"nextCursor":next}))
         }
         "runtime.followup.metric.observe" => {
-            let input: varin_runtime::catalog::followups::FollowupMetricObservation = serde_json::from_value(params)?;
+            let input: varin_runtime::catalog::followups::FollowupMetricObservation =
+                serde_json::from_value(params)?;
             let id = input.key.followup_id.clone();
             let index = input.key.source_index;
             let catalog = runtime.catalog();
-            let mut owner = catalog.lock().map_err(|_| KernelError::Storage("Catalog owner failed".into()))?;
+            let mut owner = catalog
+                .lock()
+                .map_err(|_| KernelError::Storage("Catalog owner failed".into()))?;
             let accepted = owner.apply_metric_observation(input).map_err(domain)?;
             let followup = owner.followup(&id).map_err(domain)?;
-            Ok(json!({"accepted":accepted,"metric":followup.sources.get(index).and_then(|s| s.metric.as_ref())}))
+            Ok(
+                json!({"accepted":accepted,"metric":followup.sources.get(index).and_then(|s| s.metric.as_ref())}),
+            )
         }
         "runtime.followup.research" => {
             let p: FollowupResearchWorksParams = serde_json::from_value(params)?;
@@ -160,9 +206,12 @@ pub(super) fn execute(
         }
         "runtime.followup.log.observe" => {
             let input = serde_json::from_value(params)?;
-            let accepted = runtime.catalog().lock()
+            let accepted = runtime
+                .catalog()
+                .lock()
                 .map_err(|_| KernelError::Storage("Catalog owner failed".into()))?
-                .apply_log_observation(input).map_err(domain)?;
+                .apply_log_observation(input)
+                .map_err(domain)?;
             Ok(json!({"accepted":accepted}))
         }
         "runtime.followup.research.observe" => {

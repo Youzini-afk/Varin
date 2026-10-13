@@ -8,7 +8,45 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{mpsc, Arc, Mutex};
 use varin_runtime::{catalog::followups::*, execution::CancellationToken, Catalog};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub(crate) enum Admission {
+    Local {
+        grant_id: String,
+    },
+    ManagedHost {
+        coordinator_host_id: String,
+        authority_id: String,
+        resource_epoch: String,
+    },
+}
+
 pub(crate) enum Command {
+    Idle {
+        request: FileObservationRequest,
+        reply: mpsc::Sender<Result<bool, KernelError>>,
+    },
+    ManagedAccept {
+        request: FileObservationRequest,
+        address: crate::source_resources::SourceAuthorityAddress,
+        reply: mpsc::Sender<Result<Target, KernelError>>,
+    },
+    Baseline {
+        request: FileObservationRequest,
+        observed: Option<PreparedFileObservation>,
+        address: crate::source_resources::SourceAuthorityAddress,
+        reply: mpsc::Sender<Result<Option<PreparedFileObservation>, KernelError>>,
+    },
+    ManagedRelease {
+        request: FileObservationRequest,
+        address: crate::source_resources::SourceAuthorityAddress,
+        reply: mpsc::Sender<Result<bool, KernelError>>,
+    },
     Accept {
         request: FileObservationRequest,
         grant_id: String,
@@ -51,6 +89,41 @@ impl Command {
     ) {
         let missing = || KernelError::Storage("file observation Storage owner unavailable".into());
         match self {
+            Self::Idle { request, reply } => {
+                let _ = reply.send(
+                    storage
+                        .ok_or_else(missing)
+                        .and_then(|s| s.file_observation_idle(&request, host)),
+                );
+            }
+            Self::ManagedAccept {
+                request,
+                address,
+                reply,
+            } => {
+                let _ = reply.send(storage.ok_or_else(missing).and_then(|s| {
+                    s.accept_managed_file_observation(&request, &address, epoch, host, generation)
+                }));
+            }
+            Self::Baseline {
+                request,
+                observed,
+                address,
+                reply,
+            } => {
+                let _ = reply.send(storage.ok_or_else(missing).and_then(|s| {
+                    s.initial_file_observation(&request, observed, &address, epoch, host)
+                }));
+            }
+            Self::ManagedRelease {
+                request,
+                address,
+                reply,
+            } => {
+                let _ = reply.send(storage.ok_or_else(missing).and_then(|s| {
+                    s.release_managed_file_observation(&request, &address, epoch, host)
+                }));
+            }
             Self::Accept {
                 request,
                 grant_id,
@@ -121,6 +194,7 @@ impl Command {
 pub(crate) struct Client {
     send: Arc<dyn Fn(Command) -> Result<(), KernelError> + Send + Sync>,
     bridge: OwnerChannel,
+    source_bridge: Option<OwnerChannel>,
 }
 pub(crate) struct RegistrationGuard {
     client: Client,
@@ -155,12 +229,9 @@ impl Drop for RegistrationGuard {
                 .unwrap_or((true, false));
             // A caller abort is not cancellation of a shared durable User intent.
             if may_release {
-                let _: Result<bool, KernelError> = self.client.request(|reply| Command::Release {
-                    request: request.clone(),
-                    reply,
-                });
+                let _ = self.client.release_request(request);
             }
-            if !referenced {
+            if !referenced && request.resource_authority.is_none() {
                 if let Some(watch) = watch {
                     self.client.close(target, watch);
                 }
@@ -185,6 +256,166 @@ fn failed(e: impl ToString) -> KernelError {
     KernelError::Operation(e.to_string())
 }
 impl Client {
+    /// B composes its original read worker and Documents watcher without an Agent Catalog.
+    pub(crate) fn execute_managed(
+        &self,
+        address: crate::source_resources::SourceAuthorityAddress,
+        action: crate::source_resources::SourceFileObservationAction,
+        cancel: &CancellationToken,
+    ) -> Result<Value, KernelError> {
+        use crate::source_resources::SourceFileObservationAction as A;
+        let result = (|| -> Result<Value, KernelError> {
+            match action {
+                A::Accept { request } => {
+                    let target = self.request(|reply| Command::ManagedAccept {
+                        request: request.clone(),
+                        address: address.clone(),
+                        reply,
+                    })?;
+                    let first = self.request(|reply| Command::Baseline {
+                        request: request.clone(),
+                        observed: None,
+                        address: address.clone(),
+                        reply,
+                    })?;
+                    let observation = if let Some(original) = first {
+                        original
+                    } else {
+                        let observed = self.observe_managed_target(
+                            &request, &target, None, None, None, false, cancel,
+                        )?;
+                        match self.request(|reply| Command::Baseline {
+                            request: request.clone(),
+                            observed: Some(observed),
+                            address,
+                            reply,
+                        }) {
+                            Ok(Some(value)) => value,
+                            Ok(None) => return Err(failed("Original baseline missing")),
+                            Err(error) => {
+                                let _ = self.query(
+                                    json!({"action":"release","receiptId":request.receipt_id()}),
+                                    &CancellationToken::default(),
+                                );
+                                return Err(error);
+                            }
+                        }
+                    };
+                    Ok(json!({"ok":true,"observation":observation}))
+                }
+                A::Observe {
+                    request,
+                    watch_id,
+                    after,
+                    current,
+                    ready,
+                    ..
+                } => {
+                    let target = self.request(|reply| Command::Describe {
+                        request: request.clone(),
+                        authorize: true,
+                        reply,
+                    })?;
+                    let observation = self.observe_managed_target(
+                        &request, &target, watch_id, after, current, ready, cancel,
+                    )?;
+                    Ok(json!({"ok":true,"observation":observation}))
+                }
+                A::Release { request } => {
+                    let released = self.request(|reply| Command::ManagedRelease {
+                        request: request.clone(),
+                        address,
+                        reply,
+                    })?;
+                    self.query(
+                        json!({"action":"release","receiptId":request.receipt_id()}),
+                        &CancellationToken::default(),
+                    )?;
+                    Ok(json!({"ok":true,"released":released}))
+                }
+            }
+        })();
+        result.or_else(|error| {
+            if cancel.is_cancelled() {
+                return Err(error);
+            }
+            let code = match &error {
+                KernelError::Authorization(message) if message == "file_observation_revoked" => {
+                    "authority_revoked"
+                }
+                KernelError::Authorization(_) => "authority_denied",
+                KernelError::FileObservationSource(code) => code.as_str(),
+                KernelError::Cancelled => "cancelled",
+                _ => "source_unavailable",
+            };
+            Ok(json!({"ok":false,"code":code}))
+        })
+    }
+    fn observe_managed_target(
+        &self,
+        r: &FileObservationRequest,
+        target: &Target,
+        previous: Option<String>,
+        after: Option<FileWatchPosition>,
+        current: Option<FileState>,
+        was_ready: bool,
+        cancel: &CancellationToken,
+    ) -> Result<PreparedFileObservation, KernelError> {
+        if target.immutable {
+            return self.observe_target_local(r, target, None, None, false, cancel);
+        }
+        let resumed = self.query(json!({"action":"resume","target":target}), cancel)?;
+        let watch = resumed["watchId"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| failed("Original watcher missing"))?
+            .to_owned();
+        let gap = previous.as_ref().is_some_and(|old| *old != watch);
+        if current.is_some() && after.is_some() && !gap {
+            // Probe the original watch and both writer owners before considering
+            // reuse of A's accepted version. No second body cache lives on B.
+            let begin = self.query(
+                json!({"action":"begin","target":target,"watchId":watch,"after":after}),
+                cancel,
+            )?;
+            let token = begin["token"]
+                .as_str()
+                .ok_or_else(|| failed("file probe token missing"))?;
+            let finish=match self.query(json!({"action":"finish","target":target,"watchId":watch,"token":token,"after":after}),cancel){Ok(v)=>v,Err(e)=>{self.discard(target,&watch,token);return Err(e)}};
+            let idle = self.request(|reply| Command::Idle {
+                request: r.clone(),
+                reply,
+            })?;
+            let stable = finish["stable"]
+                .as_bool()
+                .ok_or_else(|| failed("file stability evidence missing"))?;
+            let ready = idle
+                && finish["managedIdle"]
+                    .as_bool()
+                    .ok_or_else(|| failed("file writer evidence missing"))?;
+            let changed = finish["readRequired"]
+                .as_bool()
+                .ok_or_else(|| failed("file change evidence missing"))?;
+            if stable && !changed && ready == was_ready {
+                return Ok(PreparedFileObservation {
+                    resource_authority: r.resource_authority.clone(),
+                    source_index: r.source_index,
+                    receipt_id: r.receipt_id(),
+                    state: current,
+                    immutable: false,
+                    watch_id: Some(watch),
+                    position: Some(serde_json::from_value(finish["position"].clone())?),
+                    gap: false,
+                    targeted_change: false,
+                    ready,
+                });
+            }
+        }
+        let mut observed =
+            self.observe_target_local(r, target, Some(watch), after, false, cancel)?;
+        observed.gap |= gap;
+        Ok(observed)
+    }
     pub(crate) fn new(
         send: impl Fn(Command) -> Result<(), KernelError> + Send + Sync + 'static,
         bridge: OwnerChannel,
@@ -192,7 +423,119 @@ impl Client {
         Self {
             send: Arc::new(send),
             bridge,
+            source_bridge: None,
         }
+    }
+    pub(crate) fn with_source_bridge(mut self, bridge: OwnerChannel) -> Self {
+        self.source_bridge = Some(bridge);
+        self
+    }
+    fn source_query(&self, value: Value, cancel: &CancellationToken) -> Result<Value, KernelError> {
+        let reply = self
+            .source_bridge
+            .as_ref()
+            .ok_or_else(|| failed("Managed source owner unavailable"))?
+            .query(value, cancel)
+            .map_err(failed)?;
+        if reply["ok"] != true {
+            return Err(failed(
+                reply["message"]
+                    .as_str()
+                    .unwrap_or("Managed file observation unavailable"),
+            ));
+        }
+        Ok(reply["value"].clone())
+    }
+    pub(crate) fn admission(
+        &self,
+        binding: &ToolBinding,
+        cancel: &CancellationToken,
+    ) -> Result<Admission, KernelError> {
+        if binding.resource_owner.is_local() {
+            return Ok(Admission::Local {
+                grant_id: binding.grant_id.clone(),
+            });
+        }
+        serde_json::from_value(self.source_query(
+            json!({"kind":"file_observation_address","binding":binding}),
+            cancel,
+        )?)
+        .map_err(Into::into)
+    }
+    fn remote(
+        &self,
+        r: &FileObservationRequest,
+        action: Value,
+        cancel: &CancellationToken,
+    ) -> Result<Value, KernelError> {
+        let authority = r
+            .resource_authority
+            .as_ref()
+            .ok_or_else(|| failed("Original managed file authority missing"))?;
+        let value=self.source_query(json!({"kind":"file_observation","source":r.source,"authority":authority,"action":action}),cancel)?;
+        if value["ok"] == false {
+            let code = value["code"].as_str().unwrap_or("source_unavailable");
+            if code == "authority_revoked" {
+                return Err(KernelError::Authorization(
+                    "file_observation_revoked".into(),
+                ));
+            }
+            return Err(crate::error::FileObservationSourceCode::parse(code)
+                .map(KernelError::FileObservationSource)
+                .unwrap_or_else(|| failed(code)));
+        }
+        if value["ok"] != true {
+            return Err(failed("Unconfirmed file observation response"));
+        }
+        Ok(value)
+    }
+    fn remote_target(r: &FileObservationRequest) -> Target {
+        Target {
+            receipt_id: r.receipt_id(),
+            followup_id: r.followup_id.clone(),
+            source_index: r.source_index,
+            source_run_id: r.source_run_id.clone(),
+            thread_id: r.thread_id.clone(),
+            source: r.source.clone(),
+            physical_root: None,
+            path: r.path.clone(),
+            immutable: r.source.mode == varin_runtime::SourceMode::FixedBranch,
+        }
+    }
+    fn close_registration_scope(&self, r: &FileObservationRequest) -> Result<(), KernelError> {
+        let Some(scope) = &r.registration_scope else {
+            return Ok(());
+        };
+        let mut source = r.source.clone();
+        if source.mode == varin_runtime::SourceMode::Materialized
+            && source.environment_run_id.is_none()
+        {
+            source.environment_run_id = Some(r.source_run_id.clone());
+        }
+        let result=self.source_query(json!({"kind":"file_observation_scope_close","source":source,"coordinatorHostId":scope.coordinator_host_id,"scope":{"kind":"source_read","threadId":r.thread_id,"branchId":scope.branch_id,"key":scope.key}}),&CancellationToken::default())?;
+        if result["closed"] != true {
+            return Err(failed("Original file registration scope is not closed"));
+        }
+        Ok(())
+    }
+    fn release_request(&self, r: &FileObservationRequest) -> Result<bool, KernelError> {
+        if !r.source.resource_owner.is_local() {
+            if r.resource_authority.is_some() {
+                return self.remote(
+                    r,
+                    json!({"kind":"release","request":r}),
+                    &CancellationToken::default(),
+                )?["released"]
+                    .as_bool()
+                    .ok_or_else(|| failed("File release acknowledgement missing"));
+            }
+            self.close_registration_scope(r)?;
+            return Ok(true);
+        }
+        self.request(|reply| Command::Release {
+            request: r.clone(),
+            reply,
+        })
     }
     fn request<T>(
         &self,
@@ -221,6 +564,9 @@ impl Client {
         }
     }
     pub(crate) fn describe(&self, r: &FileObservationRequest) -> Result<Target, KernelError> {
+        if !r.source.resource_owner.is_local() {
+            return Ok(Self::remote_target(r));
+        }
         self.request(|reply| Command::Describe {
             request: r.clone(),
             authorize: false,
@@ -277,11 +623,28 @@ impl Client {
         watch: Option<String>,
         after: Option<FileWatchPosition>,
         reopen: bool,
+        current: Option<FileState>,
+        ready: bool,
+        cancel: &CancellationToken,
+    ) -> Result<PreparedFileObservation, KernelError> {
+        if !r.source.resource_owner.is_local() {
+            return serde_json::from_value(self.remote(r,json!({"kind":"observe","request":r,"watchId":watch,"after":after,"reopen":reopen,"current":current,"ready":ready}),cancel)?["observation"].clone()).map_err(Into::into);
+        }
+        self.observe_target_local(r, target, watch, after, reopen, cancel)
+    }
+    fn observe_target_local(
+        &self,
+        r: &FileObservationRequest,
+        target: &Target,
+        watch: Option<String>,
+        after: Option<FileWatchPosition>,
+        reopen: bool,
         cancel: &CancellationToken,
     ) -> Result<PreparedFileObservation, KernelError> {
         if target.immutable {
             let snapshot = self.read(r, cancel)?;
             return Ok(PreparedFileObservation {
+                resource_authority: r.resource_authority.clone(),
                 source_index: r.source_index,
                 receipt_id: r.receipt_id(),
                 state: Some(snapshot.state),
@@ -322,6 +685,7 @@ impl Client {
                 self.discard(target, &watch, &token);
                 watch_guard.close = false;
                 return Ok(PreparedFileObservation {
+                    resource_authority: r.resource_authority.clone(),
                     source_index: r.source_index,
                     receipt_id: r.receipt_id(),
                     state: None,
@@ -367,6 +731,7 @@ impl Client {
             .ok_or_else(|| failed("file writer evidence missing"))?;
         watch_guard.close = false;
         Ok(PreparedFileObservation {
+            resource_authority: r.resource_authority.clone(),
             source_index: r.source_index,
             receipt_id: r.receipt_id(),
             state: stable.then_some(snapshot.state),
@@ -382,7 +747,7 @@ impl Client {
         &self,
         catalog: &Arc<Mutex<Catalog>>,
         p: &mut PreparedFollowupRegistration,
-        grant_id: &str,
+        authority: &Admission,
         binding: Option<&ToolBinding>,
         cancel: &CancellationToken,
     ) -> Result<RegistrationGuard, KernelError> {
@@ -394,6 +759,29 @@ impl Client {
         if p.already_accepted() {
             return Ok(guard);
         }
+        if let Admission::ManagedHost {
+            coordinator_host_id,
+            authority_id,
+            resource_epoch,
+        } = authority
+        {
+            catalog
+                .lock()
+                .map_err(failed)?
+                .stage_file_registration(
+                    p,
+                    Some(coordinator_host_id),
+                    Some(FileObservationAuthority {
+                        coordinator_host_id: coordinator_host_id.clone(),
+                        authority_id: authority_id.clone(),
+                        resource_epoch: resource_epoch.clone(),
+                    }),
+                )
+                .map_err(failed)?;
+            if p.already_accepted() {
+                return Ok(guard);
+            }
+        }
         let mut prepared = Vec::new();
         for request in p.file_requests().map_err(failed)? {
             let authorization = {
@@ -401,6 +789,26 @@ impl Client {
                 owner.authorize_followup_registration(p)
             };
             authorization.map_err(failed)?;
+            if !request.source.resource_owner.is_local() {
+                let target = Self::remote_target(&request);
+                guard.items.push((request.clone(), target, None));
+                let observed: PreparedFileObservation = serde_json::from_value(
+                    self.remote(&request, json!({"kind":"accept","request":request}), cancel)?
+                        ["observation"]
+                        .clone(),
+                )?;
+                guard.items.last_mut().expect("accepted source").2 = observed.watch_id.clone();
+                catalog
+                    .lock()
+                    .map_err(failed)?
+                    .authorize_followup_registration(p)
+                    .map_err(failed)?;
+                prepared.push(observed);
+                continue;
+            }
+            let Admission::Local { grant_id } = authority else {
+                return Err(failed("Local file registration requires local authority"));
+            };
             let target = self.request(|reply| Command::Accept {
                 request: request.clone(),
                 grant_id: grant_id.into(),
@@ -420,11 +828,21 @@ impl Client {
                 (Some(w), Some(p))
             };
             guard.items.last_mut().expect("accepted source").2 = watch.clone();
-            let observed =
-                self.observe_target(&request, &target, watch, position, false, cancel)?;
+            let observed = self.observe_target(
+                &request, &target, watch, position, false, None, false, cancel,
+            )?;
             prepared.push(observed);
         }
         p.bind_file_observations(prepared).map_err(failed)?;
+        if let Some((request, _, _)) = guard
+            .items
+            .first()
+            .filter(|(r, _, _)| r.actor == FollowupActor::User && r.resource_authority.is_some())
+        {
+            // Every original leaf has acknowledged its baseline. Caller retirement
+            // does not release any of those independent observation receipts.
+            self.close_registration_scope(request)?;
+        }
         Ok(guard)
     }
     pub(crate) fn release(&self, work: &FileObservationWork) -> Result<bool, KernelError> {
@@ -432,10 +850,10 @@ impl Client {
             return Err(failed("Catalog still requires this file observation"));
         }
         let target = self.describe(&work.request)?;
-        let drained = self.request(|reply| Command::Release {
-            request: work.request.clone(),
-            reply,
-        })?;
+        let drained = self.release_request(&work.request)?;
+        if !work.request.source.resource_owner.is_local() {
+            return Ok(drained);
+        }
         if let Some(watch) = &work.file.watch_id {
             self.close(&target, watch);
         }
@@ -469,11 +887,15 @@ impl Client {
                 json!({"accepted":false,"followup":catalog.lock().map_err(failed)?.followup(&key.followup_id).map_err(failed)?}),
             );
         }
-        let target = self.request(|reply| Command::Describe {
-            request: work.request.clone(),
-            authorize: true,
-            reply,
-        });
+        let target = if !work.request.source.resource_owner.is_local() {
+            self.describe(&work.request)
+        } else {
+            self.request(|reply| Command::Describe {
+                request: work.request.clone(),
+                authorize: true,
+                reply,
+            })
+        };
         let observed = match &target {
             Ok(target) => self.observe_target(
                 &work.request,
@@ -481,6 +903,8 @@ impl Client {
                 work.file.watch_id.clone(),
                 work.file.position.clone(),
                 reopen,
+                work.file.current.clone(),
+                work.file.ready,
                 cancel,
             ),
             Err(KernelError::Authorization(message)) => {
@@ -524,7 +948,7 @@ impl Client {
         };
         let new_watch = update.watch_id.clone();
         let replaced = new_watch != work.file.watch_id;
-        let mut guard = if replaced {
+        let mut guard = if replaced && work.request.source.resource_owner.is_local() {
             target
                 .as_ref()
                 .ok()
@@ -549,7 +973,7 @@ impl Client {
                 guard.close = false;
             }
         }
-        if accepted && replaced {
+        if accepted && replaced && work.request.source.resource_owner.is_local() {
             if let (Ok(target), Some(old)) = (&target, &work.file.watch_id) {
                 self.close(target, old);
             }
@@ -568,12 +992,45 @@ impl Client {
         branch: &str,
         after: Option<String>,
     ) -> Result<Value, KernelError> {
-        let (requests, next) = self.request(|reply| Command::Acceptances {
-            after,
-            strict: true,
-            followup_id: None,
-            reply,
-        })?;
+        #[derive(Default, Serialize, Deserialize)]
+        struct Cursor {
+            local: Option<String>,
+            pending: Option<String>,
+            local_done: bool,
+            pending_done: bool,
+        }
+        let mut cursor: Cursor = after
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()?
+            .unwrap_or_default();
+        let (mut requests, local) = if cursor.local_done {
+            (Vec::new(), None)
+        } else {
+            self.request(|reply| Command::Acceptances {
+                after: cursor.local.clone(),
+                strict: true,
+                followup_id: None,
+                reply,
+            })?
+        };
+        cursor.local_done = local.is_none();
+        cursor.local = local;
+        if !cursor.pending_done {
+            let (pending, next) = catalog
+                .lock()
+                .map_err(failed)?
+                .pending_file_registration_page(cursor.pending.as_deref())
+                .map_err(failed)?;
+            requests.extend(pending);
+            cursor.pending_done = next.is_none();
+            cursor.pending = next;
+        }
+        let next = if cursor.local_done && cursor.pending_done {
+            None
+        } else {
+            Some(serde_json::to_string(&cursor)?)
+        };
         let owner = catalog.lock().map_err(failed)?;
         if owner.branch_thread_id(branch).map_err(failed)? != thread {
             return Err(KernelError::Authorization(
@@ -623,6 +1080,13 @@ impl Client {
             return Ok(json!({"followup":followup}));
         }
         let mut requests = Vec::new();
+        requests.extend(
+            catalog
+                .lock()
+                .map_err(failed)?
+                .pending_file_registration(key)
+                .map_err(failed)?,
+        );
         let mut after = None;
         loop {
             let (page, next) = self.request(|reply| Command::Acceptances {
@@ -675,10 +1139,111 @@ impl Client {
                         .map_err(failed)?;
                 }
             } else {
-                let _: bool = self.request(|reply| Command::Release { request, reply })?;
+                if self.release_request(&request)? {
+                    self.close_registration_scope(&request)?;
+                    catalog
+                        .lock()
+                        .map_err(failed)?
+                        .confirm_pending_file_released(&request)
+                        .map_err(failed)?;
+                }
             }
         }
         Ok(json!({"followup":followup}))
+    }
+    pub(crate) fn release_pending(
+        &self,
+        catalog: &Arc<Mutex<Catalog>>,
+        key: &FileObservationKey,
+    ) -> Result<bool, KernelError> {
+        let request = {
+            let owner = catalog.lock().map_err(failed)?;
+            let request = owner
+                .pending_file_registration(&key.followup_id)
+                .map_err(failed)?
+                .into_iter()
+                .find(|r| r.source_index == key.source_index && r.receipt_id() == key.receipt_id);
+            let Some(request) = request else {
+                return Ok(true);
+            };
+            if key.generation != 0
+                || key.observation_revision != 0
+                || !owner
+                    .file_acceptance_may_release(&request)
+                    .map_err(failed)?
+            {
+                return Err(failed("Original registration still requires its resource"));
+            }
+            request
+        };
+        let released = self.release_request(&request)?;
+        if released {
+            self.close_registration_scope(&request)?;
+            catalog
+                .lock()
+                .map_err(failed)?
+                .confirm_pending_file_released(&request)
+                .map_err(failed)?;
+        }
+        Ok(released)
+    }
+    pub(crate) fn drain_bot_scope(
+        &self,
+        catalog: &Arc<Mutex<Catalog>>,
+        suspension: &varin_runtime::catalog::bot::BotSuspension,
+        cancel: &AtomicBool,
+    ) -> Result<(), KernelError> {
+        let mut local = Vec::new();
+        let mut after = None;
+        loop {
+            if cancel.load(std::sync::atomic::Ordering::Acquire) {
+                return Err(KernelError::Cancelled);
+            }
+            let (page, next) = self.request(|reply| Command::Acceptances {
+                after,
+                strict: true,
+                followup_id: None,
+                reply,
+            })?;
+            local.extend(page);
+            after = next;
+            if after.is_none() {
+                break;
+            }
+        }
+        let (works, pending) = catalog
+            .lock()
+            .map_err(failed)?
+            .prepare_bot_file_release(suspension, &local)
+            .map_err(failed)?;
+        for work in works {
+            if cancel.load(std::sync::atomic::Ordering::Acquire) {
+                return Err(KernelError::Cancelled);
+            }
+            if !self.release(&work)? {
+                return Err(failed("Original Bot file reader has not drained"));
+            }
+            catalog
+                .lock()
+                .map_err(failed)?
+                .confirm_file_observation_released(&work.key)
+                .map_err(failed)?;
+        }
+        for request in pending {
+            if cancel.load(std::sync::atomic::Ordering::Acquire) {
+                return Err(KernelError::Cancelled);
+            }
+            if !self.release_request(&request)? {
+                return Err(failed("Original Bot file registration has not drained"));
+            }
+            self.close_registration_scope(&request)?;
+            catalog
+                .lock()
+                .map_err(failed)?
+                .confirm_pending_file_released(&request)
+                .map_err(failed)?;
+        }
+        Ok(())
     }
     pub(crate) fn bindings(
         &self,
@@ -691,6 +1256,8 @@ impl Client {
             storage_after: Option<String>,
             catalog_done: bool,
             storage_done: bool,
+            pending_after: Option<String>,
+            pending_done: bool,
         }
         let mut page: Page = after
             .map(serde_json::from_str)
@@ -735,12 +1302,37 @@ impl Client {
             }
         }
         let mut bindings = Vec::new();
+        if !page.pending_done {
+            let (requests, next) = catalog
+                .lock()
+                .map_err(failed)?
+                .pending_file_registration_page(page.pending_after.as_deref())
+                .map_err(failed)?;
+            page.pending_done = next.is_none();
+            page.pending_after = next;
+            for request in requests {
+                if catalog
+                    .lock()
+                    .map_err(failed)?
+                    .file_acceptance_may_release(&request)
+                    .map_err(failed)?
+                {
+                    bindings.push(json!({"followupId":request.followup_id,"generation":0,"sourceIndex":request.source_index,
+                        "receiptId":request.receipt_id(),"observationRevision":0,"definitionRevision":0,"target":Self::remote_target(&request),
+                        "watchId":null,"position":null,"failureCode":null,"action":"release"}));
+                }
+            }
+        }
         for mut work in works {
-            let described = self.request(|reply| Command::Describe {
-                request: work.request.clone(),
-                authorize: !work.release_required,
-                reply,
-            });
+            let described = if !work.request.source.resource_owner.is_local() {
+                self.describe(&work.request)
+            } else {
+                self.request(|reply| Command::Describe {
+                    request: work.request.clone(),
+                    authorize: !work.release_required,
+                    reply,
+                })
+            };
             let revoked = matches!(&described,Err(KernelError::Authorization(message)) if message=="file_observation_revoked");
             let (target, failure) = match described {
                 Ok(target) => (serde_json::to_value(target)?, Value::Null),
@@ -782,7 +1374,11 @@ impl Client {
             let mut value = serde_json::to_value(&work.key)?;
             value["definitionRevision"] = json!(work.definition_revision);
             value["target"] = target;
-            value["failureCode"] = failure;
+            value["failureCode"] = if failure.is_null() {
+                json!(work.file.failure_code)
+            } else {
+                failure
+            };
             value["watchId"] = json!(work.file.watch_id);
             value["position"] = json!(work.file.position);
             value["action"] = json!(if work.release_required {
@@ -794,7 +1390,7 @@ impl Client {
             });
             bindings.push(value);
         }
-        let next = if page.catalog_done && page.storage_done {
+        let next = if page.catalog_done && page.storage_done && page.pending_done {
             None
         } else {
             Some(serde_json::to_string(&page)?)

@@ -20,6 +20,13 @@ pub struct McpEndpoint {
     deny_unknown_fields
 )]
 pub enum HostJobSubject {
+    EnvironmentForward {
+        host_id: String,
+        host_epoch: String,
+        target: launches::SourceResourceOwner,
+        service_host: String,
+        service_port: u16,
+    },
     Workspace {
         workspace_id: String,
         subject_id: String,
@@ -421,6 +428,58 @@ impl Catalog {
     pub fn begin_host_job(&mut self, binding: HostJobBinding) -> Result<Operation> {
         self.begin_host_job_bound(binding, None)
     }
+    pub fn begin_environment_forward_job(
+        &mut self,
+        binding: HostJobBinding,
+        snapshot: &tool_content::ToolInvocationSnapshot,
+    ) -> Result<Operation> {
+        self.validate_tool_invocation(snapshot, true)?;
+        let HostJobSubject::EnvironmentForward {
+            service_host,
+            service_port,
+            target,
+            ..
+        } = &binding.subject
+        else {
+            return Err(RuntimeError::Conflict("Forward subject required".into()));
+        };
+        let args = &snapshot.call.arguments;
+        let host = args
+            .get("host")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .unwrap_or("127.0.0.1");
+        if snapshot.context.operation_id != binding.operation_id
+            || snapshot.call.name != "environment_forward"
+            || host != service_host
+            || args.get("port").and_then(Value::as_u64) != Some(u64::from(*service_port))
+        {
+            return Err(RuntimeError::Conflict(
+                "Forward differs from the selected invocation".into(),
+            ));
+        }
+        // An explicit target is resolved by the trusted Host registry. Otherwise
+        // the original selected Source determines the target, including no Source.
+        if args
+            .get("target")
+            .and_then(Value::as_str)
+            .is_none_or(|s| s.trim().is_empty())
+        {
+            let expected = snapshot
+                .frozen
+                .source
+                .as_ref()
+                .map(|s| s.resource_owner.clone())
+                .unwrap_or(launches::SourceResourceOwner::Local);
+            if target != &expected {
+                return Err(RuntimeError::Conflict(
+                    "Forward changed its selected Source owner".into(),
+                ));
+            }
+        }
+        self.begin_host_job_bound(binding, None)
+    }
     pub fn begin_mcp_host_job(
         &mut self,
         binding: HostJobBinding,
@@ -501,6 +560,28 @@ impl Catalog {
             None
         };
         match &binding.subject {
+            HostJobSubject::EnvironmentForward {
+                host_id,
+                host_epoch,
+                target,
+                service_host,
+                service_port,
+            } => {
+                if binding.domain != "environment.forward"
+                    || binding.domain_version != 1
+                    || host_id.trim().is_empty()
+                    || host_epoch.trim().is_empty()
+                    || !target.validate()
+                    || service_host.trim().is_empty()
+                    || *service_port == 0
+                    || tool.is_none()
+                    || op.lifetime != Lifetime::Thread
+                {
+                    return Err(RuntimeError::Conflict(
+                        "Environment forward lacks its original tool and target binding".into(),
+                    ));
+                }
+            }
             HostJobSubject::Workspace {
                 workspace_id,
                 subject_id,
@@ -620,7 +701,10 @@ impl Catalog {
             ));
         }
         match (&binding.subject, &task) {
-            (HostJobSubject::Workspace { .. }, None) => {}
+            (
+                HostJobSubject::Workspace { .. } | HostJobSubject::EnvironmentForward { .. },
+                None,
+            ) => {}
             (HostJobSubject::Mcp { .. }, Some(task))
                 if !task.task_id.is_empty()
                     && !task.created_at.is_empty()

@@ -22,6 +22,7 @@ pub(crate) enum Hint {
     },
     Receipt {
         receipt_id: String,
+        revoked: bool,
     },
 }
 
@@ -47,6 +48,7 @@ struct Receipt {
     pin_id: Option<String>,
     fixed_root: Option<String>,
     released: bool,
+    initial_observation: Option<varin_runtime::catalog::followups::PreparedFileObservation>,
 }
 pub(crate) struct ActiveRead {
     receipt_id: String,
@@ -169,19 +171,77 @@ impl Storage {
             }
         }
     }
-    pub(super) fn cancel_file_observation_grant(&self, grant_id: &str) -> Result<(), KernelError> {
-        for r in self
+    pub(super) fn cancel_file_observation_grant(
+        &mut self,
+        grant_id: &str,
+    ) -> Result<(), KernelError> {
+        for read in self
             .observation_reads
             .values()
             .filter(|r| r.grant_id == grant_id)
         {
-            r.cancel.store(true, Ordering::Release);
+            read.cancel.store(true, Ordering::Release);
         }
-        if let Some(hint) = &self.observation_hints {
-            let mut query=self.conn.prepare("SELECT operation_id FROM operations WHERE kind='file.observation.accept' AND state='committed' AND CASE WHEN json_valid(result_json) THEN json_extract(result_json,'$.originalGrantId')=?1 AND json_extract(result_json,'$.released')=0 ELSE 1 END")?;
-            for id in query.query_map([grant_id], |row| row.get::<_, String>(0))? {
-                hint(Hint::Receipt { receipt_id: id? });
+        let rows = {
+            let mut query=self.conn.prepare("SELECT operation_id,result_json FROM operations WHERE kind='file.observation.accept' AND state='committed' AND CASE WHEN json_valid(result_json) THEN json_extract(result_json,'$.originalGrantId')=?1 AND json_extract(result_json,'$.released')=0 ELSE 1 END")?;
+            let rows = query
+                .query_map([grant_id], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+        let mut corrupt = false;
+        for (id, body) in rows {
+            let receipt: Receipt = match serde_json::from_str(&body) {
+                Ok(receipt) => receipt,
+                Err(_) => {
+                    if let Some(hint) = &self.observation_hints {
+                        hint(Hint::Receipt {
+                            receipt_id: id,
+                            revoked: false,
+                        });
+                    }
+                    corrupt = true;
+                    continue;
+                }
+            };
+            // The original receipt, rather than a grant-wide ephemeral-pin rule,
+            // owns fixed observation pins and in-flight reads.
+            if let Some(hint) = &self.observation_hints {
+                hint(Hint::Receipt {
+                    receipt_id: id.clone(),
+                    revoked: true,
+                });
             }
+            if receipt.original_grant_id != grant_id {
+                return Err(denied("Observation revoke changed its original grant"));
+            }
+            let t = receipt.target;
+            let request = FileObservationRequest {
+                resource_authority: serde_json::from_value(
+                    receipt.identity["resourceAuthority"].clone(),
+                )?,
+                registration_scope: None,
+                followup_id: t.followup_id,
+                source_index: t.source_index,
+                source_run_id: t.source_run_id,
+                thread_id: t.thread_id,
+                actor: serde_json::from_value(receipt.identity["actor"].clone())?,
+                source: t.source,
+                path: t.path,
+                condition: varin_runtime::catalog::followups::FileCondition::Exists,
+                intent_ref: receipt.identity["intentRef"].clone(),
+            };
+            if request.receipt_id() != id {
+                return Err(denied("Observation revoke changed its receipt"));
+            }
+            self.release_file_observation(&request)?;
+        }
+        if corrupt {
+            return Err(KernelError::Storage(
+                "file observation receipt is corrupt".into(),
+            ));
         }
         Ok(())
     }
@@ -207,12 +267,12 @@ impl Storage {
         Ok(receipt)
     }
     fn observation_grant(&self, receipt: &Receipt, host: &str) -> Result<Grant, KernelError> {
-        if receipt.released {
-            return Err(denied("file observation released"));
-        }
         let grant = self.load_grant(&receipt.original_grant_id)?;
         if grant.state == GrantState::Revoked {
             return Err(denied("file_observation_revoked"));
+        }
+        if receipt.released {
+            return Err(denied("file observation released"));
         }
         if grant.host_id != host || grant.storage_identity != self.root.to_string_lossy() {
             return Err(denied("file observation original authority moved"));
@@ -349,6 +409,10 @@ impl Storage {
             };
             let t = receipt.target;
             let request = FileObservationRequest {
+                resource_authority: serde_json::from_value(
+                    receipt.identity["resourceAuthority"].clone(),
+                )?,
+                registration_scope: None,
                 followup_id: t.followup_id,
                 source_index: t.source_index,
                 source_run_id: t.source_run_id,
@@ -505,9 +569,161 @@ impl Storage {
                 pin_id,
                 fixed_root,
                 released: false,
+                initial_observation: None,
             })?)
         })?;
         Ok(serde_json::from_value::<Receipt>(value)?.target)
+    }
+    pub(crate) fn accept_managed_file_observation(
+        &mut self,
+        r: &FileObservationRequest,
+        address: &crate::source_resources::SourceAuthorityAddress,
+        epoch: &str,
+        host: &str,
+        generation: &str,
+    ) -> Result<Target, KernelError> {
+        let existing = !self
+            .operation_get(&json!({"operationId":r.receipt_id()}))?
+            .is_null();
+        let record = self.source_authority(address, !existing, epoch)?;
+        if !existing {
+            if record.result.phase != "ready" {
+                return Err(denied("Original file source has not completed admission"));
+            }
+            match (&r.actor, &record.result.scope) {
+                (
+                    FollowupActor::User,
+                    crate::source_resources::SourceAuthorityScope::SourceRead {
+                        thread_id,
+                        branch_id,
+                        key,
+                    },
+                ) => {
+                    let scope = r
+                        .registration_scope
+                        .as_ref()
+                        .ok_or_else(|| denied("Original User registration scope missing"))?;
+                    if record.purpose != "read"
+                        || thread_id != &r.thread_id
+                        || branch_id != &scope.branch_id
+                        || key != &scope.key
+                        || scope.key != format!("file-followup:{}", r.followup_id)
+                        || scope.coordinator_host_id != address.coordinator_host_id
+                    {
+                        return Err(denied(
+                            "File registration belongs to another source-read scope",
+                        ));
+                    }
+                }
+                (
+                    FollowupActor::Agent { .. },
+                    crate::source_resources::SourceAuthorityScope::Run { .. },
+                ) if record.purpose == "source" && r.registration_scope.is_none() => {}
+                _ => {
+                    return Err(denied(
+                        "File registration requires its original caller scope",
+                    ))
+                }
+            }
+        }
+        let binding = match r.actor {
+            FollowupActor::Agent { .. } => record.result.tool_binding.as_ref(),
+            _ => None,
+        };
+        self.accept_file_observation(r, &record.result.grant_id, binding, epoch, host, generation)
+    }
+    /// Initial capture is part of the original acceptance receipt, not a condition cursor.
+    pub(crate) fn initial_file_observation(
+        &mut self,
+        r: &FileObservationRequest,
+        observed: Option<varin_runtime::catalog::followups::PreparedFileObservation>,
+        address: &crate::source_resources::SourceAuthorityAddress,
+        epoch: &str,
+        host: &str,
+    ) -> Result<Option<varin_runtime::catalog::followups::PreparedFileObservation>, KernelError>
+    {
+        let mut receipt = self.observation_receipt(r)?;
+        self.observation_grant(&receipt, host)?;
+        if receipt.initial_observation.is_none() {
+            if let Some(observed) = observed {
+                if observed.receipt_id != r.receipt_id()
+                    || observed.source_index != r.source_index
+                    || observed.resource_authority != r.resource_authority
+                {
+                    return Err(denied("initial file observation identity changed"));
+                }
+                receipt.initial_observation = Some(observed);
+                self.operation_finish(&r.receipt_id(), &serde_json::to_value(&receipt)?)?;
+            }
+        }
+        let _ = (address, epoch); // Caller retirement follows admission of every leaf.
+        Ok(receipt.initial_observation)
+    }
+    pub(crate) fn release_managed_file_observation(
+        &mut self,
+        r: &FileObservationRequest,
+        address: &crate::source_resources::SourceAuthorityAddress,
+        epoch: &str,
+        host: &str,
+    ) -> Result<bool, KernelError> {
+        let record = self.source_authority(address, false, epoch)?;
+        if self
+            .operation_get(&json!({"operationId":r.receipt_id()}))?
+            .is_null()
+        {
+            let identity = r.authorization_identity();
+            let target = Target {
+                receipt_id: r.receipt_id(),
+                followup_id: r.followup_id.clone(),
+                source_index: r.source_index,
+                source_run_id: r.source_run_id.clone(),
+                thread_id: r.thread_id.clone(),
+                source: r.source.clone(),
+                physical_root: None,
+                path: r.path.clone(),
+                immutable: r.source.mode == varin_runtime::SourceMode::FixedBranch,
+            };
+            super::operations::idempotent(self, KIND, &identity, |_| {
+                Ok(serde_json::to_value(Receipt {
+                    identity: identity.clone(),
+                    target,
+                    original_grant_id: record.result.grant_id.clone(),
+                    pin_id: None,
+                    fixed_root: None,
+                    released: true,
+                    initial_observation: None,
+                })?)
+            })?;
+        }
+        let released = self.release_file_observation(r)?;
+        if released
+            && matches!(
+                record.result.scope,
+                crate::source_resources::SourceAuthorityScope::SourceRead { .. }
+            )
+        {
+            self.release_source_authority(address, "retire", host, epoch)?;
+        }
+        Ok(released)
+    }
+    pub(crate) fn file_observation_idle(
+        &mut self,
+        r: &FileObservationRequest,
+        host: &str,
+    ) -> Result<bool, KernelError> {
+        let receipt = self.observation_receipt(r)?;
+        self.observation_grant(&receipt, host)?;
+        let root = self.observation_root(&r.source, &r.source_run_id, host)?;
+        if let Some(root) = root {
+            if receipt.target.physical_root.as_ref().is_none_or(|v| {
+                v.root_id != root.root_id || Path::new(&v.canonical_root) != root.canonical_root
+            }) {
+                return Err(denied("accepted physical root changed"));
+            }
+            self.observation_process_idle(&root.canonical_root)
+        } else {
+            Ok(true)
+        }
     }
     pub(crate) fn prepare_file_observation(
         &mut self,
@@ -658,6 +874,7 @@ impl Storage {
             if let Some(hint) = &self.observation_hints {
                 hint(Hint::Receipt {
                     receipt_id: task.request.receipt_id(),
+                    revoked: false,
                 });
             }
         }
@@ -742,13 +959,15 @@ mod tests {
                 ))
             );
             FileObservationRequest {
+                resource_authority: None,
+                registration_scope: None,
                 followup_id: key.into(),
                 source_index: 0,
                 source_run_id: "original-run".into(),
                 thread_id: "thread".into(),
                 actor: FollowupActor::User,
                 source: SourceSelection {
-                    resource_owner:varin_runtime::catalog::launches::SourceResourceOwner::Local,
+                    resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local,
                     environment_run_id: None,
                     mode: SourceMode::LiveRoot,
                     live_root: Some(LiveRoot {
@@ -1074,18 +1293,21 @@ mod tests {
                     .unwrap()
             })
             .collect::<Vec<_>>();
-        assert!(hints
-            .iter()
-            .any(|hint| matches!(hint,Hint::Receipt{receipt_id} if *receipt_id==r.receipt_id())));
         assert!(hints.iter().any(
-            |hint| matches!(hint,Hint::Receipt{receipt_id} if *receipt_id==damaged.receipt_id())
+            |hint| matches!(hint,Hint::Receipt{receipt_id,..} if *receipt_id==r.receipt_id())
+        ));
+        assert!(hints.iter().any(
+            |hint| matches!(hint,Hint::Receipt{receipt_id,..} if *receipt_id==damaged.receipt_id())
         ));
         assert_eq!(
             f.storage.load_grant("other-reader").unwrap().state,
             GrantState::Active
         );
-        assert!(f.read(&r, "epoch", "generation").is_err());
-        f.storage.release_file_observation(&r).unwrap();
+        assert!(
+            matches!(f.read(&r,"epoch","generation"),Err(KernelError::Authorization(message)) if message=="file_observation_revoked")
+        );
+        // Explicit B revocation reclaims its persistent observer pin even when A
+        // has paused or stopped polling an immutable snapshot.
         let pins: i64 = f
             .storage
             .conn
@@ -1096,6 +1318,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(pins, 0);
+        assert!(f.storage.release_file_observation(&r).unwrap());
         assert_eq!(
             f.storage.load_grant("reader").unwrap().state,
             GrantState::Revoked
@@ -1180,6 +1403,7 @@ mod tests {
         });
         assert!(f.storage.process_receipt_wake.is_some());
         assert!(!f.read(&r, "epoch", "generation").unwrap().storage_idle);
+        assert!(!f.storage.file_observation_idle(&r, "host").unwrap());
         let receipt = crate::process::receipt_path(&f.storage.root, "old-process");
         let temporary = receipt.with_extension("tmp");
         // Corrupt spool bytes must never be opened by the short terminal callback.
@@ -1233,6 +1457,7 @@ mod tests {
         let root = target.physical_root.unwrap().root_id;
         assert!(hints.try_iter().any(|id| id == root));
         assert!(f.read(&r, "epoch", "generation").unwrap().storage_idle);
+        assert!(f.storage.file_observation_idle(&r, "host").unwrap());
         assert!(f.storage.process_receipt_wake.is_none());
         assert_eq!(fs::read(f.work.join("result.txt")).unwrap(), b"unchanged");
         assert!(f.storage.process_record("old-process").unwrap().unwrap()["outputError"].is_null());

@@ -19,7 +19,7 @@ writing Pi session files or the Host harness's existing execution records.
   inspection/list serialization runs on workers, and content collection retains every launch reference.
   Policy preparation binds the actual admitted baseline supplied by its assembly owner; the runtime
   does not hard-code a kernel policy wrapper's name.
-- Catalog 66 / wire 26 retain reconstructable Host dependency graphs in the original tool/policy
+- Catalog 67 / wire 27 retain reconstructable Host dependency graphs in the original tool/policy
   binding content. Graph validation, hashing, persistence and hydration run outside Catalog. Short
   policy metadata records exact identity and a ContentStore reference; launch, selection and delegated
   execution roots participate in the same GC publication protocol. Recovery preserves the saved
@@ -643,6 +643,18 @@ model batches and policy graphs. A committed acceptance wins over a later cancel
 an already delivered Unknown remains historical. Eventual domain outcome uses the original external
 receipt, never a second model ToolResult. The private pending projection includes short original
 identities and control facts without reading request or acceptance bodies.
+
+`runtime.host_job.acceptance` captures the original domain acceptance reference and loads the exact
+completion outside the Catalog lock. A prior delivered Unknown completion or a later terminal result
+does not replace it. Host completion must return that immutable acceptance, even if cancellation or
+executor stop happened before the callback returned; current status belongs to the original external
+receipt and status query.
+
+Environment service forwards use this same Job owner. Their subject freezes the original Host epoch,
+credential-free target identity and service address. The Host's existing forward runtime alone owns
+listeners and stream drain; a close response is only evidence for that access path, not for the remote
+service process. Family reads, subtree controls, original Wait and Bot scope cleanup use the original
+Operation. A missing old Host epoch is Unknown, not permission to reopen a replacement listener.
 
 User commands retain a source Run for attribution without reopening or blocking that Run. Accepted
 Thread jobs survive ordinary Run completion/cancellation and extension retirement. Task-tree stop

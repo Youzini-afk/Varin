@@ -2,8 +2,9 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { KernelClient } from './kernel-client.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
-import type { Followup, FollowupRegisterParams, FollowupRegistrationTrigger } from './protocol.generated.js';
+import type { Followup, FollowupFilePreparation, FollowupRegisterParams, FollowupRegistrationTrigger } from './protocol.generated.js';
 import type { LiveSourceResolver } from './live-source.js';
+import { resourceThreadSource } from './thread-context.js';
 
 /** Same relative-path admission as Storage: preserve names, reject parent/root components. */
 export function followupFilePaths(trigger: FollowupRegistrationTrigger): string[] {
@@ -31,7 +32,43 @@ export async function registerUserFollowup(kernel: KernelClient, runtime: AgentR
   const source = launch?.selection.source;
   if (!source) throw new Error('File follow-up requires the original Run source');
   if (source.resource_owner.kind === 'managed_host') {
-    throw new Error('File follow-ups for a managed Source are not available yet. Use a timer or the original process completion trigger; this Host cannot observe the target Host’s files.');
+    const coordinatorHostId = runtime.coordinatorHostId;
+    // The original command records its read scope before B can acquire anything.
+    // A lost bind/adoption reply is recovered through that scope, not a new ledger.
+    const prepared = await kernel.agentRuntimeRequest<FollowupFilePreparation, 'runtime.followup.registration.prepare'>('runtime.followup.registration.prepare', {
+      ...input, coordinatorHostId,
+    }, signal);
+    if (prepared.followup) return prepared.followup;
+    if (prepared.source.resource_owner.kind !== 'managed_host') throw new Error('File follow-up source owner changed');
+    const client = await runtime.managedSource(prepared.source.resource_owner, signal);
+    let address = prepared.authority;
+    let fresh = false;
+    if (!address) {
+      const found = await client.inspectReadScope({ coordinatorHostId, scope: prepared.scope, source: prepared.source }, signal);
+      if (found.closed) throw new Error('File follow-up registration was cancelled');
+      const existing = found.authorities.find(authority => authority.current && authority.phase === 'ready');
+      if (existing) address = { coordinatorHostId, authorityId: existing.authorityId, resourceEpoch: existing.resourceEpoch };
+      else {
+        const binding = await client.bind({ coordinatorHostId, scope: prepared.scope,
+          source: resourceThreadSource(prepared.source)!, purpose: 'read', retention: 'caller',
+        }, signal);
+        address = { coordinatorHostId, authorityId: binding.authorityId, resourceEpoch: binding.resourceEpoch };
+        fresh = true;
+      }
+    }
+    let submitted = false;
+    try {
+      signal?.throwIfAborted();
+      submitted = true;
+      return await kernel.agentRuntimeRequest<Followup, 'runtime.followup.register'>('runtime.followup.register', {
+        ...input, fileAuthority: { kind: 'managed_host', ...address },
+      }, signal);
+    } finally {
+      // Only a fresh, never-submitted caller can be retired before acceptance.
+      // Borrowed or unknown addresses remain with the original command's recovery.
+      // Successful registration already acknowledged B's read-scope closure.
+      if (fresh && !submitted) await client.release({ ...address, mode: 'retire' });
+    }
   }
   if (source.mode === 'live_root') {
     if (!source.live_root || !validateLiveSource) throw new Error('Live source owner is unavailable');
@@ -45,7 +82,7 @@ export async function registerUserFollowup(kernel: KernelClient, runtime: AgentR
   try {
     signal?.throwIfAborted();
     return await kernel.agentRuntimeRequest('runtime.followup.register', {
-      ...input, fileAuthority: { grantId: grant.grantId },
+      ...input, fileAuthority: { kind: 'local', grantId: grant.grantId },
     }, signal);
   } finally {
     // Request cancellation or an unknown reply must not destroy an already accepted
