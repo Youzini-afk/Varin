@@ -57,7 +57,9 @@ impl Storage {
                 || scope.closed
                 || scope.source != record.result.source
                 || record.result.resource_epoch != epoch
-                || matches!(record.result.phase.as_str(), "retired" | "revoked")
+                || !matches!(record.result.phase.as_str(), "preparing" | "ready")
+                || (record.purpose == "mcp_owner"
+                    && scope.mcp_closed_epoch.is_some_and(|closed| record.result.scope.epoch() <= closed))
             {
                 return Err(denied("Source authority no longer admits new work"));
             }
@@ -75,8 +77,12 @@ impl Storage {
             || !p.scope.validate()
             || !matches!(
                 p.purpose.as_str(),
-                "source" | "read" | "integration" | "result" | "process_view" | "script_environment"
+                "source" | "read" | "integration" | "result" | "process_view" | "script_environment" | "mcp_owner"
             )
+            || (p.purpose == "mcp_owner" && (!p.enabled_tools.is_empty()
+                || !matches!(p.scope, SourceAuthorityScope::Run { .. })
+                || p.operation_id.is_some()
+                || p.source.mode == varin_runtime::SourceMode::FixedBranch))
         {
             return Err(denied("Source authority identity is incomplete"));
         }
@@ -154,9 +160,14 @@ impl Storage {
                     epoch: p.scope.epoch(),
                     ready: false,
                     closed: false,
+                    mcp_closed_epoch: None,
                 });
         if scope.source != p.source || scope.epoch > p.scope.epoch() || scope.closed {
             return Err(denied("Source scope or coordinator epoch changed"));
+        }
+        if p.purpose == "mcp_owner" && (!scope.ready || scope.epoch != p.scope.epoch()
+            || scope.mcp_closed_epoch.is_some_and(|closed| p.scope.epoch() <= closed)) {
+            return Err(denied("MCP owner requires its already prepared original Run source"));
         }
         scope.epoch = p.scope.epoch();
         // Fencing new dispatch is separate from revoking the creation grant. Accepted
@@ -211,6 +222,7 @@ impl Storage {
             physical_root: None,
             first_preparation: !scope.ready,
             materialization_operation_id: format!("source-materialize:{key}"),
+            mcp_holders: Vec::new(),
         };
         let record = AuthorityRecord {
             principal_id: p.principal_id,
@@ -263,6 +275,7 @@ impl Storage {
                 epoch: 0,
                 ready: false,
                 closed: false,
+                mcp_closed_epoch: None,
             });
         if scope.source != p.source {
             return Err(denied("Original source-read scope changed"));
@@ -305,12 +318,13 @@ impl Storage {
                 authority_id: record.result.authority_id.clone(),
                 resource_epoch: record.result.resource_epoch.clone(),
             };
-            if close && record.result.phase != "revoked" {
-                self.release_source_authority(&address, "retire", host, epoch)?;
-            }
+            let phase = if close && record.result.phase != "revoked" {
+                self.release_source_authority(&address, "retire", host, epoch)?["phase"]
+                    .as_str().ok_or_else(|| denied("Source retirement has no phase"))?.to_string()
+            } else { record.result.phase.clone() };
             authorities.push(json!({"authorityId":record.result.authority_id,"resourceEpoch":record.result.resource_epoch,
-                "phase":if close && record.result.phase!="revoked" {"retired"}else{record.result.phase.as_str()},
-                "current":!scope.closed && record.result.resource_epoch==epoch && record.result.phase=="ready"}));
+                "phase":phase,
+                "current":!scope.closed && record.result.resource_epoch==epoch && phase=="ready"}));
         }
         Ok(json!({"closed":scope.closed,"authorities":authorities}))
     }
@@ -391,6 +405,7 @@ impl Storage {
             .ok_or_else(|| denied("Source scope is unavailable"))?;
         let scope = ScopeRecord {
             closed: prior.closed,
+            mcp_closed_epoch: prior.mcp_closed_epoch,
             source: record.result.source.clone(),
             epoch: record.result.scope.epoch(),
             ready: prior.ready || record.purpose != "result",
@@ -418,7 +433,23 @@ impl Storage {
         host_id: &str,
         epoch: &str,
     ) -> Result<Value, KernelError> {
+        if !matches!(mode, "retire" | "revoke") {
+            return Err(denied("Unknown source release mode"));
+        }
         let mut record = self.source_authority(address, false, epoch)?;
+        if mode == "retire" {
+            // Close new admission before checking physical drainage. A failed stop
+            // check leaves this original authority sealed, never ready again.
+            self.seal_source_record(&mut record)?;
+            if record.result.phase == "retaining"
+                && self.load_grant(&record.result.grant_id)?.state == crate::model::GrantState::Active
+            {
+                let retained: Vec<_> = record.result.mcp_holders.iter()
+                    .filter(|holder| !holder.released).cloned().collect();
+                return Ok(json!({"authorityId":address.authority_id,"phase":"retaining","grantIds":[],
+                    "receipt":{"retainedMcpHolders":retained}}));
+            }
+        }
         let receipt = match mode {
             "retire" => self.retire_grants(
                 &json!({"target":{"kind":"grant","grantId":record.result.grant_id}}),
@@ -427,7 +458,9 @@ impl Storage {
             "revoke" => self.revoke_grant(&json!({"grantId":record.result.grant_id}), host_id)?,
             _ => return Err(denied("Unknown source release mode")),
         };
-        record.result.phase = if mode == "retire" {
+        record.result.phase = if mode == "retire"
+            && self.load_grant(&record.result.grant_id)?.state != crate::model::GrantState::Revoked
+        {
             "retired"
         } else {
             "revoked"
@@ -443,6 +476,114 @@ impl Storage {
         Ok(
             json!({"authorityId":address.authority_id,"phase":record.result.phase,"grantIds":[record.result.grant_id],"receipt":receipt}),
         )
+    }
+    fn seal_source_record(&mut self, record: &mut AuthorityRecord) -> Result<(), KernelError> {
+        if record.purpose == "mcp_owner" {
+            let mut scope: ScopeRecord = self.source_record("source.scope", &record.scope_id)?
+                .ok_or_else(|| denied("Source scope is unavailable"))?;
+            if scope.source != record.result.source {
+                return Err(denied("Original MCP source scope changed"));
+            }
+            self.close_source_mcp_admission(&record.scope_id, &mut scope, record.result.scope.epoch())?;
+        }
+        if matches!(record.result.phase.as_str(), "retired" | "revoked") {
+            return Ok(());
+        }
+        record.result.phase = if record.purpose == "mcp_owner"
+            && record.result.mcp_holders.iter().any(|holder| !holder.released)
+        {
+            "retaining"
+        } else {
+            "draining"
+        }.into();
+        self.save_source_record("source.authority", &record.result.authority_id,
+            &record.result.source.workspace_id, &record.result.phase, record)
+    }
+    fn close_source_mcp_admission(
+        &mut self,
+        scope_id: &str,
+        scope: &mut ScopeRecord,
+        through_epoch: u64,
+    ) -> Result<(), KernelError> {
+        scope.mcp_closed_epoch = Some(scope.mcp_closed_epoch.map_or(through_epoch, |closed| closed.max(through_epoch)));
+        self.save_source_record("source.scope", scope_id, &scope.source.workspace_id,
+            if scope.closed { "closed" } else { "active" }, scope)
+    }
+    pub(crate) fn seal_source_authority(
+        &mut self,
+        address: &SourceAuthorityAddress,
+        epoch: &str,
+    ) -> Result<Value, KernelError> {
+        let mut record = self.source_authority(address, false, epoch)?;
+        self.seal_source_record(&mut record)?;
+        Ok(serde_json::to_value(record.result)?)
+    }
+    pub(crate) fn source_mcp_holder(
+        &mut self,
+        p: SourceMcpHolderParams,
+        epoch: &str,
+    ) -> Result<Value, KernelError> {
+        let address = SourceAuthorityAddress {
+            principal_id: p.principal_id,
+            coordinator_host_id: p.coordinator_host_id,
+            authority_id: p.authority_id,
+            resource_epoch: p.resource_epoch,
+        };
+        let mut record = self.source_authority(&address, false, epoch)?;
+        if record.purpose != "mcp_owner" || !p.binding.validate()
+            || !matches!(p.action.as_str(), "retain" | "inspect" | "release")
+        {
+            return Err(denied("Original MCP holder identity is incomplete"));
+        }
+        let previous = record.result.mcp_holders.iter()
+            .position(|holder| holder.binding.operation_id == p.binding.operation_id);
+        if previous.is_some_and(|index| record.result.mcp_holders[index].binding != p.binding) {
+            return Err(denied("Original MCP holder binding changed"));
+        }
+        if p.action == "inspect" && previous.is_none() {
+            return Err(denied("Original MCP holder is unavailable"));
+        }
+        if p.action == "retain" && !previous.is_some_and(|index| record.result.mcp_holders[index].released) {
+            let grant = self.load_grant(&record.result.grant_id)?;
+            if !matches!(record.result.phase.as_str(), "ready" | "retaining")
+                || record.result.resource_epoch != epoch
+                || grant.kernel_epoch != epoch
+                || grant.state != crate::model::GrantState::Active
+            {
+                return Err(denied("Original MCP owner no longer admits holders"));
+            }
+            if previous.is_none() {
+                self.source_authority(&address, true, epoch)?;
+                if record.result.phase != "ready" {
+                    return Err(denied("Sealed MCP owner cannot acquire another holder"));
+                }
+            }
+        }
+        let index = match previous {
+            Some(index) => index,
+            None => {
+                // A release can overtake acceptance. Preserve its complete immutable
+                // identity so a delayed retain can only recall the closed reference.
+                record.result.mcp_holders.push(SourceMcpHolder {
+                    binding: p.binding,
+                    released: p.action == "release",
+                });
+                record.result.mcp_holders.len() - 1
+            }
+        };
+        if p.action == "release" {
+            record.result.mcp_holders[index].released = true;
+            if record.result.phase == "retaining"
+                && record.result.mcp_holders.iter().all(|holder| holder.released)
+            {
+                record.result.phase = "draining".into();
+            }
+        }
+        if p.action != "inspect" {
+            self.save_source_record("source.authority", &address.authority_id,
+                &record.result.source.workspace_id, &record.result.phase, &record)?;
+        }
+        Ok(json!({"holder":record.result.mcp_holders[index],"authority":record.result}))
     }
     pub(crate) fn inspect_source_scope(
         &self,
@@ -471,6 +612,18 @@ impl Storage {
         epoch: &str,
         host_id: &str,
     ) -> Result<Value, KernelError> {
+        if !matches!(p.mode.as_str(), "retire" | "revoke") {
+            return Err(denied("Unknown source release mode"));
+        }
+        let scope_id = format!("source-scope:{}", hash_json(&json!([
+            p.principal_id, p.coordinator_host_id, ["run", p.thread_id, p.run_id]
+        ]))?);
+        if let Some(mut scope) = self.source_record::<ScopeRecord>("source.scope", &scope_id)? {
+            let through_epoch = scope.epoch;
+            // Commit the authenticated scope fence before enumerating authorities:
+            // an MCP grant that has not opened an owner yet is fenced as well.
+            self.close_source_mcp_admission(&scope_id, &mut scope, through_epoch)?;
+        }
         let records = {
             let mut q = self.conn.prepare(
                 "SELECT payload_json FROM domain_records WHERE record_type='source.authority'",

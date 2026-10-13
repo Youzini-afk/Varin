@@ -11,7 +11,7 @@ const original = (): ManagedSourceLocalScope => ({
     workspace_id: 'original-workspace', execution_workspace_id: 'child-workspace', mode: 'materialized', branch_id: 'branch', revision: 4, live_root: null },
   physicalRoot: { hostId: 'host-b', canonicalRoot: '/b/physical-child', rootId: 'b-root' }, grant: {} as never,
 });
-function fixture() {
+function fixture(transportOwner?: Parameters<typeof createManagedMcpService>[0]["transportOwner"]) {
   const scopes: McpAuthorityScope[] = [];
   const calls: unknown[] = [];
   let trusted = true, releases = 0, scopeReleases = 0, snapshots = 0;
@@ -20,7 +20,7 @@ function fixture() {
   let tokenFailure = false;
   const signals: AbortSignal[] = [];
   let dispatch: () => Promise<unknown> = async () => ({ content: [] });
-  const service = createManagedMcpService({ hostId: 'host-b', agentDir: '/b/agent',
+  const service = createManagedMcpService({ hostId: 'host-b', agentDir: '/b/agent', ...(transportOwner ? { transportOwner } : {}),
     admitSource: async () => {},
     admitWorkspaceRegistration: async id => { expect(id).toBe('original-workspace'); return { canonicalPath: '/b/original-project' }; },
     projectTrusted: () => trusted,
@@ -49,6 +49,9 @@ it('selects only B project configuration and the admitted B physical cwd', async
   expect(f.scopes).toMatchObject([{ resourceOwner: scope.source.resource_owner, configurationScopes: ['project'],
     agentDir: '/b/agent', configCwd: '/b/original-project', executionCwd: '/b/physical-child', executionScope: 'workspace',
     environmentId: JSON.stringify(['host-b', 'caller-a', 'host-a', 'child-workspace', 'authority', 'b-epoch']), sessionId: 'managed:host-a:thread' }]);
+  f.revoke();
+  await f.service.releaseView({ principal: { ...scope.principal, capabilities: [] }, coordinatorHostId: scope.coordinatorHostId,
+    authorityId: scope.authorityId, resourceEpoch: scope.resourceEpoch }, { kind: 'release', handleId: 'view', creationRequestId: 'creation' });
   await f.service.release(scope); expect(f.counts()).toEqual({ releases: 1, scopeReleases: 1, snapshots: 1 });
 });
 it('rejects read-only, wrong Host and insufficient principals before opening transports', async () => {
@@ -117,4 +120,16 @@ it('interrupts entered RPCs with the original target token and projects only exp
   while (live.signals.length < 2) await Promise.resolve();
   live.withdraw(); expect(live.signals.map(signal => signal.aborted)).toEqual([true, true]);
   finish(); await Promise.all(work); await live.service.release(scope);
+});
+
+it('seals ordinary views without draining the retained original daemon, then drains on final release', async () => {
+  let nativeDrains = 0;
+  const f = fixture(() => ({ adapt: value => value, drain: async () => { nativeDrains++; }, executorsStopped: () => nativeDrains > 0 }));
+  const scope = original();
+  await f.service.request(scope, { kind: 'snapshot', handleId: 'original-view', creationRequestId: 'open' });
+  expect(await f.service.release(scope, { retainMcpHolders: true })).toEqual({ executorStopped: false });
+  expect(nativeDrains).toBe(0); expect(f.counts().releases).toBe(1);
+  expect(await f.service.request(scope, { kind: 'snapshot', handleId: 'late', creationRequestId: 'late' })).toMatchObject({ ok: false });
+  expect(await f.service.release(scope)).toEqual({ executorStopped: true });
+  expect(nativeDrains).toBe(1);
 });

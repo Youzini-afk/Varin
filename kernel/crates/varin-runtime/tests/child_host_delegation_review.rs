@@ -48,6 +48,7 @@ fn mcp() -> HostToolBinding {
                     "A".into(),
                     McpServerSelection {
                         owner: McpServerOwner {
+                        source_authority: None,
                             resource_owner: SourceResourceOwner::Local,
                             configuration: McpConfiguration {
                                 agent_dir: "/fixture/agent".into(),
@@ -64,6 +65,7 @@ fn mcp() -> HostToolBinding {
                     "B".into(),
                     McpServerSelection {
                         owner: McpServerOwner {
+                        source_authority: None,
                             resource_owner: SourceResourceOwner::Local,
                             configuration: McpConfiguration {
                                 agent_dir: "/fixture/agent".into(),

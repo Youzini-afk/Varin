@@ -101,6 +101,42 @@ pub(crate) struct SourceAuthorityAddress {
     pub authority_id: String,
     pub resource_epoch: String,
 }
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceMcpHolderBinding {
+    pub operation_id: String,
+    pub execution_owner: ExecutorOwner,
+    pub purpose: String,
+    pub endpoint: varin_runtime::catalog::host_jobs::McpEndpoint,
+}
+impl SourceMcpHolderBinding {
+    pub fn validate(&self) -> bool {
+        !self.operation_id.is_empty()
+            && matches!(&self.execution_owner, ExecutorOwner::External { .. })
+            && self.execution_owner.validate()
+            && matches!(self.purpose.as_str(), "task" | "resource_observer")
+            && !self.endpoint.server.is_empty()
+            && !self.endpoint.resource_key.is_empty()
+            && !self.endpoint.configuration_version.is_empty()
+            && !self.endpoint.credential_version.is_empty()
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceMcpHolder {
+    pub binding: SourceMcpHolderBinding,
+    pub released: bool,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceMcpHolderParams {
+    pub principal_id: String,
+    pub coordinator_host_id: String,
+    pub authority_id: String,
+    pub resource_epoch: String,
+    pub binding: SourceMcpHolderBinding,
+    pub action: String,
+}
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SourceProcessAccessParams {
@@ -304,6 +340,7 @@ pub(crate) struct SourceAuthorityResult {
     pub physical_root: Option<LiveRoot>,
     pub first_preparation: bool,
     pub materialization_operation_id: String,
+    pub mcp_holders: Vec<SourceMcpHolder>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -323,6 +360,10 @@ pub(crate) struct ScopeRecord {
     pub epoch: u64,
     pub ready: bool,
     pub closed: bool,
+    // A seal fences MCP admission only through this coordinator epoch. Other
+    // original Source purposes and a later Run epoch keep their own admission.
+    #[serde(deserialize_with = "Option::<u64>::deserialize")]
+    pub mcp_closed_epoch: Option<u64>,
 }
 pub(crate) fn denied(message: &str) -> KernelError {
     KernelError::Authorization(message.into())
@@ -611,6 +652,9 @@ pub(crate) fn prepare_request(
                 resource_epoch: p.resource_epoch,
             };
             let record = storage.source_authority(&address, false, epoch)?;
+            if record.purpose == "mcp_owner" {
+                return Err(denied("MCP owner does not admit file observations"));
+            }
             let r = p.action.request();
             let mut source = r.source.clone();
             if matches!(record.result.scope, SourceAuthorityScope::SourceRead { .. })
@@ -669,6 +713,12 @@ pub(crate) fn prepare_request(
         }
         "source.authority.bind" => {
             storage.source_authority_bind(serde_json::from_value(params)?, epoch, host)?
+        }
+        "source.authority.seal" => {
+            storage.seal_source_authority(&serde_json::from_value(params)?, epoch)?
+        }
+        "source.mcp.holder" => {
+            storage.source_mcp_holder(serde_json::from_value(params)?, epoch)?
         }
         "source.authority.inspect" => serde_json::to_value(
             storage
@@ -739,7 +789,7 @@ pub(crate) fn prepare_request(
         "source.resource.authorize" | "source.resource.execute" => {
             let input: SourceResourceCallParams = serde_json::from_value(params)?;
             let record = storage.source_authority(&address(&input), true, epoch)?;
-            if record.result.phase != "ready" || matches!(record.purpose.as_str(), "result" | "process_view" | "script_environment") {
+            if record.result.phase != "ready" || matches!(record.purpose.as_str(), "result" | "process_view" | "script_environment" | "mcp_owner") {
                 return Err(denied("Source does not admit model tools"));
             }
             let authorize = method == "source.resource.authorize";
@@ -787,6 +837,7 @@ pub(crate) fn prepare_request(
                     resource_epoch: p.resource_epoch,
                 };
                 let record = storage.source_authority(&address, true, epoch)?;
+                if record.purpose == "mcp_owner" { return Err(denied("MCP owner only admits its dedicated process pipe")); }
                 if record.purpose == "process_view" { return Err(denied("Process view only admits its original process projection")); }
                 if record.purpose == "script_environment" && !matches!(&action, SourceResourceAction::ProcessObservation { process_id, .. } if record.operation_id.as_deref() == Some(process_id.as_str())) {
                     return Err(denied("Script authority only observes its original evaluator process"));

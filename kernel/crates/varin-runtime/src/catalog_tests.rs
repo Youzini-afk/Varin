@@ -2179,6 +2179,7 @@ fn tool_activation_retains_its_exact_composition_through_collection_and_reopen()
                 "fixture".into(),
                 launches::McpServerSelection {
                     owner: launches::McpServerOwner {
+                        source_authority: None,
                         resource_owner: launches::SourceResourceOwner::Local,
                         configuration: launches::McpConfiguration {
                             agent_dir: "/fixture/agent".into(),

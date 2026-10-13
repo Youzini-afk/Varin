@@ -3340,8 +3340,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   kernelClient.subscribeExit(() => { void targetMcpService.close(); });
   managedRemoteExecution.setSourceOwner(createManagedSourceService({ kernel: kernelClient, hostId,
     documents: documentsAuthority, validateLiveSource: liveSources.validate, prepareSource: prepareThreadSource,
-    languageAvailable: true, releaseSource: async scope => {
-      const [, mcp] = await Promise.all([targetSourceQuery.release(scope), targetMcpService.release(scope)]);
+    releaseMcpView: (scope, action) => targetMcpService.releaseView(scope, action),
+    languageAvailable: true, releaseSource: async (scope, retention) => {
+      const [, mcp] = await Promise.all([targetSourceQuery.release(scope), targetMcpService.release(scope, retention)]);
       return { mcpExecutorStopped: mcp.executorStopped };
     }, cleanupSource: targetSourceQuery.cleanup,
     serviceOperation: (scope, operation, signal) => {

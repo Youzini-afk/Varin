@@ -425,7 +425,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
         }
         if(target.task) {
           if(!options.tasks)return noEffect('mcp_task_owner_unavailable');
-          const taskLease=await lease.taskOwner(target.tool.server,undefined,signal);
+          const taskLease=await lease.taskOwner(target.tool.server,undefined,signal,{operationId:call.operationId,executionOwner:owner});
           return await options.tasks.submit({call,owner,lease:taskLease,tool:target.tool,args:target.args,signal,beforeDispatch,
             ...(target.ttl === undefined?{}:{ttl:target.ttl})});
         }

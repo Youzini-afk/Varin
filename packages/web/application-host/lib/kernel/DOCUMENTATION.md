@@ -1320,6 +1320,16 @@ so those failures do not wait forever for a guardian that never admitted the tar
 covers adapter/controlled owner ports and native pre-spawn/reopen receipts, not a full two-Host
 SDK/Kernel lifecycle.
 
+The frozen per-server owner includes its original target Source address. Initial MCP preparation uses
+an `mcp_owner` purpose inside the existing Source authority so retaining its daemon cannot extend an
+ordinary Run shell grant. Admitted Operation holders are immutable reference/fencing records there;
+Catalog remains the only Task/observer state owner. Storage seals new admission before Run retirement,
+preserves existing holders without changing resource keys or grants, and explicit revocation bypasses
+retention. Final holder release still requires the original native stop before grant retirement.
+These are lifetime prerequisites; managed Task/observer SDK forwarding is not enabled yet. The current
+internal formats are Storage 18, Agent Catalog 68 and private wire 32; older formats are rejected by
+the existing read-only gate with data preserved, without automatic migration or cleanup.
+
 Managed MCP Tasks, persistent resource observers, finite reverse interactions and mixed-owner child
 preparation, explicit managed cold calendar starts and broader combined cross-Host file recovery
 still have separate implementation work. Computer assignments, Agent/Bot identity, global settings and model

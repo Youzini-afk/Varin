@@ -15,6 +15,6 @@ export function createMcpTaskRecovery(options:{
     const context=await options.kernel.agentRuntimeRequest<{threadId:string;source:LaunchSource|null;binding:McpBinding},'runtime.host_job.task.context'>(
       'runtime.host_job.task.context',{operationId:pending.binding.operationId},signal);
     const lease=await createMcpOriginalOwnerRecovery(options)(pending.runId,subject.endpoint,context,signal);
-    try{return await lease.taskOwner(subject.endpoint.server,subject.endpoint,signal);}finally{lease.release();}
+    try{return await lease.taskOwner(subject.endpoint.server,subject.endpoint,signal,{operationId:pending.binding.operationId,executionOwner:pending.binding.executionOwner});}finally{lease.release();}
   };
 }

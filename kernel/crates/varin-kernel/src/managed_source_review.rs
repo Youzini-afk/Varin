@@ -2602,3 +2602,218 @@ fn script_source_stop_fences_late_spawn_and_recalls_original_after_reopen() {
     drop(reopened);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn original_mcp_holders_seal_scope_retirement_fence_replay_and_survive_reopen() {
+    let root = std::env::temp_dir().join(format!("varin-mcp-owner-{}", uuid::Uuid::new_v4()));
+    let work = root.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let owner = Owner::new(root.join("storage"), "mcp-host", "mcp-generation", "mcp-epoch");
+    let (ordinary, source) = owner.bind_live(&work, "ordinary-run-grant", 1);
+    let open_mcp = |grant: &str| {
+        owner.rpc("authority.grant.issue", json!({"grantId":grant,"hostGeneration":owner.generation,
+            "storageIdentity":owner.root,"sessionId":null,"owningWorkspace":"workspace","executionWorkspace":"workspace",
+            "threadId":"thread","runId":"run","capabilities":["storage.read","storage.write","process"],"pathScopes":[""]}), None).unwrap();
+        let physical = owner.rpc("file.root.register", json!({"workspaceId":"workspace",
+            "executionWorkspaceId":"workspace","canonicalRoot":work}), Some(grant)).unwrap();
+        let open = json!({"principalId":"client","coordinatorHostId":"coordinator",
+            "scope":{"kind":"run","threadId":"thread","runId":"run","epoch":1},
+            "source":source,"grantId":grant,"enabledTools":[],"purpose":"mcp_owner"});
+        let mut invalid = open.clone();
+        invalid["enabledTools"] = json!(["file_read"]);
+        assert!(owner.rpc("source.authority.open", invalid, None).is_err());
+        let mut invalid = open.clone();
+        invalid["operationId"] = json!("must-not-rewrite-grant-owner");
+        assert!(owner.rpc("source.authority.open", invalid, None).is_err());
+        let mut invalid = open.clone();
+        invalid["scope"]["epoch"] = json!(2);
+        assert!(owner.rpc("source.authority.open", invalid, None).is_err());
+        let opened = owner.rpc("source.authority.open", open, None).unwrap();
+        assert_eq!(opened["mcpHolders"], json!([]));
+        assert!(opened["operationId"].is_null());
+        assert_eq!(opened["firstPreparation"], false);
+        let address = json!({"principalId":"client","coordinatorHostId":"coordinator",
+            "authorityId":opened["authorityId"],"resourceEpoch":opened["resourceEpoch"]});
+        let mut bind = address.clone();
+        bind["physicalRoot"] = source["live_root"].clone();
+        bind["toolBinding"] = json!({"resourceOwner":source["resource_owner"],"grantId":grant,
+            "runId":"run","threadId":"thread","workspaceId":"workspace","executionWorkspaceId":"workspace",
+            "rootId":physical["rootId"],"sourceMode":"live_root","liveRoot":source["live_root"],"enabledTools":[]});
+        owner.rpc("source.authority.bind", bind.clone(), None).unwrap();
+        (address, bind)
+    };
+    let (address, bind) = open_mcp("original-mcp-grant");
+    let (revocable, _) = open_mcp("revocable-mcp-grant");
+    let grant = |id: &str| -> Value {
+        let conn = rusqlite::Connection::open_with_flags(root.join("storage/catalog.sqlite"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let body: String = conn.query_row("SELECT grant_json FROM grants WHERE grant_id=?1", [id], |row| row.get(0)).unwrap();
+        serde_json::from_str(&body).unwrap()
+    };
+    let initial_grant = grant("original-mcp-grant");
+    let binding = |id: &str, purpose: &str| json!({"operationId":id,
+        "executionOwner":{"kind":"external","identity":"original-mcp-owner","epoch":"original-mcp-owner-epoch"},
+        "purpose":purpose,"endpoint":{"server":"original-server","resourceKey":"original-resource",
+            "configurationVersion":"original-config","credentialVersion":"original-credentials"}});
+    let holder = |address: &Value, binding: &Value, action: &str| {
+        let mut params = address.clone();
+        params["binding"] = binding.clone();
+        params["action"] = json!(action);
+        params
+    };
+    let task = binding("original-task", "task");
+    let observer = binding("original-observer", "resource_observer");
+    assert!(owner.rpc("source.mcp.holder", holder(&ordinary, &task, "retain"), None).is_err());
+    assert!(owner.rpc("source.mcp.holder", holder(&address, &task, "inspect"), None).is_err());
+    for malformed in [json!({"kind":"kernel"}), json!({"kind":"external","identity":"","epoch":"epoch"})] {
+        let mut invalid = task.clone();
+        invalid["executionOwner"] = malformed;
+        assert!(owner.rpc("source.mcp.holder", holder(&address, &invalid, "retain"), None).is_err());
+    }
+    let cancelled = binding("cancelled-before-retain", "task");
+    let closed = owner.rpc("source.mcp.holder", holder(&address, &cancelled, "release"), None).unwrap();
+    assert_eq!(closed["holder"]["released"], true);
+    assert_eq!(owner.rpc("source.mcp.holder", holder(&address, &cancelled, "retain"), None).unwrap(), closed);
+    let retained = owner.rpc("source.mcp.holder", holder(&address, &task, "retain"), None).unwrap();
+    assert_eq!(retained["holder"]["binding"], task);
+    assert_eq!(retained["holder"]["released"], false);
+    owner.rpc("source.mcp.holder", holder(&address, &observer, "retain"), None).unwrap();
+    owner.rpc("source.mcp.holder", holder(&revocable, &task, "retain"), None).unwrap();
+    let mut validate = address.clone();
+    validate["requestId"] = json!("validate-original-mcp");
+    validate["clientCapabilities"] = json!(["filesystem:read"]);
+    validate["operation"] = json!({"kind":"validate"});
+    assert!(owner.rpc("source.service.call", validate.clone(), None).is_ok());
+    assert!(owner.tool(&address, "file_read", "forbidden-mcp-tool", json!({"path":"note.txt"})).is_err());
+    for field in ["principalId", "coordinatorHostId", "resourceEpoch"] {
+        let mut foreign = holder(&address, &task, "release");
+        foreign[field] = json!("foreign");
+        assert!(owner.rpc("source.mcp.holder", foreign, None).is_err());
+    }
+    for path in [vec!["purpose"], vec!["executionOwner", "identity"], vec!["executionOwner", "epoch"],
+        vec!["endpoint", "server"], vec!["endpoint", "resourceKey"], vec!["endpoint", "configurationVersion"], vec!["endpoint", "credentialVersion"]] {
+        let mut changed = task.clone();
+        if path.len() == 1 { changed[path[0]] = json!("resource_observer"); }
+        else { changed[path[0]][path[1]] = json!("changed"); }
+        for action in ["retain", "inspect", "release"] {
+            assert!(owner.rpc("source.mcp.holder", holder(&address, &changed, action), None).is_err());
+        }
+    }
+    let sealed = owner.rpc("source.authority.seal", address.clone(), None).unwrap();
+    assert_eq!(sealed["phase"], "retaining");
+    assert_eq!(sealed["grantId"], "original-mcp-grant");
+    assert!(sealed["operationId"].is_null());
+    assert_eq!(grant("original-mcp-grant"), initial_grant, "holder/seal never rewrites original grant ownership");
+    assert!(owner.rpc("source.authority.bind", bind, None).is_err());
+    assert!(owner.rpc("source.service.call", validate, None).is_err());
+    assert!(owner.rpc("source.mcp.holder", holder(&address, &binding("late-holder", "task"), "retain"), None).is_err());
+    assert_eq!(owner.rpc("source.mcp.holder", holder(&address, &task, "retain"), None).unwrap()["holder"], retained["holder"]);
+    let scope = json!({"principalId":"client","coordinatorHostId":"coordinator","threadId":"thread","runId":"run","mode":"retire"});
+    let retired_scope = owner.rpc("source.authority.release_scope", scope, None).unwrap();
+    assert_eq!(retired_scope["pendingAuthorities"], json!([]));
+    let retained_owner = retired_scope["released"].as_array().unwrap().iter()
+        .find(|value| value["authorityId"] == address["authorityId"]).unwrap();
+    assert_eq!(retained_owner["phase"], "retaining");
+    assert_eq!(retained_owner["grantIds"], json!([]));
+    assert_eq!(retained_owner["receipt"]["retainedMcpHolders"].as_array().unwrap().len(), 2);
+    assert_eq!(grant("original-mcp-grant"), initial_grant);
+    assert_eq!(grant("ordinary-run-grant")["state"], "retired");
+    let mut revoke = revocable.clone();
+    revoke["mode"] = json!("revoke");
+    assert_eq!(owner.rpc("source.authority.release", revoke, None).unwrap()["phase"], "revoked");
+    assert_eq!(grant("revocable-mcp-grant")["state"], "revoked");
+    assert!(owner.rpc("source.mcp.holder", holder(&revocable, &task, "retain"), None).is_err());
+    assert_eq!(owner.rpc("source.mcp.holder", holder(&revocable, &task, "inspect"), None).unwrap()["holder"]["released"], false);
+    assert_eq!(owner.rpc("source.mcp.holder", holder(&revocable, &task, "release"), None).unwrap()["authority"]["phase"], "revoked");
+    let mut retire_revoked = revocable;
+    retire_revoked["mode"] = json!("retire");
+    assert_eq!(owner.rpc("source.authority.release", retire_revoked, None).unwrap()["phase"], "revoked");
+    drop(owner);
+    let reopened = Owner::new(root.join("storage"), "mcp-host", "new-generation", "new-epoch");
+    let recalled = reopened.rpc("source.mcp.holder", holder(&address, &task, "inspect"), None).unwrap();
+    assert_eq!(recalled["authority"]["resourceEpoch"], "mcp-epoch");
+    assert_eq!(recalled["authority"]["grantId"], "original-mcp-grant");
+    assert_eq!(recalled["holder"], retained["holder"]);
+    assert_eq!(grant("original-mcp-grant"), initial_grant, "reopening does not recreate or reissue the original owner");
+    assert!(reopened.rpc("source.mcp.holder", holder(&address, &task, "retain"), None).is_err());
+    let first = reopened.rpc("source.mcp.holder", holder(&address, &task, "release"), None).unwrap();
+    assert_eq!(first["authority"]["phase"], "retaining");
+    let drained = reopened.rpc("source.mcp.holder", holder(&address, &observer, "release"), None).unwrap();
+    assert_eq!(drained["authority"]["phase"], "draining");
+    assert_eq!(grant("original-mcp-grant"), initial_grant, "last release cannot claim actual daemon drainage or retire its grant");
+    assert_eq!(reopened.rpc("source.mcp.holder", holder(&address, &observer, "retain"), None).unwrap()["holder"]["released"], true);
+    let mut retire = address;
+    retire["mode"] = json!("retire");
+    let done = reopened.rpc("source.authority.release", retire, None).unwrap();
+    assert_eq!(done["phase"], "retired");
+    assert_eq!(done["grantIds"], json!(["original-mcp-grant"]));
+    assert_eq!(grant("original-mcp-grant")["state"], "retired");
+    drop(reopened);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn original_mcp_scope_closure_fences_late_grants_and_preserves_newer_run_epochs() {
+    let root = std::env::temp_dir().join(format!("varin-mcp-scope-fence-{}", uuid::Uuid::new_v4()));
+    let work = root.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let owner = Owner::new(root.join("storage"), "mcp-host", "mcp-generation", "mcp-epoch");
+    let (_, source) = owner.bind_live(&work, "ordinary-epoch-one", 1);
+    let open = |grant: &str, epoch: u64, purpose: &str| -> Result<(Value, Value), KernelError> {
+        owner.rpc("authority.grant.issue", json!({"grantId":grant,"hostGeneration":owner.generation,
+            "storageIdentity":owner.root,"sessionId":null,"owningWorkspace":"workspace","executionWorkspace":"workspace",
+            "threadId":"thread","runId":"run","capabilities":["storage.read","storage.write","process"],"pathScopes":[""]}), None)?;
+        let physical = owner.rpc("file.root.register", json!({"workspaceId":"workspace",
+            "executionWorkspaceId":"workspace","canonicalRoot":work}), Some(grant))?;
+        let opened = owner.rpc("source.authority.open", json!({"principalId":"client","coordinatorHostId":"coordinator",
+            "scope":{"kind":"run","threadId":"thread","runId":"run","epoch":epoch},
+            "source":source,"grantId":grant,"enabledTools":[],"purpose":purpose}), None)?;
+        let address = json!({"principalId":"client","coordinatorHostId":"coordinator",
+            "authorityId":opened["authorityId"],"resourceEpoch":opened["resourceEpoch"]});
+        let mut bind = address.clone();
+        bind["physicalRoot"] = source["live_root"].clone();
+        bind["toolBinding"] = json!({"resourceOwner":source["resource_owner"],"grantId":grant,
+            "runId":"run","threadId":"thread","workspaceId":"workspace","executionWorkspaceId":"workspace",
+            "rootId":physical["rootId"],"sourceMode":"live_root","liveRoot":source["live_root"],"enabledTools":[]});
+        Ok((address, bind))
+    };
+    let scope = json!({"principalId":"client","coordinatorHostId":"coordinator","threadId":"thread","runId":"run","mode":"retire"});
+    let empty_mcp_scope = owner.rpc("source.authority.release_scope", scope.clone(), None).unwrap();
+    assert_eq!(empty_mcp_scope["released"].as_array().unwrap().len(), 1);
+    assert!(open("late-first-mcp-grant", 1, "mcp_owner").is_err(), "scope retirement must fence a late owner even before any MCP authority existed");
+    owner.bind_live(&work, "ordinary-epoch-two", 2);
+    let (original, bind) = open("original-epoch-two-mcp", 2, "mcp_owner").unwrap();
+    owner.rpc("source.authority.bind", bind, None).unwrap();
+    let (_, pending_bind) = open("pending-epoch-two-mcp", 2, "mcp_owner").unwrap();
+    let mut holder = original.clone();
+    holder["binding"] = json!({"operationId":"held-original-task",
+        "executionOwner":{"kind":"external","identity":"original-owner","epoch":"original-owner-epoch"},
+        "purpose":"task","endpoint":{"server":"server","resourceKey":"original-key",
+            "configurationVersion":"config","credentialVersion":"credentials"}});
+    holder["action"] = json!("retain");
+    let retained = owner.rpc("source.mcp.holder", holder.clone(), None).unwrap();
+    assert_eq!(owner.rpc("source.authority.seal", original.clone(), None).unwrap()["phase"], "retaining");
+    assert!(owner.rpc("source.authority.bind", pending_bind, None).is_err(), "seal also fences a sibling owner admitted before it could bind");
+    assert!(open("late-after-seal-mcp", 2, "mcp_owner").is_err());
+    for purpose in ["result", "process_view"] {
+        let (_, bind) = open(&format!("ordinary-{purpose}"), 2, purpose).unwrap();
+        assert!(owner.rpc("source.authority.bind", bind, None).is_ok(), "MCP closure must not fence unrelated Source purposes");
+    }
+    owner.bind_live(&work, "ordinary-epoch-three", 3);
+    let (_, bind) = open("fresh-epoch-three-mcp", 3, "mcp_owner").unwrap();
+    owner.rpc("source.authority.bind", bind, None).unwrap();
+    owner.rpc("source.authority.seal", original, None).unwrap();
+    assert!(open("fresh-after-old-owner-seal", 3, "mcp_owner").is_ok(), "sealing an old owner must not fence a newer coordinator epoch");
+    assert_eq!(owner.rpc("source.mcp.holder", holder, None).unwrap()["holder"], retained["holder"], "old holders keep the frozen original authority");
+    let retired = owner.rpc("source.authority.release_scope", scope, None).unwrap();
+    assert_eq!(retired["pendingAuthorities"], json!([]));
+    assert!(open("late-after-snapshot-mcp", 3, "mcp_owner").is_err(), "new grant identity cannot bypass the scope fence");
+    drop(owner);
+    let reopened = Owner::new(root.join("storage"), "mcp-host", "mcp-generation", "mcp-epoch");
+    let late = json!({"principalId":"client","coordinatorHostId":"coordinator",
+        "scope":{"kind":"run","threadId":"thread","runId":"run","epoch":3},"source":source,
+        "grantId":"late-after-snapshot-mcp","enabledTools":[],"purpose":"mcp_owner"});
+    assert!(reopened.rpc("source.authority.open", late, None).is_err(), "scope admission closure must survive reopening");
+    drop(reopened);
+    std::fs::remove_dir_all(root).unwrap();
+}

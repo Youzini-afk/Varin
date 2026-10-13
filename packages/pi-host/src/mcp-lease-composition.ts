@@ -150,7 +150,7 @@ export function composeMcpAuthorityLeases(parts: readonly McpAuthorityLeasePart[
     resourceEndpoint: service => serverOwner(service.server).resourceEndpoint(service),
     observeResource: (service, uri, options) => serverOwner(service.server).observeResource(service, uri, options),
     // These returned handles already retain their original connection independently.
-    taskOwner: (server, endpoint, signal) => serverOwner(server).taskOwner(server, endpoint, signal),
+    taskOwner: (server, endpoint, signal, origin) => serverOwner(server).taskOwner(server, endpoint, signal, origin),
     assertCallable: (name, version) => { const selected = target(name, version); selected.lease.assertCallable(selected.original, version); },
     revocationSignal: (name, version) => { const selected = target(name, version); return selected.lease.revocationSignal(selected.original, version); },
     validateArguments: (name, version, args) => { const selected = target(name, version); selected.lease.validateArguments(selected.original, version, args); },

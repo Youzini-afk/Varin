@@ -1383,7 +1383,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 31; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 32; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -1639,10 +1639,17 @@ export interface McpConfiguration {
   project_trusted: boolean;
 }
 
+export interface McpSourceAuthority {
+  coordinator_host_id: string;
+  authority_id: string;
+  resource_epoch: string;
+}
+
 export interface McpServerOwner {
   resource_owner: SourceResourceOwner;
   configuration: McpConfiguration;
   execution_scope: McpExecutionScope;
+  source_authority: McpSourceAuthority | null;
 }
 
 export interface McpServerSelection {

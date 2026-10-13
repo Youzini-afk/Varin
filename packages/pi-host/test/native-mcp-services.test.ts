@@ -58,7 +58,7 @@ test('provenance freezes each real scope owner and rejects changed owners before
     const local = await f.authority.acquire(f.scope, { servers: [] });
     const original = local.binding.provenance.servers.fixture!;
     assert.deepEqual(original.owner, { resource_owner: { kind: 'local' },
-      configuration: { agent_dir: f.root, config_cwd: f.root, project_trusted: false }, execution_scope: 'global' });
+      configuration: { agent_dir: f.root, config_cwd: f.root, project_trusted: false }, execution_scope: 'global', source_authority: null });
     assert(Object.isFrozen(original.owner));
     assert(Object.isFrozen(original.owner.resource_owner));
     assert(Object.isFrozen(original.owner.configuration));

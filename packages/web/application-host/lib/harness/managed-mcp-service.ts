@@ -54,6 +54,7 @@ interface Owner {
   views: Map<string, View>;
   composition: Promise<McpCompositionScope>;
   closed: boolean;
+  sealed?: boolean;
   closing?: Promise<{ executorStopped: boolean }>;
 }
 export function createManagedMcpService(options: {
@@ -78,16 +79,27 @@ export function createManagedMcpService(options: {
     if (!options.projectTrusted(project.canonicalPath)) throw new ManagedMcpAdmissionError('mcp_source_authority_denied');
     await options.admitSource(scope, signal);
     signal?.throwIfAborted();
-    return { resourceOwner: scope.source.resource_owner, configurationScopes: ['project'],
+    return { resourceOwner: scope.source.resource_owner, sourceAuthority: { coordinator_host_id: scope.coordinatorHostId,
+      authority_id: scope.authorityId, resource_epoch: scope.resourceEpoch }, configurationScopes: ['project'],
       agentDir: options.agentDir, configCwd: project.canonicalPath, projectTrusted: true,
       executionCwd: scope.physicalRoot.canonicalRoot, executionScope: 'workspace',
       environmentId: JSON.stringify([options.hostId, scope.principal.principalId, scope.coordinatorHostId, scope.source.execution_workspace_id,
         scope.authorityId, scope.resourceEpoch]), sessionId: `managed:${scope.coordinatorHostId}:${scope.scope.threadId}` };
   };
-  const release = async (scope: Address) => {
+  const release = async (scope: Address, options?: { retainMcpHolders: boolean }) => {
     const key = keyOf(scope), owner = owners.get(key);
     if (!owner) return { executorStopped: false };
     if (owner.closing) return owner.closing;
+    owner.sealed = true;
+    if (options?.retainMcpHolders) {
+      const views = [...owner.views.values()]; owner.views.clear();
+      for (const changed of owner.changed) changed();
+      await Promise.allSettled(views.map(async view => (await view.work).release()));
+      // Existing SDK holders retain only their original connections. Do not wait on their
+      // lifetime, or stop the original native daemon, when the ordinary Run view closes.
+      (await owner.composition).release();
+      return { executorStopped: false };
+    }
     owner.closed = true;
     for (const changed of owner.changed) changed();
     const views = [...owner.views.values()]; owner.views.clear();
@@ -108,25 +120,30 @@ export function createManagedMcpService(options: {
     void closing.catch(() => { if (owner.closing === closing) delete owner.closing; });
     return closing;
   };
+  const releaseView = async (scope: Address, action: Extract<ManagedMcpAction, { kind: 'release' }>): Promise<ManagedMcpReply> => {
+    const owner = owners.get(keyOf(scope)), view = owner?.views.get(action.handleId);
+    if (view && view.creationRequestId !== action.creationRequestId) throw new Error('mcp_view_creation_changed');
+    owner?.views.delete(action.handleId); if (view) (await view.work).release();
+    return { ok: true, value: null, executorStopped: true };
+  };
   const execute = async (scope: ManagedSourceLocalScope, action: ManagedMcpAction, signal: AbortSignal): Promise<unknown> => {
     const key = keyOf(scope);
     // A view release carries no new effect authority. Source retirement also calls release().
     if (action.kind === 'release') {
-      const owner = owners.get(key), view = owner?.views.get(action.handleId);
-      if (view && view.creationRequestId !== action.creationRequestId) throw new Error('mcp_view_creation_changed');
-      owner?.views.delete(action.handleId); if (view) (await view.work).release(); return null;
+      await releaseView(scope, action); return null;
     }
     const authorityScope = await authorize(scope, signal);
     let owner = owners.get(key);
     if (action.kind === 'snapshot') {
+      if (owner?.sealed) throw new Error('mcp_source_admission_closed');
       if (typeof action.handleId !== 'string' || !action.handleId) throw new Error('mcp_view_invalid');
       if (!owner) {
         const selected: Owner = { scope, authorityScope, incarnation: randomUUID(), revision: 0, changed: new Set(), views: new Map(),
           closed: false, composition: undefined as never };
         if (options.transportOwner) selected.transports = options.transportOwner(scope, async signal => {
-          if (selected.closed) throw new Error('mcp_source_view_closed');
+          if (selected.closed || selected.sealed) throw new Error('mcp_source_view_closed');
           await authorize(scope, signal);
-          if (selected.closed) throw new Error('mcp_source_view_closed');
+          if (selected.closed || selected.sealed) throw new Error('mcp_source_view_closed');
         });
         selected.composition = options.compositions.observe(authorityScope, () => {
           selected.revision++; for (const changed of selected.changed) changed();
@@ -149,13 +166,13 @@ export function createManagedMcpService(options: {
         void work.catch(() => { if (current.views.get(action.handleId) === created) current.views.delete(action.handleId); });
       }
       const lease = await view.work;
-      if (owner.closed || signal.aborted || owner.views.get(action.handleId) !== view) {
+      if (owner.closed || owner.sealed || signal.aborted || owner.views.get(action.handleId) !== view) {
         lease.release(); throw new Error('mcp_view_closed');
       }
       return { incarnation: owner.incarnation, revision: owner.revision, binding: lease.binding,
         implementationIdentity: lease.implementationIdentity, revocations: revoked(view) } satisfies ManagedMcpSnapshot;
     }
-    if (!owner || owner.closed) throw new Error('mcp_original_view_unavailable');
+    if (!owner || owner.closed || owner.sealed) throw new Error('mcp_original_view_unavailable');
     if (action.kind === 'changed') {
       if (action.incarnation !== owner.incarnation || !Number.isSafeInteger(action.after) || action.after < 0 || action.after > owner.revision)
         throw new Error('mcp_original_view_changed');
@@ -164,9 +181,9 @@ export function createManagedMcpService(options: {
         const aborted = () => { cleanup(); reject(signal.reason); };
         const cleanup = () => { owner!.changed.delete(changed); signal.removeEventListener('abort', aborted); };
         owner!.changed.add(changed); signal.addEventListener('abort', aborted, { once: true });
-        if (signal.aborted) aborted(); else if (owner!.closed || owner!.revision !== action.after) changed();
+        if (signal.aborted) aborted(); else if (owner!.closed || owner!.sealed || owner!.revision !== action.after) changed();
       });
-      if (owner.closed) throw new Error('mcp_view_closed');
+      if (owner.closed || owner.sealed) throw new Error('mcp_view_closed');
       return { incarnation: owner.incarnation, revision: owner.revision,
         revocations: Object.fromEntries([...owner.views].map(([handle, view]) => [handle, revoked(view)])) };
     }
@@ -175,7 +192,7 @@ export function createManagedMcpService(options: {
     const lease = await view.work;
     if (owner.closed || owner.views.get(action.handleId) !== view) throw new Error('mcp_view_closed');
     // The original domain rechecks its current declaration, trust and credentials at dispatch.
-    const beforeDispatch = async () => { await authorize(scope, signal); if (owner!.closed) throw new Error('mcp_view_closed'); };
+    const beforeDispatch = async () => { await authorize(scope, signal); if (owner!.closed || owner!.sealed) throw new Error('mcp_view_closed'); };
     const retainTools = (tools: readonly McpAuthorityTool[]) => { for (const tool of tools) view.tools.set(targetKey(tool.name, tool.schemaVersion), tool); revoked(view); return tools; };
     const retainService = (service: McpAuthorityService) => { view.services.set(targetKey(service.server, service.schemaVersion), service); revoked(view); return service; };
     switch (action.kind) {
@@ -194,10 +211,10 @@ export function createManagedMcpService(options: {
   return {
     adaptTransport(scope: McpAuthorityScope, transport: McpTransport): McpTransport {
       const owner = [...owners.values()].find(owner => owner.authorityScope.environmentId === scope.environmentId);
-      if (!owner || owner.closed || !owner.transports) throw new Error('mcp_original_source_transport_unavailable');
+      if (!owner || owner.closed || owner.sealed || !owner.transports) throw new Error('mcp_original_source_transport_unavailable');
       return owner.transports.adapt(transport);
     },
-    release,
+    release, releaseView,
     close: () => Promise.allSettled([...owners.values()].map(owner => release(owner.scope))),
     async request(scope: ManagedSourceLocalScope, action: ManagedMcpAction, signal?: AbortSignal): Promise<ManagedMcpReply> {
       try { return { ok: true, value: await execute(scope, action, signal ?? new AbortController().signal), executorStopped: true }; }

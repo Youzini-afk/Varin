@@ -27,7 +27,9 @@ export interface ManagedSourceServiceOptions {
   /** The target's local original preparer, never the coordinator's remote dispatcher. */
   prepareSource(input: ThreadPrepareSource, signal?: AbortSignal): Promise<ThreadPreparedSource>;
   serviceOperation?: ManagedSourceServiceHandler;
-  releaseSource?(scope: ManagedSourceCleanupScope): Promise<void | { mcpExecutorStopped: boolean }>;
+  releaseMcpView?(scope: ManagedSourceCleanupScope,
+    action: Extract<import('./managed-mcp-contract.js').ManagedMcpAction, { kind: 'release' }>): Promise<import('./managed-mcp-contract.js').ManagedMcpReply>;
+  releaseSource?(scope: ManagedSourceCleanupScope, options?: { retainMcpHolders: boolean }): Promise<void | { mcpExecutorStopped: boolean }>;
   cleanupSource?(scope: ManagedSourceCleanupScope): Promise<void>;
   languageAvailable?: boolean;
 }
@@ -109,7 +111,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     principal, coordinatorHostId, authorityId: authority.authorityId, resourceEpoch: authority.resourceEpoch,
     scope: authority.scope, source: authority.source, grant: kernel.sourceAuthorityGrant(authority), physicalRoot: authority.physicalRoot,
   });
-  const drainViews = async (principal: ManagedSourcePrincipal, coordinatorHostId: string, authority: SourceAuthorityResult): Promise<void> => {
+  const drainViews = async (principal: ManagedSourcePrincipal, coordinatorHostId: string, authority: SourceAuthorityResult, retainMcpHolders = false): Promise<void> => {
     // Stop new Host service references before taking the drain snapshot. Native
     // retirement remains the durable authority and validates its actual writers.
     closing.add(authorityKey(principal, { coordinatorHostId, authorityId: authority.authorityId, resourceEpoch: authority.resourceEpoch }));
@@ -119,7 +121,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       && flight.address.resourceEpoch === authority.resourceEpoch);
     for (const [, flight] of retained) flight.controller.abort();
     const drained = await Promise.all(retained.map(([, flight]) => flight.drain));
-    const stopped = await options.releaseSource?.(cleanupScope(principal, coordinatorHostId, authority));
+    const stopped = await options.releaseSource?.(cleanupScope(principal, coordinatorHostId, authority), { retainMcpHolders });
     // Stopping an original native MCP executor settles only its physical lifetime.
     // Catalog's unknown effect stays unknown; HTTP work has no such native tree receipt.
     for (let index = 0; index < retained.length; index++) {
@@ -284,13 +286,15 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       requireReadPrincipal(principal, input.coordinatorHostId);
       const source = selectedSource(input);
       const resultOnly = input.purpose === 'result';
+      if (input.purpose === 'mcp_owner' && (input.scope.kind !== 'run' || input.retention !== 'run' || input.operationId))
+        throw new SourceAdmissionError('source_authority_denied');
       if (['process_view', 'script_environment'].includes(input.purpose) && (input.scope.kind !== 'run' || input.retention !== 'caller' || !input.operationId))
         throw new SourceAdmissionError('source_authority_denied');
-      if (input.purpose === 'script_environment' && (source.mode === 'fixed_branch'
+      if (['script_environment', 'mcp_owner'].includes(input.purpose) && (source.mode === 'fixed_branch'
         || !['terminal:use', 'process:control'].every(capability => principal.capabilities.includes(capability)))) throw new SourceAdmissionError('source_authority_denied');
       await registration(source, signal);
       const selected = await capabilities(principal, { coordinatorHostId: input.coordinatorHostId, mode: source.mode,
-        enabledTools: input.scope.kind === 'source_read' || resultOnly ? [] : input.source.tools }, signal);
+        enabledTools: input.scope.kind === 'source_read' || resultOnly || input.purpose === 'mcp_owner' ? [] : input.source.tools }, signal);
       const integration = input.purpose === 'integration';
       if (integration && (input.scope.kind !== 'run' || !input.operationId || !principal.capabilities.includes('filesystem:write'))) throw new SourceAdmissionError('source_authority_denied');
       if (input.scope.kind === 'run' && input.retention === 'caller' && !input.operationId) throw new SourceAdmissionError('source_authority_denied');
@@ -306,7 +310,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         threadId: input.scope.threadId, ...(input.scope.kind === 'run' ? { runId: input.scope.runId } : {}),
         ...(input.operationId ? { operationId: input.operationId } : {}),
         capabilities: [...new Set([...selected.grantCapabilities, ...(integration ? ['recovery'] : []),
-          ...(resultOnly ? ['storage.write'] : []), ...(input.purpose === 'script_environment' ? ['process'] : [])])], pathScopes: [''] }, signal);
+          ...(resultOnly ? ['storage.write'] : []), ...(['script_environment', 'mcp_owner'].includes(input.purpose) ? ['process'] : [])])], pathScopes: [''] }, signal);
       let opened: SourceAuthorityResult | undefined;
       try {
         opened = await kernel.sourceRequest<SourceAuthorityResult>('source.authority.open', {
@@ -423,6 +427,13 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         const authority = mcpRelease ? await inspect(principal, input, controller.signal) : await admit(principal, input, controller.signal);
         if (authority.purpose === 'process_view' || authority.purpose === 'script_environment'
           && !(operation.kind === 'native_resource' && operation.action.kind === 'process_observation')) throw new SourceAdmissionError('source_authority_denied');
+        if (authority.purpose === 'mcp_owner' && operation.kind !== 'mcp' && operation.kind !== 'validate'
+          || operation.kind === 'mcp' && authority.purpose !== 'mcp_owner') throw new SourceAdmissionError('source_authority_denied');
+        if (operation.kind === 'mcp' && operation.action.kind === 'release') {
+          if (!options.releaseMcpView) throw new SourceAdmissionError('source_unavailable');
+          dispatched = true;
+          return options.releaseMcpView(cleanupScope(principal, input.coordinatorHostId, authority), operation.action);
+        }
         switch (operation.kind) {
           case 'native_resource': case 'validate':
             dispatched = true;
@@ -476,9 +487,12 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     },
     async release(principal, input, signal) {
       await kernel.start();
-      const authority = await inspect(principal, input, signal);
-      await drainViews(principal, input.coordinatorHostId, authority);
-      await cleanupArtifacts(principal, input.coordinatorHostId, authority);
+      let authority = await inspect(principal, input, signal);
+      if (authority.purpose === 'mcp_owner') authority = await kernel.sourceRequest<SourceAuthorityResult>(
+        'source.authority.seal', address(principal, input), signal);
+      const retained = input.mode === 'retire' && authority.mcpHolders.some(holder => !holder.released);
+      await drainViews(principal, input.coordinatorHostId, authority, retained);
+      if (!retained) await cleanupArtifacts(principal, input.coordinatorHostId, authority);
       const result = await kernel.sourceRequest<NativeRelease>('source.authority.release', { ...address(principal, input), mode: input.mode }, signal);
       closing.delete(authorityKey(principal, input));
       return projectRelease(result);
@@ -495,7 +509,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         const selected = await kernel.sourceRequest<ManagedSourceCapabilities>('source.capabilities', {
           mode: authority.source.mode, enabledTools: authority.toolBinding?.enabledTools ?? [], managed: true, languageAvailable: true,
         }, signal);
-        return { scope: authority.scope, phase: authority.phase, purpose: authority.purpose, operationId: authority.operationId, binding: project(authority, selected) };
+        return { scope: authority.scope, phase: authority.phase, purpose: authority.purpose, operationId: authority.operationId, mcpHolders: authority.mcpHolders, binding: project(authority, selected) };
       }));
     },
     async releaseScope(principal, input, signal) {
@@ -507,9 +521,14 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       // Match native retirement's original lifetime selection. A caller-owned
       // operation can outlive its Run; retirement must not close its Host work.
       const authorities = inspected.filter(authority => input.mode === 'revoke' || authority.operationId === null);
-      await Promise.all(authorities.map(async authority => {
-        await drainViews(principal, input.coordinatorHostId, authority);
-        await cleanupArtifacts(principal, input.coordinatorHostId, authority);
+      await Promise.all(authorities.map(async original => {
+        // Seal in Storage before the Host snapshot: no late holder may race this drain.
+        const authority = original.purpose === 'mcp_owner' ? await kernel.sourceRequest<SourceAuthorityResult>(
+          'source.authority.seal', address(principal, { coordinatorHostId: input.coordinatorHostId,
+            authorityId: original.authorityId, resourceEpoch: original.resourceEpoch }), signal) : original;
+        const retained = input.mode === 'retire' && authority.mcpHolders.some(holder => !holder.released);
+        await drainViews(principal, input.coordinatorHostId, authority, retained);
+        if (!retained) await cleanupArtifacts(principal, input.coordinatorHostId, authority);
       }));
       const result = await kernel.sourceRequest<{ released: NativeRelease[]; pendingAuthorities: string[] }>(
         'source.authority.release_scope', { ...params, mode: input.mode }, signal);
