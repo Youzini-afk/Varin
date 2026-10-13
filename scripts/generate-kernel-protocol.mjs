@@ -89,6 +89,7 @@ const rustType = (type) => {
   const generic = /^(\w+)<(.+)>$/u.exec(type);
   if (generic && schema.dto?.[generic[1]]?.rustType) return `${schema.dto[generic[1]].rustType}<${rustType(generic[2])}>`;
   if (schema.dto?.[type]?.rustType) return schema.dto[type].rustType;
+  if (schema.dto?.[type]?.taggedUnion) return `varin_runtime::${type}`;
   if (schema.runtimeEnums?.[type]) return `varin_runtime::${type}`;
   if (type.endsWith('[]')) return `Vec<${rustType(type.slice(0, -2))}>`;
   if (type === 'string') return 'String';
@@ -126,6 +127,7 @@ for (let changed = true; changed;) {
 }
 const renderRustDto = (name) => {
   const spec = schema.dto[name];
+  if (spec.taggedUnion) return `pub(crate) type ${name} = varin_runtime::${name};`;
   if (spec.rustType && !spec.fields) return `pub(crate) type ${name} = ${spec.rustType};`;
   const fields = Object.entries(spec.fields ?? {}).map(([field, descriptor]) => {
     const type = rustType(descriptor.type);

@@ -9,8 +9,9 @@ import { ThreadRunHistory } from './ThreadFamily';
 import { ThreadFollowupOccurrenceDetails } from './ThreadFollowupOccurrenceDetails';
 
 function jobSubjectLabel(subject: HostJobSubject): string {
-  return subject.kind === 'workspace' ? `${subject.workspaceId} · ${subject.subjectId}`
-    : `${subject.endpoint.server} · local dispatch ${subject.dispatchId}`;
+  if (subject.kind === 'workspace') return `${subject.workspaceId} · ${subject.subjectId}`;
+  if (subject.kind === 'environment_forward') return `${subject.hostId} · ${subject.serviceHost}:${subject.servicePort}`;
+  return `${subject.endpoint.server} · local dispatch ${subject.dispatchId}`;
 }
 
 const heldReason: Record<NonNullable<NonNullable<Followup['occurrence']>['hold_reason']>, string> = {

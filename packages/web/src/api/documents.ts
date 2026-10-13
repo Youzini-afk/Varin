@@ -112,7 +112,7 @@ export const parseDocumentWatchEvent = (value: unknown): VarinDocumentWatchEvent
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     const event = value as Record<string, unknown>;
     if (event.kind === 'surface-operation') {
-      if (!['capture', 'apply', 'undo'].includes(String(event.action))
+      if (!['capture', 'apply', 'undo', 'restore'].includes(String(event.action))
         || typeof event.requestId !== 'string' || !event.requestId
         || typeof event.operationId !== 'string' || !event.operationId
         || typeof event.workspaceId !== 'string' || !event.workspaceId

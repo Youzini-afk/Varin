@@ -131,7 +131,7 @@ describe('ResearchFactsPanel', () => {
     const scopes: ThreadResearchScope[] = ['old-source', 'new-source'].map(sourceRunId => ({ sourceRunId,
       workspaceId: `workspace:${sourceRunId}`, executionWorkspaceId: `workspace:${sourceRunId}`, canSubmit: true,
       source: { workspace_id: `workspace:${sourceRunId}`, execution_workspace_id: `workspace:${sourceRunId}`,
-        branch_id: `source:${sourceRunId}`, revision: 0, mode: 'fixed_branch', live_root: null },
+        branch_id: `source:${sourceRunId}`, revision: 0, mode: 'fixed_branch', live_root: null, resource_owner: { kind: 'local' } },
     }));
     const original = { ...attempt, state: 'failed', permissions: { control: true } } as ExperimentAttemptView;
     let attempts = [original];
@@ -170,7 +170,7 @@ describe('ResearchFactsPanel', () => {
     const selection = { ...identity, sourceRunId: 'read-source' };
     const api = {
       scopes: vi.fn(async () => [{ sourceRunId: selection.sourceRunId, workspaceId: 'workspace:reader', executionWorkspaceId: 'workspace:reader', canSubmit: false,
-        source: { workspace_id: 'workspace:reader', execution_workspace_id: 'workspace:reader', branch_id: 'source:reader', revision: 0, mode: 'fixed_branch' as const, live_root: null } }]),
+        source: { workspace_id: 'workspace:reader', execution_workspace_id: 'workspace:reader', branch_id: 'source:reader', revision: 0, mode: 'fixed_branch' as const, live_root: null, resource_owner: { kind: 'local' as const } } }]),
       list: vi.fn(async () => ({ attempts: [
         { ...attempt, permissions: { control: false } } as ExperimentAttemptView,
         { ...attempt, attemptId: 'attempt:old-branch', state: 'failed', permissions: { control: true } } as ExperimentAttemptView,

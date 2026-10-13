@@ -1356,7 +1356,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       );
     }
   };
-  let threadRecoveryNavigation: RecoverySessionNavigation;
   let threadRecoveryReady = false;
   const recoverySessionNavigation: RecoverySessionNavigation = {
     ready: conversation => conversation.kind === 'pi' || threadRecoveryReady,
@@ -1453,7 +1452,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   documentsAuthority.bindDurableMutationStorage((workspaceId, operation) => (
     foundationalRecoveryEngine.withWorkspaceStorage(
       workspaceId,
-      { mode: 'exclusive', purpose: 'agent-mutation', create: true },
+      { mode: 'shared', purpose: 'agent-mutation', create: true },
       (context) => operation(context),
     )
   ));
@@ -3300,7 +3299,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   }));
   const threadRecoveryOwners = { threads, runtime: agentRuntime, store: kernelRecoveryStore, storage: kernelStorageAdapter, kernel: kernelClient, liveSources };
-  threadRecoveryNavigation = createThreadRecoveryNavigation(threadRecoveryOwners);
+  const threadRecoveryNavigation = createThreadRecoveryNavigation(threadRecoveryOwners);
   kernelRecoveryContentStore.bindTargetResources(createThreadRecoveryFileResolver(threadRecoveryOwners));
   threads.bindRecoveryReader(async identity => {
     try {

@@ -1706,7 +1706,7 @@ export type VarinDirtyStateBarrierEvent = {
 };
 
 export type VarinDocumentSurfaceOperationEvent = {
-  action: 'capture' | 'apply' | 'undo';
+  action: 'capture' | 'apply' | 'undo' | 'restore';
   kind: 'surface-operation';
   operationId: string;
   requestId: string;
@@ -1755,10 +1755,18 @@ export interface VarinDocumentSurfaceOperationTarget extends VarinDocumentSurfac
   newText?: string;
   expectedAppliedRevision?: number;
   expectedAppliedHash?: string;
+  restoreState?: {
+    baseContent: string;
+    baseRevision: string | null;
+    encoding: string;
+    bom: boolean;
+    lineEnding: 'lf' | 'crlf' | 'cr';
+  };
 }
 
 export interface VarinDocumentSurfaceOperationPayload {
-  action: 'capture' | 'apply' | 'undo';
+  action: 'capture' | 'apply' | 'undo' | 'restore';
+  barrierId?: string;
   operationId: string;
   requestId: string;
   targets: VarinDocumentSurfaceOperationTarget[];
@@ -1767,13 +1775,14 @@ export interface VarinDocumentSurfaceOperationPayload {
 
 export interface VarinDocumentSurfaceOperationResourceResult {
   resource: VarinResourceReference;
-  status: 'captured' | 'applied' | 'undone' | 'failed';
+  status: 'captured' | 'applied' | 'undone' | 'restored' | 'failed';
   documentInstanceId?: string;
   beforeLocalEditRevision?: number;
   beforeHash?: string;
   afterLocalEditRevision?: number;
   afterHash?: string;
   content?: string;
+  baseContent?: string;
   message?: string;
 }
 

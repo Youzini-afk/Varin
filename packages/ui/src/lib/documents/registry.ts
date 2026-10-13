@@ -243,6 +243,9 @@ const applyRead = (record: DocumentRecord, result: VarinDocumentReadResult): Doc
   }
   const lineEnding = detectLineEnding(result.content);
   const normalized = normalizeEditorLineEndings(result.content);
+  if (record.dirty && record.buffer !== normalized && record.baseRevision === result.revision) {
+    return { ...record, status: record.conflict ? 'conflict' : 'ready', workspaceEpoch: result.epoch };
+  }
   if (record.dirty && record.buffer === normalized) {
     return {
       ...record,
@@ -328,6 +331,7 @@ export class DocumentRegistry {
   private readonly preparedWorkspaceEdits = new Map<string, PreparedWorkspaceEdit>();
   private readonly workspaceEditUndoGroups = new Map<string, WorkspaceEditUndoGroup>();
   private readonly dirtyBarriers = new Map<string, DirtyBarrierHold>();
+  private readonly deferredWatchReloads = new Map<string, DocumentIdentity>();
   private disposed = false;
   private disposePromise: Promise<void> | null = null;
 
@@ -599,6 +603,12 @@ export class DocumentRegistry {
     });
   }
 
+  private deferWatchReload(record: DocumentRecord): boolean {
+    if (!this.isDirtyBarrierHeld(record.identity)) return false;
+    this.deferredWatchReloads.set(this.keyFor(record.identity), record.identity);
+    return true;
+  }
+
   open(identity: DocumentIdentity, options?: { reload?: boolean }): Promise<DocumentRecord> {
     return this.resolveIdentity(identity).then((resolved) => {
       const key = this.keyFor(resolved);
@@ -618,6 +628,12 @@ export class DocumentRegistry {
 
   private async performOpen(identity: DocumentIdentity, options?: { reload?: boolean }): Promise<DocumentRecord> {
     this.assertActive();
+    while (this.isDirtyBarrierHeld(identity)) {
+      await Promise.all([...this.dirtyBarriers.values()].filter(barrier => barrier.active
+        && this.aliasesFor(identity).some(alias => alias.workspaceId === barrier.workspaceId
+          && barrier.paths.has(this.barrierPath(alias.resourceId, barrier.caseSensitive)))).map(barrier => barrier.released));
+      this.assertActive();
+    }
     const key = this.keyFor(identity);
     const generation = this.getGeneration();
     const existing = this.records.get(key);
@@ -1253,12 +1269,13 @@ export class DocumentRegistry {
     return this.save(identity, { overwriteConflict: true });
   }
 
-  private async waitForDirtyBarrierSaves(barrier: DirtyBarrierHold): Promise<boolean> {
+  private async waitForDirtyBarrierOperations(barrier: DirtyBarrierHold): Promise<boolean> {
     const affected = () => [...this.records.values()].filter((record) => (
       this.aliasesFor(record.identity).some((alias) => alias.workspaceId === barrier.workspaceId
         && barrier.paths.has(this.barrierPath(alias.resourceId, barrier.caseSensitive)))
     ));
-    if (!affected().some((record) => record.saving)) return true;
+    const busy = () => affected().some(record => record.saving || record.status === 'loading');
+    if (!busy()) return true;
     return new Promise((resolve) => {
       let settled = false;
       const unsubscribers: Array<() => void> = [];
@@ -1270,7 +1287,7 @@ export class DocumentRegistry {
       };
       const check = () => {
         if (!barrier.active) finish(false);
-        else if (!affected().some((record) => record.saving)) finish(true);
+        else if (!busy()) finish(true);
       };
       for (const record of affected()) unsubscribers.push(this.subscribe(record.identity, check));
       void barrier.released.then(() => finish(false));
@@ -1285,6 +1302,11 @@ export class DocumentRegistry {
         existing.active = false;
         existing.release();
         this.dirtyBarriers.delete(event.barrierId);
+        for (const [key, identity] of this.deferredWatchReloads) {
+          if (this.isDirtyBarrierHeld(identity)) continue;
+          this.deferredWatchReloads.delete(key);
+          void this.open(identity, { reload: true }).catch(error => this.reportJournalFailure(error));
+        }
       }
       return;
     }
@@ -1302,7 +1324,7 @@ export class DocumentRegistry {
     };
     this.dirtyBarriers.set(event.barrierId, barrier);
     try {
-      if (!await this.waitForDirtyBarrierSaves(barrier) || !barrier.active) return;
+      if (!await this.waitForDirtyBarrierOperations(barrier) || !barrier.active) return;
       await this.publishDirtyWorkspace(event.workspaceId);
       if (!barrier.active) return;
       const result = await this.documents.ackDirtyStateBarrier?.({
@@ -1329,9 +1351,9 @@ export class DocumentRegistry {
       // An entry (including an atomically replaced directory) invalidates open
       // descendants; only the Documents read can establish their actual state.
       for (const record of this.records.values()) {
-        if (record.status === 'loading' || record.saving) continue;
         if (this.aliasesFor(record.identity).some(alias => alias.workspaceId === event.resource.workspaceId
           && (alias.resourceId === event.resource.resourceId || alias.resourceId.startsWith(`${event.resource.resourceId}/`)))) {
+          if (this.deferWatchReload(record) || record.status === 'loading' || record.saving) continue;
           void this.open(record.identity, { reload: true });
         }
       }
@@ -1342,7 +1364,7 @@ export class DocumentRegistry {
         !resetWorkspaceId || this.aliasesFor(record.identity).some((alias) => alias.workspaceId === resetWorkspaceId)
       ));
       for (const record of records) {
-        if (record.status === 'loading') continue;
+        if (this.deferWatchReload(record) || record.status === 'loading') continue;
         void this.open(record.identity, { reload: true });
       }
       return;
@@ -1350,6 +1372,7 @@ export class DocumentRegistry {
     const identity = event.kind === 'moved' ? event.from : event.resource;
     const current = this.records.get(this.keyFor(identity));
     if (!current) return;
+    if (this.deferWatchReload(current)) return;
     if (event.kind === 'deleted') {
       const deleted = applyRead(current, {
         status: 'missing',
@@ -1449,6 +1472,7 @@ export class DocumentRegistry {
       barrier.release();
     }
     this.dirtyBarriers.clear();
+    this.deferredWatchReloads.clear();
     for (const workspaceId of dirtyWorkspaces) {
       const previous = this.dirtyPublicationTails.get(workspaceId) ?? Promise.resolve();
       const generation = this.getGeneration();
@@ -1711,6 +1735,13 @@ export class DocumentRegistry {
       ? this.workspaceEditUndoGroups.get(payload.operationId)
       : undefined;
     const existingByPath = new Map(existingUndoGroup?.documents.map((document) => [this.keyFor(document.identity), document]) ?? []);
+    const barrier = payload.barrierId ? this.dirtyBarriers.get(payload.barrierId) : undefined;
+    if (payload.action === 'restore' || payload.barrierId !== undefined) {
+      if (!barrier?.active || barrier.workspaceId !== payload.workspaceId
+        || payload.targets.some(target => !barrier.paths.has(this.barrierPath(target.resource.resourceId, barrier.caseSensitive)))) {
+        return this.surfaceOperationFailures(payload, 'Document recovery barrier is no longer held');
+      }
+    }
     const records: Array<{ target: VarinDocumentSurfaceOperationPayload['targets'][number]; record: DocumentRecord; hash: string }> = [];
     for (const target of payload.targets) {
       const record = this.records.get(this.keyFor(target.resource));
@@ -1724,7 +1755,8 @@ export class DocumentRegistry {
         : existingApplied && target.newText !== undefined
           ? await bufferHash(target.newText)
           : target.bufferHash;
-      if (!record || record.status !== 'ready'
+      if (!record || (record.status !== 'ready' && !(barrier && (record.status === 'missing' || record.status === 'deleted')))
+        || record.saving
         || !this.aliasesFor(record.identity).some((alias) => alias.workspaceId === payload.workspaceId
           && alias.resourceId === target.resource.resourceId)
         || record.connectionGeneration !== this.getGeneration()
@@ -1748,7 +1780,34 @@ export class DocumentRegistry {
         beforeLocalEditRevision: record.localEditRevision,
         beforeHash: hash,
         content: record.buffer,
+        ...(barrier ? { baseContent: record.baseContent } : {}),
       }));
+    }
+
+    if (payload.action === 'restore') {
+      if (records.some(({ target }) => typeof target.newText !== 'string' || !target.restoreState)) {
+        return this.surfaceOperationFailures(payload, 'Document recovery target is incomplete');
+      }
+      const restored = records.map(({ target, record }) => {
+        const base = target.restoreState!;
+        const buffer = normalizeEditorLineEndings(target.newText!);
+        const baseContent = normalizeEditorLineEndings(base.baseContent);
+        return { ...record, ...base, baseContent, buffer, dirty: buffer !== baseContent,
+          localEditRevision: record.localEditRevision + 1,
+          status: base.baseRevision === null && buffer === '' ? 'missing' as const : 'ready' as const,
+          byteLength: new TextEncoder().encode(base.baseContent).byteLength,
+          conflict: null, errorMessage: null, lastOrigin: 'workspace-recovery' as const,
+          lastChanges: [replacementBetween(record.buffer, buffer)].filter((change): change is DocumentChange => change !== null),
+        };
+      });
+      this.invalidateWorkspaceEditUndoGroups(restored.map(record => record.identity));
+      this.commitAtomic(restored, payload.workspaceId);
+      await Promise.all([...new Set(restored.flatMap(record => this.aliasesFor(record.identity).map(alias => alias.workspaceId)))].map(id => this.publishDirtyWorkspace(id)));
+      return Promise.all(restored.map(async (record, index) => ({ resource: records[index].target.resource,
+        status: 'restored' as const, documentInstanceId: record.documentInstanceId,
+        beforeLocalEditRevision: records[index].record.localEditRevision, beforeHash: records[index].hash,
+        afterLocalEditRevision: record.localEditRevision, afterHash: await bufferHash(record.buffer),
+      })));
     }
 
     if (payload.action === 'undo') {

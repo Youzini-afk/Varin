@@ -238,10 +238,20 @@ export interface DocumentSurfaceOperationTarget extends DocumentSurfaceBinding {
   newText?: string;
   expectedAppliedRevision?: number;
   expectedAppliedHash?: string;
+  restoreState?: DocumentSurfaceRestoreState;
+}
+
+export interface DocumentSurfaceRestoreState {
+  baseContent: string;
+  baseRevision: string | null;
+  encoding: string;
+  bom: boolean;
+  lineEnding: 'lf' | 'crlf' | 'cr';
 }
 
 export interface DocumentSurfaceOperationRequest {
-  action: 'capture' | 'apply' | 'undo';
+  action: 'capture' | 'apply' | 'undo' | 'restore';
+  barrierId?: string;
   generation: number;
   operationId: string;
   ownerId: string;
@@ -252,13 +262,14 @@ export interface DocumentSurfaceOperationRequest {
 
 export interface DocumentSurfaceOperationResult {
   resource: DocumentResource;
-  status: 'captured' | 'applied' | 'undone' | 'failed';
+  status: 'captured' | 'applied' | 'undone' | 'restored' | 'failed';
   documentInstanceId?: string;
   beforeLocalEditRevision?: number;
   beforeHash?: string;
   afterLocalEditRevision?: number;
   afterHash?: string;
   content?: string;
+  baseContent?: string;
   message?: string;
 }
 
@@ -1824,7 +1835,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     request: DocumentSurfaceOperationRequest,
     options: { signal?: AbortSignal } = {},
   ): Promise<DocumentSurfaceOperationResult[]> => {
-    if (!request || !['capture', 'apply', 'undo'].includes(request.action)
+    if (!request || !['capture', 'apply', 'undo', 'restore'].includes(request.action)
       || typeof request.operationId !== 'string' || !request.operationId
       || typeof request.ownerId !== 'string' || !request.ownerId
       || typeof request.workspaceId !== 'string' || !request.workspaceId
@@ -1844,11 +1855,27 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       });
     }
     const published = new Map(publication.resources.map((resource) => [resource.resource.resourceId, resource]));
+    const barrier = request.barrierId ? dirtyBarriers.get(request.barrierId) : undefined;
+    if (request.action === 'restore' || request.barrierId !== undefined) {
+      if (!barrier || barrier.released || barrier.workspaceId !== request.workspaceId
+        || barrier.pending.size > 0 || !barrier.surfaceKeys.has(key)
+        || request.targets.some(target => !barrier.paths.some(resourceId => (
+          barrier.caseSensitive ? resourceId === target.resource.resourceId
+            : resourceId.toLowerCase() === target.resource.resourceId.toLowerCase()
+        )))) {
+        throw new DocumentAuthorityError('Document recovery barrier is no longer held', { code: 'stale-completion', statusCode: 409 });
+      }
+    }
     const seen = new Set<string>();
     for (const target of request.targets) {
       const resourceId = target?.resource?.resourceId;
       const current = typeof resourceId === 'string' ? published.get(resourceId) : undefined;
       if ((request.action === 'apply' && typeof target.newText !== 'string')
+        || (request.action === 'restore' && (typeof target.newText !== 'string'
+          || !target.restoreState || typeof target.restoreState.baseContent !== 'string'
+          || (target.restoreState.baseRevision !== null && typeof target.restoreState.baseRevision !== 'string')
+          || target.restoreState.encoding !== 'utf-8' || typeof target.restoreState.bom !== 'boolean'
+          || !['lf', 'crlf', 'cr'].includes(target.restoreState.lineEnding)))
         || (request.action === 'undo' && (!Number.isSafeInteger(target.expectedAppliedRevision)
           || target.expectedAppliedRevision! < 0
           || typeof target.expectedAppliedHash !== 'string'
@@ -1870,7 +1897,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         || current.lineEnding !== target.lineEnding
       );
       if (!resourceId || seen.has(resourceId) || target.resource.workspaceId !== request.workspaceId
-        || (request.action !== 'undo' && !current) || currentMismatch) {
+        || (request.action !== 'undo' && !barrier && !current) || currentMismatch) {
         throw new DocumentAuthorityError('Document surface binding changed before the operation was dispatched', {
           code: 'stale-completion', statusCode: 409,
         });
@@ -1927,6 +1954,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     const { pending } = assertSurfaceOperationCaller(request);
     return {
       action: pending.action,
+      ...(pending.barrierId ? { barrierId: pending.barrierId } : {}),
       operationId: pending.operationId,
       requestId: pending.requestId,
       targets: structuredClone(pending.targets),
@@ -1953,14 +1981,15 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       const result = entry as Record<string, unknown>;
       const allowed = new Set([
         'resource', 'status', 'documentInstanceId', 'beforeLocalEditRevision', 'beforeHash',
-        'afterLocalEditRevision', 'afterHash', 'content', 'message',
+        'afterLocalEditRevision', 'afterHash', 'content', 'baseContent', 'message',
       ]);
       const resource = result.resource && typeof result.resource === 'object' && !Array.isArray(result.resource)
         ? result.resource as Record<string, unknown> : {};
       const status = String(result.status);
       const expectedStatuses = pending.action === 'capture'
         ? new Set(['captured', 'failed'])
-        : pending.action === 'apply' ? new Set(['applied', 'failed']) : new Set(['undone', 'failed']);
+        : pending.action === 'apply' ? new Set(['applied', 'failed'])
+          : pending.action === 'restore' ? new Set(['restored', 'failed']) : new Set(['undone', 'failed']);
       const validHash = (field: unknown) => field === undefined
         || (typeof field === 'string' && /^sha256-[0-9a-f]{64}$/u.test(field));
       const validRevision = (field: unknown) => field === undefined
@@ -1970,10 +1999,11 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         && validRevision(result.beforeLocalEditRevision) && validRevision(result.afterLocalEditRevision)
         && validHash(result.beforeHash) && validHash(result.afterHash)
         && (result.content === undefined || typeof result.content === 'string')
+        && (result.baseContent === undefined || typeof result.baseContent === 'string')
         && (result.message === undefined || typeof result.message === 'string')
         && (status !== 'captured' || (typeof result.content === 'string' && typeof result.documentInstanceId === 'string'
           && result.beforeLocalEditRevision !== undefined && result.beforeHash !== undefined))
-        && (status !== 'applied' || (typeof result.documentInstanceId === 'string'
+        && ((status !== 'applied' && status !== 'restored') || (typeof result.documentInstanceId === 'string'
           && result.beforeLocalEditRevision !== undefined && result.beforeHash !== undefined
           && result.afterLocalEditRevision !== undefined && result.afterHash !== undefined))
         && (status !== 'undone' || (typeof result.documentInstanceId === 'string'
@@ -1990,6 +2020,20 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       throw completionError('Document surface operation result is incomplete', { code: 'failed', statusCode: 400 });
     }
     for (const result of results) {
+      if (result.status === 'restored') {
+        const target = targetByPath.get(result.resource.resourceId)!;
+        const expectedHash = `sha256-${createHash('sha256').update(normalizeEditorLineEndings(target.newText!), 'utf8').digest('hex')}`;
+        if (result.documentInstanceId !== target.documentInstanceId
+          || result.beforeLocalEditRevision !== target.localEditRevision || result.beforeHash !== target.bufferHash
+          || result.afterLocalEditRevision !== target.localEditRevision + 1 || result.afterHash !== expectedHash) {
+          throw completionError('Document recovery completion does not match its target', { code: 'stale-completion', statusCode: 409 });
+        }
+        // A recovery changes the disk base as well as the live draft. Existing
+        // turn snapshots retain their original source and cannot follow that edit.
+        surfaceSnapshots.invalidateOwnerEdit({ ownerId: pending.ownerId, ownerGeneration: pending.generation,
+          workspaceId: pending.workspaceId, resourceIds: [result.resource.resourceId] });
+        continue;
+      }
       if (result.status !== 'applied' && result.status !== 'undone') continue;
       const target = targetByPath.get(result.resource.resourceId)!;
       const content = result.status === 'applied' ? target.newText : result.content;

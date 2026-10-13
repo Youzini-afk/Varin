@@ -2063,7 +2063,7 @@ pub(crate) struct KernelRecoveryTurnStartParams {
     pub(crate) operation_id: String,
     pub(crate) workspace_id: String,
     pub(crate) execution_id: String,
-    pub(crate) conversation: RecoveryConversation,
+    pub(crate) conversation: varin_runtime::RecoveryConversation,
     pub(crate) file_target: Option<std::collections::BTreeMap<String, Value>>,
     pub(crate) run_id: Option<String>,
     pub(crate) user_entry_id: String,
@@ -2079,7 +2079,7 @@ pub(crate) struct KernelRecoveryTurnStartParams {
 pub(crate) struct KernelRecoveryTurnGetParams {
     pub(crate) workspace_id: String,
     pub(crate) execution_id: String,
-    pub(crate) conversation: Option<RecoveryConversation>,
+    pub(crate) conversation: Option<varin_runtime::RecoveryConversation>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2119,7 +2119,7 @@ pub(crate) struct KernelRecoveryCheckpointListParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelRecoveryEntryResolveParams {
     pub(crate) workspace_id: String,
-    pub(crate) conversation: RecoveryConversation,
+    pub(crate) conversation: varin_runtime::RecoveryConversation,
     pub(crate) entry_id: String,
 }
 
@@ -2128,7 +2128,7 @@ pub(crate) struct KernelRecoveryEntryResolveParams {
 pub(crate) struct KernelRecoveryChangeBeforeParams {
     pub(crate) operation_id: String,
     pub(crate) workspace_id: String,
-    pub(crate) conversation: RecoveryConversation,
+    pub(crate) conversation: varin_runtime::RecoveryConversation,
     pub(crate) execution_id: String,
     pub(crate) checkpoint_id: String,
     pub(crate) path: String,
@@ -2150,7 +2150,7 @@ pub(crate) struct KernelRecoveryChangeGetParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelRecoveryChangeListParams {
     pub(crate) workspace_id: String,
-    pub(crate) conversation: Option<RecoveryConversation>,
+    pub(crate) conversation: Option<varin_runtime::RecoveryConversation>,
     pub(crate) execution_id: Option<String>,
     pub(crate) entry_ids: Option<Vec<String>>,
 }
@@ -2160,7 +2160,7 @@ pub(crate) struct KernelRecoveryChangeListParams {
 pub(crate) struct KernelRecoveryChangeAfterParams {
     pub(crate) operation_id: String,
     pub(crate) workspace_id: String,
-    pub(crate) conversation: RecoveryConversation,
+    pub(crate) conversation: varin_runtime::RecoveryConversation,
     pub(crate) execution_id: String,
     pub(crate) checkpoint_id: String,
     pub(crate) path: String,
@@ -2896,9 +2896,7 @@ pub(crate) struct KernelBranchChange {
     pub(crate) source_slot: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct RecoveryConversation {}
+pub(crate) type RecoveryConversation = varin_runtime::RecoveryConversation;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

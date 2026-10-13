@@ -1188,7 +1188,7 @@ it('retains an original file condition after a lost reply and displays unavailab
     actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1, observation: null,
     trigger: { kind: 'file', path: 'results/output.txt', condition: 'changed' },
     sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 1, observed: null, log: null, metric: null, file: { receipt_id: 'receipt:file', revision: 1,
-      baseline: null, current: null, immutable: true, watch_id: null,
+      baseline: null, current: null, immutable: true, watch_id: null, ready: false, resource_authority: null,
       position: null, gap: true, failure_code: 'source_unavailable', released: false } }],
     wait: { id: 'wait:file', kind: 'file', after_cursor: 1, trigger_cursor: null, state: 'waiting' }, occurrence: null };
   const register = vi.fn<ThreadsAPI['followups']['register']>().mockRejectedValueOnce(new Error('reply lost'))

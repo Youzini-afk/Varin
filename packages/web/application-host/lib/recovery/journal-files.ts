@@ -88,6 +88,9 @@ export interface RecoveryFileStoreOptions {
 }
 
 export interface RecoveryFileStore {
+  /** Editor safety content uses the same owned objects as disk recovery. */
+  storeContent?(identity: RecoveryIdentity, bytes: Buffer): Promise<{ state: RegularFileState; release(): Promise<void> }>;
+  readContent?(identity: RecoveryIdentity, state: RegularFileState): Promise<Buffer>;
   applyState: (
     identity: RecoveryIdentity,
     root: string,
