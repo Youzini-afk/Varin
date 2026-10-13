@@ -13,7 +13,7 @@ const makeView = (): McpInteractionView => ({ record: { id: 'elicitation:first',
   binding: { operationId: 'operation:original', executionOwner: { kind: 'external', identity: 'owner', epoch: 'epoch' },
     endpoint: { server: 'Original MCP server', resourceKey: 'server-key', configurationVersion: 'config', credentialVersion: 'grant' }, connectionId: 'connection', source: { kind: 'server_request', requestId: 0,
     relation: { kind: 'task', taskId: 'task:original' } } }, runId: 'run:finished', threadId: identity.threadId, branchId: identity.branchId,
-  mode: 'form', availability: 'live', choice: null, delivery: 'not_started', completionReported: false, problem: null },
+  mode: 'form', availability: 'live', choice: null, delivery: 'not_started', completionReported: false, deliveryReleased: true, problem: null },
   request: {}, response: null, presentation: { mode: 'form', message: '<script>server text</script> **untrusted server words**', fields: [
     { name: 'enabled', title: 'Enabled', kind: 'boolean', required: true, default: false },
     { name: 'count', title: 'Count', kind: 'integer', required: true, default: 0, minimum: 0, maximum: 9 },

@@ -22,7 +22,7 @@ const makeView = (): McpInteractionView => ({ record: { id: 'sampling:first', re
     endpoint: { server: 'Original MCP server', resourceKey: 'server-key', configurationVersion: 'config', credentialVersion: 'grant' }, connectionId: 'connection:original',
     source: { kind: 'server_request', requestId: 0, relation: { kind: 'rpc_response_stream', outgoingRequestId: 'request:original' } } },
   runId: 'run:finished', threadId: identity.threadId, branchId: identity.branchId, mode: 'sampling', availability: 'live', choice: null,
-  delivery: 'not_started', completionReported: false, problem: null, sampling: { review: 'request', generationOperationId: null } },
+  delivery: 'not_started', completionReported: false, deliveryReleased: true, problem: null, sampling: { review: 'request', generationOperationId: null } },
   presentation: { mode: 'sampling', message: '<b>Generate for this server</b>' }, response: null, request: structuredClone(originalRequest),
   sampling: { editedRequest: null, output: null, providerOutput: null, receipt: null, snapshot: null } });
 const outputView = (): McpInteractionView => { const view = makeView(); return { ...view,

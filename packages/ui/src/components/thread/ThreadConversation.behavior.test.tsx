@@ -2265,7 +2265,7 @@ it('projects original MCP interaction events onto idle Task requests without act
   const f = fixture(false);
   const request: McpInteractionView = { record: { id: 'request:server', revision: 1, runId: 'run:already-finished',
     threadId: identity.threadId, branchId: identity.branchId, mode: 'form', availability: 'live', choice: null,
-    delivery: 'not_started', completionReported: false, problem: null,
+    delivery: 'not_started', completionReported: false, deliveryReleased: true, problem: null,
     binding: { operationId: 'operation:accepted-task', executionOwner: { kind: 'external', identity: 'original-owner', epoch: 'epoch' },
       connectionId: 'original-connection', source: { kind: 'server_request', requestId: 0, relation: { kind: 'task', taskId: 'original-remote-task' } },
       endpoint: { server: 'original-server', resourceKey: 'server-key', configurationVersion: 'configuration', credentialVersion: 'grant' } } },
@@ -2302,7 +2302,7 @@ it('keeps original RPC-error choices available after natural Run failure without
   const failedRun = { ...f.view.activeRun!, state: 'failed' as const };
   const request: McpInteractionView = { record: { id: 'error:original', revision: 2, runId: failedRun.id,
     threadId: identity.threadId, branchId: identity.branchId, mode: 'url', availability: 'owner_unavailable', choice: null,
-    delivery: null, completionReported: false, problem: null,
+    delivery: null, completionReported: false, deliveryReleased: true, problem: null,
     binding: { operationId: 'operation:failed-call', executionOwner: { kind: 'external', identity: 'original-owner', epoch: 'epoch' },
       connectionId: 'original-connection', source: { kind: 'rpc_error', outgoingRequestId: 'rpc:original', method: 'tools/call', elicitationId: 'remote:url' },
       endpoint: { server: 'original-server', resourceKey: 'server-key', configurationVersion: 'configuration', credentialVersion: 'grant' } } },
@@ -2337,7 +2337,7 @@ it('uses the actual Thread model and sampling lifecycle in the conversation, req
     configuration: { providerId: 'other-provider', providerFamily: 'openai', model: 'other-model', endpoint: 'https://model.example.test/v1',
       allowAnonymous: true, credentialEnvironment: null, configurationGeneration: 3, maxOutputTokens: 100 } };
   let request: McpInteractionView = { record: { id: 'sampling:original', revision: 1, runId: 'ui-run', threadId: identity.threadId, branchId: identity.branchId,
-    mode: 'sampling', availability: 'live', choice: null, delivery: 'not_started', completionReported: false, problem: null,
+    mode: 'sampling', availability: 'live', choice: null, delivery: 'not_started', completionReported: false, deliveryReleased: true, problem: null,
     sampling: { generationOperationId: null, review: 'request' }, binding: { operationId: 'operation:original-tool',
       executionOwner: { kind: 'external', identity: 'original-owner', epoch: 'original-epoch' }, connectionId: 'original-connection',
       source: { kind: 'server_request', requestId: 9, relation: { kind: 'rpc_response_stream', outgoingRequestId: 3 } },
