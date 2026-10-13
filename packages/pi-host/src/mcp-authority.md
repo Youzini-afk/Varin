@@ -22,8 +22,9 @@ is not a filesystem permission or a reason to reject a server.
 Each server selection requires its own frozen `owner`: resource location, configuration/trust and
 execution scope. Scope and resource keys include that location; the combined provenance has no
 shared configuration owner. Native child delegation preserves these owners and exact definitions
-separately from execution resource identities. Mixed-owner child preparation currently reports
-unavailable until exact multi-owner child preparation is connected. The original authority prepares the
+separately from execution resource identities. Local child preparation groups each complete frozen
+owner and composes its exact contribution; managed child contributions still report unavailable until
+their original Source retention and derivation are connected. The original authority prepares the
 child's own execution binding and the runtime commits it once before first use. A global configuration
 file may still describe a workspace execution dependency; a fixed read-only child cannot borrow the
 parent's mutable cwd. Neutral global dependencies remain neutral even when a child has a private cwd.
@@ -59,8 +60,8 @@ Source grant/root and Kernel process guardian; SDK close alone is not a native p
 Unknown dispatched effects are not replayed after reconnection.
 
 This continuation supports ordinary tools, resource reads, prompts, Tasks, persistent resource
-observers and finite reverse interactions. Mixed-owner child preparation remains an explicit
-unavailable boundary; local owners retain their existing support.
+observers and finite reverse interactions. Managed child preparation remains an explicit
+unavailable boundary; mixed local owners are composed from their original frozen dependency cuts.
 
 ## Preparation, binding and revocation
 
