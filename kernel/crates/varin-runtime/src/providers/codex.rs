@@ -60,15 +60,11 @@ impl ModelProvider for CodexProvider {
 
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         validate_view(view, FAMILY)?;
-        let mut compiled = view.clone();
         let mut instructions = Vec::new();
-        compiled
-            .history
-            .retain(|item| !item.provenance.is_system());
         for item in &view.history {
             if item.provenance.is_system() {
                 if let Content::Text { text } = &item.content {
-                    instructions.push(text.clone());
+                    instructions.push(text.as_str());
                 } else {
                     return Err(ExecutionError::new(
                         "unsupported_system_content",
@@ -77,7 +73,11 @@ impl ModelProvider for CodexProvider {
                 }
             }
         }
-        let mut body = self.inner.serialize(&compiled)?;
+        let mut body = self.inner.serialize_history(
+            view,
+            project_history(&view.history, FAMILY, &view.binding.connection_identity)
+                .filter(|projected| !projected.item.provenance.is_system()),
+        )?;
         body["instructions"] = json!(if instructions.is_empty() {
             "You are a helpful assistant.".into()
         } else {
@@ -87,15 +87,21 @@ impl ModelProvider for CodexProvider {
         body["tool_choice"] = json!("auto");
         body["parallel_tool_calls"] = json!(true);
         // A branch is the stable cache/session boundary. The run ID handles branchless callers.
-        let session = if let crate::execution::RequestOrigin::McpSampling{operation_id,..} | crate::execution::RequestOrigin::AuxiliaryInference{operation_id,..} = &view.origin {
-            operation_id
-        } else if let crate::execution::RequestOrigin::PolicyModelJob{action_id,..} = &view.origin {
-            action_id
-        } else if view.binding.history_range.branch_id.is_empty() {
-            &view.run_id
-        } else {
-            &view.binding.history_range.branch_id
-        };
+        let session =
+            if let crate::execution::RequestOrigin::McpSampling { operation_id, .. }
+            | crate::execution::RequestOrigin::AuxiliaryInference { operation_id, .. } =
+                &view.origin
+            {
+                operation_id
+            } else if let crate::execution::RequestOrigin::PolicyModelJob { action_id, .. } =
+                &view.origin
+            {
+                action_id
+            } else if view.binding.history_range.branch_id.is_empty() {
+                &view.run_id
+            } else {
+                &view.binding.history_range.branch_id
+            };
         // Protocol cache keys are at most 64 characters; hashing avoids prefix collisions and
         // keeps arbitrary branch identifiers out of HTTP headers.
         body["prompt_cache_key"] = json!(hex::encode(Sha256::digest(session.as_bytes())));

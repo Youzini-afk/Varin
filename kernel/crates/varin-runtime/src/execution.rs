@@ -424,26 +424,46 @@ pub struct RequestSnapshot<M = ResolvedMedia, S = Value> {
 
 /// Semantic history is portable; opaque continuation items are confined to their protocol family.
 /// Multimodal input must be handled or rejected by the adapter's `serialize`, never dropped here.
+pub(crate) struct ProjectedHistoryItem<'a> {
+    pub item: &'a ConversationItem,
+    pub opaque: Option<&'a OpaqueProviderItem>,
+}
+
+/// Adapters borrow the immutable semantic input and copy only what enters the wire body.
+pub(crate) fn project_history<'a>(
+    history: &'a [ConversationItem],
+    family: &'a str,
+    connection_identity: &'a str,
+) -> impl Iterator<Item = ProjectedHistoryItem<'a>> + 'a {
+    history.iter().filter_map(move |item| {
+        let opaque = item.opaque.as_ref().filter(|opaque| {
+            opaque.family == family
+                && !opaque.connection_identity.is_empty()
+                && opaque.connection_identity == connection_identity
+        });
+        if matches!(item.content, Content::ProviderOnly) && opaque.is_none() {
+            None
+        } else {
+            Some(ProjectedHistoryItem { item, opaque })
+        }
+    })
+}
+
+/// The prepared request owns its semantic snapshot independently of mutable run history.
 pub fn compile_history(
     history: &[ConversationItem],
     family: &str,
     connection_identity: &str,
 ) -> Vec<ConversationItem> {
-    history
-        .iter()
-        .filter_map(|item| {
-            let mut item = item.clone();
-            if item.opaque.as_ref().is_some_and(|opaque| {
-                opaque.family != family
-                    || opaque.connection_identity.is_empty()
-                    || opaque.connection_identity != connection_identity
-            }) {
-                item.opaque = None;
-            }
-            if matches!(item.content, Content::ProviderOnly) && item.opaque.is_none() {
-                None
-            } else {
-                Some(item)
+    project_history(history, family, connection_identity)
+        .map(|projected| {
+            let item = projected.item;
+            ConversationItem {
+                resource_activation: item.resource_activation.clone(),
+                id: item.id.clone(),
+                provenance: item.provenance.clone(),
+                content: item.content.clone(),
+                opaque: projected.opaque.cloned(),
             }
         })
         .collect()

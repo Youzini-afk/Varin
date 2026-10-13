@@ -25,7 +25,9 @@ fn push(messages: &mut Vec<Value>, role: &str, block: Value) {
             .expect("constructed content")
             .push(block);
     } else {
-        messages.push(json!({"role":role,"content":[block]}));
+        let mut message = json!({"role":role});
+        message["content"] = Value::Array(vec![block]);
+        messages.push(message);
     }
 }
 fn tool_id(id: &str) -> String {
@@ -40,12 +42,16 @@ fn tool_id(id: &str) -> String {
         hex::encode(Sha256::digest(id.as_bytes()))
     }
 }
-fn bedrock_parts(parts: Vec<crate::output::OutputPart>) -> Result<Vec<Value>, ExecutionError> {
+fn bedrock_parts(parts: Vec<ProviderPart<'_>>) -> Result<Vec<Value>, ExecutionError> {
     let mut blocks = Vec::new();
     for part in parts {
         match part {
-            crate::output::OutputPart::Text { text } => blocks.push(json!({"text":text})),
-            crate::output::OutputPart::Media { media } => {
+            ProviderPart::Text { text } => {
+                let mut block = json!({});
+                block["text"] = Value::String(text.into_owned());
+                blocks.push(block);
+            }
+            ProviderPart::Media { media } => {
                 let format = match media.media_type.as_str() {
                     "image/png" => "png",
                     "image/jpeg" => "jpeg",
@@ -58,7 +64,7 @@ fn bedrock_parts(parts: Vec<crate::output::OutputPart>) -> Result<Vec<Value>, Ex
                         ));
                     }
                 };
-                blocks.push(json!({"text":media_label(&media)}));
+                blocks.push(json!({"text":media_label(media)}));
                 blocks
                     .push(json!({"image":{"format":format,"source":{"bytes":media.data_base64}}}));
             }
@@ -80,8 +86,9 @@ impl ModelProvider for BedrockProvider {
         validate_images(view, &self.connection)?;
         let mut messages = Vec::new();
         let mut system = Vec::new();
-        for item in compile_history(&view.history, FAMILY, &view.binding.connection_identity) {
-            if let Some(original) = &item.opaque {
+        for projected in project_history(&view.history, FAMILY, &view.binding.connection_identity) {
+            let item = projected.item;
+            if let Some(original) = projected.opaque {
                 if original.adapter_version != "1" {
                     return Err(ExecutionError::new(
                         "opaque_version",
@@ -108,7 +115,7 @@ impl ModelProvider for BedrockProvider {
             } else {
                 "user"
             };
-            match item.content {
+            match &item.content {
                 Content::Text { text } | Content::ReasoningSummary { text } => {
                     if item.provenance.is_system() {
                         system.push(json!({"text":text}));
@@ -129,29 +136,29 @@ impl ModelProvider for BedrockProvider {
                             ..
                         } | ToolCompletion::JobAccepted { .. }
                     );
-                    push(
-                        &mut messages,
-                        "user",
-                        json!({"toolResult":{"toolUseId":tool_id(&result.call_id),"status":if success{"success"}else{"error"},"content":bedrock_parts(completion_parts(&result.completion))?}}),
-                    );
+                    let mut block = json!({"toolResult":{"toolUseId":tool_id(&result.call_id),"status":if success{"success"}else{"error"}}});
+                    block["toolResult"]["content"] =
+                        Value::Array(bedrock_parts(completion_parts(&result.completion))?);
+                    push(&mut messages, "user", block);
                 }
                 Content::Media { media } => {
-                    for block in bedrock_parts(vec![crate::output::OutputPart::Media { media }])? {
+                    for block in bedrock_parts(vec![ProviderPart::Media { media }])? {
                         push(&mut messages, "user", block);
                     }
                 }
                 Content::Output { output } => {
                     let role = evidence_role(&item.provenance, role);
-                    for block in bedrock_parts(evidence_parts(&output, &item.provenance))? {
+                    for block in bedrock_parts(evidence_parts(output, &item.provenance))? {
                         push(&mut messages, role, block);
                     }
                 }
                 Content::ProviderOnly => {}
             }
         }
-        let mut body = json!({"messages":messages});
+        let mut body = json!({});
+        body["messages"] = Value::Array(messages);
         if !system.is_empty() {
-            body["system"] = json!(system);
+            body["system"] = Value::Array(system);
         }
         if let Some(max) = self.max_output_tokens {
             body["inferenceConfig"] = json!({"maxTokens":max});

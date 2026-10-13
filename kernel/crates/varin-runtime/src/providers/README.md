@@ -7,9 +7,15 @@ It is not a claim that every configured Pi provider, OAuth flow, or production H
 
 `serialize` compiles semantic history into a credential-free immutable request body. Same-family,
 version-1 provider originals with the same nonempty trusted connection identity are replayed without flattening encrypted reasoning, signatures, citations,
-or server-tool blocks. Cross-family provider-only items are omitted by `compile_history`; portable
+or server-tool blocks. Cross-family provider-only items are omitted by the shared history projection; portable
 text and client-tool exchanges are rebuilt. Unsupported local/multimodal references fail explicitly.
 The Host must materialize attachments before compilation. Tool schemas use the frozen request's versions.
+
+Adapters borrow that frozen history, output parts and continuation data. Only the final wire body owns
+their serialized values; constructed blocks and message arrays move into it without another deep copy.
+Textual execution receipts retain their original key order and external-data provenance. The execution
+engine still owns the semantic snapshot needed for persistence. This avoids intermediate copies within
+one request; it does not implement stable-prefix caching between requests.
 
 `Connection` resolves a credential reference immediately before dispatch through `CredentialResolver`.
 `EnvironmentCredentialResolver` is a concrete implementation for trusted reference-to-environment-header
