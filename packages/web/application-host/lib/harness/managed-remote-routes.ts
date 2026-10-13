@@ -108,8 +108,8 @@ export function registerManagedRemoteRoutes(
     response.json(await service.identity());
   }));
 
-  const sourceMethods = ['capabilities', 'handoff', 'integrationReceipt', 'resolve', 'prepare', 'bind', 'authorize', 'execute', 'service', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation'] as const;
-  const receiptMethods: ReadonlySet<string> = new Set(['handoff', 'integrationReceipt', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation']);
+  const sourceMethods = ['processAccess', 'processControl', 'processWrite', 'processResize', 'capabilities', 'handoff', 'integrationReceipt', 'resolve', 'prepare', 'bind', 'authorize', 'execute', 'service', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation'] as const;
+  const receiptMethods: ReadonlySet<string> = new Set(['processControl', 'handoff', 'integrationReceipt', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation']);
   for (const method of sourceMethods) {
     app.post(`${base}/sources/${method}`, requireAuth, receiptMethods.has(method) ? requireReceiptAuth : requireSourceAuth, route(async (request, response) => {
       const body = value(request.body);
@@ -123,7 +123,7 @@ export function registerManagedRemoteRoutes(
       ) => Promise<unknown>)(principal, body as unknown as Parameters<ManagedSourceService[typeof method]>[1], signal);
       // A disconnected observer is not a cancelled or drained accepted effect.
       // Cancellation and retirement have their own original-owner receipts.
-      const result = method === 'execute' || method === 'service' || method === 'cancelService' || method === 'cancel' || method === 'releaseReceipt' || method === 'release' || method === 'releaseScope'
+      const result = method === 'processWrite' || method === 'processResize' || method === 'processControl' || method === 'execute' || method === 'service' || method === 'cancelService' || method === 'cancel' || method === 'releaseReceipt' || method === 'release' || method === 'releaseScope'
         ? await invoke() : await whileResponseOpen(response, invoke);
       if (!response.destroyed) {
         response.setHeader('Cache-Control', 'no-store');
@@ -131,6 +131,38 @@ export function registerManagedRemoteRoutes(
       }
     }));
   }
+
+  app.post(`${base}/sources/processSubscribe`, requireAuth, requireSourceAuth, route(async (request, response) => {
+    const body = value(request.body);
+    authorize(request, body.coordinatorHostId);
+    const input = body as unknown as Parameters<ManagedSourceService['processSubscribe']>[1];
+    const controller = new AbortController();
+    let subscription: Awaited<ReturnType<ManagedSourceService['processSubscribe']>> | undefined;
+    let opened = false;
+    const early: import('../kernel/protocol.generated.js').KernelProcessStreamEvent[] = [];
+    const send = (frame: unknown) => { if (!response.destroyed && !response.writableEnded) response.write(`${JSON.stringify(frame)}\n`); };
+    const close = () => { controller.abort(); void subscription?.close().catch(() => undefined); };
+    response.once('close', close);
+    if (response.destroyed) close();
+    try {
+      subscription = await service.sources().processSubscribe(principals.get(request)!, input, event => {
+        if (opened) send({ kind: 'event', event }); else early.push(event);
+      }, controller.signal);
+      controller.signal.throwIfAborted();
+      response.setHeader('Content-Type', 'application/x-ndjson');
+      response.setHeader('Cache-Control', 'no-store');
+      send({ kind: 'ready', subscriptionId: input.subscriptionId, resourceEpoch: input.resourceEpoch });
+      opened = true;
+      for (const event of early) send({ kind: 'event', event });
+      early.length = 0;
+      try { await subscription.closed; }
+      catch (error) { send({ kind: 'error', message: error instanceof Error ? error.message : String(error) }); }
+      if (!response.destroyed) response.end();
+    } finally {
+      response.off('close', close);
+      await subscription?.close().catch(() => undefined);
+    }
+  }));
 
   app.get(`${base}/lifecycle`, requireAuth, requireManagedAuth, route(async (_request, response) => {
     response.setHeader("Cache-Control", "no-store");

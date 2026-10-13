@@ -7,7 +7,7 @@ export interface TerminalProcess {
   completion?: Promise<void>;
   /** Close only this projection of a retained job. */
   detach?(): Promise<void>;
-  onData(handler: (data: string) => void): { dispose?(): void };
+  onData(handler: (data: string, delivery?: { replay: boolean }) => void): { dispose?(): void };
   onExit(handler: (event: { exitCode: number | null; signal: number }) => void): { dispose?(): void };
   pid?: number | undefined;
   resize(cols: number, rows: number): void | Promise<void>;

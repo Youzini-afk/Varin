@@ -103,6 +103,15 @@ pub(crate) struct SourceAuthorityAddress {
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceProcessAccessParams {
+    pub principal_id: String,
+    pub coordinator_host_id: String,
+    pub authority_id: String,
+    pub resource_epoch: String,
+    pub process_id: String,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SourceAuthorityReleaseParams {
     pub principal_id: String,
     pub coordinator_host_id: String,
@@ -400,6 +409,7 @@ pub(crate) struct SourceIntegrationReceiptParams {
 /// Both the production actor and direct-owner integration fixtures use this same dispatcher.
 pub(crate) enum SourceDispatch {
     Ready(Value),
+    ProcessAccess { binding: ToolBinding, process_id: String },
     FileObservation {
         address: SourceAuthorityAddress,
         request_id: String,
@@ -430,6 +440,7 @@ impl SourceDispatch {
     pub fn key(&self) -> Option<String> {
         match self {
             Self::Ready(_) => None,
+            Self::ProcessAccess { .. } => Some(format!("process-access:{}", uuid::Uuid::new_v4())),
             Self::FileObservation {
                 address,
                 request_id,
@@ -468,6 +479,9 @@ impl SourceDispatch {
         };
         let value = match self {
             Self::Ready(value) => Ok(value),
+            Self::ProcessAccess { binding, process_id } => resources.interactions.as_ref()
+                .ok_or_else(|| denied("Original process interaction owner unavailable"))?
+                .access(binding, process_id),
             Self::FileObservation {
                 address, action, ..
             } => resources
@@ -557,6 +571,20 @@ pub(crate) fn prepare_request(
 ) -> Result<SourceDispatch, KernelError> {
     crate::protocol::validate_method_params(method, &params)?;
     let value = match method {
+        "source.process.access" => {
+            let p: SourceProcessAccessParams = serde_json::from_value(params)?;
+            let address = SourceAuthorityAddress { principal_id: p.principal_id,
+                coordinator_host_id: p.coordinator_host_id, authority_id: p.authority_id,
+                resource_epoch: p.resource_epoch };
+            let record = storage.source_authority(&address, true, epoch)?;
+            if !matches!(record.purpose.as_str(), "source" | "process_view") || record.result.phase != "ready"
+                || record.purpose == "process_view" && record.operation_id.as_deref() != Some(p.process_id.as_str()) {
+                return Err(denied("Original process source is unavailable"));
+            }
+            let mut binding = record.result.tool_binding.ok_or_else(|| denied("Original process Run binding is unavailable"))?;
+            binding.target_authority = Some(address);
+            return Ok(SourceDispatch::ProcessAccess { binding, process_id: p.process_id });
+        }
         "source.file_observation" => {
             let p: SourceFileObservationParams = serde_json::from_value(params)?;
             if !matches!(p.action, SourceFileObservationAction::Release { .. })
@@ -699,7 +727,7 @@ pub(crate) fn prepare_request(
         "source.resource.authorize" | "source.resource.execute" => {
             let input: SourceResourceCallParams = serde_json::from_value(params)?;
             let record = storage.source_authority(&address(&input), true, epoch)?;
-            if record.result.phase != "ready" || record.purpose == "result" {
+            if record.result.phase != "ready" || matches!(record.purpose.as_str(), "result" | "process_view") {
                 return Err(denied("Source does not admit model tools"));
             }
             let authorize = method == "source.resource.authorize";
@@ -747,6 +775,7 @@ pub(crate) fn prepare_request(
                     resource_epoch: p.resource_epoch,
                 };
                 let record = storage.source_authority(&address, true, epoch)?;
+                if record.purpose == "process_view" { return Err(denied("Process view only admits its original process projection")); }
                 if record.purpose == "result"
                     && !matches!(action, SourceResourceAction::ChildStorageReceipt { .. })
                 {

@@ -17,7 +17,7 @@ const turn = () => new Promise<void>(resolve => setImmediate(resolve));
 
 /** Real runtime client, source rebind, process projection and terminal consumer. Only framed kernel
  * resource responses are supplied here; actual OS receipts are exercised in the Rust guardian tests. */
-function fixture(processKind: 'process_job' | 'script_environment' = 'process_job') {
+function fixture(processKind: 'process_job' | 'script_environment' = 'process_job', replayCursor = 0) {
   const routes = new Map<string, (req: never, res: never) => Promise<void>>();
   const spawn = vi.fn(() => { throw new Error('Opening an admitted process must never spawn'); });
   const terminal = createTerminalRuntime({
@@ -50,7 +50,7 @@ function fixture(processKind: 'process_job' | 'script_environment' = 'process_jo
   const requests = vi.fn(async (method: string, params: Record<string, unknown>) => {
     if (method === 'runtime.operation.inspect') return { id: identity.operationId, run_id: 'run', executor: 'process_spawn', managed_process: { purpose: { kind: processKind }, kernel_epoch: 'epoch' } };
     if (method === 'runtime.run.inspect') return { id: 'run', thread_id: identity.threadId, branch_id: identity.branchId, state: 'completed' };
-    if (method === 'runtime.launch.inspect') return { selection: { source: { mode: 'live_root', workspace_id: 'workspace',
+    if (method === 'runtime.launch.inspect') return { selection: { source: { resource_owner: { kind: 'local' }, mode: 'live_root', workspace_id: 'workspace',
       execution_workspace_id: 'execution', branch_id: null, revision: null, environment_run_id: null,
       live_root: { hostId: 'host', rootId: 'root', canonicalRoot: '/workspace' } },
       tools: ['process_spawn', 'process_write', 'process_resize'].map(name => ({ name, requirements: { source: 'physical', process: true } })), extension_bindings: [], mcp_binding: null } };
@@ -68,8 +68,8 @@ function fixture(processKind: 'process_job' | 'script_environment' = 'process_jo
   const service = createThreadProcesses({ runtime, kernel: kernel as unknown as KernelClient, terminal: () => terminal,
     resolveLiveSource: async () => {}, onError: error => errors.push(error) });
   function emit(observer: KernelProcessObserver, stream: 'control' | 'data', chunks: Array<{ channel: 'stdout'; offset: number; bytesBase64: string }>, cursor: number, process = original) {
-    observer({ v: KERNEL_PROTOCOL_VERSION, kind: 'process-event', grantId: 'grant', error: null, stream, subscriptionId: 'subscription', processId: process.processId, kernelEpoch: 'epoch', sequence: 0,
-      result: { process, chunks, nextCursor: cursor, endCursor: cursor, inputSequence: -1, inputError: null,
+    observer({ v: KERNEL_PROTOCOL_VERSION, kind: 'process-event', replayCursor, grantId: 'grant', error: null, stream, subscriptionId: 'subscription', processId: process.processId, kernelEpoch: 'epoch', sequence: 0,
+      result: { process, chunks, nextCursor: cursor, endCursor: Math.max(cursor, replayCursor), inputSequence: -1, inputError: null,
         outputComplete: !process.writerActive, outputError: null } }, async () => {});
   }
   function settle(index: number, state: 'applied' | 'partial' = 'applied') {
@@ -145,6 +145,22 @@ it('retains partial input evidence, never retries it, and rebinds a failed view 
   await stopping;
   expect(handle.status).toBe('exited'); expect(f.scoped.processKill).not.toHaveBeenCalled();
   expect(f.scoped.processRelease).not.toHaveBeenCalled();
+});
+
+it('renders retained output without replaying terminal queries as fresh input', async () => {
+  const historical = '\x1b[?996nold output\x1b[6n';
+  const boundary = Buffer.byteLength(historical), f = fixture('process_job', boundary);
+  const opened = await f.service.openTerminal(identity), handle = f.terminal.attachTerminalSession(opened.sessionId)!;
+  const rendered: string[] = []; handle.onData(data => rendered.push(data));
+  f.emit(f.observers[0]!, 'data', [{ channel: 'stdout', offset: 0, bytesBase64: Buffer.from(historical).toString('base64') }], boundary);
+  await turn();
+  expect(rendered.join('')).toBe('old output'); expect(f.calls).toHaveLength(0);
+  const live = '\x1b[?996n';
+  f.emit(f.observers[0]!, 'data', [{ channel: 'stdout', offset: boundary, bytesBase64: Buffer.from(live).toString('base64') }], boundary + Buffer.byteLength(live));
+  await turn();
+  expect(f.calls).toHaveLength(1);
+  expect(Buffer.from(String(f.calls[0]!.params.bytesBase64), 'base64').toString()).toBe('\x1b[?997;1n');
+  f.settle(0); await turn();
 });
 
 it('rejects a foreign branch before granting or exposing the original process', async () => {

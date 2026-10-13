@@ -395,6 +395,19 @@ a launch button, then replaces its placeholder with the detected URL. Project ac
 mounted when their menus close and load configuration on first open. Output observation is directory
 scoped and claims automatic URL opening on the shared terminal tab so multiple controls do not open it twice.
 
+Thread process terminals attach the accepted session through the shared terminal transport. Managed
+Source tabs retain the returned resource owner and remote cwd as metadata under the current navigation
+directory; opening one never resolves that cwd on the coordinating Host or switches its workspace.
+Without a navigation directory, the existing workspace terminal overlay uses a session-scoped view key
+and a null workspace path. Its attached-only shared terminal view cannot create a local shell or treat
+the key as a filesystem root; dismissing and reopening retains the original process attachment.
+Remote loopback output is not probed or opened as a coordinating-Host preview. Closing an attached tab
+only detaches, and connection failures retain its session identity for an explicit retry. Thread retries
+first reopen the original Thread/branch/operation view through the coordinating Host, then attach the
+same session; a browser WebSocket reattach alone cannot readmit a failed managed Source projection.
+Late retry results are discarded after tab dismissal, navigation, or a Host generation change.
+Attached jobs are excluded from layout persistence so reload cannot recreate them as local shells.
+
 Common controls live under `src/components/ui`. `Button`, `dropdownTriggerVariants`, and the Settings
 primitives carry shared interaction chrome, sizes, focus behavior, and theme semantics. Extending a
 shared primitive is preferable when several callers genuinely need the same missing shape; a local

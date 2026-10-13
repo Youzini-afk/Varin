@@ -75,7 +75,7 @@ impl Storage {
             || !p.scope.validate()
             || !matches!(
                 p.purpose.as_str(),
-                "source" | "read" | "integration" | "result"
+                "source" | "read" | "integration" | "result" | "process_view"
             )
         {
             return Err(denied("Source authority identity is incomplete"));

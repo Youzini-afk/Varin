@@ -1252,7 +1252,7 @@ fn coordinator_read(
             );
             std::thread::sleep(Duration::from_millis(5));
         }
-        resources.replay_read_receipt_releases()?;
+        resources.replay_source_delivery_releases()?;
         while release_attempts
             .lock()
             .unwrap()
@@ -2343,4 +2343,129 @@ fn native_file_followup(
         },
     )?;
     Ok(serde_json::to_value(receipt.completion)?)
+}
+
+#[test]
+fn managed_package_delivery_cleanup_recovers_original_catalog_without_replaying_stage() {
+    let root = std::env::temp_dir().join(format!("varin-package-delivery-{}", uuid::Uuid::new_v4()));
+    let mut db = Catalog::open(root.join("catalog")).unwrap();
+    let source = json!({"resource_owner":{"kind":"managed_host","hostId":"b","connectionId":"original-b","endpointIdentity":"identity-b"},
+        "mode":"fixed_branch","workspace_id":"workspace","execution_workspace_id":"workspace","branch_id":"source-branch","revision":3,"live_root":null,"environment_run_id":null});
+    let original = begin_package_call(&mut db, json!({"source":source,"packagePath":"package","expectedRevision":0})).unwrap();
+    let id = original["operationId"].as_str().unwrap().to_string();
+    let run = original["runId"].as_str().unwrap().to_string();
+    let context = ToolExecutionContext { run_id: run.clone(), operation_id: id.clone(),
+        origin: serde_json::from_value(original["origin"].clone()).unwrap() };
+    let receipt = json!({"outcome":"installed_disabled","artifactIntegrity":"original-artifact","catalogRevision":1});
+    let catalog = Arc::new(Mutex::new(db));
+    let (tx, rx) = mpsc::sync_channel(8);
+    let bridge = crate::host_query::OwnerChannel::new("source-resource", tx);
+    bridge.initialize("coordinator-epoch");
+    let resources = KernelResourceClient::new(|_| panic!("cleanup cannot execute stage or Storage effects"), |_| Ok(()), Default::default())
+        .with_journal_catalog(catalog.clone()).with_source_bridge(bridge.clone());
+    // A running invocation has no trusted delivery/stop evidence.
+    resources.release_delivered_package_source(&id).unwrap();
+    assert!(rx.try_recv().is_err());
+    {
+        let mut db = catalog.lock().unwrap();
+        let epoch = db.epoch();
+        db.commit_execution(&run, epoch, &ExecutionRecord::ToolSettled { context,
+            completion: ToolCompletion::Result { outcome: varin_runtime::Outcome::Succeeded,
+                effect: varin_runtime::Effect::Confirmed, content: receipt.clone().into() }, executor_stopped: true }).unwrap();
+        assert!(db.external_delivery_persisted(&id).unwrap());
+    }
+    let retry = resources.clone();
+    let operation = id.clone();
+    let first = std::thread::spawn(move || retry.release_delivered_package_source(&operation));
+    let frame = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(frame["query"]["kind"], "package_cleanup");
+    assert_eq!(frame["query"]["operationId"], id);
+    assert_eq!(frame["query"]["runId"], run);
+    assert_eq!(frame["query"]["threadId"], original["threadId"]);
+    assert_eq!(frame["query"]["source"], source);
+    assert!(catalog.try_lock().is_ok(), "network cleanup must not hold Catalog");
+    bridge.receive(json!({"v":1,"kind":"source-resource-response","id":frame["id"],"kernelEpoch":"coordinator-epoch",
+        "result":{"ok":false,"message":"release did not reach B"}}));
+    assert!(first.join().unwrap().is_err());
+    drop(resources);
+    drop(catalog);
+    let reopened = Arc::new(Mutex::new(Catalog::open(root.join("catalog")).unwrap()));
+    let resources = KernelResourceClient::new(|_| panic!("recovery cannot rerun stage"), |_| Ok(()), Default::default())
+        .with_journal_catalog(reopened.clone()).with_source_bridge(bridge.clone());
+    resources.replay_source_delivery_releases().unwrap();
+    let replay = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(replay["query"], frame["query"]);
+    assert!(reopened.try_lock().is_ok());
+    bridge.receive(json!({"v":1,"kind":"source-resource-response","id":replay["id"],"kernelEpoch":"coordinator-epoch",
+        "result":{"ok":true,"value":{"operationId":id,"released":true}}}));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Arc::strong_count(&reopened) > 2 {
+        assert!(Instant::now() < deadline, "cleanup worker did not settle");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let operation = { let db = reopened.lock().unwrap(); db.capture_operation_read(db.operation(&id).unwrap()) }.load().unwrap();
+    assert_eq!(operation.outcome, Some(varin_runtime::Outcome::Succeeded));
+    assert!(serde_json::to_value(operation).unwrap().to_string().contains("original-artifact"));
+    assert!(rx.try_recv().is_err(), "cleanup emitted no stage invocation");
+    drop(resources); drop(reopened); bridge.close();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn package_capture_storage_reopen_releases_exact_pin_and_original_temporary_owners() {
+    use base64::Engine;
+    let root = std::env::temp_dir().join(format!("varin-package-pins-{}", uuid::Uuid::new_v4()));
+    let owner = Owner::new(root.join("storage"), "b", "generation-one", "epoch-one");
+    owner.rpc("authority.grant.issue", json!({"grantId":"source-grant","hostGeneration":owner.generation,
+        "storageIdentity":owner.root,"sessionId":null,"owningWorkspace":"workspace","executionWorkspace":"workspace",
+        "threadId":"thread","runId":"run","operationId":"package-stage",
+        "capabilities":["storage.read","storage.write","storage.admin"],"pathScopes":[""]}), None).unwrap();
+    let mut hashes = Vec::new();
+    for (name, content) in [("package", b"package-only".as_slice()), ("durable-handoff", b"other-consumer".as_slice()), ("unfinished-capture", b"partial-capture".as_slice())] {
+        let upload = json!({"operationId":format!("upload-{name}"),"streamId":name,"workspaceId":"workspace","byteLength":content.len()});
+        owner.rpc("storage.putBlob.begin", upload.clone(), Some("source-grant")).unwrap();
+        owner.rpc("storage.putBlob.chunk", json!({"streamId":name,"sequence":0,
+            "bytesBase64":base64::engine::general_purpose::STANDARD.encode(content)}), Some("source-grant")).unwrap();
+        let body = owner.rpc("storage.putBlob.finish", json!({"operationId":format!("upload-{name}"),
+            "streamId":name,"workspaceId":"workspace"}), Some("source-grant")).unwrap();
+        hashes.push(body["hash"].as_str().unwrap().to_string());
+        if name == "unfinished-capture" { continue; }
+        owner.rpc("branch.create.begin", json!({"operationId":format!("create-{name}"),"builderId":name,
+            "workspaceId":"workspace","branchId":name,"draftBasePaths":[],"captureScopes":[]}), Some("source-grant")).unwrap();
+        let state = crate::model::PathState::RegularFile {
+            object_hash: body["hash"].as_str().unwrap().to_string(), byte_length: content.len() as u64, mode: 0o644,
+        };
+        owner.rpc("branch.create.append", json!({"builderId":name,"sequence":0,"entries":[{"path":"body.txt",
+            "state":state,"ownerId":body["ownerId"]}]}), Some("source-grant")).unwrap();
+        owner.rpc("branch.create.finish", json!({"operationId":format!("create-{name}"),"builderId":name}), Some("source-grant")).unwrap();
+        owner.rpc("branch.pin", json!({"operationId":format!("pin-{name}"),"branchId":name,"revision":0,"pinId":format!("{name}-pin")}), Some("source-grant")).unwrap();
+        owner.rpc("branch.delete", json!({"operationId":format!("delete-{name}"),"branchId":name}), Some("source-grant")).unwrap();
+    }
+    let record = json!({"operationId":"capture-intent","recordId":"extension.package-capture:capture","workspaceId":"workspace",
+        "recordType":"extension.package-capture","state":"capturing","threadId":"thread","runId":"run",
+        "payloadJson":json!({"id":"capture","workspaceId":"workspace","captureId":"original-capture","packagePath":".",
+            "identity":{"principalId":"a-principal","coordinatorHostId":"a","authorityId":"source-authority","resourceEpoch":"epoch-one",
+                "operationId":"package-stage","scope":{"kind":"run","threadId":"thread","runId":"run","epoch":1},
+                "source":{"workspace_id":"workspace","mode":"fixed_branch","branch_id":"package","revision":0}}}).to_string(),
+        "ownerIds":[],"references":[]});
+    owner.rpc("storage.record.put", record, Some("source-grant")).unwrap();
+    drop(owner);
+    let owner = Owner::new(root.join("storage"), "b", "generation-two", "epoch-two");
+    owner.rpc("authority.grant.issue", json!({"grantId":"cleanup","hostGeneration":owner.generation,"storageIdentity":owner.root,"sessionId":null,
+        "owningWorkspace":"workspace","executionWorkspace":"workspace","threadId":"thread","runId":"run","operationId":"package-stage",
+        "capabilities":["storage.read","storage.write","storage.maintenance","storage.gc"],"pathScopes":[""]}), None).unwrap();
+    let invoke = |method, params| owner.rpc(method, params, Some("cleanup")).unwrap();
+    assert!(invoke("storage.record.get", json!({"workspaceId":"workspace","recordId":"extension.package-capture:capture"})).is_object());
+    invoke("storage.gc", json!({"operationId":"gc-before"}));
+    for hash in &hashes { assert!(crate::protocol::object_path(&owner.root, hash).unwrap().exists()); }
+    assert_eq!(invoke("branch.unpin", json!({"operationId":"cleanup-pin","branchId":"package","pinId":"package-pin"}))["released"], true);
+    invoke("storage.record.release", json!({"operationId":"cleanup-record","workspaceId":"workspace","recordId":"extension.package-capture:capture"}));
+    owner.rpc("authority.grant.retire", json!({"target":{"kind":"grant","grantId":"source-grant"}}), None).unwrap();
+    invoke("storage.gc", json!({"operationId":"gc-after"}));
+    assert!(!crate::protocol::object_path(&owner.root, &hashes[0]).unwrap().exists());
+    assert!(crate::protocol::object_path(&owner.root, &hashes[1]).unwrap().exists(), "another consumer's durable pin survives");
+    assert!(!crate::protocol::object_path(&owner.root, &hashes[2]).unwrap().exists(), "retirement releases undelivered capture owners");
+    assert_eq!(invoke("pin.read", json!({"pinId":"durable-handoff-pin","includeEntries":false}))["pinId"], "durable-handoff-pin");
+    drop(owner);
+    std::fs::remove_dir_all(root).unwrap();
 }

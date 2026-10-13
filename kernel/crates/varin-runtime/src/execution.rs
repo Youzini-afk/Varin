@@ -860,6 +860,10 @@ struct ExecutorCall<T: ?Sized> {
     context: FrozenToolContext,
 }
 impl<T: ToolExecutor + ?Sized> PreparedToolCall for ExecutorCall<T> {
+    fn receipt_persisted(&self, context: &ToolExecutionContext) {
+        self.executor.receipt_persisted(context, &self.call);
+    }
+
     fn executor_owner(&self) -> ExecutorOwner {
         self.executor.executor_owner()
     }
@@ -914,6 +918,10 @@ pub struct SelectedTools {
     pub executor: Arc<dyn ToolExecutor>,
 }
 pub trait ToolExecutor: Send + Sync + 'static {
+    /// The default bound call forwards the original committed-delivery notification.
+    /// Implementations may release that call's source resources without replaying it.
+    fn receipt_persisted(&self, _context: &ToolExecutionContext, _call: &ToolCall) {}
+
     fn executor_owner(&self) -> ExecutorOwner {
         ExecutorOwner::Kernel
     }

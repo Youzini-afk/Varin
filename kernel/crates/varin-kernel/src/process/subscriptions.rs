@@ -30,6 +30,7 @@ struct Subscription {
     output: OutputHandle,
     snapshot: Value,
     live: bool,
+    replay_cursor: u64,
     state: Mutex<State>,
 }
 struct Inner {
@@ -61,7 +62,8 @@ impl ProcessSubscriptions {
         if id.is_empty() {
             return Err(failure("subscriptionId is required"));
         }
-        if cursor > output.shared.lock().end {
+        let replay_cursor = output.shared.lock().end;
+        if cursor > replay_cursor {
             return Err(failure("subscription cursor is beyond retained output"));
         }
         let subscription = Arc::new(Subscription {
@@ -73,6 +75,7 @@ impl ProcessSubscriptions {
             output,
             snapshot,
             live,
+            replay_cursor,
             state: Mutex::new(State {
                 cursor,
                 spool: SpoolCursor::default(),
@@ -240,7 +243,7 @@ fn envelope(
 ) -> Value {
     json!({"v":crate::protocol::PROTOCOL_VERSION,"kind":"process-event","kernelEpoch":subscription.epoch,
         "subscriptionId":subscription.id,"grantId":subscription.grant_id,"processId":subscription.process_id,
-        "stream":stream,"sequence":sequence,"result":result,"error":error})
+        "stream":stream,"sequence":sequence,"replayCursor":subscription.replay_cursor,"result":result,"error":error})
 }
 fn projection(subscription: &Subscription, buffer: &super::Buffer, cursor: u64) -> (Value, Value) {
     let mut snapshot = subscription.snapshot.clone();

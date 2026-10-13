@@ -1,6 +1,6 @@
 /** One source-owned capture serves both local compilation and cross-Host staging.
  * Object addresses stay behind the original reader; only bytes reach the compiler tree. */
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -80,6 +80,8 @@ export function parseExtensionSourceSnapshot(value: unknown): ExtensionSourceSna
 export async function captureExtensionSource(input: {
   store: KernelWorkingStateRootStore; client: KernelScopedClient; source: LaunchSource; physicalRoot: LiveRoot | null;
   runId: string; operationId: string; packagePath: string; signal: AbortSignal;
+  /** Persisted by the managed source owner before pin acquisition. */
+  pinId?: string;
 }): Promise<ExtensionSourceCapture> {
   const { store, client, source, signal } = input;
   const packagePath = parseVarinExtensionPackagePath(input.packagePath);
@@ -95,7 +97,12 @@ export async function captureExtensionSource(input: {
       await Promise.allSettled([...pending]);
       // Preserve a failed release for the original owner's later cleanup attempt.
       if (captured) { await store.releaseCapturedStates(captured); captured = undefined; }
-      if (pin) { await pin.release(); pin = undefined; }
+      if (pin) {
+        if (input.pinId) await client.unpinBranch({ operationId: `extension-package-unpin:${randomUUID()}`,
+          branchId: pin.branchId, pinId: input.pinId });
+        else await pin.release();
+        pin = undefined;
+      }
     })();
     void releasing.catch(() => { releasing = undefined; });
     return releasing;
@@ -103,7 +110,9 @@ export async function captureExtensionSource(input: {
   try {
     const entries: Array<ExtensionSourceEntry & { originalPath: string }> = [];
     if (source.mode === 'fixed_branch') {
-      pin = await store.pinBranch(source.branch_id!, { revision: source.revision!, signal });
+      pin = input.pinId
+        ? await store.pinBranchHandoff(source.branch_id!, input.pinId, { revision: source.revision!, signal })
+        : await store.pinBranch(source.branch_id!, { revision: source.revision!, signal });
       const root = await store.readPath(source.branch_id!, sourcePath, { pin, signal });
       if (root?.state.kind !== 'directory') throw new Error('extension_package_directory_required');
       const tree = await store.listPaths(source.branch_id!, [sourcePath], { pin, signal });

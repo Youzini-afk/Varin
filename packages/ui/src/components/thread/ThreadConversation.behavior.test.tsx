@@ -1089,7 +1089,10 @@ it('starts an explicit goal from the latest finished Run and keeps Stop run avai
 });
 
 
-it('opens the original accepted PTY in the shared terminal and fences a late response after changing branches', async () => {
+it.each([
+  { kind: 'local' as const },
+  { kind: 'managed_host' as const, hostId: 'host-b', connectionId: 'connection-b', endpointIdentity: 'sha256-b' },
+])('opens the original $kind PTY with its owner and fences a late response after changing branches', async resourceOwner => {
   const f = fixture(true);
   const operation: ThreadSnapshot['operations'][number] = { id: 'process:interactive', run_id: 'ui-run', epoch: 1, revision: 1,
     phase: 'running', outcome: null, effect: 'dispatched', cancel_requested: false,
@@ -1097,12 +1100,14 @@ it('opens the original accepted PTY in the shared terminal and fences a late res
     intent: { call: { arguments: { mode: 'pty' } } }, result: null, external_receipt: null,
     call_completion: { kind: 'job_accepted', operation_id: 'process:interactive', phase: 'running', effect: 'dispatched', lifetime: 'environment' }, execution_owner: null };
   f.view.operations = [operation];
-  const result = { sessionId: 'original-terminal', cwd: '/original-workspace', operationId: operation.id, processId: operation.id };
+  const result = { sessionId: 'original-terminal', cwd: '/original-workspace', resourceOwner, operationId: operation.id, processId: operation.id };
   const open = vi.fn(async () => result); f.api.processes = { openTerminal: open };
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
   await act(async () => { button('Open process terminal').click(); });
   expect(open).toHaveBeenCalledWith({ ...identity, operationId: operation.id });
-  expect(attachProcessTerminal).toHaveBeenCalledWith(result.cwd, result.sessionId, 'Agent process');
+  expect(attachProcessTerminal).toHaveBeenCalledWith(result.cwd, result.sessionId, 'Agent process', resourceOwner, {
+    identity, operationId: operation.id, processId: result.processId, endpointGeneration: endpoint.generation,
+  });
   let resolve!: (value: typeof result) => void;
   open.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
   await act(async () => { button('Open process terminal').click(); });

@@ -30,6 +30,7 @@ import {
   type SourceServiceResponse,
 } from "./managed-remote-types.js";
 import { decodeManagedSourceCancellation, decodeManagedSourceReceiptRelease, decodeManagedSourceResponse } from './managed-source-response.js';
+import { consumeManagedProcessStream } from './managed-process-stream.js';
 
 const BASE_PATH = "/api/harness/managed-execution/v1";
 const TARGET_REFRESH_WORKSPACE = "__varin_managed_remote__";
@@ -105,7 +106,7 @@ class ManagedTargetClient {
     return headers;
   }
 
-  async request<Result>(relativePath: string, init: Omit<RequestInit, "body"> & { body?: RequestInit["body"] | AsyncIterable<Uint8Array> } = {}): Promise<Result> {
+  async response(relativePath: string, init: Omit<RequestInit, "body"> & { body?: RequestInit["body"] | AsyncIterable<Uint8Array> } = {}): Promise<Response> {
     const url = new URL(`${BASE_PATH}${relativePath}`, `${this.target.connection.apiUrl.replace(/\/$/, "")}/`).toString();
     const { body, ...rest } = init;
     const asyncBody = body !== undefined && typeof (body as AsyncIterable<Uint8Array>)[Symbol.asyncIterator] === "function";
@@ -120,13 +121,17 @@ class ManagedTargetClient {
       await response.body?.cancel().catch(() => undefined);
       throw new Error(`Managed target identity changed for ${this.target.machineId}`);
     }
-    const responseBody = await response.json().catch(() => null) as Result | { error?: unknown } | null;
     if (!response.ok) {
+      const responseBody = await response.json().catch(() => null) as { error?: unknown; code?: unknown } | null;
       const message = responseBody && typeof responseBody === "object" && "error" in responseBody && typeof responseBody.error === "string"
         ? responseBody.error : `Managed target request failed (${response.status})`;
       throw new ManagedResponseError(message, responseBody && typeof responseBody === 'object' && 'code' in responseBody ? responseBody.code : undefined);
     }
-    return responseBody as Result;
+    return response;
+  }
+
+  async request<Result>(relativePath: string, init: Omit<RequestInit, "body"> & { body?: RequestInit["body"] | AsyncIterable<Uint8Array> } = {}): Promise<Result> {
+    return (await this.response(relativePath, init)).json() as Promise<Result>;
   }
 
   json<Result>(relativePath: string, body?: unknown, method = "POST", signal?: AbortSignal): Promise<Result> {
@@ -356,6 +361,16 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
       return result;
     };
     return {
+      processAccess: (input, signal) => request('processAccess', input, signal),
+      processControl: input => request('processControl', input),
+      processWrite: input => request('processWrite', input),
+      processResize: input => request('processResize', input),
+      processSubscribe: async (input, observer, signal) => {
+        if (input.coordinatorHostId !== options.coordinatorHostId) throw new Error('Managed process belongs to another coordinator');
+        const response = await client.response('/sources/processSubscribe', { method: 'POST', body: JSON.stringify(input),
+          headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' }, ...(signal ? { signal } : {}) });
+        return consumeManagedProcessStream(response, input, observer, input => request('processControl', input));
+      },
       capabilities: (input, signal) => request('capabilities', input, signal),
       handoff: (input, signal) => request('handoff', input, signal),
       integrationReceipt: (input, signal) => request('integrationReceipt', input, signal),

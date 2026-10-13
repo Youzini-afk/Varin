@@ -219,6 +219,26 @@ impl Storage {
                 }
                 state_in(&["available", "retired"])?;
             }
+            "extension.package-capture" => {
+                derived("extension.package-capture")?;
+                same("workspaceId", workspace_id)?;
+                state_in(&["capturing"])?;
+                required("captureId")?;
+                required("packagePath")?;
+                let identity = object.get("identity").and_then(Value::as_object).ok_or_else(|| {
+                    KernelError::Operation("package capture owner is required".into())
+                })?;
+                for field in ["principalId", "coordinatorHostId", "authorityId", "resourceEpoch", "operationId"] {
+                    if identity.get(field).and_then(Value::as_str).is_none_or(str::is_empty) {
+                        return Err(KernelError::Operation(format!("package capture {field} is required")));
+                    }
+                }
+                if identity.get("source").and_then(|source| source.get("workspace_id")).and_then(Value::as_str) != Some(workspace_id)
+                    || identity.get("scope").and_then(|scope| scope.get("kind")).and_then(Value::as_str) != Some("run")
+                {
+                    return Err(KernelError::Operation("package capture selection is invalid".into()));
+                }
+            }
             "experiment.input-capture" => {
                 derived("experiment.input-capture")?;
                 same("workspaceId", workspace_id)?;
@@ -815,6 +835,7 @@ impl Storage {
             "research.source",
             "experiment.spec",
             "experiment.input-capture",
+            "extension.package-capture",
             "experiment.attempt",
             "experiment.job",
             "experiment.artifact",
