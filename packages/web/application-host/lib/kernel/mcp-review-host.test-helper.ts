@@ -117,7 +117,7 @@ createInterface({input:process.stdin}).on('line',line=>{const q=JSON.parse(line)
     original: { command: process.execPath, args: [peer, root], exposure: 'direct' },
   } }));
   let changed: (() => void) | undefined;
-  scope = await compositions.observe({ agentDir, configCwd: agentDir, executionCwd: agentDir,
+  scope = await compositions.observe({ resourceOwner: { kind: 'local' }, agentDir, configCwd: agentDir, executionCwd: agentDir,
     environmentId: 'fixture-host:global', executionScope: 'global', projectTrusted: false,
     sessionId: 'agent:thread' }, () => changed?.());
   recover = createMcpTaskRecovery({ kernel, authority, agentDir, hostId: 'fixture-host',

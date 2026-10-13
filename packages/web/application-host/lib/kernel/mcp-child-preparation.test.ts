@@ -57,6 +57,7 @@ else return;process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,res
       currentPolicy: policy,
       lease: await authority.acquire(
         {
+          resourceOwner: { kind: 'local' },
           agentDir: root,
           configCwd: root,
           executionCwd: parentCwd,
@@ -201,6 +202,7 @@ else return;process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,res
       currentPolicy: policy,
       lease: await authority.acquire(
         {
+          resourceOwner: { kind: 'local' },
           agentDir: root,
           configCwd: root,
           executionCwd: root,
@@ -218,7 +220,7 @@ else return;process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,res
       signal,
     );
     leases.push(neutral);
-    expect(neutral.binding.provenance.execution_scope).toBe('global');
+    expect(neutral.binding.provenance.servers.fixture!.owner.execution_scope).toBe('global');
     const neutralCall = {
       ...call,
       operationId: 'neutral-operation',
@@ -327,7 +329,7 @@ it('keeps Catalog Task controls after server removal and still requires original
   const kernel={agentRuntimeRequest:async(method:string,params:unknown)=>{reads.push({method,params});throw new Error('original_job_family_required');}} as unknown as KernelClient;
   const {createMcpTaskRuntime}=await import('./mcp-task-runtime.js');
   const tasks=createMcpTaskRuntime({kernel,runtime:{onReady:()=>()=>{},onEvent:()=>()=>{},reconcileObservations:async()=>[]},recover:async()=>{throw new Error('no endpoint may be invented');}});
-  const owner=await authority.acquire({agentDir:root,configCwd:root,executionCwd:root,environmentId:'host:global',executionScope:'global',projectTrusted:false,sessionId:'agent:reader'},{servers:[]});
+  const owner=await authority.acquire({resourceOwner:{kind:'local'},agentDir:root,configCwd:root,executionCwd:root,environmentId:'host:global',executionScope:'global',projectTrusted:false,sessionId:'agent:reader'},{servers:[]});
   const lease=createMcpLease({lease:owner,kernel,tasks,currentPolicy:async()=>({mode:'normal',rules:[]})});
   try{
     expect(owner.inspect().connectedServerCount).toBe(0);

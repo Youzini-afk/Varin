@@ -72,7 +72,7 @@ describe("pi-mcp-adapter config bridge", () => {
     const global = JSON.stringify({ mcpServers: { docs: { command: "node", enabled: false, exposure: "direct" } } });
     writeFileSync(globalPath, global); writeFileSync(projectPath, '{"mcpServers":{}}');
     const authority = new McpAuthority();
-    const scope = { agentDir, configCwd: cwd, executionCwd: cwd, environmentId: "fixture", executionScope: "workspace" as const,
+    const scope = { agentDir, configCwd: cwd, executionCwd: cwd, environmentId: "fixture", resourceOwner: { kind: 'local' as const }, executionScope: "workspace" as const,
       projectTrusted: true, sessionId: "main" };
     try {
       const opened = authority.open(scope);

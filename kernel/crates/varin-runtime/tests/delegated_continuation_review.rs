@@ -603,15 +603,18 @@ fn each_new_run_retargets_only_the_original_mcp_definition_and_its_own_recovery_
         ]
         .into(),
         provenance: McpProvenance {
-            configuration: McpConfiguration {
-                agent_dir: "/agent".into(),
-                config_cwd: "/workspace".into(),
-                project_trusted: true,
-            },
-            execution_scope: McpExecutionScope::Workspace,
             servers: [(
                 "one".into(),
                 McpServerSelection {
+                    owner: McpServerOwner {
+                        resource_owner: SourceResourceOwner::Local,
+                        configuration: McpConfiguration {
+                            agent_dir: "/agent".into(),
+                            config_cwd: "/workspace".into(),
+                            project_trusted: true,
+                        },
+                        execution_scope: McpExecutionScope::Workspace,
+                    },
                     definition_version: "definition-v1".into(),
                     resource_key: "parent-resource".into(),
                 },

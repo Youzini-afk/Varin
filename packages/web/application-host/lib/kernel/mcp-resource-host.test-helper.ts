@@ -31,7 +31,7 @@ export async function createResourceFixture(options: {
   return {
     async prepare(frame: Record<string, unknown>) {
       let changed: (() => void) | undefined;
-      const scope = await compositions.observe({ agentDir, configCwd: agentDir, executionCwd: agentDir,
+      const scope = await compositions.observe({ resourceOwner: { kind: 'local' }, agentDir, configCwd: agentDir, executionCwd: agentDir,
         environmentId: 'fixture-host:global', executionScope: 'global', projectTrusted: false,
         sessionId: `agent:${String(frame.threadId ?? 'thread')}` }, () => changed?.());
       scopes.push(scope);

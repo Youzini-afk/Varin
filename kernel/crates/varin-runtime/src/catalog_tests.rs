@@ -2175,15 +2175,18 @@ fn tool_activation_retains_its_exact_composition_through_collection_and_reopen()
         ]
         .into(),
         provenance: launches::McpProvenance {
-            execution_scope: launches::McpExecutionScope::Global,
-            configuration: launches::McpConfiguration {
-                agent_dir: "/fixture/agent".into(),
-                config_cwd: "/fixture/project".into(),
-                project_trusted: true,
-            },
             servers: [(
                 "fixture".into(),
                 launches::McpServerSelection {
+                    owner: launches::McpServerOwner {
+                        resource_owner: launches::SourceResourceOwner::Local,
+                        configuration: launches::McpConfiguration {
+                            agent_dir: "/fixture/agent".into(),
+                            config_cwd: "/fixture/project".into(),
+                            project_trusted: true,
+                        },
+                        execution_scope: launches::McpExecutionScope::Global,
+                    },
                     definition_version: "definition".into(),
                     resource_key: "server-resource".into(),
                 },

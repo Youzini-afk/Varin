@@ -19,8 +19,11 @@ Run uses its materialized cwd while retaining the original project configuration
 source-less Run may use an explicitly admitted neutral global execution scope. Transport type
 is not a filesystem permission or a reason to reject a server.
 
-Native child delegation freezes configuration provenance, explicit execution scope and exact selected
-server definitions separately from execution resource identities. The original authority prepares the
+Each server selection requires its own frozen `owner`: resource location, configuration/trust and
+execution scope. Scope and resource keys include that location; the combined provenance has no
+shared configuration owner. Native child delegation preserves these owners and exact definitions
+separately from execution resource identities. Mixed-owner child preparation currently reports
+unavailable until the managed MCP contribution adapter is connected. The original authority prepares the
 child's own execution binding and the runtime commits it once before first use. A global configuration
 file may still describe a workspace execution dependency; a fixed read-only child cannot borrow the
 parent's mutable cwd. Neutral global dependencies remain neutral even when a child has a private cwd.

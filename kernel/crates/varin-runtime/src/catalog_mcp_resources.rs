@@ -112,14 +112,13 @@ impl Catalog {
             || selected.is_none_or(|s| {
                 s.definition_version != binding.endpoint.configuration_version
                     || s.resource_key != binding.endpoint.resource_key
+                    || !s.owner.accepts_source(snapshot.frozen.source.as_ref())
             })
             || intent.contract().resources
                 != vec![crate::execution::ResourceClaim {
                     key: binding.endpoint.resource_key.clone(),
                     access: crate::execution::Access::Write,
                 }]
-            || (frozen.provenance.execution_scope == launches::McpExecutionScope::Workspace
-                && snapshot.frozen.source.is_none())
         {
             return Err(RuntimeError::Conflict(
                 "MCP resource subscription differs from original invocation".into(),
@@ -151,7 +150,7 @@ impl Catalog {
         }
         op.mcp_resource_subscription = Some(McpResourceSubscription {
             binding,
-            source_scope: frozen.provenance.execution_scope,
+            source_scope: selected.ok_or_else(|| RuntimeError::Conflict("MCP resource server missing".into()))?.owner.execution_scope,
             acceptance_ref: None,
             listener_id: None,
             availability: crate::McpResourceAvailability::Pending,

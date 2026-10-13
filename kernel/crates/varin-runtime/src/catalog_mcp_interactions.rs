@@ -342,9 +342,7 @@ impl Catalog {
             Some(
                 target
                     .mcp_resource_subscription
-                    .ok_or_else(conflict)?
-                    .binding
-                    .endpoint,
+                    .ok_or_else(conflict)?,
             )
         } else {
             None
@@ -370,11 +368,12 @@ impl Catalog {
             || op.execution_owner.as_ref() != Some(&binding.execution_owner)
             || cleanup
                 .as_ref()
-                .is_some_and(|endpoint| endpoint != &binding.endpoint)
+                .is_some_and(|subscription| subscription.binding.endpoint != binding.endpoint)
             || (cleanup.is_none()
                 && (selected.is_none_or(|s| {
                     s.definition_version != binding.endpoint.configuration_version
                         || s.resource_key != binding.endpoint.resource_key
+                        || !s.owner.accepts_source(snapshot.frozen.source.as_ref())
                 }) || server_arg.is_some_and(|s| s != binding.endpoint.server)
                     || (server_arg.is_none() && resource != Some(&binding.endpoint.resource_key))))
         {
@@ -401,7 +400,8 @@ impl Catalog {
                 sampling: (mode == Mode::Sampling).then(|| crate::mcp_sampling::McpSamplingState { generation_operation_id: None, review: "request".into() }),
             },
             epoch: self.epoch,
-            source_scope: frozen.provenance.execution_scope,
+            source_scope: cleanup.as_ref().map(|subscription| subscription.source_scope)
+                .or_else(|| selected.map(|server| server.owner.execution_scope)).ok_or_else(conflict)?,
             request_ref: body.reference.clone(),
             response_ref: None,
             selector,

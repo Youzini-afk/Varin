@@ -437,12 +437,6 @@ export class ToolBridge {
           (candidate.lease.slot ?? 'mcp') === 'mcp' &&
           binding.reference === mcp.reference &&
           binding.generation === mcp.generation &&
-          binding.provenance?.execution_scope ===
-            mcp.provenance.execution_scope &&
-          isDeepStrictEqual(
-            binding.provenance.configuration,
-            mcp.provenance.configuration,
-          ) &&
           Object.entries(mcp.provenance.servers).every(([name, server]) =>
             isDeepStrictEqual(binding.provenance.servers[name], server),
           ) &&

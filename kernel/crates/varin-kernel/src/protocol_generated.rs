@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 30;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 31;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -2720,7 +2720,7 @@ pub(crate) struct LaunchSourceParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct McpBinding {
     pub(crate) routes: std::collections::BTreeMap<String, varin_runtime::McpRoute>,
-    pub(crate) provenance: McpProvenance,
+    pub(crate) provenance: varin_runtime::catalog::launches::McpProvenance,
     pub(crate) resources: std::collections::BTreeMap<String, String>,
     pub(crate) reference: String,
     pub(crate) generation: i64,
@@ -2983,15 +2983,6 @@ pub(crate) struct LiveRoot {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct McpProvenance {
-    #[serde(rename = "execution_scope")]
-    pub(crate) execution_scope: varin_runtime::catalog::launches::McpExecutionScope,
-    pub(crate) configuration: McpConfiguration,
-    pub(crate) servers: std::collections::BTreeMap<String, McpServerSelection>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct LaunchTool {
     pub(crate) name: String,
     pub(crate) version: String,
@@ -3051,26 +3042,6 @@ pub(crate) struct ContextTransform {
     pub(crate) provider_id: String,
     pub(crate) content_version: String,
     pub(crate) sections: Vec<ContextFragment>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct McpConfiguration {
-    #[serde(rename = "agent_dir")]
-    pub(crate) agent_dir: String,
-    #[serde(rename = "config_cwd")]
-    pub(crate) config_cwd: String,
-    #[serde(rename = "project_trusted")]
-    pub(crate) project_trusted: bool,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct McpServerSelection {
-    #[serde(rename = "definition_version")]
-    pub(crate) definition_version: String,
-    #[serde(rename = "resource_key")]
-    pub(crate) resource_key: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]

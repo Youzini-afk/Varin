@@ -164,6 +164,7 @@ pub struct McpConfiguration {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct McpServerSelection {
+    pub owner: McpServerOwner,
     pub definition_version: String,
     pub resource_key: String,
 }
@@ -175,9 +176,20 @@ pub enum McpExecutionScope {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub struct McpProvenance {
+pub struct McpServerOwner {
+    pub resource_owner: SourceResourceOwner,
     pub configuration: McpConfiguration,
     pub execution_scope: McpExecutionScope,
+}
+impl McpServerOwner {
+    pub fn accepts_source(&self, source: Option<&SourceSelection>) -> bool {
+        self.execution_scope == McpExecutionScope::Global
+            || source.is_some_and(|source| source.resource_owner == self.resource_owner)
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct McpProvenance {
     pub servers: std::collections::BTreeMap<String, McpServerSelection>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -194,10 +206,11 @@ impl HostToolBinding {
     pub fn validate(&self) -> Result<()> {
         let mut names = std::collections::BTreeSet::new();
         if self.reference.is_empty()
-            || self.provenance.configuration.agent_dir.is_empty()
-            || self.provenance.configuration.config_cwd.is_empty()
             || self.provenance.servers.iter().any(|(name, server)| {
                 name.is_empty()
+                    || !server.owner.resource_owner.validate()
+                    || server.owner.configuration.agent_dir.is_empty()
+                    || server.owner.configuration.config_cwd.is_empty()
                     || server.definition_version.is_empty()
                     || server.resource_key.is_empty()
                     || self.resources.get(&format!("server:{name}")) != Some(&server.resource_key)
@@ -291,18 +304,24 @@ impl HostToolBinding {
         selected.tools = tools;
         Some(selected)
     }
+    /// A direct tool needs only its selected server. Gateways can select any admitted server.
+    pub fn tool_uses_workspace(&self, name: &str) -> bool {
+        let resource = self.resources.get(name);
+        self.provenance.servers.values().any(|server| {
+            server.owner.execution_scope == McpExecutionScope::Workspace
+                && resource.is_none_or(|key| key == &server.resource_key)
+        })
+    }
     pub fn derives_from(&self, original: &Self) -> bool {
         self.tools == original.tools
             && self.routes == original.routes
-            && self.provenance.configuration == original.provenance.configuration
-            && self.provenance.execution_scope == original.provenance.execution_scope
             && self.provenance.servers.len() == original.provenance.servers.len()
             && self.provenance.servers.iter().all(|(name, server)| {
                 original
                     .provenance
                     .servers
                     .get(name)
-                    .is_some_and(|old| old.definition_version == server.definition_version)
+                    .is_some_and(|old| old.definition_version == server.definition_version && old.owner == server.owner)
             })
             && self.resources.len() == original.resources.len()
             && self.resources.iter().all(|(name, key)| {

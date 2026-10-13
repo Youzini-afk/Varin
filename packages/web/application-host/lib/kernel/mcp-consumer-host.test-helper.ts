@@ -100,7 +100,9 @@ export default defineHostExtension({ activate(context) {
       assert.equal(frame.kind, 'fixture-consumer-child');
       assert.equal(frame.source, null);
       const binding = frame.mcpBinding as McpBinding;
-      assert.equal(binding.provenance.execution_scope, 'global');
+      for (const server of Object.values(binding.provenance.servers)) {
+        assert.equal(server.owner.execution_scope, 'global');
+      }
       const mcp = await prepareChild({ runId, threadId: String(frame.threadId), fixed: false, source: null, delegatedBinding: binding });
       assert.deepEqual(mcp.binding.tools, binding.tools);
       assert.deepEqual(mcp.binding.routes, binding.routes);

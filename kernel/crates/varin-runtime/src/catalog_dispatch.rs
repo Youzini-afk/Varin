@@ -333,10 +333,8 @@ impl ChildDispatchSelection {
                 );
             }
             return self.mcp_binding.as_ref().map(|binding| {
-                match binding.provenance.execution_scope {
-                    super::launches::McpExecutionScope::Global => ChildSourceRequirement::None,
-                    super::launches::McpExecutionScope::Workspace => ChildSourceRequirement::Source,
-                }
+                if binding.tool_uses_workspace(name) { ChildSourceRequirement::Source }
+                else { ChildSourceRequirement::None }
             });
         }
         self.catalog

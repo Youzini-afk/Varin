@@ -62,7 +62,7 @@ async function fixture(){
   const authority=new McpAuthority({interactionErrors:input=>{const entry={input,completed:[] as string[],unavailable:[] as string[]};errors.push(entry);for(const item of input.items)item.onComplete(()=>entry.completed.push(item.presentation.elicitationId),()=>entry.unavailable.push(item.presentation.elicitationId));},createTransport:()=>{transports++;return new StreamableHttpTransport({url,fetch});},interactions:input=>new Promise(respond=>{
     const settled:string[]=[];input.onResponseSettled(state=>settled.push(state));inputs.push({input,respond,settled});
   })});
-  const scope={agentDir:root,configCwd:root,executionCwd:root,environmentId:'host:global',executionScope:'global' as const,projectTrusted:false,sessionId:'pi'};
+  const scope={agentDir:root,configCwd:root,executionCwd:root,environmentId:'host:global',resourceOwner: { kind: 'local' as const }, executionScope:'global' as const,projectTrusted:false,sessionId:'pi'};
   const emit=(name:string,message:Message)=>streams.get(name)!.controller.enqueue(encode(message));
   return {authority,scope,sent,streams,inputs,errors,transports:()=>transports,failResponse:()=>{failResponse=true;},emit,get:(message:Message)=>get!.enqueue(encode(message)),
     finish(name:string){const stream=streams.get(name)!;emit(name,{id:stream.id,result:{content:[]}});stream.controller.close();},

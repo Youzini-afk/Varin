@@ -11,7 +11,7 @@ import {
   type LoadedMcpConfig, type McpServerConnection, type McpServerEntry, type McpTransportFactory,
   type McpSignInPrompt,
 } from '@earendil-works/pi-coding-agent';
-import type { McpOwnerConfig, McpOwnerConnectionSnapshot, McpOwnerEntry, McpConfiguration, McpProvenance } from '@varin/protocol';
+import type { McpOwnerConfig, McpOwnerConnectionSnapshot, McpOwnerEntry, McpServerOwner, McpProvenance, SourceResourceOwner } from '@varin/protocol';
 import { ConfigTextFileEditor, resolveConfigDocumentPath } from './config-text-file-editor.js';
 import { ConfigWatchManager } from './config-watch-manager.js';
 import { McpSessionExpiredError, McpError, type McpClient, type McpRequestOptions, type McpRequestHandlerContext } from '@earendil-works/pi-mcp';
@@ -27,6 +27,8 @@ export type { McpTaskLease, McpEndpoint, McpTaskResponse } from './mcp-tasks.js'
 export type { McpAuthorityService, McpAuthorityPrompt, McpServiceKind, McpServiceRequest, McpServiceResult } from './mcp-native-protocol.js';
 
 export interface McpAuthorityScope {
+  /** Actual configuration/transport authority; supplied by the trusted host. */
+  resourceOwner: SourceResourceOwner;
   agentDir: string;
   /** Admitted original project location. Never a materialized work branch. */
   configCwd: string;
@@ -115,7 +117,7 @@ export interface McpAuthorityInspection {
 export interface McpAuthorityAcquireOptions {
   /** Deliberate dependency selection. Empty means no MCP dependency; never connect all implicitly. */
   servers: readonly string[];
-  /** Frozen configuration dependencies, checked before opening any selected transport.
+  /** Frozen owner and configuration dependencies, checked before opening any selected transport.
    * Execution location remains the new scope's own authority. */
   provenance?: McpProvenance;
   signal?: AbortSignal;
@@ -244,13 +246,18 @@ function publicEntry(entry: McpServerEntry): McpOwnerEntry {
 }
 function normalizeScope(input: McpAuthorityScope): McpAuthorityScope {
   if (!input.agentDir || !input.configCwd || !input.executionCwd || !input.environmentId || !input.sessionId) fail('mcp-scope-invalid');
-  return { ...input, agentDir: resolve(input.agentDir), configCwd: resolve(input.configCwd), executionCwd: resolve(input.executionCwd) };
+  if (!input.resourceOwner || (input.resourceOwner.kind !== 'local' && (input.resourceOwner.kind !== 'managed_host'
+    || !input.resourceOwner.hostId || !input.resourceOwner.connectionId || !input.resourceOwner.endpointIdentity))) fail('mcp-scope-invalid');
+  return { ...input, resourceOwner: freeze(structuredClone(input.resourceOwner)), agentDir: resolve(input.agentDir), configCwd: resolve(input.configCwd), executionCwd: resolve(input.executionCwd) };
 }
 function scopeKey(scope: McpAuthorityScope): string {
-  return stable([scope.agentDir, scope.configCwd, scope.executionCwd, scope.environmentId, scope.executionScope, scope.projectTrusted]);
+  return stable([scope.resourceOwner, scope.agentDir, scope.configCwd, scope.executionCwd, scope.environmentId, scope.executionScope, scope.projectTrusted]);
 }
-function configuration(scope: McpAuthorityScope): McpConfiguration {
+function configuration(scope: McpAuthorityScope): McpServerOwner['configuration'] {
   return { agent_dir: scope.agentDir, config_cwd: scope.configCwd, project_trusted: scope.projectTrusted };
+}
+function serverOwner(scope: McpAuthorityScope): McpServerOwner {
+  return { resource_owner: scope.resourceOwner, configuration: configuration(scope), execution_scope: scope.executionScope };
 }
 function compile(tool: McpTool): ValidateFunction {
   try { return compileToolJsonSchema(tool.inputSchema); }
@@ -363,9 +370,8 @@ export class McpAuthority {
     try {
       if (record.released) fail('mcp-preparation-cancelled');
       if (options.provenance) {
-        if (options.provenance.execution_scope !== record.scope.executionScope
-          || stable(options.provenance.configuration) !== stable(configuration(record.scope))) fail('mcp_configuration_source_changed');
         for (const [name, selected] of Object.entries(options.provenance.servers)) {
+          if (stable(selected.owner) !== stable(serverOwner(record.scope))) fail('mcp_configuration_source_changed');
           const entry = record.entries.get(name);
           if (!entry || entry.config.enabled === false) fail('mcp_saved_definition_unavailable');
           if (this.#configurationIdentity(record, entry) !== selected.definition_version) {
@@ -373,8 +379,7 @@ export class McpAuthority {
             // configuration replacement. Source, revocation and execution scope remain owned
             // here; no persisted copy or latest-definition substitution is introduced.
             const original = [...this.#scopes.values()].find(candidate => candidate !== record && !candidate.released
-              && candidate.scope.executionScope === record.scope.executionScope
-              && stable(configuration(candidate.scope)) === stable(configuration(record.scope))
+              && stable(serverOwner(candidate.scope)) === stable(selected.owner)
               && candidate.definitions.get(name) === selected.definition_version
               && candidate.entries.has(name)
               && this.#resourceKey(candidate, candidate.entries.get(name)!) === selected.resource_key
@@ -494,9 +499,9 @@ export class McpAuthority {
       return {
         implementationIdentity: createHash('sha256').update(stable([record.key,handles.map(connection=>connection.handle).sort(),
           [...record.entries.values()].map(entry=>this.#configurationIdentity(record,entry)).sort()])).digest('hex'),
-        binding: freeze({ provenance: { execution_scope: record.scope.executionScope, configuration: configuration(record.scope), servers: Object.fromEntries(
+        binding: freeze({ provenance: { servers: Object.fromEntries(
           [...record.entries.values()].filter(entry => entry.config.enabled !== false && entry.config.exposure !== 'hidden').map(entry => [entry.name, {
-            definition_version: this.#configurationIdentity(record, entry), resource_key: this.#resourceKey(record, entry),
+            owner: serverOwner(record.scope), definition_version: this.#configurationIdentity(record, entry), resource_key: this.#resourceKey(record, entry),
           }])) }, reference: `mcp-owner:${createHash('sha256').update(record.key).digest('hex')}`,
           generation: 1 + Number.parseInt(createHash('sha256').update(stable([record.key,
             [...record.entries.values()].map(entry => ({ name: entry.name, identity: this.#configurationIdentity(record, entry) })).sort((a, b) => a.name.localeCompare(b.name)),
@@ -1264,7 +1269,7 @@ export class McpAuthority {
       transport, sensitive ? this.#fileRevision([entry.source, ...(entry.override ? [entry.override] : [])]) : null])).digest('hex');
   }
   #resourceKey(scope: ScopeRecord, entry: McpServerEntry): string {
-    return `mcp:${createHash('sha256').update(stable([scope.scope.agentDir, scope.scope.configCwd, scope.scope.executionCwd, scope.scope.environmentId, entry.name])).digest('hex')}`;
+    return `mcp:${createHash('sha256').update(stable([scope.scope.resourceOwner, scope.scope.agentDir, scope.scope.configCwd, scope.scope.executionCwd, scope.scope.environmentId, entry.name])).digest('hex')}`;
   }
   #connectionKey(scope: ScopeRecord, entry: McpServerEntry): string {
     return stable([scope.key, entry.name, entry.config, entry.scope === 'extension' ? [scope.scope.sessionId, entry.source] : entry.source]);

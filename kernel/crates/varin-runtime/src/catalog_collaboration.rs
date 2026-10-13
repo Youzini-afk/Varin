@@ -1770,14 +1770,9 @@ impl ChildWriterBindingsRead {
             let binding: launches::HostToolBinding =
                 serde_json::from_value(self.content.load(reference)?)?;
             binding.validate()?;
-            if binding.provenance.execution_scope == launches::McpExecutionScope::Workspace {
-                external_writers.extend(
-                    binding
-                        .tools
-                        .into_iter()
-                        .map(|tool| (binding.reference.clone(), tool.name)),
-                );
-            }
+            external_writers.extend(binding.tools.iter()
+                .filter(|tool| binding.tool_uses_workspace(&tool.name))
+                .map(|tool| (binding.reference.clone(), tool.name.clone())));
         }
         if let Some(reference) = &self.extension_bindings_ref {
             let bindings: Vec<launches::ExtensionToolBinding> =

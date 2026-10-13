@@ -101,7 +101,7 @@ for await (const line of createInterface({input:process.stdin})) {
     promptsOnly: { command: process.execPath, args: [peer, tracePath, 'prompts-only'], exposure: 'deferred' },
     unused: { command: process.execPath, args: ['-e', `throw Error('unselected dependency started')`], exposure: 'deferred' },
   } }));
-  scope = await compositions.observe({ agentDir, configCwd: root, executionCwd: root,
+  scope = await compositions.observe({ resourceOwner: { kind: 'local' }, agentDir, configCwd: root, executionCwd: root,
     environmentId: 'mcp-review-environment', executionScope: 'global', projectTrusted: false,
     sessionId: 'thread' }, () => {});
   const lease = createMcpLease({ lease: scope.snapshot(), kernel,
