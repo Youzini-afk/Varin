@@ -5,10 +5,11 @@ import { isDeepStrictEqual } from 'node:util';
 import type { KernelClient } from './kernel-client.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { LiveSourceResolver } from './live-source.js';
-import type { LaunchSource } from './protocol.generated.js';
+import type { LaunchSource, LiveRoot } from './protocol.generated.js';
+import type { ManagedSourceAddress } from '../harness/managed-remote-types.js';
 import { admitRunSourceAuthority, savedSourceLaunch, sourceToolSchemas } from './source-launch.js';
 import type { ExperimentCaller } from '../harness/research-identity.js';
-import { prepareExperimentInput, type ExperimentInputSnapshot, type PrepareExperimentInputOptions, ExperimentInputCaptureError } from '../harness/experiment-workspace.js';
+import { installExperimentInput, prepareExperimentInput, type ExperimentInputSnapshot, type PrepareExperimentInputOptions, ExperimentInputCaptureError } from '../harness/experiment-workspace.js';
 import { canonicalizePathIdentity, isPathWithinRoot } from '../workspace/path-safety.js';
 export type ExperimentSourceAdmission = {
   selection: LaunchSource;
@@ -16,6 +17,10 @@ export type ExperimentSourceAdmission = {
 } & ({
   kind: 'physical';
   canonicalRoot: string;
+} | {
+  kind: 'managed';
+  address: ManagedSourceAddress;
+  physicalRoot: LiveRoot | null;
 } | {
   kind: 'fixed';
   branchId: string;
@@ -48,10 +53,16 @@ export function createResearchSourceAuthority(options: {
     const launch = await runtime.launch(caller.owner.runId, signal);
     if (!launch || !isDeepStrictEqual(launch.selection.source, caller.owner.source))
       throw new Error('Original research LaunchSource changed');
-    if (caller.owner.source.resource_owner.kind === 'managed_host') throw new Error('Experiment input transfer from a managed Source is not available yet. Select a source on the coordinating Host; existing remote experiment machines remain available.');
     const admitted = await admitRunSourceAuthority(options.kernel, runtime, savedSourceLaunch(caller.owner.runId, caller.owner.source, sourceToolSchemas(launch.selection).map(tool => tool.name) as Parameters<typeof savedSourceLaunch>[2]), { ...(signal ? { signal } : {}), resolveLiveSource: options.resolveLiveSource, retention: 'caller', operationId: caller.owner.operationId });
-    if (admitted.kind !== 'local') { await admitted.release(); throw new Error('Research source owner changed during admission'); }
     return admitted;
+  };
+  const releaseManaged = async (caller: ExperimentCaller, admitted: Extract<ExperimentSourceAdmission, { kind: 'managed' }>) => {
+    if (caller.owner.runtime !== 'agent' || caller.owner.source.resource_owner.kind !== 'managed_host'
+      || !isDeepStrictEqual(caller.owner.source, admitted.selection) || admitted.address.coordinatorHostId !== options.runtime().coordinatorHostId)
+      throw new Error('Original managed research cleanup owner changed');
+    const service = await options.runtime().managedSource(caller.owner.source.resource_owner);
+    const result = await service.release({ ...admitted.address, mode: 'retire' }) as { authorityId?: string; phase?: string };
+    if (result?.authorityId !== admitted.address.authorityId || result.phase !== 'retired') throw new Error('Original managed research source has not drained');
   };
   // Release only this original Operation's recorded pin. Cleanup does not reacquire source
   // reading or physical-root authority after trust has been withdrawn.
@@ -102,7 +113,17 @@ export function createResearchSourceAuthority(options: {
       if (owner.runtime !== 'agent' || !('operationId' in owner))
         throw new Error('Native research source provenance is required');
       const source = await open(caller, signal);
+      let retained = false;
       try {
+        if (source.kind === 'managed') {
+          const address = { coordinatorHostId: options.runtime().coordinatorHostId, authorityId: source.binding.authorityId,
+            resourceEpoch: source.binding.resourceEpoch };
+          const result = await source.service.service({ ...address, requestId: randomUUID(),
+            operation: { kind: 'experiment_admit', operationId: owner.operationId, ...(cwd === undefined ? {} : { cwd }) } }, signal);
+          if (relative(result.cwd) !== result.cwd) throw new Error('Managed experiment cwd changed');
+          signal?.throwIfAborted(); retained = true;
+          return { kind: 'managed', selection: owner.source, address, physicalRoot: source.binding.physicalRoot, cwd: result.cwd };
+        }
         if (owner.source.mode === 'fixed_branch') {
           if (!owner.source.branch_id || owner.source.revision === null)
             throw new Error('Fixed source identity missing');
@@ -127,7 +148,7 @@ export function createResearchSourceAuthority(options: {
         return { kind: 'physical', selection: owner.source, canonicalRoot: source.canonicalRoot, cwd: directory };
       }
       finally {
-        await source.release();
+        if (!retained) await source.release();
       }
     },
     async capture(caller, admitted, capture) {
@@ -135,10 +156,46 @@ export function createResearchSourceAuthority(options: {
         throw new Error('Experiment capture source changed');
       if (!('operationId' in caller.owner))
         throw new Error('Original capture operation is missing');
-      const operation = await options.runtime().operation(caller.owner.operationId, capture.signal);
+      const operationId = caller.owner.operationId;
+      const operation = await options.runtime().operation(operationId, capture.signal);
       if (operation.cancel_requested)
         throw new ExperimentInputCaptureError('Original research operation no longer admits capture', false, { drained: true, retryable: false, cause: undefined });
+      if (admitted.kind === 'managed') {
+        if (admitted.selection.resource_owner.kind !== 'managed_host' || !capture.captureScopes) throw new Error('Original managed research input is unavailable');
+        const service = await options.runtime().managedSource(admitted.selection.resource_owner, capture.signal);
+        const captureScopes = [...new Set(capture.captureScopes.map(relative))].sort();
+        let dispatched = false;
+        let installing = false;
+        try {
+          const input = await service.service({ ...admitted.address, requestId: randomUUID(), operation: {
+            kind: 'experiment_capture', operationId, cwd: admitted.cwd, captureScopes } }, capture.signal);
+          if (input.snapshot.workspaceId !== caller.workspaceId || input.snapshot.executionWorkspaceId !== caller.executionWorkspaceId
+            || (input.snapshot.cwd ?? '') !== admitted.cwd || !isDeepStrictEqual(input.snapshot.captureScopes, captureScopes)
+            || admitted.selection.mode === 'fixed_branch' && (input.snapshot.source.kind !== 'fixed-branch'
+              || input.snapshot.source.branchId !== admitted.selection.branch_id || input.snapshot.source.revision !== admitted.selection.revision
+              || input.snapshot.source.root !== input.snapshot.root)
+            || admitted.selection.mode !== 'fixed_branch' && (input.snapshot.source.kind !== 'physical-capture'
+              || input.snapshot.sourceRoot !== admitted.physicalRoot?.canonicalRoot)) throw new Error('Managed experiment input source changed');
+          installing = true;
+          return await installExperimentInput(options.kernel, caller, input, admitted.selection, admitted.address.resourceEpoch,
+            (name, offset, length, signal) => service.service({ ...admitted.address, requestId: randomUUID(), operation: {
+              kind: 'experiment_read', operationId, path: name, offset, length } }, signal),
+            { ...capture, beforeBranchCreate: async value => { await capture.beforeBranchCreate?.(value); dispatched = true; } });
+        } catch (error) {
+          // A source-side branch create is not the coordinator's input create.
+          const localFailure = installing && error instanceof ExperimentInputCaptureError ? error : undefined;
+          let drained = false;
+          try { await releaseManaged(caller, admitted); drained = localFailure?.drained !== false; }
+          catch (cleanup) { throw new ExperimentInputCaptureError('Managed experiment input cleanup is unconfirmed',
+            localFailure?.branchCreateDispatched ?? dispatched,
+            { drained: false, retryable: true, cause: new AggregateError([error, cleanup]) }); }
+          throw new ExperimentInputCaptureError(error instanceof Error ? error.message : String(error),
+            localFailure?.branchCreateDispatched ?? dispatched,
+            { drained, retryable: localFailure?.retryable ?? false, cause: error });
+        }
+      }
       const source = await open(caller, capture.signal);
+      if (source.kind !== 'local') { await source.release(); throw new Error('Research input owner changed'); }
       let dispatched = false;
       let drained = true;
       try {
@@ -186,6 +243,16 @@ export function createResearchSourceAuthority(options: {
       const owner = caller.owner;
       if (owner.runtime !== 'agent' || !('operationId' in owner))
         throw new Error('Original domain invocation is required');
+      if (owner.source.resource_owner.kind === 'managed_host') {
+        const runtime = options.runtime(), service = await runtime.managedSource(owner.source.resource_owner);
+        const authorities = await service.inspectScope({ coordinatorHostId: runtime.coordinatorHostId, threadId: owner.threadId, runId: owner.runId });
+        for (const authority of authorities.filter(value => value.operationId === owner.operationId && value.purpose === 'source')) {
+          if (!isDeepStrictEqual(authority.binding.source, owner.source)) throw new Error('Original research cleanup source changed');
+          await releaseManaged(caller, { kind: 'managed', selection: owner.source, cwd: '', physicalRoot: authority.binding.physicalRoot,
+            address: { coordinatorHostId: runtime.coordinatorHostId, authorityId: authority.binding.authorityId, resourceEpoch: authority.binding.resourceEpoch } });
+        }
+        return true;
+      }
       // Physical admission only reads source identity. No capture/worker can begin before the
       // original attempt row. A fixed admission may additionally own this exact durable pin.
       if (owner.source.mode !== 'fixed_branch') {
@@ -197,6 +264,7 @@ export function createResearchSourceAuthority(options: {
       return drained;
     },
     async release(caller, admitted) {
+      if (admitted.kind === 'managed') { await releaseManaged(caller, admitted); return; }
       if (admitted.kind !== 'fixed')
         return;
       if (!await releaseFixedPin(caller, admitted))

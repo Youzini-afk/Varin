@@ -43,6 +43,14 @@ ModelStep 执行与 `RequestPrepared` 共用一份不可变快照；持久媒体
 编译分配字节减少 78.6%–84.5%。[实现和测量边界](../reviews/runtime-request-compilation-2026-10-13.md)
 区分局部编译成本与整体性能；跨 ModelStep 的稳定前缀复用、容量估计和目录捕获的增量工作仍未完成。
 
+## 2026-10-13 增量：Managed Source 实验输入
+
+来源 Host 固定实时、固定修订或原物化副本的实验输入，协调端按实际分页字节安装并核对完整 root，
+再沿原 Experiment spec/物化/执行 owner 消费。来源读取与内部 Storage 写入分开授权，原捕获与
+清理回执支持取消、丢回复及 Host/Storage 重开；B 的路径不用于解析 A 的输入。
+[实现与验证范围](../reviews/runtime-managed-experiment-input-2026-10-13.md)记录双内核探针和
+原服务检查。交互 PTY、持久脚本、项目 MCP/日历、跨 Host 组合恢复及完整平台/网络验收仍待完成。
+
 ## 2026-10-13 Windows 整合验收
 
 同步到 `4b14f3aa` 后沿真实 HTTP、内核 IPC、扩展 broker、文件/进程和控制通知复检。

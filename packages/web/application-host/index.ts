@@ -3288,7 +3288,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     coordinator: threadIntegrationCoordinator });
   managedRemoteExecution.setSourceOwner(createManagedSourceService({ kernel: kernelClient, hostId,
     documents: documentsAuthority, validateLiveSource: liveSources.validate, prepareSource: prepareThreadSource,
-    languageAvailable: true, releaseSource: targetSourceQuery.release,
+    languageAvailable: true, releaseSource: targetSourceQuery.release, cleanupSource: targetSourceQuery.cleanup,
     serviceOperation: (scope, operation, signal) => {
       switch (operation.kind) {
         case 'child_prepare': case 'child_result_prepare': case 'child_result_publish': case 'child_result_read': case 'child_release': case 'child_unaccepted_release':

@@ -2095,7 +2095,11 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     const id = str(payload.id)!;
     if (payload.captureStarted && payload.captureDrained !== true) {
       const sourceRoot = str(payload.sourceRoot);
-      if ((payload.sourceAdmission as ExperimentSourceAdmission | undefined)?.kind !== "fixed"
+      const admission = payload.sourceAdmission as ExperimentSourceAdmission | undefined;
+      if (admission?.kind === 'managed') {
+        await releaseSourceAdmission(ctx, workspaceId, record);
+        record = (await getAttemptRecord(ctx, workspaceId, id))!;
+      } else if (admission?.kind !== "fixed"
         && (!sourceRoot || await reconcileExperimentCapture(deps.client, recordCaller(workspaceId, record), sourceRoot, strArray(payload.workspaceScope)) !== "drained")) return;
       record = await updateAttempt(ctx, workspaceId, recordCaller(workspaceId, record), id, (current) => current.state,
         (p) => ({ ...p, captureDrained: true }));

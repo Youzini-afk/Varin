@@ -85,6 +85,9 @@ export type SourceServiceOperation =
   | { kind: 'document_read'; path: string; operationId: string }
   | { kind: 'package_capture'; captureId: string; operationId: string; packagePath: string }
   | { kind: 'package_read'; captureId: string; path: string; offset: number; length: number }
+  | { kind: 'experiment_admit'; operationId: string; cwd?: string }
+  | { kind: 'experiment_capture'; operationId: string; cwd: string; captureScopes: string[] }
+  | { kind: 'experiment_read'; operationId: string; path: string; offset: number; length: number }
   | { kind: 'check_path'; path: string }
   | { kind: 'routing_workspace' }
   | { kind: 'resources_prepare'; identity: import('@varin/application-client').ThreadIdentity;
@@ -128,6 +131,8 @@ export interface ManagedSourceLocalScope {
   grant: import('../kernel/kernel-client.js').KernelGrantHandle;
   physicalRoot: import('../kernel/protocol.generated.js').LiveRoot | null;
 }
+/** Original durable attribution for cleanup; it cannot be used as a current source reader. */
+export type ManagedSourceCleanupScope = Omit<ManagedSourceLocalScope, 'grant'> & { operationId: string | null };
 export type ManagedSourceServiceHandler = (scope: ManagedSourceLocalScope, operation: SourceServiceOperation, signal?: AbortSignal) => Promise<unknown>;
 /** The target Host composes its existing Documents, WorkingState and native resource owners.
  * Network routes only supply authenticated principal and the closed request. */
@@ -160,6 +165,9 @@ export interface SourceServiceResults {
   document_read: { bytesBase64: string; byteLength: number; sourceUrl: string; title: string; contentType: 'application/pdf' };
   package_capture: { captureId: string; snapshot: import('../kernel/extension-source.js').ExtensionSourceSnapshot };
   package_read: import('../kernel/protocol.generated.js').KernelObjectSlice;
+  experiment_admit: { cwd: string };
+  experiment_capture: import('../kernel/managed-research-source.js').ManagedExperimentInput;
+  experiment_read: import('../kernel/protocol.generated.js').KernelObjectSlice;
 
   check_path: void;
   routing_workspace: string;

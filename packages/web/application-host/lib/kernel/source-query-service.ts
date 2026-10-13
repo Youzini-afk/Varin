@@ -2,7 +2,7 @@
  * The coordinator's Run is attribution; no target Catalog Run or ToolCall is created. */
 import { isDeepStrictEqual } from 'node:util';
 import type { ThreadIdentity, ThreadSource } from '@varin/application-client';
-import type { ManagedSourceLocalScope, ManagedSourceServiceHandler } from '../harness/managed-remote-types.js';
+import type { ManagedSourceCleanupScope, ManagedSourceLocalScope, ManagedSourceServiceHandler } from '../harness/managed-remote-types.js';
 import type { StructureSource } from '../structure/types.js';
 import type { DocumentAuthority } from '../documents/authority.js';
 import type { createLanguageSupervisor } from '../lsp/supervisor.js';
@@ -18,6 +18,7 @@ import { captureExtensionSource, type ExtensionSourceCapture } from './extension
 import { resourceFailure } from '../agent-resources/source-reader.js';
 import { ManagedSourceDrainedError } from '../harness/managed-source-drain.js';
 import { waitWithSignal } from '../cancellation.js';
+import { createManagedResearchSource } from './managed-research-source.js';
 
 export interface SourceQueryServiceOptions {
   kernel: KernelClient;
@@ -29,7 +30,11 @@ export interface SourceQueryServiceOptions {
   languageSupervisor?: ReturnType<typeof createLanguageSupervisor>;
   onError?(error: Error): void;
 }
-export type SourceQueryService = ManagedSourceServiceHandler & { release(scope: ManagedSourceLocalScope): Promise<void>; dispose(): Promise<void> };
+export type SourceQueryService = ManagedSourceServiceHandler & {
+  release(scope: ManagedSourceLocalScope): Promise<void>;
+  cleanup(scope: ManagedSourceCleanupScope): Promise<void>;
+  dispose(): Promise<void>;
+};
 
 export function createSourceQueryService(options: SourceQueryServiceOptions): SourceQueryService {
   type Services = { scope: ManagedSourceLocalScope; sources: SourceQueryOwner; resources: ThreadResourceScope; language?: LanguageToolOwner;
@@ -37,6 +42,7 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
     languageController: AbortController; languagePending: Set<Promise<unknown>>; languageClosing?: Promise<void>; closing?: Promise<void> };
   // These are live service handles only. Native Storage retains authority/effect facts.
   const services = new Map<string, Services>();
+  const research = createManagedResearchSource(options.kernel);
   const keyOf = (scope: ManagedSourceLocalScope) => JSON.stringify([scope.authorityId, scope.resourceEpoch, scope.grant.grantId]);
   const queryOf = (scope: ManagedSourceLocalScope): SourceQueryAccess => ({ source: scope.source, physicalRoot: scope.physicalRoot,
     threadId: scope.scope.threadId, ...(scope.scope.kind === 'run' ? { runId: scope.scope.runId, grantId: scope.grant.grantId } : {}) });
@@ -129,6 +135,7 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
     return owned.closing;
   };
   const unsubscribeExit = options.kernel.subscribeExit(() => {
+    research.clearViews();
     for (const owned of services.values()) void release(owned.scope).catch(() => {
       const failure = new Error('Original managed source service cleanup is incomplete after kernel exit');
       if (options.onError) options.onError(failure); else console.error('[Source] Managed source service cleanup requires attention');
@@ -157,6 +164,9 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
       }
     };
     switch (operation.kind) {
+      case 'experiment_admit': case 'experiment_capture': case 'experiment_read':
+        await metadata(signal => owner.sources.validate(query, signal));
+        return research.handle(scope, operation, active);
       case 'validate': await metadata(signal => owner.sources.validate(query, signal)); return { pathScopes: [...scope.grant.pathScopes] };
       case 'read':
         await metadata(signal => owner.sources.checkPath(query, operation.path, signal));
@@ -294,7 +304,8 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
     owner.pending.add(work);
     return work.finally(() => { owner.pending.delete(work); });
   };
-  return Object.assign(handler, { release, async dispose() {
+  return Object.assign(handler, { release, cleanup: (scope: ManagedSourceCleanupScope) => research.release(scope), async dispose() {
     unsubscribeExit(); await Promise.all([...services.values()].map(owner => release(owner.scope)));
+    research.clearViews();
   } });
 }

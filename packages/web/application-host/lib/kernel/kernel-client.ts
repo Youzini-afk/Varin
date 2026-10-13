@@ -895,7 +895,7 @@ export class KernelClient {
     this.handshakeResult = result;
     this.started = true;
     const managementGrant = await this.requestRaw<Record<string, unknown>>("authority.grant.issue", {
-      grantId: `host-management:${this.options.hostId}:${process.pid}`,
+      grantId: `host-management:${this.options.hostId}:${expectedHostGeneration}`,
       hostGeneration: expectedHostGeneration,
       sessionId: null,
       threadId: null,
