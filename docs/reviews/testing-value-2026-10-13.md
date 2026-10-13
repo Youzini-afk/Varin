@@ -34,8 +34,11 @@ DOM 旧实现对新用例实测 1 fail / 2 pass；失败发生在真正的 edita
 
 ## 仍需注意的缺口
 
-- Markdown 安全现有 `markdownCore.test.ts` 只测 escape helper 与 forbidden-tag 数组，未穿过实际
-  `renderMarkdownSync → DOMPurify`。保留现有保护，但它不能证明最终富文本 DOM 安全。
+- Markdown 后续窄审发现 link renderer 直接插入 raw token.text，绕过统一 HTML 文本转义且丢失
+  inline Markdown 格式。已改为 Marked 的 parseInline(tokens)，autolink 单独转义；原 helper
+  测试迁回 `markdownSecurity.test.ts`，移除没有消费意义的 forbidden-tag 常量断言。helper
+  1 项通过，源码语法检查通过；真实 marked/remend/katex/DOMPurify 依赖当前不可用，尚未执行
+  `renderMarkdownSync → DOMPurify`，不把静态修复或 helper 成功称为完整富文本安全验收。
 - 巨型 Host orchestration fixtures 中还有故障注入用的 TS storage/surface doubles。不能整体删，
   也不能把它们的成功写作 Rust persistence 或真实 UI 已验证；优先按出现的真实风险迁移到现有 owner/consumer。
 - 入口审查发现的 Cargo、专用产物套件发现与重复构建须按实际运行器处理；测试存在不等于默认入口执行。

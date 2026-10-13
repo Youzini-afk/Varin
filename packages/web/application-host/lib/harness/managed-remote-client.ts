@@ -86,6 +86,9 @@ export interface ManagedRemoteTargetRegistryOptions {
    * remote jobs by re-running their reconcile for the listed workspaces.
    */
   onTargetReachable?(workspaceId: string, machineId: string): void;
+  /** First authenticated Source connection, or recovery after its transport failed.
+   * Source-only consumers do not register an Experiment workspace/machine. */
+  onSourceReachable?(owner: ManagedHostSourceOwner): void;
   onError?: (error: Error) => void;
 }
 
@@ -176,6 +179,15 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
   /** machineId → workspaces whose callers resolved that machine's backend. */
   const workspaceBindings = new Map<string, Set<string>>();
   let refreshPromise: Promise<void> | null = null;
+  const reachableSources = new Map<string, ManagedHostSourceOwner>();
+  const sourceKey = (owner: ManagedHostSourceOwner) => JSON.stringify([owner.hostId, owner.connectionId, owner.endpointIdentity]);
+  const sourceReached = (owner: ManagedHostSourceOwner) => {
+    const key = sourceKey(owner);
+    if (reachableSources.has(key)) return;
+    // Set before notifying: recovery itself resolves the same original Source.
+    reachableSources.set(key, owner);
+    try { options.onSourceReachable?.(owner); } catch (error) { report(error); }
+  };
   const report = (error: unknown) => options.onError?.(error instanceof Error ? error : new Error(String(error)));
 
   const probe = async (connection: ConfiguredHost, signal?: AbortSignal, fixedEndpoint = false): Promise<ManagedTarget> => {
@@ -296,10 +308,16 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     const connections = configuredHosts(await options.readSettings());
     const results = await Promise.allSettled(connections.map(async connection => {
       const endpointIdentity = managedEndpointIdentity(connection);
-      const target = await probe(connection, signal, true);
+      const target = await probe(connection, signal, true).catch(error => {
+        if (!signal?.aborted) for (const [key, owner] of reachableSources) {
+          if (owner.connectionId === connection.id && owner.endpointIdentity === endpointIdentity) reachableSources.delete(key);
+        }
+        throw error;
+      });
       if (!target.identity.capabilities.includes('sources')) throw new Error('Managed source resources are unavailable on this Host');
-      return { resourceOwner: { kind: 'managed_host' as const, hostId: target.hostId, connectionId: connection.id, endpointIdentity },
-        label: connection.label, capabilities: [...target.identity.capabilities] };
+      const resourceOwner = { kind: 'managed_host' as const, hostId: target.hostId, connectionId: connection.id, endpointIdentity };
+      sourceReached(resourceOwner);
+      return { resourceOwner, label: connection.label, capabilities: [...target.identity.capabilities] };
     }));
     signal?.throwIfAborted();
     return {
@@ -337,15 +355,27 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
   };
 
   const sourceTarget = async (owner: ManagedHostSourceOwner, signal?: AbortSignal): Promise<ManagedTarget> => {
-    const target = await forwardTarget(owner, signal);
-    if (!target.identity.capabilities.includes('sources')) throw new Error('Managed source resources are unavailable on this Host');
-    return target;
+    try {
+      const target = await forwardTarget(owner, signal);
+      if (!target.identity.capabilities.includes('sources')) throw new Error('Managed source resources are unavailable on this Host');
+      sourceReached(owner);
+      return target;
+    } catch (error) {
+      if (!signal?.aborted) reachableSources.delete(sourceKey(owner));
+      throw error;
+    }
   };
 
   const source = async (owner: ManagedHostSourceOwner, signal?: AbortSignal): Promise<ManagedSourceClient> => {
     const selected = await sourceTarget(owner, signal);
     const target = { ...selected, connection: { ...selected.connection, requestHeaders: { ...selected.connection.requestHeaders } } };
-    const client = new ManagedTargetClient(target, (url, init) => fetchImpl(url, { ...init, redirect: 'error' }));
+    const client = new ManagedTargetClient(target, async (url, init) => {
+      try { return await fetchImpl(url, { ...init, redirect: 'error' }); }
+      catch (error) {
+        if (!init?.signal?.aborted) reachableSources.delete(sourceKey(owner));
+        throw error;
+      }
+    });
     const request = async <Method extends keyof ManagedSourceService>(method: Method, input: Parameters<ManagedSourceService[Method]>[1], signal?: AbortSignal): Promise<Awaited<ReturnType<ManagedSourceService[Method]>>> => {
       if (input.coordinatorHostId !== options.coordinatorHostId) throw new Error('Managed source request belongs to another coordinator');
       const result = await client.json<Awaited<ReturnType<ManagedSourceService[Method]>>>(`/sources/${method}`, input, 'POST', signal).catch(error => {

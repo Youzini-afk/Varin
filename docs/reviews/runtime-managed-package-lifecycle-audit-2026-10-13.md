@@ -137,3 +137,16 @@ finally 释放。当前路径会尊重排队等待者，但自身不进入等待
 本轮仍不把 source-alias 的模拟 Storage consumer 测试或 Catalog/Storage 定点测试称为
 产品 HTTP、完整双 Host 集成、安装包或两台物理机器验收。冻结依赖安装曾在官方
 `cross-env@10.1.0` 下载返回 403 后停止；未通过换镜像或变更锁定版本规避。
+
+
+### Source-only 恢复通知补齐
+
+综合复核发现 Experiment 的 `onTargetReachable` 只对已登记 machine/workspace 触发，
+单独使用 managed Source 的 `sourceTarget` 不经过这条回调。原 registry 现在按冻结
+host/connection/endpoint 保存短期连通状态，在第一次认证成功或实际传输失败后的重新认证
+成功时唤醒原 Catalog 来源清理；无需 Experiment 注册，也没有新探活轮询。A Host 重开后
+第一次连接同样唤醒，持久 pending 仍由原 Operation 判定，内存状态不充当清理账本。
+
+新增 `managed-source-connection.test.ts` 用真实 registry 检查该场景及新 Host lifetime，
+但本环境在收集前被缺失的 `ignore` 依赖阻断，尚未执行，不算通过。此前真实 Catalog/Storage
+重开两例的证据保持，不能用它们代替这个连接消费者用例。
