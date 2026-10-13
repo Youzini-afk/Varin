@@ -3288,6 +3288,7 @@ fn external_result_outlives_kernel_until_original_stop_receipt() {
 fn original_mcp_resource_holder_cleanup_and_late_ack_preserve_invocation() {
     use crate::execution::*;
     use super::mcp_resources::{McpResourceBinding, McpResourceSubscription};
+    use super::mcp_interactions::{McpInteractionBinding, McpInteractionRecord};
     for (managed, failure, early_ack) in [(false, None, true), (true, None, false),
         (true, Some(false), false), (true, Some(true), false)] {
         let f = Fixture::new();
@@ -3355,6 +3356,32 @@ fn original_mcp_resource_holder_cleanup_and_late_ack_preserve_invocation() {
             "executionOwner":owner,"endpoint":{"server":"original","resourceKey":"original-resource",
                 "configurationVersion":"configuration","credentialVersion":"credential"},
             "schemaVersion":"resources-v1","uri":"original:resource"})).unwrap();
+        let interaction_binding: McpInteractionBinding = serde_json::from_value(json!({
+            "operationId":context.operation_id,"executionOwner":owner,"endpoint":binding.endpoint,
+            "connectionId":"original-client","source":{"kind":"server_request","requestId":"original-question",
+                "relation":{"kind":"rpc_response_stream","outgoingRequestId":7}}
+        })).unwrap();
+        let request = db.prepare_result_content().write_data(&json!({
+            "request":{"message":"Original question"},"presentation":{"mode":"form","message":"Original question"}
+        })).unwrap();
+        let opened = db.open_mcp_interaction("original-question".into(), interaction_binding.clone(),
+            crate::McpInteractionMode::Form, &request, &snapshot, &frozen, None).unwrap();
+        assert_eq!(opened.delivery_released, !managed);
+        let mut missing_release = serde_json::to_value(&opened).unwrap();
+        missing_release.as_object_mut().unwrap().remove("deliveryReleased");
+        assert!(serde_json::from_value::<McpInteractionRecord>(missing_release).is_err());
+        let mut error_binding = interaction_binding.clone();
+        error_binding.source = serde_json::from_value(json!({"kind":"rpc_error","outgoingRequestId":8,
+            "method":"resources/subscribe","elicitationId":"original-url"})).unwrap();
+        let error = db.prepare_result_content().write_data(&json!({
+            "request":{"code":-32042,"data":{"original":"URL requirement"}},
+            "presentations":[{"mode":"url","url":"https://fixture.invalid/review"}]
+        })).unwrap();
+        let error_opened = db.open_mcp_error_interactions(vec![("original-url".into(), error_binding.clone())],
+            &error, &snapshot, &frozen, None).unwrap();
+        assert_eq!(error_opened[0].delivery_released, !managed);
+        assert_eq!(error_opened[0].delivery, None);
+        let interactions = [("original-question", interaction_binding), ("original-url", error_binding)];
         let begun = db.begin_mcp_resource(binding.clone(), &snapshot, &frozen).unwrap();
         assert_eq!(begun.mcp_resource_subscription.as_ref().unwrap().mcp_holder_released, !managed);
         let mut missing = serde_json::to_value(begun.mcp_resource_subscription.unwrap()).unwrap();
@@ -3380,6 +3407,38 @@ fn original_mcp_resource_holder_cleanup_and_late_ack_preserve_invocation() {
         let before = db.operation(&context.operation_id).unwrap();
         let history = db.history("main").unwrap();
         db.release_mcp_resource_source(&run.run_id).unwrap();
+        db.release_mcp_interaction_source(&run.run_id).unwrap();
+        // A Source request can already exist before A sees its body, while the
+        // original invocation/source closes. Keep only the managed historical
+        // fact so its ACK debt can drain; never restore review or model admission.
+        let mut late_binding = interactions[0].1.clone();
+        late_binding.source = serde_json::from_value(json!({"kind":"server_request","requestId":"late-question",
+            "relation":{"kind":"rpc_response_stream","outgoingRequestId":7}})).unwrap();
+        let late = db.open_mcp_interaction("late-question".into(), late_binding.clone(),
+            crate::McpInteractionMode::Form, &request, &snapshot, &frozen, None);
+        if managed {
+            let late = late.unwrap();
+            assert_eq!(late.availability, crate::McpInteractionAvailability::OwnerUnavailable);
+            assert_eq!(late.choice, None);
+            assert!(!late.delivery_released);
+            let response = db.prepare_result_content().write_data(&json!({"action":"accept","content":{}})).unwrap();
+            assert!(db.respond_mcp_interaction(&context.operation_id, "late-question", late.revision,
+                crate::McpInteractionChoice::Accept, response).is_err());
+            assert!(db.begin_mcp_interaction_response(&late_binding, "late-question").is_err());
+            db.settle_mcp_interaction_response(&late_binding, "late-question", crate::McpInteractionDelivery::NotSent).unwrap();
+            db.acknowledge_mcp_interaction_delivery_released(&late_binding, "late-question").unwrap();
+            let mut sampling_binding = late_binding.clone();
+            sampling_binding.source = serde_json::from_value(json!({"kind":"server_request","requestId":"late-sampling",
+                "relation":{"kind":"rpc_response_stream","outgoingRequestId":7}})).unwrap();
+            let sampling = db.open_mcp_interaction("late-sampling".into(), sampling_binding.clone(),
+                crate::McpInteractionMode::Sampling, &request, &snapshot, &frozen, None).unwrap();
+            assert_eq!(sampling.sampling.unwrap().review, "closed");
+            assert!(db.begin_mcp_interaction_response(&sampling_binding, "late-sampling").is_err());
+            db.settle_mcp_interaction_response(&sampling_binding, "late-sampling", crate::McpInteractionDelivery::NotSent).unwrap();
+            db.acknowledge_mcp_interaction_delivery_released(&sampling_binding, "late-sampling").unwrap();
+        } else { assert!(late.is_err()); }
+        assert_eq!(db.pending_mcp_interactions().unwrap().len(), if managed { 2 } else { 0 },
+            "closed managed interactions retain their original delivery cleanup obligation");
         if early_ack {
             assert!(super::mcp_resources::require_source_released(&db.db, &run.run_id).is_err(),
                 "local observers must actually detach even when their finite RPC stopped");
@@ -3393,6 +3452,50 @@ fn original_mcp_resource_holder_cleanup_and_late_ack_preserve_invocation() {
         let mut db = f.open();
         let (snapshot, frozen) = db.capture_tool_invocation(&context, "subscribe").unwrap().load_mcp().unwrap();
         db.validate_mcp_resource_context(&context.operation_id, &snapshot, &frozen).unwrap();
+        assert_eq!(db.pending_mcp_interactions().unwrap().len(), if managed { 2 } else { 0 },
+            "closed original cleanup survives reopening the Catalog");
+        let original_operation = db.operation(&context.operation_id).unwrap();
+        for (interaction_id, original_binding) in &interactions {
+            let original = db.mcp_interaction_context(&context.operation_id, interaction_id,
+                &snapshot, &frozen, None).unwrap();
+            assert_eq!(original.owner, frozen.provenance.servers["original"].owner);
+            assert_eq!(original.record.availability, crate::McpInteractionAvailability::Cancelled);
+            assert_eq!(original.record.delivery_released, !managed);
+            assert!(db.mcp_interaction_context("another-operation", interaction_id,
+                &snapshot, &frozen, None).is_err());
+            let mut replacement = frozen.clone();
+            replacement.provenance.servers.get_mut("original").unwrap().definition_version = "replacement".into();
+            assert!(db.mcp_interaction_context(&context.operation_id, interaction_id,
+                &snapshot, &replacement, None).is_err());
+            let mut replacement_owner = frozen.clone();
+            let selected = replacement_owner.provenance.servers.get_mut("original").unwrap();
+            selected.owner.resource_owner = launches::SourceResourceOwner::ManagedHost {
+                host_id: "replacement-host".into(), connection_id: "replacement-connection".into(),
+                endpoint_identity: "replacement-endpoint".into(),
+            };
+            assert!(db.mcp_interaction_context(&context.operation_id, interaction_id,
+                &snapshot, &replacement_owner, None).is_err());
+            for field in ["credential", "connection", "owner"] {
+                let mut forged = original_binding.clone();
+                match field {
+                    "credential" => forged.endpoint.credential_version = "replacement".into(),
+                    "connection" => forged.connection_id = "replacement".into(),
+                    _ => forged.execution_owner = ExecutorOwner::Kernel,
+                }
+                assert!(db.acknowledge_mcp_interaction_delivery_released(&forged, interaction_id).is_err());
+            }
+            let released = db.acknowledge_mcp_interaction_delivery_released(original_binding, interaction_id).unwrap();
+            let mut expected = original.record;
+            expected.delivery_released = true;
+            expected.revision += u64::from(managed);
+            assert_eq!(released, expected, "delivery cleanup cannot change send or completion facts");
+            let cursor = db.event_cursor().unwrap();
+            assert_eq!(db.acknowledge_mcp_interaction_delivery_released(original_binding, interaction_id).unwrap(), released);
+            assert_eq!(db.event_cursor().unwrap(), cursor, "equal cleanup ACK creates no second event");
+        }
+        assert_eq!(db.operation(&context.operation_id).unwrap(), original_operation,
+            "interaction release cannot rewrite the original Operation's receipts or effects");
+        assert!(db.pending_mcp_interactions().unwrap().is_empty());
         let mut wrong_frozen = frozen.clone();
         wrong_frozen.provenance.servers.get_mut("original").unwrap().definition_version = "replacement".into();
         assert!(db.validate_mcp_resource_context(&context.operation_id, &snapshot, &wrong_frozen).is_err());
@@ -3471,6 +3574,14 @@ fn original_mcp_resource_holder_cleanup_and_late_ack_preserve_invocation() {
         assert_eq!(db.acknowledge_mcp_resource_holder_released(&binding).unwrap(), released);
         assert!(db.pending_mcp_resources().unwrap().is_empty());
         super::mcp_resources::require_source_released(&db.db, &run.run_id).unwrap();
+        drop(db);
+        let mut reopened = f.open();
+        assert!(reopened.pending_mcp_interactions().unwrap().is_empty());
+        for (interaction_id, original_binding) in &interactions {
+            let item = reopened.capture_mcp_interaction(&context.operation_id, interaction_id).unwrap().load().unwrap();
+            assert!(item.item.record.delivery_released);
+            assert_eq!(&item.item.record.binding, original_binding);
+        }
     }
 }
 

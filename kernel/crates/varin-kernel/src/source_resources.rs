@@ -220,6 +220,72 @@ pub(crate) struct SourceMcpHolderParams {
     pub binding: SourceMcpHolderBinding,
     pub action: String,
 }
+/// Transport facts on the original Source authority. Request/answer bodies and
+/// the only SDK responder stay in the original Host's memory.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceMcpDeliveryReceipt {
+    pub delivery_id: String,
+    pub binding: varin_runtime::catalog::mcp_interactions::McpInteractionBinding,
+    pub kind: SourceMcpDeliveryKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cleanup_holder: Option<SourceMcpHolderBinding>,
+    pub request_hash: String,
+    pub revision: u64,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub response_hash: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub delivery: Option<SourceMcpDeliveryState>,
+    pub availability: varin_runtime::McpInteractionAvailability,
+    pub completed: bool,
+    pub acknowledged_revision: u64,
+    pub released: bool,
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SourceMcpDeliveryKind {
+    Elicitation,
+    Sampling,
+    Error,
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SourceMcpDeliveryState {
+    Sending,
+    Sent,
+    NotSent,
+    Unknown,
+}
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SourceMcpDeliveryAction {
+    Open,
+    Inspect,
+    Begin,
+    Settle,
+    Close,
+    Complete,
+    Ack,
+    Release,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceMcpDeliveryParams {
+    pub principal_id: String,
+    pub coordinator_host_id: String,
+    pub authority_id: String,
+    pub resource_epoch: String,
+    pub delivery_id: String,
+    pub binding: varin_runtime::catalog::mcp_interactions::McpInteractionBinding,
+    pub action: SourceMcpDeliveryAction,
+    pub kind: Option<SourceMcpDeliveryKind>,
+    pub cleanup_holder: Option<SourceMcpHolderBinding>,
+    pub request_hash: Option<String>,
+    pub response_hash: Option<String>,
+    pub delivery: Option<SourceMcpDeliveryState>,
+    pub availability: Option<varin_runtime::McpInteractionAvailability>,
+    pub revision: Option<u64>,
+}
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SourceProcessAccessParams {
@@ -424,6 +490,7 @@ pub(crate) struct SourceAuthorityResult {
     pub first_preparation: bool,
     pub materialization_operation_id: String,
     pub mcp_holders: Vec<SourceMcpHolder>,
+    pub mcp_deliveries: Vec<SourceMcpDeliveryReceipt>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -818,6 +885,9 @@ pub(crate) fn prepare_request(
         }
         "source.authority.seal" => {
             storage.seal_source_authority(&serde_json::from_value(params)?, epoch)?
+        }
+        "source.mcp.delivery" => {
+            storage.source_mcp_delivery(serde_json::from_value(params)?, epoch)?
         }
         "source.mcp.holder" => {
             storage.source_mcp_holder(serde_json::from_value(params)?, epoch)?

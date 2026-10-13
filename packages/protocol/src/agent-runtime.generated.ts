@@ -177,6 +177,7 @@ export interface McpInteractionRecord {
   choice: McpInteractionChoice | null;
   delivery: McpInteractionDelivery | null;
   completionReported: boolean;
+  deliveryReleased: boolean;
   problem: string | null;
   sampling?: McpSamplingState;
 }
@@ -222,6 +223,11 @@ export interface McpInteractionListParams {
   branchId: string;
   cursor?: string;
   limit?: number;
+}
+
+export interface McpInteractionContext {
+  record: McpInteractionRecord;
+  owner: McpServerOwner;
 }
 
 export interface McpInteractionReadParams {
@@ -1385,7 +1391,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 34; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 35; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 

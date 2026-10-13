@@ -1350,12 +1350,24 @@ original Source explicitly retires. Recovered finite subscribe ACKs and proven f
 settle the original execution barrier without replacing already-published Unknown conversation history.
 Focused evidence covers actual coordinator/target modules with controlled ports, native receipt fences
 and Catalog persistence; it does not assert a full two-Host SDK lifecycle. The current
-internal formats are Storage 19, Agent Catalog 70 and private wire 34; older formats are rejected by
+internal formats are Storage 20, Agent Catalog 71 and private wire 35; older formats are rejected by
 the existing read-only gate with data preserved, without automatic migration or cleanup.
 
-Managed MCP finite reverse interactions and mixed-owner child
-preparation, explicit managed cold calendar starts and broader combined cross-Host file recovery
-still have separate implementation work. Computer assignments, Agent/Bot identity, global settings and model
+Managed finite reverse interactions now use the same trusted SDK scope and original Source address.
+B keeps the actual responder and a short immutable delivery/ACK fence; A alone opens the original
+Catalog interaction, handles review and sampling, and persists transport facts before acknowledging
+or releasing that Source delivery. Request bodies remain outside control frames. Per-delivery
+reconciliation isolates slow peers. A transport failure or either Host reopening never recreates the
+old receiver, resends a reviewed answer or reruns a sampling model. URL completion remains distinct
+from response delivery, and explicit unsubscribe carries its new caller separately from the retained
+observer. Closing a responder preserves unacknowledged bodies; current read/trust and original active
+grant checks still govern those bytes. Missing heaps and ambiguous initial Source-open acknowledgements
+remain unavailable as responders; matching original bodies can still be published as unavailable
+historical facts and acknowledged without restoring review/model authority. Evidence is limited to actual Host modules with controlled ports and focused native
+receipt/Catalog tests, not an end-to-end two-Host SDK or physical environment.
+
+Mixed-owner child preparation, explicit managed cold calendar starts and broader combined cross-Host
+file recovery still have separate implementation work. Computer assignments, Agent/Bot identity, global settings and model
 credentials remain with their original owners; selecting a file Host does not silently redirect them.
 
 ## Managed extension package cleanup

@@ -58,9 +58,9 @@ The Host can adapt a resolved transport through the trusted scope seam. Target s
 Source grant/root and Kernel process guardian; SDK close alone is not a native process-tree receipt.
 Unknown dispatched effects are not replayed after reconnection.
 
-This continuation supports ordinary tools, resource reads and prompts. Managed Tasks, persistent
-resource observers, finite reverse interactions and mixed-owner child preparation remain explicit
-unavailable boundaries; local owners retain their existing support.
+This continuation supports ordinary tools, resource reads, prompts, Tasks, persistent resource
+observers and finite reverse interactions. Mixed-owner child preparation remains an explicit
+unavailable boundary; local owners retain their existing support.
 
 ## Preparation, binding and revocation
 
@@ -157,7 +157,7 @@ responsibility. Remote roles, annotations and descriptions grant no instruction 
 server definition and resource match the frozen snapshot, rather than a newer gateway definition.
 Explicit hidden/disabled service withdrawal interrupts admissions; ordinary replacement retains the
 old contribution for its original callers. Resource subscriptions/updates, server interactions and
-negotiated durable MCP Tasks remain separate work.
+negotiated durable MCP Tasks retain the independent original-holder lifetimes described below.
 
 Managed server provenance also freezes the original Source authority address. Task-owner acquisition
 can carry its coordinator Operation/executor identity through both composition paths. Retained
@@ -168,5 +168,23 @@ reply recalls only the original creation outcome. Local projection release is se
 holder cleanup. Managed resource observers likewise retain the original SDK holder and creation ACK;
 A listener projections disconnect independently, while explicit withdrawal awaits original unsubscribe
 and callback drainage. Failed SDK observer acquisition drains its hidden URI holder before rejecting.
-The coordinator records gaps rather than claiming notification replay. Managed reverse interactions
-still require their own bridge.
+The coordinator records gaps rather than claiming notification replay.
+
+Managed reverse requests route by the authority's trusted original scope. B retains only the actual
+SDK responder, completion watcher and short Source delivery facts; A owns the existing interaction,
+review, sampling model execution and credentials. An immutable request hash binds each original
+connection/request identity. B admits the reviewed response once, before its SDK send, and only the
+SDK settlement callback proves sent/not-sent/unknown. A durably publishes those facts before exact
+revision acknowledgement and Source cleanup. Losing a transport acknowledgement never resends a
+response or recreates a receiver/model decision. A background reconciliation flight belongs to one
+original delivery, so a blocked peer does not block other deliveries or unrelated Run cleanup.
+
+Closed SDK owners preserve unacknowledged request bodies. Reading them still requires the original
+active Source grant and current project/read permission; revocation does not grant cleanup a new
+body-reading permission. A missing original heap remains unavailable. A repeated Source open that
+cannot prove it created this responder fails closed, including an ambiguous lost initial open ACK.
+A body matching the original binding/hash remains a read-only historical fact so A can acknowledge
+and clean it up. Late managed publication records an unavailable interaction, never new review or
+model authority.
+Explicit resource unsubscribe retains the new control Operation separately from the original
+observer holder, including when its caller belongs to a later Run.

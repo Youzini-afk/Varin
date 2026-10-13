@@ -5,12 +5,13 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 34;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 35;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "source.authority.seal",
     "source.mcp.holder",
+    "source.mcp.delivery",
     "source.script.control",
     "source.authority.release_scope",
     "source.resource.cancel",
@@ -26,6 +27,7 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.inference.dispatch",
     "runtime.inference.status",
     "runtime.mcp.interaction.inspect",
+    "runtime.mcp.interaction.delivery.released",
     "runtime.mcp.interaction.pending",
     "runtime.mcp.interaction.response.begin",
     "runtime.mcp.interaction.response.settle",
@@ -80,6 +82,7 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
 pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "source.authority.seal",
     "source.mcp.holder",
+    "source.mcp.delivery",
     "source.authority.release_scope",
     "source.resource.cancel",
     "source.authority.release",
@@ -97,6 +100,7 @@ pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "runtime.inference.status",
     "runtime.inference.settle",
     "runtime.mcp.interaction.inspect",
+    "runtime.mcp.interaction.delivery.released",
     "runtime.mcp.interaction.pending",
     "runtime.mcp.interaction.response.begin",
     "runtime.mcp.interaction.response.settle",
@@ -334,6 +338,13 @@ pub(crate) struct McpInteractionReadParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpInteractionControlParams {
+    pub(crate) binding: varin_runtime::catalog::mcp_interactions::McpInteractionBinding,
+    pub(crate) interaction_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct McpSamplingOutputReviewParams {
     pub(crate) operation_id: String,
     pub(crate) interaction_id: String,
@@ -400,13 +411,6 @@ pub(crate) struct McpInteractionRespondParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelEmptyParams {}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct McpInteractionControlParams {
-    pub(crate) binding: varin_runtime::catalog::mcp_interactions::McpInteractionBinding,
-    pub(crate) interaction_id: String,
-}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -2601,6 +2605,8 @@ pub(crate) type SourceMcpHolderParams = crate::source_resources::SourceMcpHolder
 pub(crate) type SourceMcpCreationReceiptParams =
     crate::source_resources::SourceMcpCreationReceiptParams;
 
+pub(crate) type SourceMcpDeliveryParams = crate::source_resources::SourceMcpDeliveryParams;
+
 pub(crate) type SourceAuthorityBindParams = crate::source_resources::SourceAuthorityBindParams;
 
 pub(crate) type SourceAuthorityReleaseParams =
@@ -3209,6 +3215,16 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         }
         "runtime.mcp.interaction.inspect" => {
             serde_json::from_value::<McpInteractionReadParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.mcp.interaction.context" => {
+            serde_json::from_value::<McpInteractionReadParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.mcp.interaction.delivery.released" => {
+            serde_json::from_value::<McpInteractionControlParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
@@ -4474,6 +4490,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
+        "source.mcp.delivery" => serde_json::from_value::<SourceMcpDeliveryParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "source.authority.bind" => {
             serde_json::from_value::<SourceAuthorityBindParams>(params.clone())
                 .map(|_| ())

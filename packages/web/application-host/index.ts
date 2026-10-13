@@ -46,6 +46,7 @@ import { createSourceQueryService } from './lib/kernel/source-query-service.js';
 import { createManagedMcpService } from './lib/harness/managed-mcp-service.js';
 import { createManagedMcpProcesses } from './lib/kernel/managed-mcp-processes.js';
 import { createManagedMcpLease } from './lib/kernel/managed-mcp-lease.js';
+import { createManagedMcpInteractions } from './lib/kernel/managed-mcp-interactions.js';
 import { createManagedMcpPreparer, selectMcpServers } from './lib/kernel/managed-mcp-preparation.js';
 import { createManagedSourceService } from './lib/harness/managed-source-service.js';
 import { createManagedChildSourceService } from './lib/kernel/managed-source-collaboration.js';
@@ -1587,6 +1588,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // reconcile inspects and re-polls rather than resubmitting.
     onSourceReachable: (owner) => {
       managedMcpOwner.current?.sourceReached(owner);
+      managedMcpInteractionsOwner.current?.wake();
       mcpTaskRuntimeOwner.current?.sourceReached();
       mcpResourceRuntimeOwner.current?.sourceReached();
       void scriptRuntimeOwner.current?.recoverSource(owner).catch(() => console.error("[Script] Original target stop remains pending"));
@@ -2022,6 +2024,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     updateSettings: (mutator) => updateSettingsOnDisk((current) => mutator(current as Record<string, unknown>) as typeof current),
   });
   const desktopControlHolder = `desktop:${hostId}`;
+  const managedMcpInteractionsOwner: { current?: ReturnType<typeof createManagedMcpInteractions> } = {};
   const managedMcpOwner: { current?: ReturnType<typeof createManagedMcpPreparer> } = {};
   const mcpTaskRuntimeOwner: { current?: ReturnType<typeof createMcpTaskRuntime> } = {};
   const mcpResourceRuntimeOwner: { current?: ReturnType<typeof createMcpResourceRuntime> } = {};
@@ -3081,9 +3084,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const mcpAuthority = new McpAuthority({
     adaptTransport: (scope, transport) => scope.resourceOwner.kind === 'managed_host'
       ? targetMcpService.adaptTransport(scope, transport) : transport,
-    interactions: input => mcpInteractionRuntime.receiver(input),
-    sampling: input => mcpInteractionRuntime.samplingReceiver(input),
-    interactionErrors: input => mcpInteractionRuntime.errorReceiver(input),
+    interactions: (input, scope) => scope.resourceOwner.kind === 'managed_host'
+      ? targetMcpService.receiveInteraction(scope, input) : mcpInteractionRuntime.receiver(input),
+    sampling: (input, scope) => scope.resourceOwner.kind === 'managed_host'
+      ? targetMcpService.receiveSampling(scope, input) : mcpInteractionRuntime.samplingReceiver(input),
+    interactionErrors: (input, scope) => scope.resourceOwner.kind === 'managed_host'
+      ? targetMcpService.receiveInteractionError(scope, input) : mcpInteractionRuntime.errorReceiver(input),
     providerToken: async (_scope, provider) => (await hostCredentialAuthority.getAuth(provider))?.auth.apiKey,
     credentialScope: async (_scope, provider) => hostCredentialAuthority.currentScope(provider),
   });
@@ -3111,7 +3117,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     projectTrusted: cwd => mcpHostProjectTrusted(mcpAgentDir, cwd),
     currentPolicy: async (cwd, trusted) => readMcpHostPermissionPolicy(mcpAgentDir, cwd, trusted),
   });
-  managedMcpOwner.current = createManagedMcpPreparer({ runtime: () => agentRuntime, createLease: createManagedMcpLease,
+  managedMcpOwner.current = createManagedMcpPreparer({ runtime: () => agentRuntime, createLease: input => createManagedMcpLease({ ...input, ...(managedMcpInteractionsOwner.current ? { interactions: managedMcpInteractionsOwner.current } : {}) }),
     changed: runId => { void agentRuntime.refreshMcp(runId).catch(() => console.error('[MCP] Target contribution preparation requires attention')); },
     onError: () => console.error('[MCP] Target contribution is unavailable; original calls are not replayed'),
   });
@@ -3347,6 +3353,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     releaseMcpView: (scope, action) => targetMcpService.releaseView(scope, action),
     mcpTaskContinuation: (scope, action, signal) => targetMcpService.taskContinuation(scope, action, signal),
     mcpResourceContinuation: (scope, action, signal) => targetMcpService.resourceContinuation(scope, action, signal),
+    mcpInteractionContinuation: (scope, action, signal) => targetMcpService.interactionContinuation(scope, action, signal),
     languageAvailable: true, releaseSource: async (scope, retention) => {
       const [, mcp] = await Promise.all([targetSourceQuery.release(scope), targetMcpService.release(scope, retention)]);
       return { mcpExecutorStopped: mcp.executorStopped, mcpTaskControlsDrained: mcp.taskControlsDrained };
@@ -3420,7 +3427,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   } });
   const mcpInteractionRuntime = createMcpInteractionRuntime({kernel:kernelClient,runtime:agentRuntime,onError:()=>console.error('[MCP] Original user interaction requires reconciliation')});
   agentRuntime.setMcpInteractionOwner(mcpInteractionRuntime);
-  const mcpTaskRecovery = createMcpTaskRecovery({kernel:kernelClient,authority:mcpAuthority,agentDir:mcpAgentDir,hostId,runtime:agentRuntime,
+  const managedMcpInteractions = createManagedMcpInteractions({ kernel: kernelClient, runtime: agentRuntime, interactions: mcpInteractionRuntime,
+    onError: () => console.error('[MCP] Original remote interaction delivery requires reconciliation') });
+  managedMcpInteractionsOwner.current = managedMcpInteractions;
+  agentRuntime.setManagedMcpInteractions(managedMcpInteractions);
+  const mcpTaskRecovery = createMcpTaskRecovery({kernel:kernelClient,authority:mcpAuthority,agentDir:mcpAgentDir,hostId,runtime:agentRuntime,interactions:managedMcpInteractions,
       admitWorkspaceRegistration:(id,signal)=>documentsAuthority.admitWorkspaceRegistration(id,signal),projectTrusted:cwd=>mcpHostProjectTrusted(mcpAgentDir,cwd),
       validateLiveSource:async(source,signal)=>{
         if(source.mode!=='live_root'||!source.live_root)throw new Error('MCP Task live source missing');
@@ -3432,7 +3443,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError:()=>console.error('[MCP] Original task reconciliation requires attention'),
   });
   mcpTaskRuntimeOwner.current = mcpTaskRuntime;
-  const mcpResourceRecovery=createMcpResourceRecovery({kernel:kernelClient,authority:mcpAuthority,agentDir:mcpAgentDir,hostId,runtime:agentRuntime,
+  const mcpResourceRecovery=createMcpResourceRecovery({kernel:kernelClient,authority:mcpAuthority,agentDir:mcpAgentDir,hostId,runtime:agentRuntime,interactions:managedMcpInteractions,
       admitWorkspaceRegistration:(id,signal)=>documentsAuthority.admitWorkspaceRegistration(id,signal),projectTrusted:cwd=>mcpHostProjectTrusted(mcpAgentDir,cwd),
       currentPolicy:async(cwd,trusted)=>readMcpHostPermissionPolicy(mcpAgentDir,cwd,trusted),
       validateLiveSource:async(source,signal)=>{if(source.mode!=='live_root'||!source.live_root)throw new Error('MCP resource original live source missing');
@@ -4634,6 +4645,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const unregisterResearchCapability = extensionRuntime.capabilities.register(RESEARCH_CAPABILITY, researchRuntime.capability);
   researchRuntime.start();
   mcpInteractionRuntime.start();
+  managedMcpInteractions.start();
   mcpTaskRuntime.start();
   mcpResourceRuntime.start();
   const unregisterScheduleCapability = extensionRuntime.capabilities.register(SCHEDULE_CAPABILITY,
@@ -5188,6 +5200,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       unregisterScriptCapability();
       unregisterResearchCapability();
       await researchRuntime.dispose();
+      await managedMcpInteractions.dispose();
       await mcpInteractionRuntime.dispose();
       await mcpResourceRuntime.dispose();
       await mcpTaskRuntime.dispose();

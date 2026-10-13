@@ -5,7 +5,7 @@ use crate::source_resources::*;
 use serde::Serialize;
 
 impl Storage {
-    fn source_record<T: serde::de::DeserializeOwned>(
+    pub(super) fn source_record<T: serde::de::DeserializeOwned>(
         &self,
         kind: &str,
         id: &str,
@@ -21,7 +21,7 @@ impl Storage {
         body.map(|v| serde_json::from_str(&v).map_err(Into::into))
             .transpose()
     }
-    fn save_source_record<T: Serialize>(
+    pub(super) fn save_source_record<T: Serialize>(
         &mut self,
         kind: &str,
         id: &str,
@@ -223,6 +223,7 @@ impl Storage {
             first_preparation: !scope.ready,
             materialization_operation_id: format!("source-materialize:{key}"),
             mcp_holders: Vec::new(),
+            mcp_deliveries: Vec::new(),
         };
         let record = AuthorityRecord {
             principal_id: p.principal_id,
@@ -446,8 +447,10 @@ impl Storage {
             {
                 let retained: Vec<_> = record.result.mcp_holders.iter()
                     .filter(|holder| !holder.released).cloned().collect();
+                let deliveries: Vec<_> = record.result.mcp_deliveries.iter()
+                    .filter(|delivery| !delivery.released).cloned().collect();
                 return Ok(json!({"authorityId":address.authority_id,"phase":"retaining","grantIds":[],
-                    "receipt":{"retainedMcpHolders":retained}}));
+                    "receipt":{"retainedMcpHolders":retained,"retainedMcpDeliveries":deliveries}}));
             }
         }
         let receipt = match mode {
@@ -490,7 +493,8 @@ impl Storage {
             return Ok(());
         }
         record.result.phase = if record.purpose == "mcp_owner"
-            && record.result.mcp_holders.iter().any(|holder| !holder.released)
+            && (record.result.mcp_holders.iter().any(|holder| !holder.released)
+                || record.result.mcp_deliveries.iter().any(|delivery| !delivery.released))
         {
             "retaining"
         } else {
@@ -578,6 +582,7 @@ impl Storage {
             record.result.mcp_holders[index].released = true;
             if record.result.phase == "retaining"
                 && record.result.mcp_holders.iter().all(|holder| holder.released)
+                && record.result.mcp_deliveries.iter().all(|delivery| delivery.released)
             {
                 record.result.phase = "draining".into();
             }

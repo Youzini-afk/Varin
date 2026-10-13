@@ -57,6 +57,7 @@ mod recovery_journal;
 pub(crate) mod result_publication;
 mod state_tree;
 mod source_authorities;
+mod source_mcp_deliveries;
 pub(crate) mod source_read_receipts;
 pub(crate) mod source_mcp_receipts;
 

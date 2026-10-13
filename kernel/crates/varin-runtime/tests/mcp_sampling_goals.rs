@@ -230,6 +230,7 @@ fn fixture(budget: u64) -> Fixture {
             &staged,
             &snapshot,
             &original,
+            None,
         )
         .unwrap();
     let config: ModelSessionConfiguration = serde_json::from_value(config).unwrap();

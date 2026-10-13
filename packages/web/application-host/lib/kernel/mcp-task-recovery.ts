@@ -10,6 +10,7 @@ import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { HostJobPending, LaunchSource, McpBinding, Operation, SourceMcpHolderBinding, SourceMcpCreationOutcome } from './protocol.generated.js';
 export function createMcpTaskRecovery(options: {
   kernel: KernelClient; authority: McpAuthority; agentDir: string; hostId: string;
+  interactions?: Pick<import('./managed-mcp-interactions.js').ManagedMcpInteractions, 'ensure'>;
   runtime?: Pick<AgentRuntimeClient, 'managedSource' | 'coordinatorHostId'>;
   admitWorkspaceRegistration(id: string, signal?: AbortSignal): Promise<{ canonicalPath: string }>;
   projectTrusted(cwd: string): boolean;
@@ -48,6 +49,9 @@ export function createMcpTaskRecovery(options: {
         || original.receipt.outcome.response.task.taskId !== pending.mcpTask.task.taskId
         || original.receipt.outcome.response.task.createdAt !== pending.mcpTask.task.createdAt)
         throw new McpTaskRequestError('mcp_task_original_transport_unavailable', false, 'owner');
+      if (!options.interactions) throw new McpTaskRequestError('mcp_interaction_owner_unavailable', false, 'owner');
+      await options.interactions.ensure({ ...target, origin: { operationId: target.binding.operationId, executionOwner: target.binding.executionOwner },
+        server: { ...selected.server, server: selected.endpoint.server }, endpoint: selected.endpoint });
       return createManagedMcpTaskLease(target);
     }
     const lease = await createMcpOriginalOwnerRecovery(options)(pending.runId, selected.endpoint, selected.original, signal);
@@ -85,7 +89,7 @@ export function createMcpTaskRecovery(options: {
       if (typeof released?.retire !== 'boolean' || released.controlsDrained !== true) throw new McpTaskRequestError('mcp_task_cleanup_receipt_invalid', false, 'protocol');
       if (released.retire) {
         const retired = await target.client.release({ ...target.address, mode: 'retire' }, signal) as { phase?: string };
-        if (retired.phase !== 'retired' && retired.phase !== 'revoked') throw new McpTaskRequestError('mcp_task_original_retirement_pending', false, 'owner');
+        if (retired.phase !== 'retired' && retired.phase !== 'revoked' && retired.phase !== 'retaining') throw new McpTaskRequestError('mcp_task_original_retirement_pending', false, 'owner');
       }
     },
   });
