@@ -15,6 +15,7 @@ const record = (value: unknown): value is Record<string, unknown> => !!value && 
 const fail = (code: string): never => { throw new McpAuthorityError(code); };
 export async function createManagedMcpLease(input: {
   access: ManagedSourceAccess;
+  interactions?: Pick<import('./managed-mcp-interactions.js').ManagedMcpInteractions, 'ensure'>;
   coordinatorHostId: string;
   owner: SourceResourceOwner;
   selection?: McpBinding;
@@ -116,6 +117,15 @@ export async function createManagedMcpLease(input: {
     assertService(service);
     if (!request.operation.startsWith(`${service.kind}/`)) fail('mcp_service_operation_invalid');
   };
+  const ensureInteractions = async (server: string, origin: import('@varin/pi-host/mcp-authority').McpInteractionOrigin | undefined, endpoint?: McpEndpoint) => {
+    if (!origin) return;
+    if (!input.interactions) return fail('mcp_interaction_owner_unavailable');
+    const selected = snapshot.binding.provenance.servers[server];
+    if (!selected) return fail('mcp_interaction_server_unbound');
+    await input.interactions.ensure({ client: access.client, address: { coordinatorHostId: input.coordinatorHostId,
+      authorityId: access.binding.authorityId, resourceEpoch: access.binding.resourceEpoch }, origin,
+      server: { ...selected, server }, ...(endpoint ? { endpoint } : {}) });
+  };
   const lease: McpAuthorityLease = {
     binding: snapshot.binding, implementationIdentity: `${snapshot.incarnation}:${snapshot.implementationIdentity}`,
     inspect: () => { assertLive(); return snapshot.binding.readiness; },
@@ -145,15 +155,17 @@ export async function createManagedMcpLease(input: {
     revocationSignal: (name, version) => { assertCallable(name, version); return revokedSignal(toolRevocations, name, version); },
     serviceRevocationSignal: service => { assertService(service); return revokedSignal(serviceRevocations, service.server, service.schemaVersion); },
     async callTool(name, arguments_, options) {
-      validateArguments(name, options.schemaVersion, arguments_); await options.beforeDispatch?.();
+      validateArguments(name, options.schemaVersion, arguments_);
+      await ensureInteractions(assertCallable(name, options.schemaVersion).server, options.interaction);
+      await options.beforeDispatch?.();
       assertCallable(name, options.schemaVersion); options.signal.throwIfAborted();
-      try { return await call({ kind: 'call', handleId, name, schemaVersion: options.schemaVersion, arguments: arguments_ },
+      try { return await call({ kind: 'call', handleId, name, schemaVersion: options.schemaVersion, arguments: arguments_, ...(options.interaction ? { interaction: options.interaction } : {}) },
         AbortSignal.any([options.signal, revokedSignal(toolRevocations, name, options.schemaVersion)])); }
       catch (error) { if (error instanceof McpAuthorityError) throw error; throw new McpAuthorityError('mcp_source_response_lost', true); }
     },
     async requestService(service, request, options) {
-      validateServiceRequest(service, request); await options.beforeDispatch?.(); assertService(service); options.signal.throwIfAborted();
-      try { return await call({ kind: 'service', handleId, service, request },
+      validateServiceRequest(service, request); await ensureInteractions(service.server, options.interaction); await options.beforeDispatch?.(); assertService(service); options.signal.throwIfAborted();
+      try { return await call({ kind: 'service', handleId, service, request, ...(options.interaction ? { interaction: options.interaction } : {}) },
         AbortSignal.any([options.signal, revokedSignal(serviceRevocations, service.server, service.schemaVersion)])); }
       catch (error) { if (error instanceof McpAuthorityError) throw error; throw new McpAuthorityError('mcp_source_response_lost', true); }
     },
@@ -163,6 +175,7 @@ export async function createManagedMcpLease(input: {
       if (!record(selected) || selected.server !== server || selected.resourceKey !== snapshot.binding.provenance.servers[server]?.resource_key
         || typeof selected.configurationVersion !== 'string' || typeof selected.credentialVersion !== 'string'
         || endpoint && !isDeepStrictEqual(endpoint, selected)) return fail('mcp_task_original_endpoint_changed');
+      await ensureInteractions(server, origin, selected);
       return createManagedMcpTaskLease({ client: access.client, address: { coordinatorHostId: input.coordinatorHostId,
         authorityId: access.binding.authorityId, resourceEpoch: access.binding.resourceEpoch },
         binding: { ...origin, purpose: 'task', endpoint: selected }, creation: { handleId, lifetime: input.lifetime } });
@@ -175,6 +188,7 @@ export async function createManagedMcpLease(input: {
       assertService(service);
       if (!options.interaction) return fail('mcp_resource_original_identity_missing');
       const endpoint = lease.resourceEndpoint(service);
+      await ensureInteractions(service.server, options.interaction, endpoint);
       await options.beforeDispatch?.(); assertService(service); options.signal.throwIfAborted();
       const binding = { ...options.interaction, endpoint, schemaVersion: service.schemaVersion, uri };
       const address = { coordinatorHostId: input.coordinatorHostId, authorityId: access.binding.authorityId, resourceEpoch: access.binding.resourceEpoch };

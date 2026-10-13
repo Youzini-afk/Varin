@@ -113,7 +113,7 @@ export function registerManagedRemoteRoutes(
   for (const method of sourceMethods) {
     const methodAuth: RequestHandler = (request, response, next) => {
       const operation = value(value(request.body).operation);
-      const cleanup = method === 'service' && operation.kind === 'mcp' && ['release', 'task_inspect', 'task_cancel', 'task_release', 'resource_inspect', 'resource_release'].includes(String(value(operation.action).kind));
+      const cleanup = method === 'service' && operation.kind === 'mcp' && ['release', 'task_inspect', 'task_cancel', 'task_release', 'resource_inspect', 'resource_release', 'interaction_inspect', 'interaction_ack', 'interaction_release', 'interaction_close'].includes(String(value(operation.action).kind));
       return (receiptMethods.has(method) || cleanup ? requireReceiptAuth : requireSourceAuth)(request, response, next);
     };
     app.post(`${base}/sources/${method}`, requireAuth, methodAuth, route(async (request, response) => {
@@ -129,7 +129,7 @@ export function registerManagedRemoteRoutes(
       // A disconnected observer is not a cancelled or drained accepted effect.
       // Cancellation and retirement have their own original-owner receipts.
       const sourceOperation = value(body.operation);
-      const mcpObserver = method === 'service' && sourceOperation.kind === 'mcp' && value(sourceOperation.action).kind === 'changed';
+      const mcpObserver = method === 'service' && sourceOperation.kind === 'mcp' && ['changed', 'resource_watch', 'interaction_watch'].includes(String(value(sourceOperation.action).kind));
       const result = !mcpObserver && (method === 'scriptSpawn' || method === 'scriptControl' || method === 'processWrite' || method === 'processResize' || method === 'processControl' || method === 'execute' || method === 'service' || method === 'cancelService' || method === 'cancel' || method === 'releaseReceipt' || method === 'release' || method === 'releaseScope')
         ? await invoke() : await whileResponseOpen(response, invoke);
       if (!response.destroyed) {

@@ -20,6 +20,51 @@ fn invocation(
         )
         .map_err(domain)
 }
+struct InteractionInvocation {
+    snapshot: varin_runtime::catalog::tool_content::ToolInvocationSnapshot,
+    frozen: varin_runtime::catalog::launches::HostToolBinding,
+    cleanup: Option<(
+        varin_runtime::catalog::tool_content::ToolInvocationSnapshot,
+        varin_runtime::catalog::launches::HostToolBinding,
+    )>,
+}
+impl InteractionInvocation {
+    fn cleanup(&self) -> Option<(
+        &varin_runtime::catalog::tool_content::ToolInvocationSnapshot,
+        &varin_runtime::catalog::launches::HostToolBinding,
+    )> {
+        self.cleanup.as_ref().map(|(snapshot, frozen)| (snapshot, frozen))
+    }
+}
+fn load_invocation(
+    owner: &std::sync::Mutex<Catalog>,
+    operation_id: &str,
+) -> Result<InteractionInvocation, KernelError> {
+    let read = {
+        let db = owner.lock()
+            .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+        invocation(&db, operation_id)?
+    };
+    let (snapshot, frozen) = read.load_mcp().map_err(domain)?;
+    // Explicit unsubscribe may target a server removed from the caller's catalog.
+    // Load the retained subscribe owner's actual frozen binding outside Catalog too.
+    let cleanup = if let Some(varin_runtime::McpRoute::ResourceUnsubscribe { argument }) =
+        frozen.routes.get(&snapshot.call.name)
+    {
+        let target_id = snapshot.call.arguments[argument].as_str()
+            .ok_or_else(|| KernelError::Protocol("MCP cleanup target missing".into()))?;
+        let read = {
+            let db = owner.lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+            db.access_mcp_resource(&snapshot.context.run_id, target_id, true).map_err(domain)?;
+            invocation(&db, target_id)?
+        };
+        Some(read.load_mcp().map_err(domain)?)
+    } else {
+        None
+    };
+    Ok(InteractionInvocation { snapshot, frozen, cleanup })
+}
 pub(super) fn execute(
     runtime: Arc<RunSupervisor>,
     credentials: &crate::credential_bridge::CredentialBridge,
@@ -54,14 +99,8 @@ pub(super) fn execute(
         },
         "runtime.mcp.interaction.open" => {
             let p: McpInteractionOpenParams = serde_json::from_value(params)?;
-            let (read, prep) = {
-                let db = db!();
-                (
-                    invocation(&db, &p.binding.operation_id)?,
-                    db.prepare_result_content(),
-                )
-            };
-            let (snapshot, frozen) = read.load_mcp().map_err(domain)?;
+            let invocation = load_invocation(&owner, &p.binding.operation_id)?;
+            let prep = db!().prepare_result_content();
             let body = prep
                 .write_data(&json!({"request":p.request,"presentation":p.presentation}))
                 .map_err(domain)?;
@@ -70,7 +109,8 @@ pub(super) fn execute(
             }
             Ok(serde_json::to_value(
                 db!()
-                    .open_mcp_interaction(p.id, p.binding, p.mode, &body, &snapshot, &frozen)
+                    .open_mcp_interaction(p.id, p.binding, p.mode, &body,
+                        &invocation.snapshot, &invocation.frozen, invocation.cleanup())
                     .map_err(domain)?,
             )?)
         }
@@ -80,14 +120,8 @@ pub(super) fn execute(
                 .items
                 .first()
                 .ok_or_else(|| KernelError::Protocol("Empty MCP error observation".into()))?;
-            let (read, prep) = {
-                let db = db!();
-                (
-                    invocation(&db, &first.binding.operation_id)?,
-                    db.prepare_result_content(),
-                )
-            };
-            let (snapshot, frozen) = read.load_mcp().map_err(domain)?;
+            let invocation = load_invocation(&owner, &first.binding.operation_id)?;
+            let prep = db!().prepare_result_content();
             let presentations: Vec<_> = p
                 .items
                 .iter()
@@ -107,7 +141,8 @@ pub(super) fn execute(
                 .collect();
             Ok(serde_json::to_value(
                 db!()
-                    .open_mcp_error_interactions(items, &body, &snapshot, &frozen)
+                    .open_mcp_error_interactions(items, &body,
+                        &invocation.snapshot, &invocation.frozen, invocation.cleanup())
                     .map_err(domain)?,
             )?)
         }
@@ -157,6 +192,24 @@ pub(super) fn execute(
             let p:McpInteractionReadParams=serde_json::from_value(params)?;
             db!().inspect_mcp_interaction(&p.operation_id,&p.interaction_id).map_err(domain)
         },
+        "runtime.mcp.interaction.context" => {
+            let p: McpInteractionReadParams = serde_json::from_value(params)?;
+            let invocation = load_invocation(&owner, &p.operation_id)?;
+            if cancelled.load(Ordering::Acquire) {
+                return Err(KernelError::Cancelled);
+            }
+            Ok(serde_json::to_value(
+                db!().mcp_interaction_context(&p.operation_id, &p.interaction_id,
+                    &invocation.snapshot, &invocation.frozen, invocation.cleanup()).map_err(domain)?,
+            )?)
+        }
+        "runtime.mcp.interaction.delivery.released" => {
+            let p: McpInteractionControlParams = serde_json::from_value(params)?;
+            Ok(serde_json::to_value(
+                db!().acknowledge_mcp_interaction_delivery_released(&p.binding, &p.interaction_id)
+                    .map_err(domain)?,
+            )?)
+        }
         "runtime.mcp.interaction.pending" => {
             let mut db=db!();
             let records=db.pending_mcp_interactions().map_err(domain)?;

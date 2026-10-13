@@ -3022,3 +3022,221 @@ fn original_mcp_scope_closure_fences_late_grants_and_preserves_newer_run_epochs(
     drop(reopened);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn original_mcp_delivery_receipts_fence_send_ack_release_and_survive_source_retirement() {
+    let root = std::env::temp_dir().join(format!("varin-mcp-delivery-{}", uuid::Uuid::new_v4()));
+    let work = root.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let owner = Owner::new(root.join("storage"), "delivery-host", "delivery-generation", "delivery-epoch");
+    let (ordinary, source) = owner.bind_live(&work, "ordinary-delivery-grant", 1);
+    let open_mcp = |grant: &str| {
+        owner.rpc("authority.grant.issue", json!({"grantId":grant,"hostGeneration":owner.generation,
+            "storageIdentity":owner.root,"sessionId":null,"owningWorkspace":"workspace","executionWorkspace":"workspace",
+            "threadId":"thread","runId":"run","capabilities":["storage.read","storage.write","process"],"pathScopes":[""]}), None).unwrap();
+        let physical = owner.rpc("file.root.register", json!({"workspaceId":"workspace",
+            "executionWorkspaceId":"workspace","canonicalRoot":work}), Some(grant)).unwrap();
+        let opened = owner.rpc("source.authority.open", json!({"principalId":"client","coordinatorHostId":"coordinator",
+            "scope":{"kind":"run","threadId":"thread","runId":"run","epoch":1},
+            "source":source,"grantId":grant,"enabledTools":[],"purpose":"mcp_owner"}), None).unwrap();
+        assert_eq!(opened["mcpDeliveries"], json!([]));
+        let address = json!({"principalId":"client","coordinatorHostId":"coordinator",
+            "authorityId":opened["authorityId"],"resourceEpoch":opened["resourceEpoch"]});
+        let mut bind = address.clone();
+        bind["physicalRoot"] = source["live_root"].clone();
+        bind["toolBinding"] = json!({"resourceOwner":source["resource_owner"],"grantId":grant,
+            "runId":"run","threadId":"thread","workspaceId":"workspace","executionWorkspaceId":"workspace",
+            "rootId":physical["rootId"],"sourceMode":"live_root","liveRoot":source["live_root"],"enabledTools":[]});
+        owner.rpc("source.authority.bind", bind, None).unwrap();
+        address
+    };
+    let address = open_mcp("delivery-grant");
+    let revoked = open_mcp("revoked-delivery-grant");
+    let task_source = open_mcp("task-delivery-grant");
+    let cleanup_source = open_mcp("cleanup-delivery-grant");
+    let binding = json!({"operationId":"original-operation",
+        "executionOwner":{"kind":"external","identity":"original-mcp-owner","epoch":"original-mcp-generation"},
+        "endpoint":{"server":"server","resourceKey":"resource","configurationVersion":"config","credentialVersion":"credentials"},
+        "connectionId":"original-sdk-connection","source":{"kind":"server_request","requestId":"original-request",
+            "relation":{"kind":"rpc_response_stream","outgoingRequestId":7}}});
+    let params = |address: &Value, id: &str, action: &str, extra: Value| {
+        let mut params = address.clone();
+        params["binding"] = binding.clone();
+        params["deliveryId"] = json!(id);
+        params["action"] = json!(action);
+        params.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        params
+    };
+    let open = json!({"kind":"elicitation","requestHash":"a".repeat(64)});
+    let begin = json!({"responseHash":"b".repeat(64)});
+    let call = |owner: &Owner, address: &Value, id: &str, action: &str, extra: Value| {
+        owner.rpc("source.mcp.delivery", params(address, id, action, extra), None)
+    };
+    assert!(call(&owner, &ordinary, "delivery", "open", open.clone()).is_err());
+    for invalid in [json!({"kind":"elicitation","requestHash":"not-a-hash"}),
+        json!({"kind":"error","requestHash":"a".repeat(64)}),
+        json!({"kind":"elicitation","requestHash":"a".repeat(64),"request":{"secret":"no-body-store"}})] {
+        assert!(call(&owner, &address, "delivery", "open", invalid).is_err());
+    }
+    call(&owner, &address, "independent", "open", open.clone()).unwrap();
+    call(&owner, &address, "independent", "close", json!({"availability":"cancelled"})).unwrap();
+    call(&owner, &address, "independent", "ack", json!({"revision":2})).unwrap();
+    assert_eq!(call(&owner, &address, "independent", "release", json!({"revision":2})).unwrap()["phase"], "ready",
+        "releasing one delivery never seals an active original Source");
+    let opened = call(&owner, &address, "delivery", "open", open.clone()).unwrap();
+    assert_eq!(opened["receipt"]["revision"], 1);
+    assert_eq!(opened["dispatch"], false);
+    assert_eq!(opened["created"], true);
+    let mut duplicate = opened.clone();
+    duplicate["created"] = json!(false);
+    assert_eq!(call(&owner, &address, "delivery", "open", open.clone()).unwrap(), duplicate);
+    assert_eq!(call(&owner, &address, "delivery", "inspect", json!({})).unwrap()["created"], false);
+    assert!(call(&owner, &address, "delivery", "open", json!({"kind":"elicitation","requestHash":"c".repeat(64)})).is_err());
+    assert!(call(&owner, &revoked, "delivery", "inspect", json!({})).is_err());
+    for field in ["principalId", "coordinatorHostId", "resourceEpoch", "authorityId"] {
+        let mut foreign = params(&address, "delivery", "inspect", json!({}));
+        foreign[field] = json!("another-original");
+        assert!(owner.rpc("source.mcp.delivery", foreign, None).is_err());
+    }
+    for field in ["operationId", "connectionId"] {
+        let mut foreign = params(&address, "delivery", "inspect", json!({}));
+        foreign["binding"][field] = json!("another-binding");
+        assert!(owner.rpc("source.mcp.delivery", foreign, None).is_err());
+    }
+    for field in ["executionOwner", "endpoint", "source"] {
+        let mut foreign = params(&address, "delivery", "inspect", json!({}));
+        match field {
+            "executionOwner" => foreign["binding"][field]["identity"] = json!("other-owner"),
+            "endpoint" => foreign["binding"][field]["credentialVersion"] = json!("other-credential"),
+            _ => foreign["binding"][field]["requestId"] = json!("other-request"),
+        }
+        assert!(owner.rpc("source.mcp.delivery", foreign, None).is_err());
+    }
+    assert!(call(&owner, &address, "delivery", "settle", json!({"delivery":"sent"})).is_err());
+    let begun = call(&owner, &address, "delivery", "begin", begin.clone()).unwrap();
+    assert_eq!(begun["dispatch"], true);
+    assert_eq!(begun["created"], false);
+    assert_eq!(begun["receipt"]["revision"], 2);
+    assert_eq!(call(&owner, &address, "delivery", "begin", begin.clone()).unwrap()["dispatch"], false);
+    assert!(call(&owner, &address, "delivery", "begin", json!({"responseHash":"c".repeat(64)})).is_err());
+    call(&owner, &address, "delivery", "settle", json!({"delivery":"unknown"})).unwrap();
+    let sent = call(&owner, &address, "delivery", "settle", json!({"delivery":"sent"})).unwrap();
+    assert_eq!(sent["receipt"]["revision"], 4);
+    assert_eq!(call(&owner, &address, "delivery", "settle", json!({"delivery":"unknown"})).unwrap(), sent);
+    assert!(call(&owner, &address, "delivery", "settle", json!({"delivery":"not_sent"})).is_err());
+    assert!(call(&owner, &address, "delivery", "ack", json!({"revision":5})).is_err());
+    assert!(call(&owner, &address, "delivery", "release", json!({"revision":4})).is_err());
+    call(&owner, &address, "delivery", "ack", json!({"revision":4})).unwrap();
+    let closed = call(&owner, &address, "delivery", "close", json!({"availability":"rpc_closed"})).unwrap();
+    assert_eq!(closed["receipt"]["revision"], 5);
+    assert!(call(&owner, &address, "delivery", "release", json!({"revision":4})).is_err());
+    assert!(call(&owner, &address, "delivery", "release", json!({"revision":5})).is_err());
+    call(&owner, &address, "pending", "open", open.clone()).unwrap();
+    call(&owner, &address, "lost-heap", "open", open.clone()).unwrap();
+    call(&owner, &revoked, "delivery", "open", open.clone()).unwrap();
+    call(&owner, &revoked, "pending", "open", open.clone()).unwrap();
+    call(&owner, &revoked, "delivery", "begin", begin.clone()).unwrap();
+    owner.rpc("authority.grant.revoke", json!({"grantId":"revoked-delivery-grant"}), None).unwrap();
+    assert!(call(&owner, &revoked, "pending", "begin", begin.clone()).is_err());
+    assert!(call(&owner, &revoked, "new", "open", open.clone()).is_err());
+    assert_eq!(call(&owner, &revoked, "delivery", "begin", begin.clone()).unwrap()["dispatch"], false);
+    let recalled = call(&owner, &revoked, "delivery", "settle", json!({"delivery":"sent"})).unwrap();
+    assert_eq!(recalled["grantState"], "revoked");
+    // The original retained Task may admit later callbacks; arbitrary new work
+    // on a sealed Source still cannot acquire a delivery reference.
+    let mut task = task_source.clone();
+    task["binding"] = json!({"operationId":binding["operationId"],"executionOwner":binding["executionOwner"],
+        "endpoint":binding["endpoint"],"purpose":"task"});
+    task["action"] = json!("begin");
+    task["requestHash"] = json!("original-task-request");
+    owner.rpc("source.mcp.creation_receipt", task.clone(), None).unwrap();
+    let mut observer = cleanup_source.clone();
+    observer["binding"] = json!({"operationId":"original-observer-operation","executionOwner":binding["executionOwner"],
+        "endpoint":binding["endpoint"],"purpose":"resource_observer"});
+    observer["action"] = json!("begin");
+    observer["requestHash"] = json!("original-observer-request");
+    owner.rpc("source.mcp.creation_receipt", observer.clone(), None).unwrap();
+    let retire = |owner: &Owner, address: &Value| {
+        let mut release = address.clone(); release["mode"] = json!("retire");
+        owner.rpc("source.authority.release", release, None).unwrap()
+    };
+    assert_eq!(retire(&owner, &task_source)["phase"], "retaining");
+    call(&owner, &task_source, "task-callback", "open", open.clone()).unwrap();
+    let mut task_release = task_source.clone();
+    task_release["binding"] = task["binding"].clone();
+    task_release["action"] = json!("release");
+    assert_eq!(owner.rpc("source.mcp.holder", task_release, None).unwrap()["authority"]["phase"], "retaining");
+    // An explicit unsubscribe is a new real control Operation. Only its
+    // exact original observer proof can admit a callback after holder release.
+    let mut seal = cleanup_source.clone();
+    assert_eq!(owner.rpc("source.authority.seal", seal.clone(), None).unwrap()["phase"], "retaining");
+    seal["binding"] = observer["binding"].clone();
+    seal["action"] = json!("release");
+    assert_eq!(owner.rpc("source.mcp.holder", seal, None).unwrap()["authority"]["phase"], "draining");
+    assert!(call(&owner, &cleanup_source, "unsubscribe", "open", open.clone()).is_err());
+    let mut cleanup_open = open.clone();
+    cleanup_open["cleanupHolder"] = observer["binding"].clone();
+    for field in ["operationId", "purpose", "endpoint"] {
+        let mut forged = cleanup_open.clone();
+        if field == "endpoint" { forged["cleanupHolder"][field]["credentialVersion"] = json!("replacement"); }
+        else { forged["cleanupHolder"][field] = json!("replacement"); }
+        assert!(call(&owner, &cleanup_source, "unsubscribe", "open", forged).is_err());
+    }
+    let cleanup = call(&owner, &cleanup_source, "unsubscribe", "open", cleanup_open.clone()).unwrap();
+    assert_eq!(cleanup["phase"], "retaining");
+    assert_eq!(cleanup["receipt"]["cleanupHolder"], observer["binding"]);
+    assert_eq!(cleanup["receipt"]["binding"]["operationId"], "original-operation");
+    assert_eq!(cleanup["created"], true);
+    let mut duplicate_cleanup = cleanup.clone();
+    duplicate_cleanup["created"] = json!(false);
+    assert_eq!(call(&owner, &cleanup_source, "unsubscribe", "open", cleanup_open.clone()).unwrap(), duplicate_cleanup);
+    assert!(call(&owner, &cleanup_source, "unsubscribe", "open", open.clone()).is_err());
+    assert_eq!(call(&owner, &cleanup_source, "unsubscribe", "begin", begin.clone()).unwrap()["dispatch"], true);
+    let cleanup = call(&owner, &cleanup_source, "unsubscribe", "settle", json!({"delivery":"sent"})).unwrap();
+    call(&owner, &cleanup_source, "unsubscribe", "ack", json!({"revision":cleanup["receipt"]["revision"]})).unwrap();
+    assert_eq!(call(&owner, &cleanup_source, "unsubscribe", "release", json!({"revision":cleanup["receipt"]["revision"]})).unwrap()["phase"], "draining");
+    let mut explicit_revoke = task_source.clone();
+    explicit_revoke["mode"] = json!("revoke");
+    assert_eq!(owner.rpc("source.authority.release", explicit_revoke, None).unwrap()["phase"], "revoked");
+    assert_eq!(call(&owner, &task_source, "task-callback", "complete", json!({})).unwrap()["grantState"], "revoked");
+    let retaining = retire(&owner, &address);
+    assert_eq!(retaining["phase"], "retaining");
+    assert_eq!(retaining["receipt"]["retainedMcpDeliveries"].as_array().unwrap().len(), 3);
+    assert!(call(&owner, &address, "new", "open", open.clone()).is_err());
+    assert_eq!(call(&owner, &address, "pending", "begin", begin.clone()).unwrap()["dispatch"], true);
+    // URL completion remains receivable after the finite parent RPC was closed.
+    let completed = call(&owner, &address, "delivery", "complete", json!({})).unwrap();
+    assert_eq!(completed["receipt"]["revision"], 6);
+    assert_eq!(completed["receipt"]["completed"], true);
+    call(&owner, &address, "delivery", "ack", json!({"revision":6})).unwrap();
+    assert_eq!(call(&owner, &address, "delivery", "release", json!({"revision":6})).unwrap()["receipt"]["released"], true);
+    drop(owner);
+    let reopened = Owner::new(root.join("storage"), "delivery-host", "delivery-generation-next", "delivery-epoch-next");
+    let stored = call(&reopened, &address, "delivery", "inspect", json!({})).unwrap();
+    assert_eq!(stored["receipt"]["revision"], 6);
+    assert_eq!(stored["receipt"]["delivery"], "sent");
+    assert_eq!(stored["receipt"]["completed"], true);
+    assert_eq!(stored["receipt"]["released"], true);
+    assert!(call(&reopened, &address, "lost-heap", "begin", begin.clone()).is_err());
+    assert!(call(&reopened, &cleanup_source, "new-unsubscribe", "open", cleanup_open).is_err(),
+        "an original cleanup proof never bypasses the current resource epoch");
+    assert!(call(&reopened, &address, "new", "open", open).is_err());
+    assert_eq!(call(&reopened, &address, "pending", "begin", begin).unwrap()["dispatch"], false);
+    call(&reopened, &address, "pending", "settle", json!({"delivery":"unknown"})).unwrap();
+    let stopped = call(&reopened, &address, "pending", "settle", json!({"delivery":"not_sent"})).unwrap();
+    assert_eq!(stopped["receipt"]["delivery"], "not_sent");
+    assert!(call(&reopened, &address, "pending", "settle", json!({"delivery":"sent"})).is_err());
+    for id in ["pending", "lost-heap"] {
+        let closed = call(&reopened, &address, id, "close", json!({"availability":"owner_unavailable"})).unwrap();
+        let revision = closed["receipt"]["revision"].clone();
+        call(&reopened, &address, id, "ack", json!({"revision":revision})).unwrap();
+        call(&reopened, &address, id, "release", json!({"revision":revision})).unwrap();
+    }
+    let authorities = reopened.rpc("source.authority.inspect_scope", json!({"principalId":"client", "coordinatorHostId":"coordinator",
+        "threadId":"thread","runId":"run"}), None).unwrap();
+    assert_eq!(authorities.as_array().unwrap().iter().find(|item| item["authorityId"] == address["authorityId"]).unwrap()["phase"], "draining");
+    assert_eq!(retire(&reopened, &address)["phase"], "retired");
+    assert_eq!(call(&reopened, &address, "delivery", "inspect", json!({})).unwrap()["grantState"], "retired");
+    drop(reopened);
+    std::fs::remove_dir_all(root).unwrap();
+}

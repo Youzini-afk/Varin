@@ -13,6 +13,7 @@ interface OriginalObservation {
   released: boolean; live: boolean; listenerId: string | null; revision: number;
 }
 export function createMcpResourceRecovery(options: McpOriginalOwnerOptions & {
+  interactions?: Pick<import('./managed-mcp-interactions.js').ManagedMcpInteractions, 'ensure'>;
   currentPolicy(cwd: string, trusted: boolean): Promise<PermissionPolicy>;
   runtime?: Pick<AgentRuntimeClient, 'managedSource' | 'coordinatorHostId'>;
 }) {
@@ -99,17 +100,22 @@ export function createMcpResourceRecovery(options: McpOriginalOwnerOptions & {
       if (observed.receipt?.outcome?.kind === 'accepted') throw new McpAuthorityError('mcp-resource-original-receipt-changed');
       return observed.receipt?.outcome ?? null;
     },
-    async cleanup(op: McpResourcePending, signal: AbortSignal): Promise<McpResourceRelease> {
+    async cleanup(op: McpResourcePending, signal: AbortSignal, cleanup?: { interaction: import('@varin/pi-host/mcp-authority').McpInteractionOrigin; signal: AbortSignal }): Promise<McpResourceRelease> {
       const selected = await context(op, signal);
       if (selected.server.owner.resource_owner.kind !== 'managed_host') throw new McpAuthorityError('mcp-resource-cleanup-owner-changed');
       const target = await managed(selected, signal);
+      if (cleanup) {
+        if (!options.interactions) throw new McpAuthorityError('mcp_interaction_owner_unavailable');
+        await options.interactions.ensure({ ...target, origin: cleanup.interaction,
+          server: { ...selected.server, server: op.subscription.binding.endpoint.server }, endpoint: op.subscription.binding.endpoint });
+      }
       const released = await requestManagedMcpResource<{ controlsDrained: boolean; retire: boolean; release: McpResourceRelease }>(target.client, target.address,
-        { kind: 'resource_release', binding: op.subscription.binding }, signal);
+        { kind: 'resource_release', binding: op.subscription.binding, ...(cleanup ? { interaction: cleanup.interaction } : {}) }, signal);
       if (released.controlsDrained !== true || typeof released.retire !== 'boolean'
         || !['acknowledged', 'shared', 'unknown'].includes(released.release?.status)) throw new McpAuthorityError('mcp_resource_cleanup_receipt_invalid');
       if (released.retire) {
         const retired = await target.client.release({ ...target.address, mode: 'retire' }, signal) as { phase?: string };
-        if (retired.phase !== 'retired' && retired.phase !== 'revoked') throw new McpAuthorityError('mcp_resource_original_retirement_pending');
+        if (retired.phase !== 'retired' && retired.phase !== 'revoked' && retired.phase !== 'retaining') throw new McpAuthorityError('mcp_resource_original_retirement_pending');
       }
       return released.release;
     },

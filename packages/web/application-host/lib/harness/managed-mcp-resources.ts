@@ -55,7 +55,7 @@ export function createManagedMcpResources(options: {
   interface Entry { binding: McpResourceBinding; requestHash: string; observer?: McpResourceObserver;
     work: Promise<Subscription>; outcome?: SourceMcpCreationOutcome; settled: boolean; released: boolean; unavailable: boolean;
     admission: AbortController; revision: number; changes: Map<McpResourceChange['kind'], { revision: number; change: McpResourceChange }>;
-    watchers: Set<() => void>; cleanup?: Promise<McpResourceRelease>; }
+    watchers: Set<() => void>; cleanup?: Promise<McpResourceRelease>; cleanupOptions?: { interaction: import('@varin/pi-host/mcp-authority').McpInteractionOrigin; signal: AbortSignal }; }
   const entries = new Map<string, Entry>();
   const address = (scope: Scope): SourceAuthorityAddress => ({ principalId: scope.principal.principalId,
     coordinatorHostId: scope.coordinatorHostId, authorityId: scope.authorityId, resourceEpoch: scope.resourceEpoch });
@@ -72,9 +72,9 @@ export function createManagedMcpResources(options: {
   const detach = (selected: Entry): Promise<McpResourceRelease> => {
     if (selected.cleanup) return selected.cleanup;
     if (!selected.observer) return Promise.resolve({ status: 'unknown' });
-    // SDK detach removes its listener synchronously, then waits for the original
-    // client's bounded unsubscribe. Never attach A's Operation to B's Catalog.
-    try { selected.cleanup = selected.observer.detach().catch(() => ({ status: 'unknown' as const })); }
+    // Only an actual explicit unsubscribe carries its new control Operation to
+    // the authenticated interaction bridge. Autonomous cleanup has no new origin.
+    try { selected.cleanup = selected.observer.detach(selected.cleanupOptions).catch(() => ({ status: 'unknown' as const })); }
     catch { selected.cleanup = Promise.resolve({ status: 'unknown' }); }
     return selected.cleanup;
   };
@@ -131,6 +131,7 @@ export function createManagedMcpResources(options: {
             entered = true;
             const observer = await view.lease.observeResource(service, binding.uri, {
               signal: new AbortController().signal,
+              interaction: { operationId: binding.operationId, executionOwner: binding.executionOwner },
               beforeDispatch: async () => {
                 await view.beforeDispatch();
                 const current = await options.kernel.sourceRequest<{ holder: SourceMcpHolder }>('source.mcp.holder', {
@@ -197,7 +198,7 @@ export function createManagedMcpResources(options: {
       if (current.grantState !== 'active' || current.holder.released) return failure('mcp_resource_original_owner_revoked');
       return snapshot();
     },
-    async release(scope: Scope, binding: McpResourceBinding): Promise<{ retire: boolean; controlsDrained: true; release: McpResourceRelease }> {
+    async release(scope: Scope, binding: McpResourceBinding, cleanupOptions?: { interaction: import('@varin/pi-host/mcp-authority').McpInteractionOrigin; signal: AbortSignal }): Promise<{ retire: boolean; controlsDrained: true; release: McpResourceRelease }> {
       const selected = entry(scope, binding);
       // Fence an absent first dispatch, then check the full immutable request
       // identity before releasing a started holder. A has recovered its ACK before
@@ -209,6 +210,7 @@ export function createManagedMcpResources(options: {
         ...address(scope), binding: holderBinding(binding), action: 'release' });
       let release: McpResourceRelease = { status: 'unknown' };
       if (selected) {
+        if (cleanupOptions) selected.cleanupOptions = cleanupOptions;
         stop(selected);
         await join(selected.work);
         release = await detach(selected);

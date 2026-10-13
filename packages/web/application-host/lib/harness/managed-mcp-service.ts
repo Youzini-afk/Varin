@@ -1,12 +1,14 @@
 /** Target-side contribution views over the existing MCP authority. Catalog stays on A. */
 import { randomUUID } from 'node:crypto';
-import type { McpAuthorityLease, McpAuthorityScope, McpAuthorityTool, McpAuthorityService, McpTransport } from '@varin/pi-host/mcp-authority';
+import { isDeepStrictEqual } from 'node:util';
+import type { McpAuthorityLease, McpAuthorityScope, McpAuthorityTool, McpAuthorityService, McpTransport, McpInteractionRequest, McpErrorInteraction } from '@varin/pi-host/mcp-authority';
 import type { McpCompositions, McpCompositionScope } from '@varin/pi-host/mcp-authority';
 import type { ManagedSourceLocalScope, ManagedSourceCleanupScope } from './managed-remote-types.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
 import { createManagedMcpTasks, mcpTaskFailure } from './managed-mcp-tasks.js';
 import { createManagedMcpResources } from './managed-mcp-resources.js';
-import { isManagedMcpTaskContinuation, isManagedMcpResourceContinuation } from './managed-mcp-contract.js';
+import { createManagedMcpInteractions } from './managed-mcp-interactions.js';
+import { isManagedMcpTaskContinuation, isManagedMcpResourceContinuation, isManagedMcpInteractionContinuation } from './managed-mcp-contract.js';
 import type { ManagedMcpAction, ManagedMcpReply, ManagedMcpSnapshot, ManagedMcpRevocations } from './managed-mcp-contract.js';
 class ManagedMcpAdmissionError extends Error {
   readonly dispatched = false;
@@ -103,6 +105,16 @@ export function createManagedMcpService(options: {
   };
   const tasks = options.kernel ? createManagedMcpTasks({ kernel: options.kernel, view: originalView }) : undefined;
   const resources = options.kernel ? createManagedMcpResources({ kernel: options.kernel, view: originalView }) : undefined;
+  const interactions = options.kernel ? createManagedMcpInteractions({ kernel: options.kernel,
+    authorizeRead: (scope, signal) => authorizeInteractionRead(scope, signal),
+  }) : undefined;
+  const originalInteractionOwner = (scope: McpAuthorityScope) => {
+    const owner = [...owners.values()].find(owner => owner.authorityScope.environmentId === scope.environmentId
+      && isDeepStrictEqual(owner.authorityScope.resourceOwner, scope.resourceOwner)
+      && isDeepStrictEqual(owner.authorityScope.sourceAuthority, scope.sourceAuthority));
+    if (!owner || owner.closed || !interactions) throw new ManagedMcpAdmissionError('mcp_original_interaction_owner_unavailable');
+    return owner;
+  };
   const release = async (scope: Address, options?: { retainMcpHolders: boolean }) => {
     const key = keyOf(scope), owner = owners.get(key);
     if (!owner) return { executorStopped: false, taskControlsDrained: true };
@@ -121,13 +133,14 @@ export function createManagedMcpService(options: {
     for (const changed of owner.changed) changed();
     const views = [...owner.views.values()]; owner.views.clear();
     owner.closing = (async () => {
+      const interactionClosing = interactions?.close(scope);
       await Promise.all([tasks?.close(scope), resources?.close(scope)]);
       await Promise.allSettled(views.map(async view => (await view.work).release()));
       // Native processes carry their own Storage tree receipts even if SDK close swallows an error.
       const results = await Promise.allSettled([owner.composition.then(composition => composition.releaseAndDrain(), error => {
         // Failed acquisition already drained its candidate. Preserve actual close failures.
         if ((error as { code?: unknown })?.code === 'mcp-close-failed') throw error;
-      }), owner.transports?.drain()]);
+      }), owner.transports?.drain(), interactionClosing]);
       const failed = results.find(result => result.status === 'rejected');
       if (failed?.status === 'rejected') throw failed.reason;
       // Retain a failed close as unresolved; a second cleanup cannot turn it into success.
@@ -152,6 +165,10 @@ export function createManagedMcpService(options: {
     }
     if (isManagedMcpTaskContinuation(action)) return continueTask(scope, action, signal);
     if (isManagedMcpResourceContinuation(action)) return continueResource(scope, action, signal);
+    if (isManagedMcpInteractionContinuation(action)) {
+      if (!interactions) throw new ManagedMcpAdmissionError('mcp_interaction_source_unavailable');
+      return interactions.request(scope, action, signal);
+    }
     const authorityScope = await authorize(scope, signal);
     let owner = owners.get(key);
     if (action.kind === 'snapshot') {
@@ -168,7 +185,7 @@ export function createManagedMcpService(options: {
         selected.composition = options.compositions.observe(authorityScope, () => {
           selected.revision++; for (const changed of selected.changed) changed();
         });
-        owner = selected; owners.set(key, selected);
+        owner = selected; owners.set(key, selected); interactions?.bind(scope);
         void selected.composition.catch(() => undefined); // Original cleanup still owns its transport admission.
       }
       const selection = JSON.stringify(action.selection ?? null);
@@ -234,9 +251,9 @@ export function createManagedMcpService(options: {
       }
       case 'prepare_prompt': { const prompt = await lease.preparePrompt(action.server, action.name, action.schemaVersion, signal); retainService(prompt.service); return prompt; }
       case 'call': return lease.callTool(action.name, action.arguments, { schemaVersion: action.schemaVersion,
-        signal: AbortSignal.any([signal, lease.revocationSignal(action.name, action.schemaVersion)]), beforeDispatch });
+        signal: AbortSignal.any([signal, lease.revocationSignal(action.name, action.schemaVersion)]), beforeDispatch, ...(action.interaction ? { interaction: action.interaction } : {}) });
       case 'service': return lease.requestService(action.service, action.request, {
-        signal: AbortSignal.any([signal, lease.serviceRevocationSignal(action.service)]), beforeDispatch });
+        signal: AbortSignal.any([signal, lease.serviceRevocationSignal(action.service)]), beforeDispatch, ...(action.interaction ? { interaction: action.interaction } : {}) });
     }
     throw new Error('mcp_source_action_invalid');
   };
@@ -248,10 +265,33 @@ export function createManagedMcpService(options: {
     if (project.canonicalPath !== owner.authorityScope.configCwd || !options.projectTrusted(project.canonicalPath))
       throw new ManagedMcpAdmissionError('mcp_source_authority_denied');
   };
+  const authorizeInteractionRead = async (scope: Address, signal: AbortSignal) => {
+    // An SDK owner may already be closed while A still owes durable publication
+    // of an original request. Historical body reads use the exact Source identity,
+    // current project/read permission and the delivery's original active-grant fence.
+    // This does not recreate a receiver, connection, or response admission.
+    if (!scope.principal.capabilities.includes('filesystem:read') || !options.kernel)
+      throw new ManagedMcpAdmissionError('mcp_source_authority_denied');
+    const authority = await options.kernel.sourceRequest<import('../kernel/protocol.generated.js').SourceAuthorityResult>('source.authority.inspect', {
+      principalId: scope.principal.principalId, coordinatorHostId: scope.coordinatorHostId,
+      authorityId: scope.authorityId, resourceEpoch: scope.resourceEpoch,
+    }, signal);
+    if (authority.purpose !== 'mcp_owner' || authority.source.resource_owner.kind !== 'managed_host'
+      || authority.source.resource_owner.hostId !== options.hostId) throw new ManagedMcpAdmissionError('mcp_source_authority_denied');
+    const project = await options.admitWorkspaceRegistration(authority.source.workspace_id, signal);
+    if (!options.projectTrusted(project.canonicalPath)) throw new ManagedMcpAdmissionError('mcp_source_authority_denied');
+  };
   const continueResource = async (scope: Address, action: Extract<ManagedMcpAction, { kind: 'resource_inspect' | 'resource_watch' | 'resource_release' }>, signal: AbortSignal) => {
     if (!resources) throw new ManagedMcpAdmissionError('mcp_resource_source_unavailable');
     if (action.kind === 'resource_inspect') return resources.inspect(scope, action.binding, action.fenceUnstarted, signal);
-    if (action.kind === 'resource_release') return resources.release(scope, action.binding);
+    if (action.kind === 'resource_release') {
+      const unregister = action.interaction ? interactions?.registerCleanup(scope, action.interaction, {
+        operationId: action.binding.operationId, executionOwner: action.binding.executionOwner,
+        endpoint: action.binding.endpoint, purpose: 'resource_observer',
+      }) : undefined;
+      try { return await resources.release(scope, action.binding, action.interaction ? { interaction: action.interaction, signal } : undefined); }
+      finally { unregister?.(); }
+    }
     await authorizeContinuationRead(scope, signal);
     const observed = await resources.watch(scope, action, signal);
     await authorizeContinuationRead(scope, signal);
@@ -263,6 +303,15 @@ export function createManagedMcpService(options: {
     if (action.kind === 'task_release') return tasks.release(scope, action.binding);
     if (action.kind === 'task_get' || action.kind === 'task_result') await authorizeContinuationRead(scope, signal);
     return tasks.control(scope, action, signal);
+  };
+  const published = async <T>(scope: Address, work: () => Promise<T>): Promise<T> => {
+    try { return await work(); }
+    finally {
+      try { await interactions?.published(scope); }
+      catch { throw Object.assign(new Error('mcp_interaction_publication_pending'), {
+        code: 'mcp_interaction_publication_pending', dispatched: true, settlement: 'unknown',
+      }); }
+    }
   };
   const reply = async (work: () => Promise<unknown>): Promise<ManagedMcpReply> => {
     try { return { ok: true, value: await work(), executorStopped: true }; }
@@ -277,18 +326,33 @@ export function createManagedMcpService(options: {
       if (!owner || owner.closed || owner.sealed || !owner.transports) throw new Error('mcp_original_source_transport_unavailable');
       return owner.transports.adapt(transport);
     },
+    receiveInteraction(scope: McpAuthorityScope, input: McpInteractionRequest) {
+      return interactions!.receive(originalInteractionOwner(scope).scope, input, 'elicitation') as Promise<import('@varin/protocol').McpElicitationResponse>;
+    },
+    receiveSampling(scope: McpAuthorityScope, input: McpInteractionRequest) {
+      return interactions!.receive(originalInteractionOwner(scope).scope, input, 'sampling') as Promise<import('@varin/protocol').McpSamplingResult>;
+    },
+    receiveInteractionError(scope: McpAuthorityScope, input: McpErrorInteraction) {
+      interactions!.receiveError(originalInteractionOwner(scope).scope, input);
+    },
+    interactionContinuation(scope: ManagedSourceCleanupScope, action: import('./managed-mcp-contract.js').ManagedMcpInteractionAction, signal?: AbortSignal) {
+      return reply(async () => {
+        if (!interactions) throw new ManagedMcpAdmissionError('mcp_interaction_source_unavailable');
+        return interactions.request(scope, action, signal ?? new AbortController().signal);
+      });
+    },
     release, releaseView,
     close: () => Promise.allSettled([...owners.values()].map(owner => release(owner.scope))),
     taskContinuation(scope: ManagedSourceCleanupScope,
       action: Extract<ManagedMcpAction, { kind: 'task_inspect' | 'task_get' | 'task_result' | 'task_cancel' | 'task_release' }>, signal?: AbortSignal) {
-      return reply(() => continueTask(scope, action, signal ?? new AbortController().signal));
+      return reply(() => published(scope, () => continueTask(scope, action, signal ?? new AbortController().signal)));
     },
     resourceContinuation(scope: ManagedSourceCleanupScope,
       action: Extract<ManagedMcpAction, { kind: 'resource_inspect' | 'resource_watch' | 'resource_release' }>, signal?: AbortSignal) {
-      return reply(() => continueResource(scope, action, signal ?? new AbortController().signal));
+      return reply(() => published(scope, () => continueResource(scope, action, signal ?? new AbortController().signal)));
     },
     request(scope: ManagedSourceLocalScope, action: ManagedMcpAction, signal?: AbortSignal): Promise<ManagedMcpReply> {
-      return reply(() => execute(scope, action, signal ?? new AbortController().signal));
+      return reply(() => published(scope, () => execute(scope, action, signal ?? new AbortController().signal)));
     },
   };
 }

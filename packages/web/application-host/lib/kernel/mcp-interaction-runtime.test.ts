@@ -47,6 +47,20 @@ function fixture(){
   };
   return {runtime,receive,request,attempts,records,errors,loseOpen(){openReplyLost=true;},failSettle(n:number){settleFailures=n;},holdChoice(fn:()=>Promise<void>){heldChoice=fn;},holdOpen(fn:()=>Promise<void>){heldOpen=fn;}};
 }
+it('joins exact original publication without waiting for review or releasing an answer', async () => {
+  const f = fixture(); let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; }); f.holdOpen(() => held);
+  const peer = f.receive('original'); let published = false;
+  const barrier = f.runtime.published(binding('original')).then(() => { published = true; });
+  try {
+    await vi.waitFor(() => expect(f.attempts).toContain('runtime.mcp.interaction.open'));
+    expect(published).toBe(false);
+    release(); await barrier;
+    expect(peer.view().record.choice).toBeNull();
+    expect(f.attempts).not.toContain('runtime.mcp.interaction.respond');
+    await expect(f.runtime.published({ ...binding('original'), operationId: 'different' })).rejects.toThrow('mcp_interaction_conflict');
+  } finally { release(); await f.runtime.dispose(); }
+});
 it('reconciles an open reply loss and retries only the known settlement after ACK loss, with no repeated answer',async()=>{
   const f=fixture();f.loseOpen();f.failSettle(1);const peer=f.receive('original');
   try{

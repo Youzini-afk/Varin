@@ -480,7 +480,12 @@ export class AgentRuntimeClient {
   }
   private mcpResourceOwner?: Pick<import('./mcp-resource-runtime.js').McpResourceRuntime, 'releaseSource'>;
   setMcpResourceOwner(owner:Pick<import('./mcp-resource-runtime.js').McpResourceRuntime, 'releaseSource'>):void { this.mcpResourceOwner=owner; }
-  async releaseMcpResourceSource(runId:string):Promise<void> { await Promise.all([this.mcpResourceOwner?.releaseSource(runId), this.mcpInteractionOwner?.releaseSource(runId)]); }
+  private managedMcpInteractions?: Pick<import('./managed-mcp-interactions.js').ManagedMcpInteractions, 'releaseSource'>;
+  setManagedMcpInteractions(owner: Pick<import('./managed-mcp-interactions.js').ManagedMcpInteractions, 'releaseSource'>): void { this.managedMcpInteractions = owner; }
+  async releaseMcpResourceSource(runId:string):Promise<void> {
+    await Promise.all([this.mcpResourceOwner?.releaseSource(runId), this.mcpInteractionOwner?.releaseSource(runId)]);
+    await this.managedMcpInteractions?.releaseSource(runId);
+  }
   async retireSourceGrants(runId: string): Promise<void> {
     await this.releaseMcpResourceSource(runId);
     const [run, launch] = await Promise.all([this.run(runId), this.launch(runId)]);

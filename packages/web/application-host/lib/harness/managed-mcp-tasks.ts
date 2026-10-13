@@ -86,15 +86,14 @@ export function createManagedMcpTasks(options: {
           began = true;
           let outcome: SourceMcpCreationOutcome;
           try {
-            // Never bind A's Operation to B's Catalog interaction receiver. Reverse
-            // interactions require their own authenticated A delivery bridge.
             const response = await lease.start(action.name, action.arguments, { schemaVersion: action.schemaVersion,
-              signal: active, ...(action.ttl === undefined ? {} : { ttl: action.ttl }), beforeDispatch: async () => {
+              signal: active, interaction: { operationId: binding.operationId, executionOwner: binding.executionOwner }, ...(action.ttl === undefined ? {} : { ttl: action.ttl }), beforeDispatch: async () => {
                 await view.beforeDispatch();
                 const current = await options.kernel.sourceRequest<{ holder: SourceMcpHolder }>('source.mcp.holder', {
                   ...address(scope), binding, action: 'retain' });
                 if (current.holder.released || selected.released) failure('mcp_task_holder_released');
               } });
+            lease.bindInteraction?.(response.task.taskId, { operationId: binding.operationId, executionOwner: binding.executionOwner });
             outcome = { kind: 'accepted', response };
           } catch (error) { outcome = { kind: 'failed', error: mcpTaskFailure(error, true) }; }
           // An interrupted requester cannot discard the original response before Storage

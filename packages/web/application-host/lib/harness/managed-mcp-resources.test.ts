@@ -24,6 +24,7 @@ function fixture() {
   let holder: SourceMcpHolder | undefined, outcome: SourceMcpCreationOutcome | null = null;
   let views = 0, subscriptions = 0, detaches = 0, sealed = false, settleFailures = 0, lostSettleReply = false, lostBeginReply = false;
   let creationSignal: AbortSignal | undefined;
+  const cleanupOrigins: unknown[] = [];
   let change: ((event: McpResourceChange) => void) | undefined;
   let run = async () => acknowledgement;
   let detach = async (): Promise<McpResourceRelease> => ({ status: 'acknowledged', acknowledgement: { _meta: { unsubscribed: true } } });
@@ -63,17 +64,17 @@ function fixture() {
     return { beforeDispatch: async () => { active.throwIfAborted(); if (sealed) throw new Error('view sealed'); }, lease: {
       resourceEndpoint: () => binding.endpoint,
       async observeResource(originalService: McpAuthorityService, uri: string, options: any) {
-        expect(originalService).toEqual(service); expect(uri).toBe(binding.uri); expect(options.interaction).toBeUndefined();
+        expect(originalService).toEqual(service); expect(uri).toBe(binding.uri); expect(options.interaction).toEqual({ operationId: binding.operationId, executionOwner: binding.executionOwner });
         await options.beforeDispatch(); creationSignal = options.signal; change = options.onChange; subscriptions++;
         const ack = await run();
         return { endpoint: binding.endpoint, listenerId: 'original-listener', acknowledgement: ack,
-          detach() { detaches++; return detach(); } };
+          detach(options?: unknown) { cleanupOrigins.push(options); detaches++; return detach(); } };
       },
     } };
   };
   const create = () => createManagedMcpResources({ kernel, view } as never);
   return { resources: create(), create, calls, revokeGrant: () => { grantState = 'revoked'; }, emit: (event: McpResourceChange) => change?.(event),
-    counts: () => ({ views, subscriptions, detaches }), holder: () => holder, outcome: () => outcome, creationSignal: () => creationSignal,
+    cleanupOrigins, counts: () => ({ views, subscriptions, detaches }), holder: () => holder, outcome: () => outcome, creationSignal: () => creationSignal,
     seal: () => { sealed = true; }, run: (next: typeof run) => { run = next; }, detach: (next: typeof detach) => { detach = next; },
     failSettle: (count = 1) => { settleFailures = count; }, loseSettleReply: () => { lostSettleReply = true; }, loseBeginReply: () => { lostBeginReply = true; } };
 }
@@ -285,4 +286,15 @@ it('direct original grant revocation fences watch delivery while receipts and cl
   await expect(f.resources.watch(scope, watch(), signal())).rejects.toThrow('original_owner_revoked');
   expect(await f.resources.inspect(scope, binding)).toMatchObject({ receipt: { outcome: { kind: 'subscribed' } } });
   expect(await f.resources.release(scope, binding)).toMatchObject({ controlsDrained: true });
+});
+
+it('carries only the explicit new unsubscribe identity while automatic observer cleanup stays originless', async () => {
+  const explicit = fixture(); await explicit.resources.subscribe(scope, subscribe, signal());
+  const interaction = { operationId: 'actual-unsubscribe', executionOwner: binding.executionOwner }, active = signal();
+  await explicit.resources.release(scope, binding, { interaction, signal: active });
+  expect(explicit.cleanupOrigins).toEqual([{ interaction, signal: active }]);
+  expect(explicit.holder()?.binding.operationId).toBe(binding.operationId);
+  const automatic = fixture(); await automatic.resources.subscribe(scope, subscribe, signal());
+  await automatic.resources.release(scope, binding);
+  expect(automatic.cleanupOrigins).toEqual([undefined]);
 });

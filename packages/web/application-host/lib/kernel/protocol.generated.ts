@@ -3,17 +3,19 @@
  * Do not hand-edit the wire shapes; run `node scripts/generate-kernel-protocol.mjs`.
  */
 
-export const KERNEL_PROTOCOL_VERSION = 34 as const;
+export const KERNEL_PROTOCOL_VERSION = 35 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
-export const KERNEL_CONTROL_METHODS = ["source.authority.seal","source.mcp.holder","source.script.control","source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status","runtime.mcp.interaction.inspect","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.source.tools","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
-export const KERNEL_CONTROL_RESPONSE_METHODS = ["source.authority.seal","source.mcp.holder","source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.generate","runtime.inference.receipt_pending","runtime.inference.admit","runtime.inference.dispatch","runtime.inference.status","runtime.inference.settle","runtime.mcp.interaction.inspect","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.source.tools","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
+export const KERNEL_CONTROL_METHODS = ["source.authority.seal","source.mcp.holder","source.mcp.delivery","source.script.control","source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status","runtime.mcp.interaction.inspect","runtime.mcp.interaction.delivery.released","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.source.tools","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
+export const KERNEL_CONTROL_RESPONSE_METHODS = ["source.authority.seal","source.mcp.holder","source.mcp.delivery","source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.generate","runtime.inference.receipt_pending","runtime.inference.admit","runtime.inference.dispatch","runtime.inference.status","runtime.inference.settle","runtime.mcp.interaction.inspect","runtime.mcp.interaction.delivery.released","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.source.tools","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["process.write","process.resize","runtime.tools.invoke","file.lease.wait"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.branch.navigate":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.memory_work.admit","runtime.memory_work.read","runtime.memory_work.status","runtime.memory_work.list","runtime.memory_work.update","runtime.inference.generate","runtime.inference.admit","runtime.inference.settle","runtime.mcp.sampling.review_output","runtime.mcp.sampling.review_request","runtime.mcp.sampling.generate","runtime.mcp.interaction.open","runtime.mcp.interaction.error.open","runtime.mcp.interaction.list","runtime.mcp.interaction.read","runtime.mcp.interaction.respond","runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
-export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v34" as const;
+export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v35" as const;
 
 export type KernelMethod =
+  | "runtime.mcp.interaction.context"
+  | "runtime.mcp.interaction.delivery.released"
   | "runtime.followup.registration.prepare"
   | "source.authority.inspect_read_scope"
   | "source.authority.close_read_scope"
@@ -359,6 +361,7 @@ export type KernelMethod =
   | "source.authority.seal"
   | "source.mcp.holder"
   | "source.mcp.creation_receipt"
+  | "source.mcp.delivery"
   | "source.authority.open"
   | "source.capabilities"
   | "source.authority.handoff"
@@ -669,6 +672,7 @@ export interface McpInteractionRecord {
   choice: McpInteractionChoice | null;
   delivery: McpInteractionDelivery | null;
   completionReported: boolean;
+  deliveryReleased: boolean;
   problem: string | null;
   sampling?: McpSamplingState;
 }
@@ -714,6 +718,11 @@ export interface McpInteractionListParams {
   branchId: string;
   cursor?: string;
   limit?: number;
+}
+
+export interface McpInteractionContext {
+  record: McpInteractionRecord;
+  owner: McpServerOwner;
 }
 
 export interface McpInteractionReadParams {
@@ -2148,7 +2157,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 34; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 35; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -5022,6 +5031,16 @@ export type SourceMcpCreationReceiptParams = SourceAuthorityAddress & {binding:S
 
 export interface SourceMcpCreationReceiptResult { dispatch:boolean;holder:SourceMcpHolder;authority:SourceAuthorityResult;outcome:SourceMcpCreationOutcome|null; }
 
+export type SourceMcpDeliveryKind = 'elicitation'|'sampling'|'error';
+
+export type SourceMcpDeliveryState = 'sending'|'sent'|'not_sent'|'unknown';
+
+export interface SourceMcpDeliveryReceipt { deliveryId:string;binding:McpInteractionBinding;kind:SourceMcpDeliveryKind;cleanupHolder?:SourceMcpHolderBinding;requestHash:string;revision:number;responseHash:string|null;delivery:SourceMcpDeliveryState|null;availability:McpInteractionAvailability;completed:boolean;acknowledgedRevision:number;released:boolean; }
+
+export type SourceMcpDeliveryParams = SourceAuthorityAddress & {deliveryId:string;binding:McpInteractionBinding} & ({action:'open';kind:SourceMcpDeliveryKind;requestHash:string;cleanupHolder?:SourceMcpHolderBinding}|{action:'inspect'}|{action:'begin';responseHash:string}|{action:'settle';delivery:'sent'|'not_sent'|'unknown'}|{action:'close';availability:Exclude<McpInteractionAvailability,'live'>}|{action:'complete'}|{action:'ack'|'release';revision:number});
+
+export interface SourceMcpDeliveryResult { receipt:SourceMcpDeliveryReceipt;dispatch:boolean;created:boolean;phase:SourceAuthorityResult['phase'];grantState:'active'|'retired'|'revoked'; }
+
 export interface SourceMcpHolderParams extends SourceAuthorityAddress { binding:SourceMcpHolderBinding;action:'retain'|'inspect'|'release'|'release_unstarted'; }
 
 export interface SourceAuthorityOpenParams { principalId:string;coordinatorHostId:string;scope:SourceAuthorityScope;source:LaunchSource;grantId:string;enabledTools:string[];purpose:'source'|'read'|'integration'|'result'|'process_view'|'script_environment'|'mcp_owner';operationId?:string; }
@@ -5042,7 +5061,7 @@ export interface SourceServiceCallParams extends SourceAuthorityAddress { reques
 
 export interface SourceToolBinding { resourceOwner:SourceResourceOwner;grantId:string;runId:string;threadId:string;workspaceId:string;executionWorkspaceId:string;sourceMode:SourceMode;rootId?:string;fileSource?:{branchId:string;revision:number};materializedSource?:{branchId:string;revision:number};liveRoot?:LiveRoot;environmentRunId?:string;enabledTools:string[];remoteAuthority?:{authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner}; }
 
-export interface SourceAuthorityResult { authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner;source:LaunchSource;scope:SourceAuthorityScope;phase:'preparing'|'ready'|'retaining'|'draining'|'retired'|'revoked';purpose:'source'|'read'|'integration'|'result'|'process_view'|'script_environment'|'mcp_owner';operationId:string|null;grantId:string;toolBinding:SourceToolBinding|null;physicalRoot:LiveRoot|null;firstPreparation:boolean;materializationOperationId:string;mcpHolders:SourceMcpHolder[]; }
+export interface SourceAuthorityResult { authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner;source:LaunchSource;scope:SourceAuthorityScope;phase:'preparing'|'ready'|'retaining'|'draining'|'retired'|'revoked';purpose:'source'|'read'|'integration'|'result'|'process_view'|'script_environment'|'mcp_owner';operationId:string|null;grantId:string;toolBinding:SourceToolBinding|null;physicalRoot:LiveRoot|null;firstPreparation:boolean;materializationOperationId:string;mcpHolders:SourceMcpHolder[];mcpDeliveries:SourceMcpDeliveryReceipt[]; }
 
 export interface SourceAuthorityScopeReleaseParams {principalId:string;coordinatorHostId:string;threadId:string;runId:string;mode:'retire'|'revoke';}
 
@@ -5499,6 +5518,8 @@ export type KernelMethodParams = {
   "runtime.inference.status": InferenceOwnerParams;
   "runtime.inference.settle": InferenceSettleParams;
   "runtime.mcp.interaction.inspect": McpInteractionReadParams;
+  "runtime.mcp.interaction.context": McpInteractionReadParams;
+  "runtime.mcp.interaction.delivery.released": McpInteractionControlParams;
   "runtime.mcp.sampling.review_output": McpSamplingOutputReviewParams;
   "runtime.mcp.sampling.review_request": McpSamplingRequestReviewParams;
   "runtime.mcp.sampling.generate": McpSamplingGenerateParams;
@@ -5809,6 +5830,7 @@ export type KernelMethodParams = {
   "source.authority.seal": SourceAuthorityAddress;
   "source.mcp.holder": SourceMcpHolderParams;
   "source.mcp.creation_receipt": SourceMcpCreationReceiptParams;
+  "source.mcp.delivery": SourceMcpDeliveryParams;
   "source.authority.bind": SourceAuthorityBindParams;
   "source.authority.inspect": SourceAuthorityAddress;
   "source.authority.release": SourceAuthorityReleaseParams;
@@ -6050,6 +6072,24 @@ export type KernelRequest =
       id: string;
       method: "runtime.mcp.interaction.inspect";
       params: McpInteractionReadParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.mcp.interaction.context";
+      params: McpInteractionReadParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.mcp.interaction.delivery.released";
+      params: McpInteractionControlParams;
       epoch?: string;
       grantId?: string;
     }
@@ -8840,6 +8880,15 @@ export type KernelRequest =
       id: string;
       method: "source.mcp.creation_receipt";
       params: SourceMcpCreationReceiptParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "source.mcp.delivery";
+      params: SourceMcpDeliveryParams;
       epoch?: string;
       grantId?: string;
     }

@@ -1,6 +1,6 @@
 /** Closed source-local MCP requests. No paths, credentials or arbitrary Host method names. */
-import type { McpAuthorityBinding, McpAuthorityService, McpServiceRequest } from '@varin/pi-host/mcp-authority';
-import type { McpBinding, McpEndpoint, McpResourceBinding, SourceMcpHolderBinding, SourceMcpCreationOutcome } from '../kernel/protocol.generated.js';
+import type { McpAuthorityBinding, McpAuthorityService, McpServiceRequest, McpInteractionOrigin } from '@varin/pi-host/mcp-authority';
+import type { McpBinding, McpEndpoint, McpResourceBinding, McpInteractionBinding, SourceMcpDeliveryReceipt, SourceMcpHolderBinding, SourceMcpCreationOutcome } from '../kernel/protocol.generated.js';
 
 /** The body projection crosses the content lane, never an authority control snapshot. */
 export interface ManagedMcpTaskCreationReceipt { requestHash: string; outcome: SourceMcpCreationOutcome | null }
@@ -17,7 +17,7 @@ export type ManagedMcpResourceAction =
   | { kind: 'resource_subscribe'; handleId: string; binding: McpResourceBinding; service: McpAuthorityService }
   | { kind: 'resource_inspect'; binding: McpResourceBinding; fenceUnstarted?: boolean }
   | { kind: 'resource_watch'; binding: McpResourceBinding; listenerId: string; after: number }
-  | { kind: 'resource_release'; binding: McpResourceBinding };
+  | { kind: 'resource_release'; binding: McpResourceBinding; interaction?: McpInteractionOrigin };
 export function isManagedMcpResourceContinuation(action: ManagedMcpAction): action is Exclude<ManagedMcpResourceAction, { kind: 'resource_subscribe' }> {
   return ['resource_inspect', 'resource_watch', 'resource_release'].includes(action.kind);
 }
@@ -26,7 +26,33 @@ export interface ManagedMcpResourceSnapshot {
   revision: number;
   changes: Array<{ revision: number; change: import('@varin/pi-host/mcp-authority').McpResourceChange }>;
 }
-export type ManagedMcpAction = ManagedMcpTaskAction | ManagedMcpResourceAction
+/** Original SDK responders are observed over the authenticated Source address. */
+export type ManagedMcpInteractionResponse =
+  | { kind: 'result'; value: Record<string, unknown> }
+  | { kind: 'sampling_rejected' };
+export type ManagedMcpInteractionAction =
+  | { kind: 'interaction_watch'; incarnation?: string; after: number }
+  | { kind: 'interaction_read' | 'interaction_inspect'; deliveryId: string; binding: McpInteractionBinding }
+  | { kind: 'interaction_respond'; deliveryId: string; binding: McpInteractionBinding; response: ManagedMcpInteractionResponse }
+  | { kind: 'interaction_ack' | 'interaction_release'; deliveryId: string; binding: McpInteractionBinding; revision: number }
+  | { kind: 'interaction_close'; deliveryId: string; binding: McpInteractionBinding; availability: 'rpc_closed' | 'connection_lost' | 'owner_unavailable' | 'cancelled' };
+export function isManagedMcpInteractionContinuation(action: ManagedMcpAction): action is ManagedMcpInteractionAction {
+  return action.kind.startsWith('interaction_');
+}
+export interface ManagedMcpInteractionSnapshot {
+  incarnation: string;
+  revision: number;
+  deliveries: Array<{ receipt: SourceMcpDeliveryReceipt; live: boolean }>;
+}
+export interface ManagedMcpInteractionInspection {
+  receipt: SourceMcpDeliveryReceipt;
+  live: boolean;
+}
+export type ManagedMcpInteractionBody =
+  | { kind: 'elicitation' | 'sampling'; deliveryId: string; binding: McpInteractionBinding; request: Record<string, unknown> }
+  | { kind: 'error'; request: Record<string, unknown>; items: Array<{ deliveryId: string; binding: McpInteractionBinding;
+      presentation: Extract<import('@varin/protocol').McpElicitationPresentation, { mode: 'url' }> }> };
+export type ManagedMcpAction = ManagedMcpTaskAction | ManagedMcpResourceAction | ManagedMcpInteractionAction
   | { kind: 'snapshot'; handleId: string; creationRequestId: string; selection?: McpBinding }
   | { kind: 'changed'; incarnation: string; after: number }
   | { kind: 'release'; handleId: string; creationRequestId: string }
@@ -35,8 +61,8 @@ export type ManagedMcpAction = ManagedMcpTaskAction | ManagedMcpResourceAction
   | { kind: 'discover_services'; handleId: string; server: string }
   | { kind: 'prepare_service'; handleId: string; server: string; serviceKind: McpAuthorityService['kind']; schemaVersion: string }
   | { kind: 'prepare_prompt'; handleId: string; server: string; name: string; schemaVersion: string }
-  | { kind: 'call'; handleId: string; name: string; schemaVersion: string; arguments: Record<string, unknown> }
-  | { kind: 'service'; handleId: string; service: McpAuthorityService; request: McpServiceRequest };
+  | { kind: 'call'; handleId: string; name: string; schemaVersion: string; arguments: Record<string, unknown>; interaction?: McpInteractionOrigin }
+  | { kind: 'service'; handleId: string; service: McpAuthorityService; request: McpServiceRequest; interaction?: McpInteractionOrigin };
 export interface ManagedMcpRevocations {
   tools: Array<{ name: string; schemaVersion: string }>;
   services: Array<{ server: string; schemaVersion: string }>;

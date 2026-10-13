@@ -1,10 +1,13 @@
 /** Live responders for Catalog-owned MCP input records. No durable state or connection authority here. */
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { McpSamplingRejectedError, decodeElicitationRequest, validateElicitationResponse, decodeUrlElicitationError, type McpInteractionRequest, type McpInteractionReceiver, type McpErrorInteractionItem, type McpErrorInteractionReceiver } from '@varin/pi-host/mcp-authority';
+import { McpSamplingRejectedError } from '@varin/pi-host/mcp-errors';
+import { publishMcpInteractionRequest, isDefiniteMcpPublicationFailure } from './mcp-interaction-publication.js';
+import { decodeElicitationRequest, validateElicitationResponse, decodeUrlElicitationError } from '@varin/pi-host/mcp-interactions';
+import type { McpInteractionRequest, McpInteractionReceiver, McpErrorInteractionItem, McpErrorInteractionReceiver } from '@varin/pi-host/mcp-authority';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { KernelClient } from './kernel-client.js';
-import type { McpInteractionRecord, McpInteractionView, McpInteractionRespondParams, McpElicitationResponse, McpInteractionAvailability, McpInteractionDelivery } from './protocol.generated.js';
+import type { McpInteractionBinding, McpInteractionRecord, McpInteractionView, McpInteractionRespondParams, McpElicitationResponse, McpInteractionAvailability, McpInteractionDelivery } from './protocol.generated.js';
 import type { McpInteractionPending, McpSamplingResult, McpSamplingRequestReviewParams, McpSamplingOutputReviewParams, ModelSessionConfiguration, Operation } from './protocol.generated.js';
 import type { CredentialScope, ExistingHostCredentialOwner } from './credential-owner.js';
 type ReviewedAnswer = McpElicitationResponse | McpSamplingResult;
@@ -133,21 +136,10 @@ export function createMcpInteractionRuntime(options: { kernel: KernelClient; run
     const answer = new Promise<ReviewedAnswer>((yes, no) => { resolve = yes; reject = no; });
     void answer.catch(() => {});
     let openRejected = false;
-    const opened = options.kernel.agentRuntimeRequest<McpInteractionRecord, 'runtime.mcp.interaction.open'>('runtime.mcp.interaction.open', {
-      id, binding: input.binding, mode: decoded.presentation.mode, request: decoded.request, presentation: decoded.presentation,
-    }).catch(async error => {
-      // Reconcile the same request after a lost publication reply, never invent a new request.
-      try {
-        const view = await options.kernel.agentRuntimeRequest<McpInteractionView, 'runtime.mcp.interaction.read'>('runtime.mcp.interaction.read', {operationId: input.binding.operationId, interactionId: id});
-        if (!isDeepStrictEqual(view.record.binding, input.binding) || !isDeepStrictEqual(view.request, decoded.request)) throw error;
-        return view.record;
-      } catch {
-        // A definite private-domain rejection created no new row. Transport/storage
-        // uncertainty still retains the same exact close fact for reconciliation.
-        const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
-        openRejected = ['operation-error','protocol-error','cancelled','unauthorized'].includes(String(code));
-        throw error;
-      }
+    const opened = publishMcpInteractionRequest({ id, binding: input.binding,
+      mode: decoded.presentation.mode, request: decoded.request, presentation: decoded.presentation,
+    }, { kernel: options.kernel, disposed: () => disposed, waitRetry: pause, report }).catch(error => {
+      openRejected = isDefiniteMcpPublicationFailure(error); throw error;
     });
     const entry: Entry = { id, input, controller, resolve, reject, opened, finished: false, choiceLane: Promise.resolve() };
     entries.set(id, entry);
@@ -169,7 +161,7 @@ export function createMcpInteractionRuntime(options: { kernel: KernelClient; run
       adopt(entry, await short<McpInteractionRecord>('runtime.mcp.interaction.response.begin', entry));
       signal.throwIfAborted(); await input.assertLive();
     });
-    input.onResponseSettled(state => {
+    input.onResponseSettled((state: 'sent' | 'not_sent' | 'unknown') => {
       if (openRejected) { entry.unobserve?.(); entries.delete(id); return; }
       entry.finished = true; entry.settlementFact = entry.answerReleased ? state : 'not_sent';
       void opened.catch(() => undefined).then(() => { if (!disposed) void flush(entry); });
@@ -297,6 +289,16 @@ export function createMcpInteractionRuntime(options: { kernel: KernelClient; run
   return {
     receiver,
     samplingReceiver,
+    async published(binding: McpInteractionBinding): Promise<void> {
+      const id = `mcp-interaction:${createHash('sha256').update(JSON.stringify([binding.connectionId, binding.source])).digest('hex')}`;
+      const entry = entries.get(id);
+      if (entry && !isDeepStrictEqual(entry.input.binding, binding)) throw failure('mcp_interaction_conflict');
+      // Source cleanup joins publication, never user review or model execution.
+      // A retired in-memory receiver is sufficient only if its exact Catalog row exists.
+      const record = entry ? await entry.opened : await options.kernel.agentRuntimeRequest<McpInteractionRecord,
+        'runtime.mcp.interaction.inspect'>('runtime.mcp.interaction.inspect', { operationId: binding.operationId, interactionId: id });
+      if (record.id !== id || !isDeepStrictEqual(record.binding, binding)) throw failure('mcp_interaction_conflict');
+    },
     async reviewRequest(input: McpSamplingRequestReviewParams, model?: SamplingModelSelection, signal?: AbortSignal): Promise<McpInteractionView> {
       if(input.action !== 'generate') return reviewSamplingChoice(input as McpSamplingOutputReviewParams, 'request', signal);
       const previous=await readSampling(input);

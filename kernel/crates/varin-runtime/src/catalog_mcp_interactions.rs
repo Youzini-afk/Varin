@@ -72,10 +72,17 @@ pub struct McpInteractionRecord {
     pub availability: Availability,
     pub choice: Option<Choice>,
     pub delivery: Option<Delivery>,
+    pub delivery_released: bool,
     pub completion_reported: bool,
     pub problem: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sampling: Option<crate::mcp_sampling::McpSamplingState>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpInteractionContext {
+    pub record: McpInteractionRecord,
+    pub owner: launches::McpServerOwner,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -316,34 +323,38 @@ impl Catalog {
         if let Some(generation)=generation { value["generation"]=serde_json::to_value(generation)?; }
         Ok(value)
     }
-    fn prepare_mcp_interaction(
+    fn mcp_interaction_owner(
         &self,
-        id: String,
-        binding: McpInteractionBinding,
-        mode: Mode,
-        body: &result_content::PreparedOperationResult,
-        selector: Option<usize>,
+        binding: &McpInteractionBinding,
         snapshot: &tool_content::ToolInvocationSnapshot,
         frozen: &launches::HostToolBinding,
-    ) -> Result<(Metadata, bool)> {
+        cleanup: Option<(&tool_content::ToolInvocationSnapshot, &launches::HostToolBinding)>,
+    ) -> Result<launches::McpServerOwner> {
         self.validate_tool_invocation(snapshot, false)?;
         let op = self.operation(&binding.operation_id)?;
         let run = self.run(&op.run_id)?;
-        let selected = frozen.provenance.servers.get(&binding.endpoint.server);
         let resource = frozen.resources.get(&snapshot.call.name);
+        let selected = frozen.provenance.servers.get(&binding.endpoint.server);
         let route = frozen.routes.get(&snapshot.call.name);
         // Explicit unsubscribe is a new, real control invocation of a retained observer.
         // Its exact target supplies the old endpoint; background cleanup has no caller.
-        let cleanup = if let Some(crate::McpRoute::ResourceUnsubscribe { argument }) = route {
+        let cleanup_owner = if let Some(crate::McpRoute::ResourceUnsubscribe { argument }) = route {
             let target_id = snapshot.call.arguments[argument]
                 .as_str()
                 .ok_or_else(conflict)?;
             let target = self.access_mcp_resource(&run.id, target_id, true)?;
-            Some(
-                target
-                    .mcp_resource_subscription
-                    .ok_or_else(conflict)?,
-            )
+            let (target_snapshot, target_frozen) = cleanup.ok_or_else(conflict)?;
+            self.validate_mcp_resource_context(target_id, target_snapshot, target_frozen)?;
+            let subscription = target.mcp_resource_subscription.ok_or_else(conflict)?;
+            if subscription.binding.endpoint != binding.endpoint {
+                return Err(conflict());
+            }
+            let server = target_frozen.provenance.servers.get(&binding.endpoint.server)
+                .ok_or_else(conflict)?;
+            if !server.owner.validate() || server.owner.execution_scope != subscription.source_scope {
+                return Err(conflict());
+            }
+            Some(server.owner.clone())
         } else {
             None
         };
@@ -360,25 +371,65 @@ impl Catalog {
             ) => None,
             _ => return Err(conflict()),
         };
-        if id.is_empty()
-            || binding.connection_id.is_empty()
+        if binding.connection_id.is_empty()
             || !binding.execution_owner.validate()
             || binding.endpoint.credential_version.is_empty()
             || snapshot.context.operation_id != binding.operation_id
+            || snapshot.context.run_id != run.id
             || op.execution_owner.as_ref() != Some(&binding.execution_owner)
-            || cleanup
-                .as_ref()
-                .is_some_and(|subscription| subscription.binding.endpoint != binding.endpoint)
-            || (cleanup.is_none()
+            || (cleanup_owner.is_none()
                 && (selected.is_none_or(|s| {
                     s.definition_version != binding.endpoint.configuration_version
                         || s.resource_key != binding.endpoint.resource_key
+                        || !s.owner.validate()
                         || !s.owner.accepts_source(snapshot.frozen.source.as_ref())
                 }) || server_arg.is_some_and(|s| s != binding.endpoint.server)
                     || (server_arg.is_none() && resource != Some(&binding.endpoint.resource_key))))
         {
             return Err(conflict());
         }
+        cleanup_owner.or_else(|| selected.map(|server| server.owner.clone()))
+            .ok_or_else(conflict)
+    }
+    /// Resolve only the original frozen owner, including after cancellation or reopen.
+    /// The caller loads invocation bodies before entering this short Catalog read.
+    pub fn mcp_interaction_context(
+        &self,
+        operation_id: &str,
+        id: &str,
+        snapshot: &tool_content::ToolInvocationSnapshot,
+        frozen: &launches::HostToolBinding,
+        cleanup: Option<(&tool_content::ToolInvocationSnapshot, &launches::HostToolBinding)>,
+    ) -> Result<McpInteractionContext> {
+        let m: Metadata = record(&self.db, "mcp_interactions", id)?;
+        if m.record.binding.operation_id != operation_id {
+            return Err(conflict());
+        }
+        let owner = self.mcp_interaction_owner(&m.record.binding, snapshot, frozen, cleanup)?;
+        let run = self.run(&snapshot.context.run_id)?;
+        if m.record.run_id != run.id || m.record.thread_id != run.thread_id
+            || m.record.branch_id != run.branch_id || m.source_scope != owner.execution_scope
+        {
+            return Err(conflict());
+        }
+        Ok(McpInteractionContext { record: m.record, owner })
+    }
+    fn prepare_mcp_interaction(
+        &self,
+        id: String,
+        binding: McpInteractionBinding,
+        mode: Mode,
+        body: &result_content::PreparedOperationResult,
+        selector: Option<usize>,
+        snapshot: &tool_content::ToolInvocationSnapshot,
+        frozen: &launches::HostToolBinding,
+        cleanup: Option<(&tool_content::ToolInvocationSnapshot, &launches::HostToolBinding)>,
+    ) -> Result<(Metadata, bool)> {
+        if id.is_empty() {
+            return Err(conflict());
+        }
+        let owner = self.mcp_interaction_owner(&binding, snapshot, frozen, cleanup)?;
+        let run = self.run(&snapshot.context.run_id)?;
         let mut m = Metadata {
             record: McpInteractionRecord {
                 id,
@@ -395,13 +446,13 @@ impl Catalog {
                 } else {
                     Some(Delivery::NotStarted)
                 },
+                delivery_released: matches!(owner.resource_owner, launches::SourceResourceOwner::Local),
                 completion_reported: false,
                 problem: None,
                 sampling: (mode == Mode::Sampling).then(|| crate::mcp_sampling::McpSamplingState { generation_operation_id: None, review: "request".into() }),
             },
             epoch: self.epoch,
-            source_scope: cleanup.as_ref().map(|subscription| subscription.source_scope)
-                .or_else(|| selected.map(|server| server.owner.execution_scope)).ok_or_else(conflict)?,
+            source_scope: owner.execution_scope,
             request_ref: body.reference.clone(),
             response_ref: None,
             selector,
@@ -419,12 +470,16 @@ impl Catalog {
             return Err(conflict());
         }
         if let Err(error) = original_live(&self.db, &m, self.epoch) {
-            if !m.record.binding.source.is_error() {
+            if !m.record.binding.source.is_error() && m.record.delivery_released {
                 return Err(error);
             }
-            // This is an already received fact, even if cancellation/source retirement won
-            // the local publication race. Preserve the evidence without restoring authority.
+            // A managed Source already retains this exact request for delivery cleanup.
+            // Cancellation may win its transport/publication race. Preserve that received
+            // historical fact, as for protocol errors, without review or model authority.
             m.record.availability = Availability::OwnerUnavailable;
+            if let Some(sampling) = m.record.sampling.as_mut() {
+                sampling.review = "closed".into();
+            }
             m.record.problem = Some("mcp_interaction_owner_unavailable".into());
         }
         Ok((m, true))
@@ -453,9 +508,10 @@ impl Catalog {
         body: &result_content::PreparedOperationResult,
         snapshot: &tool_content::ToolInvocationSnapshot,
         frozen: &launches::HostToolBinding,
+        cleanup: Option<(&tool_content::ToolInvocationSnapshot, &launches::HostToolBinding)>,
     ) -> Result<McpInteractionRecord> {
         let prepared =
-            self.prepare_mcp_interaction(id, binding, mode, body, None, snapshot, frozen)?;
+            self.prepare_mcp_interaction(id, binding, mode, body, None, snapshot, frozen, cleanup)?;
         self.publish_mcp_interactions(vec![prepared])?
             .pop()
             .ok_or_else(conflict)
@@ -466,6 +522,7 @@ impl Catalog {
         body: &result_content::PreparedOperationResult,
         snapshot: &tool_content::ToolInvocationSnapshot,
         frozen: &launches::HostToolBinding,
+        cleanup: Option<(&tool_content::ToolInvocationSnapshot, &launches::HostToolBinding)>,
     ) -> Result<Vec<McpInteractionRecord>> {
         let prepared = items
             .into_iter()
@@ -479,6 +536,7 @@ impl Catalog {
                     Some(index),
                     snapshot,
                     frozen,
+                    cleanup,
                 )
             })
             .collect::<Result<Vec<_>>>()?;
@@ -661,6 +719,24 @@ impl Catalog {
         tx.commit()?;
         Ok(m.record)
     }
+    /// Acknowledge exact original Source delivery cleanup without settling its response,
+    /// changing availability, or asserting anything about remote execution effects.
+    pub fn acknowledge_mcp_interaction_delivery_released(
+        &mut self,
+        binding: &McpInteractionBinding,
+        id: &str,
+    ) -> Result<McpInteractionRecord> {
+        let tx = self.db.transaction()?;
+        let mut m: Metadata = record(&tx, "mcp_interactions", id)?;
+        linked(&m, binding)?;
+        if m.record.delivery_released {
+            return Ok(m.record);
+        }
+        m.record.delivery_released = true;
+        publish(&tx, &mut m, "mcp.interaction.delivery_released")?;
+        tx.commit()?;
+        Ok(m.record)
+    }
     pub fn close_mcp_interaction(
         &mut self,
         binding: &McpInteractionBinding,
@@ -740,7 +816,7 @@ impl Catalog {
     }
     pub fn pending_mcp_interactions(&mut self) -> Result<Vec<McpInteractionRecord>> {
         let ids = {
-            let mut q=self.db.prepare("SELECT id FROM mcp_interactions WHERE (json_extract(body,'$.availability')='live' AND (json_extract(body,'$.binding.source.kind')!='rpc_error' OR (json_extract(body,'$.completionReported')=0 AND (json_extract(body,'$.choice') IS NULL OR json_extract(body,'$.choice')='accept')))) OR json_extract(body,'$.delivery')='sending' OR (json_extract(body,'$.availability')='rpc_closed' AND json_extract(body,'$.mode')='url' AND json_extract(body,'$.choice')='accept' AND json_extract(body,'$.completionReported')=0 AND json_extract(body,'$.delivery')!='not_sent')")?;
+            let mut q=self.db.prepare("SELECT id FROM mcp_interactions WHERE json_extract(body,'$.deliveryReleased')=0 OR (json_extract(body,'$.availability')='live' AND (json_extract(body,'$.binding.source.kind')!='rpc_error' OR (json_extract(body,'$.completionReported')=0 AND (json_extract(body,'$.choice') IS NULL OR json_extract(body,'$.choice')='accept')))) OR json_extract(body,'$.delivery')='sending' OR (json_extract(body,'$.availability')='rpc_closed' AND json_extract(body,'$.mode')='url' AND json_extract(body,'$.choice')='accept' AND json_extract(body,'$.completionReported')=0 AND json_extract(body,'$.delivery')!='not_sent')")?;
             let rows = q
                 .query_map([], |r| r.get::<_, String>(0))?
                 .collect::<std::result::Result<Vec<_>, _>>()?;

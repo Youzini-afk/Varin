@@ -1,4 +1,4 @@
-import { McpAuthorityError, McpTaskRequestError } from './mcp-errors.js';
+import { McpAuthorityError, McpTaskRequestError, McpSamplingRejectedError } from './mcp-errors.js';
 /** Shared Application Host MCP authority. Pi and native runtimes lease these same connections. */
 import { createHash, randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
@@ -57,7 +57,7 @@ export interface McpInteractionRequest {
   onComplete(callback: () => void, unavailable?: () => void): () => void;
 }
 export type McpInteractionReceiver = (request: McpInteractionRequest) => Promise<McpElicitationResponse>;
-export class McpSamplingRejectedError extends McpError { constructor() { super(-1, 'User rejected sampling request'); } }
+export { McpSamplingRejectedError } from './mcp-errors.js';
 export type McpSamplingReceiver = (request: McpInteractionRequest) => Promise<import("@varin/protocol").McpSamplingResult>;
 export interface McpErrorInteractionItem {
   binding: McpInteractionBinding;
@@ -74,9 +74,9 @@ export interface McpErrorInteraction {
 export type McpErrorInteractionReceiver = (error: McpErrorInteraction) => void;
 
 export interface McpAuthorityOptions {
-  interactions?: McpInteractionReceiver;
-  sampling?: McpSamplingReceiver;
-  interactionErrors?: McpErrorInteractionReceiver;
+  interactions?: (request: McpInteractionRequest, scope: McpAuthorityScope) => ReturnType<McpInteractionReceiver>;
+  sampling?: (request: McpInteractionRequest, scope: McpAuthorityScope) => ReturnType<McpSamplingReceiver>;
+  interactionErrors?: (error: McpErrorInteraction, scope: McpAuthorityScope) => void;
   providerToken?: (scope: McpAuthorityScope, provider: string) => Promise<string | undefined>;
   credentialScope?: (scope: McpAuthorityScope, provider: string) => Promise<{
     reference: string; generation: number; authority?: string; account?: string;
@@ -868,7 +868,7 @@ export class McpAuthority {
           callback();
           if (taskId !== undefined) for (const listener of record.taskListeners) listener(taskId);
         }, unavailable),
-      }))});
+      }))}, scope.scope);
     } catch { for (const watch of watches) watch.dispose(); return 'mcp_interaction_owner_unavailable'; }
     return undefined;
   }
@@ -914,14 +914,19 @@ export class McpAuthority {
         const id = decoded.presentation.elicitationId;
         return this.#completionWatch(scope, record, client, id).observe(callback, unavailable);
       },
-    });
+    }, scope.scope);
   }
   async #receiveSampling(record: ConnectionRecord, client: McpClient, params: unknown, context: McpRequestHandlerContext): Promise<import('@varin/protocol').McpSamplingResult> {
     if (!this.#options.sampling || !client.options.capabilities?.sampling) throw new McpError(-32601, 'Client capability is not supported');
     if (!taskObject(params)) throw new McpError(-32602, 'Sampling params must be an object');
-    const { binding, signal, assertLive } = await this.#associateRequest(record, client, params, context);
-    return this.#options.sampling({ binding, request: structuredClone(params), signal, assertLive,
-      beforeResponse: context.beforeResponse, onResponseSettled: context.onResponseSettled, onComplete: () => () => {} });
+    const { binding, signal, assertLive, scope } = await this.#associateRequest(record, client, params, context);
+    try {
+      return await this.#options.sampling({ binding, request: structuredClone(params), signal, assertLive,
+        beforeResponse: context.beforeResponse, onResponseSettled: context.onResponseSettled, onComplete: () => () => {} }, scope.scope);
+    } catch (error) {
+      if (error instanceof McpSamplingRejectedError) throw new McpError(-1, error.message);
+      throw error;
+    }
   }
   async #associateRequest(record: ConnectionRecord, client: McpClient, params: unknown, context: McpRequestHandlerContext) {
     const meta = taskObject(params) && taskObject(params._meta) ? params._meta : undefined;

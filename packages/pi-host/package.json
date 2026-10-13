@@ -59,6 +59,10 @@
     "./mcp-errors": {
       "types": "./dist/mcp-errors.d.ts",
       "import": "./dist/mcp-errors.js"
+    },
+    "./mcp-interactions": {
+      "types": "./dist/mcp-interactions.d.ts",
+      "import": "./dist/mcp-interactions.js"
     }
   },
   "scripts": {
