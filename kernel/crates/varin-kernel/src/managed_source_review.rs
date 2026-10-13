@@ -2469,3 +2469,64 @@ fn package_capture_storage_reopen_releases_exact_pin_and_original_temporary_owne
     drop(owner);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn script_source_stop_fences_late_spawn_and_recalls_original_after_reopen() {
+    let root = std::env::temp_dir().join(format!("varin-script-source-{}", uuid::Uuid::new_v4()));
+    let work = root.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let owner = Owner::new(root.join("storage"), "script-host", "script-generation", "script-epoch");
+    let bind = |grant: &str, process: &str| {
+        owner.rpc("authority.grant.issue", json!({"grantId":grant,"hostGeneration":owner.generation,
+            "storageIdentity":owner.root,"sessionId":null,"owningWorkspace":"workspace","executionWorkspace":"workspace",
+            "threadId":"thread","runId":"run","operationId":process,
+            "capabilities":["storage.read","storage.write","process"],"pathScopes":[""]}), None).unwrap();
+        let physical=owner.rpc("file.root.register",json!({"workspaceId":"workspace","executionWorkspaceId":"workspace","canonicalRoot":work}),Some(grant)).unwrap();
+        let live=json!({"hostId":owner.host,"rootId":physical["rootId"],"canonicalRoot":physical["canonicalRoot"]});
+        let source=json!({"resource_owner":{"kind":"managed_host","hostId":owner.host,"connectionId":"original","endpointIdentity":"original"},
+            "workspace_id":"workspace","execution_workspace_id":"workspace","mode":"live_root","branch_id":null,"revision":null,"live_root":live,"environment_run_id":null});
+        let opened=owner.rpc("source.authority.open",json!({"principalId":"client","coordinatorHostId":"a",
+            "scope":{"kind":"run","threadId":"thread","runId":"run","epoch":1},"source":source,"grantId":grant,"enabledTools":[],
+            "purpose":"script_environment","operationId":process}),None).unwrap();
+        owner.rpc("source.authority.bind",json!({"principalId":"client","coordinatorHostId":"a","authorityId":opened["authorityId"],
+            "resourceEpoch":opened["resourceEpoch"],"physicalRoot":live,"toolBinding":{"resourceOwner":source["resource_owner"],
+                "grantId":grant,"runId":"run","threadId":"thread","workspaceId":"workspace","executionWorkspaceId":"workspace",
+                "rootId":physical["rootId"],"sourceMode":"live_root","liveRoot":live,"enabledTools":[]}}),None).unwrap();
+        (source, physical["rootId"].clone())
+    };
+    let (source, root_id) = bind("late-grant", "late-process");
+    let control=|id: &str, stop: bool|json!({"principalId":"client","coordinatorHostId":"a","threadId":"thread","runId":"run","processId":id,"source":source,"stop":stop});
+    let spawn=|id: &str|json!({"processId":id,"workspaceId":"workspace","rootId":root_id,"cwd":"","command":std::env::var("VARIN_NODE").unwrap_or_else(|_|"node".into()),
+        "args":["-e","process.stdout.write('original');setInterval(()=>{},1000)"],"env":[],"mode":"pipe","cols":80,"rows":24});
+    let fenced = owner.rpc("source.script.control", control("late-process", true), None).unwrap();
+    assert_eq!(fenced["accepted"], false);
+    assert_eq!(fenced["executorStopped"], false, "missing acceptance is not proof of a stopped evaluator");
+    assert!(owner.rpc("process.spawn", spawn("late-process"), Some("late-grant")).is_err(), "late original spawn must fail its revoked grant");
+    let (same_source, _) = bind("active-grant", "active-process");
+    assert_eq!(same_source, source);
+    bind("unrelated-grant", "unrelated-process");
+    let started=owner.rpc("process.spawn",spawn("active-process"),Some("active-grant")).unwrap();
+    assert_eq!(started["processId"], "active-process");
+    let mut foreign=control("active-process",true);foreign["principalId"]=json!("other-client");
+    assert!(owner.rpc("source.script.control",foreign,None).is_err());
+    let first=owner.rpc("source.script.control",control("active-process",true),None).unwrap();
+    assert_eq!(first["accepted"],true);
+    let deadline=Instant::now()+Duration::from_secs(10);
+    let terminal=loop {
+        let receipt=owner.rpc("source.script.control",control("active-process",false),None).unwrap();
+        if receipt["executorStopped"]==true {break receipt;}
+        assert!(Instant::now()<deadline,"original evaluator stop did not confirm: {receipt}");
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!(terminal["process"]["treeConfirmed"],true);
+    assert_eq!(terminal["process"]["writerActive"],false);
+    assert!(owner.rpc("file.root.register",json!({"workspaceId":"workspace","executionWorkspaceId":"workspace","canonicalRoot":work}),Some("unrelated-grant")).is_ok());
+    drop(owner);
+    let reopened=Owner::new(root.join("storage"),"script-host","new-generation","new-epoch");
+    let recalled=reopened.rpc("source.script.control",control("active-process",true),None).unwrap();
+    assert_eq!(recalled["process"]["kernelEpoch"],"script-epoch");
+    assert_eq!(recalled["executorStopped"],true);
+    assert_eq!(recalled["process"]["processId"],"active-process");
+    drop(reopened);
+    std::fs::remove_dir_all(root).unwrap();
+}

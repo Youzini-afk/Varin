@@ -890,7 +890,11 @@ pub(crate) fn spawn(
                                 let result = (|| {
                                     for operation in processes {
                                         runtime.cancel_operation_control(&operation.id);
-                                        if !resources.cancel_known_process(&operation.id)? { resources.cancel_process(&operation.id, &operation.run_id)?; }
+                                        if operation.managed_process.as_ref().is_some_and(|process| process.is_environment()) {
+                                            resources.request_environment_stop(operation.id, operation.run_id)?;
+                                        } else if !resources.cancel_known_process(&operation.id)? {
+                                            resources.cancel_process(&operation.id, &operation.run_id)?;
+                                        }
                                     }
                                     runtime.drain_bot_scope(&capture).map_err(|e|KernelError::Operation(e.to_string()))
                                 })();

@@ -12,6 +12,7 @@ import { SourceAdmissionError, sourceReadError } from '../kernel/source-admissio
 import { normalizeThreadSourcePreparation } from '../kernel/thread-sources.js';
 import { normalizePathIdentity } from '../workspace/path-safety.js';
 import { ManagedSourceDrainedError } from './managed-source-drain.js';
+import { resolveScriptNodeBinding, scriptNodeSpawnInput } from '../kernel/script-node-binding.js';
 import { createManagedSourceProcesses } from './managed-source-processes.js';
 import type { ManagedSourceAddress, ManagedSourceBindRequest, ManagedSourceBinding, ManagedSourceCapabilities,
   ManagedSourcePrincipal, ManagedSourceService, ManagedSourceServiceHandler, ManagedSourceLocalScope,
@@ -149,20 +150,53 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     if (!['filesystem:read', 'terminal:use', 'process:control'].every(capability => principal.capabilities.includes(capability)))
       throw new SourceAdmissionError('source_authority_denied');
     const authority = await admit(principal, input, signal);
-    if (!authority.physicalRoot || authority.scope.kind !== 'run' || authority.purpose !== 'process_view'
+    if (!authority.physicalRoot || authority.scope.kind !== 'run' || !['process_view', 'script_environment'].includes(authority.purpose)
       || authority.operationId !== input.processId) throw new SourceAdmissionError('source_changed');
     const process = await kernel.sourceRequest<import('../kernel/protocol.generated.js').KernelProcessSnapshot>('source.process.access',
       { ...address(principal, input), processId: input.processId }, signal);
     // A reopened Host observes the original spool under its current view grant.
     // The process keeps its creation epoch; Storage still rejects old-epoch input.
     if (process.processId !== input.processId || !process.kernelEpoch
-      || process.workspaceId !== authority.source.workspace_id || process.mode !== 'pty') throw new SourceAdmissionError('source_changed');
+      || process.workspaceId !== authority.source.workspace_id || process.mode !== (authority.purpose === 'script_environment' ? 'pipe' : 'pty')) throw new SourceAdmissionError('source_changed');
     return { authority, process };
   };
   const processViews = createManagedSourceProcesses({ kernel, access: async (principal, input, signal) => (await processAccess(principal, input, signal)).authority,
-    release: (principal, input) => kernel.sourceRequest('source.authority.release', { ...address(principal, input), mode: 'retire' }).then(() => undefined) });
+    release: async (principal, input) => {
+      // A script transport is only a projection. Its original execution authority
+      // survives disconnection until Catalog cancellation and callback drain settle.
+      const authority = await inspect(principal, input);
+      if (authority.purpose === 'process_view') await kernel.sourceRequest('source.authority.release', { ...address(principal, input), mode: 'retire' });
+    } });
 
   return {
+    async scriptControl(principal, input, signal) {
+      requirePrincipal(principal, input.coordinatorHostId);
+      await kernel.start();
+      return kernel.sourceRequest('source.script.control', { ...input, principalId: principal.principalId }, signal);
+    },
+    async scriptBinding(principal, input, signal) {
+      requireReadPrincipal(principal, input.coordinatorHostId);
+      if (input.source.mode === 'fixed_branch' || !['terminal:use', 'process:control'].every(capability => principal.capabilities.includes(capability)))
+        throw new SourceAdmissionError('source_authority_denied');
+      await registration(input.source, signal);
+      const node = await resolveScriptNodeBinding();
+      signal?.throwIfAborted();
+      return node;
+    },
+    async scriptSpawn(principal, input, signal) {
+      if (!['terminal:use', 'process:control'].every(capability => principal.capabilities.includes(capability)))
+        throw new SourceAdmissionError('source_authority_denied');
+      const authority = await admit(principal, input, signal);
+      if (authority.purpose !== 'script_environment' || authority.operationId !== input.processId || !authority.physicalRoot
+        || authority.scope.kind !== 'run' || typeof input.cwd !== 'string') throw new SourceAdmissionError('source_changed');
+      const node = await resolveScriptNodeBinding();
+      if (!isDeepStrictEqual(node, input.node)) throw new Error('Original target script Node binding changed');
+      signal?.throwIfAborted();
+      return kernel.scoped(kernel.sourceAuthorityGrant(authority)).processSpawn({
+        ...scriptNodeSpawnInput(node), processId: input.processId, workspaceId: authority.source.workspace_id,
+        rootId: authority.physicalRoot.rootId, cwd: input.cwd, mode: 'pipe', cols: 80, rows: 24,
+      }, signal);
+    },
     processAccess: async (principal, input, signal) => (await processAccess(principal, input, signal)).process,
     processSubscribe: processViews.processSubscribe,
     processControl: processViews.processControl,
@@ -223,8 +257,10 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       requireReadPrincipal(principal, input.coordinatorHostId);
       const source = selectedSource(input);
       const resultOnly = input.purpose === 'result';
-      if (input.purpose === 'process_view' && (input.scope.kind !== 'run' || input.retention !== 'caller' || !input.operationId))
+      if (['process_view', 'script_environment'].includes(input.purpose) && (input.scope.kind !== 'run' || input.retention !== 'caller' || !input.operationId))
         throw new SourceAdmissionError('source_authority_denied');
+      if (input.purpose === 'script_environment' && (source.mode === 'fixed_branch'
+        || !['terminal:use', 'process:control'].every(capability => principal.capabilities.includes(capability)))) throw new SourceAdmissionError('source_authority_denied');
       await registration(source, signal);
       const selected = await capabilities(principal, { coordinatorHostId: input.coordinatorHostId, mode: source.mode,
         enabledTools: input.scope.kind === 'source_read' || resultOnly ? [] : input.source.tools }, signal);
@@ -243,7 +279,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         threadId: input.scope.threadId, ...(input.scope.kind === 'run' ? { runId: input.scope.runId } : {}),
         ...(input.operationId ? { operationId: input.operationId } : {}),
         capabilities: [...new Set([...selected.grantCapabilities, ...(integration ? ['recovery'] : []),
-          ...(resultOnly ? ['storage.write'] : [])])], pathScopes: [''] }, signal);
+          ...(resultOnly ? ['storage.write'] : []), ...(input.purpose === 'script_environment' ? ['process'] : [])])], pathScopes: [''] }, signal);
       let opened: SourceAuthorityResult | undefined;
       try {
         opened = await kernel.sourceRequest<SourceAuthorityResult>('source.authority.open', {
@@ -342,7 +378,8 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       const work = Promise.resolve().then(async () => {
         controller.signal.throwIfAborted();
         const authority = await admit(principal, input, controller.signal);
-        if (authority.purpose === 'process_view') throw new SourceAdmissionError('source_authority_denied');
+        if (authority.purpose === 'process_view' || authority.purpose === 'script_environment'
+          && !(operation.kind === 'native_resource' && operation.action.kind === 'process_observation')) throw new SourceAdmissionError('source_authority_denied');
         switch (operation.kind) {
           case 'native_resource': case 'validate':
             dispatched = true;

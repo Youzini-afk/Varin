@@ -808,6 +808,7 @@ pub(crate) struct KernelResourceClient {
     controls: crate::process::ProcessControlRegistry,
     admission_control: Option<Arc<AdmissionControl>>,
     journal_catalog: Option<Arc<std::sync::Mutex<varin_runtime::Catalog>>>,
+    environment_stops: Arc<std::sync::Mutex<BTreeSet<String>>>,
     source_bridge: Option<crate::host_query::OwnerChannel>,
     source_journal: Option<varin_runtime::catalog::journal::JournalAnchor>,
 }
@@ -826,6 +827,7 @@ impl KernelResourceClient {
             controls,
             admission_control: None,
             journal_catalog: None,
+            environment_stops: Default::default(),
             source_bridge: None,
             source_journal: None,
         }
@@ -1095,6 +1097,21 @@ impl KernelResourceClient {
             .0
             .load()
             .map_err(|e| KernelError::Operation(e.to_string()))?;
+        if operation.managed_process.as_ref().is_some_and(|process| process.is_environment()) {
+            if !matches!(phase, "observe" | "cancel") {
+                return Err(KernelError::Authorization("Script environment release requires its original callback drain".into()));
+            }
+            // The evaluator lives at B, while A's extension invocation remains the
+            // executor. Never reinterpret A's executor identity as a B Source lease.
+            let receipt = self.source_query(json!({"kind":"script_control","source":read.1,
+                "runId":operation.run_id,"threadId":read.2,"processId":id,"stop":phase == "cancel"}),
+                &CancellationToken::default()).map_err(|e| KernelError::Operation(e.to_string()))?;
+            if receipt["processId"] != id || receipt["runId"] != operation.run_id
+                || receipt["threadId"] != read.2 || receipt["source"] != serde_json::to_value(&read.1)? {
+                return Err(KernelError::Authorization("Original script receipt identity changed".into()));
+            }
+            return Ok(Some(receipt));
+        }
         let Some(varin_runtime::ExecutorOwner::External { identity, epoch }) =
             &operation.execution_owner
         else {
@@ -1300,6 +1317,27 @@ impl KernelResourceClient {
             }
         }
         (self.replay)(local)
+    }
+    /// Notification delivery must not await a target Host. Deduplicate only live
+    /// stop attempts; original pending Operations remain Catalog's recovery facts.
+    pub(crate) fn request_environment_stop(&self, operation_id: String, run_id: String) -> Result<(), KernelError> {
+        if !self.environment_stops.lock().map_err(|_| KernelError::Storage("Environment stop owner failed".into()))?.insert(operation_id.clone()) {
+            return Ok(());
+        }
+        let resources = self.clone();
+        let id = operation_id.clone();
+        if let Err(error) = std::thread::Builder::new().name("script-stop".into()).spawn(move || {
+            let _ = resources.cancel_known_process(&id).and_then(|known| {
+                if known { Ok(true) } else { resources.cancel_process(&id, &run_id) }
+            });
+            // Transport failure is not a terminal receipt. A later original owner
+            // wake can retry after this attempt, without blocking unrelated Runs.
+            if let Ok(mut active) = resources.environment_stops.lock() { active.remove(&id); }
+        }) {
+            if let Ok(mut active) = self.environment_stops.lock() { active.remove(&operation_id); }
+            return Err(error.into());
+        }
+        Ok(())
     }
     pub(crate) fn cancel_known_process(&self, operation_id: &str) -> Result<bool, KernelError> {
         self.controls.cancel_known_process(operation_id)

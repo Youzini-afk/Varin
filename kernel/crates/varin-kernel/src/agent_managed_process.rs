@@ -143,7 +143,7 @@ pub(super) fn execute(
                     .managed_process_caller(&p.operation_id, &p.execution_owner, false)
                     .map_err(domain)?
             };
-            let process = observe(&catalog, &resources, &op, &context, &binding)?;
+            let process = observe(&catalog, &resources, &op, &context, Some(&binding))?;
             let link = require_process(&op).map_err(domain)?;
             let ManagedProcessKind::ScriptEnvironment { node } = &link.purpose else {
                 return Err(KernelError::Authorization(
@@ -163,7 +163,7 @@ pub(super) fn execute(
         }
         "runtime.managed_process.terminal" => {
             let p: ManagedProcessTerminalParams = serde_json::from_value(params)?;
-            let binding: crate::tools::ToolBinding = serde_json::from_value(p.tool_binding)?;
+            let binding: Option<crate::tools::ToolBinding> = p.tool_binding.map(serde_json::from_value).transpose()?;
             let (op, context) = lock()?
                 .managed_process_caller(&p.operation_id, &p.execution_owner, false)
                 .map_err(domain)?;
@@ -179,14 +179,14 @@ pub(super) fn execute(
             {
                 return read_operation(op);
             }
-            let process = observe(&catalog, &resources, &op, &context, &binding)?;
+            let process = observe(&catalog, &resources, &op, &context, binding.as_ref())?;
             let physical_epoch = process["kernelEpoch"]
                 .as_str()
                 .ok_or_else(|| KernelError::Protocol("Process epoch missing".into()))?;
             lock()?
                 .confirm_process_epoch(&op.id, physical_epoch)
                 .map_err(domain)?;
-            let tree_stopped = process["writerActive"] == false;
+            let tree_stopped = process["writerActive"] == false && process["treeConfirmed"] == true;
             let stopped = tree_stopped && p.callbacks_stopped;
             // Unknown is the original uncertainty receipt. New physical evidence stays in
             // Storage until callback drain can refine it, rather than rewriting Unknown.
@@ -216,9 +216,9 @@ fn observe(
     resources: &crate::tools::KernelResourceClient,
     op: &varin_runtime::OperationMetadata,
     context: &ToolExecutionContext,
-    binding: &crate::tools::ToolBinding,
+    binding: Option<&crate::tools::ToolBinding>,
 ) -> Result<Value, KernelError> {
-    {
+    let managed = {
         let db = catalog
             .lock()
             .map_err(|_| KernelError::Storage("Catalog owner failed".into()))?;
@@ -227,15 +227,26 @@ fn observe(
             .launch_metadata(&op.run_id)
             .map_err(domain)?
             .ok_or_else(|| KernelError::Authorization("Original source missing".into()))?;
-        if binding.run_id != op.run_id
-            || binding.thread_id != run.thread_id
-            || launch.selection.source.as_ref() != Some(&binding.source_selection()?)
-        {
-            return Err(KernelError::Authorization(
-                "Managed process source binding changed".into(),
-            ));
+        let source = launch.selection.source.as_ref().ok_or_else(|| KernelError::Authorization("Original source missing".into()))?;
+        if let Some(binding) = binding {
+            if binding.run_id != op.run_id || binding.thread_id != run.thread_id || source != &binding.source_selection()? {
+                return Err(KernelError::Authorization("Managed process source binding changed".into()));
+            }
         }
+        !source.resource_owner.is_local()
+    };
+    if managed {
+        // Revocation fences late spawn/input. Original physical receipts remain
+        // observable after revocation without re-admitting project access.
+        let receipt = resources.remote_operation_receipt(&op.id, "observe")?
+            .ok_or_else(|| KernelError::Authorization("Original script resource owner unavailable".into()))?;
+        let process = &receipt["process"];
+        if receipt["accepted"] != true || process["processId"] != op.id || process["mode"] != "pipe" {
+            return Err(KernelError::Authorization("Original script process acceptance is unconfirmed".into()));
+        }
+        return Ok(process.clone());
     }
+    let binding = binding.ok_or_else(|| KernelError::Authorization("Local script source binding missing".into()))?;
     resources
         .observe_process(
             binding,
@@ -268,20 +279,8 @@ pub(super) fn close_ended_environments(
             .collect::<Result<Vec<_>, _>>()
             .map_err(domain)?
     };
-    let mut failure = None;
     for (id, run) in candidates {
-        let stop = resources.cancel_known_process(&id).and_then(|known| {
-            if known {
-                Ok(true)
-            } else {
-                resources.cancel_process(&id, &run)
-            }
-        });
-        if let Err(error) = stop {
-            if failure.is_none() {
-                failure = Some(error);
-            }
-        }
+        resources.request_environment_stop(id, run)?;
     }
-    failure.map_or(Ok(()), Err)
+    Ok(())
 }

@@ -75,7 +75,7 @@ impl Storage {
             || !p.scope.validate()
             || !matches!(
                 p.purpose.as_str(),
-                "source" | "read" | "integration" | "result" | "process_view"
+                "source" | "read" | "integration" | "result" | "process_view" | "script_environment"
             )
         {
             return Err(denied("Source authority identity is incomplete"));
@@ -784,6 +784,51 @@ impl Storage {
     }
     /// Recall only facts belonging to the authority's actual creation grant. Missing
     /// receipts are unknown, never evidence that executing the same intent is safe.
+    /// Recover the original evaluator through its existing Source + process records.
+    /// No replacement grant, evaluator heap or Catalog execution is created here.
+    pub(crate) fn control_source_script(
+        &mut self,
+        p: SourceScriptControlParams,
+        epoch: &str,
+        host: &str,
+    ) -> Result<Value, KernelError> {
+        if p.process_id.is_empty() || p.source.resource_owner.host_id() != Some(host) {
+            return Err(denied("Original script source identity is incomplete"));
+        }
+        let authorities: Vec<SourceAuthorityResult> = serde_json::from_value(self.inspect_source_scope(SourceAuthorityScopeParams {
+            principal_id: p.principal_id.clone(), coordinator_host_id: p.coordinator_host_id.clone(),
+            thread_id: p.thread_id.clone(), run_id: p.run_id.clone(),
+        })?)?;
+        let authorities: Vec<_> = authorities.into_iter().filter(|a| a.purpose == "script_environment"
+            && a.operation_id.as_deref() == Some(p.process_id.as_str()) && a.source == p.source).collect();
+        let creation_grant: Option<String> = self.conn.query_row(
+            "SELECT grant_id FROM process_records WHERE process_id=?1", [&p.process_id], |row| row.get(0),
+        ).optional()?;
+        let creation = creation_grant.as_ref().and_then(|grant| authorities.iter().find(|a| &a.grant_id == grant));
+        if creation_grant.is_some() && creation.is_none() {
+            return Err(denied("Script process belongs to another original source"));
+        }
+        // Fence even an admitted spawn whose process acceptance has not arrived yet.
+        // This only revokes the original environment's grants, never its whole Run.
+        if p.stop {
+            for authority in &authorities {
+                self.release_source_authority(&SourceAuthorityAddress {
+                    principal_id: p.principal_id.clone(), coordinator_host_id: p.coordinator_host_id.clone(),
+                    authority_id: authority.authority_id.clone(), resource_epoch: authority.resource_epoch.clone(),
+                }, "revoke", host, epoch)?;
+            }
+        }
+        let Some(creation) = creation else {
+            return Ok(json!({"processId":p.process_id,"source":p.source,"runId":p.run_id,"threadId":p.thread_id,
+                "accepted":false,"executorStopped":false,"process":null}));
+        };
+        let receipt = self.observe_source_operation(&SourceAuthorityAddress {
+            principal_id:p.principal_id, coordinator_host_id:p.coordinator_host_id,
+            authority_id:creation.authority_id.clone(), resource_epoch:creation.resource_epoch.clone(),
+        }, &p.process_id, epoch, p.stop)?;
+        Ok(json!({"processId":p.process_id,"source":p.source,"runId":p.run_id,"threadId":p.thread_id,
+            "accepted":receipt["accepted"],"executorStopped":receipt["executorStopped"],"process":receipt["process"]}))
+    }
     pub(crate) fn observe_source_operation(
         &mut self,
         address: &SourceAuthorityAddress,

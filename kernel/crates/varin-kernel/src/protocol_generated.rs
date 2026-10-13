@@ -5,10 +5,11 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 29;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 30;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
+    "source.script.control",
     "source.authority.release_scope",
     "source.resource.cancel",
     "source.authority.release",
@@ -431,7 +432,7 @@ pub(crate) struct RunParams {
 pub(crate) struct ManagedProcessTerminalParams {
     pub(crate) operation_id: String,
     pub(crate) execution_owner: varin_runtime::ExecutorOwner,
-    pub(crate) tool_binding: Value,
+    pub(crate) tool_binding: Option<Value>,
     pub(crate) callbacks_stopped: bool,
 }
 
@@ -2587,6 +2588,8 @@ pub(crate) type SourceResourceCallParams = crate::source_resources::SourceResour
 
 pub(crate) type SourceProcessAccessParams = crate::source_resources::SourceProcessAccessParams;
 
+pub(crate) type SourceScriptControlParams = crate::source_resources::SourceScriptControlParams;
+
 pub(crate) type SourceResourceControlParams = crate::source_resources::SourceResourceControlParams;
 
 pub(crate) type SourceServiceCallParams = crate::source_resources::SourceServiceCallParams;
@@ -4474,6 +4477,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         }
         "source.process.access" => {
             serde_json::from_value::<SourceProcessAccessParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "source.script.control" => {
+            serde_json::from_value::<SourceScriptControlParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

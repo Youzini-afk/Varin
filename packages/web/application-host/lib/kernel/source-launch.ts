@@ -115,7 +115,7 @@ export async function admitRunSourceAuthority(
   kernel: KernelClient,
   runtime: AgentRuntimeClient,
   selection: SourceLaunch,
-  options: { signal?: AbortSignal; resolveLiveSource?: LiveSourceResolver; allowMaterialization?: boolean; purpose?: 'source' | 'integration' | 'result' | 'process_view'; operationId?: string; retention?: 'run' | 'caller' } = {},
+  options: { signal?: AbortSignal; resolveLiveSource?: LiveSourceResolver; allowMaterialization?: boolean; purpose?: 'source' | 'integration' | 'result' | 'process_view' | 'script_environment'; operationId?: string; retention?: 'run' | 'caller' } = {},
 ) {
   const signal = options.signal;
   signal?.throwIfAborted();
@@ -150,6 +150,11 @@ export async function admitRunSourceAuthority(
     const operation = await runtime.operation(options.operationId, signal);
     if (operation.run_id !== run.id || operation.phase !== 'running' || operation.executor !== 'integrate_child'
       || operation.execution_owner?.kind !== 'external' || operation.cancel_requested) throw new Error('Integration target authority requires its original active Host tool Operation');
+  }
+  if (options.purpose === 'script_environment') {
+    if (!options.operationId || options.retention !== 'caller') throw new Error('Script source requires its original environment operation');
+    const operation = await runtime.operation(options.operationId, signal);
+    if (operation.managed_process?.purpose.kind !== 'script_environment') throw new Error('Source is not the original script environment');
   }
   if (options.retention === 'caller') {
     if (!options.operationId) throw new Error('Independent source lifetime requires its actual Operation');

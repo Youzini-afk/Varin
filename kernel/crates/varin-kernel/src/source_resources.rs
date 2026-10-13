@@ -112,6 +112,17 @@ pub(crate) struct SourceProcessAccessParams {
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceScriptControlParams {
+    pub principal_id: String,
+    pub coordinator_host_id: String,
+    pub thread_id: String,
+    pub run_id: String,
+    pub process_id: String,
+    pub source: SourceSelection,
+    pub stop: bool,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SourceAuthorityReleaseParams {
     pub principal_id: String,
     pub coordinator_host_id: String,
@@ -571,14 +582,15 @@ pub(crate) fn prepare_request(
 ) -> Result<SourceDispatch, KernelError> {
     crate::protocol::validate_method_params(method, &params)?;
     let value = match method {
+        "source.script.control" => storage.control_source_script(serde_json::from_value(params)?, epoch, host)?,
         "source.process.access" => {
             let p: SourceProcessAccessParams = serde_json::from_value(params)?;
             let address = SourceAuthorityAddress { principal_id: p.principal_id,
                 coordinator_host_id: p.coordinator_host_id, authority_id: p.authority_id,
                 resource_epoch: p.resource_epoch };
             let record = storage.source_authority(&address, true, epoch)?;
-            if !matches!(record.purpose.as_str(), "source" | "process_view") || record.result.phase != "ready"
-                || record.purpose == "process_view" && record.operation_id.as_deref() != Some(p.process_id.as_str()) {
+            if !matches!(record.purpose.as_str(), "source" | "process_view" | "script_environment") || record.result.phase != "ready"
+                || matches!(record.purpose.as_str(), "process_view" | "script_environment") && record.operation_id.as_deref() != Some(p.process_id.as_str()) {
                 return Err(denied("Original process source is unavailable"));
             }
             let mut binding = record.result.tool_binding.ok_or_else(|| denied("Original process Run binding is unavailable"))?;
@@ -727,7 +739,7 @@ pub(crate) fn prepare_request(
         "source.resource.authorize" | "source.resource.execute" => {
             let input: SourceResourceCallParams = serde_json::from_value(params)?;
             let record = storage.source_authority(&address(&input), true, epoch)?;
-            if record.result.phase != "ready" || matches!(record.purpose.as_str(), "result" | "process_view") {
+            if record.result.phase != "ready" || matches!(record.purpose.as_str(), "result" | "process_view" | "script_environment") {
                 return Err(denied("Source does not admit model tools"));
             }
             let authorize = method == "source.resource.authorize";
@@ -776,6 +788,9 @@ pub(crate) fn prepare_request(
                 };
                 let record = storage.source_authority(&address, true, epoch)?;
                 if record.purpose == "process_view" { return Err(denied("Process view only admits its original process projection")); }
+                if record.purpose == "script_environment" && !matches!(&action, SourceResourceAction::ProcessObservation { process_id, .. } if record.operation_id.as_deref() == Some(process_id.as_str())) {
+                    return Err(denied("Script authority only observes its original evaluator process"));
+                }
                 if record.purpose == "result"
                     && !matches!(action, SourceResourceAction::ChildStorageReceipt { .. })
                 {
