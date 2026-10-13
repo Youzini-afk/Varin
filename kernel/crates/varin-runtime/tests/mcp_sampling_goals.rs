@@ -114,7 +114,7 @@ fn fixture(budget: u64) -> Fixture {
                     history: vec![],
                 },
                 serialized: json!({}),
-            },
+            }.into(),
         },
     );
     commit(

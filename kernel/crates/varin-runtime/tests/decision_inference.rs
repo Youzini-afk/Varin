@@ -96,7 +96,7 @@ impl Fixture {
                         history: vec![],
                     },
                     serialized: json!({}),
-                },
+                }.into(),
             },
         );
         record(

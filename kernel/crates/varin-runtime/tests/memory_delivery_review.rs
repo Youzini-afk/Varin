@@ -440,7 +440,7 @@ fn memory_request_selection_is_not_delivery_and_frozen_request_evidence_survives
         &receipt.run_id,
         epoch,
         &ExecutionRecord::RequestPrepared {
-            snapshot: selected.clone(),
+            snapshot: selected.clone().into(),
         },
     )
     .unwrap();
@@ -484,7 +484,7 @@ fn memory_request_selection_is_not_delivery_and_frozen_request_evidence_survives
     db.commit_execution(
         &receipt.run_id,
         epoch,
-        &ExecutionRecord::RequestPrepared { snapshot: sent },
+        &ExecutionRecord::RequestPrepared { snapshot: sent.into() },
     )
     .unwrap();
     db.commit_execution(
@@ -512,7 +512,7 @@ fn memory_request_selection_is_not_delivery_and_frozen_request_evidence_survives
         &receipt.run_id,
         epoch,
         &ExecutionRecord::RequestPrepared {
-            snapshot: good.clone(),
+            snapshot: good.clone().into(),
         },
     )
     .unwrap();
@@ -687,7 +687,7 @@ fn external_tool_json_cannot_forge_memory_receipts_or_suppress_authoritative_fac
     db.commit_execution(
         &receipt.run_id,
         epoch,
-        &ExecutionRecord::RequestPrepared { snapshot: request },
+        &ExecutionRecord::RequestPrepared { snapshot: request.into() },
     )
     .unwrap();
     assert_eq!(

@@ -109,7 +109,7 @@ impl Fixture {
                     history: vec![],
                 },
                 serialized: json!({}),
-            },
+            }.into(),
         });
     }
     fn finish(&mut self, id: &str, n: u64) -> ExecutionRecord {

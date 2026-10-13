@@ -169,7 +169,7 @@ impl Harness {
                         history: vec![],
                     },
                     serialized: json!({}),
-                },
+                }.into(),
             },
         );
         self.record(

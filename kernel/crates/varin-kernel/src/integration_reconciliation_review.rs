@@ -234,7 +234,7 @@ fn replay_scenario(tail_phase: Option<&str>) {
                     history: vec![],
                 },
                 serialized: json!({}),
-            },
+            }.into(),
         },
         ExecutionRecord::ModelDispatched {
             request_id: "integration-request".into(),

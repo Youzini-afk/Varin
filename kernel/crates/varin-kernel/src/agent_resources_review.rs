@@ -290,7 +290,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
         let epoch = catalog.epoch();
         if !policy_call {
             for record in [
-                ExecutionRecord::RequestPrepared { snapshot },
+                ExecutionRecord::RequestPrepared { snapshot: snapshot.into() },
                 ExecutionRecord::ModelDispatched {
                     request_id: "model".into(),
                 },

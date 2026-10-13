@@ -117,7 +117,7 @@ impl ModelProvider for Provider {
 }
 struct Cut {
     db: Arc<Mutex<Catalog>>,
-    cut: Mutex<Option<RequestSnapshot>>,
+    cut: Mutex<Option<Arc<RequestSnapshot>>>,
     cancel: CancellationToken,
 }
 impl Persistence for Cut {

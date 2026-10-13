@@ -92,7 +92,7 @@ fn model_call(
                     history: vec![],
                 },
                 serialized: json!({}),
-            },
+            }.into(),
         },
     );
     record(

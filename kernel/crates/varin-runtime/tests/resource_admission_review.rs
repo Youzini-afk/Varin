@@ -84,7 +84,7 @@ fn setup(kind: CompletionKind) -> (std::path::PathBuf, Catalog, String) {
     db.commit_execution(
         &r.run_id,
         epoch,
-        &ExecutionRecord::RequestPrepared { snapshot },
+        &ExecutionRecord::RequestPrepared { snapshot: snapshot.into() },
     )
     .unwrap();
     db.commit_execution(

@@ -474,7 +474,7 @@ fn model_output_and_history_are_one_commit_and_reject_stale_heads() {
         &r.run_id,
         epoch,
         &ExecutionRecord::RequestPrepared {
-            snapshot: snapshot.clone(),
+            snapshot: snapshot.clone().into(),
         },
     )
     .unwrap();
@@ -537,7 +537,7 @@ fn completed_model_history_is_durable_without_a_second_append() {
         &r.run_id,
         epoch,
         &ExecutionRecord::RequestPrepared {
-            snapshot: request_snapshot(&r),
+            snapshot: request_snapshot(&r).into(),
         },
     )
     .unwrap();
@@ -642,7 +642,7 @@ fn tool_batch_receipt_cannot_cross_between_two_active_runs() {
     db.commit_execution(
         &original.run_id,
         epoch,
-        &ExecutionRecord::RequestPrepared { snapshot },
+        &ExecutionRecord::RequestPrepared { snapshot: snapshot.into() },
     )
     .unwrap();
     db.commit_execution(
@@ -725,7 +725,7 @@ fn unfinished_model_tool_exchange_cannot_complete_a_run() {
     db.commit_execution(
         &r.run_id,
         epoch,
-        &ExecutionRecord::RequestPrepared { snapshot },
+        &ExecutionRecord::RequestPrepared { snapshot: snapshot.into() },
     )
     .unwrap();
     db.commit_execution(
@@ -915,7 +915,7 @@ fn early_external_terminal_and_model_job_acceptance_converge() {
     db.commit_execution(
         &r.run_id,
         epoch,
-        &ExecutionRecord::RequestPrepared { snapshot },
+        &ExecutionRecord::RequestPrepared { snapshot: snapshot.into() },
     )
     .unwrap();
     db.commit_execution(
@@ -1543,6 +1543,52 @@ fn content_backed_request_stays_compact_across_phases_and_reopens_exactly() {
 }
 
 #[test]
+fn prepared_snapshot_preserves_typed_media_and_opaque_provider_body_through_gc_and_reopen() {
+    use crate::execution::*;
+    use base64::Engine;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let receipt = submit(&mut db);
+    let mut snapshot = request_snapshot(&receipt);
+    let encoded = base64::engine::general_purpose::STANDARD.encode(vec![17u8; 700_000]);
+    snapshot.view.history.push(ConversationItem {
+        id: "typed-history".into(),
+        resource_activation: None,
+        provenance: Provenance::Assistant,
+        content: Content::Output {
+            output: OutputBody {
+                data: json!({"signed":[null,"原样",17]}),
+                parts: vec![
+                    OutputPart::Text { text: "before media".into() },
+                    OutputPart::Media { media: IncomingMedia { media_type: "image/png".into(), data_base64: encoded.clone() }
+                        .admit(OutputSource::Operation { operation_id: "original-output".into() }).unwrap() },
+                    OutputPart::Text { text: "after media".into() },
+                ],
+            },
+        },
+        opaque: Some(OpaqueProviderItem { connection_identity: "fixture-connection".into(), family: "test".into(), adapter_version: "1".into(),
+            value: json!({"signature":[null,42,"unaltered"]}) }),
+    });
+    // Image-shaped provider JSON is opaque material, independent of the typed
+    // media dependency retained in the same immutable RequestSnapshot.
+    snapshot.serialized = json!({"provider":"mock","unknown":[null,true,17],"image":{"media_type":"image/png","data":encoded}});
+    let expected = serde_json::to_value(&snapshot).unwrap();
+    let request_id = snapshot.view.request_id.clone();
+    db.commit_execution(&receipt.run_id, db.epoch(), &ExecutionRecord::RequestPrepared { snapshot: snapshot.into() }).unwrap();
+    let body: String = db.db.query_row("SELECT body FROM model_steps WHERE id=?1", [&request_id], |row| row.get(0)).unwrap();
+    let reference = serde_json::from_str::<Value>(&body).unwrap()["request"].clone();
+    let load = |catalog: &Catalog| serde_json::to_value(catalog.content.load_snapshot(&reference).unwrap()).unwrap();
+    assert_eq!(db.model_step(&request_id).unwrap().request["serialized"], expected["serialized"]);
+    assert_eq!(load(&db), expected);
+    db.content.save(&json!({"orphan":"collect this without dropping prepared media"})).unwrap();
+    assert!(content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap() > 0);
+    assert_eq!(load(&db), expected);
+    drop(db);
+    let reopened = f.open();
+    assert_eq!(load(&reopened), expected);
+}
+
+#[test]
 fn missing_request_content_does_not_mark_unsent_public_dispatch_as_dispatched() {
     let f = Fixture::new();
     let mut db = f.open();
@@ -1909,7 +1955,7 @@ fn independent_prepare(
     db.commit_execution(
         &receipt.run_id,
         epoch,
-        &ExecutionRecord::RequestPrepared { snapshot },
+        &ExecutionRecord::RequestPrepared { snapshot: snapshot.into() },
     )
     .unwrap();
     db.commit_execution(
@@ -3488,7 +3534,7 @@ fn admitted_native_query(
     db.commit_execution(
         &r.run_id,
         epoch,
-        &ExecutionRecord::RequestPrepared { snapshot },
+        &ExecutionRecord::RequestPrepared { snapshot: snapshot.into() },
     )
     .unwrap();
     db.commit_execution(

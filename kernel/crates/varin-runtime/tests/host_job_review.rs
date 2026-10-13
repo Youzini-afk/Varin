@@ -97,7 +97,7 @@ impl Fixture {
                     history: vec![],
                 },
                 serialized: json!({}),
-            },
+            }.into(),
         });
         self.record(ExecutionRecord::ModelDispatched {
             request_id: request.into(),

@@ -19,7 +19,7 @@ writing Pi session files or the Host harness's existing execution records.
   inspection/list serialization runs on workers, and content collection retains every launch reference.
   Policy preparation binds the actual admitted baseline supplied by its assembly owner; the runtime
   does not hard-code a kernel policy wrapper's name.
-- Catalog 67 / wire 27 retain reconstructable Host dependency graphs in the original tool/policy
+- Catalog 67 / wire 28 retain reconstructable Host dependency graphs in the original tool/policy
   binding content. Graph validation, hashing, persistence and hydration run outside Catalog. Short
   policy metadata records exact identity and a ContentStore reference; launch, selection and delegated
   execution roots participate in the same GC publication protocol. Recovery preserves the saved
@@ -69,6 +69,10 @@ writing Pi session files or the Host harness's existing execution records.
   The default policy is replaceable; it does not own or mutate the catalog itself.
 - `catalog_execution` commits model output, immutable conversation items and unresolved call identities
   together. A frozen request cannot publish against a changed history head.
+  Execution and `RequestPrepared` share one immutable request snapshot. Media persistence projects its
+  view while borrowing the serialized provider body, avoiding a second copy of that body.
+  Stored JSON, media references and provider originals keep the same shape. This removes duplicate
+  copies within a ModelStep; context compilation and provider serialization still visit the full input.
 - User answers prepare content outside Catalog and commit its identity with the original question,
   branch, wait and owner guards. Equal retries deliver once; conflicting answers and late cancelled
   work fail. Waiting/cancellation lookup selects the actual Run's questions instead of decoding all
