@@ -445,6 +445,7 @@ export interface HostJobUserParams {
 export type HostJobOrigin = {kind:'tool';origin:ToolOrigin;call_id:string;tool_name:string;schema_version:string} | {kind:'user';key:string};
 
 export interface HostJobPending {
+  mcpHolderReleased: boolean;
   executorStopped: boolean;
   binding: HostJobBinding;
   runId: string;
@@ -469,6 +470,7 @@ export interface HostJobSource {
 }
 
 export interface HostJobLink {
+  mcpHolderReleased: boolean;
   binding: HostJobBinding;
   acceptanceRef: unknown | null;
   mcpTask?: McpTaskLink;
@@ -1383,7 +1385,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 32; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 33; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 

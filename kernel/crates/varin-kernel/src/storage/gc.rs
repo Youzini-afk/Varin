@@ -229,6 +229,17 @@ impl Storage {
         for row in self.conn.prepare("SELECT json_extract(result_json,'$.objectHash') FROM operations WHERE kind='source.read' AND state='committed' AND json_extract(result_json,'$.released') IS NOT 1")?.query_map([], |row| row.get::<_,String>(0))? {
             blobs.insert(row?);
         }
+        // Original MCP holders own creation bodies until their exact release,
+        // including while their Source is revoked or a Host has reopened.
+        for row in self.conn.prepare(
+            "SELECT json_extract(holder.value,'$.creationReceipt.outcomeRef.objectHash')
+             FROM domain_records AS source, json_each(source.payload_json,'$.result.mcpHolders') AS holder
+             WHERE source.record_type='source.authority'
+               AND json_extract(holder.value,'$.released')=0
+               AND json_extract(holder.value,'$.creationReceipt.outcomeRef.objectHash') IS NOT NULL"
+        )?.query_map([], |row| row.get::<_, String>(0))? {
+            blobs.insert(row?);
+        }
         for row in self
             .conn
             .prepare("SELECT object_hash FROM domain_record_refs")?

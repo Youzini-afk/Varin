@@ -1,10 +1,11 @@
-/** Reconcile the original Catalog HostJob with its accepted MCP Task. This owns live leases only;
- * every durable identity, cancellation, acceptance, observation and output stays in Catalog. */
-import { McpAuthorityError, McpTaskRequestError, type McpTaskLease, type McpAuthorityTool, type McpTaskResponse } from '@varin/pi-host/mcp-authority';
+/** Reconcile the original Catalog HostJob with its original MCP Task creation and holder.
+ * Catalog owns task state; source cleanup acknowledges the exact durable holder before local detach. */
+import { McpAuthorityError, McpTaskRequestError } from '@varin/pi-host/mcp-errors';
+import type { McpTaskLease, McpAuthorityTool, McpTaskResponse } from '@varin/pi-host/mcp-authority';
 import type { KernelClient } from './kernel-client.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { HostToolCall, ToolExecutionReceipt } from './tool-bridge.js';
-import type { ExecutorOwner, HostJobBinding, HostJobPending, HostJobTaskUpdateParams, KernelMethod, KernelMethodParams, McpTaskAction, McpTaskProblem, McpTaskStage, Operation, OutputBody, ResolvedMedia } from './protocol.generated.js';
+import type { ExecutorOwner, HostJobBinding, HostJobPending, HostJobTaskUpdateParams, KernelMethod, KernelMethodParams, McpTaskAction, McpTaskProblem, McpTaskStage, Operation, OutputBody, ResolvedMedia, SourceMcpTaskCreationError, SourceMcpTaskCreationOutcome } from './protocol.generated.js';
 import { projectMcpOutput } from './mcp-output.js';
 const DOMAIN = 'mcp.task';
 const terminal = (status: string) => ['completed','failed','cancelled'].includes(status);
@@ -14,6 +15,7 @@ interface Entry {
   op: HostJobPending;
   acceptance?:McpTaskResponse;
   acceptanceFlight?:Promise<void>;
+  creationFailure?:SourceMcpTaskCreationError;
   lease?: McpTaskLease;
   unobserve?:()=>void;
   unbindInteraction?:(reason?:'rpc_closed')=>void;
@@ -26,6 +28,7 @@ interface Entry {
   resultError?:McpTaskRequestError;
   resultAttempted:boolean;
   observationSignal:number;
+  sourceRevision:number;
   interactionBlocked?: 'status' | 'result';
   serial:Promise<unknown>;
 }
@@ -34,11 +37,14 @@ export function createMcpTaskRuntime(options:{
   kernel:KernelClient;
   runtime:Pick<AgentRuntimeClient,'onReady'|'onEvent'|'reconcileObservations'>;
   recover(pending:HostJobPending,signal:AbortSignal):Promise<McpTaskLease>;
+  recoverCreation?(pending:HostJobPending,signal:AbortSignal):Promise<SourceMcpTaskCreationOutcome|null>;
+  cleanup?(pending:HostJobPending,signal:AbortSignal):Promise<void>;
   onError?:(error:Error)=>void;
 }) {
   const entries = new Map<string,Entry>(), admitting = new Set<string>();
   const lifetime = new AbortController();
   const removers:Array<()=>void> = [];
+  let sourceRevision=0, reconciledSourceRevision=0;
   let started=false, disposed=false, work:Promise<void>|undefined, dirty=false, timer:ReturnType<typeof setTimeout>|undefined;
   const report = (error:unknown) => { if (!disposed) options.onError?.(error instanceof Error ? error : new Error(String(error))); };
   const request = <T,M extends Extract<KernelMethod,`runtime.${string}`>>(method:M,params:KernelMethodParams[M],signal?:AbortSignal):Promise<T> => options.kernel.agentRuntimeRequest<T,M>(method,params,signal);
@@ -65,6 +71,7 @@ export function createMcpTaskRuntime(options:{
     entry.op=next;return next;
   });
   const recordProblem = async(entry:Entry,error:unknown,stage:McpTaskStage,observationSignal=entry.observationSignal) => {
+    if(disposed||entries.get(entry.op.binding.operationId)!==entry)return;
     const task=entry.op.mcpTask!.task;
     const problem:McpTaskProblem = error instanceof McpTaskRequestError
       ? {kind:error.kind,stage,...(error.rpcCode === undefined ? {} : {rpcCode:error.rpcCode})}
@@ -80,7 +87,7 @@ export function createMcpTaskRuntime(options:{
     });
     if(error instanceof McpTaskRequestError && error.rpcCode === -32042 && (stage === 'status' || stage === 'result')
       && observationSignal === entry.observationSignal && (stage === 'status' || !terminal(entry.op.mcpTask!.task.status)))entry.interactionBlocked=stage;
-    if(unavailable(entry) || entry.interactionBlocked === 'status')entry.nextPoll=Infinity;
+    if(observationSignal === entry.observationSignal && (unavailable(entry) || entry.interactionBlocked === 'status'))entry.nextPoll=Infinity;
   };
   const observe = async(entry:Entry,response:McpTaskResponse,requested?:HostJobPending['mcpTask']) => {
     const original=entry.op.mcpTask!.task,next=response.task;
@@ -148,7 +155,7 @@ export function createMcpTaskRuntime(options:{
           }else await recordProblem(entry,error,'result',observationSignal);
         }
       }
-    })().catch(report).finally(()=>{delete entry.resultFlight;if(!disposed){entry.nextPoll=unavailable(entry)||entry.interactionBlocked==='status'?Infinity:Date.now()+(entry.op.mcpTask!.task.pollInterval ?? 1000);wake();}});
+    })().catch(report).finally(()=>{delete entry.resultFlight;if(!disposed){entry.nextPoll=observationSignal!==entry.observationSignal?0:unavailable(entry)||entry.interactionBlocked==='status'?Infinity:Date.now()+(entry.op.mcpTask!.task.pollInterval ?? 1000);wake();}});
   };
   const retain = (entry:Entry,lease:McpTaskLease) => {
     entry.lease=lease;
@@ -160,7 +167,7 @@ export function createMcpTaskRuntime(options:{
     });
   };
   const forget = (id:string,entry:Entry) => {
-    const natural = !disposed && !entry.op.cancelRequested && entry.op.mcpTask?.resultReady && stopped(entry.op.mcpTask.task.status);
+    const natural = !disposed && !entry.op.cancelRequested && entry.op.mcpTask?.resultReady && entry.op.executorStopped;
     entry.unobserve?.();entry.unbindInteraction?.(natural ? 'rpc_closed' : undefined);entry.lease?.release();entries.delete(id);
   };
   const recordAcceptance=(entry:Entry):Promise<void>=>{
@@ -177,7 +184,10 @@ export function createMcpTaskRuntime(options:{
   const ensureLease=(entry:Entry):Promise<void>=>{
     if(entry.lease)return Promise.resolve();
     if(entry.recoveryFlight)return entry.recoveryFlight;
-    entry.recoveryFlight=options.recover(entry.op,lifetime.signal).then(lease=>retain(entry,lease)).finally(()=>{delete entry.recoveryFlight;});
+    entry.recoveryFlight=options.recover(entry.op,lifetime.signal).then(lease=>{
+      if(disposed||entries.get(entry.op.binding.operationId)!==entry){lease.release();throw new McpTaskRequestError('mcp-task-owner-closed',false,'owner');}
+      retain(entry,lease);
+    }).finally(()=>{delete entry.recoveryFlight;});
     return entry.recoveryFlight;
   };
   const cancelEntry=(entry:Entry):Promise<void>=>{
@@ -189,21 +199,60 @@ export function createMcpTaskRuntime(options:{
     })().finally(()=>{delete entry.cancelFlight;wake();});
     return entry.cancelFlight;
   };
+  const cleanupEntry=async(entry:Entry)=>{
+    if(disposed)return;
+    if(!entry.op.mcpHolderReleased){
+      // The callback releases the exact persisted source holder even with no SDK lease.
+      // A lost release or Catalog ACK is retried against the same idempotent identity.
+      await options.cleanup?.(entry.op,lifetime.signal);
+      if(disposed)return;
+      entry.op=await request<HostJobPending,'runtime.host_job.task.holder_released'>('runtime.host_job.task.holder_released',{binding:entry.op.binding});
+    }
+    if(entry.op.mcpHolderReleased)forget(entry.op.binding.operationId,entry);
+  };
+  const syncCreation=async(entry:Entry)=>{
+    if(entry.acceptance){await recordAcceptance(entry);return;}
+    const outcome=entry.creationFailure?{kind:'failed' as const,error:entry.creationFailure}:await options.recoverCreation?.(entry.op,lifetime.signal);
+    if(disposed)return;
+    if(outcome?.kind==='accepted'){
+      entry.acceptance=outcome.response;
+      await recordAcceptance(entry);
+      return;
+    }
+    // Only the original typed pre-dispatch failure proves no effect. Missing receipts,
+    // generic terminal phases and expired sessions all retain the original Unknown duty.
+    if(outcome?.kind==='failed'&&!outcome.error.dispatched){
+      entry.creationFailure=outcome.error;
+      if(entry.op.phase!=='terminal'||!entry.op.executorStopped)
+        entry.op=await request<HostJobPending,'runtime.host_job.terminal'>('runtime.host_job.terminal',{
+          binding:entry.op.binding,outcome:entry.op.cancelRequested?'cancelled':'failed',effect:'none',executorStopped:true,
+          content:{data:{error:outcome.error.code,...(outcome.error.protocolError?{protocolError:outcome.error.protocolError}:{})},parts:[]},
+        });
+      await cleanupEntry(entry);
+    }
+    entry.nextPoll=Infinity;
+  };
+  const retryDeadline=(entry:Entry)=>Date.now()+Math.max(1000,entry.op.mcpTask?.task.pollInterval ?? 1000);
   const syncEntry=(entry:Entry):Promise<void>=>{
     if(entry.pollFlight)return entry.pollFlight;
-    if(Date.now()<entry.nextPoll)return Promise.resolve();
-    entry.nextPoll=Date.now()+(entry.op.mcpTask!.task.pollInterval ?? 1000);
+    if(disposed||Date.now()<entry.nextPoll)return Promise.resolve();
+    const observationSignal=entry.observationSignal;
+    entry.nextPoll=entry.op.mcpTask?Date.now()+(entry.op.mcpTask.task.pollInterval ?? 1000):Infinity;
     entry.pollFlight=(async()=>{
-      if(stopped(entry.op.mcpTask!.task.status)&&!entry.op.executorStopped)
+      if(!entry.op.accepted||!entry.op.mcpTask){
+        await syncCreation(entry);
+        if(!entry.op.accepted||!entry.op.mcpTask)return;
+      }
+      if(disposed)return;
+      if(stopped(entry.op.mcpTask.task.status)&&!entry.op.executorStopped)
         entry.op=await request<HostJobPending,'runtime.host_job.task.finish'>('runtime.host_job.task.finish',{binding:entry.op.binding});
       if(entry.op.mcpTask!.resultReady){
-        entry.op=await request<HostJobPending,'runtime.host_job.task.finish'>('runtime.host_job.task.finish',{binding:entry.op.binding});
-        // A cancelled task can retain a response without proving its writer stopped.
-        if(entry.op.executorStopped)forget(entry.op.binding.operationId,entry);else entry.nextPoll=Infinity;
+        // Result readiness and physical stop are separate facts. In particular, cancellation
+        // and a retained cancelled result do not release the source holder.
+        if(entry.op.executorStopped)await cleanupEntry(entry);else entry.nextPoll=Infinity;
         return;
       }
-      try {await ensureLease(entry);}catch(error){if(!disposed)await recordProblem(entry,error,'rebind');return;}
-      const observationSignal = entry.observationSignal;
+      try {await ensureLease(entry);}catch(error){if(!disposed)await recordProblem(entry,error,'rebind',observationSignal);return;}
       try {
         await getStatus(entry);
         await publishResult(entry);
@@ -213,7 +262,20 @@ export function createMcpTaskRuntime(options:{
         }
         if(status==='cancelled'&&entry.resultAttempted&&!entry.resultFlight)entry.nextPoll=Infinity;
       }catch(error){if(!disposed)await recordProblem(entry,error,'status',observationSignal);}
-    })().catch(report).finally(()=>{delete entry.pollFlight;schedule();});
+    })().catch(error=>{
+      // Retry only publication of the original acceptance or a proven cleanup duty. These
+      // idempotent continuations need no new lease, dispatch or unrelated source traffic.
+      const retryable=entry.acceptance || entry.op.mcpTask?.resultReady&&entry.op.executorStopped
+        || entry.creationFailure&&!entry.creationFailure.dispatched
+        || error instanceof McpTaskRequestError&&error.code==='mcp_task_creation_receipt_pending';
+      entry.nextPoll=retryable?retryDeadline(entry):Infinity;report(error);
+    }).finally(()=>{
+      delete entry.pollFlight;
+      // A source reconnect or Task notification during an old request must survive its
+      // failure/finalizer, including an old result or cleanup that was already in flight.
+      if(!disposed&&observationSignal!==entry.observationSignal)entry.nextPoll=0;
+      schedule();
+    });
     return entry.pollFlight;
   };
   const schedule=()=>{
@@ -222,35 +284,43 @@ export function createMcpTaskRuntime(options:{
     const next=Math.min(...[...entries.values()].filter(entry=>!entry.pollFlight).map(entry=>entry.nextPoll));
     if(Number.isFinite(next)){timer=setTimeout(wake,Math.max(0,next-Date.now()));timer.unref?.();}
   };
+  const resetSource=(entry:Entry,revision:number)=>{
+    if(entry.sourceRevision>=revision)return;
+    entry.sourceRevision=revision;entry.observationSignal++;entry.nextPoll=0;entry.resultAttempted=false;
+    delete entry.interactionBlocked;
+  };
   const sync=async()=>{
     await Promise.all([...entries.values()].filter(entry=>entry.acceptance&&entry.nextPoll<=Date.now()).map(async entry=>{
-      try{await recordAcceptance(entry);}catch(error){entry.nextPoll=Date.now()+1000;report(error);}
+      try{await recordAcceptance(entry);}catch(error){entry.nextPoll=retryDeadline(entry);report(error);}
     }));
+    const revision=sourceRevision;
     const pending=await request<HostJobPending[],'runtime.host_job.pending'>('runtime.host_job.pending',{});
     const remaining=new Set<string>();
     for(const op of pending){
-      if(op.binding.domain !== DOMAIN || op.binding.subject.kind !== 'mcp' || !op.accepted || !op.mcpTask)continue;
+      if(op.binding.domain !== DOMAIN || op.binding.subject.kind !== 'mcp' || op.mcpHolderReleased)continue;
       const id=op.binding.operationId;remaining.add(id);if(admitting.has(id))continue;
       let entry=entries.get(id);
       if(!entry){
-        const problem=op.mcpTask.problem;
-        const blocked=problem?.rpcCode === -32042 && (problem.stage === 'status' || problem.stage === 'result' && !terminal(op.mcpTask.task.status)) ? problem.stage : undefined;
-        entry={op,nextPoll:blocked==='status'?Infinity:0,resultAttempted:false,observationSignal:0,serial:Promise.resolve(),...(blocked ? {interactionBlocked:blocked as 'status'|'result'} : {})};entries.set(id,entry);
+        const problem=op.mcpTask?.problem;
+        const blocked=problem?.rpcCode === -32042 && (problem.stage === 'status' || problem.stage === 'result' && !terminal(op.mcpTask!.task.status)) ? problem.stage : undefined;
+        entry={op,nextPoll:blocked==='status'?Infinity:0,resultAttempted:false,observationSignal:0,sourceRevision:reconciledSourceRevision,serial:Promise.resolve(),...(blocked ? {interactionBlocked:blocked as 'status'|'result'} : {})};entries.set(id,entry);
       }
-      else if(!entry.op.mcpTask || op.mcpTask.revision>=entry.op.mcpTask.revision){
-        if(entry.acceptance){
+      else if(!entry.op.mcpTask || op.mcpTask&&op.mcpTask.revision>=entry.op.mcpTask.revision){
+        if(entry.acceptance&&op.mcpTask){
           if(entry.acceptance.task.taskId!==op.mcpTask.task.taskId || entry.acceptance.task.createdAt!==op.mcpTask.task.createdAt)
             throw new McpTaskRequestError('mcp-task-acceptance-identity-changed',true,'protocol');
           delete entry.acceptance;
           entry.nextPoll=0;
         }
-        if(op.cancelRequested && !entry.op.cancelRequested)entry.nextPoll=0;
+        if(op.cancelRequested && !entry.op.cancelRequested || op.executorStopped && !entry.op.executorStopped)entry.nextPoll=0;
         entry.op={...op,cancelRequested:op.cancelRequested||entry.op.cancelRequested,executorStopped:op.executorStopped||entry.op.executorStopped};
       }
-      if(entry.op.cancelRequested && (!entry.op.mcpTask?.problem || entry.nextPoll<=Date.now()))void cancelEntry(entry).catch(report);
+      resetSource(entry,revision);
+      if(entry.op.mcpTask&&entry.op.cancelRequested && (!entry.op.mcpTask.problem || entry.nextPoll<=Date.now()))void cancelEntry(entry).catch(report);
       void syncEntry(entry).catch(report);
     }
     for(const [id,entry]of entries)if(!remaining.has(id)&&!admitting.has(id)&&!entry.acceptance)forget(id,entry);
+    reconciledSourceRevision=revision;
     schedule();
   };
   const reconcile=():Promise<void>=>{
@@ -260,9 +330,10 @@ export function createMcpTaskRuntime(options:{
     return work;
   };
   const wake=()=>{if(started&&!disposed)void reconcile().catch(report);};
+  const sourceReached=()=>{if(disposed)return;sourceRevision++;for(const entry of entries.values())resetSource(entry,sourceRevision);wake();};
   return {
-    start(){if(started||disposed)return;started=true;removers.push(options.runtime.onReady(()=>{for(const entry of entries.values()){entry.nextPoll=0;entry.resultAttempted=false;}wake();}),options.runtime.onEvent(wake));wake();},
-    reconcile,
+    start(){if(started||disposed)return;started=true;removers.push(options.runtime.onReady(sourceReached),options.runtime.onEvent(wake));wake();},
+    reconcile,sourceReached,
     async submit(input:{call:HostToolCall;owner:ExecutorOwner;lease:McpTaskLease;tool:McpAuthorityTool;args:Record<string,unknown>;ttl?:number;signal:AbortSignal;beforeDispatch?:()=>void|Promise<void>}):Promise<ToolExecutionReceipt>{
       if(disposed)throw new McpTaskRequestError('mcp-task-owner-closed',false,'owner');
       const binding:HostJobBinding={operationId:input.call.operationId,executionOwner:input.owner,domain:DOMAIN,domainVersion:1,
@@ -272,13 +343,27 @@ export function createMcpTaskRuntime(options:{
         const before=await request<HostJobPending,'runtime.host_job.begin'>('runtime.host_job.begin',{binding});
         if(before.accepted)return accepted(binding.operationId);
         if(before.cancelRequested || before.phase === 'terminal')throw new McpTaskRequestError('mcp-task-original-dispatch-unavailable',false,'owner');
-        const response=await input.lease.start(input.tool.tool,input.args,{schemaVersion:input.tool.schemaVersion,signal:AbortSignal.any([input.signal,lifetime.signal]),
-          ...(input.ttl === undefined?{}:{ttl:input.ttl}),...(input.beforeDispatch?{beforeDispatch:input.beforeDispatch}:{}),
-          interaction:{operationId:input.call.operationId,executionOwner:input.owner}});
+        const entry:Entry={op:before,nextPoll:0,resultAttempted:false,observationSignal:0,sourceRevision,serial:Promise.resolve()};
+        entries.set(binding.operationId,entry);
+        let response:McpTaskResponse;
+        try {
+          response=await input.lease.start(input.tool.tool,input.args,{schemaVersion:input.tool.schemaVersion,signal:AbortSignal.any([input.signal,lifetime.signal]),
+            ...(input.ttl === undefined?{}:{ttl:input.ttl}),...(input.beforeDispatch?{beforeDispatch:input.beforeDispatch}:{}),
+            interaction:{operationId:input.call.operationId,executionOwner:input.owner}});
+        }catch(error){
+          if(error instanceof McpAuthorityError&&!error.dispatched){
+            // Persist positive local pre-dispatch evidence before losing the callback. There
+            // may be no B receipt at all when its transport was never entered.
+            entry.creationFailure={code:error.code,dispatched:false,settlement:error.settlement,
+              ...(error.protocolError?{protocolError:error.protocolError}:{}),...(error instanceof McpTaskRequestError?{taskKind:error.kind,...(error.rpcCode===undefined?{}:{rpcCode:error.rpcCode})}:{})};
+            await syncEntry(entry);
+          }
+          throw error;
+        }
         // A returned remote ID is retained even if Catalog's acceptance reply is interrupted.
         // Only this identical local acceptance may be retried; tools/call is never replayed.
-        const entry:Entry={op:before,acceptance:response,nextPoll:0,resultAttempted:false,observationSignal:0,serial:Promise.resolve()};
-        retain(entry,input.lease);entries.set(binding.operationId,entry);retained=true;
+        entry.acceptance=response;
+        retain(entry,input.lease);retained=true;
         await recordAcceptance(entry);
         return {...accepted(binding.operationId),completion:{kind:'job_accepted',operation_id:binding.operationId,phase:'accepted',effect:'confirmed',lifetime:'thread',content:{data:response.result,parts:[]}}};
       } finally {admitting.delete(binding.operationId);if(!retained)input.lease.release();wake();}

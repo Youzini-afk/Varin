@@ -458,7 +458,8 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
               ...(error instanceof McpAuthorityError && error.interactionProblem ? { interactionProblem:error.interactionProblem } : {}),
             }, parts: [] },
           },
-          error instanceof McpAuthorityError && (error.settlement === 'session_expired' || error.settlement === 'rpc_response'),
+          !(target.kind === 'tool' && target.task) && error instanceof McpAuthorityError
+            && (error.settlement === 'session_expired' || error.settlement === 'rpc_response'),
         );
       }
     },

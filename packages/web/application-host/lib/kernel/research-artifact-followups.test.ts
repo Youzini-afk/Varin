@@ -56,7 +56,7 @@ it('continues original research leaves after Job pending is empty and preserves 
 it('keeps original cancellation responsive while an independent artifact metadata reply is held', async () => {
   const entered = deferred(), held = deferred(); let event = () => {}; let requested = false, cancelled = false;
   const other = { ...binding, operationId: 'other-job', subject: { ...binding.subject, subjectId: 'other-attempt' } };
-  const job: HostJobPending = { binding: other, runId: 'other-run', accepted: true, cancelRequested: true, phase: 'running', executorStopped: false, origin: { kind: 'user', key: 'other' } };
+  const job: HostJobPending = { binding: other, runId: 'other-run', accepted: true, cancelRequested: true, phase: 'running', executorStopped: false, mcpHolderReleased: true, origin: { kind: 'user', key: 'other' } };
   const caller: ExperimentCaller = { workspaceId: other.subject.workspaceId, executionWorkspaceId: 'exec', owner: { runtime: 'agent', actor: { kind: 'user', key: 'other' }, rootThreadId: 'parent', threadId: 'parent', branchId: 'branch', runId: 'other-run', operationId: other.operationId, executionOwner: other.executionOwner, source }, access: { kind: 'family', readThreadIds: ['parent'], controlThreadIds: ['parent'] } };
   const errors: unknown[] = [];
   const research = createResearchRuntime({

@@ -162,5 +162,7 @@ negotiated durable MCP Tasks remain separate work.
 Managed server provenance also freezes the original Source authority address. Task-owner acquisition
 can carry its coordinator Operation/executor identity through both composition paths. Retained
 connections keep that original source reference; an ordinary Run view release is not daemon drainage.
-The current managed Task/observer transport methods remain unavailable pending their dedicated wire
-adapters and original acceptance/recovery receipts.
+Managed Task adapters now retain that original holder through a one-shot Source creation receipt and
+A's Catalog HostJob cleanup acknowledgement. A owns status/result scheduling and cancellation; a lost
+reply recalls only the original creation outcome. Local projection release is separate from durable
+holder cleanup. Managed persistent observers and reverse interactions still require their own bridge.

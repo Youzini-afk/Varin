@@ -61,7 +61,7 @@ function fixture(options: { delayedOpen?: boolean; delayedClose?: boolean; begin
   const ready = new Set<() => void>(), changes = new Set<(event: { stream: 'durable' | 'progress' }) => void>();
   let counter = 0, begins = 0, accepts = 0, resolved = 0, failReads = false;
   const pendingFor = (op: Operation): HostJobPending => ({ binding: clone(op.host_job!.binding), accepted: op.host_job!.acceptanceRef !== null,
-    executorStopped: op.external_receipt?.executor_stopped ?? false, cancelRequested: op.cancel_requested, phase: op.phase,
+    executorStopped: op.external_receipt?.executor_stopped ?? false, mcpHolderReleased: op.host_job!.mcpHolderReleased, cancelRequested: op.cancel_requested, phase: op.phase,
     runId: op.run_id, origin: { kind: 'tool', origin: { kind: 'model_step', request_id: 'step' }, call_id: op.id, tool_name: 'environment_forward', schema_version: 'v1' } });
   const kernel = { async agentRuntimeRequest(method: string, params: Record<string, unknown>) {
     calls.push(method);
@@ -70,7 +70,7 @@ function fixture(options: { delayedOpen?: boolean; delayedClose?: boolean; begin
     switch (method) {
       case 'runtime.host_job.begin':
         begins++; if (!op) throw new Error('No admitted original operation');
-        op.host_job ??= { binding: clone(binding!), acceptanceRef: null };
+        op.host_job ??= { binding: clone(binding!), acceptanceRef: null, mcpHolderReleased: true };
         if (options.beginReplyLost && begins === 1) throw new Error('begin reply lost');
         return pendingFor(op);
       case 'runtime.host_job.accept': {

@@ -1,3 +1,4 @@
+import { McpAuthorityError, McpTaskRequestError } from './mcp-errors.js';
 /** Shared Application Host MCP authority. Pi and native runtimes lease these same connections. */
 import { createHash, randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
@@ -183,15 +184,7 @@ function drain(): Drain {
   void promise.catch(() => undefined);
   return { promise, resolve, reject };
 }
-/** A pre-dispatch rejection is safe to record as no effect; an entered transport is uncertain. */
-export class McpAuthorityError extends Error {
-  constructor(readonly code: string, readonly dispatched = false,
-    readonly settlement: 'unknown' | 'session_expired' | 'rpc_response' = 'unknown', readonly protocolError?: Record<string, unknown>, readonly interactionProblem?: string) { super(code); this.name = 'McpAuthorityError'; }
-}
-export class McpTaskRequestError extends McpAuthorityError {
-  constructor(code:string, dispatched:boolean, readonly kind:'protocol'|'transport'|'unsupported'|'owner',
-    readonly rpcCode?:number, override readonly protocolError?:Record<string,unknown>, settlement:'unknown'|'session_expired'|'rpc_response'='unknown', interactionProblem?:string) { super(code,dispatched,settlement,protocolError,interactionProblem); }
-}
+export { McpAuthorityError, McpTaskRequestError } from './mcp-errors.js';
 type ConfigPatch = { enabled?: boolean; exposure?: 'direct' | 'codemode' | 'deferred' | 'hidden' };
 interface SourceWatch { keys: Set<string>; ready: Promise<string> }
 type McpTool = McpServerConnection['tools'][number];

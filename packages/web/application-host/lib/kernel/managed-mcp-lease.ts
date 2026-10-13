@@ -5,7 +5,8 @@ import { McpAuthorityError, type McpAuthorityLease, type McpAuthorityTool, type 
   type McpAuthorityPrompt, type McpServiceRequest } from '@varin/pi-host/mcp-authority';
 import { compileToolJsonSchema } from '@varin/pi-host/tool-schema';
 import type { ManagedSourceAccess } from './managed-source-consumers.js';
-import type { McpBinding, SourceResourceOwner } from './protocol.generated.js';
+import { createManagedMcpTaskLease } from './managed-mcp-task-lease.js';
+import type { McpBinding, McpEndpoint, SourceResourceOwner } from './protocol.generated.js';
 import type { ManagedMcpAction, ManagedMcpSnapshot, ManagedMcpRevocations } from '../harness/managed-mcp-contract.js';
 import { isManagedMcpRevocations } from '../harness/managed-mcp-contract.js';
 
@@ -143,8 +144,16 @@ export async function createManagedMcpLease(input: {
         AbortSignal.any([options.signal, revokedSignal(serviceRevocations, service.server, service.schemaVersion)])); }
       catch (error) { if (error instanceof McpAuthorityError) throw error; throw new McpAuthorityError('mcp_source_response_lost', true); }
     },
-    // Continuing owners require original Operation retention and interaction delivery, not RPC lifetimes.
-    taskOwner: async () => fail('mcp_managed_task_owner_unavailable'),
+    async taskOwner(server, endpoint, signal, origin) {
+      if (!origin) return fail('mcp_task_original_identity_missing');
+      const selected = await call<McpEndpoint>({ kind: 'task_prepare', handleId, server, ...(endpoint ? { endpoint } : {}) }, signal);
+      if (!record(selected) || selected.server !== server || selected.resourceKey !== snapshot.binding.provenance.servers[server]?.resource_key
+        || typeof selected.configurationVersion !== 'string' || typeof selected.credentialVersion !== 'string'
+        || endpoint && !isDeepStrictEqual(endpoint, selected)) return fail('mcp_task_original_endpoint_changed');
+      return createManagedMcpTaskLease({ client: access.client, address: { coordinatorHostId: input.coordinatorHostId,
+        authorityId: access.binding.authorityId, resourceEpoch: access.binding.resourceEpoch },
+        binding: { ...origin, purpose: 'task', endpoint: selected }, creation: { handleId, lifetime: input.lifetime } });
+    },
     resourceEndpoint: () => fail('mcp_managed_observer_owner_unavailable'),
     observeResource: async () => fail('mcp_managed_observer_owner_unavailable'),
     release() {

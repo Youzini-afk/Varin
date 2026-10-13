@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 32;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 33;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -2585,6 +2585,8 @@ pub(crate) type SourceAuthorityAddress = crate::source_resources::SourceAuthorit
 
 pub(crate) type SourceMcpHolderParams = crate::source_resources::SourceMcpHolderParams;
 
+pub(crate) type SourceMcpTaskReceiptParams = crate::source_resources::SourceMcpTaskReceiptParams;
+
 pub(crate) type SourceAuthorityBindParams = crate::source_resources::SourceAuthorityBindParams;
 
 pub(crate) type SourceAuthorityReleaseParams =
@@ -4386,6 +4388,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
+        "runtime.host_job.task.holder_released" => {
+            serde_json::from_value::<HostJobBeginParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.mcp.resource.begin" => {
             serde_json::from_value::<McpResourceBeginParams>(params.clone())
                 .map(|_| ())
@@ -4438,6 +4445,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "source.mcp.holder" => serde_json::from_value::<SourceMcpHolderParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "source.mcp.task_receipt" => {
+            serde_json::from_value::<SourceMcpTaskReceiptParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "source.authority.bind" => {
             serde_json::from_value::<SourceAuthorityBindParams>(params.clone())
                 .map(|_| ())

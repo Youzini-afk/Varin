@@ -1,8 +1,19 @@
 /** Closed source-local MCP requests. No paths, credentials or arbitrary Host method names. */
 import type { McpAuthorityBinding, McpAuthorityService, McpServiceRequest } from '@varin/pi-host/mcp-authority';
-import type { McpBinding } from '../kernel/protocol.generated.js';
+import type { McpBinding, McpEndpoint, SourceMcpHolderBinding, SourceMcpTaskCreationOutcome } from '../kernel/protocol.generated.js';
 
-export type ManagedMcpAction =
+/** The body projection crosses the content lane, never an authority control snapshot. */
+export interface ManagedMcpTaskCreationReceipt { requestHash: string; outcome: SourceMcpTaskCreationOutcome | null }
+export type ManagedMcpTaskAction =
+  | { kind: 'task_prepare'; handleId: string; server: string; endpoint?: McpEndpoint }
+  | { kind: 'task_start'; handleId: string; binding: SourceMcpHolderBinding; name: string; schemaVersion: string; arguments: Record<string, unknown>; ttl?: number }
+  | { kind: 'task_inspect'; binding: SourceMcpHolderBinding; fenceUnstarted?: boolean }
+  | { kind: 'task_get' | 'task_result' | 'task_cancel'; binding: SourceMcpHolderBinding; taskId: string }
+  | { kind: 'task_release'; binding: SourceMcpHolderBinding };
+export function isManagedMcpTaskContinuation(action: ManagedMcpAction): action is Exclude<ManagedMcpTaskAction, { kind: 'task_prepare' | 'task_start' }> {
+  return ['task_inspect', 'task_get', 'task_result', 'task_cancel', 'task_release'].includes(action.kind);
+}
+export type ManagedMcpAction = ManagedMcpTaskAction
   | { kind: 'snapshot'; handleId: string; creationRequestId: string; selection?: McpBinding }
   | { kind: 'changed'; incarnation: string; after: number }
   | { kind: 'release'; handleId: string; creationRequestId: string }
@@ -35,4 +46,4 @@ export interface ManagedMcpSnapshot {
 }
 export type ManagedMcpReply =
   | { ok: true; value: unknown; executorStopped: true }
-  | { ok: false; error: { code: string; dispatched: boolean; settlement: 'unknown' | 'session_expired' | 'rpc_response'; protocolError?: Record<string, unknown>; interactionProblem?: string }; executorStopped: boolean };
+  | { ok: false; error: { code: string; dispatched: boolean; settlement: 'unknown' | 'session_expired' | 'rpc_response'; protocolError?: Record<string, unknown>; interactionProblem?: string; taskKind?: 'protocol' | 'transport' | 'unsupported' | 'owner'; rpcCode?: number }; executorStopped: boolean };

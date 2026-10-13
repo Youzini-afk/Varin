@@ -2,7 +2,10 @@
 import { randomUUID } from 'node:crypto';
 import type { McpAuthorityLease, McpAuthorityScope, McpAuthorityTool, McpAuthorityService, McpTransport } from '@varin/pi-host/mcp-authority';
 import type { McpCompositions, McpCompositionScope } from '@varin/pi-host/mcp-authority';
-import type { ManagedSourceLocalScope } from './managed-remote-types.js';
+import type { ManagedSourceLocalScope, ManagedSourceCleanupScope } from './managed-remote-types.js';
+import type { KernelClient } from '../kernel/kernel-client.js';
+import { createManagedMcpTasks, mcpTaskFailure } from './managed-mcp-tasks.js';
+import { isManagedMcpTaskContinuation } from './managed-mcp-contract.js';
 import type { ManagedMcpAction, ManagedMcpReply, ManagedMcpSnapshot, ManagedMcpRevocations } from './managed-mcp-contract.js';
 class ManagedMcpAdmissionError extends Error {
   readonly dispatched = false;
@@ -55,10 +58,11 @@ interface Owner {
   composition: Promise<McpCompositionScope>;
   closed: boolean;
   sealed?: boolean;
-  closing?: Promise<{ executorStopped: boolean }>;
+  closing?: Promise<{ executorStopped: boolean; taskControlsDrained: boolean }>;
 }
 export function createManagedMcpService(options: {
   compositions: Pick<McpCompositions, 'observe'>;
+  kernel?: Pick<KernelClient, 'sourceRequest'>;
   agentDir: string;
   hostId: string;
   admitWorkspaceRegistration(id: string, signal?: AbortSignal): Promise<{ canonicalPath: string }>;
@@ -86,9 +90,19 @@ export function createManagedMcpService(options: {
       environmentId: JSON.stringify([options.hostId, scope.principal.principalId, scope.coordinatorHostId, scope.source.execution_workspace_id,
         scope.authorityId, scope.resourceEpoch]), sessionId: `managed:${scope.coordinatorHostId}:${scope.scope.threadId}` };
   };
+  const tasks = options.kernel ? createManagedMcpTasks({ kernel: options.kernel, view: async (scope, handleId, signal) => {
+    const owner = owners.get(keyOf(scope)), view = owner?.views.get(handleId);
+    if (!owner || owner.closed || owner.sealed || !view) throw new ManagedMcpAdmissionError('mcp_original_view_unavailable');
+    const beforeDispatch = async () => {
+      if (owner.closed || owner.sealed || owner.views.get(handleId) !== view) throw new ManagedMcpAdmissionError('mcp_view_closed');
+      await authorize(owner.scope, signal); signal.throwIfAborted();
+      if (owner.closed || owner.sealed || owner.views.get(handleId) !== view) throw new ManagedMcpAdmissionError('mcp_view_closed');
+    };
+    await beforeDispatch(); return { lease: await view.work, beforeDispatch };
+  } }) : undefined;
   const release = async (scope: Address, options?: { retainMcpHolders: boolean }) => {
     const key = keyOf(scope), owner = owners.get(key);
-    if (!owner) return { executorStopped: false };
+    if (!owner) return { executorStopped: false, taskControlsDrained: true };
     if (owner.closing) return owner.closing;
     owner.sealed = true;
     if (options?.retainMcpHolders) {
@@ -98,12 +112,13 @@ export function createManagedMcpService(options: {
       // Existing SDK holders retain only their original connections. Do not wait on their
       // lifetime, or stop the original native daemon, when the ordinary Run view closes.
       (await owner.composition).release();
-      return { executorStopped: false };
+      return { executorStopped: false, taskControlsDrained: false };
     }
     owner.closed = true;
     for (const changed of owner.changed) changed();
     const views = [...owner.views.values()]; owner.views.clear();
     owner.closing = (async () => {
+      await tasks?.close(scope);
       await Promise.allSettled(views.map(async view => (await view.work).release()));
       // Native processes carry their own Storage tree receipts even if SDK close swallows an error.
       const results = await Promise.allSettled([owner.composition.then(composition => composition.releaseAndDrain(), error => {
@@ -114,7 +129,7 @@ export function createManagedMcpService(options: {
       if (failed?.status === 'rejected') throw failed.reason;
       // Retain a failed close as unresolved; a second cleanup cannot turn it into success.
       if (owners.get(key) === owner) owners.delete(key);
-      return { executorStopped: owner.transports?.executorsStopped() === true };
+      return { executorStopped: owner.transports?.executorsStopped() === true, taskControlsDrained: true };
     })();
     const closing = owner.closing;
     void closing.catch(() => { if (owner.closing === closing) delete owner.closing; });
@@ -132,6 +147,7 @@ export function createManagedMcpService(options: {
     if (action.kind === 'release') {
       await releaseView(scope, action); return null;
     }
+    if (isManagedMcpTaskContinuation(action)) return continueTask(scope, action, signal);
     const authorityScope = await authorize(scope, signal);
     let owner = owners.get(key);
     if (action.kind === 'snapshot') {
@@ -196,6 +212,12 @@ export function createManagedMcpService(options: {
     const retainTools = (tools: readonly McpAuthorityTool[]) => { for (const tool of tools) view.tools.set(targetKey(tool.name, tool.schemaVersion), tool); revoked(view); return tools; };
     const retainService = (service: McpAuthorityService) => { view.services.set(targetKey(service.server, service.schemaVersion), service); revoked(view); return service; };
     switch (action.kind) {
+      case 'task_prepare':
+        if (!tasks) throw new ManagedMcpAdmissionError('mcp_task_source_unavailable');
+        return tasks.prepare(scope, action.handleId, action.server, action.endpoint, signal);
+      case 'task_start':
+        if (!tasks) throw new ManagedMcpAdmissionError('mcp_task_source_unavailable');
+        return tasks.start(scope, action, signal);
       case 'discover': return retainTools(await lease.discover(action.server, signal));
       case 'prepare_tool': { const tool = await lease.prepareTool(action.server, action.tool, action.schemaVersion, signal); retainTools([tool]); return tool; }
       case 'discover_services': return (await lease.discoverServices(action.server, signal)).map(retainService);
@@ -208,6 +230,29 @@ export function createManagedMcpService(options: {
     }
     throw new Error('mcp_source_action_invalid');
   };
+  const continueTask = async (scope: Address, action: Extract<ManagedMcpAction, { kind: 'task_inspect' | 'task_get' | 'task_result' | 'task_cancel' | 'task_release' }>, signal: AbortSignal) => {
+    if (!tasks) throw new ManagedMcpAdmissionError('mcp_task_source_unavailable');
+    if (action.kind === 'task_inspect') return tasks.inspect(scope, action.binding, action.fenceUnstarted, signal);
+    if (action.kind === 'task_release') return tasks.release(scope, action.binding);
+    if (action.kind === 'task_get' || action.kind === 'task_result') {
+      const owner = owners.get(keyOf(scope));
+      if (!owner || owner.closed) throw new ManagedMcpAdmissionError('mcp_task_original_transport_unavailable');
+      // Continuing holders keep their original grant/daemon, not a perpetual trust
+      // approval. Recheck current read authority without re-admitting a sealed Run.
+      if (!scope.principal.capabilities.includes('filesystem:read')) throw new ManagedMcpAdmissionError('mcp_source_authority_denied');
+      const project = await options.admitWorkspaceRegistration(owner.scope.source.workspace_id, signal);
+      if (project.canonicalPath !== owner.authorityScope.configCwd || !options.projectTrusted(project.canonicalPath))
+        throw new ManagedMcpAdmissionError('mcp_source_authority_denied');
+    }
+    return tasks.control(scope, action, signal);
+  };
+  const reply = async (work: () => Promise<unknown>): Promise<ManagedMcpReply> => {
+    try { return { ok: true, value: await work(), executorStopped: true }; }
+    catch (error) {
+      const failure = mcpTaskFailure(error);
+      return { ok: false, error: failure, executorStopped: !failure.dispatched || failure.settlement !== 'unknown' };
+    }
+  };
   return {
     adaptTransport(scope: McpAuthorityScope, transport: McpTransport): McpTransport {
       const owner = [...owners.values()].find(owner => owner.authorityScope.environmentId === scope.environmentId);
@@ -216,17 +261,12 @@ export function createManagedMcpService(options: {
     },
     release, releaseView,
     close: () => Promise.allSettled([...owners.values()].map(owner => release(owner.scope))),
-    async request(scope: ManagedSourceLocalScope, action: ManagedMcpAction, signal?: AbortSignal): Promise<ManagedMcpReply> {
-      try { return { ok: true, value: await execute(scope, action, signal ?? new AbortController().signal), executorStopped: true }; }
-      catch (error) {
-        // Only the original trusted MCP owner can declare an entered/settled transport.
-        const failure = error as { code?: unknown; dispatched?: unknown; settlement?: unknown; protocolError?: Record<string, unknown>; interactionProblem?: string } | null;
-        const dispatched = failure?.dispatched === true;
-        const settlement = failure?.settlement === 'session_expired' || failure?.settlement === 'rpc_response' ? failure.settlement : 'unknown';
-        return { ok: false, error: { code: typeof failure?.code === 'string' ? failure.code : 'mcp_source_unavailable', dispatched, settlement,
-          ...(failure?.protocolError ? { protocolError: failure.protocolError } : {}), ...(failure?.interactionProblem ? { interactionProblem: failure.interactionProblem } : {}) },
-          executorStopped: !dispatched || settlement !== 'unknown' };
-      }
+    taskContinuation(scope: ManagedSourceCleanupScope,
+      action: Extract<ManagedMcpAction, { kind: 'task_inspect' | 'task_get' | 'task_result' | 'task_cancel' | 'task_release' }>, signal?: AbortSignal) {
+      return reply(() => continueTask(scope, action, signal ?? new AbortController().signal));
+    },
+    request(scope: ManagedSourceLocalScope, action: ManagedMcpAction, signal?: AbortSignal): Promise<ManagedMcpReply> {
+      return reply(() => execute(scope, action, signal ?? new AbortController().signal));
     },
   };
 }
