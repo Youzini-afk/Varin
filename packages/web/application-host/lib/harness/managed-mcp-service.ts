@@ -66,7 +66,8 @@ export function createManagedMcpService(options: {
   transportOwner?(scope: ManagedSourceLocalScope, readmit: (signal: AbortSignal) => Promise<void>): NonNullable<Owner['transports']>;
 }) {
   const owners = new Map<string, Owner>();
-  const keyOf = (scope: ManagedSourceLocalScope) => JSON.stringify([scope.principal.principalId,
+  type Address = Pick<ManagedSourceLocalScope, 'principal' | 'coordinatorHostId' | 'authorityId' | 'resourceEpoch'>;
+  const keyOf = (scope: Address) => JSON.stringify([scope.principal.principalId,
     scope.coordinatorHostId, scope.authorityId, scope.resourceEpoch]);
   const authorize = async (scope: ManagedSourceLocalScope, signal?: AbortSignal): Promise<McpAuthorityScope> => {
     if (scope.source.resource_owner.kind !== 'managed_host' || scope.source.resource_owner.hostId !== options.hostId
@@ -83,7 +84,7 @@ export function createManagedMcpService(options: {
       environmentId: JSON.stringify([options.hostId, scope.principal.principalId, scope.coordinatorHostId, scope.source.execution_workspace_id,
         scope.authorityId, scope.resourceEpoch]), sessionId: `managed:${scope.coordinatorHostId}:${scope.scope.threadId}` };
   };
-  const release = async (scope: ManagedSourceLocalScope) => {
+  const release = async (scope: Address) => {
     const key = keyOf(scope), owner = owners.get(key);
     if (!owner) return { executorStopped: false };
     if (owner.closing) return owner.closing;

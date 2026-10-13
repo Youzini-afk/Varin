@@ -4,7 +4,7 @@ import path from 'node:path';
 import { StdioTransport, StreamableHttpTransport, type McpTransport, type StdioTransportOptions } from '@varin/pi-host/mcp-authority';
 import { KernelManagedProcess } from './process-service.js';
 import type { KernelClient } from './kernel-client.js';
-import { KernelClientError } from './kernel-error.js';
+import { KernelRequestError } from './kernel-error.js';
 import type { ManagedSourceLocalScope } from '../harness/managed-remote-types.js';
 import type { ManagedPipedProcessHandle, ManagedProcessOwner } from '../process/types.js';
 import { ManagedProcessLaunchError, terminateManagedProcess } from '../process/types.js';
@@ -21,7 +21,8 @@ export function createManagedMcpProcesses(input: {
   const controller = new AbortController();
   let external = false, stopped = false;
   const handles = new Set<KernelManagedProcess>();
-  const unobserved = new Set<string>();
+  // An error response finishes the original native invocation; a transport loss does not.
+  const unobserved = new Map<string, 'unknown' | 'rejected'>();
   const launches = new Set<Promise<ManagedPipedProcessHandle>>();
   const unsubscribe = kernel.subscribeExit(error => {
     controller.abort(); for (const handle of handles) handle.invalidate(error);
@@ -42,12 +43,15 @@ export function createManagedMcpProcesses(input: {
     const processId = `mcp:${randomUUID()}`;
     const env: NodeJS.ProcessEnv = options.inheritEnv === false ? { ...options.env } : { ...process.env, ...options.env };
     // Do not cancel the response wait after native dispatch: a late accepted process must be retained.
-    unobserved.add(processId);
+    unobserved.set(processId, 'unknown');
     const initial = await client.processSpawn({ processId, workspaceId: scope.source.workspace_id, rootId: root.rootId,
       cwd: relative, command: options.command, args: [...(options.args ?? [])], mode: 'pipe', cols: 80, rows: 24,
       env: Object.entries(env).flatMap(([name, value]) => value === undefined || name === 'NODE_CHANNEL_FD' ? [] : [{ name, value }]),
     }).catch(error => {
-      if (error instanceof KernelClientError && ['unauthorized', 'protocol-error'].includes(error.code)) unobserved.delete(processId);
+      if (error instanceof KernelRequestError && error.method === 'process.spawn') {
+        if (error.settlement === 'not_dispatched') unobserved.delete(processId);
+        else unobserved.set(processId, 'rejected');
+      }
       throw error;
     });
     if (initial.processId !== processId || initial.workspaceId !== scope.source.workspace_id || initial.kernelEpoch !== scope.resourceEpoch)
@@ -84,7 +88,12 @@ export function createManagedMcpProcesses(input: {
     // The original Source receipt is readable after grant revocation and Host/kernel reopening.
     // It never reacquires a process permit, starts another daemon or replays retained stdout.
     let receipt = await observe(true);
-    if (!receipt.accepted) throw new Error('mcp_original_process_acceptance_unconfirmed');
+    if (!receipt.accepted) {
+      // Only a completed native error response plus the original empty receipt proves rejection.
+      // Absence after a lost response is still Unknown and must never discard the original ID.
+      if (unobserved.get(processId) !== 'rejected') throw new Error('mcp_original_process_acceptance_unconfirmed');
+      unobserved.delete(processId); return;
+    }
     while (!receipt.executorStopped) {
       await new Promise<void>(resolve => setTimeout(resolve, 100)); receipt = await observe(false);
       if (!receipt.accepted) throw new Error('mcp_original_process_acceptance_unconfirmed');
@@ -105,7 +114,7 @@ export function createManagedMcpProcesses(input: {
       const children = [...handles];
       const results = await Promise.allSettled([
         ...children.map(child => terminateManagedProcess(child, true).catch(() => stopOriginal(child.address.processId))),
-        ...[...unobserved].map(stopOriginal),
+        ...[...unobserved.keys()].map(stopOriginal),
       ]);
       const failed = results.find(result => result.status === 'rejected');
       if (failed?.status === 'rejected') throw failed.reason;

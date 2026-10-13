@@ -24,7 +24,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { KernelTransport, CONTROL_METHODS, CONTROL_RESPONSE_METHODS, controlFrame } from "./kernel-transport.js";
 import { prepareKernelCommand } from './kernel-launch.js';
-import { KernelClientError } from './kernel-error.js';
+import { KernelClientError, KernelRequestError } from './kernel-error.js';
 export { KernelClientError } from './kernel-error.js';
 import {
   KERNEL_PROTOCOL_VERSION,
@@ -963,7 +963,7 @@ export class KernelClient {
       pending.release();
       if (response.ok) pending.resolve(response.result);
       else {
-        pending.reject(new KernelClientError(response.error ?? { code: "kernel-error", message: "Rust kernel request failed" }));
+        pending.reject(new KernelRequestError(response.error ?? { code: "kernel-error", message: "Rust kernel request failed" }, pending.method, "response"));
       }
   }
 
@@ -1042,7 +1042,8 @@ export class KernelClient {
 
   private async requestRaw<T, M extends KernelMethod = KernelMethod>(method: M, params: KernelMethodParams[M], options: { signal?: AbortSignal | undefined; grant?: KernelGrantHandle | undefined; allowBootstrap?: boolean | undefined; settleCancellation?: boolean | undefined } = {}): Promise<T> {
     const cancelled = () => new KernelClientError({ code: "cancelled", message: "Kernel request cancelled", retryable: true });
-    const release = this.closed && method === "kernel.shutdown" ? () => undefined : await (CONTROL_RESPONSE_METHODS.has(method) ? this.controlWindow : this.window).acquire(options.signal, cancelled);
+    const release = this.closed && method === "kernel.shutdown" ? () => undefined : await (CONTROL_RESPONSE_METHODS.has(method) ? this.controlWindow : this.window).acquire(options.signal, cancelled)
+      .catch(error => { throw new KernelRequestError(error instanceof Error ? error : new Error(String(error)), method, 'not_dispatched'); });
     let admitted = false;
     try {
       if (this.closed && method !== "kernel.shutdown") throw new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closed" });
@@ -1085,6 +1086,10 @@ export class KernelClient {
       } finally {
         options.signal?.removeEventListener("abort", abort);
       }
+    } catch (error) {
+      if (!admitted)
+        throw new KernelRequestError(error instanceof Error ? error : new Error(String(error)), method, 'not_dispatched');
+      throw error;
     } finally {
       if (!admitted) release();
     }

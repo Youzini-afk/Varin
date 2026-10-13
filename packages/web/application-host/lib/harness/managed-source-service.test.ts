@@ -5,7 +5,7 @@ import type { SourceAuthorityOpenParams, SourceAuthorityBindParams, SourceAuthor
 import { createManagedSourceService } from './managed-source-service.js';
 import { ManagedSourceDrainedError } from './managed-source-drain.js';
 import { createSourceQueryService } from '../kernel/source-query-service.js';
-import type { ManagedSourceBindRequest, ManagedSourcePrincipal, ManagedSourceServiceHandler, ManagedSourceLocalScope } from './managed-remote-types.js';
+import type { ManagedSourceBindRequest, ManagedSourcePrincipal, ManagedSourceServiceHandler, ManagedSourceLocalScope, ManagedSourceCleanupScope } from './managed-remote-types.js';
 
 const principal: ManagedSourcePrincipal = { principalId: 'verified', capabilities: ['filesystem:read'] };
 const source: ThreadSource = { resourceOwner: { kind: 'managed_host', hostId: 'target', connectionId: 'connection', endpointIdentity: 'endpoint' },
@@ -60,7 +60,7 @@ function fixture() {
   } as unknown as KernelClient;
   const prepareSource = vi.fn(async (input: ThreadPrepareSource) => ({ path: '/target/project', source: { ...source, resourceOwner: input.resourceOwner } }));
   const serviceOperation = vi.fn<ManagedSourceServiceHandler>(async () => { state.trusted = false; return { committed: true }; });
-  const releaseSource = vi.fn<(scope: ManagedSourceLocalScope) => Promise<void | { mcpExecutorStopped: boolean }>>(async () => { events.push('drain-views'); });
+  const releaseSource = vi.fn<(scope: ManagedSourceCleanupScope) => Promise<void | { mcpExecutorStopped: boolean }>>(async () => { events.push('drain-views'); });
   const service = createManagedSourceService({ kernel, hostId: 'target', documents: {
     admitWorkspaceRegistration: async () => {
       events.push('registration'); if (!state.trusted) throw new Error('Trust withdrawn');
@@ -139,7 +139,7 @@ describe('managed Source target admission orchestration', () => {
     const receipt = await f.service.release(principal, { coordinatorHostId: 'coordinator', authorityId: binding.authorityId,
       resourceEpoch: binding.resourceEpoch, mode: 'retire' });
     expect(f.events.slice(before)).toEqual(['source.authority.inspect', 'drain-views', 'source.authority.release']);
-    expect(f.releaseSource).toHaveBeenCalledWith(expect.objectContaining({ authorityId: binding.authorityId, grant: expect.objectContaining({ threadId: 'thread' }) }));
+    expect(f.releaseSource).toHaveBeenCalledWith(expect.objectContaining({ authorityId: binding.authorityId, scope: expect.objectContaining({ threadId: 'thread' }) }));
     expect(receipt).toEqual({ authorityId: binding.authorityId, phase: 'retired' });
   });
 
@@ -377,6 +377,7 @@ describe('managed Source target admission orchestration', () => {
       kind: 'call', handleId: 'view', name: 'write', schemaVersion: 'v1', arguments: {},
     } } });
     expect(await f.service.cancelService(principal, { ...address, requestId: 'entered-call' })).toMatchObject({ status: 'unknown' });
+    f.kernel.sourceAuthorityGrant = () => { throw new Error('Original grant is inactive'); };
     const releasing = f.service.release(principal, { ...address, mode: 'retire' });
     if (nativeStopped) await releasing;
     else await expect(releasing).rejects.toThrow('termination is unconfirmed');

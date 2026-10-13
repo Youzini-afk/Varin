@@ -27,7 +27,7 @@ export interface ManagedSourceServiceOptions {
   /** The target's local original preparer, never the coordinator's remote dispatcher. */
   prepareSource(input: ThreadPrepareSource, signal?: AbortSignal): Promise<ThreadPreparedSource>;
   serviceOperation?: ManagedSourceServiceHandler;
-  releaseSource?(scope: ManagedSourceLocalScope): Promise<void | { mcpExecutorStopped: boolean }>;
+  releaseSource?(scope: ManagedSourceCleanupScope): Promise<void | { mcpExecutorStopped: boolean }>;
   cleanupSource?(scope: ManagedSourceCleanupScope): Promise<void>;
   languageAvailable?: boolean;
 }
@@ -119,13 +119,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       && flight.address.resourceEpoch === authority.resourceEpoch);
     for (const [, flight] of retained) flight.controller.abort();
     const drained = await Promise.all(retained.map(([, flight]) => flight.drain));
-    let stopped: void | { mcpExecutorStopped: boolean } = undefined;
-    if (options.releaseSource) {
-      let scope: ManagedSourceLocalScope | undefined;
-      try { scope = localScope(principal, coordinatorHostId, authority); }
-      catch { /* Native retirement still checks the previous lifetime's persisted writers. */ }
-      if (scope) stopped = await options.releaseSource(scope);
-    }
+    const stopped = await options.releaseSource?.(cleanupScope(principal, coordinatorHostId, authority));
     // Stopping an original native MCP executor settles only its physical lifetime.
     // Catalog's unknown effect stays unknown; HTTP work has no such native tree receipt.
     for (let index = 0; index < retained.length; index++) {
@@ -137,9 +131,11 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     if (drained.includes('unknown')) throw new Error('Managed source service termination is unconfirmed');
     for (const [key] of retained) services.delete(key);
   };
-  const cleanupArtifacts = (principal: ManagedSourcePrincipal, coordinatorHostId: string, authority: SourceAuthorityResult) =>
-    options.cleanupSource?.({ principal, coordinatorHostId, authorityId: authority.authorityId, resourceEpoch: authority.resourceEpoch,
+  const cleanupScope = (principal: ManagedSourcePrincipal, coordinatorHostId: string, authority: SourceAuthorityResult): ManagedSourceCleanupScope =>
+    ({ principal, coordinatorHostId, authorityId: authority.authorityId, resourceEpoch: authority.resourceEpoch,
       source: authority.source, scope: authority.scope, physicalRoot: authority.physicalRoot, operationId: authority.operationId });
+  const cleanupArtifacts = (principal: ManagedSourcePrincipal, coordinatorHostId: string, authority: SourceAuthorityResult) =>
+    options.cleanupSource?.(cleanupScope(principal, coordinatorHostId, authority));
   const admit = async (principal: ManagedSourcePrincipal, input: ManagedSourceAddress, signal?: AbortSignal, enabledTools: string[] = []) => {
     if (closing.has(authorityKey(principal, input))) throw new SourceAdmissionError('source_authority_denied');
     const authority = await inspect(principal, input, signal);

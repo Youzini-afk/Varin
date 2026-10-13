@@ -861,12 +861,20 @@ impl Storage {
             let original_epoch = status["kernelEpoch"]
                 .as_str()
                 .ok_or_else(|| denied("Process epoch disappeared"))?;
-            if let Some(terminal) = crate::process::read_receipt(&self.root, id, original_epoch)? {
-                if terminal["processId"] != id || terminal["kernelEpoch"] != original_epoch {
-                    return Err(denied("Original process terminal identity changed"));
-                }
-                for (key, value) in terminal.as_object().into_iter().flatten() {
-                    status[key] = value.clone();
+            let never_spawned = status["status"] == "failed"
+                && status["writerActive"] == false
+                && status["treeConfirmed"] == true
+                && status["spawned"] == false;
+            // Pre-spawn failure is durable in the original Storage record. Receipt-directory
+            // setup itself may have failed, so it cannot require a guardian's receipt file.
+            if !never_spawned {
+                if let Some(terminal) = crate::process::read_receipt(&self.root, id, original_epoch)? {
+                    if terminal["processId"] != id || terminal["kernelEpoch"] != original_epoch {
+                        return Err(denied("Original process terminal identity changed"));
+                    }
+                    for (key, value) in terminal.as_object().into_iter().flatten() {
+                        status[key] = value.clone();
+                    }
                 }
             }
             (
