@@ -69,7 +69,7 @@ it.each([1, 3])('real FileSearch uses configured %i-worker budget and scoped adm
     entries: [{ path: 'tiny.txt', state: { kind: 'regular-file', objectHash: blob.hash, byteLength: bytes.length, mode: 0o644 }, ownerId: blob.ownerId }] });
   const source = await actor.readBranch({ branchId: 'source' });
   const published = await actor.publishBranch({ operationId: 'publish-source', branchId: 'source', expectedRoot: source.root, expectedWriteRevision: source.writeRevision });
-  await runtimeClient.startRun(receipt.run_id, undefined, { grantId: grant.grantId, runId: receipt.run_id, threadId: 'family-thread', workspaceId: 'workspace', executionWorkspaceId: 'workspace',
+  await runtimeClient.startRun(receipt.run_id, undefined, { resourceOwner: { kind: 'local' }, sourceMode: 'fixed_branch', grantId: grant.grantId, runId: receipt.run_id, threadId: 'family-thread', workspaceId: 'workspace', executionWorkspaceId: 'workspace',
     fileSource: { branchId: 'source', revision: Number(published.revision) }, enabledTools: ['file_search'] });
   await expect.poll(async () => (await runtimeClient.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
   expect(turns).toBe(2);

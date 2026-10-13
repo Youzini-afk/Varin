@@ -480,21 +480,6 @@ impl ToolExecutor for CollaborationTools {
         })
     }
 }
-fn validate_preset(
-    selected: &ChildDispatchSelection,
-    input: &DispatchInput,
-) -> Result<(), ExecutionError> {
-    if let Some(id) = &input.preset {
-        let preset = selected
-            .catalog
-            .presets
-            .iter()
-            .find(|preset| &preset.id == id)
-            .ok_or_else(|| error("preset is not selected"))?;
-        crate::child_capabilities::select_frozen(selected, &preset.tools).map_err(error)?;
-    }
-    Ok(())
-}
 pub(crate) fn resolve_selection(
     selected: &ChildDispatchSelection,
     input: &DispatchInput,
@@ -505,7 +490,6 @@ pub(crate) fn resolve_selection(
     ),
     ExecutionError,
 > {
-    validate_preset(selected, input)?;
     let resolved = selected.resolve(input).map_err(error)?;
     let mut schemas = crate::child_capabilities::select_frozen(selected, &resolved.profile.tools)
         .map_err(error)?;

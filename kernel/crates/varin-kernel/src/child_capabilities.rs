@@ -70,10 +70,16 @@ pub(crate) fn select_frozen(
             if let Some(tool) = selected.host_tool(name) {
                 return Ok(tool.clone());
             }
-            selected.frozen.allowed_delegation
-                .iter()
-                .find(|tool| &tool.name == name && (available.contains(tool) || *tool == &crate::memory::bot_schema(true) || *tool == &crate::memory::bot_schema(false)))
-                .cloned()
+            let original = selected.frozen.allowed_delegation.iter().find(|tool| &tool.name == name);
+            original.filter(|tool| available.contains(tool) || *tool == &crate::memory::bot_schema(true) || *tool == &crate::memory::bot_schema(false))
+                .or_else(|| {
+                    // The resolved configured profile (or explicit isolated-write mode)
+                    // can select native capabilities beyond the parent's visible tools.
+                    // Its frozen catalog and the owning declaration must still agree.
+                    if original.is_some() { return None; }
+                    available.iter().find(|tool| &tool.name == name && selected.catalog.native_capabilities.iter()
+                        .any(|capability| capability.name == tool.name && capability.version == tool.version))
+                }).cloned()
                 .ok_or_else(|| {
                     varin_runtime::RuntimeError::Invalid(format!(
                         "unsupported child capability: {name}"

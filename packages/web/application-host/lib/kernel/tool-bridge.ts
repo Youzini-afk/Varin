@@ -111,6 +111,8 @@ interface CallEntry {
   receipt?: ToolExecutionReceipt;
   receiptId: string;
   acknowledged: boolean;
+  receiptAccepted: Promise<boolean>;
+  acknowledgeReceipt(accepted: boolean): void;
   actualPending: boolean;
   stopWatch?: () => void;
 }
@@ -565,6 +567,7 @@ export class ToolBridge {
             if (call.receiptId === v.id) {
               // Accepted or definitive identity rejection ends retransmission, never changes the fact.
               call.acknowledged = true;
+              call.acknowledgeReceipt(v.accepted);
               this.#collect(run, key, owner);
               return true;
             }
@@ -738,6 +741,8 @@ export class ToolBridge {
       });
       return;
     }
+    let acknowledgeReceipt!: (accepted: boolean) => void;
+    const receiptAccepted = new Promise<boolean>(resolve => { acknowledgeReceipt = resolve; });
     const entry = previous ?? {
       identity,
       call: structuredClone(call),
@@ -745,6 +750,8 @@ export class ToolBridge {
       started: false,
       receiptId: randomUUID(),
       acknowledged: false,
+      receiptAccepted,
+      acknowledgeReceipt,
       actualPending: false,
     };
     owner.calls.set(call.operationId, entry);
@@ -820,11 +827,18 @@ export class ToolBridge {
           return receipt;
         });
     }
-    const receipt = await waitForOwner(
+    let receipt = await waitForOwner(
       entry.result,
       signal,
       unknownToolReceipt,
     );
+    if (receipt === entry.receipt) {
+      // Sending the receipt frame first does not order its asynchronous Catalog
+      // write before the response. The engine needs this invocation's durable
+      // receipt, including successful domain reads with effect:none.
+      const accepted = await waitForOwner(entry.receiptAccepted, signal, () => false);
+      if (!accepted) receipt = unknownToolReceipt();
+    }
     await this.#reply(request, { ok: true, ...receipt });
   }
 }

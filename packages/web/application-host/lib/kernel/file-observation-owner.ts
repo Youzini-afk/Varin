@@ -5,7 +5,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { DocumentAuthority } from '../documents/authority.js';
 import { createWorkspaceWatcher, type WorkspaceWatcher, type WatchEvent } from '../documents/watch.js';
 import type { CaptureToken } from '../documents/mutation-authority.js';
-import { canonicalizePathIdentity } from '../workspace/path-safety.js';
+import { canonicalizePathIdentity, normalizePathIdentity } from '../workspace/path-safety.js';
 import type { LiveSourceResolver } from './live-source.js';
 import type { FileObservationOwnerQuery, FileObservationOwnerResult, FileObservationOwnerHint,
   FileObservationTarget, FileWatchPosition } from './protocol.generated.js';
@@ -68,18 +68,20 @@ export class DocumentsFileObservationOwner implements FileObservationOwner {
       this.changed(hint.receiptId); return;
     }
     for (const watch of this.watches.values()) if (watch.target.physicalRoot?.rootId === hint.rootId
-      && watch.target.physicalRoot.canonicalRoot === hint.canonicalRoot) this.changed(watch.target.receiptId);
+      && normalizePathIdentity(watch.target.physicalRoot.canonicalRoot) === normalizePathIdentity(hint.canonicalRoot)) this.changed(watch.target.receiptId);
   }
   private async validate(target: FileObservationTarget, signal: AbortSignal): Promise<void> {
     signal.throwIfAborted();
     const root = target.physicalRoot;
     if (target.immutable || !root || root.hostId !== this.documents.hostId) failed('root_changed');
     if (target.source.mode === 'live_root') {
-      if (!target.source.live_root || !isDeepStrictEqual(root, target.source.live_root)) failed('root_changed');
+      const original = target.source.live_root;
+      if (!original || original.hostId !== root.hostId || original.rootId !== root.rootId
+        || normalizePathIdentity(original.canonicalRoot) !== normalizePathIdentity(root.canonicalRoot)) failed('root_changed');
       await this.validateLiveSource({ workspaceId: target.source.workspace_id,
         executionWorkspaceId: target.source.execution_workspace_id, liveRoot: root }, signal);
     } else if (target.source.mode !== 'materialized') failed('root_changed');
-    if (await canonicalizePathIdentity(root.canonicalRoot) !== root.canonicalRoot) failed('root_changed');
+    if (normalizePathIdentity(await canonicalizePathIdentity(root.canonicalRoot)) !== normalizePathIdentity(root.canonicalRoot)) failed('root_changed');
     if (!(await fs.promises.stat(root.canonicalRoot)).isDirectory()) failed('source_unavailable');
     signal.throwIfAborted();
   }

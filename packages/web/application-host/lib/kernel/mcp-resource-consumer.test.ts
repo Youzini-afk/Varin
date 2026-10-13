@@ -234,6 +234,8 @@ async function sourceReleaseFixture() {
         expect(pending.cancelRequested && pending.subscription.localReleased).toBe(true);
         trace.push('child-resource-release'); child.resources_released = true; return structuredClone(child);
       case 'runtime.status': return { eventCursor: 0 };
+      case 'runtime.run.inspect': return structuredClone(run);
+      case 'runtime.launch.inspect': return { selection: structuredClone(child.launch) };
       default: throw new Error(`Unexpected source consumer request: ${method}`);
     }
   });
@@ -253,6 +255,7 @@ async function sourceReleaseFixture() {
       expect(input.handoffOperationId).toBe('handoff:original'); return { grantId: 'grant:release-original' };
     }),
     scoped: () => ({ unpinBranch: unpin }), revokeGrant: vi.fn(async () => {}), retireRunGrants: retire,
+    releaseLanguageSource: vi.fn(async () => {}), cancelRunPreparation() {}, unregisterCredentialOwner() {}, unregisterToolOwners() {}, releaseRunPolicyOwners() {},
   } as unknown as KernelClient;
   const runtime = new AgentRuntimeClient(kernel);
   const errors: unknown[] = [];

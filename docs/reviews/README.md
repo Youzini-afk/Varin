@@ -8,6 +8,7 @@ Last updated: 2026-10-13
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [Windows 运行时整合验收（2026-10-13）](runtime-2026-10-13.md) | 真实 HTTP/内核 IPC、回执与控制事实、脚本/桌面独立清理、Windows 路径及更新组；修复与未通过范围 |
 | [Managed 文件跟进与原服务转发](runtime-managed-observation-forward-2026-10-13.md) | 原注册 scope/文件基线/撤权释放与 Host Thread Job、canonical acceptance、Bot 排空；实际资源和受控网络证据分列 |
 | [同源 managed Host 执行](runtime-managed-source-2026-10-13.md) | 原资源 owner、文件/进程/检索语言及 child、原回执交付与释放；同名目录隔离及后续消费者边界 |
 | [Computer 应用工具](runtime-computer-applications-2026-10-13.md) | 原 actor/assignment/driver、桌面生命周期、原 artifacts 与 Bot；受控效果和真实桌面验收分列 |

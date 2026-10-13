@@ -52,7 +52,7 @@ export class WorkspacePathError extends Error {
 
 export const isWinDriveAbsolute = (value: string): boolean => /^[A-Za-z]:[\\/]/.test(value);
 
-const stripWindowsNamespacePrefix = (value: string): string => {
+export const stripWindowsNamespacePrefix = (value: string): string => {
   if (value.startsWith('\\\\?\\UNC\\')) return `\\\\${value.slice(8)}`;
   if (value.startsWith('\\\\?\\')) return value.slice(4);
   return value;

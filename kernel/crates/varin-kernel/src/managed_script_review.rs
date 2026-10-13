@@ -569,7 +569,9 @@ impl AgentPolicy for Cells {
         let (name, args) = match stage {
             1 if self.scenario == Scenario::RunEndJob => (
                 "script_run",
-                json!({"environmentId": env, "script": "const independent = await tools.invoke({callId:'independent',name:'process_spawn',arguments:{cwd:'',command:'/bin/sh',args:['-c', 'printf started > job-started; while [ ! -e job-release ]; do sleep 0.05; done; printf survived > job-result'],mode:'pipe'}}); if (independent.completion.kind !== 'job_accepted') throw Error('independent job was not accepted'); print(independent.operationId);"}),
+                json!({"environmentId": env, "script": format!(
+                    "const independent = await tools.invoke({}); if (independent.completion.kind !== 'job_accepted') throw Error('independent job was not accepted'); print(independent.operationId);",
+                    json!({"callId":"independent","name":"process_spawn","arguments":{"cwd":"","command":std::env::var("VARIN_NODE").unwrap_or_else(|_| "node".into()),"args":["-e", "const fs = require('node:fs'); fs.writeFileSync('job-started','started'); const timer = setInterval(() => { if (fs.existsSync('job-release')) { fs.writeFileSync('job-result','survived'); clearInterval(timer); } }, 50);"],"mode":"pipe"}}))}),
             ),
             1 if self.scenario == Scenario::CancelDrain => (
                 "script_run",

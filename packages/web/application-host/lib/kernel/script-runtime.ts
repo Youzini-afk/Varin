@@ -336,15 +336,20 @@ export function createScriptRuntime(options: {
   };
   const unsubscribeEvents = runtime.onEvent(() => { void reconcile().catch(options.onError); });
   let recovering: Promise<void> | undefined;
+  const recoveryTasks = new Map<string, Promise<ToolExecutionReceipt>>();
   const recover = (): Promise<void> => {
     if (recovering) return recovering;
     recovering = (async () => {
       const pending = await rpc<Operation[], 'runtime.managed_process.pending'>('runtime.managed_process.pending', {});
-      await Promise.all(pending.map(async operation => {
+      // Open waits for this inventory only, so its new environment cannot be
+      // mistaken for a pre-existing process. Each old environment owns its drain.
+      for (const operation of pending) {
+        if (recoveryTasks.has(operation.id)) continue;
         const environment = environments.get(operation.id);
-        if (environment) await close(environment, new Error('Original process channel ended'));
-        else await recoverEnvironment(operation);
-      }));
+        const task = environment ? close(environment, new Error('Original process channel ended')) : recoverEnvironment(operation);
+        recoveryTasks.set(operation.id, task);
+        void task.finally(() => { if (recoveryTasks.get(operation.id) === task) recoveryTasks.delete(operation.id); }).catch(options.onError);
+      }
     })().finally(() => { recovering = undefined; });
     return recovering;
   };
@@ -379,6 +384,10 @@ export function createScriptRuntime(options: {
       await Promise.all([...environments.values()].filter(environment => environment.runId === runId && environment.cell
         && (!desktopIds || desktopIds.some(id => environment.cell!.desktops.has(id)))).map(environment => close(environment, new Error('User stopped current Computer work'))));
     },
-    async dispose() { unsubscribeEvents(); unsubscribeReady(); await Promise.allSettled([...environments.values()].map(environment => close(environment, new Error('Script Host closed')))); },
+    async dispose() {
+      unsubscribeEvents(); unsubscribeReady();
+      await recovering;
+      await Promise.allSettled([...recoveryTasks.values(), ...[...environments.values()].map(environment => close(environment, new Error('Script Host closed')))]);
+    },
   };
 }

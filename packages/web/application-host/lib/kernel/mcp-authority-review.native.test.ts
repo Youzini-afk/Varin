@@ -205,7 +205,7 @@ it('lazy discovery starts only its selected real server, then validates and gate
   expect(await fs.stat(f.unusedPath).then(() => true, () => false)).toBe(false);
   const toolNames = (f.requests[0]!.body.tools as Array<{ name: string }>).map(tool => tool.name);
   expect(toolNames).toEqual(expect.arrayContaining(['mcp_call', 'mcp_discover', 'ask_user']));
-  expect(toolNames).not.toContain('send');
+  expect(toolNames.some(name => name.startsWith('mcp__fixture__'))).toBe(false);
   held.writeHead(200, { 'content-type': 'text/event-stream' });
   held.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: 'lazy-discover-item', type: 'function_call', call_id: 'lazy-discover-id', name: 'mcp_discover', arguments: JSON.stringify({ server: 'fixture' }) }] } })}\n\n`);
   await expect.poll(async () => (await f.api.snapshot(identity)).operations.some(op => op.waiting_on?.startsWith('permission:')), { timeout: 15_000 }).toBe(true).catch(async error => { throw new Error(`${String(error)} ${JSON.stringify({ requests: f.requests.length, run: await f.runtime.run(receipt.run_id), events: (await f.runtime.events(0, 256)).slice(-8) })}`); });
@@ -300,7 +300,7 @@ it('disabling a real selected MCP dependency ends its outstanding permission wai
   expect(await fs.readFile(f.effectsPath,'utf8').catch(()=>'' )).toBe('');
   expect((await f.api.snapshot(identity)).operations.some(op=>op.waiting_on?.startsWith('permission:'))).toBe(false);
   const result=(f.requests[1]!.body.input as Array<{type:string;output?:unknown}>).find(item=>item.type==='function_call_output')!;
-  expect(JSON.parse(responsesMetadataText(result.output))).toMatchObject({kind:'result',outcome:'failed',effect:'none',content:{error:'mcp_authorization_failed'}});
+  expect(JSON.parse(responsesMetadataText(result.output))).toMatchObject({kind:'not_dispatched',reason:expect.any(String)});
 },30_000);
 it('cold MCP preparation starts the model and publishes a fast dependency while another real server is still preparing',async()=>{
   let held!:ServerResponse;let turns=0;
@@ -452,7 +452,11 @@ it('a real oversized UTF-8 MCP result keeps its remote-effect receipt, preserves
   expect((await f.api.run(receipt.run_id)).state).toBe('completed');
   const settled = await f.api.operation(op.id);
   expect(settled).toMatchObject({ phase: 'terminal', outcome: 'succeeded', effect: 'confirmed' });
-  expect((outputResult(settled.result) as {content:Array<{text:string}>}).content[0]!.text).toBe('界'.repeat(6*1024*1024));
+  expect((outputResult(settled.result) as {content:Array<{text:unknown}>}).content[0]!.text).toEqual({ outputPartIndex: 0 });
+  if (settled.result?.kind !== 'output') throw new Error('Expected retained original output');
+  const part = settled.result.output.parts[0];
+  expect(part?.kind).toBe('text');
+  expect(part?.kind === 'text' && part.text === '界'.repeat(6*1024*1024)).toBe(true);
   const records = (await fs.readFile(f.effectsPath, 'utf8')).trim().split('\n').map(value => JSON.parse(value));
   expect(records.filter(value => value.name === 'send')).toHaveLength(1);
   const sizes = records.find(value => value.outputBytes);

@@ -2105,6 +2105,10 @@
     "KernelFileRootRegisterParams": {"fields": {
       "workspaceId": {"type": "string"}, "executionWorkspaceId": {"type": "string"}, "canonicalRoot": {"type": "string"}
     }},
+    "KernelFileRootRegisterResult": {"fields": {
+      "rootId": {"type": "string"}, "executionWorkspaceId": {"type": "string"}, "canonicalRoot": {"type": "string"},
+      "reconciledOperations": {"type": "number"}, "pendingOperations": {"type": "number"}
+    }},
     "KernelFileOperationListParams": {"fields": {
       "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}
     }},

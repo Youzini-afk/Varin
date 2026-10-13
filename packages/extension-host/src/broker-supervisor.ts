@@ -973,6 +973,14 @@ export class BrokeredHostSupervisor {
   async discardPreparedCandidate(extensionId: string, integrity: string): Promise<void> {
     const group = this.#staged.get(extensionId);
     if (!group || group.integrity !== integrity || this.#candidateSelections.has(extensionId)) return;
+    const entry = (await this.#catalog.snapshot()).extensions.find(value => value.manifest.id === extensionId);
+    // A failed Surface releases its own preparation. The accepted grouped update
+    // still owns the shared Host candidate until it is replaced or withdrawn.
+    if (entry?.desired.enabled && entry.desired.revision === group.desiredRevision
+      && entry.candidate?.integrity === integrity && entry.candidate.applyRequested
+      && entry.candidate.manifest.updateReadiness
+      && group.instances.every(instance => !instance.preparation.signal.aborted && !instance.revoked)) return;
+    if (this.#staged.get(extensionId) !== group || this.#candidateSelections.has(extensionId)) return;
     await this.#releaseCandidateGroup(group);
   }
   async #releaseCandidateGroup(group: CandidateGroup): Promise<void> {

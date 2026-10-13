@@ -64,7 +64,7 @@ async function fixture(records = new Map<string, KernelRecordResult>(), remote: 
     },
     async putRecord(params: Record<string, unknown>) {
       const id = params.recordId as string, previous = records.get(id);
-      if (params.expectedRecordRevision !== undefined && previous?.recordRevision !== params.expectedRecordRevision) throw new Error('revision conflict');
+      if (params.expectedRecordRevision !== undefined && previous?.recordRevision !== params.expectedRecordRevision) throw new KernelClientError({ code: 'record-revision-conflict', message: 'record revision conflict' });
       if (failClear && typeof params.payloadJson === 'string' && JSON.parse(params.payloadJson).physicalControl === null && previous && JSON.parse(previous.payloadJson).physicalControl) { failClear = false; throw new Error('controlled storage clear failure'); }
       const stored = { ...params, createdAt: previous?.createdAt ?? 1, updatedAt: 1, recordRevision: (previous?.recordRevision ?? 0) + 1 } as unknown as KernelRecordResult;
       records.set(id, stored); return stored;
@@ -388,6 +388,48 @@ test('one unreadable accepted Run does not block another terminal desktop cleanu
   } finally { await f.cleanup(); }
 });
 
+test('a later terminal execution drains while an earlier desktop release is still pending', { timeout: 5000 }, async t => {
+  const f = await fixture();
+  const entered = deferred<void>(), release = deferred<void>();
+  const finish = f.computers.finishExecution.bind(f.computers);
+  const accepted = f.computers.automation.acceptedExecutions.bind(f.computers.automation);
+  let showOther = false;
+  let first: Promise<void> | undefined;
+  try {
+    await f.computers.ensureLocal();
+    const original = f.records.get('computer.desktop:local-console')!;
+    f.records.set('computer.desktop:other-desktop', { ...original, recordId: 'computer.desktop:other-desktop', payloadJson: JSON.stringify({ ...JSON.parse(original.payloadJson), id: 'other-desktop' }) });
+    await f.computers.automation.authorize(work(), 'control', 'local-console', async () => {});
+    await f.computers.automation.authorize(work('other'), 'control', 'other-desktop', async () => {});
+    f.computers.automation.acceptedExecutions = () => accepted().filter(value => showOther || value.runId === 'root-run');
+    f.computers.finishExecution = async execution => {
+      if (execution.runId === 'root-run') { entered.resolve(); await release.promise; }
+      return finish(execution);
+    };
+    f.terminal();
+    first = f.computer.reconcileExecutions();
+    await entered.promise;
+    showOther = true;
+    const second = f.computer.reconcileExecutions();
+    await new Promise<void>((resolve, reject) => {
+      const inspect = () => {
+        if (t.signal.aborted) reject(t.signal.reason);
+        else if (f.computers.automation.controller('other-desktop') === null) resolve();
+        else setImmediate(inspect);
+      };
+      inspect();
+    });
+    assert.equal(f.computers.automation.controller('local-console')?.execution.runId, 'root-run');
+    release.resolve();
+    await Promise.all([first, second]);
+  } finally {
+    release.resolve(); await first;
+    f.computers.automation.acceptedExecutions = accepted;
+    f.computers.finishExecution = finish;
+    await f.cleanup();
+  }
+});
+
 test('release false receipt ends this release attempt without clearing the old physical owner', async () => {
   const f = await fixture();
   try {
@@ -649,7 +691,7 @@ test('lost application response never proves stopped input; unsupported managed 
     assert.ok(JSON.parse(f.records.get('computer.desktop:local-console')!.payloadJson).physicalControl);
     const environment = await f.invoke('environment', {});
     assert.equal((environment.content as { source: unknown }).source, null);
-    assert.equal((environment.content as { serviceForwards: { available: boolean } }).serviceForwards.available, false);
+    assert.equal((environment.content as { placementChanges: { available: boolean } }).placementChanges.available, false);
     assert.equal(f.calls.filter(call => call === 'browser').length, 1);
   } finally { await f.cleanup(); }
 });
@@ -867,7 +909,7 @@ async function remoteFixture(target: Awaited<ReturnType<typeof fixture>>, interc
     // The control subscription carries no test events. All identity/admission/action calls
     // use the real target Router; no product HTTP listener or external socket is involved.
     if (url.pathname.endsWith('/stream')) {
-      const body = new ReadableStream<Uint8Array>({ start(controller) { init?.signal?.addEventListener('abort', () => { try { controller.close(); } catch {} }, { once: true }); } });
+      const body = new ReadableStream<Uint8Array>({ start(controller) { init?.signal?.addEventListener('abort', () => { try { controller.close(); } catch { /* The fixture stream may already be cancelled. */ } }, { once: true }); } });
       return new Response(body, { headers: { 'content-type': 'text/event-stream', 'x-varin-computer-host': 'host' } });
     }
     const headers = new Headers(init?.headers);

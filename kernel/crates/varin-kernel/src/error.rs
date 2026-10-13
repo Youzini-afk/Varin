@@ -47,6 +47,8 @@ pub(crate) enum KernelError {
     Authorization(String),
     #[error("operation error: {0}")]
     Operation(String),
+    #[error("record revision conflict")]
+    RecordRevisionConflict,
     #[error("not found: {0}")]
     NotFound(String),
     #[error("file observation source failed: {0}")]
@@ -82,6 +84,7 @@ impl From<serde_json::Error> for KernelError {
 pub(crate) fn error_code(error: &KernelError) -> &'static str {
     match error {
         KernelError::ContextJobAlreadyAdmitted => "context-job-already-admitted",
+        KernelError::RecordRevisionConflict => "record-revision-conflict",
         KernelError::Protocol(_) => "protocol-error",
         KernelError::Storage(_) => "storage-error",
         KernelError::Authorization(_) => "unauthorized",
@@ -96,7 +99,7 @@ pub(crate) fn error_code(error: &KernelError) -> &'static str {
 }
 
 pub(crate) fn response_error(id: &str, error: &KernelError) -> Value {
-    serde_json::json!({"v": 1, "kind": "response", "id": id, "ok": false, "error": {"code": error_code(error), "message": error.to_string(), "retryable": matches!(error, KernelError::Cancelled | KernelError::ActivationHeld(_))}})
+    serde_json::json!({"v": crate::protocol::PROTOCOL_VERSION, "kind": "response", "id": id, "ok": false, "error": {"code": error_code(error), "message": error.to_string(), "retryable": matches!(error, KernelError::Cancelled | KernelError::ActivationHeld(_))}})
 }
 
 #[cfg(test)]

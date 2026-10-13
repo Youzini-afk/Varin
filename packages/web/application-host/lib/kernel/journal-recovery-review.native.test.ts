@@ -1,5 +1,6 @@
 import { responsesMetadataText } from './responses-wire.test-helper.js';
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { DatabaseSync } from 'node:sqlite';
 import { createServer, type ServerResponse } from 'node:http';
 import { once } from 'node:events';
 import fs from 'node:fs/promises';
@@ -14,7 +15,8 @@ const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.
 const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.join(repository, 'kernel/target/debug/varin-kernel');
 const buildVersion = (JSON.parse(await fs.readFile(path.join(repository, 'package.json'), 'utf8')) as { version: string }).version;
 function sql(filename: string, statement: string) {
-  execFileSync('python3', ['-c', 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.executescript(sys.argv[2]); c.commit()', filename, statement]);
+  const database = new DatabaseSync(filename);
+  try { database.exec(statement); } finally { database.close(); }
 }
 function tool(response: ServerResponse, name: string, args: unknown, serial: number) {
   response.writeHead(200, { 'content-type': 'text/event-stream' });

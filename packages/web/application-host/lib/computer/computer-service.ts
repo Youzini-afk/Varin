@@ -61,7 +61,7 @@ import type {
   ComputerVmState,
   ComputerVmStep,
 } from "@varin/protocol";
-import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.js";
+import { KernelClientError, type KernelClient, type KernelScopedClient } from "../kernel/kernel-client.js";
 import type { KernelRecordResult } from "../kernel/protocol.generated.js";
 import { HarnessServiceError } from "../harness/service-error.js";
 import {
@@ -1024,8 +1024,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         return;
       } catch (error) {
         // Retry a proven revision race, not a storage failure or an uncertain immutable change.
-        const current = await client.getRecord(COMPUTER_CATALOG_WORKSPACE_ID, recordId);
-        if (!current || current.recordRevision === record.recordRevision) throw error;
+        if (!(error instanceof KernelClientError) || error.code !== 'record-revision-conflict') throw error;
       }
     }
   };
@@ -1547,20 +1546,22 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   const drivers = driverPool.inputs;
   const driverFor = driverPool.acquire;
   const persistPhysicalControl = async (id: string, previous: ComputerPhysicalControl | undefined, next: ComputerPhysicalControl | undefined) => {
-    const client = await scoped();
-    const recordId = `computer.desktop:${id}`;
-    const record = await client.getRecord(COMPUTER_CATALOG_WORKSPACE_ID, recordId);
-    if (!record) throw new ComputerError('computer-work-not-found', 'The physical desktop record no longer exists');
-    const body = JSON.parse(record.payloadJson) as Record<string, unknown>;
-    const stored = decodeComputerRuntime(body).physicalControl;
-    if (JSON.stringify(stored) !== JSON.stringify(previous)) throw new ComputerError('computer-input-release-unconfirmed', 'The desktop physical owner changed while saving its release; refresh and retry Stop');
     try {
-      await client.putRecord({ operationId: `computer.desktop:physical:${randomUUID()}`, workspaceId: COMPUTER_CATALOG_WORKSPACE_ID,
-        recordId, recordType: 'computer.desktop', state: record.state, payloadJson: JSON.stringify({ ...body, runtimeVersion: 4, physicalControl: next ?? null }),
-        ownerIds: [], references: [], expectedRecordRevision: record.recordRevision });
-    } catch { throw new ComputerError('computer-input-release-unconfirmed', next
+      // Stop also writes its cancellation event to this record. Merge those
+      // independent fields through the existing CAS owner, while rechecking
+      // the exact physical holder on every observed revision race.
+      await updateControlRecord(id, body => {
+        const stored = decodeComputerRuntime(body).physicalControl;
+        if (JSON.stringify(stored) !== JSON.stringify(previous)) throw new ComputerError('computer-input-release-unconfirmed', 'The desktop physical owner changed while saving its release; refresh and retry Stop');
+        body.runtimeVersion = 4;
+        body.physicalControl = next ?? null;
+      });
+    } catch (error) {
+      if (error instanceof ComputerError) throw error;
+      throw new ComputerError('computer-input-release-unconfirmed', next
       ? 'The physical input owner could not be saved; no new input was sent. Retry the operation'
-      : 'Input was released, but its durable cleanup could not be saved; keep this Host open and retry Stop'); }
+      : 'Input was released, but its durable cleanup could not be saved; keep this Host open and retry Stop');
+    }
     if (next) laneFor(id).physicalControl = next; else delete laneFor(id).physicalControl;
   };
   const markInputOwner = async (id: string, driver: ComputerDriverSession) => {
@@ -2165,10 +2166,10 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       const lane = laneFor(id);
       if (generation !== lane.generation) throw new CancelledActionError();
       if (lane.control.owner !== "agent" || lane.transitioning) throw new HarnessServiceError("forbidden", "Desktop control is changing or held by a human");
-      if (lane.needsObservation) throw new HarnessServiceError("invalid-params", "Observe the desktop after handback before resuming input");
       if (params.automationEpoch !== undefined && params.automationEpoch !== modelEpoch(id)) {
         throw new HarnessServiceError("forbidden", "This computer script was invalidated by a control change; start a new evaluation from the current scene");
       }
+      if (lane.needsObservation) throw new HarnessServiceError("invalid-params", "Observe the desktop after handback before resuming input");
     };
     let submitted = false;
     try {

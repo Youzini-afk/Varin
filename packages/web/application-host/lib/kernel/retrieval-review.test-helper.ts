@@ -82,9 +82,8 @@ export async function retrievalFixture(reply: (body: Record<string, unknown>, re
     await runtime.createThread(threadId, branchId);
     const receipt = await runtime.submit({ key: `${id}-input`, threadId, branchId, expectedHead: null, input: { text: id }, configuration, ...(initialContext ? { initialContext } : {}) });
     const grant = await kernel.issueGrant({ grantId: `${id}-grant`, threadId, runId: receipt.run_id, owningWorkspace: workspaceId, executionWorkspace: workspaceId, capabilities, pathScopes: scopes });
-    const root = await kernel.scoped(grant).fileRootRegister({ workspaceId, executionWorkspaceId: workspaceId, canonicalRoot: documents.workspaceRoot });
-    const liveRoot = { hostId: 'process-consumer', canonicalRoot: root.canonicalRoot, rootId: root.rootId };
-    const binding = { grantId: grant.grantId, threadId, runId: receipt.run_id, workspaceId, executionWorkspaceId: workspaceId, rootId: root.rootId, sourceMode: 'live_root', liveRoot, enabledTools: tools };
+    const liveRoot = await liveSources.prepare(workspaceId, workspaceId, threadId);
+    const binding: import('./protocol.generated.js').SourceToolBinding = { resourceOwner: { kind: 'local' }, grantId: grant.grantId, threadId, runId: receipt.run_id, workspaceId, executionWorkspaceId: workspaceId, rootId: liveRoot.rootId, sourceMode: 'live_root', liveRoot, enabledTools: tools };
     return { receipt, grant, binding, branchId, start: () => runtime.startRun(receipt.run_id, undefined, binding) };
   }
   return { configuration, documents, kernel, compute, liveSources, runtime, api, hostUrl, workspaceId, requests, launchErrors, admit,

@@ -54,7 +54,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
     const receipt = await runtime.submit({ key: `${id}-input`, threadId, branchId, expectedHead: null, input: { text: id }, configuration });
     const grant = await kernel.issueGrant({ grantId: `${id}-grant`, threadId, runId: receipt.run_id, owningWorkspace: 'workspace', executionWorkspace: 'workspace', capabilities, pathScopes: scopes });
     const registered = await kernel.scoped(grant).fileRootRegister({ workspaceId: 'workspace', executionWorkspaceId: 'workspace', canonicalRoot: workspace });
-    const binding = { grantId: grant.grantId, runId: receipt.run_id, threadId, workspaceId: 'workspace', executionWorkspaceId: 'workspace', rootId: registered.rootId, sourceMode: 'live_root', liveRoot: { hostId: 'language-review', canonicalRoot: registered.canonicalRoot, rootId: registered.rootId }, enabledTools: tools };
+    const binding: import('./protocol.generated.js').SourceToolBinding = { resourceOwner: { kind: 'local' }, grantId: grant.grantId, runId: receipt.run_id, threadId, workspaceId: 'workspace', executionWorkspaceId: 'workspace', rootId: registered.rootId, sourceMode: 'live_root', liveRoot: { hostId: 'language-review', canonicalRoot: registered.canonicalRoot, rootId: registered.rootId }, enabledTools: tools };
     return { receipt, grant, binding, branchId, start: () => runtime.startRun(receipt.run_id, undefined, binding) };
   }
   return { root, workspace, kernel, runtime, requests, admit };

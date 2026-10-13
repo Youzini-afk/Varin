@@ -307,7 +307,20 @@ impl Storage {
             self.root.join("managed").join("runs").join(key)
         };
         let canonical = fs::canonicalize(&requested)?;
-        if canonical != requested || !fs::metadata(&canonical)?.is_dir() {
+        #[cfg(not(windows))]
+        let same_path = canonical == requested;
+        #[cfg(windows)]
+        let same_path = {
+            // Node and Rust use different Win32 namespace spellings. Only remove
+            // that spelling difference; a symlink/junction retarget still fails.
+            let plain = |path: &Path| {
+                let value = path.to_string_lossy().replace('/', "\\");
+                if let Some(rest) = value.strip_prefix("\\\\?\\UNC\\") { format!("\\\\{rest}") }
+                else { value.strip_prefix("\\\\?\\").unwrap_or(&value).to_owned() }
+            };
+            plain(&canonical) == plain(&requested)
+        };
+        if !same_path || !fs::metadata(&canonical)?.is_dir() {
             return Err(denied("observation source root changed"));
         }
         let identity = format!(
@@ -716,7 +729,7 @@ impl Storage {
         let root = self.observation_root(&r.source, &r.source_run_id, host)?;
         if let Some(root) = root {
             if receipt.target.physical_root.as_ref().is_none_or(|v| {
-                v.root_id != root.root_id || Path::new(&v.canonical_root) != root.canonical_root
+                v.root_id != root.root_id || !fs::canonicalize(&v.canonical_root).is_ok_and(|path| path == root.canonical_root)
             }) {
                 return Err(denied("accepted physical root changed"));
             }
@@ -742,7 +755,7 @@ impl Storage {
         let id = Uuid::new_v4().to_string();
         let (capture, fixed, lease_id, storage_idle) = if let Some(root) = root {
             if receipt.target.physical_root.as_ref().is_none_or(|v| {
-                v.root_id != root.root_id || Path::new(&v.canonical_root) != root.canonical_root
+                v.root_id != root.root_id || !fs::canonicalize(&v.canonical_root).is_ok_and(|path| path == root.canonical_root)
             }) {
                 return Err(denied("accepted physical root changed"));
             }

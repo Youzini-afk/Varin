@@ -80,6 +80,11 @@ export const mapMarkupArray = (value: unknown) => {
   )).filter(Boolean);
 };
 
+const relativeUriPath = (uri: string | URL, root: string, pathModule: typeof path): string => {
+  const file = fileURLToPath(uri, { windows: pathModule.sep === '\\' });
+  return pathModule.relative(pathModule.toNamespacedPath(root), pathModule.toNamespacedPath(file));
+};
+
 export const resourceFromUri = (
   uri: unknown,
   workspaceId: string,
@@ -87,13 +92,12 @@ export const resourceFromUri = (
   pathModule: typeof path = path,
 ): LanguageResource | null => {
   if (typeof uri !== 'string' || !uri) return null;
-  let absolutePath;
+  let relative;
   try {
-    absolutePath = fileURLToPath(uri);
+    relative = relativeUriPath(uri, root, pathModule);
   } catch {
     return null;
   }
-  const relative = pathModule.relative(root, absolutePath);
   if (!relative || (relative === '..' || relative.startsWith(`..${pathModule.sep}`)) || pathModule.isAbsolute(relative)) return null;
   return { workspaceId, resourceId: relative.split(pathModule.sep).join('/') };
 };
@@ -110,7 +114,7 @@ export const strictLocationRejection = (value: unknown, root: string, pathModule
   try {
     const url = new URL(uri);
     if (url.protocol !== 'file:' || url.search || url.hash) return 'unmappable';
-    const relative = pathModule.relative(root, fileURLToPath(url));
+    const relative = relativeUriPath(url, root, pathModule);
     if (relative === '..' || relative.startsWith(`..${pathModule.sep}`) || pathModule.isAbsolute(relative)) return 'outOfScope';
     if (!relative) return 'unmappable';
   } catch { return 'unmappable'; }
@@ -125,7 +129,7 @@ export const rejectedLocationReason = (value: unknown, root: string, pathModule:
   const uri = record.targetUri ?? record.uri;
   if (typeof uri !== 'string') return 'unmappable';
   try {
-    const relative = pathModule.relative(root, fileURLToPath(uri));
+    const relative = relativeUriPath(uri, root, pathModule);
     return relative === '..' || relative.startsWith(`..${pathModule.sep}`) || pathModule.isAbsolute(relative) ? 'outOfScope' : 'unmappable';
   } catch { return 'unmappable'; }
 };

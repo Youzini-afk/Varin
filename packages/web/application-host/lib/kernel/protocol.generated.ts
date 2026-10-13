@@ -3393,6 +3393,14 @@ export interface KernelFileRootRegisterParams {
   canonicalRoot: string;
 }
 
+export interface KernelFileRootRegisterResult {
+  rootId: string;
+  executionWorkspaceId: string;
+  canonicalRoot: string;
+  reconciledOperations: number;
+  pendingOperations: number;
+}
+
 export interface KernelFileOperationListParams {
   workspaceId: string;
   rootId: string;

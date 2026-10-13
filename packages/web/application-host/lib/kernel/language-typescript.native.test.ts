@@ -136,7 +136,7 @@ it('executes all three live tools end to end through the bundled TypeScript serv
         const root = await client.scoped(grant).fileRootRegister({ workspaceId: documents.identity.workspaceId,
           executionWorkspaceId: documents.identity.workspaceId, canonicalRoot: documents.workspaceRoot });
         expect(root.rootId).toBe(liveRoot.rootId);
-        await runtime.startRun(receipt.run_id, undefined, { grantId: grant.grantId, runId: receipt.run_id, threadId,
+        await runtime.startRun(receipt.run_id, undefined, { resourceOwner: { kind: 'local' }, grantId: grant.grantId, runId: receipt.run_id, threadId,
           workspaceId: documents.identity.workspaceId, executionWorkspaceId: documents.identity.workspaceId,
           sourceMode: 'live_root', liveRoot, rootId: liveRoot.rootId,
           enabledTools: ['language_definition', 'language_references', 'language_diagnostics'] });

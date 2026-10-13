@@ -340,11 +340,6 @@ const managedAttemptPath = (storageRoot: string, workspaceId: string, attemptId:
   return { managedRoot, attemptRoot };
 };
 
-const rootIdFrom = (value: Record<string, unknown>, label: string): string => {
-  if (typeof value.rootId !== "string" || value.rootId.length === 0) throw new Error(`${label} returned no root identity`);
-  return value.rootId;
-};
-
 /** Capture code/data into a durable immutable branch/root for an experiment spec. */
 export async function prepareExperimentInput(
   client: KernelClient,
@@ -372,7 +367,7 @@ export async function prepareExperimentInput(
       executionWorkspaceId: caller.executionWorkspaceId,
       canonicalRoot: sourceRoot,
     }, options.signal);
-    const sourceRootId = rootIdFrom(registered, "Source file root registration");
+    const sourceRootId = registered.rootId;
     if (options.sourceAuthority && sourceRootId !== options.sourceAuthority.rootId) throw new Error("Native source root differs from its grant");
     const leaseId = `experiment-input-lease:${randomUUID()}`;
     for (;;) {
@@ -550,7 +545,7 @@ export async function materializeExperimentAttempt(client: KernelClient, caller:
       executionWorkspaceId: caller.executionWorkspaceId,
       canonicalRoot: storageRoot,
     }, options.signal);
-    const containerRootId = rootIdFrom(container, "Experiment managed storage root registration");
+    const containerRootId = container.rootId;
     const relativeTarget = path.relative(storageRoot, attemptRoot).replaceAll("\\", "/");
     if (!relativeTarget || relativeTarget.startsWith("../") || path.isAbsolute(relativeTarget)) {
       throw new Error("Experiment attempt directory escaped managed storage");
@@ -574,7 +569,7 @@ export async function materializeExperimentAttempt(client: KernelClient, caller:
       executionWorkspaceId: caller.executionWorkspaceId,
       canonicalRoot: canonicalTarget,
     }, options.signal);
-    const rootId = rootIdFrom(target, "Experiment attempt root registration");
+    const rootId = target.rootId;
     transferred = true;
     return {
       releaseAuthority: grant.release,
@@ -612,7 +607,7 @@ export async function reconcileExperimentCapture(client: KernelClient, caller: E
   const { scoped } = grant;
   try {
     const root = await scoped.fileRootRegister({ workspaceId: caller.workspaceId, executionWorkspaceId: caller.executionWorkspaceId, canonicalRoot: sourceRoot });
-    const rootId = rootIdFrom(root, "Experiment source reconciliation");
+    const rootId = root.rootId;
     const leaseId = `experiment-input-observe:${randomUUID()}`;
     const lease = await scoped.fileLeaseAcquire({ workspaceId: caller.workspaceId, rootId, leaseId,
       resources: (captureScopes.length ? [...captureScopes] : [""]).map((entry) => ({ path: entry, scope: "subtree" })) });
@@ -646,7 +641,7 @@ export async function reconcileExperimentPreparation(client: KernelClient, calle
     const { attemptRoot } = managedAttemptPath(storageRoot, caller.workspaceId, attemptId);
     const registered = await scoped.fileRootRegister({ workspaceId: caller.workspaceId,
       executionWorkspaceId: caller.executionWorkspaceId, canonicalRoot: storageRoot });
-    const rootId = rootIdFrom(registered, "Experiment preparation reconciliation root");
+    const rootId = registered.rootId;
     const leaseId = `experiment-preparation-observe:${randomUUID()}`;
     const lease = await scoped.fileLeaseAcquire({ workspaceId: caller.workspaceId, rootId, leaseId,
       resources: [{ path: path.relative(storageRoot, attemptRoot).replaceAll("\\", "/"), scope: "subtree" }] });

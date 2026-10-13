@@ -2093,7 +2093,12 @@ pub(super) fn history_input_items(
             return Ok(items);
         }
     }
-    Ok(vec![serde_json::from_value(content.clone())?])
+    let mut item: ConversationItem = serde_json::from_value(content.clone())?;
+    // One fact body may be delivered to both actor and root branches. Its
+    // provenance retains the fact identity; the projected item must address
+    // this branch's actual history entry, including its recipient suffix.
+    item.id = id.into();
+    Ok(vec![item])
 }
 
 /// A user record may project several typed parts; the final projected part retains the
