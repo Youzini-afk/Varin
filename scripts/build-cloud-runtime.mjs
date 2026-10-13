@@ -431,30 +431,10 @@ export const installCloudRuntimeDependencies = (
 };
 
 const buildSourcePackages = ({ json }) => {
-  run('bun', ['run', '--cwd', 'packages/extension-host', 'build'], {
-    json,
-    label: 'Varin extension host build',
-  });
-  run('bun', ['run', '--cwd', 'packages/runtime-broker', 'build'], {
-    json,
-    label: 'Pi runtime build',
-  });
-  run('bun', ['run', '--cwd', 'packages/runtime-client', 'build'], {
-    json,
-    label: 'Pi runtime client build',
-  });
-  run('bun', ['run', '--cwd', 'packages/application-client', 'build'], {
-    json,
-    label: 'Varin application client build',
-  });
-  run('bun', ['run', '--cwd', 'packages/extension-loader', 'build'], {
-    json,
-    label: 'Varin managed extension Surface build',
-  });
-  run('bun', ['run', '--cwd', 'packages/web', 'build'], {
+  run('bun', ['run', 'build:web'], {
     env: { VARIN_LOW_MEMORY_BUILD: '1' },
     json,
-    label: 'Varin web build',
+    label: 'Varin web and runtime dependencies build',
   });
 };
 

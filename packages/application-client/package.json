@@ -21,7 +21,8 @@
     }
   },
   "scripts": {
-    "build": "bun run --cwd ../protocol build && bun run --cwd ../extension-contract build && tsc -p tsconfig.build.json",
+    "build": "bun run --cwd ../protocol build && bun run --cwd ../extension-contract build && bun run build:raw",
+    "build:raw": "tsc -p tsconfig.build.json",
     "lint": "eslint \"./src/**/*.ts\" --config ../../eslint.config.js",
     "test": "tsx --test \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit -p tsconfig.json",

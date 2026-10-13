@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DocumentsError } from '@varin/application-client';
+import { DocumentsError, isDocumentsError } from '@varin/application-client';
 import { getRuntimeEndpointGeneration, switchRuntimeEndpoint } from '@varin/application-client';
 
 const { runtimeFetchMock } = vi.hoisted(() => ({ runtimeFetchMock: vi.fn() }));
@@ -45,21 +45,22 @@ describe('createWebDocumentsAPI', () => {
     await expect(pending).rejects.toMatchObject({ reason: 'stale-completion' });
   });
 
-  it('preserves maintenance failure reason and HTTP status from the host', async () => {
+  it.each([
+    { reason: 'maintenance', status: 409, expected: 'maintenance' },
+    { reason: 'future-host-reason', status: 503, expected: 'failed' },
+  ])('preserves $reason failures through the actual documents client', async ({ reason, status, expected }) => {
     const { createWebDocumentsAPI } = await import('./documents');
     const api = createWebDocumentsAPI();
     runtimeFetchMock.mockResolvedValueOnce(Response.json({
-      error: 'Workspace is in maintenance mode',
-      reason: 'maintenance',
-    }, { status: 409 }));
+      error: 'Workspace is unavailable', reason,
+    }, { status }));
 
-    await expect(api.read({
+    const pending = api.read({
       workspaceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       resourceId: 'note.txt',
-    })).rejects.toMatchObject({
-      reason: 'maintenance',
-      status: 409,
     });
+    await expect(pending).rejects.toSatisfy(isDocumentsError);
+    await expect(pending).rejects.toMatchObject({ reason: expected, status });
   });
 
   it('publishes live dirty buffers through the document authority', async () => {

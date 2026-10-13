@@ -22,6 +22,7 @@ jobs:
       queue: max
     outputs:
       code: ${{ steps.surface.outputs.code }}
+      rust: ${{ steps.surface.outputs.rust }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -36,12 +37,20 @@ jobs:
           fi
           if ! git cat-file -e "$BASE" 2>/dev/null; then
             echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "rust=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if git diff --name-only "$BASE" HEAD | grep -qvE '(^docs/|^packages/docs/|\.mdx?$|^\.github/readme/|^LICENSE$)'; then
+          CHANGED=$(git diff --name-only "$BASE" HEAD)
+          CODE_CHANGED=$(grep -vE '(^docs/|^packages/docs/|\.mdx?$|^\.github/readme/|^LICENSE$)' <<< "$CHANGED" || true)
+          if [ -n "$CODE_CHANGED" ]; then
             echo "code=true" >> "$GITHUB_OUTPUT"
           else
             echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+          if grep -qE '(^kernel/|^scripts/(build-kernel|generate-kernel-protocol|test-kernel-authority)\.mjs$|^package\.json$|^\.github/workflows/ci\.yml$)' <<< "$CODE_CHANGED"; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "rust=false" >> "$GITHUB_OUTPUT"
           fi
 
   source-quality:
@@ -78,6 +87,13 @@ jobs:
       - if: needs.changes.outputs.code == 'true'
         name: Build and verify native kernel authority
         run: node scripts/test-kernel-authority.mjs --build
+      # Rust state-machine/unit tests have one Linux owner. The release-binary
+      # acceptance above and on Windows exercises the Host/native boundary.
+      - if: needs.changes.outputs.rust == 'true'
+        name: Test Rust workspace
+        env:
+          VARIN_TEST_KERNEL_EXECUTABLE: ${{ github.workspace }}/kernel/target/release/varin-kernel
+        run: bun run test:rust
       - if: needs.changes.outputs.code == 'true'
         run: bun run test:pi
       - if: needs.changes.outputs.code == 'true'

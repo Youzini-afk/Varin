@@ -24,7 +24,7 @@
     "build": "tsc -p tsconfig.build.json",
     "type-check": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint \"./src/**/*.ts\" \"./test/**/*.ts\" --config ../../eslint.config.js",
-    "test": "tsc -p tsconfig.build.json && node --experimental-repl-await --import tsx --test test/*.test.ts test/*.test.mjs",
+    "test": "node --experimental-repl-await --import tsx --test \"test/**/*.test.ts\"",
     "test:dist": "node --experimental-repl-await --test test/worker.dist.test.mjs"
   },
   "dependencies": {

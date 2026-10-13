@@ -76,7 +76,9 @@ requirement to run every command on every change.
 | Source test suites | `bun run test:pi` |
 | Existing compiled-runtime tests | `bun run test:pi:dist` |
 | Rust compile check / release binary | `bun run kernel:check` / `bun run kernel:build` |
-| Native authority suite | `bun run test:kernel` |
+| Rust workspace unit and state-machine tests | `bun run test:rust` |
+| Release-kernel / Host native acceptance | `bun run test:kernel` |
+| Host packaging boundary and cloud-layout helper tests | `bun run test:cloud` |
 | Engineering docs / public docs plus engineering checks | `bun run docs:check` / `bun run docs:validate` |
 | Documentation checker behavior tests | `bun run test:docs` |
 
@@ -90,8 +92,18 @@ first; do not silently test an earlier build. Electron type checking uses genera
 and need not overwrite a running `server/` generation. A source-development Host may use the permitted
 Cargo runner; packaged layouts need the manifest-verified staged Rust executable.
 
-Web's aggregate `type-check` checks and emits the Application Host's declarations before checking
-browser and CLI consumers. Cross-layer tests use the existing `#application-host` boundary: TypeScript
+The root `build:runtime-dependencies` orders shared package outputs by their dependency graph, once
+per invocation. `build:type-dependencies` adds the Host declaration cache. Root `build`, `build:web`,
+`type-check` and the cloud-runtime builder reuse these ordered outputs instead of recursively building
+them again. Package `build` commands remain self-contained; `build:raw` consumes already prepared
+dependencies and is for ordered aggregates, not a clean-checkout shortcut. `release:npm:build` has its
+own smaller dependency graph for the public package set. Root `type-check:prepared` consumes the same
+fresh outputs without rebuilding; `release:prepare` uses it after its completed build.
+
+Web's aggregate `type-check` prepares dependencies and emits the Application Host's declarations before
+checking browser and CLI consumers. Root `type-check` prepares those outputs once, then calls Web's
+`type-check:prepared` alongside the other packages' checks; that prepared entry does not emit again.
+Cross-layer tests use the existing `#application-host` boundary: TypeScript
 reads those fresh declarations, while the native Vitest configuration resolves the same imports to
 real Host source. Host implementations remain checked in their Node project; browser code keeps its
 own DOM/lib settings. A successful type check is not execution of a listener-bearing native test.
@@ -101,6 +113,20 @@ run through the dedicated kernel entry rather than the portable Web suite. Elect
 updater, Linux desktop and packaging-helper coverage. Python driver tests use
 `python3 -m unittest discover -s packages/computer-driver/linux -p 'test_*.py'`; their simulated app
 protocols do not replace an actual desktop run. Consult the package scripts before selecting files.
+
+`test:rust` runs Cargo's workspace tests from `kernel/`, selecting its pinned toolchain. CI gives it one
+Linux execution for kernel, protocol-generator, kernel-build/test entry or workflow changes. It protects
+Rust-owned state machines separately from `test:kernel`, which runs Node/Vitest against a release binary
+and does not run Cargo tests. The full workspace includes Host/guardian consumers: install the Node/tsx
+and built Host/builtin dependencies first, and set `VARIN_TEST_KERNEL_EXECUTABLE` to the absolute path
+of the matching built kernel binary. CI supplies the release binary verified by its preceding kernel
+step; `test:rust` does not rebuild it. Pass `--build` to `test:kernel` when that binary needs building.
+
+The built-in extension package's `test:dist` runs its existing `test:packaging` smoke against completed
+language-server assets; the root dist aggregate and production-build CI own that check. The Host
+production-boundary helper tests belong to `test:cloud` and use temporary fixtures without rebuilding
+or starting the product. Mobile identity and harness replay checks remain focused entries for their
+own changes rather than additional unconditional gates.
 
 **Dependencies.** `bun.lock` owns the development graph; `scripts/cloud-runtime.bun.lock` owns the staged
 production graph. Changes reaching the cloud runtime use `bun run update:cloud-runtime-lock` after the
