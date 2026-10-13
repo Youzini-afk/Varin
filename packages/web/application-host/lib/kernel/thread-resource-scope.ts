@@ -25,7 +25,7 @@ export class ResourceScopeError extends Error {
   constructor(readonly failure: ResourceFailure) { super(failure.reason); this.name = 'ResourceScopeError'; this.code = `resource-${failure.status}`; }
 }
 
-interface ResourceContextScope { mode: 'agent' | 'bot'; threadRole: string; projectId: string | null }
+export interface ResourceContextScope { mode: 'agent' | 'bot'; threadRole: string; projectId: string | null }
 export interface ResourceSourceReadInput {
   identity: ThreadIdentity;
   source: Exclude<ThreadSource, { mode: 'live_root' }>;
@@ -49,11 +49,19 @@ export interface ThreadResourceScopeOptions {
   snapshot?: PreparedAgentResources;
 }
 export interface ThreadResourceScope {
+  prepare(identity: ThreadIdentity, source: ThreadSource | null, admitted: ResourceContextScope, options?: ThreadResourceScopeOptions): Promise<PreparedAgentResources>;
   withScope<T>(identity: ThreadIdentity, source: ThreadSource | null, admitted: ResourceContextScope,
     consume: (binding: { admittedScope: AdmittedAgentResourceScope; readers: ResourceReader[] }) => Promise<T>, options?: ThreadResourceScopeOptions): Promise<T>;
   prepareSourceCapture: NonNullable<StableSourcePreparationOwners['prepareResources']>;
 }
 export interface ThreadResourceScopeOwners {
+  remote?: Pick<ThreadResourceScope, 'prepare' | 'withScope'>;
+  /** Target-only authority callback. No client request can supply this execution handle. */
+  targetAuthority?: {
+    assert(source: ThreadSource, signal?: AbortSignal): Promise<void>;
+    withSourceRead: ThreadResourceScopeOwners['withSourceRead'];
+    withLiveSourceRead<T>(source: Extract<ThreadSource, { mode: 'live_root' }>, consume: (store: WorkingStateRootStore) => Promise<T>, signal?: AbortSignal): Promise<T>;
+  };
   agentDir: string;
   homeDir?: string;
   documents: Pick<DocumentAuthority, 'inspectWorkspace' | 'readSnapshot' | 'admitWorkspaceRegistration'>;
@@ -286,6 +294,7 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
   const home = path.resolve(owners.homeDir ?? process.env.HOME ?? os.homedir());
   const agentDir = path.resolve(owners.agentDir);
   const authority = createAgentResourceAuthority();
+  const withSourceRead: ThreadResourceScopeOwners['withSourceRead'] = (input, consume) => (owners.targetAuthority?.withSourceRead ?? owners.withSourceRead)(input, consume);
 
   const freshDomain = async (root: string, kind: string, snapshot?: PreparedAgentResources): Promise<ResourceDomain> => {
     const canonical = await canonicalizePathIdentity(root, { allowMissing: true });
@@ -563,7 +572,7 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
         try {
           const paths = requestPaths();
           if (!paths.length) return unavailable(target) as T;
-          return await owners.withSourceRead({ identity, source, paths, ...(options.runId ? { runId: options.runId } : {}), ...(signal ? { signal } : {}) }, async ({ store, pin, readOriginalSource, admitSymlinkTarget }) => {
+          return await withSourceRead({ identity, source, paths, ...(options.runId ? { runId: options.runId } : {}), ...(signal ? { signal } : {}) }, async ({ store, pin, readOriginalSource, admitSymlinkTarget }) => {
             const original = await readOriginalSource();
             const capture = original?.provenance.resources;
             const base = createPinnedResourceReader({ domainId: `workspace:${source.workspaceId}`, store, pin, coverage: capture?.coverage ?? noCoverage(),
@@ -619,7 +628,7 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
     if (source.mode === 'live_root') {
       await owners.validateLiveSource(source, signal);
       scope.projectTrusted = await owners.projectTrusted(source.liveRoot.canonicalRoot);
-      return owners.workingStates.withBranchStore(source.workspaceId, 'resource-live-scope', async store => {
+      const consume = async (store: WorkingStateRootStore) => {
         const root = source.liveRoot.canonicalRoot;
         const id = `workspace:${source.workspaceId}`;
         const previous = options.snapshot?.readers.find(reader => reader.domainId === id);
@@ -636,11 +645,13 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
           applyCapture(scope, scope.project.reader, captured.resources);
         }
         return finish();
-      }, 'shared', { threadId: identity.threadId });
+      };
+      return owners.targetAuthority ? owners.targetAuthority.withLiveSourceRead(source, consume, signal)
+        : owners.workingStates.withBranchStore(source.workspaceId, 'resource-live-scope', consume, 'shared', { threadId: identity.threadId });
     }
     const registration = await owners.documents.admitWorkspaceRegistration(source.workspaceId, signal);
     if (source.executionWorkspaceId !== source.workspaceId) await owners.documents.admitWorkspaceRegistration(source.executionWorkspaceId, signal);
-    return owners.withSourceRead({ identity, source, paths: [''], ...(signal ? { signal } : {}), ...(options.runId ? { runId: options.runId } : {}) }, async ({ store, pin, readOriginalSource }) => {
+    return withSourceRead({ identity, source, paths: [''], ...(signal ? { signal } : {}), ...(options.runId ? { runId: options.runId } : {}) }, async ({ store, pin, readOriginalSource }) => {
       const original = await readOriginalSource();
       const capture = original?.provenance.resources;
       const root = capture?.root ?? registration.canonicalPath;
@@ -654,7 +665,16 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
     });
   };
   const withScope: ThreadResourceScope['withScope'] = async (identity, source, admitted, consume, options = {}) => {
-    try { return await (options.snapshot ? readSnapshotScope : withScopeImpl)(identity, source, admitted, consume, options); }
+    try {
+      if (source?.resourceOwner.kind === 'managed_host' && !owners.targetAuthority) {
+        if (!owners.remote) throw new Error('The original managed resource owner is unavailable');
+        return await owners.remote.withScope(identity, source, admitted, consume, options);
+      }
+      if (source && owners.targetAuthority) await owners.targetAuthority.assert(source, options.signal);
+      const result = await (options.snapshot ? readSnapshotScope : withScopeImpl)(identity, source, admitted, consume, options);
+      if (source && owners.targetAuthority) await owners.targetAuthority.assert(source, options.signal);
+      return result;
+    }
     catch (error) {
       if (error instanceof ResourceScopeError || sourceFailureCode(error)) throw error;
       const status = options.signal?.aborted || (error as Error)?.name === 'AbortError' ? 'cancelled'
@@ -663,7 +683,18 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
         status === 'cancelled' ? 'Resource admission was cancelled' : status === 'denied' ? 'Resource owner denied admission' : 'The admitted resource view is unavailable'));
     }
   };
-  return { withScope, prepareSourceCapture };
+  const prepare: ThreadResourceScope['prepare'] = async (identity, source, admitted, options = {}) => {
+    if (source?.resourceOwner.kind === 'managed_host' && !owners.targetAuthority) {
+      if (!owners.remote) throw new ResourceScopeError(resourceFailure({ domainId: 'agent-resources', viewId: 'admission' }, '', 'unavailable', 'The original managed resource owner is unavailable'));
+      return owners.remote.prepare(identity, source, admitted, options);
+    }
+    return withScope(identity, source, admitted, async ({ admittedScope }) => {
+      const result = await authority.prepare(admittedScope, options.signal);
+      if (result.status !== 'ready') throw new ResourceScopeError(result);
+      return result.snapshot;
+    }, options);
+  };
+  return { withScope, prepareSourceCapture, prepare };
 }
 
 function applyCapture(scope: AdmittedAgentResourceScope, reader: ResourceReader, capture: SourceResourceCapture, captureOnly = false): void {

@@ -223,7 +223,8 @@ fn combined(ending: Ending) {
         }
     });
     let binding = ToolBinding {
-        grant_id: "search".into(),
+        resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
+grant_id: "search".into(),
         run_id: input.run_id.clone(),
         thread_id: "thread".into(),
         workspace_id: "workspace".into(),

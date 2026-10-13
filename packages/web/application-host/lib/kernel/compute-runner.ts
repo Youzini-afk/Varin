@@ -7,6 +7,8 @@ export interface KernelComputeOptions {
   signal?: AbortSignal | undefined;
   collect?: boolean | undefined;
   onRecords?: ((records: KernelComputeRecord[]) => void | Promise<void>) | undefined;
+  /** Local observer only; called after original terminal evidence and release. */
+  onDrained?: (() => void) | undefined;
 }
 export interface KernelComputeResult extends Omit<KernelComputeReadResult, "records"> {
   records: KernelComputeRecord[];
@@ -95,5 +97,8 @@ export async function runKernelCompute(
       }
     }
     await client.computeRelease(address);
+    // Observers cannot replace the original result or failure. A cleanup failure
+    // above never reaches this notification.
+    try { options.onDrained?.(); } catch { /* observational callback */ }
   }
 }

@@ -229,7 +229,7 @@ async function initialize(frame:Record<string,unknown>) {
     isAllowedRoot:async(candidate:string)=>candidate===workspace||candidate.startsWith(workspace+'/')});
   const identity=await documents.resolveWorkspace({path:workspace});
   const live=createLiveSourceOwner({documents,kernel});
-  selectedSource={workspace_id:identity.workspaceId,execution_workspace_id:identity.workspaceId,
+  selectedSource={resource_owner:{kind:'local'},workspace_id:identity.workspaceId,execution_workspace_id:identity.workspaceId,
     mode:'live_root',branch_id:null,revision:null,live_root:await live.prepare(identity.workspaceId,identity.workspaceId,'thread:parent')};
   physicalRoot=selectedSource.live_root;
   if(sourceMode!=='live_root') {

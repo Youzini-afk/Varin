@@ -16,7 +16,7 @@ it('research ingress preserves legal empty values and limit zero, and rejects ma
  assert.throws(()=>decodeResearchParams('sources',{kind:'imaginary'}));assert.throws(()=>decodeResearchParams('cancel',{attemptId:''}));
 });
 it('a User admission shields only its own original subject while its Catalog response is in flight',async()=>{
- const source={workspace_id:'ws',execution_workspace_id:'exec',mode:'fixed_branch' as const,branch_id:'source',revision:1,live_root:null};
+ const source={resource_owner: { kind: 'local' as const }, workspace_id:'ws',execution_workspace_id:'exec',mode:'fixed_branch' as const,branch_id:'source',revision:1,live_root:null};
  const scope:ResearchScope={rootThreadId:'thread',threadId:'thread',branchId:'branch',sourceRunId:'run',source,canSubmit:true,readThreadIds:['thread'],controlThreadIds:['thread']};
  const pending=(id:string):HostJobPending=>({binding:{operationId:id,executionOwner:{kind:'external',identity:'research.experiment',epoch:id},domain:'research.experiment',domainVersion:1,subject:{kind:'workspace',workspaceId:'ws',subjectId:id}},runId:'run',accepted:false,cancelRequested:false,phase:'running',executorStopped:false,origin:{kind:'user',key:id}});
  const operations=new Map<string,HostJobPending>([['orphan',pending('orphan')]]),checked:string[]=[];
@@ -55,7 +55,7 @@ it('a User admission shields only its own original subject while its Catalog res
 it.each([false, true])('original subscriptions precede recheck and preserve one accepted Job when already stopped is %s', async initiallyStopped => {
   const binding = { operationId: 'user-job:early', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, domain: 'research.experiment', domainVersion: 1, subject: { kind: 'workspace', workspaceId: 'ws', subjectId: 'attempt:early' } } satisfies HostJobPending['binding'];
   const job: HostJobPending = { binding, runId: 'completed-source-run', accepted: false, cancelRequested: false, phase: 'running', executorStopped: false, origin: { kind: 'user', key: 'early' } };
-  const source = { workspace_id: 'ws', execution_workspace_id: 'exec', mode: 'fixed_branch' as const, branch_id: 'fixed', revision: 1, live_root: null };
+  const source = { resource_owner: { kind: 'local' as const }, workspace_id: 'ws', execution_workspace_id: 'exec', mode: 'fixed_branch' as const, branch_id: 'fixed', revision: 1, live_root: null };
   const actor = { runtime: 'agent' as const, actor: { kind: 'user' as const, key: 'early' }, rootThreadId: 'thread', threadId: 'thread', branchId: 'branch', runId: job.runId, operationId: binding.operationId, executionOwner: binding.executionOwner, source };
   const accepted = { spec: null, attempt: { attemptId: binding.subject.subjectId, state: 'submitted' }, text: 'original acceptance' };
   let stopped = initiallyStopped;

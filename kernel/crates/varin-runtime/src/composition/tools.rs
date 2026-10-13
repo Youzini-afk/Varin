@@ -245,6 +245,10 @@ fn selected(
     }))
 }
 impl PreparedToolCall for SelectedCall {
+    fn receipt_persisted(&self, context: &ToolExecutionContext) {
+        self.invocation.receipt_persisted(context);
+    }
+
     fn managed_process(&self) -> Option<crate::catalog::managed_process::ManagedProcessKind> {
         self.invocation.managed_process()
     }
@@ -511,12 +515,10 @@ mod tests {
             source: None,
         };
         let cancelled = CancellationToken::default();
-        assert!(
-            first
-                .clone()
-                .bind_call(&call, &context, &cancelled)
-                .is_err()
-        );
+        assert!(first
+            .clone()
+            .bind_call(&call, &context, &cancelled)
+            .is_err());
         let old_call = pinned.bind_call(&call, &context, &cancelled).unwrap();
         let contract = old_call.prepare(&cancelled).unwrap();
         let execution = ToolExecutionContext {
@@ -550,11 +552,9 @@ mod tests {
         assert!(next.revoke(first_id).unwrap());
         assert!(cancelled.is_cancelled());
         assert!(!next_token.is_cancelled());
-        assert!(
-            old_call
-                .authorize(&execution, &contract, &cancelled)
-                .is_err()
-        );
+        assert!(old_call
+            .authorize(&execution, &contract, &cancelled)
+            .is_err());
         assert!(
             matches!(next_call.execute(&execution, &next_contract, &next_token).completion, ToolCompletion::Result {content, ..} if content.data == "next")
         );

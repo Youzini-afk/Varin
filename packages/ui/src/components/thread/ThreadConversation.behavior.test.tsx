@@ -1,4 +1,4 @@
-import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
+import { registerRuntimeAPIs, getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import type { DocumentsAPI, RuntimeAPIs } from '@varin/application-client';
 import { attachProcessTerminal } from '@/lib/attachProcessTerminal';
 import React, { act } from 'react';
@@ -77,6 +77,8 @@ function fixture(active = false) {
     listMcpInteractions: vi.fn(async () => ({ items: [], nextCursor: null })), readMcpInteraction: unused, respondMcpInteraction: unused,
     reviewMcpSamplingRequest: unused, reviewMcpSamplingOutput: unused,
     snapshot: async () => structuredClone(view), submit, enqueue, editInput, cancelInput, cancelRun,
+    sources: { list: async () => ({ targets: [{ resourceOwner: { kind: 'local' }, label: 'This Host', capabilities: [] }], unavailable: [] }),
+      resolve: async (_identity, request) => ({ resourceOwner: request.resourceOwner, path: request.path, workspaceId: (await getRegisteredRuntimeAPIs()!.documents.resolveWorkspace({ path: request.path })).workspaceId }) },
     recoverySource: unused, prepareNavigation: unused, navigate: unused, navigationReceipt: unused,
     inspectTools: unused, inspectPolicy: unused, restartPolicy: unused, cancelPolicyUpdate: unused, selectModel: unused, decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, retryPreparation: unused, events: async () => [],
     observe: async (_cursor, onEvent, { signal }) => new Promise<void>(resolve => { listener = onEvent; if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true }); }),
@@ -207,8 +209,8 @@ it.each(['file-backed', 'source-free'] as const)('keeps the original report, wai
     state: sourceFree ? 'failed' : 'completed', revision: 3, cursor: 3, receipt: { run_id: 'child-run', input_id: 'input', branch_id: 'branch:child', thread_id: 'thread:child', cursor: 1 },
     report: { outcome: sourceFree ? 'failed' : 'succeeded', sender_thread_id: 'thread:child', run_id: 'child-run', history_ids: ['original-report'], detail: 'The original child report' },
     resources_released: !sourceFree, code_result: sourceFree ? { kind: 'not_applicable' } : { kind: 'pending' },
-    source: sourceFree ? { kind: 'absent' } : { kind: 'pending', handoff: { operation_id: 'handoff', source: { mode: 'fixed_branch' as const, workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null },
-      root: { kind: 'fixed' as const, pin: { pin_id: 'pin', root: 'root', source: { mode: 'fixed_branch' as const, workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null } } } } },
+    source: sourceFree ? { kind: 'absent' } : { kind: 'pending', handoff: { operation_id: 'handoff', resource_authority: null, source: { resource_owner: { kind: 'local' as const }, mode: 'fixed_branch' as const, workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null },
+      root: { kind: 'fixed' as const, pin: { pin_id: 'pin', root: 'root', source: { resource_owner: { kind: 'local' as const }, mode: 'fixed_branch' as const, workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null } } } } },
   };
   f.view.children = [child];
   const observation: ThreadSnapshot['operations'][number] = { id: 'original-child-wait', run_id: 'ui-run', epoch: 1, revision: 1,
@@ -532,7 +534,7 @@ function resourceCheckpoint(): ContextCheckpoint {
     proposal: { key: 'context:original', branch_id: identity.branchId, through_id: null, expected_revision: 2,
       summary: '', effective_system_prompt: 'Private composed prompt', instruction_sources: [], memory_checkpoint: null },
     resources: {
-      source: { workspace_id: 'workspace:fixture', execution_workspace_id: 'workspace:fixture', branch_id: 'source:branch', revision: 7, mode: 'fixed_branch', live_root: null },
+      source: { resource_owner: { kind: 'local' as const }, workspace_id: 'workspace:fixture', execution_workspace_id: 'workspace:fixture', branch_id: 'source:branch', revision: 7, mode: 'fixed_branch', live_root: null },
       snapshot: { id: 'resources:original', scope: { threadId: identity.threadId, branchId: identity.branchId, mode: 'agent', threadRole: 'main',
         projectId: 'project:fixture', sourceIdentity: 'source:fixed', cwd: '/workspace/project', projectTrusted: true, projectRoot: '/workspace/project' },
         readers: [{ domainId: 'project:fixture', viewId: 'source:fixed', consistency: 'immutable' }],
@@ -761,7 +763,7 @@ it('retries summary generation without duplicating the job and applies its compl
 
 it('prepares a real source selection, preserves it and the draft on uncertain send, then omits it for continuation', async () => {
   const f = fixture();
-  const prepared = { path: '/workspace/project', source: { workspaceId: 'captured-workspace', executionWorkspaceId: 'captured-workspace', branchId: 'captured-branch', revision: 0, mode: 'fixed_branch' as const, tools: ['file_read' as const] } };
+  const prepared = { path: '/workspace/project', source: { resourceOwner: { kind: 'local' as const }, workspaceId: 'captured-workspace', executionWorkspaceId: 'captured-workspace', branchId: 'captured-branch', revision: 0, mode: 'fixed_branch' as const, tools: ['file_read' as const] } };
   f.api.prepareSource = vi.fn().mockRejectedValueOnce(new Error('capture unavailable')).mockResolvedValue(prepared);
   f.submit.mockRejectedValueOnce(new Error('send uncertain'));
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} initialWorkspacePath="/workspace/project" />); });
@@ -794,14 +796,14 @@ it('discards in-flight source preparation when the API owner changes', async () 
   await act(async () => { button('Prepare workspace').click(); });
   const next = fixture();
   await act(async () => { root.render(<ThreadConversation api={next.api} identity={identity} initialWorkspacePath="/new-host/project" />); });
-  await act(async () => { resolvePrepare({ path: '/old-host/project', source: { workspaceId: 'old-host-workspace', executionWorkspaceId: 'old-host-workspace', branchId: 'old-host-source', revision: 0, mode: 'fixed_branch', tools: ['file_read'] } }); });
+  await act(async () => { resolvePrepare({ path: '/old-host/project', source: { resourceOwner: { kind: 'local' as const }, workspaceId: 'old-host-workspace', executionWorkspaceId: 'old-host-workspace', branchId: 'old-host-source', revision: 0, mode: 'fixed_branch', tools: ['file_read'] } }); });
   expect(container.querySelector('[aria-label="Prepared workspace"]')).toBeNull();
   expect(button('Preparing workspace snapshot')).toBeUndefined();
 });
 
 it('does not silently discard a prepared workspace when a live run appears before send', async () => {
   const f = fixture();
-  f.api.prepareSource = vi.fn().mockResolvedValue({ path: '/workspace/project', source: { workspaceId: 'prepared-ws', executionWorkspaceId: 'prepared-ws', branchId: 'prepared-source', revision: 0, mode: 'materialized', tools: ['file_read', 'file_write'] } });
+  f.api.prepareSource = vi.fn().mockResolvedValue({ path: '/workspace/project', source: { resourceOwner: { kind: 'local' as const }, workspaceId: 'prepared-ws', executionWorkspaceId: 'prepared-ws', branchId: 'prepared-source', revision: 0, mode: 'materialized', tools: ['file_read', 'file_write'] } });
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} initialWorkspacePath="/workspace/project" />); });
   await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
   await edit('[aria-label="Message thread"]', 'run on prepared workspace');
@@ -893,7 +895,7 @@ it('permission UI sends only an explicit one-action decision and cannot approve 
 
 it('requires an explicit live workspace choice and discloses direct effects before sending its prepared identity', async () => {
   const f = fixture();
-  const prepared = { path: '/workspace/project', source: { workspaceId: 'live-workspace', executionWorkspaceId: 'live-workspace', mode: 'live_root' as const,
+  const prepared = { path: '/workspace/project', source: { resourceOwner: { kind: 'local' as const }, workspaceId: 'live-workspace', executionWorkspaceId: 'live-workspace', mode: 'live_root' as const,
     liveRoot: { hostId: 'selected-host', canonicalRoot: '/workspace/project', rootId: 'registered-root' }, tools: ['file_read' as const, 'file_write' as const] } };
   f.api.prepareSource = vi.fn().mockResolvedValue(prepared);
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} initialWorkspacePath="/workspace/project" />); });
@@ -915,9 +917,9 @@ it('requires an explicit live workspace choice and discloses direct effects befo
 it.each(['fixed_branch', 'materialized'] as const)('reprepares %s and submits the new source tool directory unchanged', async mode => {
   const f = fixture();
   const languageTools = ['language_definition', 'language_references', 'language_diagnostics'] as const;
-  const live = { path: '/workspace/project', source: { workspaceId: 'selected-workspace', executionWorkspaceId: 'selected-workspace', mode: 'live_root' as const,
+  const live = { path: '/workspace/project', source: { resourceOwner: { kind: 'local' as const }, workspaceId: 'selected-workspace', executionWorkspaceId: 'selected-workspace', mode: 'live_root' as const,
     liveRoot: { hostId: 'host', canonicalRoot: '/workspace/project', rootId: 'live-root' }, tools: ['file_read' as const, ...languageTools] } };
-  const fixed = { path: '/workspace/project', source: { workspaceId: 'selected-workspace', executionWorkspaceId: 'selected-workspace', branchId: 'captured-source', revision: 0,
+  const fixed = { path: '/workspace/project', source: { resourceOwner: { kind: 'local' as const }, workspaceId: 'selected-workspace', executionWorkspaceId: 'selected-workspace', branchId: 'captured-source', revision: 0,
     mode, tools: mode === 'fixed_branch' ? ['file_read' as const] : [...live.source.tools, 'file_write' as const] } };
   f.api.prepareSource = vi.fn().mockResolvedValueOnce(live).mockResolvedValueOnce(fixed);
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} initialWorkspacePath="/workspace/project" />); });
@@ -1117,7 +1119,7 @@ it.each(['file-backed', 'source-free'] as const)('continues a completed %s child
   const previous = { ...f.view.activeRun!, state: 'completed' as const };
   f.view.activeRun = null; f.view.thread.branches[0]!.active_run_id = null; f.view.thread.branches[0]!.latest_run = previous;
   f.view.thread.branches[0]!.head = 'old-head';
-  const source = { mode: 'fixed_branch' as const, workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null };
+  const source = { resource_owner: { kind: 'local' as const }, mode: 'fixed_branch' as const, workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null };
   const original: DelegatedExecution = { execution_id: 'old-execution', child_operation_id: 'original-dispatch', child_thread_id: identity.threadId, child_branch_id: identity.branchId,
     parent_run_id: 'parent-run', parent_thread_id: 'parent-thread', parent_branch_id: 'parent-branch', origin: { kind: 'model_step', request_id: 'original-request' }, call_id: 'dispatch', project_id: null,
     selected_profile: { preset_id: null, catalog_identity: 'frozen', work_mode: sourceFree ? 'read_only' : 'isolated_write', tools: [], instructions: '' },
@@ -2473,7 +2475,7 @@ function navigationFixture() {
     return { threadId: input.threadId, branchId: input.branchId, previousHeadId: input.expectedHeadId, headId: input.targetHeadId, key: input.key, alreadyApplied: false };
   });
   const navigationReceipt = vi.fn<ThreadsAPI['navigationReceipt']>(async () => null);
-  const recoverySource = vi.fn<ThreadsAPI['recoverySource']>(async () => ({ workspaceId: 'actual-source-owner', mode: 'materialized', runId: 'finished-run' }));
+  const recoverySource = vi.fn<ThreadsAPI['recoverySource']>(async () => ({ resourceOwner: { kind: 'local' }, workspaceId: 'actual-source-owner', mode: 'materialized', runId: 'finished-run' }));
   const fork = vi.fn<ThreadsAPI['fork']>(async () => identity);
   Object.assign(f.api, { prepareNavigation, navigate, navigationReceipt, recoverySource, fork });
   return { ...f, user, assistant, prepareNavigation, navigate, navigationReceipt, recoverySource, fork };
@@ -2585,7 +2587,7 @@ it('thread recovery uses the actual materialized source owner for automatic comb
 
 it('thread recovery keeps fixed-branch sources conversation-only even when combined recovery is preferred', async () => {
   const f = navigationFixture(); const recovery = combinedFixture(f); useUIStore.setState({ recoveryPreference: 'both' });
-  f.recoverySource.mockResolvedValue({ workspaceId: 'read-only-source', mode: 'fixed_branch', runId: 'finished-run' });
+  f.recoverySource.mockResolvedValue({ resourceOwner: { kind: 'local' }, workspaceId: 'read-only-source', mode: 'fixed_branch', runId: 'finished-run' });
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   await act(async () => button('Restore before this message').click());
   expect(f.navigate).toHaveBeenCalledOnce(); expect(recovery.prepareCombinedRecovery).not.toHaveBeenCalled();
@@ -2746,12 +2748,12 @@ it('thread recovery resumes a stopped nonterminal combined operation using its o
   expect(f.navigate).not.toHaveBeenCalled(); expect(container.querySelectorAll('article')).toHaveLength(1);
 });
 
-it('thread recovery rebuilds independent navigation Undo from the original owner after reopening without replaying its old draft', async () => {
+it.each([false, true])('thread recovery rebuilds independent navigation Undo after reopening with combined recovery unavailable=%s', async combinedUnavailable => {
   const f = navigationFixture();
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   await act(async () => button('Restore before this message').click());
   const receipt = await f.navigate.mock.results[0]!.value;
-  f.view.recovery = { navigation: receipt, operations: [] };
+  f.view.recovery = { navigation: receipt, operations: [], ...(combinedUnavailable ? { combinedUnavailable: 'Managed file recovery is unavailable. Conversation navigation remains available.' } : {}) };
   await act(async () => { root.unmount(); }); root = createRoot(container);
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('');
@@ -2813,4 +2815,19 @@ it('thread recovery offers an explicit conversation-only choice when file prepar
   await act(async () => button('Restore conversation only').click());
   expect(f.navigate).toHaveBeenCalledOnce(); expect(f.prepareNavigation).toHaveBeenCalledOnce();
   expect(container.querySelectorAll('article')).toHaveLength(1);
+});
+
+
+it('keeps managed file recovery off the coordinator and preserves explicit conversation-only navigation', async () => {
+  const f = navigationFixture(); const recovery = combinedFixture(f); useUIStore.setState({ recoveryPreference: 'both' });
+  f.recoverySource.mockResolvedValue({ resourceOwner: { kind: 'managed_host', hostId: 'host-b', connectionId: 'b', endpointIdentity: 'sha256-b' },
+    workspaceId: 'same-path-on-b', mode: 'materialized', runId: 'finished-run' });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Restore before this message').click());
+  expect(recovery.prepareCombinedRecovery).not.toHaveBeenCalled(); expect(f.navigate).not.toHaveBeenCalled();
+  expect(container.textContent).toContain('File recovery for this managed Host is not available yet');
+  const conversation = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('Restore conversation only'));
+  expect(conversation).toBeDefined();
+  await act(async () => conversation!.click());
+  expect(f.navigate).toHaveBeenCalledOnce(); expect(recovery.prepareCombinedRecovery).not.toHaveBeenCalled();
 });

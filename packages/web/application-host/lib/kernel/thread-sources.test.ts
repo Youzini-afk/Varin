@@ -69,7 +69,7 @@ async function fixture() {
   const workingStates: WorkspaceWorkingStateRootAccess = { async withBranchStore(_workspace, _purpose, callback) { return callback(store); } };
   const options = { documents, workingStates, inspectInventory: async () => ({ kind: 'directory' as const }), sourceTools: async () => ['file_read'] };
   const prepare = createThreadSourcePreparer(options);
-  const input: ThreadPrepareSource = { runtime: 'agent', threadId: 'thread:source-review', branchId: 'branch:source-review', key: 'source', workspaceId,
+  const input: ThreadPrepareSource = { resourceOwner: { kind: 'local' }, runtime: 'agent', threadId: 'thread:source-review', branchId: 'branch:source-review', key: 'source', workspaceId,
     mode: 'fixed_branch', content: { mode: 'saved-files' }, captureScopes: [] };
   const consumer: AgentInputSnapshotConsumer = { kind: 'thread', threadId: input.threadId, branchId: input.branchId };
   const snapshot = async () => {

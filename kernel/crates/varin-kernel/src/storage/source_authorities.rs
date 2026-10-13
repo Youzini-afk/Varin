@@ -1,0 +1,1046 @@
+//! Source leases live in the original Storage record owner. These are permissions and
+//! fencing records, not another operation or process ledger.
+use super::*;
+use crate::source_resources::*;
+use serde::Serialize;
+
+impl Storage {
+    fn source_record<T: serde::de::DeserializeOwned>(
+        &self,
+        kind: &str,
+        id: &str,
+    ) -> Result<Option<T>, KernelError> {
+        let body: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT payload_json FROM domain_records WHERE record_type=?1 AND record_id=?2",
+                params![kind, id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        body.map(|v| serde_json::from_str(&v).map_err(Into::into))
+            .transpose()
+    }
+    fn save_source_record<T: Serialize>(
+        &mut self,
+        kind: &str,
+        id: &str,
+        workspace: &str,
+        state: &str,
+        value: &T,
+    ) -> Result<(), KernelError> {
+        self.conn.execute("INSERT INTO domain_records(record_id,workspace_id,record_type,state,record_revision,payload_json,created_at,updated_at) VALUES(?1,?2,?3,?4,1,?5,?6,?6) ON CONFLICT(workspace_id,record_id) DO UPDATE SET state=excluded.state,payload_json=excluded.payload_json,record_revision=record_revision+1,updated_at=excluded.updated_at",params![id,workspace,kind,state,serde_json::to_string(value)?,now_ms()])?;
+        Ok(())
+    }
+    pub(crate) fn source_authority(
+        &self,
+        address: &SourceAuthorityAddress,
+        current: bool,
+        epoch: &str,
+    ) -> Result<AuthorityRecord, KernelError> {
+        let record: AuthorityRecord = self
+            .source_record("source.authority", &address.authority_id)?
+            .ok_or_else(|| denied("Original source authority is unavailable"))?;
+        if record.principal_id != address.principal_id
+            || record.coordinator_host_id != address.coordinator_host_id
+            || record.result.resource_epoch != address.resource_epoch
+        {
+            return Err(denied(
+                "Source authority belongs to another authenticated owner",
+            ));
+        }
+        if current {
+            let scope: ScopeRecord = self
+                .source_record("source.scope", &record.scope_id)?
+                .ok_or_else(|| denied("Source scope is unavailable"))?;
+            if scope.epoch != record.result.scope.epoch()
+                || scope.source != record.result.source
+                || record.result.resource_epoch != epoch
+                || matches!(record.result.phase.as_str(), "retired" | "revoked")
+            {
+                return Err(denied("Source authority no longer admits new work"));
+            }
+        }
+        Ok(record)
+    }
+    pub(crate) fn source_authority_open(
+        &mut self,
+        p: SourceAuthorityOpenParams,
+        epoch: &str,
+        host_id: &str,
+    ) -> Result<Value, KernelError> {
+        if p.principal_id.is_empty()
+            || p.coordinator_host_id.is_empty()
+            || !p.scope.validate()
+            || !matches!(
+                p.purpose.as_str(),
+                "source" | "read" | "integration" | "result"
+            )
+        {
+            return Err(denied("Source authority identity is incomplete"));
+        }
+        p.source.validate().map_err(|e| denied(&e.to_string()))?;
+        if p.source.resource_owner.host_id() != Some(host_id) {
+            return Err(denied("Source belongs to another resource Host"));
+        }
+        if let Some(execution) = p
+            .source
+            .branch_id
+            .as_deref()
+            .and_then(|branch| branch.strip_prefix("child-source:"))
+        {
+            let receipt = self.operation_get(
+                &json!({"operationId":format!("child-source-handoff:{execution}")}),
+            )?;
+            if receipt["kind"] != "source.handoff" || receipt["state"] != "committed" {
+                return Err(denied("Private child source has no original handoff"));
+            }
+            let handoff: varin_runtime::catalog::collaboration::ChildSourceHandoff =
+                serde_json::from_value(receipt["result"].clone())?;
+            let original = handoff
+                .resource_authority
+                .ok_or_else(|| denied("Private source has no managed creation authority"))?;
+            let creator = self.source_authority(
+                &SourceAuthorityAddress {
+                    principal_id: p.principal_id.clone(),
+                    coordinator_host_id: p.coordinator_host_id.clone(),
+                    authority_id: original.authority_id,
+                    resource_epoch: original.resource_epoch,
+                },
+                false,
+                epoch,
+            )?;
+            if p.scope.thread_id() != creator.result.scope.thread_id()
+                && p.scope.thread_id() != format!("thread:child:{execution}")
+            {
+                return Err(denied("Private child source belongs to another Thread"));
+            }
+            if p.source.resource_owner != creator.result.source.resource_owner
+                || p.source.workspace_id != creator.result.source.workspace_id
+                || p.source.execution_workspace_id != creator.result.source.execution_workspace_id
+            {
+                return Err(denied(
+                    "Private child source belongs to another original resource",
+                ));
+            }
+        }
+        let grant = self.load_grant(&p.grant_id)?;
+        if grant.state != crate::model::GrantState::Active
+            || grant.host_id != host_id
+            || grant.kernel_epoch != epoch
+            || grant.thread_id.as_deref() != Some(p.scope.thread_id())
+            || grant.run_id.as_deref() != p.scope.run_id()
+            || grant.owning_workspace.as_deref() != Some(&p.source.workspace_id)
+            || grant.execution_workspace.as_deref() != Some(&p.source.execution_workspace_id)
+            || grant.operation_id != p.operation_id
+        {
+            return Err(denied(
+                "Source grant differs from its original admitted scope",
+            ));
+        }
+        let scope_id = format!(
+            "source-scope:{}",
+            hash_json(&json!([
+                p.principal_id,
+                p.coordinator_host_id,
+                p.scope.identity()
+            ]))?
+        );
+        let mut scope: ScopeRecord =
+            self.source_record("source.scope", &scope_id)?
+                .unwrap_or(ScopeRecord {
+                    source: p.source.clone(),
+                    epoch: p.scope.epoch(),
+                    ready: false,
+                });
+        if scope.source != p.source || scope.epoch > p.scope.epoch() {
+            return Err(denied("Source scope or coordinator epoch changed"));
+        }
+        scope.epoch = p.scope.epoch();
+        // Fencing new dispatch is separate from revoking the creation grant. Accepted
+        // Thread processes continue under their original lifetime and receipt identity.
+        self.save_source_record(
+            "source.scope",
+            &scope_id,
+            &p.source.workspace_id,
+            "active",
+            &scope,
+        )?;
+        let authority_id = format!(
+            "source-authority:{}",
+            hash_json(&json!([p.principal_id, p.coordinator_host_id, p.grant_id]))?
+        );
+        if let Some(previous) =
+            self.source_record::<AuthorityRecord>("source.authority", &authority_id)?
+        {
+            if previous.result.source != p.source
+                || previous.result.scope != p.scope
+                || previous.enabled_tools != p.enabled_tools
+                || previous.purpose != p.purpose
+            {
+                return Err(denied("Source authority identity was reused"));
+            }
+            return Ok(serde_json::to_value(previous.result)?);
+        }
+        let environment = p
+            .source
+            .environment_run_id
+            .as_deref()
+            .or(p.scope.run_id())
+            .unwrap_or("");
+        let key = hex::encode(Sha256::digest(serde_json::to_vec(&json!([
+            p.source.workspace_id,
+            environment
+        ]))?));
+        let result = SourceAuthorityResult {
+            authority_id: authority_id.clone(),
+            resource_epoch: epoch.into(),
+            execution_owner: varin_runtime::ExecutorOwner::External {
+                identity: format!("source:{host_id}:{authority_id}"),
+                epoch: epoch.into(),
+            },
+            source: p.source,
+            scope: p.scope,
+            phase: "preparing".into(),
+            purpose: p.purpose.clone(),
+            operation_id: p.operation_id.clone(),
+            grant_id: p.grant_id,
+            tool_binding: None,
+            physical_root: None,
+            first_preparation: !scope.ready,
+            materialization_operation_id: format!("source-materialize:{key}"),
+        };
+        let record = AuthorityRecord {
+            principal_id: p.principal_id,
+            coordinator_host_id: p.coordinator_host_id,
+            scope_id,
+            enabled_tools: p.enabled_tools,
+            purpose: p.purpose,
+            operation_id: p.operation_id,
+            result,
+        };
+        self.save_source_record(
+            "source.authority",
+            &authority_id,
+            &record.result.source.workspace_id,
+            "preparing",
+            &record,
+        )?;
+        Ok(serde_json::to_value(record.result)?)
+    }
+    pub(crate) fn source_authority_bind(
+        &mut self,
+        p: SourceAuthorityBindParams,
+        epoch: &str,
+        host_id: &str,
+    ) -> Result<Value, KernelError> {
+        let address = SourceAuthorityAddress {
+            principal_id: p.principal_id,
+            coordinator_host_id: p.coordinator_host_id,
+            authority_id: p.authority_id,
+            resource_epoch: p.resource_epoch,
+        };
+        let mut record = self.source_authority(&address, true, epoch)?;
+        if let Some(binding) = &p.tool_binding {
+            if record.result.scope.run_id() != Some(binding.run_id.as_str())
+                || record.result.scope.thread_id() != binding.thread_id
+                || record.result.grant_id != binding.grant_id
+                || binding.source_selection()? != record.result.source
+                || binding
+                    .enabled_tools
+                    .iter()
+                    .map(|t| t.name().to_string())
+                    .collect::<BTreeSet<_>>()
+                    != record.enabled_tools.iter().cloned().collect()
+            {
+                return Err(denied("Source binding changed after admission"));
+            }
+            if binding.remote_authority.is_some() {
+                return Err(denied(
+                    "Receiving source authority cannot redirect resource execution",
+                ));
+            }
+            crate::tools::KernelToolExecutor::validate_source_binding(binding)?;
+        } else if record.result.scope.run_id().is_some() {
+            return Err(denied("Run source requires its exact tool binding"));
+        }
+        if let Some(root) = &p.physical_root {
+            let grant = self.load_grant(&record.result.grant_id)?;
+            let registered = self.registered_file_root(&root.root_id, &grant)?;
+            if root.host_id != host_id
+                || root.canonical_root != registered.canonical_root
+                || registered.execution_workspace_id != record.result.source.execution_workspace_id
+            {
+                return Err(denied("Source physical root changed"));
+            }
+            if record.result.source.mode == varin_runtime::SourceMode::LiveRoot
+                && record.result.source.live_root.as_ref() != Some(root)
+            {
+                return Err(denied("Live source identity changed"));
+            }
+            if let Some(binding) = &p.tool_binding {
+                if binding.root_id.as_deref() != Some(root.root_id.as_str()) {
+                    return Err(denied("Tool root differs from admitted source"));
+                }
+            }
+        } else if record.purpose != "result"
+            && p.tool_binding
+                .as_ref()
+                .is_some_and(|b| b.source_mode != varin_runtime::SourceMode::FixedBranch)
+        {
+            return Err(denied("Physical source requires its original root"));
+        }
+        if record.result.phase == "ready"
+            && (serde_json::to_value(&record.result.tool_binding)?
+                != serde_json::to_value(&p.tool_binding)?
+                || record.result.physical_root != p.physical_root)
+        {
+            return Err(denied("Ready source authority is immutable"));
+        }
+        record.result.tool_binding = p.tool_binding;
+        record.result.physical_root = p.physical_root;
+        record.result.phase = "ready".into();
+        let prior: ScopeRecord = self
+            .source_record("source.scope", &record.scope_id)?
+            .ok_or_else(|| denied("Source scope is unavailable"))?;
+        let scope = ScopeRecord {
+            source: record.result.source.clone(),
+            epoch: record.result.scope.epoch(),
+            ready: prior.ready || record.purpose != "result",
+        };
+        self.save_source_record(
+            "source.scope",
+            &record.scope_id,
+            &record.result.source.workspace_id,
+            "active",
+            &scope,
+        )?;
+        self.save_source_record(
+            "source.authority",
+            &address.authority_id,
+            &record.result.source.workspace_id,
+            "ready",
+            &record,
+        )?;
+        Ok(serde_json::to_value(record.result)?)
+    }
+    pub(crate) fn release_source_authority(
+        &mut self,
+        address: &SourceAuthorityAddress,
+        mode: &str,
+        host_id: &str,
+        epoch: &str,
+    ) -> Result<Value, KernelError> {
+        let mut record = self.source_authority(address, false, epoch)?;
+        let receipt = match mode {
+            "retire" => self.retire_grants(
+                &json!({"target":{"kind":"grant","grantId":record.result.grant_id}}),
+                host_id,
+            )?,
+            "revoke" => self.revoke_grant(&json!({"grantId":record.result.grant_id}), host_id)?,
+            _ => return Err(denied("Unknown source release mode")),
+        };
+        record.result.phase = if mode == "retire" {
+            "retired"
+        } else {
+            "revoked"
+        }
+        .into();
+        self.save_source_record(
+            "source.authority",
+            &address.authority_id,
+            &record.result.source.workspace_id,
+            &record.result.phase,
+            &record,
+        )?;
+        Ok(
+            json!({"authorityId":address.authority_id,"phase":record.result.phase,"grantIds":[record.result.grant_id],"receipt":receipt}),
+        )
+    }
+    pub(crate) fn inspect_source_scope(
+        &self,
+        p: SourceAuthorityScopeParams,
+    ) -> Result<Value, KernelError> {
+        let mut q = self.conn.prepare(
+            "SELECT payload_json FROM domain_records WHERE record_type='source.authority'",
+        )?;
+        let rows = q.query_map([], |r| r.get::<_, String>(0))?;
+        let mut found = Vec::new();
+        for row in rows {
+            let record: AuthorityRecord = serde_json::from_str(&row?)?;
+            if record.principal_id == p.principal_id
+                && record.coordinator_host_id == p.coordinator_host_id
+                && record.result.scope.thread_id() == p.thread_id
+                && record.result.scope.run_id() == Some(p.run_id.as_str())
+            {
+                found.push(record.result);
+            }
+        }
+        Ok(serde_json::to_value(found)?)
+    }
+    pub(crate) fn release_source_scope(
+        &mut self,
+        p: SourceAuthorityScopeReleaseParams,
+        epoch: &str,
+        host_id: &str,
+    ) -> Result<Value, KernelError> {
+        let records = {
+            let mut q = self.conn.prepare(
+                "SELECT payload_json FROM domain_records WHERE record_type='source.authority'",
+            )?;
+            let rows = q.query_map([], |r| r.get::<_, String>(0))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        let mut released = Vec::new();
+        let mut pending = Vec::new();
+        for body in records {
+            let record: AuthorityRecord = serde_json::from_str(&body)?;
+            if record.principal_id != p.principal_id
+                || record.coordinator_host_id != p.coordinator_host_id
+                || record.result.scope.thread_id() != p.thread_id
+                || record.result.scope.run_id() != Some(p.run_id.as_str())
+            {
+                continue;
+            }
+            if p.mode == "retire" && record.operation_id.is_some() {
+                continue;
+            }
+            let address = SourceAuthorityAddress {
+                principal_id: p.principal_id.clone(),
+                coordinator_host_id: p.coordinator_host_id.clone(),
+                authority_id: record.result.authority_id.clone(),
+                resource_epoch: record.result.resource_epoch,
+            };
+            match self.release_source_authority(&address, &p.mode, host_id, epoch) {
+                Ok(result) => {
+                    if result["receipt"]["pendingProcesses"]
+                        .as_array()
+                        .is_some_and(|v| !v.is_empty())
+                        || result["receipt"]["processStopFailures"]
+                            .as_array()
+                            .is_some_and(|v| !v.is_empty())
+                    {
+                        pending.push(record.result.authority_id);
+                    }
+                    released.push(result)
+                }
+                Err(_) => pending.push(record.result.authority_id),
+            }
+        }
+        Ok(json!({"released":released,"pendingAuthorities":pending}))
+    }
+}
+
+impl Storage {
+    fn source_authority_for_grant(
+        &self,
+        grant_id: &str,
+    ) -> Result<Option<AuthorityRecord>, KernelError> {
+        let mut query = self.conn.prepare(
+            "SELECT payload_json FROM domain_records WHERE record_type='source.authority'",
+        )?;
+        for row in query.query_map([], |row| row.get::<_, String>(0))? {
+            let record: AuthorityRecord = serde_json::from_str(&row?)?;
+            if record.result.grant_id == grant_id {
+                return Ok(Some(record));
+            }
+        }
+        Ok(None)
+    }
+    pub(crate) fn validate_source_grant_owner(
+        &self,
+        current_grant: &str,
+        creation_grant: &str,
+    ) -> Result<(), KernelError> {
+        match (
+            self.source_authority_for_grant(current_grant)?,
+            self.source_authority_for_grant(creation_grant)?,
+        ) {
+            (None, None) => Ok(()),
+            (Some(current), Some(original))
+                if current.principal_id == original.principal_id
+                    && current.coordinator_host_id == original.coordinator_host_id
+                    && current.result.scope.thread_id() == original.result.scope.thread_id()
+                    && current.result.scope.run_id() == original.result.scope.run_id()
+                    && current.result.source == original.result.source =>
+            {
+                Ok(())
+            }
+            _ => Err(denied(
+                "Original source result belongs to another authenticated owner",
+            )),
+        }
+    }
+    pub(crate) fn validate_source_resource(
+        &self,
+        address: &SourceAuthorityAddress,
+        binding: &crate::tools::ToolBinding,
+        epoch: &str,
+        current: bool,
+    ) -> Result<(), KernelError> {
+        let record = self.source_authority(address, current, epoch)?;
+        if record.result.phase != "ready"
+            || record.result.grant_id != binding.grant_id
+            || record.result.source != binding.source_selection()?
+            || record.result.scope.run_id() != Some(binding.run_id.as_str())
+            || record.result.scope.thread_id() != binding.thread_id
+        {
+            return Err(denied(
+                "Typed resource no longer has its original source authority",
+            ));
+        }
+        Ok(())
+    }
+    /// Managed process IDs are namespaced by the authenticated coordinator/principal,
+    /// not by caller-supplied Thread or Run strings. Delegated output follows only
+    /// handoffs and immutable branch bases already recorded by this Storage owner.
+    pub(crate) fn validate_source_process_access(
+        &self,
+        binding: &crate::tools::ToolBinding,
+        id: &str,
+        epoch: &str,
+        lineage: Option<&varin_runtime::catalog::process_wait::ProcessResultLineage>,
+    ) -> Result<(), KernelError> {
+        let Some(address) = &binding.target_authority else {
+            return Ok(());
+        };
+        let current = self.source_authority(address, true, epoch)?;
+        let actor: String = self.conn.query_row(
+            "SELECT grant_id FROM process_records WHERE process_id=?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        let mut query = self.conn.prepare(
+            "SELECT payload_json FROM domain_records WHERE record_type='source.authority'",
+        )?;
+        let rows = query.query_map([], |row| row.get::<_, String>(0))?;
+        let mut creation = None;
+        for row in rows {
+            let value: AuthorityRecord = serde_json::from_str(&row?)?;
+            if value.result.grant_id == actor {
+                creation = Some(value);
+                break;
+            }
+        }
+        let creation =
+            creation.ok_or_else(|| denied("Process has no original managed source authority"))?;
+        if creation.principal_id != current.principal_id
+            || creation.coordinator_host_id != current.coordinator_host_id
+            || creation.result.scope.thread_id() != current.result.scope.thread_id()
+            || creation.result.source.resource_owner != current.result.source.resource_owner
+            || creation.result.source.workspace_id != current.result.source.workspace_id
+            || creation.result.source.execution_workspace_id
+                != current.result.source.execution_workspace_id
+        {
+            return Err(denied(
+                "Process belongs to another authenticated source owner",
+            ));
+        }
+        if let Some(proof) = lineage {
+            if proof.process_id() != id
+                || Some(proof.source_run_id()) != creation.result.scope.run_id()
+                || Some(proof.target_run_id()) != current.result.scope.run_id()
+                || proof.source() != &creation.result.source
+                || proof.target() != &current.result.source
+                || proof.executions().is_empty()
+            {
+                return Err(denied(
+                    "Process lineage differs from its original source owners",
+                ));
+            }
+            let mut step = current;
+            let mut seen = BTreeSet::new();
+            for execution in proof.executions() {
+                if !seen.insert(execution)
+                    || step.result.source.branch_id.as_deref()
+                        != Some(format!("child-source:{execution}").as_str())
+                {
+                    return Err(denied(
+                        "Process lineage has no matching target source branch",
+                    ));
+                }
+                let receipt = self.operation_get(
+                    &json!({"operationId":format!("child-source-handoff:{execution}")}),
+                )?;
+                if receipt["kind"] != "source.handoff" || receipt["state"] != "committed" {
+                    return Err(denied("Process lineage handoff is unavailable"));
+                }
+                let handoff: varin_runtime::catalog::collaboration::ChildSourceHandoff =
+                    serde_json::from_value(receipt["result"].clone())?;
+                let varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin } =
+                    &handoff.root
+                else {
+                    return Err(denied(
+                        "Process lineage requires the original immutable continuation basis",
+                    ));
+                };
+                let branch = self.branch(step.result.source.branch_id.as_deref().unwrap())?;
+                if branch.base_root != pin.root || pin.source != handoff.source {
+                    return Err(denied(
+                        "Process lineage branch differs from its original handoff",
+                    ));
+                }
+                let original = handoff
+                    .resource_authority
+                    .ok_or_else(|| denied("Process lineage original source authority missing"))?;
+                let prior = self.source_authority(
+                    &SourceAuthorityAddress {
+                        principal_id: step.principal_id.clone(),
+                        coordinator_host_id: step.coordinator_host_id.clone(),
+                        authority_id: original.authority_id,
+                        resource_epoch: original.resource_epoch,
+                    },
+                    false,
+                    epoch,
+                )?;
+                if prior.result.scope.thread_id() != step.result.scope.thread_id()
+                    || prior.result.source.resource_owner != step.result.source.resource_owner
+                    || handoff.source.resource_owner != prior.result.source.resource_owner
+                    || handoff.source.workspace_id != prior.result.source.workspace_id
+                    || handoff.source.execution_workspace_id
+                        != prior.result.source.execution_workspace_id
+                    || handoff.source.branch_id != prior.result.source.branch_id
+                {
+                    return Err(denied(
+                        "Process continuation belongs to another actual source",
+                    ));
+                }
+                step = prior;
+            }
+            if step.result.scope.run_id() != creation.result.scope.run_id()
+                || step.result.source != creation.result.source
+            {
+                return Err(denied(
+                    "Process lineage does not reach its actual creation source",
+                ));
+            }
+        }
+        Ok(())
+    }
+    pub(crate) fn source_service(
+        &mut self,
+        p: SourceServiceCallParams,
+        epoch: &str,
+    ) -> Result<Value, KernelError> {
+        let address = SourceAuthorityAddress {
+            principal_id: p.principal_id,
+            coordinator_host_id: p.coordinator_host_id,
+            authority_id: p.authority_id,
+            resource_epoch: p.resource_epoch,
+        };
+        let record = self.source_authority(&address, true, epoch)?;
+        if record.result.phase != "ready" || p.request_id.is_empty() {
+            return Err(denied(
+                "Source service requires its ready original authority",
+            ));
+        }
+        if !matches!(p.operation, SourceServiceOperation::Validate) {
+            return Err(denied("Native resource must use its original worker"));
+        }
+        let grant = self.load_grant(&record.result.grant_id)?;
+        if grant.state != crate::model::GrantState::Active {
+            return Err(denied("Source permit is no longer active"));
+        }
+        Ok(json!({"pathScopes":grant.path_scopes}))
+    }
+    /// The original interaction journal contains only a bounded intent and receipt.
+    /// The worker uses the existing process-interaction owner to read/drain its receipt.
+    pub(crate) fn source_interaction_receipt(
+        &mut self,
+        address: &SourceAuthorityAddress,
+        id: &str,
+        epoch: &str,
+    ) -> Result<
+        Option<(
+            AuthorityRecord,
+            super::process_interactions::Native,
+            super::process_interactions::Address,
+        )>,
+        KernelError,
+    > {
+        let record = self.source_authority(address, false, epoch)?;
+        let prior = self.operation_get(&json!({"operationId":id}))?;
+        if !matches!(
+            prior["kind"].as_str(),
+            Some("process.write" | "process.resize")
+        ) {
+            return Ok(None);
+        }
+        let intent: super::process_interactions::Intent =
+            serde_json::from_value(prior["result"]["intent"].clone())?;
+        let native = intent
+            .native
+            .ok_or_else(|| denied("Process interaction has no original invocation"))?;
+        let expected = if prior["kind"] == "process.write" {
+            "process_write"
+        } else {
+            "process_resize"
+        };
+        if intent.current_grant_id != record.result.grant_id
+            || native.resource_owner != record.result.source.resource_owner
+            || record.result.scope.run_id() != Some(native.context.run_id.as_str())
+            || native.context.operation_id != id
+            || native.executor != expected
+            || intent.address.operation_id != id
+            || intent.address.workspace_id != record.result.source.workspace_id
+            || record
+                .result
+                .tool_binding
+                .as_ref()
+                .is_none_or(|b| b.root_id != intent.address.root_id)
+        {
+            return Err(denied(
+                "Process interaction belongs to another original source authority",
+            ));
+        }
+        Ok(Some((record, native, intent.address)))
+    }
+    /// Recall only facts belonging to the authority's actual creation grant. Missing
+    /// receipts are unknown, never evidence that executing the same intent is safe.
+    pub(crate) fn observe_source_operation(
+        &mut self,
+        address: &SourceAuthorityAddress,
+        id: &str,
+        epoch: &str,
+        cancel: bool,
+    ) -> Result<Value, KernelError> {
+        let record = self.source_authority(address, false, epoch)?;
+        if id.is_empty() {
+            return Err(denied("Original operation identity required"));
+        }
+        let process_grant: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT grant_id FROM process_records WHERE process_id=?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let (accepted, stopped, result) = if let Some(grant) = process_grant {
+            if grant != record.result.grant_id {
+                return Err(denied("Process belongs to another source authority"));
+            }
+            if cancel {
+                let _ = self.processes.kill(id, true);
+            }
+            let mut status = self
+                .refresh_process_record(id)?
+                .ok_or_else(|| denied("Process receipt disappeared"))?;
+            let original_epoch = status["kernelEpoch"]
+                .as_str()
+                .ok_or_else(|| denied("Process epoch disappeared"))?;
+            if let Some(terminal) = crate::process::read_receipt(&self.root, id, original_epoch)? {
+                if terminal["processId"] != id || terminal["kernelEpoch"] != original_epoch {
+                    return Err(denied("Original process terminal identity changed"));
+                }
+                for (key, value) in terminal.as_object().into_iter().flatten() {
+                    status[key] = value.clone();
+                }
+            }
+            (
+                true,
+                status["writerActive"] == false && status["treeConfirmed"] == true,
+                status,
+            )
+        } else {
+            let prior = self.operation_get(&json!({"operationId":id}))?;
+            if prior.is_null() {
+                (false, false, Value::Null)
+            } else {
+                if prior["kind"] == "source.read" {
+                    if prior["result"]["authorityId"] != record.result.authority_id
+                        || prior["result"]["grantId"] != record.result.grant_id
+                    {
+                        return Err(denied("Read belongs to another original source authority"));
+                    }
+                    let receipt:varin_runtime::execution::ToolExecutionReceipt=varin_runtime::execution::ToolExecutionReceipt{executor_stopped:false,completion:varin_runtime::execution::ToolCompletion::Result{outcome:varin_runtime::Outcome::Indeterminate,effect:varin_runtime::Effect::None,content:json!({"reason":"Original source read has not returned a durable completion"}).into()}};
+                    return Ok(
+                        json!({"operationId":id,"resourceEpoch":record.result.resource_epoch,"executionOwner":record.result.execution_owner,"accepted":true,"executorStopped":false,"result":receipt,"process":null}),
+                    );
+                }
+                let identity = if prior["state"] == "started" {
+                    &prior["result"]["intent"]
+                } else {
+                    &prior["result"]
+                };
+                if identity["__nativeGrantId"] != record.result.grant_id {
+                    return Err(denied("Operation belongs to another original authority"));
+                }
+                let mut result = if prior["state"] == "committed" {
+                    prior["result"].clone()
+                } else {
+                    json!({"reason":"Original file effect remains unresolved"})
+                };
+                if let Some(object) = result.as_object_mut() {
+                    object.remove("__nativeGrantId");
+                    object.remove("__nativeEpoch");
+                    object.remove("__nativeRequestHash");
+                }
+                (true, prior["state"] == "committed", result)
+            }
+        };
+        use varin_runtime::execution::{ToolCompletion, ToolExecutionReceipt};
+        use varin_runtime::{Effect, Lifetime, Outcome};
+        let process = result.get("processId").is_some();
+        let completion: ToolCompletion = if process && !stopped {
+            ToolCompletion::JobAccepted {
+                operation_id: id.into(),
+                phase: result["status"].as_str().unwrap_or("unknown").into(),
+                effect: Effect::Dispatched,
+                lifetime: Lifetime::Thread,
+                content: None,
+            }
+        } else {
+            ToolCompletion::Result {
+                outcome: if !stopped {
+                    Outcome::Indeterminate
+                } else if process {
+                    if result["status"] == "exited" && result["exitCode"] == 0 {
+                        Outcome::Succeeded
+                    } else {
+                        Outcome::Failed
+                    }
+                } else if result["status"] == "applied" {
+                    Outcome::Succeeded
+                } else {
+                    Outcome::Failed
+                },
+                effect: if !stopped {
+                    Effect::Unknown
+                } else if process || result["status"] == "applied" {
+                    Effect::Confirmed
+                } else {
+                    Effect::None
+                },
+                content: result.clone().into(),
+            }
+        };
+        let receipt = ToolExecutionReceipt {
+            completion,
+            executor_stopped: stopped,
+        };
+        Ok(
+            json!({"operationId":id,"resourceEpoch":record.result.resource_epoch,"executionOwner":record.result.execution_owner,"accepted":accepted,"executorStopped":stopped,"result":receipt,"process":if process{result}else{Value::Null}}),
+        )
+    }
+}
+
+impl Storage {
+    pub(crate) fn inspect_source_handoff(
+        &self,
+        p: &SourceHandoffInspectParams,
+        epoch: &str,
+    ) -> Result<Value, KernelError> {
+        let receipt = self.operation_get(
+            &json!({"operationId":format!("child-source-handoff:{}",p.operation_id)}),
+        )?;
+        if receipt.is_null() {
+            return Ok(Value::Null);
+        }
+        if receipt["kind"] != "source.handoff" || receipt["state"] != "committed" {
+            return Err(denied("Original handoff is still unresolved"));
+        }
+        let handoff: varin_runtime::catalog::collaboration::ChildSourceHandoff =
+            serde_json::from_value(receipt["result"].clone())?;
+        let original = handoff
+            .resource_authority
+            .as_ref()
+            .ok_or_else(|| denied("Handoff has no managed resource authority"))?;
+        let authority = self.source_authority(
+            &SourceAuthorityAddress {
+                principal_id: p.principal_id.clone(),
+                coordinator_host_id: p.coordinator_host_id.clone(),
+                authority_id: original.authority_id.clone(),
+                resource_epoch: original.resource_epoch.clone(),
+            },
+            false,
+            epoch,
+        )?;
+        if authority.result.scope.run_id() != Some(p.parent_run_id.as_str())
+            || authority.result.scope.thread_id() != p.parent_thread_id
+            || handoff.source != p.source
+            || authority.result.source != p.source
+        {
+            return Err(denied("Handoff belongs to another original parent/source"));
+        }
+        Ok(serde_json::to_value(handoff)?)
+    }
+    pub(crate) fn claim_source_handoff(
+        &mut self,
+        p: SourceHandoffClaimParams,
+        epoch: &str,
+        host: &str,
+        generation: &str,
+    ) -> Result<Value, KernelError> {
+        use varin_runtime::catalog::collaboration::{
+            ChildSourceAuthority, ChildSourceHandoff, ChildSourcePin, ChildSourceRoot,
+        };
+        let SourceAuthorityScope::SourceRead {
+            thread_id,
+            branch_id,
+            ..
+        } = &p.scope
+        else {
+            return Err(denied("Child preparation has no model Run"));
+        };
+        let (handoff, dispatch) = match (p.handoff, p.continuation) {
+            (Some(handoff), None) => {
+                let original = handoff
+                    .resource_authority
+                    .as_ref()
+                    .ok_or_else(|| denied("Original managed handoff authority missing"))?;
+                let authority = self.source_authority(
+                    &SourceAuthorityAddress {
+                        principal_id: p.principal_id.clone(),
+                        coordinator_host_id: p.coordinator_host_id.clone(),
+                        authority_id: original.authority_id.clone(),
+                        resource_epoch: original.resource_epoch.clone(),
+                    },
+                    false,
+                    epoch,
+                )?;
+                let dispatch = handoff
+                    .operation_id
+                    .strip_prefix("child-source-handoff:")
+                    .ok_or_else(|| denied("Handoff operation identity invalid"))?
+                    .to_string();
+                if *thread_id != format!("thread:child:{dispatch}")
+                    || *branch_id != format!("branch:child:{dispatch}")
+                    || authority.result.source != handoff.source
+                    || handoff.source != p.source
+                {
+                    return Err(denied("Child grant differs from its original handoff"));
+                }
+                (handoff, dispatch)
+            }
+            (None, Some(continuation)) => {
+                if continuation.execution_id.is_empty()
+                    || continuation.previous_run_id.is_empty()
+                    || continuation.root.is_empty()
+                {
+                    return Err(denied("Continuation source identity missing"));
+                }
+                let candidates = self.inspect_source_scope(SourceAuthorityScopeParams {
+                    principal_id: p.principal_id.clone(),
+                    coordinator_host_id: p.coordinator_host_id.clone(),
+                    thread_id: thread_id.clone(),
+                    run_id: continuation.previous_run_id,
+                })?;
+                let previous = candidates
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|v| serde_json::from_value::<SourceAuthorityResult>(v.clone()))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .find(|old| {
+                        old.phase != "revoked"
+                            && old.source.resource_owner == p.source.resource_owner
+                            && old.source.workspace_id == p.source.workspace_id
+                            && old.source.execution_workspace_id == p.source.execution_workspace_id
+                            && old.source.branch_id == p.source.branch_id
+                    })
+                    .ok_or_else(|| {
+                        denied("Continuation has no original source authority in this child Thread")
+                    })?;
+                let branch = p
+                    .source
+                    .branch_id
+                    .as_deref()
+                    .ok_or_else(|| denied("Continuation basis is not a fixed branch"))?;
+                let revision = p
+                    .source
+                    .revision
+                    .ok_or_else(|| denied("Continuation basis revision missing"))?;
+                let basis = self.branch_read(
+                    &json!({"branchId":branch,"revision":revision,"includeEntries":false}),
+                )?;
+                if basis["workspaceId"] != p.source.workspace_id
+                    || basis["root"] != continuation.root
+                {
+                    return Err(denied(
+                        "Continuation basis does not match original Storage root",
+                    ));
+                }
+                let dispatch = continuation.execution_id;
+                let op = format!("child-source-handoff:{dispatch}");
+                let pin_id = format!("child-pin:{dispatch}");
+                let authority = ChildSourceAuthority {
+                    authority_id: previous.authority_id,
+                    resource_epoch: previous.resource_epoch,
+                };
+                let expected = ChildSourceHandoff {
+                    operation_id: op.clone(),
+                    source: p.source.clone(),
+                    resource_authority: Some(authority),
+                    root: ChildSourceRoot::Fixed {
+                        pin: ChildSourcePin {
+                            pin_id: pin_id.clone(),
+                            root: continuation.root,
+                            source: p.source.clone(),
+                        },
+                    },
+                };
+                let identity = json!({"operationId":op,"workspaceId":p.source.workspace_id,"handoff":expected});
+                let grant_id = previous.grant_id;
+                let handoff =
+                    super::operations::idempotent(self, "source.handoff", &identity, |storage| {
+                        storage.branch_pin(
+                            &json!({"branchId":branch,"revision":revision,"pinId":pin_id}),
+                            true,
+                            &grant_id,
+                        )?;
+                        Ok(serde_json::to_value(&expected)?)
+                    })?;
+                (serde_json::from_value(handoff)?, dispatch)
+            }
+            _ => {
+                return Err(denied(
+                    "Exactly one original child preparation proof is required",
+                ));
+            }
+        };
+        let storage_identity = self.root.to_string_lossy().to_string();
+        self.claim_child_handoff(&json!({"grantId":p.grant_id,"operationId":dispatch,"childThreadId":thread_id,"childBranchId":branch_id}),&handoff,host,generation,&storage_identity,epoch)
+    }
+}
+
+impl Storage {
+    pub(crate) fn source_integration_receipt(
+        &self,
+        p: SourceIntegrationReceiptParams,
+    ) -> Result<Value, KernelError> {
+        let mut query = self.conn.prepare(
+            "SELECT payload_json FROM domain_records WHERE record_type='source.authority'",
+        )?;
+        let rows = query.query_map([], |row| row.get::<_, String>(0))?;
+        let mut found = false;
+        for body in rows {
+            let authority: AuthorityRecord = serde_json::from_str(&body?)?;
+            if authority.principal_id == p.principal_id
+                && authority.coordinator_host_id == p.coordinator_host_id
+                && authority.purpose == "integration"
+                && authority.operation_id.as_deref() == Some(p.operation_id.as_str())
+                && authority.result.scope.run_id() == Some(p.run_id.as_str())
+                && authority.result.scope.thread_id() == p.thread_id
+                && authority.result.source == p.source
+            {
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            return Err(denied(
+                "Integration receipt has no matching original source authority",
+            ));
+        }
+        let (reply, _) = std::sync::mpsc::channel();
+        self.integration_receipt(&crate::tools::IntegrationReceiptRead {
+            source: p.source,
+            run_id: p.run_id,
+            thread_id: p.thread_id,
+            operation_id: p.operation_id,
+            reply,
+        })
+    }
+}

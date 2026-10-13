@@ -26,7 +26,7 @@ it('requires the original materialized directory and rejects substitution inside
 it('uses current Documents admission before minting a source grant and revokes it if trust changes during preparation', async () => {
   const f = await createDocumentAuthorityHarness();
   try {
-    const source = { workspaceId: f.identity.workspaceId, executionWorkspaceId: f.identity.workspaceId,
+    const source = { resourceOwner: { kind: 'local' as const }, workspaceId: f.identity.workspaceId, executionWorkspaceId: f.identity.workspaceId,
       runId: 'run', mode: 'fixed_branch' as const, branchId: 'fixed', revision: 7, tools: [] };
     let revokeDuringRead = false;
     const readBranch = vi.fn(async () => {
@@ -37,7 +37,7 @@ it('uses current Documents admission before minting a source grant and revokes i
       issueGrant: vi.fn(async (input: { grantId: string }) => ({ grantId: input.grantId })), revokeGrant: vi.fn(async () => {}),
       agentRuntimeRequest: vi.fn(async (method: string) => {
         if (method === 'runtime.run.inspect') return { id: 'run', thread_id: 'thread', state: 'runnable' };
-        if (method === 'runtime.launch.inspect') return { selection: { source: { mode: 'fixed_branch', workspace_id: source.workspaceId,
+        if (method === 'runtime.launch.inspect') return { selection: { source: { mode: 'fixed_branch', resource_owner: source.resourceOwner, workspace_id: source.workspaceId,
           execution_workspace_id: source.executionWorkspaceId, branch_id: 'fixed', revision: 7, live_root: null }, tools: [], extension_bindings: [] } };
         throw new Error('Source preparation must not start a model or tool');
       }) };

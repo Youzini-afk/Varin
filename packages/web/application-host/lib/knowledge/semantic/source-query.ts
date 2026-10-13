@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { StructureSource } from '../../structure/types.js';
 import { languageIdForPath } from '../../harness/language-id.js';
 import { pathInRoots } from '../../workspace/path-scope.js';
-import { indexPathAllowed, insideDirectory, type IndexScope } from '../index-scope.js';
+import { indexPathAllowed, type IndexScope } from '../index-scope.js';
 import { packStructuralUnits } from './chunker.js';
 import { recipeIdOf, spaceIdOf, type SemanticScopeKey } from './identity.js';
 import type { SemanticEmbedder } from './embedder.js';
@@ -16,16 +16,26 @@ import type { SemanticSourceView } from './query-view.js';
 import type { SemanticIndexStatus, SemanticSearchResult } from './runtime.js';
 import { waitWithSignal } from '../../cancellation.js';
 
+function resourcePaths(root: string) {
+  const coordinates = /^[a-z]:[\\/]|^\\\\/i.test(root) ? path.win32 : path.posix;
+  const inside = (directory: string, target: string) => {
+    const relative = coordinates.relative(directory, target);
+    return relative === '' || relative !== '..' && !relative.startsWith(`..${coordinates.sep}`) && !coordinates.isAbsolute(relative);
+  };
+  return { coordinates, inside };
+}
+
 /** Pure identity intersection. A removed/replaced old live directory cannot reroute this view. */
 export function sourceViewRoots(root: string, requested: readonly string[], selected: readonly string[] | null | undefined,
   scope?: IndexScope): string[] {
+  const { coordinates, inside } = resourcePaths(root);
   const directories = scope ? [...scope.directories, ...(scope.pausedDirectories ?? [])] : selected ?? [root];
   const paths = directories.flatMap(directory => requested.flatMap(relative => {
-    const target = path.resolve(root, relative);
-    if (insideDirectory(directory, target)) return [target];
-    return insideDirectory(target, directory) ? [directory] : [];
-  })).filter(directory => insideDirectory(root, directory) && (!scope || indexPathAllowed(scope, directory, true)));
-  return [...new Set(paths)].map(directory => path.relative(root, directory).split(path.sep).join('/') || '.');
+    const target = coordinates.resolve(root, relative);
+    if (inside(directory, target)) return [target];
+    return inside(target, directory) ? [directory] : [];
+  })).filter(directory => inside(root, directory) && (!scope || indexPathAllowed(scope, directory, true)));
+  return [...new Set(paths)].map(directory => coordinates.relative(root, directory).split(coordinates.sep).join('/') || '.');
 }
 
 export async function acquireSourceQuery(input: {
@@ -48,10 +58,13 @@ export async function acquireSourceQuery(input: {
   queryVector(question: string, cached: number[] | undefined, signal: AbortSignal): Promise<number[]>;
 }) {
   const { source, embedder, cache, scope } = input;
+  const { coordinates, inside } = resourcePaths(source.resourceRoot);
+  const structure = source.resourceOwner.kind === 'managed_host' ? source.structure : input.structure;
+  if (!structure) throw new Error('The original source structure service is unavailable');
   const schedule = <T>(work: () => Promise<T>): Promise<T> => embedder.ownsScheduling ? work() : input.scheduler.enqueue('foreground', work);
   const lifetime = new AbortController();
   const signal = AbortSignal.any([input.signal, lifetime.signal]);
-  const roots = sourceViewRoots(source.configurationRoot, input.roots, input.indexDirectories, input.indexScope);
+  const roots = sourceViewRoots(source.resourceRoot, input.roots, input.indexDirectories, input.indexScope);
   const held: { store?: SemanticGenerationStore; reader?: SemanticPublishedReader | undefined } = {};
   type Prepared = { extras: SemanticOverlayBlock[]; maskPaths: string[]; gaps: SemanticSearchResult['gaps']; status: SemanticIndexStatus };
   let preparation: Promise<Prepared> | undefined;
@@ -107,14 +120,14 @@ export async function acquireSourceQuery(input: {
     let complete = true, publishedDocuments = 0;
     await authorize(signal);
     if (roots.length) {
-      const ignoredRoots = sourceViewRoots(source.configurationRoot, roots, input.includeIgnoredDirectories ?? []);
+      const ignoredRoots = sourceViewRoots(source.resourceRoot, roots, input.includeIgnoredDirectories ?? []);
       const selections = roots.flatMap(root => {
-        const directory = path.resolve(source.configurationRoot, root);
-        if (ignoredRoots.some(ignored => insideDirectory(path.resolve(source.configurationRoot, ignored), directory))) {
+        const directory = coordinates.resolve(source.resourceRoot, root);
+        if (ignoredRoots.some(ignored => inside(coordinates.resolve(source.resourceRoot, ignored), directory))) {
           return [{ root, respectGitignore: false }];
         }
-        return [{ root, respectGitignore: true }, ...ignoredRoots.filter(ignored => insideDirectory(directory,
-          path.resolve(source.configurationRoot, ignored))).map(root => ({ root, respectGitignore: false }))];
+        return [{ root, respectGitignore: true }, ...ignoredRoots.filter(ignored => inside(directory,
+          coordinates.resolve(source.resourceRoot, ignored))).map(root => ({ root, respectGitignore: false }))];
       });
       const inventoryFiles = new Map<string, { path: string; revision: string }>();
       for (const selection of selections) {
@@ -127,26 +140,26 @@ export async function acquireSourceQuery(input: {
       for (const file of inventoryFiles.values()) {
         assertAvailable();
         if (!pathInRoots(file.path, roots) || input.indexScope
-          && !indexPathAllowed(input.indexScope, path.resolve(source.configurationRoot, file.path), true)) continue;
+          && !indexPathAllowed(input.indexScope, coordinates.resolve(source.resourceRoot, file.path), true)) continue;
         const languageId = languageIdForPath(file.path);
         if (!languageId) { complete = false; if (!gaps.some(gap => gap.reason === 'unsupported-files')) gaps.push({ path: '.', reason: 'unsupported-files' }); continue; }
         const prior = states.get(file.path);
         if (prior?.revision === file.revision && prior.recipeId === recipeIdOf()) {
           retained.add(file.path); publishedDocuments++; continue;
         }
-        if (!input.structure.unitsFixed) throw new Error('Original source units are unavailable');
+        if (!structure.unitsFixed) throw new Error('Original source units are unavailable');
         try {
           const recipeRequest = { workspaceId: scope.scopeId, path: file.path, languageId };
-          const sourceRecipe = input.structure.unitsRecipe ? await input.structure.unitsRecipe(recipeRequest) : undefined;
+          const sourceRecipe = structure.unitsRecipe ? await structure.unitsRecipe(recipeRequest) : undefined;
           assertAvailable();
           const documentKey = () => ({ documentId: file.path, revision: file.revision, spaceId: spaceIdOf(embedder.space),
             recipeId: recipeIdOf(), sourceRecipeId: sourceRecipe ?? 'native-text-v1' });
-          let chunks = input.structure.unitsRecipe && embedder.space.dim > 0 ? cache.getDocument(documentKey()) : undefined;
+          let chunks = structure.unitsRecipe && embedder.space.dim > 0 ? cache.getDocument(documentKey()) : undefined;
           if (!chunks) {
-            const units = await input.structure.unitsFixed({ ...recipeRequest, compute: source.compute, lane: 'foreground', signal });
+            const units = await structure.unitsFixed({ ...recipeRequest, compute: source.compute, lane: 'foreground', signal });
             assertAvailable();
             if (!['ready', 'empty'].includes(units.status) || units.revision !== file.revision
-              || input.structure.unitsRecipe && units.recipeId !== sourceRecipe) throw new Error('Source units changed or did not complete');
+              || structure.unitsRecipe && units.recipeId !== sourceRecipe) throw new Error('Source units changed or did not complete');
             // Local packing uses the retained generation's tokenizer. Cached chunks
             // and vectors do not trigger model preparation or an inference request.
             await embedder.prepare(); assertAvailable();
@@ -182,7 +195,7 @@ export async function acquireSourceQuery(input: {
             cache.set({ spaceId: spaceIdOf(embedder.space), purpose: 'document', embedText: chunk.embedText }, vector);
             extras.push({ ...chunk, revision: file.revision, vector });
           }
-          if (input.structure.unitsRecipe && embedder.space.dim > 0) cache.setDocument(documentKey(), chunks);
+          if (structure.unitsRecipe && embedder.space.dim > 0) cache.setDocument(documentKey(), chunks);
           publishedDocuments++;
         } catch {
           await authorize(signal);
@@ -219,7 +232,7 @@ export async function acquireSourceQuery(input: {
       cache.set({ spaceId, purpose: 'query', embedText: question, authority: input.cacheAuthority }, vector);
       const indexScope = input.indexScope;
       const hits = await store.searchPinned(reader.token, vector, limit, { roots, maskPaths, extras,
-        ...(indexScope ? { indexScope: { resourceRoot: source.configurationRoot,
+        ...(indexScope ? { indexScope: { resourceRoot: source.resourceRoot,
           directories: indexScope.directories, pausedDirectories: indexScope.pausedDirectories,
           removedDirectories: indexScope.removedDirectories, excludedDirectories: indexScope.excludedDirectories } } : {}) }, active);
       await authorize(active);

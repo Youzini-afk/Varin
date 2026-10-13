@@ -222,7 +222,7 @@ fn assembled_tool_journal_and_explicit_successor_use_the_selected_ancestry() {
             .dispatch("file.root.register", &args, Some(&grant_id), &grant)
             .unwrap();
         drop(store);
-        let params=serde_json::from_value(json!({"runId":run.id,"toolBinding":{"grantId":grant_id,"runId":run.id,"threadId":"thread","workspaceId":"workspace","executionWorkspaceId":"workspace","sourceMode":"live_root","rootId":registered["rootId"],"liveRoot":{"hostId":"host","canonicalRoot":workspace,"rootId":registered["rootId"]},"enabledTools":["file_read","file_write"]}})).unwrap();
+        let params=serde_json::from_value(json!({"runId":run.id,"toolBinding":{"resourceOwner":{"kind":"local"},"grantId":grant_id,"runId":run.id,"threadId":"thread","workspaceId":"workspace","executionWorkspaceId":"workspace","sourceMode":"live_root","rootId":registered["rootId"],"liveRoot":{"hostId":"host","canonicalRoot":workspace,"rootId":registered["rootId"]},"enabledTools":["file_read","file_write"]}})).unwrap();
         let PreparedLaunch::Start(mut start) = assembly
             .prepare(RunPreparation::new(params, &run).unwrap(), None, || false)
             .unwrap()

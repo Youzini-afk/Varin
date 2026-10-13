@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import type { ApplicationExtensionRuntime, HostServiceBinding } from '@varin/extension-host';
-import type { VarinExtensionServiceProvision } from '@varin/extension-contract';
+import type { VarinExtensionServiceProvision, VarinHostServiceComposition } from '@varin/extension-contract';
 import { SCRIPT_TOOL_DECLARATIONS } from '@varin/extension-builtins';
 import { createExtensionTools, type ExtensionToolLease, type ExtensionToolOwnerOptions } from './extension-tool-owner.js';
 import type { KernelClient } from './kernel-client.js';
@@ -18,6 +18,10 @@ function fixture(warm: boolean, configuration: Pick<ExtensionToolOwnerOptions, '
       ...(dependency ? { requirements: { source: dependency as 'source' | 'physical' | 'live', process: dependency === 'physical' } } : {}) },
   }));
   const extensionId = 'example.source';
+  const composition: VarinHostServiceComposition = { schemaVersion: 1, root: 'source-composition', nodes: [{
+    id: 'source-composition', extensionId, entrypointId: 'host', extensionVersion: '1.0.0',
+    artifactIntegrity: 'fixture-artifact', activationConfiguration: null, grants: [], dependencies: [],
+  }] };
   const providers = descriptors.map(descriptor => ({ providerId: descriptor.id, providerKey: `${extensionId}:host:${descriptor.id}@1`,
     extensionId, extensionVersion: '1.0.0', entrypointId: 'host', generation: 1, status: 'active' }));
   const live = warm ? [...providers] : [];
@@ -25,7 +29,7 @@ function fixture(warm: boolean, configuration: Pick<ExtensionToolOwnerOptions, '
   let pins = 0;
   const bind = (id: string): HostServiceBinding => {
     const provider = providers.find(candidate => candidate.providerId === id)!;
-    return { ...provider, descriptor: descriptors.find(descriptor => descriptor.id === id)!, pin() {
+    return { ...provider, composition, release() {}, descriptor: descriptors.find(descriptor => descriptor.id === id)!, pin() {
       pins++;
       return { assertAvailable() {}, release() { pins--; }, revocationSignal: signal, async invoke() { throw new Error('Preparation must not execute'); } };
     } } as unknown as HostServiceBinding;
@@ -36,7 +40,12 @@ function fixture(warm: boolean, configuration: Pick<ExtensionToolOwnerOptions, '
       routing: { authoritative: true, document: { schemaVersion: 1, revision: 0, rules: [], updatedAt: '2026-10-11T00:00:00Z' } },
       services: { providers: live, selections: {} } }; },
     services: { getSnapshot: () => ({ providers: live }), bind, bindPinned: bind },
-    supervisor: { getRetainedArtifactIdentity: () => 'fixture-artifact' },
+    supervisor: { getRetainedArtifactIdentity: () => 'fixture-artifact', getRetainedComposition: () => composition },
+    async resolveServiceCompositions(request: {serviceId:string}) {
+      const provider = providers.find(candidate => candidate.providerId === request.serviceId)!;
+      return {routingRevision:0,services:[{providerKey:provider.providerKey,
+        descriptor:descriptors.find(descriptor=>descriptor.id===request.serviceId),composition}]};
+    },
     async prepareService(request: { serviceId: string }) {
       const provider = providers.find(candidate => candidate.providerId === request.serviceId)!;
       if (!live.includes(provider)) live.push(provider);
@@ -46,7 +55,7 @@ function fixture(warm: boolean, configuration: Pick<ExtensionToolOwnerOptions, '
   } as unknown as ApplicationExtensionRuntime;
   return { prepare: createExtensionTools({ runtime, kernel: {} as KernelClient, currentPolicy: async () => ({ mode: 'normal', rules: [] }), ...configuration }), pins: () => pins };
 }
-const source = (mode: LaunchSource['mode']): LaunchSource => ({ mode, workspace_id: 'workspace', execution_workspace_id: 'execution',
+const source = (mode: LaunchSource['mode']): LaunchSource => ({ resource_owner: {kind:'local'}, mode, workspace_id: 'workspace', execution_workspace_id: 'execution',
   branch_id: mode === 'live_root' ? null : 'branch', revision: mode === 'live_root' ? null : 1, environment_run_id: null,
   live_root: mode === 'live_root' ? { hostId: 'host', rootId: 'root', canonicalRoot: '/fixture' } : null });
 
@@ -79,7 +88,7 @@ it('failed Node configuration is local to actual scripts and leaves unrelated so
   try {
     // Invalid only in this test process. No installed Node file is changed.
     Object.defineProperty(process, 'execPath', { ...original, value: '' });
-    const resolver = await scripts.prepareConfiguration(() => 'ordinary-configuration');
+    const resolver = await scripts.prepareConfiguration(() => 'ordinary-configuration', null);
     expect(() => resolver(SCRIPT_TOOL_DECLARATIONS[0]!)).toThrow();
     expect(() => resolver(SCRIPT_TOOL_DECLARATIONS[0]!, 'required-original-node')).toThrow();
     const f = fixture(true, { prepareConfiguration: async () => resolver });

@@ -235,7 +235,7 @@ fn job_unknown_without_stop_never_wins_then_original_stop_delivers_active_input_
 #[test]
 fn historical_user_job_stops_before_registration_and_continues_current_work_source_in_new_run() {
     let mut f = Fixture::with_source(
-        json!({"workspace_id":"workspace","execution_workspace_id":"workspace","mode":"fixed_branch","branch_id":"source","revision":1,"live_root":null}),
+        json!({"resource_owner":{"kind":"local"},"workspace_id":"workspace","execution_workspace_id":"workspace","mode":"fixed_branch","branch_id":"source","revision":1,"live_root":null}),
     );
     let historical = f.run.clone();
     let binding = job(&mut f, "history", true);

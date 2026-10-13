@@ -22,7 +22,7 @@ impl Fixture {
         let mut db = Catalog::open(&root).unwrap();
         db.create_thread("thread", "branch").unwrap();
         let launch:LaunchSelection=serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"fixture","provider_family":"fixture","model":"model","configuration_generation":1,"tool_schema_generation":1,
-   "tools":[{"name":"research_submit","version":"1","description":"Research submit","schema":{"type":"object"},"output_schema":null,"metadata":null},{"name":"research_wait","version":"1","description":"Observe research","schema":{"type":"object"},"output_schema":null,"metadata":null}],"policy":{"name":"fixture","version":"1"},"source":{"workspace_id":"ws","execution_workspace_id":"exec","mode":"fixed_branch","branch_id":"source","revision":1,"live_root":null}})).unwrap();
+   "tools":[{"name":"research_submit","version":"1","description":"Research submit","schema":{"type":"object"},"output_schema":null,"metadata":null},{"name":"research_wait","version":"1","description":"Observe research","schema":{"type":"object"},"output_schema":null,"metadata":null}],"policy":{"name":"fixture","version":"1"},"source":{"resource_owner":{"kind":"local"},"workspace_id":"ws","execution_workspace_id":"exec","mode":"fixed_branch","branch_id":"source","revision":1,"live_root":null}})).unwrap();
         let receipt = db
             .submit_with_launch(
                 &SubmitInput {

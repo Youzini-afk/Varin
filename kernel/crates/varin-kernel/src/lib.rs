@@ -35,6 +35,7 @@ mod run_tools;
 mod runtime;
 mod storage;
 mod storage_schema;
+mod source_resources;
 mod tools;
 mod transport;
 

@@ -776,7 +776,7 @@ fn run_case(scenario: Scenario) {
             &grant,
         )
         .unwrap();
-    let source:SourceSelection=serde_json::from_value(json!({"mode":"live_root","live_root":{"hostId":HOST,"canonicalRoot":work,"rootId":registered["rootId"]},"workspace_id":"workspace","execution_workspace_id":"workspace","branch_id":null,"revision":null})).unwrap();
+    let source:SourceSelection=serde_json::from_value(json!({"resource_owner":{"kind":"local"},"mode":"live_root","live_root":{"hostId":HOST,"canonicalRoot":work,"rootId":registered["rootId"]},"workspace_id":"workspace","execution_workspace_id":"workspace","branch_id":null,"revision":null})).unwrap();
     let binding:RequestBinding=serde_json::from_value(json!({"goal":null,"resource_activations":[],"resource_checkpoint_id":null,"connection_identity":"fixture","provider_family":if scenario==Scenario::TypedMedia {"openai-responses"} else {"fixture"},"model":"unused","credential_ref":null,"configuration_generation":1,"tool_schema_generation":1,"tools":schemas,"instruction_sources":[],"memory_checkpoint":null,"attachment_refs":[],"environment_cursor":0,"history_range":{"branch_id":"main","ancestor_id":null,"leaf_id":null}})).unwrap();
     let mut launch = LaunchSelection::from_binding(&binding, policy.identity(), Some(source));
     launch.extension_bindings = bindings.clone();
@@ -846,7 +846,7 @@ fn run_case(scenario: Scenario) {
     )];
     if scenario == Scenario::RunEndJob {
         rpc.execute(&json!({"method":"authority.grant.issue","params":{"grantId":"independent-job-grant","owningWorkspace":"workspace","executionWorkspace":"workspace","threadId":"thread","runId":run,"capabilities":["storage.read","storage.write","process"],"pathScopes":[""]}})).unwrap();
-        let binding:crate::tools::ToolBinding=serde_json::from_value(json!({"grantId":"independent-job-grant","runId":run,"threadId":"thread","workspaceId":"workspace","executionWorkspaceId":"workspace","rootId":registered["rootId"],"sourceMode":"live_root","liveRoot":{"hostId":HOST,"canonicalRoot":work,"rootId":registered["rootId"]},"enabledTools":["process_spawn"]})).unwrap();
+        let binding:crate::tools::ToolBinding=serde_json::from_value(json!({"resourceOwner":{"kind":"local"},"grantId":"independent-job-grant","runId":run,"threadId":"thread","workspaceId":"workspace","executionWorkspaceId":"workspace","rootId":registered["rootId"],"sourceMode":"live_root","liveRoot":{"hostId":HOST,"canonicalRoot":work,"rootId":registered["rootId"]},"enabledTools":["process_spawn"]})).unwrap();
         base.extend(
             crate::tools::KernelToolExecutor::new(binding, rpc.resources.clone())
                 .unwrap()

@@ -333,7 +333,7 @@ impl Fixture {
                 vec!["file_read".into()]
             }),
         };
-        let source: SourceSelection = serde_json::from_value(json!({"mode":"fixed_branch","live_root":null,
+        let source: SourceSelection = serde_json::from_value(json!({"resource_owner":{"kind":"local"},"mode":"fixed_branch","live_root":null,
             "workspace_id":"workspace-A","execution_workspace_id":"workspace-A","branch_id":"fixed-parent","revision":revision})).unwrap();
         let mut launch: LaunchSelection = serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"frozen-connection",
             "provider_family":"openai-responses","model":"fixture-model","configuration_generation":2,"tool_schema_generation":1,

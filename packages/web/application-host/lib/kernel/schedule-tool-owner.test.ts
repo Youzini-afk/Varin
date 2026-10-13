@@ -49,7 +49,7 @@ it('the ordinary scheduled task example edits its admitted project and returns n
       decisions: [{ capability: SCHEDULE_CAPABILITY, realm: 'host', granted: true }] });
     await extensions.setEnabled(manifest.id, true, (await extensions.catalog.snapshot()).revision);
     const selected = await extensions.prepareService({ serviceId: descriptor.id, version: descriptor.version, method: 'execute', args: [], routing: { sessionId: 'thread' } });
-    const sourceBinding: LaunchSource = { workspace_id: 'original-workspace', execution_workspace_id: 'source-execution', branch_id: 'source-branch', revision: 1, mode: 'fixed_branch', live_root: null, environment_run_id: 'source-run' };
+    const sourceBinding: LaunchSource = { resource_owner: {kind:'local'}, workspace_id: 'original-workspace', execution_workspace_id: 'source-execution', branch_id: 'source-branch', revision: 1, mode: 'fixed_branch', live_root: null, environment_run_id: 'source-run' };
     const run = { id: 'run', thread_id: 'thread', branch_id: 'branch', state: 'executing', revision: 1, epoch: 1, configuration: {}, cancel_requested: false, waiting_on: null } as Run;
     const launch = { run_id: run.id, selection: { source: sourceBinding } } as LaunchIntent;
     const owner: ExecutorOwner = { kind: 'external', identity: selected.providerKey, epoch: 'executor' };
@@ -76,9 +76,9 @@ it('the ordinary scheduled task example edits its admitted project and returns n
     expect(await execute({ action: 'upsert', task })).toMatchObject({ completion: { outcome: 'succeeded', effect: 'confirmed' }, executor_stopped: true });
     const [stored] = await config.listScheduledTasks('project');
     expect(stored?.execution).toEqual(task.execution); expect(stored?.target).toEqual(task.target);
-    expect(await execute({ action: 'run', taskId: stored!.id }, true)).toMatchObject({ completion: { outcome: 'succeeded', effect: 'confirmed', content: { runtime: 'agent', occurrence } }, executor_stopped: true });
+    expect(await execute({ action: 'run', taskId: stored!.id }, true)).toMatchObject({ completion: { outcome: 'succeeded', effect: 'confirmed', content: { data: { runtime: 'agent', occurrence } } }, executor_stopped: true });
     expect(runCalendar).toHaveBeenCalledWith('project', stored!.id, 'policy:node:schedule-2');
-    expect(await execute({ action: 'list' })).toMatchObject({ completion: { effect: 'none', content: { tasks: [expect.objectContaining({ id: stored!.id })] } } });
+    expect(await execute({ action: 'list' })).toMatchObject({ completion: { effect: 'none', content: { data: { tasks: [expect.objectContaining({ id: stored!.id })] } } } });
     expect(workspaceRoot.mock.calls.every(([id]) => id === 'original-workspace')).toBe(true);
     await expect(execute({ action: 'run', taskId: stored!.id, directory: '/another-project' })).rejects.toThrow('input_schema');
     managementArguments = { action: 'remove', taskId: stored!.id };
@@ -89,5 +89,9 @@ it('the ordinary scheduled task example edits its admitted project and returns n
     vi.spyOn(service, 'upsert').mockImplementationOnce(async (...args) => { await original(...args); throw new Error('Calendar publication response lost'); });
     expect(await execute({ action: 'upsert', task: { id: stored!.id, name: 'Persisted despite lost response' } })).toMatchObject({ completion: { outcome: 'indeterminate', effect: 'unknown' }, executor_stopped: true });
     expect((await config.listScheduledTasks('project'))[0]?.name).toBe('Persisted despite lost response');
+    const localReads = workspaceRoot.mock.calls.length;
+    sourceBinding.resource_owner = { kind: 'managed_host', hostId: 'other-host', connectionId: 'original-connection', endpointIdentity: 'original-endpoint' };
+    expect(await execute({ action: 'list' })).toMatchObject({ completion: { outcome: 'failed', effect: 'none', content: { data: { status: 'rejected', error: expect.stringContaining('owning Host') } } }, executor_stopped: true });
+    expect(workspaceRoot).toHaveBeenCalledTimes(localReads);
   } finally { retained?.lease.release(); await extensions?.stop(); scheduler.stop(); await fs.rm(root, { recursive: true, force: true }); }
 }, 30_000);

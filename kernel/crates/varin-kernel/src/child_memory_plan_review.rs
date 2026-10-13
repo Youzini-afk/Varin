@@ -69,7 +69,7 @@ fn bot_plan_fixture() -> Fixture {
     let run = f.db.run(&child.receipt.as_ref().unwrap().run_id).unwrap();
     let original = f.db.launch_intent(&run.id).unwrap().unwrap().selection;
     let params = json!({"runId":run.id,"credentialScope":original.credential_scope,
-        "toolBinding":{"grantId":"child-source-grant","runId":run.id,"threadId":run.thread_id,
+        "toolBinding":{"resourceOwner":{"kind":"local"},"grantId":"child-source-grant","runId":run.id,"threadId":run.thread_id,
             "workspaceId":source.workspace_id,"executionWorkspaceId":source.execution_workspace_id,
             "sourceMode":"fixed_branch","fileSource":{"branchId":source.branch_id,"revision":source.revision},"enabledTools":[]}});
     Fixture::from_catalog(f.root, child, run, original, params, f.db)

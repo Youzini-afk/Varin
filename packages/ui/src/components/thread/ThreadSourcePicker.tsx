@@ -1,13 +1,12 @@
 import React from 'react';
 import { getRuntimeEndpointGeneration, registerRuntimeEndpointSwitchBlocker, subscribeRuntimeEndpointChanged } from '@varin/application-client';
-import type { ThreadIdentity, ThreadPreparedSource, ThreadPrepareSource, ThreadSnapshot, ThreadsAPI } from '@varin/application-client';
-import type { AgentInputContext, AgentInputSnapshotConsumer } from '@varin/protocol';
+import type { ThreadIdentity, ThreadPreparedSource, ThreadPrepareSource, ThreadSnapshot, ThreadsAPI, ThreadSourceTargets, ThreadResolvedSource } from '@varin/application-client';
+import type { AgentInputContext, AgentInputSnapshotConsumer, SourceResourceOwner } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { getDocumentRegistry } from '@/lib/documents/session';
 import type { DocumentRegistry } from '@/lib/documents/registry';
-import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 
 // A retry keeps the original snapshot and request identity, even if editors keep changing.
 // The registry remains the only mutable text owner; this holds only its opaque snapshot lease.
@@ -15,7 +14,7 @@ type SourceRequest = {
   key: string;
   consumer: AgentInputSnapshotConsumer;
   input?: ThreadPrepareSource;
-  workspace?: Promise<string>;
+  workspace?: Promise<ThreadResolvedSource>;
   registry?: DocumentRegistry;
   capture?: Promise<AgentInputContext>;
   controller?: AbortController;
@@ -33,7 +32,7 @@ function releaseRequest(request: SourceRequest): Promise<void> {
 }
 
 export function ThreadSourcePicker({ api, identity, initialPath, active, launch, prepared, onPrepared, onPreparingChange }: {
-  api: Pick<ThreadsAPI, 'prepareSource'>;
+  api: Pick<ThreadsAPI, 'prepareSource' | 'sources'>;
   identity: ThreadIdentity;
   initialPath?: string;
   active: boolean;
@@ -43,6 +42,9 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
   onPreparingChange(value: boolean): void;
 }) {
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
+  const [targets, setTargets] = React.useState<ThreadSourceTargets>({ targets: [], unavailable: [] });
+  const [resourceOwner, setResourceOwner] = React.useState<SourceResourceOwner>({ kind: 'local' });
+  const [directoryError, setDirectoryError] = React.useState<string>();
   const [path, setPath] = React.useState(initialPath ?? '');
   const [mode, setMode] = React.useState<'fixed_branch' | 'materialized' | 'live_root'>('fixed_branch');
   const [contentMode, setContentMode] = React.useState<'saved-files' | 'surface-drafts'>('saved-files');
@@ -64,6 +66,14 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
     callbacks.current.onPrepared(null); callbacks.current.onPreparingChange(false);
     return () => { void retire().catch(() => { /* The original Host may already be disconnected. */ }); };
   }, [api, host, identity.threadId, identity.branchId, retire]);
+  React.useEffect(() => {
+    const controller = new AbortController();
+    setTargets({ targets: [], unavailable: [] }); setDirectoryError(undefined); setResourceOwner({ kind: 'local' });
+    void api.sources.list(identity, controller.signal).then(value => {
+      if (!controller.signal.aborted) setTargets(value);
+    }, error => { if (!controller.signal.aborted) setDirectoryError(error instanceof Error ? error.message : 'Source Hosts could not be loaded'); });
+    return () => controller.abort();
+  }, [api, host, identity.threadId, identity.branchId]);
   React.useEffect(() => registerRuntimeEndpointSwitchBlocker(async () => {
     // Release on the original Host before the endpoint changes, including a late capture reply.
     const releasing = retire();
@@ -92,14 +102,14 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
     try {
       if (!pending.input) {
         if (!pending.workspace) {
-          const documents = getRegisteredRuntimeAPIs()?.documents;
-          if (!documents) throw new Error('Documents is unavailable on this Host. The workspace was not resolved.');
-          pending.workspace = documents.resolveWorkspace({ path }).then(workspace => workspace.workspaceId);
+          pending.workspace = api.sources.resolve(identity, { resourceOwner, path }, controller.signal);
         }
-        const workspaceId = await pending.workspace;
+        const resolved = await pending.workspace;
+        const { workspaceId } = resolved;
         if (!isCurrent()) return;
         let content: ThreadPrepareSource['content'] = { mode: 'saved-files' };
         if (mode !== 'live_root' && contentMode === 'surface-drafts') {
+          if (resolved.resourceOwner.kind !== 'local') throw new Error('This window’s drafts cannot be captured on another Host. Select saved files.');
           if (!pending.capture) {
             const registry = getDocumentRegistry();
             pending.registry = registry;
@@ -112,7 +122,7 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
           }
           content = { mode: 'surface-drafts', context };
         }
-        pending.input = { ...identity, key: pending.key, workspaceId, mode, content,
+        pending.input = { ...identity, key: pending.key, resourceOwner: resolved.resourceOwner, workspaceId, mode, content,
           captureScopes: mode === 'live_root' ? [] : scopes.split(/\r?\n/).map(value => value.trim()).filter(Boolean) };
       }
       if (!isCurrent()) return;
@@ -132,15 +142,33 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
   };
   const source = launch?.selection.source;
   const provenance = prepared?.provenance;
+  const targetKey = (owner: SourceResourceOwner) => owner.kind === 'local' ? 'local' : JSON.stringify([owner.connectionId, owner.endpointIdentity, owner.hostId]);
+  const ownerLabel = (owner: SourceResourceOwner) => targets.targets.find(target => targetKey(target.resourceOwner) === targetKey(owner))?.label
+    ?? (owner.kind === 'local' ? 'This Host' : owner.hostId);
   return <details className="mx-auto max-h-64 w-full max-w-3xl shrink-0 overflow-y-auto px-4 text-xs text-muted-foreground">
     <summary className="cursor-pointer">Workspace · {prepared ? 'Prepared for next run' : source ? source.mode === 'live_root' ? 'Live workspace' : source.mode === 'materialized' ? 'Isolated editable copy' : 'Read-only snapshot' : 'Chat only'}</summary>
     <div className="space-y-2 py-2">
-      {source && <p>Current source: workspace {source.workspace_id}{source.mode !== 'live_root' && ` · revision ${source.revision}`}. {source.mode === 'live_root' ? 'Following runs use this same live workspace. Edits change its actual files.' : source.mode === 'materialized' ? 'Following runs keep this working copy.' : 'Following runs read the same fixed snapshot.'}</p>}
+      {source && <p>Current source: {ownerLabel(source.resource_owner)} · workspace {source.workspace_id}{source.mode !== 'live_root' && ` · revision ${source.revision}`}. {source.mode === 'live_root' ? 'Following runs use this same live workspace. Edits change its actual files.' : source.mode === 'materialized' ? 'Following runs keep this working copy.' : 'Following runs read the same fixed snapshot.'}</p>}
+      <label className="block">Source Host
+        <select aria-label="Source Host" className="mt-1 w-full rounded border bg-background px-2 py-1 text-sm" disabled={active || !targets.targets.length}
+          value={targetKey(resourceOwner)} onChange={event => {
+            const target = targets.targets.find(target => targetKey(target.resourceOwner) === event.target.value);
+            if (!target) return;
+            invalidate(); setResourceOwner(target.resourceOwner); setPath(target.resourceOwner.kind === 'local' ? initialPath ?? '' : '');
+            if (target.resourceOwner.kind === 'managed_host') setContentMode('saved-files');
+          }}>
+          {!targets.targets.length && <option value="local">This Host</option>}
+          {targets.targets.map(target => <option key={targetKey(target.resourceOwner)} value={targetKey(target.resourceOwner)}>{target.label}</option>)}
+        </select>
+      </label>
+      {resourceOwner.kind === 'managed_host' && <p>The folder and source tools run on {ownerLabel(resourceOwner)}. This conversation stays on its current Host.</p>}
+      {directoryError && <p role="alert">{directoryError}</p>}
+      {targets.unavailable.map(target => <p key={target.connectionId}>{target.label}: {target.message}</p>)}
       <label className="block">Workspace folder
         <Input aria-label="Workspace folder" className="mt-1 w-full rounded border bg-background px-2 py-1 text-sm"
           disabled={active} value={path} onChange={event => { invalidate(); setPath(event.target.value); }} />
       </label>
-      {initialPath && <Button type="button" variant="ghost" size="sm" disabled={active} onClick={() => { invalidate(); setPath(initialPath); }}>Use current workspace folder</Button>}
+      {resourceOwner.kind === 'local' && initialPath && <Button type="button" variant="ghost" size="sm" disabled={active} onClick={() => { invalidate(); setPath(initialPath); }}>Use current workspace folder</Button>}
       <select aria-label="Workspace access" className="w-full rounded border bg-background px-2 py-1 text-sm" disabled={active}
         value={mode} onChange={event => { invalidate(); setMode(event.target.value as typeof mode); if (event.target.value === 'live_root') setContentMode('saved-files'); }}>
         <option value="fixed_branch">Read-only file snapshot: read, list and search</option>
@@ -152,7 +180,7 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
           <select aria-label="Snapshot content" className="mt-1 w-full rounded border bg-background px-2 py-1 text-sm" disabled={active}
             value={contentMode} onChange={event => { invalidate(); setContentMode(event.target.value as typeof contentMode); }}>
             <option value="saved-files">Saved files only</option>
-            <option value="surface-drafts">Saved files with this window's editor drafts</option>
+            <option value="surface-drafts" disabled={resourceOwner.kind !== 'local'}>Saved files with this window's editor drafts</option>
           </select>
         </label>
         <p>{contentMode === 'saved-files' ? 'Unsaved editor changes are not included.' : 'Captures drafts only in the selected workspace. Editors and saved files stay unchanged. Later editor changes do not alter the captured request.'}</p>
@@ -164,11 +192,12 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
       </>}
       {mode === 'materialized' && <p>File edits start in a separate working copy. Commands can have external effects; this is not a security sandbox. Changes are not copied back automatically.</p>}
       {active && <p>Workspace selection applies to a new run. Wait for the current run to finish before preparing another source.</p>}
-      <Button type="button" variant="outline" size="sm" disabled={active || preparing || !path.trim()} onClick={() => void prepare()}>{preparing ? 'Preparing workspace' : 'Prepare workspace'}</Button>
+      <Button type="button" variant="outline" size="sm" disabled={active || preparing || !path.trim() || !targets.targets.some(target => targetKey(target.resourceOwner) === targetKey(resourceOwner))} onClick={() => void prepare()}>{preparing ? 'Preparing workspace' : 'Prepare workspace'}</Button>
       {request.current && <Button type="button" variant="ghost" size="sm" onClick={invalidate}>{preparing ? 'Cancel preparation' : 'Discard captured request'}</Button>}
       {error && contentMode === 'surface-drafts' && <Button type="button" variant="ghost" size="sm" disabled={active || preparing} onClick={() => { invalidate(); void prepare(); }}>Capture drafts again</Button>}
       {prepared && <div aria-label="Prepared workspace">
-        <p>{prepared.path} · {prepared.source.mode === 'live_root' ? 'Live files and commands' : prepared.source.mode === 'materialized' ? 'Editable copy and commands' : 'Read-only'} · ready for the next send</p>
+        <p>{ownerLabel(prepared.source.resourceOwner)} · {prepared.path} · {prepared.source.mode === 'live_root' ? 'Live files and commands' : prepared.source.mode === 'materialized' ? 'Editable copy and commands' : 'Read-only'} · ready for the next send</p>
+        <p>Available source tools: {prepared.source.tools.length ? prepared.source.tools.join(', ') : 'None'}</p>
         {prepared.source.mode !== 'live_root' && <p>Fixed revision: {prepared.source.revision}</p>}
         {provenance && <div aria-label="Capture provenance">
           <p>Consistency: {provenance.consistency}</p>

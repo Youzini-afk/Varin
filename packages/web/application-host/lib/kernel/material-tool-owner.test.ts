@@ -22,7 +22,7 @@ const authority = (policy = false): ToolInvocationAuthority => ({
   threadId: "thread",
   operationId: policy ? "action:node:node" : "request:tool:call",
   origin: policy ? { kind: "policy_action", action_id: "action", node_id: "node" } : { kind: "model_step", request_id: "request" },
-  source: { workspace_id: "ws", execution_workspace_id: "execution-other", branch_id: "branch", revision: 1,
+  source: { resource_owner: { kind: "local" as const }, workspace_id: "ws", execution_workspace_id: "execution-other", branch_id: "branch", revision: 1,
     mode: "fixed_branch", live_root: null },
 });
 

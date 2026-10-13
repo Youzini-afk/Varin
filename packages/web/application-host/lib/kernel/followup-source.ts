@@ -30,6 +30,9 @@ export async function registerUserFollowup(kernel: KernelClient, runtime: AgentR
   const [run, launch] = await Promise.all([runtime.run(input.runId, signal), runtime.launch(input.runId, signal)]);
   const source = launch?.selection.source;
   if (!source) throw new Error('File follow-up requires the original Run source');
+  if (source.resource_owner.kind === 'managed_host') {
+    throw new Error('File follow-ups for a managed Source are not available yet. Use a timer or the original process completion trigger; this Host cannot observe the target Host’s files.');
+  }
   if (source.mode === 'live_root') {
     if (!source.live_root || !validateLiveSource) throw new Error('Live source owner is unavailable');
     await validateLiveSource({ workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id,

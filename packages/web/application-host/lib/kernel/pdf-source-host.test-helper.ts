@@ -70,9 +70,9 @@ async function initialize(frame: Record<string, unknown>) {
         state: { kind: 'regular-file', objectHash: blob.hash, byteLength: fixedBytes.byteLength, mode: 420 } }] });
     await actor.releaseBlob(blob.ownerId);
     source = mode === 'live_root'
-      ? { mode, workspace_id: workspaceId, execution_workspace_id: workspaceId, branch_id: null, revision: null,
+      ? { resource_owner: { kind: 'local' }, mode, workspace_id: workspaceId, execution_workspace_id: workspaceId, branch_id: null, revision: null,
         live_root: await live.prepare(workspaceId, workspaceId, selection.threadId) }
-      : { mode: mode as 'materialized' | 'fixed_branch', workspace_id: workspaceId, execution_workspace_id: workspaceId,
+      : { resource_owner: { kind: 'local' }, mode: mode as 'materialized' | 'fixed_branch', workspace_id: workspaceId, execution_workspace_id: workspaceId,
         branch_id: 'source:pdf', revision: 0, live_root: null };
     await writeFile(join(physical, 'paper.pdf'), pdf('LIVE'));
     if (mode === 'materialized') {

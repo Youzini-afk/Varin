@@ -1,4 +1,4 @@
-import { normalizeThreadSourcePreparation } from './thread-sources.js';
+import { normalizeThreadSourcePreparation, parseSourceResourceOwner } from './thread-sources.js';
 import { threadSourceFailureMessage } from '@varin/application-client';
 import { sourceFailureCode } from './source-admission-error.js';
 import type { McpElicitationResponse, McpSamplingRequestAction, McpSamplingOutputAction } from '@varin/protocol';
@@ -95,7 +95,9 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'mcp/interactions/respond': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId', 'expectedRevision', 'response'],
     'mcp/interactions/sampling/request': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId', 'expectedRevision', 'action', 'model', 'editedRequest'],
     'mcp/interactions/sampling/output': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId', 'expectedRevision', 'action'],
-    'source/prepare': ['runtime', 'threadId', 'branchId', 'key', 'workspaceId', 'mode', 'content', 'captureScopes'],
+    'source/list': ['runtime', 'threadId', 'branchId'],
+    'source/resolve': ['runtime', 'threadId', 'branchId', 'resourceOwner', 'path'],
+    'source/prepare': ['resourceOwner', 'runtime', 'threadId', 'branchId', 'key', 'workspaceId', 'mode', 'content', 'captureScopes'],
     'context/compact': ['runtime', 'threadId', 'branchId', 'key', 'throughId', 'expectedRevision', 'model'],
     'context/publish': ['runtime', 'threadId', 'branchId', 'runId'], 'context/cancel': ['runtime', 'threadId', 'branchId', 'runId'], 'context/resume': ['runtime', 'threadId', 'branchId', 'runId'],
     'messages/send': ['runtime', 'threadId', 'branchId', 'request'],
@@ -352,9 +354,11 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('navigation/receipt', (body, signal) => adapter.navigationReceipt({ ...identity(body), key: text(body.key) }, signal));
   post('navigate', (body, signal) => adapter.navigate({ ...identity(body), key: text(body.key), expectedHeadId: body.expectedHeadId === null ? null : text(body.expectedHeadId), targetHeadId: body.targetHeadId === null ? null : text(body.targetHeadId), ...(body.undoOf === undefined ? {} : { undoOf: text(body.undoOf) }) }, signal));
   post('fork', (body, signal) => adapter.fork({ ...identity(body), key: text(body.key), headId: body.headId === null ? null : text(body.headId) }, signal));
+  post('source/list', (body, signal) => adapter.listSourceTargets(identity(body), signal));
+  post('source/resolve', (body, signal) => adapter.resolveSource(identity(body), { resourceOwner: parseSourceResourceOwner(body.resourceOwner), path: text(body.path) }, signal));
   post('source/prepare', (body, signal) => {
     if (body.mode !== 'fixed_branch' && body.mode !== 'materialized' && body.mode !== 'live_root') throw new Error('Invalid source mode');
-    return adapter.prepareSource(normalizeThreadSourcePreparation({ ...identity(body), key: text(body.key), workspaceId: text(body.workspaceId), mode: body.mode,
+    return adapter.prepareSource(normalizeThreadSourcePreparation({ ...identity(body), resourceOwner: parseSourceResourceOwner(body.resourceOwner), key: text(body.key), workspaceId: text(body.workspaceId), mode: body.mode,
       content: body.content, captureScopes: body.captureScopes } as import('@varin/application-client').ThreadPrepareSource), signal);
   });
   post('context/compact', body => {
@@ -372,11 +376,12 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       model: modelSelection(body.model) };
     if (body.source !== undefined) {
       const source = object(body.source);
-      if (Object.keys(source).some(key => !['workspaceId', 'executionWorkspaceId', 'branchId', 'revision', 'mode', 'tools', 'liveRoot'].includes(key))) throw new Error('Unsupported source selection field');
+      if (Object.keys(source).some(key => !['resourceOwner', 'workspaceId', 'executionWorkspaceId', 'branchId', 'revision', 'mode', 'tools', 'liveRoot', 'environmentRunId'].includes(key))) throw new Error('Unsupported source selection field');
       if (source.mode !== 'fixed_branch' && source.mode !== 'materialized' && source.mode !== 'live_root') throw new Error('Invalid source mode');
+      if (source.environmentRunId !== undefined && source.mode !== 'materialized') throw new Error('Only a materialized source has an execution environment');
       // The kernel resolves names against the same tool declarations used for admission.
       if (!Array.isArray(source.tools) || source.tools.some(tool => typeof tool !== 'string' || !tool.length)) throw new Error('Tool names must be non-empty strings');
-      const base = { workspaceId: text(source.workspaceId), executionWorkspaceId: text(source.executionWorkspaceId),
+      const base = { resourceOwner: parseSourceResourceOwner(source.resourceOwner), workspaceId: text(source.workspaceId), executionWorkspaceId: text(source.executionWorkspaceId),
         tools: source.tools as NonNullable<ThreadSubmit['source']>['tools'] };
       if (source.mode === 'live_root') {
         if (source.branchId !== undefined || source.revision !== undefined) throw new Error('Live source cannot claim a fixed revision');
@@ -385,7 +390,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
         input.source = { ...base, mode: 'live_root', liveRoot: { hostId: text(root.hostId), canonicalRoot: text(root.canonicalRoot), rootId: text(root.rootId) } };
       } else {
         if (source.liveRoot !== undefined) throw new Error('Fixed source cannot claim a live root');
-        input.source = { ...base, branchId: text(source.branchId), revision: revision(source.revision), mode: source.mode };
+        input.source = { ...base, branchId: text(source.branchId), revision: revision(source.revision), mode: source.mode, ...(source.environmentRunId === undefined ? {} : { environmentRunId: text(source.environmentRunId) }) };
       }
     }
     return adapter.submit(input);

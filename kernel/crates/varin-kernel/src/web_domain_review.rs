@@ -54,6 +54,13 @@ impl Host {
             frames,
         }
     }
+    pub(super) fn next_frame(&self, wait: Duration) -> Option<Value> {
+        match self.frames.recv_timeout(wait) {
+            Ok(frame) => Some(frame),
+            Err(mpsc::RecvTimeoutError::Timeout) => None,
+            Err(error) => panic!("Original Host stdio closed: {error}"),
+        }
+    }
     pub(super) fn send(&mut self, value: Value) {
         writeln!(self.input, "{value}").unwrap();
         self.input.flush().unwrap();
@@ -85,23 +92,43 @@ impl Fixture {
             return command.load(&|| false);
         }
         if method.starts_with("runtime.inference.") {
-            return inference_commands::execute(self.runtime.clone(),method,params,&AtomicBool::new(false));
+            return inference_commands::execute(
+                self.runtime.clone(),
+                method,
+                params,
+                &AtomicBool::new(false),
+            );
         }
         match method {
             "runtime.operation.status" => {
-                let p: OperationParams=serde_json::from_value(params)?;
-                Ok(operation_cancellation_receipt(&owner.lock().unwrap().operation(&p.operation_id).map_err(domain)?))
+                let p: OperationParams = serde_json::from_value(params)?;
+                Ok(operation_cancellation_receipt(
+                    &owner
+                        .lock()
+                        .unwrap()
+                        .operation(&p.operation_id)
+                        .map_err(domain)?,
+                ))
             }
             "runtime.operation.cancel" | "runtime.run.cancel" => {
-                let (sender,_)=mpsc::sync_channel(16);
-                let controls=control_commands::ControlCommands {
-                    runtime:self.runtime.clone(),
-                    resources:crate::tools::KernelResourceClient::new(|_|Err(KernelError::Operation("unrequested resource effect".into())), |_|Ok(()),Default::default()),
-                    models:crate::run_models::RunModels::new(owner.clone(),crate::credential_bridge::CredentialBridge::new(sender)),
-                    tools:crate::run_tools::RunTools::new(owner.clone(),self.bridge.clone()),
+                let (sender, _) = mpsc::sync_channel(16);
+                let controls = control_commands::ControlCommands {
+                    runtime: self.runtime.clone(),
+                    resources: crate::tools::KernelResourceClient::new(
+                        |_| Err(KernelError::Operation("unrequested resource effect".into())),
+                        |_| Ok(()),
+                        Default::default(),
+                    ),
+                    models: crate::run_models::RunModels::new(
+                        owner.clone(),
+                        crate::credential_bridge::CredentialBridge::new(sender),
+                    ),
+                    tools: crate::run_tools::RunTools::new(owner.clone(), self.bridge.clone()),
                 };
-                if let Some(value)=controls.admit_control(method,&params)? { return Ok(value); }
-                controls.execute(method,params,&AtomicBool::new(false))
+                if let Some(value) = controls.admit_control(method, &params)? {
+                    return Ok(value);
+                }
+                controls.execute(method, params, &AtomicBool::new(false))
             }
             "runtime.bot.gate.publish"
             | "runtime.thread.list"
@@ -134,95 +161,16 @@ impl Fixture {
                 params,
                 &AtomicBool::new(false),
             ),
-            "authority.grant.issue" => self.storage.lock().unwrap().issue_grant(
-                &params,
+            _ => storage_rpc(
+                &self.storage,
+                &self.storage_root,
+                method,
+                params,
+                frame["grantId"].as_str(),
+                epoch,
                 HOST,
                 GENERATION,
-                &self.storage_root.to_string_lossy(),
-                epoch,
             ),
-            "authority.grant.revoke" => self.storage.lock().unwrap().revoke_grant(&params, HOST),
-            "authority.grant.retire" => self.storage.lock().unwrap().retire_grants(&params, HOST),
-            _ => {
-                let grant_id = frame["grantId"].as_str();
-                let mut storage = self.storage.lock().unwrap();
-                let (grant, params) =
-                    storage.authorize(grant_id, epoch, HOST, GENERATION, method, &params)?;
-                if method == "file.materialize" || method == "file.materializedView.prepare" {
-                    use crate::storage::materialization::Admission;
-                    let admission = if method == "file.materializedView.prepare" {
-                        storage.prepare_materialized_view(&params, &grant, Arc::new(AtomicBool::new(false)))?
-                    } else {
-                        storage.prepare_materialization(&params, &grant, Arc::new(AtomicBool::new(false)))?
-                    };
-                    drop(storage);
-                    let result = match admission {
-                        Admission::Complete(value) => Ok(value),
-                        Admission::Work(task) => {
-                            let result = task.run(|control| {
-                                self.storage.lock().unwrap().control_materialization(
-                                    &task.operation_id,
-                                    &task.job_id,
-                                    control,
-                                    false,
-                                )
-                            });
-                            self.storage
-                                .lock()
-                                .unwrap()
-                                .finish_materialization(&task.operation_id, &task.job_id);
-                            result
-                        }
-                    }?;
-                    return if method == "file.materializedView.prepare" {
-                        self.storage.lock().unwrap().finish_materialized_view(&params, &grant, result)
-                    } else { Ok(result) };
-                }
-                if method == "file.materializedView.release" {
-                    let task = storage.prepare_materialized_view_release(&params, &grant)?;
-                    drop(storage);
-                    return match task {
-                        Some(task) => {
-                            let result = task.run();
-                            self.storage.lock().unwrap().finish_materialized_view_release(&task, result)
-                        }
-                        None => Ok(json!({"released":true})),
-                    };
-                }
-                if method == "file.capture" {
-                    let task = storage.prepare_capture(
-                        method,
-                        &params,
-                        &grant,
-                        Arc::new(AtomicBool::new(false)),
-                    )?;
-                    drop(storage);
-                    let body = task.run();
-                    let mut storage = self.storage.lock().unwrap();
-                    let result = (|| {
-                        let (grant, _) = storage
-                            .authorize(grant_id, epoch, HOST, GENERATION, method, &params)?;
-                        storage.publish_capture(&task, body?, &grant)
-                    })();
-                    storage.finish_retained_file_lease(task.lease_id());
-                    return result;
-                }
-                if method == "storage.getBlob" {
-                    let task = storage.prepare_blob_read(
-                        &params,
-                        &grant,
-                        Arc::new(AtomicBool::new(false)),
-                    )?;
-                    drop(storage);
-                    let body = task.run();
-                    return self
-                        .storage
-                        .lock()
-                        .unwrap()
-                        .finish_blob_read(&task, body, &grant);
-                }
-                storage.dispatch(method, &params, grant_id, &grant)
-            }
         }
     }
     pub(super) fn pump(&mut self) -> Option<Value> {
@@ -233,7 +181,7 @@ impl Fixture {
         &mut self,
         deliver: impl FnMut(&Value, &Result<Value, KernelError>) -> bool,
     ) -> Option<Value> {
-        self.pump_request(|_|None,deliver)
+        self.pump_request(|_| None, deliver)
     }
     /// A finite original boundary error, distinct from a successful commit with a lost ACK.
     pub(super) fn pump_request(
@@ -248,9 +196,11 @@ impl Fixture {
         &mut self,
         dispatch: impl FnMut(&Value) -> Option<Result<Value, KernelError>>,
         deliver: impl FnMut(&Value, &Result<Value, KernelError>) -> bool,
-    ) -> Option<Value> { self.pump_dispatch_epoch(EPOCH, dispatch, deliver) }
+    ) -> Option<Value> {
+        self.pump_dispatch_epoch(EPOCH, dispatch, deliver)
+    }
     pub(super) fn pump_epoch(&mut self, epoch: &str) -> Option<Value> {
-        self.pump_dispatch_epoch(epoch, |_|None, |_,_|true)
+        self.pump_dispatch_epoch(epoch, |_| None, |_, _| true)
     }
     fn pump_dispatch_epoch(
         &mut self,
@@ -268,9 +218,24 @@ impl Fixture {
         };
         match frame["kind"].as_str().unwrap() {
             "fixture-request" => {
-                let before = self.runtime.catalog().lock().unwrap().event_cursor().unwrap();
-                let result = match dispatch(&frame) { Some(result)=>result,None=>self.rpc(&frame, epoch) };
-                let cursor = self.runtime.catalog().lock().unwrap().event_cursor().unwrap();
+                let before = self
+                    .runtime
+                    .catalog()
+                    .lock()
+                    .unwrap()
+                    .event_cursor()
+                    .unwrap();
+                let result = match dispatch(&frame) {
+                    Some(result) => result,
+                    None => self.rpc(&frame, epoch),
+                };
+                let cursor = self
+                    .runtime
+                    .catalog()
+                    .lock()
+                    .unwrap()
+                    .event_cursor()
+                    .unwrap();
                 if cursor != before {
                     self.host.send(json!({"v":crate::protocol::PROTOCOL_VERSION,"kind":"runtime-event","kernelEpoch":epoch,"stream":"durable","cursor":cursor}));
                 }
@@ -753,4 +718,116 @@ fn original_web_search_fixed_pdf_and_public_reader_share_native_identity_and_sto
     assert_eq!(finished["searches"], 0);
     drop(reopened);
     std::fs::remove_dir_all(root).unwrap();
+}
+
+/// Shared test-only delivery adapter for original Storage's deferred workers.
+pub(super) fn storage_rpc(
+    owner: &Mutex<Storage>,
+    storage_root: &std::path::Path,
+    method: &str,
+    params: Value,
+    grant_id: Option<&str>,
+    epoch: &str,
+    host: &str,
+    generation: &str,
+) -> Result<Value, KernelError> {
+    match method {
+        "authority.grant.issue" => owner.lock().unwrap().issue_grant(
+            &params,
+            host,
+            generation,
+            &storage_root.to_string_lossy(),
+            epoch,
+        ),
+        "authority.grant.revoke" => owner.lock().unwrap().revoke_grant(&params, host),
+        "authority.grant.retire" => owner.lock().unwrap().retire_grants(&params, host),
+        _ => {
+            let mut storage = owner.lock().unwrap();
+            let (grant, params) =
+                storage.authorize(grant_id, epoch, host, generation, method, &params)?;
+            if method == "file.materialize" || method == "file.materializedView.prepare" {
+                use crate::storage::materialization::Admission;
+                let admission = if method == "file.materializedView.prepare" {
+                    storage.prepare_materialized_view(
+                        &params,
+                        &grant,
+                        Arc::new(AtomicBool::new(false)),
+                    )?
+                } else {
+                    storage.prepare_materialization(
+                        &params,
+                        &grant,
+                        Arc::new(AtomicBool::new(false)),
+                    )?
+                };
+                drop(storage);
+                let result = match admission {
+                    Admission::Complete(value) => Ok(value),
+                    Admission::Work(task) => {
+                        let result = task.run(|control| {
+                            owner.lock().unwrap().control_materialization(
+                                &task.operation_id,
+                                &task.job_id,
+                                control,
+                                false,
+                            )
+                        });
+                        owner
+                            .lock()
+                            .unwrap()
+                            .finish_materialization(&task.operation_id, &task.job_id);
+                        result
+                    }
+                }?;
+                return if method == "file.materializedView.prepare" {
+                    owner
+                        .lock()
+                        .unwrap()
+                        .finish_materialized_view(&params, &grant, result)
+                } else {
+                    Ok(result)
+                };
+            }
+            if method == "file.materializedView.release" {
+                let task = storage.prepare_materialized_view_release(&params, &grant)?;
+                drop(storage);
+                return match task {
+                    Some(task) => {
+                        let result = task.run();
+                        owner
+                            .lock()
+                            .unwrap()
+                            .finish_materialized_view_release(&task, result)
+                    }
+                    None => Ok(json!({"released":true})),
+                };
+            }
+            if matches!(method, "file.capture" | "file.captureBatch") {
+                let task = storage.prepare_capture(
+                    method,
+                    &params,
+                    &grant,
+                    Arc::new(AtomicBool::new(false)),
+                )?;
+                drop(storage);
+                let body = task.run();
+                let mut storage = owner.lock().unwrap();
+                let result = (|| {
+                    let (grant, _) =
+                        storage.authorize(grant_id, epoch, host, generation, method, &params)?;
+                    storage.publish_capture(&task, body?, &grant)
+                })();
+                storage.finish_retained_file_lease(task.lease_id());
+                return result;
+            }
+            if method == "storage.getBlob" {
+                let task =
+                    storage.prepare_blob_read(&params, &grant, Arc::new(AtomicBool::new(false)))?;
+                drop(storage);
+                let body = task.run();
+                return owner.lock().unwrap().finish_blob_read(&task, body, &grant);
+            }
+            storage.dispatch(method, &params, grant_id, &grant)
+        }
+    }
 }

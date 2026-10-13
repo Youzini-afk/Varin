@@ -748,6 +748,7 @@ mod tests {
                 thread_id: "thread".into(),
                 actor: FollowupActor::User,
                 source: SourceSelection {
+                    resource_owner:varin_runtime::catalog::launches::SourceResourceOwner::Local,
                     environment_run_id: None,
                     mode: SourceMode::LiveRoot,
                     live_root: Some(LiveRoot {

@@ -71,11 +71,18 @@ Native embedding uses the shared OpenAI-compatible wire with zero automatic retr
 output dimension remains missing. An output-budgeted Goal therefore retains its existing unknown-use
 barrier when this provider supplies no output dimension. Query vector cache hits require the current
 source, binding and captured credential-scope fingerprint; they create no HTTP Operation or usage.
-For native fixed/materialized queries, foreground document misses use the same session with a distinct
+For native fixed/materialized queries and every managed-Host source mode, foreground document misses use the same session with a distinct
 document-embedding purpose. `beforeDispatch` runs the full source-version fence after acknowledged
 dispatch intent and before the request-started flag/transport. Short authorization guards can repeat
 without repeatedly hashing the same file. A failed fence records the original admitted no-send fact;
 a later candidate rejection does not undo already observed HTTP usage.
+Managed sources use the original target SourceView for inventory, structure and document-version
+checks, including live roots. `resourceRoot` is a target coordinate only; `configurationRoot` selects
+the coordinator's global inference settings. Workspace/cache identities include the frozen target
+Host, connection, endpoint identity and workspace. Coordinator index selection, ignored-directory
+settings and same-named local publications cannot redirect that source. Target authorization and
+bytes remain at the source owner; model credentials, requests and usage remain with the Agent owner.
+
 The older Pi workspace broker retains
 its existing failure/cancellation projection; this native lifecycle is not a claim that those older
 observer semantics were replaced.

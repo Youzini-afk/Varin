@@ -14,7 +14,7 @@ afterEach(async()=>{for(const fn of cleanup.splice(0).reverse())await fn();});
 async function fixture(mode:LaunchSource['mode']='fixed_branch'){
  const root=await realpath(await mkdtemp(path.join(tmpdir(),'research-source-')));cleanup.push(()=>rm(root,{recursive:true,force:true}));
  const key=createHash('sha256').update(JSON.stringify(['ws','run'])).digest('hex');const materialized=path.join(root,'managed/runs',key);await mkdir(materialized,{recursive:true});
- const source:LaunchSource={workspace_id:'ws',execution_workspace_id:'exec',mode,branch_id:mode==='live_root'?null:'source',revision:mode==='live_root'?null:7,live_root:mode==='live_root'?{hostId:'host',rootId:'live-root',canonicalRoot:root}:null};
+ const source:LaunchSource={resource_owner: { kind: 'local' as const }, workspace_id:'ws',execution_workspace_id:'exec',mode,branch_id:mode==='live_root'?null:'source',revision:mode==='live_root'?null:7,live_root:mode==='live_root'?{hostId:'host',rootId:'live-root',canonicalRoot:root}:null};
  const issued:KernelGrantIssueParams[]=[],retired:string[]=[],pins=new Set<string>(),operations=new Map<string,unknown>();
  let losePin=false,pendingPin=false,cancelRequested=false,trusted=true,activeCapture:Promise<void>|undefined;let finishCapture:()=>void=()=>{};
  const branch={workspaceId:'ws',branchId:'source',revision:7,view:'revision',root:'sha256-exact',entries:[]};

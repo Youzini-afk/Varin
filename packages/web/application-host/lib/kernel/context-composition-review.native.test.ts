@@ -128,7 +128,7 @@ it('packaged default and installable scoped example reach captured model request
   const f = await fixture((_body, response) => { if (++count === 1) held = response; else complete(response, `composition-${count}`, 'done'); });
   const identity = await f.api.create('composition-review');
   await fs.writeFile(path.join(f.workspace, 'AGENTS.md'), 'FROZEN WORKSPACE');
-  const source = await f.api.prepareSource({ ...identity, key: 'source', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
+  const source = await f.api.prepareSource({ ...identity, key: 'source', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   const first = await f.api.submit({ ...identity, key: 'first', expectedHead: null, text: 'first', model, source: source.source });
   await expect.poll(() => f.requests.length).toBe(1);
   const oldBytes = structuredClone(f.requests[0]!.body);

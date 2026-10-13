@@ -16,7 +16,7 @@ const attempt: ExperimentAttemptView = { attemptId: 'attempt:accepted', specId: 
 function fixture() {
   const research = {
     scopes: vi.fn(async () => [{ sourceRunId: selection.sourceRunId, workspaceId: 'workspace:original', executionWorkspaceId: 'workspace:private', canSubmit: true,
-      source: { workspace_id: 'workspace:original', execution_workspace_id: 'workspace:private', branch_id: 'source:original', revision: 2,
+      source: { resource_owner: { kind: 'local' as const }, workspace_id: 'workspace:original', execution_workspace_id: 'workspace:private', branch_id: 'source:original', revision: 2,
         mode: 'materialized' as const, live_root: null } }]),
     submit: vi.fn(async (_selection, request) => ({ attempt: { ...attempt, requestId: request.requestId }, spec: null, text: 'accepted' })),
     list: vi.fn(async () => ({ attempts: [attempt], text: '' })), get: vi.fn(async () => ({ attempt, artifacts: [] })),

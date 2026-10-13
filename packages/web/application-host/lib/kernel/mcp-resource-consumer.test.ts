@@ -173,7 +173,7 @@ async function sourceReleaseFixture() {
   let change!: (value: McpResourceChange) => void;
   let pending!: McpResourcePending;
   const operation = observation();
-  const source = { mode: 'fixed_branch' as const, workspace_id: 'workspace:original', execution_workspace_id: 'workspace:original',
+  const source = { mode: 'fixed_branch' as const, resource_owner: { kind: 'local' as const }, workspace_id: 'workspace:original', execution_workspace_id: 'workspace:original',
     branch_id: 'branch:original-source', revision: 1, live_root: null };
   const pin = { pin_id: 'pin:original-source', root: 'root:original-source', source };
   const child: DelegatedExecution = {
@@ -186,7 +186,7 @@ async function sourceReleaseFixture() {
       connection_identity: 'original', provider_family: 'original', model: 'original', configuration_generation: 1,
       tool_schema_generation: 1, tools: [], policy: { name: 'default', version: '1' }, source },
     policy_target: { kind: 'default' }, source_basis: null,
-    source: { kind: 'ready', handoff: { operation_id: 'handoff:original', source, root: { kind: 'fixed', pin } },
+    source: { kind: 'ready', handoff: { resource_authority: null, operation_id: 'handoff:original', source, root: { kind: 'fixed', pin } },
       pin, selection: source, provenance: { consistency: 'fixed-root', root: pin.root } },
     code_result: { kind: 'no_changes' }, state: 'completed', revision: 4, cursor: 1,
     receipt: { run_id: run.id, input_id: 'input:child', thread_id: identity.threadId, branch_id: identity.branchId, cursor: 1 },

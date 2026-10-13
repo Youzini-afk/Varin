@@ -98,6 +98,7 @@ else return;process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,res
       threadId: 'child-thread',
       fixed: true,
       source: {
+        resourceOwner: { kind: 'local' as const },
         runId: 'child-run',
         mode: 'materialized' as const,
         workspaceId: 'workspace',

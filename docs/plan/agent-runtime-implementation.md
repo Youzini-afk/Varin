@@ -14,6 +14,18 @@
 - 推理用途接入不等于每个用途都有本地推理包。已有提供商 decision/rerank/embedding 的配置、真实消费者与原生执行合同仍需保留/接通；本地包当前只有已有 Bekko。用户本轮明确暂缓 native 图像生成，不计剩余交付范围；旧 Pi 的 `models.generateImages()` 基础不等于 native 已实现。§18.1/§24 的建议/评估限定已有配置的辅助请求，不能扩成默认模型链；没有另设独立“材料 rerank”产品的任务。此前清单混用用途、消费者和本地包，现以这些明确边界纠正，历史台账不充当新需求。
 - 已有本地嵌入是 `bekko-embedding-v1-a8m` 的 `local-semantic` ONNX 组件。下述增量已将其原安装/校验/worker 接入 native query 和前台文档向量，HTTP 仍是显式配置的另一执行器。HTTP 或受控本地模型的执行验证不代表用户配置了外部服务，也不代表实际 ONNX 权重、硬件质量/性能已验收；当前组件协议需按原 builder 构建 v3 包后导入。
 
+## 2026-10-13 增量：同源 managed Host 执行
+
+- 将固定、物化和 live Source 的 resource owner 贯穿 picker/client/认证 Router、原 Run 工具、同源检索/语言、child 与 journal。协调端 Catalog 保意图和交付，目标 Host 原 Storage/KernelToolExecutor/进程 guardian 保执行事实；不制造目标端影子 Run，不将目标 hash 当协调端对象引用。Catalog **66**、Storage **16**、wire **26**直接采用当前合同。
+- B Documents 解析一次来源，后续按冻结连接/工作区准入；失联、换 epoch、取消与结果查询沿原 authority/operation。目标文件/进程/上下文和派生语义缓存不再误用协调机同名根。原 child pin/result/Integration 与 caller-retained lifetime 同 owner；未交付正文保原回执，持久交付后精确回收，Bot 删除失败保留原清理地址。
+- [本轮记录](../reviews/runtime-managed-source-2026-10-13.md)分列最终 5 个真实资源组合和有限 consumer/独立 bridge 证据。跨 Host 文件恢复、文件事件/PTY/script 及部分项目消费者仍有明确缺口；不把整体 managed 环境或两设计标为完成。Computer 应用工具沿独立原 actor/driver 并行推进。
+
+## 2026-10-13 增量：Computer 应用工具
+
+- 原 builtin、broker 与 native invocation 接通 Computer control/open/put/install、browser/Office、evidence 和环境读取。实际 actor、peer assignment、输入 lane 和 driver 继续独占权限与效果；新控制租约后重新观察，child observer 不清除 root 的手动交还要求。
+- 明确目标前置拒绝、未知效果、媒体编码错误、安装/helper 真正退出和嵌套脚本取消分别保原事实。受控双 owner 与认证 Router 已复验正常 control → snapshot → act、撤销 assignment、丢控制 ACK 和晚到取消；原包构建与完整 Host 类型检查通过。[功能证据](../reviews/runtime-computer-applications-2026-10-13.md)保留真实桌面、双机网络和平台未验边界。
+- 后续同域增量已接 managed desktop prepare/start/stop 与原 artifact/Bot 工作消费者。实际目标 reset 的分配回执覆盖途中 observer，保 reset 后新 grant；目标 peer 不制造本地 Thread，明确 not-found 与故障分开。新 13 个精确入口、独立跨 owner 反例、产包与最终 Host 类型检查已通过；setup helper 无合作中断时仍等真实退出。native placement/forward Job 保明确缺口。
+
 ## 2026-10-13 增量：Thread 历史导航与原文件恢复
 
 - 原 HistoryBranch 使用锁外祖先/上下文准备、head CAS 与持久命令 receipt；原 key 的未知重试不回退后来新输入，Undo 只沿原 receipt。Run、用量、效果、Goal 取消和当前来源保留，跨摘要范围时只清摘要专属 Bot baseline。

@@ -32,6 +32,7 @@ pub(super) struct RetrievalQueryArgs {
     limit: Option<u64>,
 }
 impl RetrievalQueryArgs {
+    pub(super) fn source_descriptor(paths:Option<Vec<String>>)->Self{Self{question:String::new(),paths,limit:None}}
     pub(super) fn parse(value: &Value) -> Result<Self, ExecutionError> {
         let args: Self = serde_json::from_value(value.clone()).map_err(|_| {
             ExecutionError::new("invalid_tool_arguments", "Invalid code retrieval arguments")

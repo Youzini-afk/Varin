@@ -13,11 +13,20 @@ impl Storage {
         grant: &Grant,
         host_id: &str,
     ) -> Result<Option<varin_runtime::catalog::launches::LiveRoot>, KernelError> {
-        if binding.source_mode == varin_runtime::SourceMode::FixedBranch { return Ok(None); }
-        let root = self.registered_file_root(binding.root_id.as_deref().ok_or_else(||
-            KernelError::Authorization("physical source root is missing".into()))?, grant)?;
-        Ok(Some(varin_runtime::catalog::launches::LiveRoot { host_id:host_id.into(),
-            root_id:root.root_id, canonical_root:root.canonical_root.to_string_lossy().into_owned() }))
+        if binding.source_mode == varin_runtime::SourceMode::FixedBranch {
+            return Ok(None);
+        }
+        let root = self.registered_file_root(
+            binding.root_id.as_deref().ok_or_else(|| {
+                KernelError::Authorization("physical source root is missing".into())
+            })?,
+            grant,
+        )?;
+        Ok(Some(varin_runtime::catalog::launches::LiveRoot {
+            host_id: host_id.into(),
+            root_id: root.root_id,
+            canonical_root: root.canonical_root.to_string_lossy().into_owned(),
+        }))
     }
     pub(crate) fn child_source_handoff(
         &mut self,
@@ -34,8 +43,11 @@ impl Storage {
         {
             return Err(KernelError::Authorization("child source handoff requires whole-root read authority and an explicit supported profile".into()));
         }
-        if delegation.process && (delegation.work_mode != varin_runtime::catalog::dispatch::ChildWorkMode::IsolatedWrite
-            || (!delegation.configured_preset && !grant.capabilities.contains("process"))) {
+        if delegation.process
+            && (delegation.work_mode
+                != varin_runtime::catalog::dispatch::ChildWorkMode::IsolatedWrite
+                || (!delegation.configured_preset && !grant.capabilities.contains("process")))
+        {
             return Err(KernelError::Authorization("process delegation requires the frozen configured capability or original parent process authority".into()));
         }
         let source = binding.source_selection()?;
@@ -58,7 +70,9 @@ impl Storage {
                 )?;
                 json!({"kind":"fixed","pin":{"pin_id":pin_id,"root":pinned["root"],"source":source}})
             };
-            Ok(json!({"operation_id":operation_id,"source":source,"root":root}))
+            Ok(
+                json!({"operation_id":operation_id,"source":source,"root":root,"resource_authority":binding.target_authority.as_ref().map(|authority|json!({"authority_id":authority.authority_id,"resource_epoch":authority.resource_epoch}))}),
+            )
         })
     }
     pub(crate) fn child_storage_receipt(
@@ -89,6 +103,24 @@ impl Storage {
             return Err(KernelError::Authorization(
                 "child receipt requires the whole private source".into(),
             ));
+        }
+        if binding.target_authority.is_some() {
+            let candidate = match kind {
+                "working.result.prepare" => receipt["result"].clone(),
+                "working.result.publish" => self.operation_get(
+                    &json!({"operationId":format!("result-prepare:{operation_id}")}),
+                )?["result"]
+                    .clone(),
+                _ => {
+                    return Err(KernelError::Authorization(
+                        "Managed child receipt kind is unavailable".into(),
+                    ))
+                }
+            };
+            let original = candidate["ownerGrantId"].as_str().ok_or_else(|| {
+                KernelError::Authorization("Child result creation grant missing".into())
+            })?;
+            self.validate_source_grant_owner(&grant.grant_id, original)?;
         }
         Ok(receipt["result"].clone())
     }
@@ -265,13 +297,16 @@ impl Storage {
             }
         }
         let parent_branch = match &handoff.root {
-            varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin } => pin.source.branch_id.as_deref(),
+            varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin } => {
+                pin.source.branch_id.as_deref()
+            }
             _ => None,
         };
         if let Some(record) = params.get("recordId").and_then(Value::as_str) {
             if method != "storage.getBlob"
                 || (record != format!("working-source:{branch}")
-                    && !parent_branch.is_some_and(|parent| record == format!("working-source:{parent}")))
+                    && !parent_branch
+                        .is_some_and(|parent| record == format!("working-source:{parent}")))
                 || params["slot"] != "source-provenance"
             {
                 return Err(deny());
@@ -280,7 +315,8 @@ impl Storage {
         if method == "operation.get"
             && params["operationId"] != id
             && params["operationId"] != format!("branch-create:{branch}")
-            && !parent_branch.is_some_and(|parent| params["operationId"] == format!("branch-create:{parent}"))
+            && !parent_branch
+                .is_some_and(|parent| params["operationId"] == format!("branch-create:{parent}"))
         {
             return Err(deny());
         }
@@ -570,9 +606,15 @@ mod handoff_tests {
     use super::*;
     use crate::tools::{FixedFileSource, ToolKind};
     use varin_runtime::{execution::ToolOrigin, SourceMode};
-    fn invoke(storage:&mut Storage, actor:&str, method:&str, params:Value)->Result<Value,KernelError>{
-        let (grant,params)=storage.authorize(Some(actor),"epoch","host","generation",method,&params)?;
-        storage.dispatch(method,&params,Some(actor),&grant)
+    fn invoke(
+        storage: &mut Storage,
+        actor: &str,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, KernelError> {
+        let (grant, params) =
+            storage.authorize(Some(actor), "epoch", "host", "generation", method, &params)?;
+        storage.dispatch(method, &params, Some(actor), &grant)
     }
     #[test]
     fn readonly_fixed_parent_dispatch_claim_only_authorizes_its_exact_private_source() {
@@ -581,11 +623,17 @@ mod handoff_tests {
         let identity = root.to_string_lossy().into_owned();
         storage.issue_grant(&json!({"grantId":"parent","hostGeneration":"generation","owningWorkspace":"workspace","executionWorkspace":"workspace","threadId":"parent-thread","runId":"parent-run","pathScopes":[""],"capabilities":["storage.read","storage.write"]}),"host","generation",&identity,"epoch").unwrap();
         let parent = storage.load_grant("parent").unwrap();
-        let text=r#"{"resources":{"skills":["captured-resource"]}}"#;
-        let upload=json!({"operationId":"provenance","streamId":"provenance","workspaceId":"workspace","byteLength":text.len()});
-        invoke(&mut storage,"parent","storage.putBlob.begin",upload.clone()).unwrap();
+        let text = r#"{"resources":{"skills":["captured-resource"]}}"#;
+        let upload = json!({"operationId":"provenance","streamId":"provenance","workspaceId":"workspace","byteLength":text.len()});
+        invoke(
+            &mut storage,
+            "parent",
+            "storage.putBlob.begin",
+            upload.clone(),
+        )
+        .unwrap();
         invoke(&mut storage,"parent","storage.putBlob.chunk",json!({"streamId":"provenance","sequence":0,"bytesBase64":BASE64.encode(text.as_bytes())})).unwrap();
-        let body=invoke(&mut storage,"parent","storage.putBlob.finish",upload).unwrap();
+        let body = invoke(&mut storage, "parent", "storage.putBlob.finish", upload).unwrap();
         for (method, params) in [
             (
                 "branch.create.begin",
@@ -611,6 +659,9 @@ mod handoff_tests {
                 .unwrap();
         }
         let binding = ToolBinding {
+            resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local,
+            remote_authority: None,
+            target_authority: None,
             grant_id: "parent".into(),
             run_id: "parent-run".into(),
             thread_id: "parent-thread".into(),
@@ -635,7 +686,19 @@ mod handoff_tests {
             operation_id: "request:tool:dispatch".into(),
         };
         let original = storage
-            .child_source_handoff(&binding, &context, &varin_runtime::catalog::dispatch::ChildSourceDelegation { work_mode: varin_runtime::catalog::dispatch::ChildWorkMode::IsolatedWrite, process: false, configured_preset: false, selection_ref: json!({"content_object":"fixture"}) }, &parent, "host", false)
+            .child_source_handoff(
+                &binding,
+                &context,
+                &varin_runtime::catalog::dispatch::ChildSourceDelegation {
+                    work_mode: varin_runtime::catalog::dispatch::ChildWorkMode::IsolatedWrite,
+                    process: false,
+                    configured_preset: false,
+                    selection_ref: json!({"content_object":"fixture"}),
+                },
+                &parent,
+                "host",
+                false,
+            )
             .unwrap();
         let handoff = serde_json::from_value(original).unwrap();
         storage
@@ -651,16 +714,37 @@ mod handoff_tests {
                 "epoch",
             )
             .unwrap();
-        let original=invoke(&mut storage,"claim","operation.get",json!({"operationId":"branch-create:fixed"})).unwrap();
-        assert_eq!(original["result"]["sourceProvenance"]["objectHash"],body["hash"]);
+        let original = invoke(
+            &mut storage,
+            "claim",
+            "operation.get",
+            json!({"operationId":"branch-create:fixed"}),
+        )
+        .unwrap();
+        assert_eq!(
+            original["result"]["sourceProvenance"]["objectHash"],
+            body["hash"]
+        );
         let bytes=invoke(&mut storage,"claim","storage.getBlob",json!({"hash":body["hash"],"recordId":"working-source:fixed","slot":"source-provenance"})).unwrap();
-        assert_eq!(bytes["bytesBase64"],BASE64.encode(text.as_bytes()));
-        for (method,params) in [
-            ("operation.get",json!({"operationId":"branch-create:other-parent"})),
-            ("storage.getBlob",json!({"hash":body["hash"],"recordId":"working-source:other-parent","slot":"source-provenance"})),
-            ("storage.getBlob",json!({"hash":body["hash"],"recordId":"working-source:fixed","slot":"other-slot"})),
+        assert_eq!(bytes["bytesBase64"], BASE64.encode(text.as_bytes()));
+        for (method, params) in [
+            (
+                "operation.get",
+                json!({"operationId":"branch-create:other-parent"}),
+            ),
+            (
+                "storage.getBlob",
+                json!({"hash":body["hash"],"recordId":"working-source:other-parent","slot":"source-provenance"}),
+            ),
+            (
+                "storage.getBlob",
+                json!({"hash":body["hash"],"recordId":"working-source:fixed","slot":"other-slot"}),
+            ),
         ] {
-            assert!(invoke(&mut storage,"claim",method,params).is_err(),"must reject unrelated parent receipt/record/slot");
+            assert!(
+                invoke(&mut storage, "claim", method, params).is_err(),
+                "must reject unrelated parent receipt/record/slot"
+            );
         }
         let good = json!({"operationId":"branch-create:child-source:request:tool:dispatch","builderId":"child","workspaceId":"workspace","branchId":"child-source:request:tool:dispatch","baseRef":storage.branch("fixed").unwrap().head_root,"draftBasePaths":[],"captureScopes":[]});
         assert!(storage

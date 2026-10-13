@@ -606,7 +606,7 @@ describe("IntegrationCoordinator", () => {
       parentBranchId: "parent-conversation", origin: { kind: "model_step", request_id: "request" }, callId: "call",
       childOperationId: "child-task", childExecutionId: "child-execution", childThreadId: "thread-1",
       result: { workspaceId: "ws", branchId: "thread-1", resultRevision: result.resultRevision, root, publicationId: "published-result" },
-      target: { mode, workspace_id: "ws", execution_workspace_id: mode === "materialized" ? "original-storage-workspace" : "execution",
+      target: { mode, resource_owner: { kind: "local" as const }, workspace_id: "ws", execution_workspace_id: mode === "materialized" ? "original-storage-workspace" : "execution",
         branch_id: mode === "materialized" ? "parent-files" : null, revision: mode === "materialized" ? 0 : null,
         environment_run_id: mode === "materialized" ? "original-environment-run" : null,
         live_root: mode === "live_root" ? { hostId: "host", rootId: "root", canonicalRoot: target } : null },
@@ -1767,7 +1767,7 @@ describe("IntegrationCoordinator", () => {
       parentBranchId: "parent-conversation", origin: { kind: "model_step", request_id: "request" }, callId: "call",
       childOperationId: "child-task", childExecutionId: "child-execution", childThreadId: "thread-1",
       result: { workspaceId: "ws", branchId: "thread-1", resultRevision: result.resultRevision, root, publicationId: "published-result" },
-      target: { mode: "live_root", workspace_id: "ws", execution_workspace_id: "ws", branch_id: null, revision: null,
+      target: { mode: "live_root", resource_owner: { kind: "local" as const }, workspace_id: "ws", execution_workspace_id: "ws", branch_id: null, revision: null,
         environment_run_id: null, live_root: { hostId: "host", rootId: "root", canonicalRoot: h.workspace } },
     };
     const input = { operationId: "integration:cancel-mixed", workspaceId: "ws", threadId: "thread-1", branchId: "thread-1",
@@ -1835,7 +1835,7 @@ describe("IntegrationCoordinator", () => {
       parentBranchId: "parent-conversation", origin: { kind: "model_step", request_id: "request" }, callId: "call",
       childOperationId: "child-task", childExecutionId: "child-execution", childThreadId: "thread-1",
       result: { workspaceId: "ws", branchId: "thread-1", resultRevision: result.resultRevision, root, publicationId: "published-result" },
-      target: { mode: "live_root", workspace_id: "ws", execution_workspace_id: "ws", branch_id: null, revision: null,
+      target: { mode: "live_root", resource_owner: { kind: "local" as const }, workspace_id: "ws", execution_workspace_id: "ws", branch_id: null, revision: null,
         environment_run_id: null, live_root: { hostId: "host", rootId: "root", canonicalRoot: h.workspace } },
     };
     const input = { operationId: "integration:cancel-surface-owners", workspaceId: "ws", threadId: "thread-1", branchId: "thread-1",

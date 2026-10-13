@@ -26,7 +26,7 @@ impl Fixture {
         let launch: LaunchSelection = serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"fixture",
             "provider_family":"fixture","model":"model","configuration_generation":1,"tool_schema_generation":1,
             "tools":[{"name":WAIT_TOOL,"version":"1","description":"Wait for fixture operation","output_schema":null,"metadata":null,"schema":{"type":"object"}},
-                {"name":"process_spawn","version":"1","description":"Original native process","output_schema":null,"metadata":null,"schema":{"type":"object"}}],"policy":{"name":"fixture","version":"1"},"source":{"mode":"live_root","live_root":{"hostId":"fixture","canonicalRoot":root,"rootId":"fixture-root"},"workspace_id":"fixture","execution_workspace_id":"fixture","branch_id":null,"revision":null}})).unwrap();
+                {"name":"process_spawn","version":"1","description":"Original native process","output_schema":null,"metadata":null,"schema":{"type":"object"}}],"policy":{"name":"fixture","version":"1"},"source":{"resource_owner":{"kind":"local"},"mode":"live_root","live_root":{"hostId":"fixture","canonicalRoot":root,"rootId":"fixture-root"},"workspace_id":"fixture","execution_workspace_id":"fixture","branch_id":null,"revision":null}})).unwrap();
         let receipt = db
             .submit_with_launch(
                 &SubmitInput {

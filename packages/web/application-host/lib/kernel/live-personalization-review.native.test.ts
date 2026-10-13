@@ -110,7 +110,7 @@ it('live profiles advance at the request boundary while note tails preserve the 
   const note = await f.personalization.saveNote({ scope: { kind: 'global' }, content: 'NOTE OLD' });
   await fs.writeFile(path.join(f.workspace, 'AGENTS.md'), 'PINNED AGENT SOURCE');
   await fs.writeFile(path.join(f.workspace, 'source.txt'), 'actual pinned body');
-  const prepared = await f.api.prepareSource({ ...identity, key: 'live-source', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
+  const prepared = await f.api.prepareSource({ ...identity, key: 'live-source', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   const receipt = await f.api.submit({ ...identity, key: 'live-input', expectedHead: null, text: 'read source after a note edit', model, source: prepared.source });
   await expect.poll(() => f.requests.length).toBe(1);
   const initialWire = structuredClone(f.requests[0]!.body);

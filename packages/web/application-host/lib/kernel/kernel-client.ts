@@ -1,3 +1,4 @@
+import { ManagedSourceBridge, type ManagedSourceOwner, type PrivateManagedSourceFrame } from './managed-source-bridge.js';
 import { FileObservationBridge, type PrivateFileObservationResponse } from './file-observation-bridge.js';
 import type { FileObservationOwner } from './file-observation-owner.js';
 import type { KernelRecoveryOperationConflictsResult, McpBinding, LiveMcpBinding } from './protocol.generated.js';
@@ -614,6 +615,7 @@ export class KernelClient {
   private readonly toolBridge: ToolBridge;
   private readonly mcpReleaseListeners = new Set<(runId: string) => void>();
   private readonly languageBridge: LanguageBridge;
+  private readonly managedSourceBridge: ManagedSourceBridge;
   private readonly memoryBridge: MemoryBridge;
   private readonly contextBridge: ContextBridge;
   private readonly resourceBridge: ResourceBridge;
@@ -644,6 +646,7 @@ export class KernelClient {
   private startPromise: Promise<KernelHandshakeResult> | null = null;
 
   constructor(options: KernelClientOptions) {
+    this.managedSourceBridge = new ManagedSourceBridge(() => this.epoch, frame => this.write(frame), () => this.failAll(new KernelClientError({ code: 'source-channel-failed', message: 'Managed source channel failed', retryable: false }), true));
     this.options = options;
     this.spawnProcess = options.spawnProcess ?? spawn;
     this.policyBridge = new AgentPolicyBridge(() => this.epoch, response => this.write(response),
@@ -719,6 +722,23 @@ export class KernelClient {
     }
     return this.assertGrant(grant);
   }
+  /** Original target-issued permit for a source service; a pre-Run read has no invented Run. */
+  sourceAuthorityGrant(query: Pick<import('./protocol.generated.js').SourceAuthorityResult, 'grantId' | 'source' | 'scope' | 'resourceEpoch'>): KernelGrantHandle {
+    const grant = this.issuedGrants.get(query.grantId);
+    const runId = query.scope.kind === 'run' ? query.scope.runId : null;
+    if (!grant || this.inactiveGrants.has(query.grantId) || grant.kernelEpoch !== query.resourceEpoch
+      || grant.runId !== runId || grant.threadId !== query.scope.threadId
+      || grant.owningWorkspace !== query.source.workspace_id || grant.executionWorkspace !== query.source.execution_workspace_id
+      || grant.sessionId !== null || grant.workerId !== null) {
+      throw new KernelClientError({ code: 'forbidden', message: 'Original source authority permit is unavailable or mismatched' });
+    }
+    return this.assertGrant(grant);
+  }
+  sourceRequest<T = unknown, M extends Extract<KernelMethod, `source.${string}`> = Extract<KernelMethod, `source.${string}`>>(
+    method: M, params: KernelMethodParams[M], signal?: AbortSignal,
+  ): Promise<T> {
+    return this.requestRaw<T>(method, params, { signal, allowBootstrap: true, settleCancellation: method === 'source.service.call' || method === 'source.resource.execute' });
+  }
   async fileReadCheck(params: KernelMethodParams["file.read.check"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<{ resourceKey: string }> {
     return this.requestRaw<{ resourceKey: string }>("file.read.check", params, { signal, grant });
   }
@@ -733,6 +753,7 @@ export class KernelClient {
   setResourceOwner(owner: ResourceOwner): void { this.resourceBridge.setOwner(owner); }
   setFileObservationOwner(owner: FileObservationOwner): void { this.fileObservationBridge.setOwner(owner); }
   setPlanOwner(owner: PlanOwner): void { this.planBridge.setOwner(owner); }
+  setManagedSourceOwner(owner: ManagedSourceOwner, coordinatorHostId: () => string): void { this.managedSourceBridge.setOwner(owner, coordinatorHostId); }
   setLanguageOwner(owner: LanguageToolOwner): void { this.languageBridge.setOwner(owner); }
   /** Await the actual shared language view retirement before capturing a stopped source. */
   releaseLanguageSource(runId: string): Promise<void> { return this.languageBridge.releaseSource({ runId }); }
@@ -989,7 +1010,7 @@ export class KernelClient {
         pending?.release();
         return;
       }
-      if (this.credentialBridge.consume(response) || this.fileObservationBridge.consume(response) || this.resourceBridge.consume(response) || this.contextBridge.consume(response) || this.memoryBridge.consume(response) || this.planBridge.consume(response) || this.languageBridge.consume(response) || this.retrievalBridge.consume(response) || this.toolBridge.consume(response) || this.policyBridge.consume(response)) return;
+      if (this.managedSourceBridge.consume(response) || this.credentialBridge.consume(response) || this.fileObservationBridge.consume(response) || this.resourceBridge.consume(response) || this.contextBridge.consume(response) || this.memoryBridge.consume(response) || this.planBridge.consume(response) || this.languageBridge.consume(response) || this.retrievalBridge.consume(response) || this.toolBridge.consume(response) || this.policyBridge.consume(response)) return;
       if (response.kind === "runtime-event") {
         if (response.v !== KERNEL_PROTOCOL_VERSION || response.kernelEpoch !== this.epoch
           || !["durable", "progress"].includes(response.stream)
@@ -1059,6 +1080,7 @@ export class KernelClient {
     this.credentialBridge.close();
     this.toolBridge.reset();
     this.languageBridge.close();
+    this.managedSourceBridge.close();
     this.memoryBridge.close();
     this.contextBridge.close();
     this.resourceBridge.close();
@@ -1087,7 +1109,7 @@ export class KernelClient {
     if (terminate && this.child && !this.child.killed) this.child.kill();
   }
 
-  private async write(request: KernelRequest | PrivateCredentialResponse | PrivateToolFrame | PrivatePolicyResponse | PrivateMemoryResponse | PrivateContextResponse | PrivateResourceResponse | PrivateFileObservationResponse | PrivatePlanResponse | PrivateLanguageResponse | PrivateRetrievalResponse): Promise<void> {
+  private async write(request: PrivateManagedSourceFrame | KernelRequest | PrivateCredentialResponse | PrivateToolFrame | PrivatePolicyResponse | PrivateMemoryResponse | PrivateContextResponse | PrivateResourceResponse | PrivateFileObservationResponse | PrivatePlanResponse | PrivateLanguageResponse | PrivateRetrievalResponse): Promise<void> {
     const transport = this.transport;
     if (!transport) throw new KernelClientError({ code: "kernel-disconnected", message: "Rust kernel transport is unavailable", retryable: true });
     const control = request.kind === "cancel" || request.kind === "credential-response" || request.kind === "host-tool-revoked" || request.kind === "file-observation-response"
@@ -1637,6 +1659,11 @@ export class KernelClient {
     return this.requestRaw<Record<string, unknown>>("recovery.operation.release", params, { signal, grant });
   }
 
+  async claimManagedChildSource(params: KernelMethodParams['source.authority.claim_handoff'], signal?: AbortSignal): Promise<KernelGrantHandle> {
+    if (!this.handshakeResult) await this.start();
+    const result = await this.sourceRequest<Record<string, unknown>>('source.authority.claim_handoff', params, signal);
+    const handle = this.grantFromResponse(result); this.inactiveGrants.delete(handle.grantId); this.issuedGrants.set(handle.grantId, handle); return handle;
+  }
   async claimChildSource(params: KernelMethodParams["source.handoff.claim"], signal?: AbortSignal): Promise<KernelGrantHandle> {
     if (!this.handshakeResult) await this.start();
     // This Host-only command obtains the child grant from an already accepted handoff.
@@ -1789,6 +1816,7 @@ export class KernelClient {
     this.credentialBridge.close();
     this.toolBridge.reset();
     this.languageBridge.close();
+    this.managedSourceBridge.close();
     this.memoryBridge.close();
     this.contextBridge.close();
     this.resourceBridge.close();

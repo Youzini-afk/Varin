@@ -48,12 +48,16 @@ export function createResearchSourceAuthority(options: {
     const launch = await runtime.launch(caller.owner.runId, signal);
     if (!launch || !isDeepStrictEqual(launch.selection.source, caller.owner.source))
       throw new Error('Original research LaunchSource changed');
-    return admitRunSourceAuthority(options.kernel, runtime, savedSourceLaunch(caller.owner.runId, caller.owner.source, sourceToolSchemas(launch.selection).map(tool => tool.name) as Parameters<typeof savedSourceLaunch>[2]), { ...(signal ? { signal } : {}), resolveLiveSource: options.resolveLiveSource, retention: 'caller', operationId: caller.owner.operationId });
+    if (caller.owner.source.resource_owner.kind === 'managed_host') throw new Error('Experiment input transfer from a managed Source is not available yet. Select a source on the coordinating Host; existing remote experiment machines remain available.');
+    const admitted = await admitRunSourceAuthority(options.kernel, runtime, savedSourceLaunch(caller.owner.runId, caller.owner.source, sourceToolSchemas(launch.selection).map(tool => tool.name) as Parameters<typeof savedSourceLaunch>[2]), { ...(signal ? { signal } : {}), resolveLiveSource: options.resolveLiveSource, retention: 'caller', operationId: caller.owner.operationId });
+    if (admitted.kind !== 'local') { await admitted.release(); throw new Error('Research source owner changed during admission'); }
+    return admitted;
   };
   // Release only this original Operation's recorded pin. Cleanup does not reacquire source
   // reading or physical-root authority after trust has been withdrawn.
   const releaseFixedPin = async (caller: ExperimentCaller, admitted?: Extract<ExperimentSourceAdmission, { kind: 'fixed' }>): Promise<boolean> => {
     const owner = caller.owner;
+    if (owner.runtime === 'agent' && 'source' in owner && owner.source.resource_owner.kind === 'managed_host') throw new Error('Managed experiment input cleanup requires its original remote source owner');
     if (owner.runtime !== 'agent' || !('operationId' in owner) || owner.source.mode !== 'fixed_branch'
       || !owner.source.branch_id || owner.source.revision === null
       || caller.workspaceId !== owner.source.workspace_id || caller.executionWorkspaceId !== owner.source.execution_workspace_id)

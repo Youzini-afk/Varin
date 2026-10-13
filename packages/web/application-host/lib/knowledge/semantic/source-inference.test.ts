@@ -13,7 +13,7 @@ import type { SemanticSourceView } from './query-view.js';
 import type { StructureSource } from '../../structure/types.js';
 import type { DocumentAuthority } from '../../documents/authority.js';
 
-async function fixture(failSource: boolean, local = false) {
+async function fixture(failSource: boolean, local = false, managed = false) {
   const directory = mkdtempSync(join(tmpdir(), 'varin-source-inference-'));
   const credentials = { reference: 'fixture', authority: 'fixture-owner', account: 'fixture-account', generation: 1 };
   const embedding = { providerId: 'embedding', modelId: 'fixture', protocol: 'openai-compatible', dimensions: 2, maxTokens: 4096, enabled: true };
@@ -47,20 +47,28 @@ async function fixture(failSource: boolean, local = false) {
     egress: { prepare: async () => ({ policy: { version: 1, mode: 'direct', noProxy: [], source: 'default' } as never, fetch }) },
   } });
   const versionCheck = vi.fn(async () => { if (failSource) throw new Error('Original source changed'); });
-  const source: SemanticSourceView = { mode: 'fixed_branch', configurationRoot: '/removed/original',
+  const source: SemanticSourceView = { mode: 'fixed_branch', resourceOwner: { kind: 'local' }, resourceRoot: '/removed/original',
+    configurationRoot: '/removed/original', cacheWorkspaceId: 'original-workspace',
     listFiles: async () => ({ complete: true, files: [{ path: 'a.ts', revision: 'original-revision' }] }),
     compute: async () => { throw new Error('The structure port supplies controlled units'); }, validateDocuments: versionCheck };
   const structure: StructureSource = { unitsRecipe: async () => 'recipe-1', unitsFixed: async () => ({ status: 'ready', revision: 'original-revision', recipeId: 'recipe-1',
     units: [{ startLine: 1, endLine: 1, parentName: '', parentKind: 'file', parentSignature: '', docComments: '', text: 'export const source = 42;', fallback: true }] }),
     outline: async () => { throw new Error('not used'); }, classifyHits: async () => { throw new Error('not used'); },
     literalCalls: async () => { throw new Error('not used'); }, imports: async () => { throw new Error('not used'); } };
+  if (managed) {
+    source.mode = 'live_root';
+    source.resourceOwner = { kind: 'managed_host', hostId: 'host-b', connectionId: 'connection-b', endpointIdentity: 'endpoint-b' };
+    source.resourceRoot = 'C:\\remote\\project'; source.configurationRoot = ''; source.cacheWorkspaceId = 'managed-source:host-b';
+    source.structure = structure;
+  }
   const unavailable = () => { throw new Error('A source query must not inspect or watch the old live directory'); };
   const documents = { inspectWorkspace: unavailable, read: unavailable, watch: unavailable,
     agentInputDraftPaths: unavailable, readAgentInputSnapshot: unavailable } as unknown as DocumentAuthority;
   const component = local ? await localComponentFixture(join(directory, 'component')) : undefined;
   const encoder = component ? createLocalSemanticEmbedder({ dataDir: '', pack: component.pack }) : createHashEmbedder();
   const runtime = createWorkspaceSemanticRuntime({ dataDir: directory, hostId: 'source-inference', configCwd: directory,
-    documents, structureSource: structure, scheduler: createEmbedScheduler(), embedder: encoder, runtimeInference: inference,
+    documents, structureSource: managed ? new Proxy({} as StructureSource, { get: () => { throw new Error('Managed source cannot use coordinator grammars'); } }) : structure,
+    ...(managed ? { getIndexScope: () => { throw new Error('Managed source cannot use coordinator index selection'); } } : {}), scheduler: createEmbedScheduler(), embedder: encoder, runtimeInference: inference,
     getBroker: unavailable, executionViews: { get: () => undefined }, workingBranches: { pinQuery: async () => null } });
   let invocation = 0;
   const run = (beforeSearch?: () => void) => inference.requests!.run({ operationId: `original-query-${++invocation}`,
@@ -74,7 +82,7 @@ async function fixture(failSource: boolean, local = false) {
       return await lease.stage.implementation.search('source meaning', 5, call.signal);
     } finally { lease.release(); }
   });
-  return { frames, fetch, versionCheck, embedding, run, runtime, inference, component, directory, encoder,
+  return { source, frames, fetch, versionCheck, embedding, run, runtime, inference, component, directory, encoder,
     select: (value: unknown) => { selection = value; }, setReadGate: (gate?: () => Promise<void>) => { readGate = gate; }, close: async () => {
     await runtime.dispose(); await inference.close(); rmSync(directory, { recursive: true, force: true });
   } };
@@ -168,5 +176,17 @@ it('reuses the active local generation when the same verified component bytes ar
     f.versionCheck.mockClear(); await f.run();
     expect(await f.component!.calls()).toHaveLength(before);
     await f.encoder.prepare();
+  } finally { await f.close(); }
+});
+
+it('queries managed live source units under an owner-qualified cache with coordinator inference and no local source lookup', async () => {
+  const f = await fixture(false, false, true);
+  try {
+    const result = await f.run();
+    expect(result.hits).toHaveLength(1);
+    expect(result.scope).toEqual({ scopeKind: 'workspace', scopeId: f.source.cacheWorkspaceId });
+    expect(result.hits[0]?.body).toContain('export const source = 42');
+    expect(f.fetch).toHaveBeenCalledTimes(2);
+    expect(f.versionCheck).toHaveBeenCalledTimes(2);
   } finally { await f.close(); }
 });

@@ -42,6 +42,8 @@ enum WorkerRequest {
         result: Result<crate::storage::blob_reads::PreparedBlobRead, KernelError>,
     },
     Wire(Value, Arc<AtomicBool>),
+    SourceWire(Value,varin_runtime::execution::CancellationToken),
+    SourceDone { request:Value, key:String, result:Result<crate::source_resources::SourceWorkResult,KernelError> },
     Resource(crate::tools::ResourceCall),
     FileObservation(crate::file_observation::Command),
     FileWriterStopped(String),
@@ -231,6 +233,9 @@ struct Kernel {
     )>,
     pending_root_registrations: HashMap<String, PendingRootRegistration>,
     active_materializations: usize,
+    source_resources:Option<crate::tools::KernelResourceClient>,
+    source_request_cancel:Option<varin_runtime::execution::CancellationToken>,
+    source_tasks:HashMap<String,varin_runtime::execution::CancellationToken>,
     agent_control: crate::agent_runtime::AgentControl,
 }
 
@@ -264,6 +269,9 @@ impl Kernel {
             blob_read_hold: None,
             pending_root_registrations: HashMap::new(),
             active_materializations: 0,
+            source_resources:None,
+            source_request_cancel:None,
+            source_tasks:HashMap::new(),
             agent_control: crate::agent_runtime::AgentControl::default(),
         }
     }
@@ -455,6 +463,26 @@ impl Kernel {
             KernelError::Authorization("Host identity is unavailable".to_string())
         })?;
         let grant_id = request.get("grantId").and_then(Value::as_str);
+        if method.starts_with("source.") && method!="source.handoff.claim" {
+            use crate::source_resources::*;
+            if grant_id.is_some(){return Err(denied("Source authority entry requires authenticated Host ownership"));}
+            if method=="source.resource.cancel" {
+                let p:SourceResourceControlParams=serde_json::from_value(params_value.clone())?;
+                let address=SourceAuthorityAddress{principal_id:p.principal_id,coordinator_host_id:p.coordinator_host_id,authority_id:p.authority_id,resource_epoch:p.resource_epoch};
+                storage.source_authority(&address,false,&self.epoch)?;
+                if let Some(token)=self.source_tasks.get(&format!("{}:{}",address.authority_id,p.operation_id)){token.cancel();}
+            }
+            let work=prepare_request(storage,method,params_value,&self.epoch,host_id,self.host_generation.as_deref().unwrap_or_default())?;
+            if let SourceDispatch::Ready(value)=work{return Ok(Some(response_ok(id,value)));}
+            let key=work.key().expect("source work identity");
+            if self.source_tasks.contains_key(&key){return Err(denied("Original source request is already in flight; observe it"));}
+            let resources=self.source_resources.clone().ok_or_else(||denied("Source resource worker unavailable"))?;
+            let cancel=self.source_request_cancel.take().unwrap_or_default();
+            let request=request.clone();let sender=completions.clone();
+            self.source_tasks.insert(key.clone(),cancel.clone());
+            thread::spawn(move||{let result=work.execute(resources,cancel);let _=sender.send(WorkerRequest::SourceDone{request,key,result});});
+            return Ok(None);
+        }
         if method == "source.handoff.claim" {
             if grant_id.is_some() {
                 return Err(KernelError::Authorization(
@@ -1020,6 +1048,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let language_bridge = crate::language::LanguageBridge::new(response_tx.clone());
     let retrieval_bridge = crate::retrieval::RetrievalBridge::new(response_tx.clone());
     let policy_bridge = crate::policy::PolicyBridge::new(response_tx.clone());
+    let source_bridge=crate::host_query::OwnerChannel::new("source-resource",response_tx.clone());
     let writer_failed = Arc::new(AtomicBool::new(false));
     let subscriptions =
         crate::process::subscriptions::ProcessSubscriptions::new(response_tx.clone());
@@ -1188,6 +1217,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         },
         process_controls.clone(),
     )
+    .with_source_bridge(source_bridge.clone())
     .with_file_observations(file_observations)
     .with_process_interactions(interaction_client.clone())
     .with_integration_receipts(move |read| {
@@ -1239,6 +1269,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let credit_cancellations = cancellations.clone();
     let credit_responses = response_tx.clone();
     let agent_control = crate::agent_runtime::AgentControl::default();
+    let source_resources=resources.clone();
     let agent_worker = crate::agent_runtime::spawn(
         agent_rx,
         agent_tx.clone(),
@@ -1278,16 +1309,18 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let worker_plan = plan_bridge.clone();
     let worker_retrieval = retrieval_bridge.clone();
     let worker_policy = policy_bridge.clone();
+    let worker_source=source_bridge.clone();
     let worker_response_tx = response_tx.clone();
     let worker_writer_failed = writer_failed.clone();
     let capture_completions = request_tx.clone();
     let worker = thread::spawn(move || {
         let mut kernel = Kernel::new(transport_epoch);
         kernel.agent_control = worker_agent_control;
+        kernel.source_resources=Some(source_resources);
         let mut stopping = false;
         for message in request_rx {
             if stopping
-                && kernel.active_materializations == 0
+                && kernel.active_materializations == 0 && kernel.source_tasks.is_empty()
                 && !kernel
                     .storage
                     .as_ref()
@@ -1297,15 +1330,26 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             let (request, cancellation) = match message {
                 WorkerRequest::Wire(request, cancellation) => (request, cancellation),
+                WorkerRequest::SourceWire(request,cancel)=>{kernel.source_request_cancel=Some(cancel.clone());(request,cancel.shared_flag())},
+                WorkerRequest::SourceDone{request,key,result}=>{
+                    kernel.source_tasks.remove(&key);
+                    let id=request["id"].as_str().unwrap_or_default();
+                    if let Ok(mut active)=worker_cancellations.lock(){active.remove(id);}
+                    let result=result.and_then(|value|value.finish(kernel.storage.as_mut().expect("source Storage owner")));
+                    let response=match result{Ok(value)=>response_ok(id,value),Err(error)=>response_error(id,&error)};
+                    if worker_response_tx.send(response).is_err(){break;}
+                    continue;
+                },
                 WorkerRequest::Stop => {
                     stopping = true;
+                    for cancel in kernel.source_tasks.values(){cancel.cancel();}
                     for (cancel, _) in &kernel.file_workers {
                         cancel.store(true, Ordering::Release);
                     }
                     if let Some(storage) = kernel.storage.as_ref() {
                         storage.cancel_file_observation_reads();
                     }
-                    if kernel.active_materializations == 0
+                    if kernel.active_materializations == 0 && kernel.source_tasks.is_empty()
                         && !kernel
                             .storage
                             .as_ref()
@@ -1420,7 +1464,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                             break;
                         }
                     }
-                    if stopping && kernel.active_materializations == 0 {
+                    if stopping && kernel.active_materializations == 0 && kernel.source_tasks.is_empty() {
                         break;
                     }
                     continue;
@@ -1590,7 +1634,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                             kernel.host_id.as_deref().unwrap_or_default(),
                             kernel.host_generation.as_deref().unwrap_or_default(),
                         ) {
-                            if intent.native.is_some() {
+                            if intent.native.as_ref().is_some_and(|native|native.resource_owner.is_local()) {
                                 let _ = worker_agent_tx.send(
                                     crate::agent_runtime::Command::ProcessInteraction {
                                         intent,
@@ -1743,7 +1787,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             let response = match handled {
                 Ok(Some(response)) => response,
                 Ok(None) => {
-                    if method.as_deref().is_some_and(pending_file_worker) {
+                    if method.as_deref().is_some_and(|method| pending_file_worker(method)||matches!(method,"source.resource.authorize"|"source.resource.execute"|"source.service.call"|"source.resource.observe"|"source.resource.cancel")) {
                         continue;
                     }
                     worker_cancellations
@@ -1773,6 +1817,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     worker_plan.initialize(epoch);
                     worker_retrieval.initialize(epoch);
                     worker_policy.initialize(epoch);
+                    worker_source.initialize(epoch);
                     if let Some(storage) = kernel.storage.as_mut() {
                         let output = worker_response_tx.clone();
                         let epoch = epoch.to_owned();
@@ -1835,6 +1880,10 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
+            if matches!(method.as_deref(),Some("source.authority.release"|"source.authority.release_scope")) && response["ok"]==true {
+                let receipts=if method.as_deref()==Some("source.authority.release_scope"){response["result"]["released"].as_array().cloned().unwrap_or_default()}else{vec![response["result"].clone()]};
+                for receipt in receipts {for grant in receipt["grantIds"].as_array().into_iter().flatten().filter_map(Value::as_str){storage_subscriptions.close_grant(grant);mark_grant_revoked(&worker_revoked_grants,&worker_cancellations,grant);}}
+            }
             if method.as_deref() == Some("authority.grant.issue") {
                 let target = request
                     .get("params")
@@ -1861,7 +1910,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             if shutdown {
                 stopping = true;
-                if kernel.active_materializations == 0 {
+                if kernel.active_materializations == 0 && kernel.source_tasks.is_empty() {
                     break;
                 }
             }
@@ -1954,6 +2003,8 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             retrieval_bridge.receive(request);
             continue;
         }
+        if request.get("kind").and_then(Value::as_str)==Some("source-process-terminal") {if let Ok(frame)=serde_json::from_value(request){let _=agent_tx.send(crate::agent_runtime::Command::SourceProcessTerminal(frame));}continue;}
+        if request.get("kind").and_then(Value::as_str)==Some("source-resource-response") {source_bridge.receive(request);continue;}
         if request.get("kind").and_then(Value::as_str) == Some("plan-response") {
             plan_bridge.receive(request);
             continue;
@@ -2117,6 +2168,14 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 },
             );
         }
+        if request["method"].as_str().is_some_and(|m|matches!(m,"source.resource.authorize"|"source.resource.execute"|"source.service.call")) {
+            let request_id=request["id"].as_str().unwrap_or_default().to_string();
+            let cancel={let mut active=cancellations.lock().map_err(|_|"cancellation owner poisoned")?;
+                let active=active.get_mut(&request_id).ok_or("source request lost admission")?;
+                let cancel=active.runtime_cancel.clone().unwrap_or_default();if active.token.load(Ordering::Acquire){cancel.cancel();}
+                active.token=cancel.shared_flag();active.runtime_cancel=Some(cancel.clone());cancel};
+            if request_tx.send(WorkerRequest::SourceWire(request,cancel)).is_err(){break;}continue;
+        }
         if request["method"].as_str().is_some_and(|method| {
             matches!(
                 method,
@@ -2260,6 +2319,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     plan_bridge.close();
     retrieval_bridge.close();
     policy_bridge.close();
+    source_bridge.close();
     subscriptions.shutdown();
     let _ = subscription_tx.send(crate::process::subscriptions::ControlCommand::Stop);
     drop(subscription_tx);

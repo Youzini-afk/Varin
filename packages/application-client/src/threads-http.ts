@@ -108,6 +108,8 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     recoverySource: input => post('recovery/source', input),
     navigate: input => post('navigate', input),
     navigationReceipt: input => post('navigation/receipt', input),
+    sources: { list: (identity, signal) => post('source/list', identity, signal),
+      resolve: (identity, request, signal) => post('source/resolve', { ...identity, ...request }, signal) },
     prepareSource: (input, signal) => post('source/prepare', input, signal),
     compact: input => post('context/compact', input),
     publishContext: (identity, runId) => post('context/publish', { ...identity, runId }),

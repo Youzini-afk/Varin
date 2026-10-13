@@ -25,6 +25,7 @@ export function createThreadProcesses(options: {
     const launch = await runtime.launch(run.id);
     const source = launch?.selection.source;
     if (!source || source.mode === 'fixed_branch') throw new Error('Process has no physical source');
+    if (source.resource_owner.kind === 'managed_host') throw new Error('Interactive terminal attachment for this managed Source is not available yet. Read output, wait or cancel through the original process operation.');
     const terminal = options.terminal();
     if (!terminal?.adoptTerminalSession) throw new Error('Terminal runtime is unavailable');
     const sessionId = `agent-process:${createHash('sha256').update(JSON.stringify([run.thread_id, run.branch_id, operation.id])).digest('hex')}`;
@@ -46,6 +47,7 @@ export function createThreadProcesses(options: {
       void authority.release().catch(options.onError);
     };
     try {
+      if (authority.kind !== 'local') throw new Error('Terminal resource owner changed during admission');
       const access = await runtime.processAccess({ threadId: input.threadId, branchId: input.branchId,
         operationId: operation.id, toolBinding: authority.toolBinding });
       if (access.operationId !== operation.id || access.runId !== run.id || access.threadId !== input.threadId

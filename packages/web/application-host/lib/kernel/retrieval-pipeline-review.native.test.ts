@@ -38,12 +38,12 @@ it('public HTTP runs keyword → actual Rust structure → durable history → f
   const identity = await f.api.create('retrieval-public-http');
   const liveRoot = await f.liveSources.prepare(f.workspaceId, f.workspaceId, identity.threadId);
   const receipt = await f.api.submit({ ...identity, key: 'retrieval-http-input', expectedHead: null, text: 'Find retrievalNeedle and check the source', model: { providerId: 'fixture', modelId: 'retrieval-loopback' },
-    source: { mode: 'live_root', workspaceId: f.workspaceId, executionWorkspaceId: f.workspaceId, liveRoot, tools: ['code_retrieval', 'file_read'] } });
+    source: { mode: 'live_root', resourceOwner: { kind: 'local' as const }, workspaceId: f.workspaceId, executionWorkspaceId: f.workspaceId, liveRoot, tools: ['code_retrieval', 'file_read'] } });
   await expect.poll(async () => (await f.api.run(receipt.run_id)).state, { timeout: 15_000 }).toBe('completed');
   expect(f.launchErrors).toEqual([]); expect(f.requests).toHaveLength(3);
   const retrieval = latestOutput(f.requests[1]!)!;
   expect(retrieval).toMatchObject({ outcome: 'succeeded', content: {
-    source: { mode: 'live_root', workspace_id: f.workspaceId, live_root: liveRoot },
+    source: { mode: 'live_root', resource_owner: { kind: 'local' as const }, workspace_id: f.workspaceId, live_root: liveRoot },
     snippets: expect.arrayContaining([expect.objectContaining({ path: 'module.ts', startLine: 1, endLine: 4, content: sourceText.trimEnd() })]),
   } });
   expect(results.get(receipt.run_id)?.plan).toMatchObject({ configurationGeneration: 1,

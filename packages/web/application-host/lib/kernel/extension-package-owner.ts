@@ -47,6 +47,7 @@ export async function captureExtensionPackage(options: Omit<ExtensionPackageOwne
     throw new Error('extension_package_source_required');
   }
   const source = authority.source;
+  if (source.resource_owner.kind === 'managed_host') throw new Error('Extension package staging from a managed Source is not available yet. Stage the package on its owning Host; reviewed candidates can still be applied here.');
   const selection = savedSourceLaunch(authority.runId, source, sourceToolSchemas(launch.selection).map(tool => tool.name));
   const admitted = await admitRunSourceAuthority(options.kernel, options.runtime, selection, {
     signal, resolveLiveSource: options.resolveLiveSource, retention: 'caller', operationId: authority.operationId,
@@ -59,6 +60,7 @@ export async function captureExtensionPackage(options: Omit<ExtensionPackageOwne
   let primaryError: unknown;
   let failed = false;
   try {
+    if (admitted.kind !== 'local') throw new Error('Extension package source owner changed during admission');
     const common = { grant: admitted.grant, owningWorkspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id };
     const context = source.mode === 'fixed_branch'
       ? await options.storage.contextFromBranchGrant(common)

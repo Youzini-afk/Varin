@@ -1,4 +1,4 @@
-import type { AgentInputContext, ChildSourceProvenance, ContextSummaryRecipe, SourceFailureCode } from '@varin/protocol';
+import type { AgentInputContext, ChildSourceProvenance, ContextSummaryRecipe, SourceFailureCode, SourceResourceOwner } from '@varin/protocol';
 import type { DocumentReadRequest, FetchResult } from '@varin/protocol';
 import type { McpInteractionListParams, McpInteractionReadParams, McpInteractionRespondParams, McpInteractionPage, McpInteractionView, McpSamplingRequestReviewParams, McpSamplingOutputReviewParams } from '@varin/protocol';
 import type { MediaReadParams, MediaReadChunk } from '@varin/protocol';
@@ -25,21 +25,42 @@ export type ThreadMcpSamplingRequestReview = ThreadIdentity & Omit<McpSamplingRe
   | { action: Exclude<McpSamplingRequestReviewParams['action'], 'generate'>; model?: never; editedRequest?: never }
 );
 interface ThreadSourceBase {
+  resourceOwner: SourceResourceOwner;
   workspaceId: string;
   executionWorkspaceId: string;
   /** Names are admitted by the Rust source-tool directory, not a client-side capability list. */
   tools: string[];
 }
 export type ThreadSource = ThreadSourceBase & (
-  | { mode: 'fixed_branch' | 'materialized'; branchId: string; revision: number; liveRoot?: never }
-  | { mode: 'live_root'; liveRoot: LiveRoot; branchId?: never; revision?: never }
+  | { mode: 'fixed_branch' | 'materialized'; branchId: string; revision: number; liveRoot?: never; environmentRunId?: string }
+  | { mode: 'live_root'; liveRoot: LiveRoot; branchId?: never; revision?: never; environmentRunId?: never }
 );
 export interface ThreadPrepareSource extends ThreadIdentity {
+  resourceOwner: SourceResourceOwner;
   key: string;
   workspaceId: string;
   mode: ThreadSource['mode'];
   content: { mode: 'saved-files' } | { mode: 'surface-drafts'; context: AgentInputContext };
   captureScopes: string[];
+}
+/** Configured connection identities are returned by the trusted Host, never renderer credentials. */
+export interface ThreadSourceTarget {
+  resourceOwner: SourceResourceOwner;
+  label: string;
+  capabilities: string[];
+}
+export interface ThreadSourceTargets {
+  targets: ThreadSourceTarget[];
+  unavailable: Array<{ connectionId: string; label: string; message: string }>;
+}
+export interface ThreadResolvedSource {
+  resourceOwner: SourceResourceOwner;
+  workspaceId: string;
+  path: string;
+}
+export interface ThreadSourcesAPI {
+  list(identity: ThreadIdentity, signal?: AbortSignal): Promise<ThreadSourceTargets>;
+  resolve(identity: ThreadIdentity, request: { resourceOwner: SourceResourceOwner; path: string }, signal?: AbortSignal): Promise<ThreadResolvedSource>;
 }
 export interface ThreadPreparedSource {
   path: string;
@@ -153,7 +174,10 @@ export interface ThreadGoalsAPI {
 }
 export interface ThreadSnapshot {
   recovery?: {
+    /** The owner could not establish current recovery metadata. */
     unavailable?: string;
+    /** Combined file recovery is unavailable; independent navigation receipts remain valid. */
+    combinedUnavailable?: string;
     navigation: import("@varin/protocol").NavigationReceipt | null;
     operations: import("@varin/extension-contract").WorkspaceCombinedRecoveryOperation[];
   };
@@ -255,10 +279,11 @@ export interface ThreadsAPI {
   selectModel(input: ThreadIdentity & { runId: string; key: string; model: ThreadModel }): Promise<RunModelSelection>;
   list(): Promise<ThreadSummary[]>;
   create(key: string): Promise<ThreadIdentity>;
+  sources: ThreadSourcesAPI;
   prepareSource(input: ThreadPrepareSource, signal?: AbortSignal): Promise<ThreadPreparedSource>;
   /** Fork immutable conversation ancestry; live runs and resource grants are not copied. */
   prepareNavigation(input: ThreadIdentity & { entryId: string }): Promise<import("@varin/protocol").NavigationSelection & { editorImages?: ImageAttachment[] }>;
-  recoverySource(input: ThreadIdentity & { entryId: string }): Promise<{ workspaceId: string; mode: "live_root" | "materialized" | "fixed_branch"; runId: string } | null>;
+  recoverySource(input: ThreadIdentity & { entryId: string }): Promise<{ resourceOwner: SourceResourceOwner; workspaceId: string; mode: "live_root" | "materialized" | "fixed_branch"; runId: string } | null>;
   navigate(input: ThreadIdentity & { key: string; expectedHeadId: string | null; targetHeadId: string | null; undoOf?: string }): Promise<import("@varin/protocol").NavigationReceipt>;
   navigationReceipt(input: ThreadIdentity & { key: string }): Promise<import("@varin/protocol").NavigationReceipt | null>;
   fork(input: ThreadIdentity & { key: string; headId: string | null }): Promise<ThreadIdentity>;

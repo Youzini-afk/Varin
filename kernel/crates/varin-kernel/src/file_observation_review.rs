@@ -85,9 +85,9 @@ impl Fixture {
                 "branch.create.finish",
                 json!({"operationId":"fixed","builderId":"fixed"}),
             );
-            json!({"mode":"fixed_branch","live_root":null,"workspace_id":"workspace","execution_workspace_id":"workspace","branch_id":"fixed","revision":0})
+            json!({"resource_owner":{"kind":"local"},"mode":"fixed_branch","live_root":null,"workspace_id":"workspace","execution_workspace_id":"workspace","branch_id":"fixed","revision":0})
         } else {
-            json!({"mode":"live_root","live_root":{"hostId":HOST,"rootId":root_id,"canonicalRoot":work},"workspace_id":"workspace","execution_workspace_id":"workspace","branch_id":null,"revision":null})
+            json!({"resource_owner":{"kind":"local"},"mode":"live_root","live_root":{"hostId":HOST,"rootId":root_id,"canonicalRoot":work},"workspace_id":"workspace","execution_workspace_id":"workspace","branch_id":null,"revision":null})
         };
         let launch:LaunchSelection=serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"fixture","provider_family":"fixture","model":"fixture","configuration_generation":1,"tool_schema_generation":1,"tools":[crate::followup_tools::schema()],"policy":{"name":"fixture","version":"1"},"source":source})).unwrap();
         let mut db = Catalog::open(root.join("catalog")).unwrap();

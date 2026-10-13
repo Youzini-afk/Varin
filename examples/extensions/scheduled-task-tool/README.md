@@ -8,6 +8,9 @@ There is no special kernel callback or second asset writer.
 The Host derives the project from the permission-admitted invocation's real workspace source.
 The extension cannot supply a project path, credentials, origin or Run authority. Model and
 policy calls use the same invocation, effect receipt and original project/Markdown service.
+Project scheduling currently requires a source on the coordinating Host. A managed file source
+reports an actionable unavailable result before looking up any local project; open that project
+on its owning Host to manage its schedules.
 A new GUI definition without an ID derives a stable ID from its original operation; manual
 run-now uses that same original operation identity for an uncertain retry.
 

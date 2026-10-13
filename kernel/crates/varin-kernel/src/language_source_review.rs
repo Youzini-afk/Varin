@@ -466,7 +466,7 @@ impl Review {
             .send(json!({"kind":"fixture-select","runId":run,"threadId":thread_id,"source":source,
                 "expectClean":if source["mode"]=="fixed_branch" { Some(source["revision"]==1) } else { None }}));
         let selected = self.receive("fixture-selected");
-        let mut value = json!({"grantId":selected["grantId"],"runId":run,"threadId":thread_id,
+        let mut value = json!({"resourceOwner":{"kind":"local"},"grantId":selected["grantId"],"runId":run,"threadId":thread_id,
             "workspaceId":source["workspace_id"],"executionWorkspaceId":source["execution_workspace_id"],
             "sourceMode":source["mode"],"enabledTools":TOOLS});
         let fixed = json!({"branchId":source["branch_id"],"revision":source["revision"]});

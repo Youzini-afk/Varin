@@ -52,7 +52,7 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         Self::with_source(
-            json!({"mode":"live_root","live_root":{"hostId":"host","canonicalRoot":"/workspace/fixture","rootId":"root"},"workspace_id":"workspace","execution_workspace_id":"workspace","branch_id":null,"revision":null}),
+            json!({"resource_owner":{"kind":"local"},"mode":"live_root","live_root":{"hostId":"host","canonicalRoot":"/workspace/fixture","rootId":"root"},"workspace_id":"workspace","execution_workspace_id":"workspace","branch_id":null,"revision":null}),
         )
     }
     fn with_source(source: serde_json::Value) -> Self {
@@ -704,7 +704,7 @@ fn same_scope_but_changed_physical_source_holds_without_switching_authority() {
 #[test]
 fn materialized_source_inheritance_preserves_the_original_environment_owner() {
     let mut f = Fixture::with_source(
-        json!({"mode":"materialized","live_root":null,"workspace_id":"workspace","execution_workspace_id":"workspace","branch_id":"fixed-source","revision":3}),
+        json!({"resource_owner":{"kind":"local"},"mode":"materialized","live_root":null,"workspace_id":"workspace","execution_workspace_id":"workspace","branch_id":"fixed-source","revision":3}),
     );
     f.register();
     f.state(RunState::Completed);

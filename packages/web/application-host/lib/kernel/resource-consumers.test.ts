@@ -193,12 +193,12 @@ it('ThreadAdapter publishes one winning resource candidate and propagates the lo
 
 it('ThreadAdapter submits an explicit source with real forSource preparation and the original role, project and memory', async () => {
   const f = await fixture();
-  const source: ThreadSource = { workspaceId: 'new-workspace', executionWorkspaceId: 'new-execution', mode: 'fixed_branch', branchId: 'new-source', revision: 2, tools: ['file_read'] };
+  const source: ThreadSource = { resourceOwner: { kind: 'local' }, workspaceId: 'new-workspace', executionWorkspaceId: 'new-execution', mode: 'fixed_branch', branchId: 'new-source', revision: 2, tools: ['file_read'] };
   const scopes: Array<{ source: ThreadSource | null; mode: string; threadRole: string; projectId: string | null }> = [];
-  const resources: typeof f.resources = { ...f.resources, withScope: async (identity, selected, admitted, consume, options) => {
+  const resources: typeof f.resources = { ...f.resources, prepare: async (identity, selected, admitted, options) => {
     scopes.push({ source: selected, ...admitted });
-    return f.resources.withScope(identity, null, admitted, async binding => consume({ ...binding,
-      admittedScope: { ...binding.admittedScope, sourceIdentity: selected ? `source:${selected.workspaceId}` : null } }), options);
+    const snapshot = await f.resources.prepare(identity, null, admitted, options);
+    return { ...snapshot, scope: { ...snapshot.scope, sourceIdentity: selected ? `source:${selected.workspaceId}` : null } };
   } };
   const projectLookup = vi.fn(async () => 'MUST NOT REASSIGN PROJECT');
   let catalog: AgentPersonalizationCatalog = { revision: 5, prompts: {}, memories: [
@@ -240,14 +240,15 @@ it('ThreadAdapter reuses an accepted input receipt after settings break, and onl
   const f = await fixture(); const saved = checkpoint(f.context);
   const childProfiles = vi.fn(async () => ({ identity: 'accepted-profile-snapshot', presets: [], normal_unavailable: null, native_capabilities: [] }));
   const fAdapter = adapterFixture(saved, f.prepare, childProfiles);
-  const source: ThreadSource = { workspaceId: 'selected-workspace', executionWorkspaceId: 'selected-workspace',
+  const source: ThreadSource = { resourceOwner: { kind: 'local' }, workspaceId: 'selected-workspace', executionWorkspaceId: 'selected-workspace',
     mode: 'fixed_branch', branchId: 'selected-source', revision: 0, tools: ['file_read'] };
   // Source pin admission is a separate tested owner. Keep this fixture's real user resource
   // preparation while admitting the selected immutable source identity to the Host consumer.
-  const withScope = f.resources.withScope.bind(f.resources);
-  vi.spyOn(f.resources, 'withScope').mockImplementation((identity, selected, admitted, consume, options) =>
-    withScope(identity, null, admitted, binding => consume({ ...binding,
-      admittedScope: { ...binding.admittedScope, sourceIdentity: selected ? `source:${selected.workspaceId}` : null } }), options));
+  const prepareResources = f.resources.prepare.bind(f.resources);
+  vi.spyOn(f.resources, 'prepare').mockImplementation(async (identity, selected, admitted, options) => {
+    const snapshot = await prepareResources(identity, null, admitted, options);
+    return { ...snapshot, scope: { ...snapshot.scope, sourceIdentity: selected ? `source:${selected.workspaceId}` : null } };
+  });
   const preparation = vi.spyOn(f.prepare, 'forSource');
   const input = { ...identity, key: 'accepted-key', expectedHead: 'history', text: 'Use the selected source',
     model: { providerId: 'fixture', modelId: 'fixture' }, source };

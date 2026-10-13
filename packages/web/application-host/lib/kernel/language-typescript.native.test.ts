@@ -46,7 +46,7 @@ it('executes all three live tools end to end through the bundled TypeScript serv
     capabilities: ['storage.read', 'storage.write'], pathScopes: [''] });
   type Query = Parameters<typeof owner>[0];
   const query = (overrides: Partial<Query>): Query => ({ runId: 'real-ts-run', threadId: 'real-ts-thread',
-    grantId: ownerGrant.grantId, source: { mode: 'live_root', workspace_id: documents.identity.workspaceId,
+    grantId: ownerGrant.grantId, source: { mode: 'live_root', resource_owner: { kind: 'local' as const }, workspace_id: documents.identity.workspaceId,
       execution_workspace_id: documents.identity.workspaceId, branch_id: null, revision: null, live_root: liveRoot }, physicalRoot: liveRoot,
     method: 'definition', path: 'main.ts', line: 1, character: 0, ...overrides });
   const invoke = (overrides: Partial<Query>) => owner(query(overrides), new AbortController().signal);

@@ -126,7 +126,7 @@ it('explicit live source reads current disk and shares actual root with list, se
   });
   await fs.writeFile(path.join(f.workspace, 'source.txt'), 'at preparation');
   const identity = await f.api.create('live-all-consumers');
-  const prepared = await f.api.prepareSource({ ...identity, key: 'live-root', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
+  const prepared = await f.api.prepareSource({ ...identity, key: 'live-root', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
   expect(prepared.source).toMatchObject({ mode: 'live_root', liveRoot: { hostId: 'live-source-review', canonicalRoot: await fs.realpath(f.workspace) } });
   expect(prepared.source).not.toHaveProperty('branchId');
   expect(prepared.source).not.toHaveProperty('revision');
@@ -147,11 +147,11 @@ it('explicit live source reads current disk and shares actual root with list, se
 it('rejects forged host, root, path and execution owner before durable input or context admission', async () => {
   const f = await fixture((_body, response) => done(response));
   const identity = await f.api.create('live-forgery');
-  const prepared = await f.api.prepareSource({ ...identity, key: 'source-a', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
+  const prepared = await f.api.prepareSource({ ...identity, key: 'source-a', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
   if (prepared.source.mode !== 'live_root') throw new Error('expected live source');
   const otherRoot = path.join(f.root, 'other-workspace'); await fs.mkdir(otherRoot);
   await fs.writeFile(path.join(otherRoot, 'AGENTS.md'), 'UNAUTHORIZED WRONG ROOT INSTRUCTIONS');
-  const other = await f.api.prepareSource({ ...identity, key: 'source-b', workspaceId: (await f.documents.resolveWorkspace({ path: otherRoot })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
+  const other = await f.api.prepareSource({ ...identity, key: 'source-b', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: otherRoot })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
   if (other.source.mode !== 'live_root') throw new Error('expected second live source');
   const source = prepared.source;
   const cases = [
@@ -179,7 +179,7 @@ it('freezes actual Documents AGENTS revision at first context while live reads a
   });
   const identity = await f.api.create('live-context');
   await fs.writeFile(path.join(f.workspace, 'AGENTS.md'), 'BEFORE LIVE PREPARATION');
-  const prepared = await f.api.prepareSource({ ...identity, key: 'live-context-source', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
+  const prepared = await f.api.prepareSource({ ...identity, key: 'live-context-source', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
   await fs.writeFile(path.join(f.workspace, 'AGENTS.md'), 'AT FIRST ADMISSION');
   const document = await f.documents.readSnapshot({ workspaceId: prepared.source.workspaceId, resourceId: 'AGENTS.md' });
   if (document.status !== 'ready') throw new Error('expected real document snapshot');
@@ -207,10 +207,10 @@ it('live preparation does not capture a branch and failed fixed preparation neve
   const f = await fixture((_body, response) => done(response));
   const identity = await f.api.create('no-live-fallback');
   const capture = vi.spyOn(f.workingStates, 'withBranchStore').mockRejectedValue(new Error('fixture immutable capture unavailable'));
-  const live = await f.api.prepareSource({ ...identity, key: 'live', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
+  const live = await f.api.prepareSource({ ...identity, key: 'live', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
   expect(live.source.mode).toBe('live_root');
   expect(capture).not.toHaveBeenCalled();
-  await expect(f.api.prepareSource({ ...identity, key: 'fixed', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' })).rejects.toMatchObject({ status: 400 });
+  await expect(f.api.prepareSource({ ...identity, key: 'fixed', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' })).rejects.toMatchObject({ status: 400 });
   expect(capture).toHaveBeenCalledTimes(1);
   expect((await f.api.snapshot(identity)).history).toEqual([]);
   expect(f.requests).toHaveLength(0);
@@ -230,7 +230,7 @@ it('queued live selection reopens with fresh authority and reads changed disk wi
   const f = await fixture(reply);
   await fs.writeFile(path.join(f.workspace, 'source.txt'), 'before queue');
   const identity = await f.api.create('live-queued-restart');
-  const prepared = await f.api.prepareSource({ ...identity, key: 'live', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
+  const prepared = await f.api.prepareSource({ ...identity, key: 'live', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
   const first = await f.api.submit({ ...identity, key: 'held', expectedHead: null, text: 'hold first model request', model, source: prepared.source });
   await expect.poll(() => f.requests.length).toBe(1);
   // Leave the admitted successor unprepared, as if its first Host callback was interrupted.
@@ -255,12 +255,12 @@ it('queued live selection reopens with fresh authority and reads changed disk wi
 it('registered canonical-root retarget is rejected on rebind and cannot read a same-name replacement environment', async () => {
   const f = await fixture((_body, response) => done(response));
   const identity = await f.api.create('live-root-retarget');
-  const prepared = await f.api.prepareSource({ ...identity, key: 'live', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
+  const prepared = await f.api.prepareSource({ ...identity, key: 'live', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
   if (prepared.source.mode !== 'live_root') throw new Error('expected live source');
   const selected = prepared.source;
   const run = await f.runtime.submit({ key: 'retarget-input', threadId: identity.threadId, branchId: identity.branchId, expectedHead: null, input: { text: 'do not read a redirected root' },
     configuration: { providerFamily: 'openai-responses', model: 'fixture-model', endpoint: f.endpoint, allowAnonymous: true, configurationGeneration: 1, maxOutputTokens: 32 },
-    launch: { source: { mode: 'live_root', workspaceId: selected.workspaceId, executionWorkspaceId: selected.executionWorkspaceId, branchId: null, revision: null, liveRoot: selected.liveRoot }, enabledTools: ['file_read'] } });
+    launch: { source: { mode: 'live_root', resourceOwner: { kind: 'local' as const }, workspaceId: selected.workspaceId, executionWorkspaceId: selected.executionWorkspaceId, branchId: null, revision: null, liveRoot: selected.liveRoot }, enabledTools: ['file_read'] } });
   const preserved = path.join(f.root, 'preserved-original');
   const other = path.join(f.root, 'replacement');
   await fs.mkdir(other); await fs.writeFile(path.join(other, 'source.txt'), 'WRONG ROOT MUST NOT BE READ');
@@ -277,7 +277,7 @@ it('registered canonical-root retarget is rejected on rebind and cannot read a s
 it('cancelling during live owner validation never issues executable authority or publishes a model request', async () => {
   const f = await fixture((_body, response) => done(response));
   const identity = await f.api.create('live-cancel-validation');
-  const prepared = await f.api.prepareSource({ ...identity, key: 'live', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
+  const prepared = await f.api.prepareSource({ ...identity, key: 'live', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
   let release!: () => void;
   let entered = false;
   const gate = new Promise<void>(resolve => { release = resolve; });
@@ -302,7 +302,7 @@ it('cancelling during live owner validation never issues executable authority or
 it('cancelling after actual live-root registration revokes the fresh grant before a late registration reply can start work', async () => {
   const f = await fixture((_body, response) => done(response));
   const identity = await f.api.create('live-cancel-registration');
-  const prepared = await f.api.prepareSource({ ...identity, key: 'live', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
+  const prepared = await f.api.prepareSource({ ...identity, key: 'live', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
   const pending = await f.runtime.submit({ key: 'cancel-registration', threadId: identity.threadId, branchId: identity.branchId, expectedHead: null, input: { text: 'cancel registered root launch' },
     configuration: { providerFamily: 'openai-responses', model: 'fixture', endpoint: f.endpoint, allowAnonymous: true, configurationGeneration: 1, maxOutputTokens: 32 } });
   let release!: () => void;
@@ -343,7 +343,7 @@ it('live read and discovery do not authorize a returned path that escapes its re
   await fs.writeFile(path.join(outside, 'private.txt'), 'UNAUTHORIZED OUTSIDE CONTENT');
   await fs.symlink(outside, path.join(f.workspace, 'outside'), process.platform === 'win32' ? 'junction' : 'dir');
   const identity = await f.api.create('live-containment');
-  const prepared = await f.api.prepareSource({ ...identity, key: 'live', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
+  const prepared = await f.api.prepareSource({ ...identity, key: 'live', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
   const receipt = await f.api.submit({ ...identity, key: 'containment', expectedHead: null, text: 'verify selected root access', model, source: prepared.source });
   await expect.poll(async () => (await f.api.run(receipt.run_id)).state, { timeout: 15_000 }).toBe('completed');
   expect(returned).toHaveLength(2);
@@ -356,7 +356,7 @@ it('the kernel refuses process effects attached to a fixed branch even with a va
   let calls = 0;
   const f = await fixture((_body, response) => { if (++calls === 1) tool(response, 'process_spawn', { cwd: '', command: process.execPath, args: ['-e', 'require("node:fs").writeFileSync("forbidden.txt","wrong fixed-source effect")'], mode: 'pipe' }, 1); else done(response); });
   const identity = await f.api.create('fixed-process-refusal');
-  const prepared = await f.api.prepareSource({ ...identity, key: 'fixed', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
+  const prepared = await f.api.prepareSource({ ...identity, key: 'fixed', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   if (prepared.source.mode === 'live_root') throw new Error('expected fixed branch');
   const source = prepared.source;
   const pending = await f.runtime.submit({ key: 'fixed-process', threadId: identity.threadId, branchId: identity.branchId, expectedHead: null, input: { text: 'fixed source must not execute process' },
@@ -379,11 +379,11 @@ it('source preparation selects language tools only for the explicitly prepared l
   await fs.writeFile(path.join(f.workspace, 'source.ts'), 'export const value = 1;\n');
   const identity = await f.api.create('language-source-selection');
   const languageTools = ['language_definition', 'language_references', 'language_diagnostics'];
-  const live = await f.api.prepareSource({ ...identity, key: 'live-language', workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
+  const live = await f.api.prepareSource({ ...identity, key: 'live-language', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
   expect(live.source.mode).toBe('live_root');
   expect(live.source.tools).toEqual(expect.arrayContaining(languageTools));
   for (const mode of ['fixed_branch', 'materialized'] as const) {
-    const prepared = await f.api.prepareSource({ ...identity, key: `switch-${mode}`, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode });
+    const prepared = await f.api.prepareSource({ ...identity, key: `switch-${mode}`, resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode });
     expect(prepared.source.mode).toBe(mode);
     for (const tool of languageTools) expect(prepared.source.tools).not.toContain(tool);
     expect(prepared.source.tools).toContain('file_read');

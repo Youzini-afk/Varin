@@ -1,0 +1,645 @@
+//! Authenticated Host source authority and the closed resource wire contract.
+//! The receiving Host has no copy of the coordinating Agent Catalog.
+use crate::{error::KernelError, tools::ToolBinding};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use varin_runtime::catalog::launches::{LiveRoot, SourceSelection};
+use varin_runtime::ExecutorOwner;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum SourceAuthorityScope {
+    Run {
+        #[serde(rename = "threadId")]
+        thread_id: String,
+        #[serde(rename = "runId")]
+        run_id: String,
+        epoch: u64,
+    },
+    SourceRead {
+        #[serde(rename = "threadId")]
+        thread_id: String,
+        #[serde(rename = "branchId")]
+        branch_id: String,
+        key: String,
+    },
+}
+impl SourceAuthorityScope {
+    pub fn thread_id(&self) -> &str {
+        match self {
+            Self::Run { thread_id, .. } | Self::SourceRead { thread_id, .. } => thread_id,
+        }
+    }
+    pub fn run_id(&self) -> Option<&str> {
+        match self {
+            Self::Run { run_id, .. } => Some(run_id),
+            _ => None,
+        }
+    }
+    pub fn epoch(&self) -> u64 {
+        match self {
+            Self::Run { epoch, .. } => *epoch,
+            _ => 0,
+        }
+    }
+    pub fn identity(&self) -> Value {
+        match self {
+            Self::Run {
+                thread_id, run_id, ..
+            } => json!(["run", thread_id, run_id]),
+            Self::SourceRead {
+                thread_id,
+                branch_id,
+                key,
+            } => json!(["source_read", thread_id, branch_id, key]),
+        }
+    }
+    pub fn validate(&self) -> bool {
+        !self.thread_id().is_empty()
+            && match self {
+                Self::Run { run_id, .. } => !run_id.is_empty(),
+                Self::SourceRead { branch_id, key, .. } => !branch_id.is_empty() && !key.is_empty(),
+            }
+    }
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceCapabilitiesParams {
+    pub mode: varin_runtime::SourceMode,
+    pub enabled_tools: Option<Vec<String>>,
+    pub managed: bool,
+    pub client_capabilities: Option<Vec<String>>,
+    pub language_available: Option<bool>,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceAuthorityOpenParams {
+    pub principal_id: String,
+    pub coordinator_host_id: String,
+    pub scope: SourceAuthorityScope,
+    pub source: SourceSelection,
+    pub grant_id: String,
+    pub enabled_tools: Vec<String>,
+    pub purpose: String,
+    pub operation_id: Option<String>,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceAuthorityBindParams {
+    pub principal_id: String,
+    pub coordinator_host_id: String,
+    pub authority_id: String,
+    pub resource_epoch: String,
+    pub tool_binding: Option<ToolBinding>,
+    pub physical_root: Option<LiveRoot>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceAuthorityAddress {
+    pub principal_id: String,
+    pub coordinator_host_id: String,
+    pub authority_id: String,
+    pub resource_epoch: String,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceAuthorityReleaseParams {
+    pub principal_id: String,
+    pub coordinator_host_id: String,
+    pub authority_id: String,
+    pub resource_epoch: String,
+    pub mode: String,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceAuthorityScopeParams {
+    pub principal_id: String,
+    pub coordinator_host_id: String,
+    pub thread_id: String,
+    pub run_id: String,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceAuthorityScopeReleaseParams {
+    pub principal_id: String,
+    pub coordinator_host_id: String,
+    pub thread_id: String,
+    pub run_id: String,
+    pub mode: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceCall {
+    pub run_id: String,
+    pub operation_id: String,
+    pub origin: varin_runtime::execution::ToolOrigin,
+    pub call_id: String,
+    pub name: String,
+    pub schema_version: String,
+    pub arguments: Value,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceResourceCallParams {
+    pub principal_id: String,
+    pub coordinator_host_id: String,
+    pub authority_id: String,
+    pub resource_epoch: String,
+    pub call: SourceCall,
+    pub journal: Option<varin_runtime::catalog::journal::JournalAnchor>,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceResourceControlParams {
+    pub principal_id: String,
+    pub coordinator_host_id: String,
+    pub authority_id: String,
+    pub resource_epoch: String,
+    pub operation_id: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum SourceResourceAction {
+    Read {
+        path: String,
+        offset: u64,
+        length: Option<u64>,
+    },
+    LanguageSource {
+        path: String,
+        derived_view: Option<Value>,
+    },
+    RetrievalSource {
+        paths: Option<Vec<String>>,
+    },
+    ChildSourceHandoff {
+        delegation: varin_runtime::catalog::dispatch::ChildSourceDelegation,
+    },
+    ChildStorageReceipt {
+        operation_id: String,
+        receipt_kind: String,
+    },
+    ChildRootIdle,
+    CollaborationPin {
+        release: bool,
+        pin_id: String,
+    },
+    ProcessObservation {
+        source_run_id: String,
+        lineage: Option<varin_runtime::catalog::process_wait::ProcessResultLineage>,
+        process_id: String,
+        read: Option<(u64, Option<u64>)>,
+    },
+    ReconcileMutation {
+        mutation: crate::storage::file_mutations::TextMutation,
+        executor: String,
+    },
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum SourceServiceOperation {
+    NativeResource {
+        context: varin_runtime::execution::ToolExecutionContext,
+        action: SourceResourceAction,
+        #[serde(rename = "authorizeOnly")]
+        authorize_only: bool,
+    },
+    Validate,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceServiceCallParams {
+    pub principal_id: String,
+    pub coordinator_host_id: String,
+    pub authority_id: String,
+    pub resource_epoch: String,
+    pub request_id: String,
+    pub client_capabilities: Vec<String>,
+    pub operation: SourceServiceOperation,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceAuthorityResult {
+    pub authority_id: String,
+    pub resource_epoch: String,
+    pub execution_owner: ExecutorOwner,
+    pub source: SourceSelection,
+    pub scope: SourceAuthorityScope,
+    pub phase: String,
+    pub purpose: String,
+    pub operation_id: Option<String>,
+    pub grant_id: String,
+    pub tool_binding: Option<ToolBinding>,
+    pub physical_root: Option<LiveRoot>,
+    pub first_preparation: bool,
+    pub materialization_operation_id: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AuthorityRecord {
+    pub principal_id: String,
+    pub coordinator_host_id: String,
+    pub scope_id: String,
+    pub enabled_tools: Vec<String>,
+    pub purpose: String,
+    pub operation_id: Option<String>,
+    pub result: SourceAuthorityResult,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ScopeRecord {
+    pub source: SourceSelection,
+    pub epoch: u64,
+    pub ready: bool,
+}
+pub(crate) fn denied(message: &str) -> KernelError {
+    KernelError::Authorization(message.into())
+}
+pub(crate) fn address(p: &SourceResourceCallParams) -> SourceAuthorityAddress {
+    SourceAuthorityAddress {
+        principal_id: p.principal_id.clone(),
+        coordinator_host_id: p.coordinator_host_id.clone(),
+        authority_id: p.authority_id.clone(),
+        resource_epoch: p.resource_epoch.clone(),
+    }
+}
+
+pub(crate) fn capabilities(p: SourceCapabilitiesParams) -> Result<Value, KernelError> {
+    crate::tools::source_capabilities(p)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceProcessTerminal {
+    pub v: u64,
+    pub kind: String,
+    pub kernel_epoch: String,
+    pub source: SourceSelection,
+    pub execution_owner: ExecutorOwner,
+    pub process: Value,
+}
+impl SourceProcessTerminal {
+    pub fn process_id(&self) -> String {
+        self.process["processId"]
+            .as_str()
+            .unwrap_or_default()
+            .into()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceHandoffInspectParams {
+    pub principal_id: String,
+    pub coordinator_host_id: String,
+    pub operation_id: String,
+    pub parent_run_id: String,
+    pub parent_thread_id: String,
+    pub source: SourceSelection,
+}
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceContinuation {
+    pub execution_id: String,
+    pub previous_run_id: String,
+    pub root: String,
+}
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceHandoffClaimParams {
+    pub principal_id: String,
+    pub coordinator_host_id: String,
+    pub grant_id: String,
+    pub scope: SourceAuthorityScope,
+    pub source: SourceSelection,
+    pub handoff: Option<varin_runtime::catalog::collaboration::ChildSourceHandoff>,
+    pub continuation: Option<SourceContinuation>,
+}
+
+pub(crate) fn authorize_service_capabilities(
+    p: &SourceServiceCallParams,
+) -> Result<(), KernelError> {
+    let has = |cap: &str| p.client_capabilities.iter().any(|value| value == cap);
+    if !has("filesystem:read") {
+        return Err(denied("Current source read capability was revoked"));
+    }
+    if let SourceServiceOperation::NativeResource { action, .. } = &p.operation {
+        let process = matches!(action, SourceResourceAction::ProcessObservation { .. })
+            || matches!(action,SourceResourceAction::ChildSourceHandoff{delegation} if delegation.process);
+        if process && (!has("terminal:use") || !has("process:control")) {
+            return Err(denied("Current source process capability was revoked"));
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceIntegrationReceiptParams {
+    pub principal_id: String,
+    pub coordinator_host_id: String,
+    pub source: SourceSelection,
+    pub run_id: String,
+    pub thread_id: String,
+    pub operation_id: String,
+}
+
+/// Short original-owner admission. Callers must release Storage before running a Work item.
+/// Both the production actor and direct-owner integration fixtures use this same dispatcher.
+pub(crate) enum SourceDispatch {
+    Ready(Value),
+    ReadObserve(crate::storage::source_read_receipts::ReadReceipt),
+    InteractionObserve {
+        record: AuthorityRecord,
+        native: crate::storage::process_interactions::Native,
+        address: crate::storage::process_interactions::Address,
+    },
+    Tool {
+        record: AuthorityRecord,
+        input: SourceResourceCallParams,
+        authorize: bool,
+        read: Option<crate::storage::source_read_receipts::ReadPreparation>,
+    },
+    Resource {
+        record: AuthorityRecord,
+        address: SourceAuthorityAddress,
+        request_id: String,
+        context: varin_runtime::execution::ToolExecutionContext,
+        action: SourceResourceAction,
+        authorize: bool,
+    },
+}
+impl SourceDispatch {
+    pub fn key(&self) -> Option<String> {
+        match self {
+            Self::Ready(_) => None,
+            Self::ReadObserve(_) => Some(format!("source-read-observe:{}", uuid::Uuid::new_v4())),
+            Self::InteractionObserve {
+                record, address, ..
+            } => Some(format!(
+                "observe:{}:{}",
+                record.result.authority_id, address.operation_id
+            )),
+            Self::Tool { input, .. } => Some(format!(
+                "{}:{}",
+                input.authority_id, input.call.operation_id
+            )),
+            Self::Resource {
+                address,
+                request_id,
+                ..
+            } => Some(format!("service:{}:{}", address.authority_id, request_id)),
+        }
+    }
+    pub fn execute(
+        mut self,
+        resources: crate::tools::KernelResourceClient,
+        cancel: varin_runtime::execution::CancellationToken,
+    ) -> Result<SourceWorkResult, KernelError> {
+        let read = if let Self::Tool { read, .. } = &mut self {
+            read.take()
+        } else {
+            None
+        };
+        let value = match self {
+            Self::Ready(value) => Ok(value),
+            Self::ReadObserve(read) => read.load(),
+            Self::InteractionObserve {
+                record,
+                native,
+                address,
+            } => {
+                let id = address.operation_id.clone();
+                let client = resources
+                    .interactions
+                    .as_ref()
+                    .ok_or_else(|| denied("Original process interaction owner unavailable"))?;
+                let value = client.reconcile(native, address)?;
+                let (stopped, completion): (bool, varin_runtime::execution::ToolCompletion) =
+                    if let Some((_, receipt)) = value {
+                        (
+                            receipt.identity().state != crate::process::interaction::State::Unknown,
+                            varin_runtime::execution::ToolCompletion::Result {
+                                outcome: receipt.outcome(),
+                                effect: receipt.effect(),
+                                content: serde_json::to_value(receipt)?.into(),
+                            },
+                        )
+                    } else {
+                        (false,varin_runtime::execution::ToolCompletion::Result{outcome:varin_runtime::Outcome::Indeterminate,effect:varin_runtime::Effect::Unknown,content:json!({"reason":"Original process interaction receipt remains unresolved"}).into()})
+                    };
+                Ok(
+                    json!({"operationId":id,"resourceEpoch":record.result.resource_epoch,"executionOwner":record.result.execution_owner,"accepted":true,"executorStopped":stopped,"result":varin_runtime::execution::ToolExecutionReceipt{completion,executor_stopped:stopped},"process":null}),
+                )
+            }
+            Self::Tool {
+                record,
+                input,
+                authorize,
+                ..
+            } => crate::tools::execute_source_tool(resources, record, input, authorize, cancel),
+            Self::Resource {
+                record,
+                address,
+                context,
+                action,
+                authorize,
+                ..
+            } => crate::tools::execute_source_resource(
+                resources, record, address, context, action, authorize, cancel,
+            ),
+        };
+        if let Some(read) = read {
+            let (value, staged) = read.stage(value)?;
+            Ok(SourceWorkResult {
+                value,
+                read: Some(staged),
+            })
+        } else {
+            value.map(|value| SourceWorkResult { value, read: None })
+        }
+    }
+}
+pub(crate) struct SourceWorkResult {
+    value: Value,
+    read: Option<crate::storage::source_read_receipts::StagedRead>,
+}
+impl SourceWorkResult {
+    pub(crate) fn finish(
+        self,
+        storage: &mut crate::storage::Storage,
+    ) -> Result<Value, KernelError> {
+        if let Some(read) = self.read {
+            storage.publish_source_read(read)?;
+        }
+        Ok(self.value)
+    }
+}
+pub(crate) fn prepare_request(
+    storage: &mut crate::storage::Storage,
+    method: &str,
+    params: Value,
+    epoch: &str,
+    host: &str,
+    generation: &str,
+) -> Result<SourceDispatch, KernelError> {
+    crate::protocol::validate_method_params(method, &params)?;
+    let value = match method {
+        "source.integration.receipt" => {
+            storage.source_integration_receipt(serde_json::from_value(params)?)?
+        }
+        "source.authority.handoff" => {
+            storage.inspect_source_handoff(&serde_json::from_value(params)?, epoch)?
+        }
+        "source.authority.claim_handoff" => storage.claim_source_handoff(
+            serde_json::from_value(params)?,
+            epoch,
+            host,
+            generation,
+        )?,
+        "source.capabilities" => capabilities(serde_json::from_value(params)?)?,
+        "source.authority.open" => {
+            storage.source_authority_open(serde_json::from_value(params)?, epoch, host)?
+        }
+        "source.authority.bind" => {
+            storage.source_authority_bind(serde_json::from_value(params)?, epoch, host)?
+        }
+        "source.authority.inspect" => serde_json::to_value(
+            storage
+                .source_authority(&serde_json::from_value(params)?, false, epoch)?
+                .result,
+        )?,
+        "source.authority.inspect_scope" => {
+            storage.inspect_source_scope(serde_json::from_value(params)?)?
+        }
+        "source.authority.release" => {
+            let p: SourceAuthorityReleaseParams = serde_json::from_value(params)?;
+            storage.release_source_authority(
+                &SourceAuthorityAddress {
+                    principal_id: p.principal_id,
+                    coordinator_host_id: p.coordinator_host_id,
+                    authority_id: p.authority_id,
+                    resource_epoch: p.resource_epoch,
+                },
+                &p.mode,
+                host,
+                epoch,
+            )?
+        }
+        "source.authority.release_scope" => {
+            storage.release_source_scope(serde_json::from_value(params)?, epoch, host)?
+        }
+        "source.resource.release" => {
+            let p: SourceResourceControlParams = serde_json::from_value(params)?;
+            storage.release_source_read(
+                &SourceAuthorityAddress {
+                    principal_id: p.principal_id,
+                    coordinator_host_id: p.coordinator_host_id,
+                    authority_id: p.authority_id,
+                    resource_epoch: p.resource_epoch,
+                },
+                &p.operation_id,
+                epoch,
+            )?
+        }
+        "source.resource.observe" | "source.resource.cancel" => {
+            let p: SourceResourceControlParams = serde_json::from_value(params)?;
+            let address = SourceAuthorityAddress {
+                principal_id: p.principal_id,
+                coordinator_host_id: p.coordinator_host_id,
+                authority_id: p.authority_id,
+                resource_epoch: p.resource_epoch,
+            };
+            let record = storage.source_authority(&address, false, epoch)?;
+            if let Some(read) = storage.recall_source_read(&record, &p.operation_id)? {
+                return Ok(SourceDispatch::ReadObserve(read));
+            }
+            if let Some((record, native, interaction)) =
+                storage.source_interaction_receipt(&address, &p.operation_id, epoch)?
+            {
+                return Ok(SourceDispatch::InteractionObserve {
+                    record,
+                    native,
+                    address: interaction,
+                });
+            }
+            storage.observe_source_operation(
+                &address,
+                &p.operation_id,
+                epoch,
+                method == "source.resource.cancel",
+            )?
+        }
+        "source.resource.authorize" | "source.resource.execute" => {
+            let input: SourceResourceCallParams = serde_json::from_value(params)?;
+            let record = storage.source_authority(&address(&input), true, epoch)?;
+            if record.result.phase != "ready" || record.purpose == "result" {
+                return Err(denied("Source does not admit model tools"));
+            }
+            let authorize = method == "source.resource.authorize";
+            let read = if !authorize && crate::tools::managed_read_receipt_tool(&input.call.name) {
+                match storage.prepare_source_read(&record, &input)? {
+                    Some(read) => Some(read),
+                    None => {
+                        return if let Some(read) =
+                            storage.recall_source_read(&record, &input.call.operation_id)?
+                        {
+                            Ok(SourceDispatch::ReadObserve(read))
+                        } else {
+                            Ok(SourceDispatch::Ready(storage.observe_source_operation(
+                                &address(&input),
+                                &input.call.operation_id,
+                                epoch,
+                                false,
+                            )?))
+                        };
+                    }
+                }
+            } else {
+                None
+            };
+            return Ok(SourceDispatch::Tool {
+                record,
+                input,
+                authorize,
+                read,
+            });
+        }
+        "source.service.call" => {
+            let p: SourceServiceCallParams = serde_json::from_value(params.clone())?;
+            authorize_service_capabilities(&p)?;
+            if let SourceServiceOperation::NativeResource {
+                context,
+                action,
+                authorize_only,
+            } = p.operation
+            {
+                let address = SourceAuthorityAddress {
+                    principal_id: p.principal_id,
+                    coordinator_host_id: p.coordinator_host_id,
+                    authority_id: p.authority_id,
+                    resource_epoch: p.resource_epoch,
+                };
+                let record = storage.source_authority(&address, true, epoch)?;
+                if record.purpose == "result"
+                    && !matches!(action, SourceResourceAction::ChildStorageReceipt { .. })
+                {
+                    return Err(denied(
+                        "Result authority only recalls original child receipts",
+                    ));
+                }
+                return Ok(SourceDispatch::Resource {
+                    record,
+                    address,
+                    request_id: p.request_id,
+                    context,
+                    action,
+                    authorize: authorize_only,
+                });
+            }
+            storage.source_service(p, epoch)?
+        }
+        _ => return Err(denied("Unknown closed source request")),
+    };
+    Ok(SourceDispatch::Ready(value))
+}

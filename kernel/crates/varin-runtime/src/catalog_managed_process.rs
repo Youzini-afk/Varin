@@ -61,7 +61,7 @@ pub fn require_process(op: &Operation) -> Result<&ManagedProcess> {
         || op.executor.as_deref() != Some(intent.call().name.as_str())
         || match &link.purpose {
             ManagedProcessKind::ProcessJob => {
-                op.execution_owner != Some(ExecutorOwner::Kernel) || op.lifetime != Lifetime::Thread
+                !(op.execution_owner==Some(ExecutorOwner::Kernel)||matches!(&op.execution_owner,Some(ExecutorOwner::External{identity,..}) if identity.starts_with("source:"))) || op.lifetime != Lifetime::Thread
             }
             ManagedProcessKind::ScriptEnvironment { node } => {
                 node.validate()?;
@@ -107,6 +107,15 @@ impl Catalog {
             return Err(RuntimeError::Conflict(
                 "Managed process requires its original physical source".into(),
             ));
+        }
+        if matches!(kind, ManagedProcessKind::ProcessJob) {
+            let source = launch.selection.source.as_ref().expect("physical source checked");
+            let matching = match (&source.resource_owner, &op.execution_owner) {
+                (launches::SourceResourceOwner::Local, Some(ExecutorOwner::Kernel)) => true,
+                (launches::SourceResourceOwner::ManagedHost{host_id,..}, Some(ExecutorOwner::External{identity,epoch})) => !epoch.is_empty() && identity.strip_prefix(&format!("source:{host_id}:source-authority:")).is_some_and(|suffix|!suffix.is_empty()),
+                _ => false,
+            };
+            if !matching { return Err(RuntimeError::Conflict("Process executor differs from its frozen resource Host".into())); }
         }
         if let Some(old) = &op.managed_process {
             if old.purpose != kind {

@@ -20,7 +20,7 @@ const identity: ThreadIdentity = { runtime: 'agent', threadId: 'real-thread', br
 const selected = { workspaceId: 'selected-workspace', resourceId: 'draft.txt' };
 const other = { workspaceId: 'other-workspace', resourceId: 'private.txt' };
 const prepared: ThreadPreparedSource = {
-  path: '/selected', source: { mode: 'fixed_branch', workspaceId: selected.workspaceId, executionWorkspaceId: selected.workspaceId, branchId: 'fixed-branch', revision: 7, tools: ['file_read'] },
+  path: '/selected', source: { resourceOwner: { kind: 'local' }, mode: 'fixed_branch', workspaceId: selected.workspaceId, executionWorkspaceId: selected.workspaceId, branchId: 'fixed-branch', revision: 7, tools: ['file_read'] },
   provenance: { consistency: 'git-base-with-overlay', contentMode: 'fixed-draft-baseline', captureScopes: ['ignored/data'], omittedDraftPaths: ['ignored/omitted.txt'] },
 };
 const gate = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; };
@@ -71,7 +71,11 @@ async function fixture() {
   registry.applyTransaction(selected, 'selected unsaved', { origin: 'editor' });
   registry.applyTransaction(other, 'unrelated unsaved', { origin: 'editor' });
   const prepareSource = vi.fn<ThreadsAPI['prepareSource']>(async () => prepared);
-  const api: Pick<ThreadsAPI, 'prepareSource'> = { prepareSource };
+  const sources: ThreadsAPI['sources'] = {
+    list: vi.fn<ThreadsAPI['sources']['list']>(async () => ({ targets: [{ resourceOwner: { kind: 'local' }, label: 'This Host', capabilities: [] }], unavailable: [] })),
+    resolve: vi.fn(async (_identity, request) => ({ resourceOwner: request.resourceOwner, path: request.path, workspaceId: (await documents.resolveWorkspace({ path: request.path })).workspaceId })),
+  };
+  const api: Pick<ThreadsAPI, 'prepareSource' | 'sources'> = { prepareSource, sources };
   const onPrepared = vi.fn(); const onPreparingChange = vi.fn();
   const render = async (owner = identity, currentApi = api) => { await act(async () => root.render(
     <ThreadSourcePicker api={currentApi} identity={owner} initialPath="/selected" active={false} launch={null}
@@ -187,4 +191,33 @@ it('does not recapture or fall back to disk after a failed draft capture without
   await settle(() => expect(f.prepareSource).toHaveBeenCalledOnce());
   expect(f.capture).toHaveBeenCalledTimes(2); expect(f.prepareSource).toHaveBeenCalledOnce();
   expect(f.prepareSource.mock.calls[0]![0].content.mode).toBe('surface-drafts');
+});
+
+
+it('freezes the managed Host and resolves its Documents workspace once without consulting local editors', async () => {
+  const f = await fixture();
+  f.resolveWorkspace.mockClear();
+  const resourceOwner = { kind: 'managed_host' as const, hostId: 'host-b', connectionId: 'saved-b', endpointIdentity: 'sha256-endpoint-b' };
+  const remotePrepared: ThreadPreparedSource = { ...prepared, path: '/same-folder', source: { ...prepared.source, resourceOwner, workspaceId: 'b-documents-workspace', executionWorkspaceId: 'b-documents-workspace' } };
+  const resolve = vi.fn<ThreadsAPI['sources']['resolve']>(async (_identity, request) => ({ resourceOwner: request.resourceOwner, workspaceId: 'b-documents-workspace', path: '/same-folder' }));
+  const sources: ThreadsAPI['sources'] = { list: async () => ({ targets: [{ resourceOwner: { kind: 'local' }, label: 'This Host', capabilities: [] },
+    { resourceOwner, label: 'Remote B', capabilities: ['sources'] }], unavailable: [] }), resolve };
+  const api = { ...f.api, sources };
+  f.prepareSource.mockRejectedValueOnce(new Error('Remote receipt response lost')).mockResolvedValue(remotePrepared);
+  await f.render(identity, api);
+  await edit('Source Host', JSON.stringify([resourceOwner.connectionId, resourceOwner.endpointIdentity, resourceOwner.hostId]));
+  await edit('Workspace folder', '/same-folder', 'input');
+  await click('Prepare workspace');
+  expect(resolve).toHaveBeenCalledOnce();
+  expect(resolve.mock.calls[0]![1]).toEqual({ resourceOwner, path: '/same-folder' });
+  const original = f.prepareSource.mock.calls[0]![0];
+  expect(original).toMatchObject({ resourceOwner, workspaceId: 'b-documents-workspace', content: { mode: 'saved-files' } });
+  resolve.mockRejectedValue(new Error('Remote alias moved'));
+  await click('Prepare workspace');
+  expect(f.prepareSource.mock.calls[1]![0]).toBe(original);
+  expect(resolve).toHaveBeenCalledOnce();
+  expect(f.resolveWorkspace).not.toHaveBeenCalled(); expect(f.capture).not.toHaveBeenCalled();
+  await f.render(identity, api);
+  expect(container.querySelector('[aria-label="Prepared workspace"]')?.textContent).toContain('Remote B');
+  expect(container.textContent).toContain('Available source tools: file_read');
 });

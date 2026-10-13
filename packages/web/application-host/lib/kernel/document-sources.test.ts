@@ -1,9 +1,10 @@
+import type { ThreadSource } from '@varin/application-client';
 import { createHash } from 'node:crypto';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { KernelClient, KernelClientError } from './kernel-client.js';
 import { KERNEL_PROTOCOL_VERSION, type LaunchSource } from './protocol.generated.js';
-import { createDocumentSources } from './document-sources.js';
+import { createDocumentSources, readSourceDocument } from './document-sources.js';
 import type { ToolInvocationAuthority } from './tool-invocation.js';
 import type { ExperimentCaller } from '../harness/research-identity.js';
 
@@ -24,7 +25,7 @@ function fixture(mode: 'live_root' | 'fixed_branch', hold?: 'file.capture' | 'st
   owner.started = true; owner.startPromise = Promise.resolve(owner.handshakeResult);
   const bytes = Buffer.from('%PDF-1.7\noriginal source bytes');
   const state = { kind: 'regular-file', objectHash: `sha256-${createHash('sha256').update(bytes).digest('hex')}`, byteLength: bytes.byteLength, mode: 420 };
-  const source: LaunchSource = { mode, workspace_id: 'workspace', execution_workspace_id: 'execution',
+  const source: LaunchSource = { resource_owner: { kind: 'local' }, mode, workspace_id: 'workspace', execution_workspace_id: 'execution',
     branch_id: mode === 'fixed_branch' ? 'fixed' : null, revision: mode === 'fixed_branch' ? 7 : null,
     live_root: mode === 'live_root' ? { hostId: 'document-host', rootId: 'original-root', canonicalRoot: '/fixture/source' } : null };
   const authority: ToolInvocationAuthority = { invocationId: 'invocation', runId: 'run', threadId: 'thread', operationId: 'op', callId: 'call',
@@ -54,7 +55,7 @@ function fixture(mode: 'live_root' | 'fixed_branch', hold?: 'file.capture' | 'st
         case 'file.capture': reply(frame, { path: 'paper.pdf', stateJson: JSON.stringify(state), ownerId: 'capture-owner' }); break;
         case 'branch.read': reply(frame, { workspaceId: 'workspace', branchId: 'fixed', revision: 7, view: 'revision', root: 'fixed-root',
           entries: p.includeEntries === false ? [] : [{ path: 'paper.pdf', state }] }); break;
-        case 'storage.getBlob': reply(frame, { bytesBase64: bytes.toString('base64'), nextOffset: bytes.byteLength, eof: true }); break;
+        case 'storage.getBlob': reply(frame, { hash: state.objectHash, byteLength: bytes.byteLength, offset: 0, bytesBase64: bytes.toString('base64'), nextOffset: bytes.byteLength, eof: true }); break;
         case 'storage.blob.release': reply(frame, { released: true }); break;
         default: throw new Error(`Unexpected document source wire request: ${frame.method}`);
       }
@@ -111,4 +112,43 @@ it('uses the original research operation for tool artifact reads and the explici
   expect(f.callers[1]!.owner).toMatchObject({ runtime: 'agent', actor: { kind: 'reader' }, runId: 'run' });
   expect(f.callers.every(caller => caller.access.kind === 'family' && caller.access.readThreadIds.includes('sibling') && !caller.sessionId)).toBe(true);
   await expect(f.documents.tool({ ...f.authority, source: null }).readPath!('paper.pdf')).rejects.toMatchObject({ harnessCode: 'unavailable' });
+});
+
+
+it('transfers managed binary pages into coordinator ingestion with target provenance and releases only the original capture', async () => {
+  const bytes = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(700_000, 0x7f)]);
+  const objectHash = `sha256-${createHash('sha256').update(bytes).digest('hex')}`;
+  const original = fixture('live_root').authority;
+  const source: LaunchSource = { ...original.source!, resource_owner: { kind: 'managed_host', hostId: 'host-b', connectionId: 'b', endpointIdentity: 'sha256-b' },
+    live_root: { hostId: 'host-b', rootId: 'b-root', canonicalRoot: '/same-folder' } };
+  const target = {
+    readBranch: vi.fn(async () => { throw new Error('Live document must use its actual capture'); }),
+    fileCapture: vi.fn(async () => ({ path: 'paper.pdf', ownerId: 'b-capture-owner', stateJson: JSON.stringify({ kind: 'regular-file', objectHash, byteLength: bytes.byteLength, mode: 420 }) })),
+    getBlob: vi.fn(async (_hash, handle, range) => {
+      expect(handle).toEqual({ ownerId: 'b-capture-owner' }); expect(range?.length).toBe(256 * 1024);
+      const offset = range?.offset ?? 0, page = bytes.subarray(offset, offset + range!.length!);
+      return { hash: objectHash, byteLength: bytes.byteLength, offset, nextOffset: offset + page.length, eof: offset + page.length === bytes.length, bytesBase64: page.toString('base64') };
+    }),
+    releaseBlob: vi.fn(async ownerId => { expect(ownerId).toBe('b-capture-owner'); return { released: true }; }),
+  } satisfies Parameters<typeof readSourceDocument>[0]['client'];
+  const service = vi.fn(async request => {
+    expect(request.operation).toEqual({ kind: 'document_read', operationId: original.operationId, path: 'paper.pdf' });
+    const document = await readSourceDocument({ client: target, source, physicalRoot: source.live_root,
+      operationId: request.operation.operationId, path: request.operation.path });
+    return { bytesBase64: document.source.toString('base64'), byteLength: document.source.length,
+      sourceUrl: document.sourceUrl, title: document.title, contentType: document.contentType };
+  });
+  const access = { client: { service }, binding: { authorityId: 'original-b-authority', resourceEpoch: 'original-b-epoch' } };
+  const runtime = { coordinatorHostId: 'host-a', launch: async () => ({ selection: { source } }),
+    withManagedSourceAuthority: async (_run: string, selected: ThreadSource, consume: (owned: typeof access) => Promise<unknown>) => {
+      expect(selected.resourceOwner).toEqual(source.resource_owner);
+      return consume(access);
+    } } as unknown as AgentRuntimeClient;
+  const local = new Proxy({}, { get() { throw new Error('Managed document must not read the coordinator filesystem'); } });
+  const documents = createDocumentSources({ kernel: local as never, runtime, resolveLiveSource: async () => { throw new Error('No local source'); },
+    experiments: { readArtifact: async () => { throw new Error('No artifact read'); } } });
+  const result = await documents.tool({ ...original, source }).readPath!('paper.pdf');
+  expect(result.source).toEqual(bytes); expect(result.sourceUrl).toBe('varin-source:///hosts/host-b/workspaces/workspace/roots/b-root/paper.pdf');
+  expect(target.getBlob).toHaveBeenCalledTimes(3); expect(target.releaseBlob).toHaveBeenCalledOnce();
+  expect(result).not.toHaveProperty('content_object'); expect(target.readBranch).not.toHaveBeenCalled();
 });

@@ -38,7 +38,7 @@ it('keeps fixed and materialized syntax separate from live LSP while acquiring t
   const root = { hostId: 'host', rootId: 'root', canonicalRoot: '/original/live' };
   const query: RetrievalQuery = { runId: 'run', threadId: 'thread', grantId: 'grant', projectId: null, question: 'needle',
     invocation: { kind: 'model_step', requestId: 'step', toolCallId: 'call' }, inferenceOwner: { kind: 'external', identity: 'owner', epoch: 'epoch' },
-    source: { workspace_id: 'workspace', execution_workspace_id: 'execution', mode: 'fixed_branch', branch_id: 'snapshot', revision: 0, live_root: null }, physicalRoot: null };
+    source: { resource_owner: {kind:'local'}, workspace_id: 'workspace', execution_workspace_id: 'execution', mode: 'fixed_branch', branch_id: 'snapshot', revision: 0, live_root: null }, physicalRoot: null };
   const scope = { threadId: 'thread', workspaceId: '/original/live' };
   const request = { path: 'file.unknown', languageId: null, text: 'snapshot body', revision: 'snapshot-revision' };
   for (const mode of ['fixed_branch', 'materialized'] as const) {
@@ -52,7 +52,8 @@ it('keeps fixed and materialized syntax separate from live LSP while acquiring t
   }
   expect(structure.outline).not.toHaveBeenCalled();
   expect(prepareSemantic).toHaveBeenCalledTimes(2);
-  const live = await composition.prepare({ ...scope, query: { ...query, source: { workspace_id: 'workspace', execution_workspace_id: 'workspace', mode: 'live_root', branch_id: null, revision: null, live_root: root }, physicalRoot: root } });
+  const liveSource = { resource_owner: {kind:'local' as const}, workspace_id: 'workspace', execution_workspace_id: 'workspace', mode: 'live_root' as const, branch_id: null, revision: null, live_root: root };
+  const live = await composition.prepare({ ...scope, query: { ...query, source: liveSource, physicalRoot: root } });
   expect((await live.structure!.outline(request)).status).toBe('ready');
   expect(structure.outline).toHaveBeenCalledOnce();
   expect(prepareSemantic).toHaveBeenCalledTimes(3);
@@ -63,6 +64,12 @@ it('keeps fixed and materialized syntax separate from live LSP while acquiring t
   expect(fixedAgain.plan.stages.find(stage => stage.kind === 'semantic')?.status).toBe('unavailable');
   expect(prepareSemantic).toHaveBeenCalledTimes(4);
   fixedAgain.release();
+  const managed = await composition.prepare({ ...scope, query: { ...query, source: { ...liveSource,
+    resource_owner: {kind:'managed_host', hostId:'other-host', connectionId:'connection', endpointIdentity:'endpoint'} }, physicalRoot: root } });
+  expect(managed.structure).toBe(syntax);
+  expect((await managed.structure!.outline(request)).status).toBe('unsupported');
+  expect(structure.outline).toHaveBeenCalledOnce();
+  managed.release();
 });
 
 it('preserves only typed source failures before retrieval configuration is prepared', async () => {

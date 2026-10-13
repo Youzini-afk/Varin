@@ -38,6 +38,8 @@ import {
 } from './source-launch.js';
 import type { ExistingHostCredentialOwner } from './credential-owner.js';
 import type { KernelClient } from './kernel-client.js';
+import type { ManagedSourceClient, ManagedRemoteTargetRegistry } from '../harness/managed-remote-client.js';
+import type { ManagedHostSourceOwner, ManagedSourceBinding } from '../harness/managed-remote-types.js';
 import type {
   RunModelSelection,
   RunModelSelections,
@@ -123,6 +125,50 @@ interface ToolCompositionState {
 }
 /** Explicit authority client. Existing Pi thread routes are not silently redirected. */
 export class AgentRuntimeClient {
+  private managedSources?: Pick<ManagedRemoteTargetRegistry, 'source'>;
+  private readonly managedSourceBindings = new Map<string, { client: ManagedSourceClient; binding: ManagedSourceBinding }>();
+  bindManagedSources(registry: Pick<ManagedRemoteTargetRegistry, 'source'>): void {
+    if (this.managedSources && this.managedSources !== registry) throw new Error('Managed source owner is already bound');
+    this.managedSources = registry;
+  }
+  get coordinatorHostId(): string {
+    const hostId = this.kernel.handshake?.hostId;
+    if (!hostId) throw new Error('The coordinating Host identity is unavailable');
+    return hostId;
+  }
+  managedSource(owner: ManagedHostSourceOwner, signal?: AbortSignal): Promise<ManagedSourceClient> {
+    if (!this.managedSources) throw new Error('Managed source owner is unavailable');
+    return this.managedSources.source(owner, signal);
+  }
+  retainManagedSourceBinding(runId: string, binding: ManagedSourceBinding, client: ManagedSourceClient): void {
+    this.managedSourceBindings.set(runId, { binding, client });
+  }
+  async withManagedSourceAuthority<T>(runId: string, source: import('@varin/application-client').ThreadSource,
+    consume: (access: { client: ManagedSourceClient; binding: ManagedSourceBinding }) => Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (source.resourceOwner.kind !== 'managed_host') throw new SourceAdmissionError('source_changed');
+    const [run, launch] = await Promise.all([this.run(runId, signal), this.launch(runId, signal)]);
+    const original = launch?.selection.source;
+    if (!original || !isDeepStrictEqual(original.resource_owner, source.resourceOwner)
+      || original.workspace_id !== source.workspaceId || original.execution_workspace_id !== source.executionWorkspaceId
+      || original.mode !== source.mode || original.branch_id !== (source.branchId ?? null) || original.revision !== (source.revision ?? null)
+      || !isDeepStrictEqual(original.live_root, source.liveRoot ?? null)
+      || (original.environment_run_id ?? undefined) !== source.environmentRunId) throw new SourceAdmissionError('source_changed');
+    let access = this.managedSourceBindings.get(runId);
+    if (!access) {
+      const client = await this.managedSource(source.resourceOwner, signal);
+      const candidates = await client.inspectScope({ coordinatorHostId: this.coordinatorHostId,
+        threadId: run.thread_id, runId }, signal);
+      const originalBinding = candidates.find(candidate => candidate.phase === 'ready' && candidate.purpose === 'source'
+        && candidate.scope.kind === 'run' && candidate.scope.epoch === run.epoch
+        && isDeepStrictEqual(candidate.binding.source, original));
+      if (!originalBinding) throw new SourceAdmissionError('source_authority_denied');
+      access = { client, binding: originalBinding.binding };
+      this.managedSourceBindings.set(runId, access);
+    }
+    if (!isDeepStrictEqual(access.binding.source, original)) throw new SourceAdmissionError('source_changed');
+    signal?.throwIfAborted();
+    return consume(access);
+  }
   constructor(
     private readonly kernel: KernelClient,
     private readonly prepareMcpOwner?: McpPreparer,
@@ -137,6 +183,7 @@ export class AgentRuntimeClient {
       for (const run of this.toolCompositions.keys())
         this.releaseToolComposition(run);
       this.sourceGrants.clear();
+      this.managedSourceBindings.clear();
       this.mcpPreparations.clear();
       for (const controller of this.mcpUpdates.values()) controller.abort();
       this.mcpUpdates.clear();
@@ -421,6 +468,15 @@ export class AgentRuntimeClient {
   async releaseMcpResourceSource(runId:string):Promise<void> { await Promise.all([this.mcpResourceOwner?.releaseSource(runId), this.mcpInteractionOwner?.releaseSource(runId)]); }
   async retireSourceGrants(runId: string): Promise<void> {
     await this.releaseMcpResourceSource(runId);
+    const [run, launch] = await Promise.all([this.run(runId), this.launch(runId)]);
+    if (launch?.selection.source?.resource_owner.kind === 'managed_host') {
+      const service = await this.managedSource(launch.selection.source.resource_owner);
+      const result = await service.releaseScope({ coordinatorHostId: this.coordinatorHostId, threadId: run.thread_id, runId, mode: 'retire' });
+      if (!result || typeof result !== 'object' || !('pendingAuthorities' in result) || !Array.isArray(result.pendingAuthorities)
+        || result.pendingAuthorities.length) throw new Error('The original managed source still requires cleanup');
+      this.managedSourceBindings.delete(runId);
+      return;
+    }
     await this.kernel.releaseLanguageSource(runId);
     // The durable Storage grant owner resolves this Run, including grants from a previous Host.
     await this.kernel.retireRunGrants(runId);
@@ -809,7 +865,7 @@ export class AgentRuntimeClient {
   journalAnchor(operationId: string, signal?: AbortSignal): Promise<import('./protocol.generated.js').RecoveryAnchor> {
     return this.kernel.agentRuntimeRequest('runtime.operation.recovery.anchor', { operationId }, signal);
   }
-  recoveryWorkspaces(input: { threadId: string; branchId: string }, signal?: AbortSignal): Promise<string[]> {
+  recoveryWorkspaces(input: { threadId: string; branchId: string }, signal?: AbortSignal): Promise<import('./protocol.generated.js').LaunchSource[]> {
     return this.kernel.agentRuntimeRequest('runtime.branch.recovery.workspaces', input, signal);
   }
   recoveryRange(input: import('./protocol.generated.js').NavigationSelectParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').RecoveryRangeTurn[]> {
@@ -1064,8 +1120,14 @@ export class AgentRuntimeClient {
     );
   }
   /** Recheck the original Documents owner; a namespace is never a physical execution root. */
-  async admitSourceRegistration(source: { workspaceId: string; executionWorkspaceId: string }, signal?: AbortSignal): Promise<void> {
+  async admitSourceRegistration(source: { resourceOwner: CalendarProtocol.SourceResourceOwner; workspaceId: string; executionWorkspaceId: string }, signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted();
+    if (source.resourceOwner.kind === 'managed_host') {
+      // Documents admission belongs to the target's source binding. Here only the
+      // frozen connection is checked; never register its names on this Host.
+      await this.managedSource(source.resourceOwner, signal);
+      return;
+    }
     if (!this.sourceRegistration) throw new SourceAdmissionError('source_unavailable');
     await this.sourceRegistration(source.workspaceId, signal);
     if (source.executionWorkspaceId !== source.workspaceId) await this.sourceRegistration(source.executionWorkspaceId, signal);
@@ -1594,6 +1656,7 @@ export class AgentRuntimeClient {
   private async admitStartingSource(runId: string, signal: AbortSignal): Promise<void> {
     const source = (await this.launch(runId, signal))?.selection.source;
     if (source && source.mode !== 'live_root') await this.admitSourceRegistration({
+      resourceOwner: source.resource_owner,
       workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id,
     }, signal);
   }

@@ -51,7 +51,7 @@ pub(crate) enum ToolKind {
     CodeRetrieval,
 }
 impl ToolKind {
-    fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Self::FileRead => "file_read",
             Self::FileList => "file_list",
@@ -135,10 +135,16 @@ impl ToolKind {
             Self::LanguageDiagnostics => {
                 "Read diagnostics from the admitted source's language provider."
             }
-            Self::LanguageHover => "Read type, signature and documentation at a zero-based UTF-16 source position.",
-            Self::LanguageSymbols => "Find workspace symbols matching query using a representative source file's language provider.",
+            Self::LanguageHover => {
+                "Read type, signature and documentation at a zero-based UTF-16 source position."
+            }
+            Self::LanguageSymbols => {
+                "Find workspace symbols matching query using a representative source file's language provider."
+            }
             Self::LanguageDocumentSymbols => "Read the source document's hierarchical symbols.",
-            Self::LanguageCallHierarchy => "Find incoming or outgoing calls at a zero-based UTF-16 source position. Returned call-site ranges belong to the from resource.",
+            Self::LanguageCallHierarchy => {
+                "Find incoming or outgoing calls at a zero-based UTF-16 source position. Returned call-site ranges belong to the from resource."
+            }
             Self::CodeRetrieval => {
                 "Retrieve code context from the admitted source using the selected retrieval service."
             }
@@ -181,11 +187,85 @@ pub(crate) use varin_runtime::SourceMode;
 fn default_source_mode() -> SourceMode {
     SourceMode::FixedBranch
 }
+pub(crate) fn source_capabilities(
+    p: crate::source_resources::SourceCapabilitiesParams,
+) -> Result<Value, KernelError> {
+    let requested = p
+        .enabled_tools
+        .as_ref()
+        .map(|names| names.iter().cloned().collect::<BTreeSet<_>>());
+    let client = p
+        .client_capabilities
+        .as_ref()
+        .map(|caps| caps.iter().map(String::as_str).collect::<BTreeSet<_>>());
+    let mut tools = BTreeSet::new();
+    let mut client_capabilities = BTreeSet::new();
+    let mut unavailable = Vec::new();
+    for kind in ToolKind::all() {
+        if requested
+            .as_ref()
+            .is_some_and(|names| !names.contains(kind.name()))
+        {
+            continue;
+        }
+        let mut caps = vec!["filesystem:read"];
+        if matches!(kind, ToolKind::FileWrite | ToolKind::FileEdit) {
+            caps.push("filesystem:write");
+        }
+        if kind.requirements().process {
+            caps.extend(["terminal:use", "process:control"]);
+        }
+        let language = matches!(
+            kind,
+            ToolKind::LanguageDefinition
+                | ToolKind::LanguageReferences
+                | ToolKind::LanguageDiagnostics
+                | ToolKind::LanguageHover
+                | ToolKind::LanguageSymbols
+                | ToolKind::LanguageDocumentSymbols
+                | ToolKind::LanguageCallHierarchy
+        );
+        let missing = !kind.requirements().accepts_mode(p.mode)
+            || client
+                .as_ref()
+                .is_some_and(|set| caps.iter().any(|cap| !set.contains(cap)))
+            || p.managed && language && !p.language_available.unwrap_or(false);
+        if missing {
+            unavailable.push(json!({"name":kind.name(),"code":"source_capability_unavailable"}));
+        } else {
+            tools.insert(kind);
+            client_capabilities.extend(caps);
+        }
+    }
+    if let Some(requested) = requested {
+        if requested.len() != tools.len() {
+            return Err(KernelError::Authorization(
+                "An explicitly selected source capability is unavailable".into(),
+            ));
+        }
+    }
+    let mut grant_capabilities = vec!["storage.read"];
+    // Registering/capturing a physical source is an internal resource-owner write,
+    // independent of whether model/client file mutation is available.
+    if p.mode != SourceMode::FixedBranch {
+        grant_capabilities.push("storage.write");
+    }
+    if tools.iter().any(|kind| kind.requirements().process) {
+        grant_capabilities.push("process");
+    }
+    Ok(
+        json!({"tools":KernelToolExecutor::selected_schemas(&tools),"grantCapabilities":grant_capabilities,"clientCapabilities":client_capabilities,"unavailable":unavailable}),
+    )
+}
 /// Supplied by the trusted Host after resolving its environment/source view, never by model args.
 /// A binding is not itself a grant: the Storage owner revalidates the persisted grant on every call.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ToolBinding {
+    pub resource_owner: varin_runtime::catalog::launches::SourceResourceOwner,
+    pub remote_authority: Option<RemoteResourceAuthority>,
+    #[serde(skip)]
+    pub target_authority: Option<crate::source_resources::SourceAuthorityAddress>,
     pub grant_id: String,
     pub run_id: String,
     pub thread_id: String,
@@ -200,6 +280,13 @@ pub(crate) struct ToolBinding {
     /// Source lineage only; resource admission always uses the registered root.
     pub environment_run_id: Option<String>,
     pub enabled_tools: BTreeSet<ToolKind>,
+}
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct RemoteResourceAuthority {
+    pub authority_id: String,
+    pub resource_epoch: String,
+    pub execution_owner: varin_runtime::ExecutorOwner,
 }
 impl ToolBinding {
     fn physical_source(&self) -> Value {
@@ -220,6 +307,7 @@ impl ToolBinding {
             .as_ref()
             .or(self.materialized_source.as_ref());
         let source = varin_runtime::catalog::launches::SourceSelection {
+            resource_owner: self.resource_owner.clone(),
             environment_run_id: self.environment_run_id.clone(),
             mode: self.source_mode,
             live_root: self.live_root.clone(),
@@ -519,9 +607,18 @@ impl ResourceOperation {
                 ("storage.health", params)
             }
             Self::LanguageQuery(args) => {
-                if let Some(source)=&binding.file_source { ("branch.read",json!({"branchId":source.branch_id,"revision":source.revision,"paths":[args.path],"includeEntries":false})) }
-                else { ("file.read",json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,"path":args.path})) }
-            },
+                if let Some(source) = &binding.file_source {
+                    (
+                        "branch.read",
+                        json!({"branchId":source.branch_id,"revision":source.revision,"paths":[args.path],"includeEntries":false}),
+                    )
+                } else {
+                    (
+                        "file.read",
+                        json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,"path":args.path}),
+                    )
+                }
+            }
             Self::FileQuery(args) => ("compute.start", args.params(binding, context)),
             Self::ObserveCompute { .. } => (
                 "compute.read",
@@ -565,10 +662,10 @@ impl ResourceOperation {
             }
             Self::ProcessInspect(args) => (
                 "process.inspect",
-                json!({"workspaceId":binding.workspace_id,"processId":args.process_id}),
+                json!({"workspaceId":binding.workspace_id,"processId":args.process_id,"rootId":binding.root_id}),
             ),
             Self::ProcessRead(args) => {
-                let mut params = json!({"workspaceId":binding.workspace_id,"processId":args.process_id,"cursor":args.cursor});
+                let mut params = json!({"workspaceId":binding.workspace_id,"processId":args.process_id,"rootId":binding.root_id,"cursor":args.cursor});
                 if let Some(limit) = args.max_bytes {
                     params["maxBytes"] = json!(limit);
                 }
@@ -711,6 +808,8 @@ pub(crate) struct KernelResourceClient {
     controls: crate::process::ProcessControlRegistry,
     admission_control: Option<Arc<AdmissionControl>>,
     journal_catalog: Option<Arc<std::sync::Mutex<varin_runtime::Catalog>>>,
+    source_bridge: Option<crate::host_query::OwnerChannel>,
+    source_journal: Option<varin_runtime::catalog::journal::JournalAnchor>,
 }
 impl KernelResourceClient {
     pub(crate) fn new(
@@ -727,9 +826,50 @@ impl KernelResourceClient {
             controls,
             admission_control: None,
             journal_catalog: None,
+            source_bridge: None,
+            source_journal: None,
         }
     }
-    pub(crate) fn with_journal_catalog(mut self, catalog: Arc<std::sync::Mutex<varin_runtime::Catalog>>) -> Self { self.journal_catalog=Some(catalog); self }
+    pub(crate) fn with_source_bridge(mut self, bridge: crate::host_query::OwnerChannel) -> Self {
+        self.source_bridge = Some(bridge);
+        self
+    }
+    pub(crate) fn with_source_journal(
+        mut self,
+        journal: Option<varin_runtime::catalog::journal::JournalAnchor>,
+    ) -> Self {
+        self.source_journal = journal;
+        self
+    }
+    pub(crate) fn source_query(
+        &self,
+        query: Value,
+        cancel: &CancellationToken,
+    ) -> Result<Value, ExecutionError> {
+        let result = self
+            .source_bridge
+            .as_ref()
+            .ok_or_else(|| {
+                ExecutionError::new("source_unavailable", "Managed source bridge is unavailable")
+            })?
+            .query_draining(query, cancel)?;
+        if result["ok"] != true {
+            return Err(ExecutionError::new(
+                "source_unavailable",
+                result["message"]
+                    .as_str()
+                    .unwrap_or("Managed source request failed"),
+            ));
+        }
+        Ok(result["value"].clone())
+    }
+    pub(crate) fn with_journal_catalog(
+        mut self,
+        catalog: Arc<std::sync::Mutex<varin_runtime::Catalog>>,
+    ) -> Self {
+        self.journal_catalog = Some(catalog);
+        self
+    }
     pub(crate) fn with_file_observations(
         mut self,
         client: crate::file_observation::Client,
@@ -819,6 +959,9 @@ impl KernelResourceClient {
         thread_id: String,
         operation_id: String,
     ) -> Result<Value, KernelError> {
+        if !source.resource_owner.is_local() {
+            return self.source_query(json!({"kind":"integration_receipt","source":source,"runId":run_id,"threadId":thread_id,"operationId":operation_id}),&CancellationToken::default()).map_err(|error|KernelError::Operation(error.to_string()));
+        }
         let (reply, receive) = mpsc::channel();
         self.integration_receipts.as_ref().ok_or_else(|| {
             KernelError::Storage("Integration journal reader is unavailable".into())
@@ -913,11 +1056,203 @@ impl KernelResourceClient {
         )
         .map_err(|failure| ExecutionError::new("collaboration_source", failure.error.to_string()))
     }
+    pub(crate) fn remote_operation_receipt(
+        &self,
+        id: &str,
+        phase: &str,
+    ) -> Result<Option<Value>, KernelError> {
+        let Some(catalog) = &self.journal_catalog else {
+            return Ok(None);
+        };
+        let read = {
+            let db = catalog
+                .lock()
+                .map_err(|_| KernelError::Storage("Catalog unavailable".into()))?;
+            let operation = db
+                .operation(id)
+                .map_err(|e| KernelError::Operation(e.to_string()))?;
+            let Some(source) = db
+                .launch_metadata(&operation.run_id)
+                .map_err(|e| KernelError::Operation(e.to_string()))?
+                .and_then(|l| l.selection.source)
+            else {
+                return Ok(None);
+            };
+            if source.resource_owner.is_local() {
+                return Ok(None);
+            }
+            let run = db
+                .run(&operation.run_id)
+                .map_err(|e| KernelError::Operation(e.to_string()))?;
+            (
+                db.capture_operation_read(operation),
+                source,
+                run.thread_id,
+                run.cancel_requested,
+            )
+        };
+        let operation = read
+            .0
+            .load()
+            .map_err(|e| KernelError::Operation(e.to_string()))?;
+        let Some(varin_runtime::ExecutorOwner::External { identity, epoch }) =
+            &operation.execution_owner
+        else {
+            return Err(KernelError::Authorization(
+                "Managed source process lost original executor".into(),
+            ));
+        };
+        let prefix = format!(
+            "source:{}:",
+            read.1.resource_owner.host_id().unwrap_or_default()
+        );
+        let authority_id = identity.strip_prefix(&prefix).ok_or_else(|| {
+            KernelError::Authorization("Managed process executor differs from source Host".into())
+        })?;
+        let watch_process = operation.executor.as_deref() == Some("process_spawn");
+        let phase = if watch_process && (operation.cancel_requested || read.3) {
+            "cancel"
+        } else {
+            phase
+        };
+        let invocation: varin_runtime::execution::ToolInvocation =
+            serde_json::from_value(operation.intent)?;
+        let fixed = read
+            .1
+            .branch_id
+            .as_ref()
+            .zip(read.1.revision)
+            .map(|(branch, revision)| FixedFileSource {
+                branch_id: branch.clone(),
+                revision: revision as i64,
+            });
+        let binding = ToolBinding {
+            resource_owner: read.1.resource_owner.clone(),
+            remote_authority: Some(RemoteResourceAuthority {
+                authority_id: authority_id.into(),
+                resource_epoch: epoch.clone(),
+                execution_owner: operation.execution_owner.clone().unwrap(),
+            }),
+            target_authority: None,
+            grant_id: authority_id.into(),
+            run_id: operation.run_id.clone(),
+            thread_id: read.2,
+            workspace_id: read.1.workspace_id,
+            execution_workspace_id: read.1.execution_workspace_id,
+            root_id: read.1.live_root.as_ref().map(|r| r.root_id.clone()),
+            file_source: if read.1.mode == SourceMode::FixedBranch {
+                fixed.clone()
+            } else {
+                None
+            },
+            source_mode: read.1.mode,
+            materialized_source: if read.1.mode == SourceMode::Materialized {
+                fixed
+            } else {
+                None
+            },
+            live_root: read.1.live_root,
+            environment_run_id: read.1.environment_run_id,
+            enabled_tools: BTreeSet::new(),
+        };
+        let context = ToolExecutionContext {
+            run_id: operation.run_id,
+            operation_id: id.into(),
+            origin: invocation.origin,
+        };
+        let receipt=self.source_query(json!({"kind":"control","phase":phase,"binding":binding,"context":context,"watchProcess":watch_process}),&CancellationToken::default()).map_err(|e|KernelError::Operation(e.to_string()))?;
+        if receipt["operationId"] != id
+            || receipt["resourceEpoch"] != *epoch
+            || receipt["executionOwner"]
+                != serde_json::to_value(
+                    &binding.remote_authority.as_ref().unwrap().execution_owner,
+                )?
+        {
+            return Err(KernelError::Authorization(
+                "Original managed receipt identity changed".into(),
+            ));
+        }
+        Ok(Some(receipt))
+    }
+    pub(crate) fn release_delivered_read_receipt(&self, id: &str) -> Result<(), KernelError> {
+        let Some(catalog) = &self.journal_catalog else {
+            return Ok(());
+        };
+        {
+            let db = catalog
+                .lock()
+                .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?;
+            if !crate::reconcile::is_managed_read(
+                &db.operation(id)
+                    .map_err(|e| KernelError::Operation(e.to_string()))?,
+            ) || !db
+                .external_delivery_persisted(id)
+                .map_err(|e| KernelError::Operation(e.to_string()))?
+            {
+                return Ok(());
+            }
+        }
+        if let Some(receipt) = self.remote_operation_receipt(id, "release")? {
+            if receipt["released"] != true {
+                return Err(KernelError::Operation(
+                    "Original read receipt is not ready for release".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+    pub(crate) fn schedule_read_receipt_release(&self, id: String) {
+        let resources = self.clone();
+        let _ = std::thread::Builder::new()
+            .name("source-read-delivery".into())
+            .spawn(move || {
+                if let Err(error) = resources.release_delivered_read_receipt(&id) {
+                    eprintln!("Original source read delivery cleanup remains pending: {error}");
+                }
+            });
+    }
+    pub(crate) fn replay_read_receipt_releases(&self) -> Result<(), KernelError> {
+        let Some(catalog) = &self.journal_catalog else {
+            return Ok(());
+        };
+        let delivered = catalog
+            .lock()
+            .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+            .delivered_external_operations()
+            .map_err(|e| KernelError::Operation(e.to_string()))?;
+        let resources = self.clone();
+        std::thread::Builder::new()
+            .name("source-read-delivery-replay".into())
+            .spawn(move || {
+                for operation in delivered {
+                    if crate::reconcile::is_managed_read(&operation) {
+                        if let Err(error) = resources.release_delivered_read_receipt(&operation.id)
+                        {
+                            eprintln!(
+                                "Original source read delivery cleanup remains pending: {error}"
+                            );
+                        }
+                    }
+                }
+            })
+            .map_err(|e| KernelError::Operation(e.to_string()))?;
+        Ok(())
+    }
     pub(crate) fn replay_process_terminals(
         &self,
         process_ids: Vec<String>,
     ) -> Result<(), KernelError> {
-        (self.replay)(process_ids)
+        let mut local = Vec::new();
+        for id in process_ids {
+            match self.remote_operation_receipt(&id, "observe") {
+                Ok(Some(_)) => (),
+                Ok(None) => local.push(id),
+                Err(error) => {
+                    eprintln!("Original managed process remains unresolved: {error}");
+                }
+            }
+        }
+        (self.replay)(local)
     }
     pub(crate) fn cancel_known_process(&self, operation_id: &str) -> Result<bool, KernelError> {
         self.controls.cancel_known_process(operation_id)
@@ -927,6 +1262,9 @@ impl KernelResourceClient {
         operation_id: &str,
         run_id: &str,
     ) -> Result<bool, KernelError> {
+        if let Some(receipt) = self.remote_operation_receipt(operation_id, "cancel")? {
+            return Ok(receipt["accepted"] == true);
+        }
         self.controls.cancel_process(operation_id, run_id)
     }
     fn call(
@@ -961,17 +1299,50 @@ impl KernelResourceClient {
                 dispatched: false,
             });
         }
+        if binding.remote_authority.is_some() {
+            let action = operation.source_action().map_err(|error| ResourceFailure {
+                error,
+                dispatched: false,
+            })?;
+            return self.source_query(json!({"kind":"resource","binding":binding,"context":context,"action":action,"authorizeOnly":authorize_only}),cancellation)
+                .map_err(|error|ResourceFailure{error:KernelError::Operation(error.to_string()),dispatched:!authorize_only});
+        }
         let (reply, result) = mpsc::channel();
         let wake = authorize_only.then(|| mpsc::sync_channel(1));
         let _cancel_wait = wake
             .as_ref()
             .map(|(sender, _)| cancellation.wake_on_cancel(sender.clone()));
-        let journal = if !authorize_only && matches!(operation,ResourceOperation::FileMutation(_) | ResourceOperation::ProcessSpawn(_)) {
-            self.journal_catalog.as_ref().map(|catalog| {
-                let read = catalog.lock().map_err(|_|KernelError::Storage("journal owner unavailable".into()))?.capture_journal_anchor(context).map_err(|error|KernelError::Operation(error.to_string()))?;
-                read.load().map_err(|error|KernelError::Operation(error.to_string()))
-            }).transpose().map_err(|error|ResourceFailure {error,dispatched:false})?
-        } else {None};
+        let journal = if !authorize_only
+            && matches!(
+                operation,
+                ResourceOperation::FileMutation(_) | ResourceOperation::ProcessSpawn(_)
+            ) {
+            self.source_journal
+                .clone()
+                .map(|value| Ok(Some(value)))
+                .unwrap_or_else(|| {
+                    self.journal_catalog
+                        .as_ref()
+                        .map(|catalog| {
+                            let read = catalog
+                                .lock()
+                                .map_err(|_| {
+                                    KernelError::Storage("journal owner unavailable".into())
+                                })?
+                                .capture_journal_anchor(context)
+                                .map_err(|error| KernelError::Operation(error.to_string()))?;
+                            read.load()
+                                .map_err(|error| KernelError::Operation(error.to_string()))
+                        })
+                        .transpose()
+                })
+                .map_err(|error| ResourceFailure {
+                    error,
+                    dispatched: false,
+                })?
+        } else {
+            None
+        };
         (self.send)(ResourceCall {
             journal,
             admission_key: None,
@@ -1037,6 +1408,18 @@ pub(crate) struct KernelToolExecutor {
     retrieval_invocations: Option<Arc<varin_runtime::nested_tools::NestedTools>>,
 }
 impl KernelToolExecutor {
+    pub(crate) fn validate_source_binding(binding: &ToolBinding) -> Result<(), KernelError> {
+        binding.source_selection()?;
+        if [&binding.grant_id, &binding.run_id, &binding.thread_id]
+            .iter()
+            .any(|id| id.is_empty())
+        {
+            return Err(KernelError::Authorization(
+                "Source tool scope is incomplete".into(),
+            ));
+        }
+        Ok(())
+    }
     pub(crate) fn new(
         binding: ToolBinding,
         resources: KernelResourceClient,
@@ -1063,8 +1446,13 @@ impl KernelToolExecutor {
                     | ToolKind::FileList
                     | ToolKind::FileSearch
                     | ToolKind::CodeRetrieval
-                    | ToolKind::LanguageDefinition | ToolKind::LanguageReferences | ToolKind::LanguageDiagnostics
-                    | ToolKind::LanguageHover | ToolKind::LanguageSymbols | ToolKind::LanguageDocumentSymbols | ToolKind::LanguageCallHierarchy
+                    | ToolKind::LanguageDefinition
+                    | ToolKind::LanguageReferences
+                    | ToolKind::LanguageDiagnostics
+                    | ToolKind::LanguageHover
+                    | ToolKind::LanguageSymbols
+                    | ToolKind::LanguageDocumentSymbols
+                    | ToolKind::LanguageCallHierarchy
             )
         }) && binding.source_mode == SourceMode::FixedBranch
             && !binding
@@ -1271,7 +1659,12 @@ impl KernelToolExecutor {
                 | ResourceOperation::ProcessWrite(_)
                 | ResourceOperation::ProcessResize(_)
         );
-        let key = |value: Value| value.to_string();
+        let key = |mut value: Value| {
+            if let Some(parts) = value.as_array_mut() {
+                parts.insert(1, json!(self.binding.resource_owner));
+            }
+            value.to_string()
+        };
         let (resource, access) = match operation {
             ResourceOperation::CollaborationPin { .. }
             | ResourceOperation::ChildSourceHandoff { .. }
@@ -1426,6 +1819,19 @@ impl KernelToolExecutor {
         operation: &ResourceOperation,
         cancel: &CancellationToken,
     ) -> Result<ToolContract, ExecutionError> {
+        if self.binding.remote_authority.is_some()
+            && !matches!(
+                operation,
+                ResourceOperation::LanguageQuery(_) | ResourceOperation::RetrievalQuery(_)
+            )
+        {
+            return self
+                .remote_tool("authorize", context, call, cancel)
+                .and_then(|value| {
+                    serde_json::from_value(value)
+                        .map_err(|e| ExecutionError::new("source_contract", e.to_string()))
+                });
+        }
         let mut contract = self.contract(call, operation);
         if self.physical_file(operation) {
             let plan = self
@@ -1474,6 +1880,13 @@ impl KernelToolExecutor {
     }
 }
 impl ToolExecutor for KernelToolExecutor {
+    fn executor_owner(&self) -> varin_runtime::ExecutorOwner {
+        self.binding
+            .remote_authority
+            .as_ref()
+            .map(|a| a.execution_owner.clone())
+            .unwrap_or(varin_runtime::ExecutorOwner::Kernel)
+    }
     fn bind_call(
         self: Arc<Self>,
         call: &ToolCall,
@@ -1572,6 +1985,37 @@ impl ToolExecutor for KernelToolExecutor {
     }
 }
 impl KernelToolExecutor {
+    pub(crate) fn remote_tool(
+        &self,
+        phase: &str,
+        context: &ToolExecutionContext,
+        call: &ToolCall,
+        cancel: &CancellationToken,
+    ) -> Result<Value, ExecutionError> {
+        let journal = if phase == "execute"
+            && matches!(
+                call.name.as_str(),
+                "file_write" | "file_edit" | "process_spawn"
+            ) {
+            self.resources
+                .journal_catalog
+                .as_ref()
+                .map(|catalog| {
+                    catalog
+                        .lock()
+                        .map_err(|_| {
+                            ExecutionError::new("source_journal", "Journal owner unavailable")
+                        })?
+                        .capture_journal_anchor(context)
+                        .and_then(|r| r.load())
+                        .map_err(|e| ExecutionError::new("source_journal", e.to_string()))
+                })
+                .transpose()?
+        } else {
+            None
+        };
+        self.resources.source_query(json!({"kind":"tool","phase":phase,"binding":self.binding,"context":context,"call":call,"journal":journal}),cancel)
+    }
     fn plan_operation(&self, call: &ToolCall, operation: &ResourceOperation) -> ToolPreparation {
         if self.physical_file(&operation) {
             // Storage canonicalizes parents, junctions and root aliases. Until it resolves the
@@ -1601,6 +2045,9 @@ impl KernelToolExecutor {
         operation: &ResourceOperation,
         contract: &ToolContract,
     ) -> bool {
+        if self.binding.remote_authority.is_some() {
+            return false;
+        }
         // Eligibility is this trusted adapter's promise, never extension/MCP metadata.
         let Some(source) = &context.source else {
             return false;
@@ -1640,6 +2087,21 @@ impl KernelToolExecutor {
                 "unauthorized",
                 "tool execution identity does not match bound Run",
             ));
+        }
+        if self.binding.remote_authority.is_some()
+            && !matches!(
+                operation,
+                ResourceOperation::LanguageQuery(_) | ResourceOperation::RetrievalQuery(_)
+            )
+        {
+            return if &self.planned_contract(context, call, operation, cancel)? == contract {
+                Ok(())
+            } else {
+                Err(ExecutionError::new(
+                    "source_contract",
+                    "Managed resource contract changed",
+                ))
+            };
         }
         if let ResourceOperation::RetrievalQuery(args) = &operation {
             if &self.contract(call, &operation) != contract {
@@ -1814,6 +2276,31 @@ fn execution_context(run_id: &str, call: &ToolCall, origin: &ToolOrigin) -> Tool
     }
 }
 impl PreparedToolCall for KernelCall {
+    fn receipt_persisted(&self, context: &ToolExecutionContext) {
+        if self.executor.binding.remote_authority.is_some()
+            && managed_read_receipt_tool(&self.call.name)
+        {
+            self.executor
+                .resources
+                .schedule_read_receipt_release(context.operation_id.clone());
+        }
+    }
+
+    fn executor_owner(&self) -> varin_runtime::ExecutorOwner {
+        if matches!(
+            self.operation,
+            ResourceOperation::LanguageQuery(_) | ResourceOperation::RetrievalQuery(_)
+        ) {
+            varin_runtime::ExecutorOwner::Kernel
+        } else {
+            self.executor
+                .binding
+                .remote_authority
+                .as_ref()
+                .map(|a| a.execution_owner.clone())
+                .unwrap_or(varin_runtime::ExecutorOwner::Kernel)
+        }
+    }
     fn managed_process(
         &self,
     ) -> Option<varin_runtime::catalog::managed_process::ManagedProcessKind> {
@@ -1866,6 +2353,33 @@ impl PreparedToolCall for KernelCall {
         contract: &ToolContract,
         cancel: &CancellationToken,
     ) -> varin_runtime::execution::ToolExecutionReceipt {
+        if self.executor.binding.remote_authority.is_some()
+            && !matches!(
+                self.operation,
+                ResourceOperation::LanguageQuery(_) | ResourceOperation::RetrievalQuery(_)
+            )
+        {
+            return self
+                .executor
+                .remote_tool("execute", context, &self.call, cancel)
+                .and_then(|value| {
+                    serde_json::from_value(value["result"].clone())
+                        .map_err(|e| ExecutionError::new("source_receipt", e.to_string()))
+                })
+                .unwrap_or_else(|error| varin_runtime::execution::ToolExecutionReceipt {
+                    completion: ToolCompletion::Result {
+                        outcome: Outcome::Indeterminate,
+                        effect: if contract.read_only {
+                            Effect::None
+                        } else {
+                            Effect::Unknown
+                        },
+                        content: json!({"error":"source_unavailable","message":error.to_string()})
+                            .into(),
+                    },
+                    executor_stopped: false,
+                });
+        }
         varin_runtime::execution::ToolExecutionReceipt::local(
             self.executor.execute_operation(
                 context,
@@ -1961,6 +2475,30 @@ pub(crate) fn prepare_resource(
     host_generation: &str,
     request: &ResourceCall,
 ) -> Result<ResourceWork, ResourceFailure> {
+    if let Some(authority) = &request.binding.target_authority {
+        storage
+            .validate_source_resource(
+                authority,
+                &request.binding,
+                epoch,
+                !matches!(
+                    request.operation,
+                    ResourceOperation::ComputeControl { .. }
+                        | ResourceOperation::ObserveCompute { .. }
+                ),
+            )
+            .map_err(|error| ResourceFailure {
+                error,
+                dispatched: false,
+            })?;
+    } else if !request.binding.resource_owner.is_local() {
+        return Err(ResourceFailure {
+            error: KernelError::Authorization(
+                "Managed source requires its admitted target authority".into(),
+            ),
+            dispatched: false,
+        });
+    }
     let ResourceOperation::FileRead(args) = &request.operation else {
         return serve_resource_immediate(storage, epoch, host_id, host_generation, request)
             .map(ResourceWork::Ready);
@@ -2109,6 +2647,31 @@ fn serve_resource_immediate(
             &params,
         )?;
         validate_binding(&grant, &request.binding, &request.context)?;
+        match &request.operation {
+            ResourceOperation::ProcessObservation {
+                process_id,
+                lineage,
+                ..
+            } => storage.validate_source_process_access(
+                &request.binding,
+                process_id,
+                epoch,
+                lineage.as_ref(),
+            )?,
+            ResourceOperation::ProcessInspect(args) => storage.validate_source_process_access(
+                &request.binding,
+                &args.process_id,
+                epoch,
+                None,
+            )?,
+            ResourceOperation::ProcessRead(args) => storage.validate_source_process_access(
+                &request.binding,
+                &args.process_id,
+                epoch,
+                None,
+            )?,
+            _ => (),
+        }
         // A language backend can read all project dependencies/configuration in its cwd.
         // The original Run grant must admit that input even when a Host service grant
         // owns the derived materialization or language process.
@@ -2230,7 +2793,9 @@ fn serve_resource_immediate(
             request.operation,
             ResourceOperation::RetrievalQuery(_) | ResourceOperation::LanguageQuery(_)
         ) {
-            if matches!(request.operation, ResourceOperation::LanguageQuery(_)) && request.binding.source_mode != SourceMode::FixedBranch {
+            if matches!(request.operation, ResourceOperation::LanguageQuery(_))
+                && request.binding.source_mode != SourceMode::FixedBranch
+            {
                 // Keep the original file scope/lease admission without returning its
                 // authorize-only null before the source descriptor is assembled.
                 storage.set_cancellation(request.cancellation.shared_flag());
@@ -2258,12 +2823,22 @@ fn serve_resource_immediate(
                     &source_grant,
                 )?;
             }
-            if let ResourceOperation::LanguageQuery(args)=&request.operation {
-                if let Some(expected)=&args.derived_view {
-                    let view=storage.check_materialized_view(&json!({"workspaceId":source.workspace_id,"viewId":expected["viewId"]}),&grant)?;
+            if let ResourceOperation::LanguageQuery(args) = &request.operation {
+                if let Some(expected) = &args.derived_view {
+                    let view = storage.check_materialized_view(
+                        &json!({"workspaceId":source.workspace_id,"viewId":expected["viewId"]}),
+                        &grant,
+                    )?;
                     let branch=storage.dispatch("branch.read",&json!({"branchId":source.branch_id,"revision":source.revision,"includeEntries":false}),Some(&grant.grant_id),&grant)?;
-                    if source.mode!=SourceMode::FixedBranch || view!=*expected || view["branchId"]!=json!(source.branch_id) || view["revision"]!=json!(source.revision) || view["sourceRoot"]!=branch["root"] {
-                        return Err(KernelError::Authorization("Language derived view differs from its immutable source".into()));
+                    if source.mode != SourceMode::FixedBranch
+                        || view != *expected
+                        || view["branchId"] != json!(source.branch_id)
+                        || view["revision"] != json!(source.revision)
+                        || view["sourceRoot"] != branch["root"]
+                    {
+                        return Err(KernelError::Authorization(
+                            "Language derived view differs from its immutable source".into(),
+                        ));
                     }
                 }
             }
@@ -2341,3 +2916,284 @@ mod collaboration_boundary_review;
 #[cfg(test)]
 #[path = "tools_retrieval_review.rs"]
 mod retrieval_source_adapter_review;
+
+/// Runs only on the actual resource Host. The original coordinator owns Catalog intent;
+/// this adapter invokes the existing typed Storage/compute/process owners directly.
+pub(crate) fn managed_read_receipt_tool(name: &str) -> bool {
+    matches!(
+        serde_json::from_value::<ToolKind>(json!(name)),
+        Ok(ToolKind::FileRead
+            | ToolKind::FileList
+            | ToolKind::FileSearch
+            | ToolKind::ProcessRead
+            | ToolKind::ProcessInspect)
+    )
+}
+pub(crate) fn execute_source_tool(
+    resources: KernelResourceClient,
+    record: crate::source_resources::AuthorityRecord,
+    input: crate::source_resources::SourceResourceCallParams,
+    authorize_only: bool,
+    cancel: CancellationToken,
+) -> Result<Value, KernelError> {
+    let mut binding = record
+        .result
+        .tool_binding
+        .clone()
+        .ok_or_else(|| KernelError::Authorization("Tool source has no Run binding".into()))?;
+    let address = crate::source_resources::address(&input);
+    binding.target_authority = Some(address);
+    let call = ToolCall {
+        call_id: input.call.call_id,
+        name: input.call.name,
+        schema_version: input.call.schema_version,
+        arguments: input.call.arguments,
+    };
+    let context = ToolExecutionContext {
+        run_id: input.call.run_id,
+        operation_id: input.call.operation_id,
+        origin: input.call.origin,
+    };
+    if context.run_id != binding.run_id
+        || context.operation_id != context.origin.operation_id(&call.call_id)
+    {
+        return Err(KernelError::Authorization(
+            "Source invocation differs from its original Run/Operation".into(),
+        ));
+    }
+    if input.journal.as_ref().is_some_and(|j| {
+        j.run_id != binding.run_id
+            || j.thread_id != binding.thread_id
+            || j.epoch != record.result.scope.epoch()
+    }) {
+        return Err(KernelError::Authorization(
+            "Source journal differs from its admitted coordinator scope".into(),
+        ));
+    }
+    let resources = resources.with_source_journal(input.journal);
+    let executor = KernelToolExecutor::new(binding.clone(), resources.clone())
+        .map_err(|e| KernelError::Authorization(e.to_string()))?;
+    let operation = executor
+        .operation(Some(&context), &call)
+        .map_err(|e| KernelError::Authorization(e.to_string()))?;
+    let contract = executor
+        .planned_contract(&context, &call, &operation, &cancel)
+        .map_err(|e| KernelError::Authorization(e.to_string()))?;
+    let _grant_watch = executor
+        .watch_admission(&context, &call, &contract, &cancel)
+        .map_err(|e| KernelError::Authorization(e.to_string()))?;
+    if authorize_only {
+        if matches!(
+            operation,
+            ResourceOperation::ProcessWrite(_) | ResourceOperation::ProcessResize(_)
+        ) {
+            let id = match &operation {
+                ResourceOperation::ProcessWrite(args) => args.process_id.clone(),
+                ResourceOperation::ProcessResize(args) => args.process_id.clone(),
+                _ => unreachable!(),
+            };
+            resources
+                .interactions
+                .as_ref()
+                .ok_or_else(|| KernelError::Storage("Process owner unavailable".into()))?
+                .access(binding.clone(), id)?;
+        } else {
+            executor
+                .authorize_operation(&context, &call, &operation, &contract, &cancel)
+                .map_err(|e| KernelError::Authorization(e.to_string()))?;
+        }
+        return Ok(serde_json::to_value(contract)?);
+    }
+    let receipt = if matches!(
+        operation,
+        ResourceOperation::ProcessWrite(_) | ResourceOperation::ProcessResize(_)
+    ) {
+        let (id, action) = match operation {
+            ResourceOperation::ProcessWrite(args) => (
+                args.process_id,
+                crate::process::interaction::Input::Write {
+                    bytes: args.text.into_bytes().into(),
+                    eof: args.eof,
+                },
+            ),
+            ResourceOperation::ProcessResize(args) => (
+                args.process_id,
+                crate::process::interaction::Input::Resize {
+                    cols: args.cols,
+                    rows: args.rows,
+                },
+            ),
+            _ => unreachable!(),
+        };
+        let client = resources.interactions.as_ref().ok_or_else(|| {
+            KernelError::Storage("Original process interaction owner unavailable".into())
+        })?;
+        let value = client
+            .invoke(
+                crate::storage::process_interactions::Context {
+                    grant_id: binding.grant_id.clone(),
+                    epoch: None,
+                    binding: Some(binding.clone()),
+                },
+                crate::storage::process_interactions::Address {
+                    workspace_id: binding.workspace_id.clone(),
+                    process_id: id,
+                    operation_id: context.operation_id.clone(),
+                    root_id: binding.root_id.clone(),
+                },
+                || Ok(action),
+                Some(crate::storage::process_interactions::Native {
+                    resource_owner: binding.resource_owner.clone(),
+                    context: context.clone(),
+                    executor: call.name.clone(),
+                }),
+                cancel.clone(),
+            )
+            .map_err(|e| e.error)?;
+        let stopped = value.identity().state != crate::process::interaction::State::Unknown;
+        varin_runtime::execution::ToolExecutionReceipt {
+            completion: ToolCompletion::Result {
+                outcome: value.outcome(),
+                effect: value.effect(),
+                content: serde_json::to_value(value)?.into(),
+            },
+            executor_stopped: stopped,
+        }
+    } else {
+        let completion = executor.execute_operation(&context, &call, operation, &contract, &cancel);
+        varin_runtime::execution::ToolExecutionReceipt::local(completion, &contract)
+    };
+    Ok(
+        json!({"operationId":context.operation_id,"resourceEpoch":record.result.resource_epoch,"executionOwner":record.result.execution_owner,
+        "accepted":!matches!(receipt.completion,ToolCompletion::NotDispatched{..}),"executorStopped":receipt.executor_stopped,"result":receipt}),
+    )
+}
+impl ResourceOperation {
+    fn source_action(&self) -> Result<crate::source_resources::SourceResourceAction, KernelError> {
+        use crate::source_resources::SourceResourceAction as A;
+        Ok(match self {
+            Self::FileRead(args) => A::Read {
+                path: args.path.clone(),
+                offset: args.offset,
+                length: args.length,
+            },
+            Self::LanguageQuery(args) => A::LanguageSource {
+                path: args.path.clone(),
+                derived_view: args.derived_view.clone(),
+            },
+            Self::RetrievalQuery(args) => A::RetrievalSource {
+                paths: args.paths.clone(),
+            },
+            Self::ChildSourceHandoff { delegation } => A::ChildSourceHandoff {
+                delegation: delegation.clone(),
+            },
+            Self::ChildStorageReceipt { operation_id, kind } => A::ChildStorageReceipt {
+                operation_id: operation_id.clone(),
+                receipt_kind: kind.clone(),
+            },
+            Self::ChildRootIdle => A::ChildRootIdle,
+            Self::CollaborationPin { release, pin_id } => A::CollaborationPin {
+                release: *release,
+                pin_id: pin_id.clone(),
+            },
+            Self::ProcessObservation {
+                source_run_id,
+                lineage,
+                process_id,
+                read,
+            } => A::ProcessObservation {
+                source_run_id: source_run_id.clone(),
+                lineage: lineage.clone(),
+                process_id: process_id.clone(),
+                read: *read,
+            },
+            Self::ReconcileMutation { mutation, executor } => A::ReconcileMutation {
+                mutation: mutation.clone(),
+                executor: executor.clone(),
+            },
+            _ => {
+                return Err(KernelError::Authorization(
+                    "Resource requires its closed managed Tool entry".into(),
+                ));
+            }
+        })
+    }
+    fn from_source_action(action: crate::source_resources::SourceResourceAction) -> Self {
+        use crate::source_resources::SourceResourceAction as A;
+        match action {
+            A::Read {
+                path,
+                offset,
+                length,
+            } => Self::FileRead(FileReadArgs {
+                path,
+                offset,
+                length,
+            }),
+            A::LanguageSource { path, derived_view } => {
+                Self::LanguageQuery(LanguageQueryArgs::source_descriptor(path, derived_view))
+            }
+            A::RetrievalSource { paths } => {
+                Self::RetrievalQuery(RetrievalQueryArgs::source_descriptor(paths))
+            }
+            A::ChildSourceHandoff { delegation } => Self::ChildSourceHandoff { delegation },
+            A::ChildStorageReceipt {
+                operation_id,
+                receipt_kind,
+            } => Self::ChildStorageReceipt {
+                operation_id,
+                kind: receipt_kind,
+            },
+            A::ChildRootIdle => Self::ChildRootIdle,
+            A::CollaborationPin { release, pin_id } => Self::CollaborationPin { release, pin_id },
+            A::ProcessObservation {
+                source_run_id,
+                lineage,
+                process_id,
+                read,
+            } => Self::ProcessObservation {
+                source_run_id,
+                lineage,
+                process_id,
+                read,
+            },
+            A::ReconcileMutation { mutation, executor } => {
+                Self::ReconcileMutation { mutation, executor }
+            }
+        }
+    }
+}
+pub(crate) fn execute_source_resource(
+    resources: KernelResourceClient,
+    record: crate::source_resources::AuthorityRecord,
+    address: crate::source_resources::SourceAuthorityAddress,
+    context: ToolExecutionContext,
+    action: crate::source_resources::SourceResourceAction,
+    authorize_only: bool,
+    cancel: CancellationToken,
+) -> Result<Value, KernelError> {
+    let mut binding = record.result.tool_binding.ok_or_else(|| {
+        KernelError::Authorization("Resource requires its original Run binding".into())
+    })?;
+    if context.run_id != binding.run_id {
+        return Err(KernelError::Authorization(
+            "Resource belongs to another Run".into(),
+        ));
+    }
+    binding.target_authority = Some(address);
+    let _grant_watch = resources
+        .admission_control
+        .as_ref()
+        .map(|watch| watch(&binding, &cancel))
+        .transpose()
+        .map_err(|e| KernelError::Authorization(e.to_string()))?;
+    resources
+        .call(
+            &binding,
+            &context,
+            ResourceOperation::from_source_action(action),
+            authorize_only,
+            &cancel,
+        )
+        .map_err(|f| f.error)
+}

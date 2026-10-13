@@ -39,7 +39,7 @@ impl Fixture {
             let result = serve_resource(&mut storage.lock().unwrap(), EPOCH, HOST, GENERATION, &request);
             request.reply.send(result).unwrap(); Ok(())
         }}, |_| Ok(()), Default::default());
-        let binding: ToolBinding = serde_json::from_value(json!({"grantId":"reader","runId":"run","threadId":"thread",
+        let binding: ToolBinding = serde_json::from_value(json!({"resourceOwner":{"kind":"local"},"grantId":"reader","runId":"run","threadId":"thread",
             "workspaceId":"workspace","executionWorkspaceId":"execution","sourceMode":"fixed_branch",
             "fileSource":{"branchId":"fixed","revision":0},"enabledTools":["code_retrieval"]})).unwrap();
         let schemas = crate::child_capabilities::select(&["code_retrieval".into()]).unwrap();
