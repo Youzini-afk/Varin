@@ -1,8 +1,8 @@
 /** Original MCP definitions rebound to an admitted child's own execution view.
  * Configuration, transports and credentials remain owned by the shared McpAuthority. */
 import { isDeepStrictEqual } from 'node:util';
-import type { McpAuthority } from '@varin/pi-host/mcp-authority';
-import type { PermissionPolicy } from '@varin/protocol';
+import { composeMcpAuthorityLeases, type McpAuthority, type McpAuthorityOwnedLease } from '@varin/pi-host/mcp-authority';
+import type { McpProvenance, McpServerOwner, PermissionPolicy } from '@varin/protocol';
 import type { McpPreparation } from './agent-runtime-client.js';
 import type { KernelClient } from './kernel-client.js';
 import type { McpResourceRuntime } from './mcp-resource-runtime.js';
@@ -25,100 +25,125 @@ export function createChildMcpPreparer(owners: {
     signal?.throwIfAborted();
     const selection = input.delegatedBinding ?? input.requiredBinding;
     if (!selection)
-      throw new Error(
-        'Child MCP preparation requires its original dependency selection',
-      );
-    // Empty server selections contain only Catalog-owned controls. Their neutral local
-    // scope supplies no endpoint authority. Mixed owners require contribution composition.
-    const selectedOwners = Object.values(selection.provenance.servers).map(server => server.owner);
-    const owner = selectedOwners[0] ?? { resource_owner: { kind: 'local' as const },
+      throw new Error('Child MCP preparation requires its original dependency selection');
+    // A dependency cut groups complete frozen owners, not just their physical Host.
+    // Configuration precedence was already resolved by the original selection.
+    const groups: Array<{ owner: McpServerOwner; provenance: McpProvenance }> = [];
+    for (const [name, server] of Object.entries(selection.provenance.servers)) {
+      if (server.owner.resource_owner.kind !== 'local')
+        throw new Error('Child MCP requires its original target Host execution owner');
+      let group = groups.find(candidate => isDeepStrictEqual(candidate.owner, server.owner));
+      if (!group) {
+        group = { owner: server.owner, provenance: { servers: {} } };
+        groups.push(group);
+      }
+      group.provenance.servers[name] = server;
+    }
+    // Catalog-owned controls need no endpoint, but keep the existing neutral lease.
+    if (!groups.length) groups.push({ owner: {
+      resource_owner: { kind: 'local' }, source_authority: null,
       configuration: { agent_dir: owners.agentDir, config_cwd: owners.agentDir, project_trusted: false },
-      execution_scope: 'global' as const };
-    if (selectedOwners.some(selected => !isDeepStrictEqual(selected, owner)))
-      throw new Error('Child MCP requires composition of its original server owners');
-    if (owner.resource_owner.kind !== 'local')
-      throw new Error('Child MCP requires its original target Host execution owner');
-    const configuration = owner.configuration;
-    const needsWorkspace = owner.execution_scope === 'workspace';
+      execution_scope: 'global',
+    }, provenance: { servers: {} } });
+    const needsWorkspace = groups.some(group => group.owner.execution_scope === 'workspace');
     if (needsWorkspace && input.source?.resourceOwner.kind === 'managed_host')
       throw new Error('Project MCP requires its original target Host execution owner. Managed file sources currently support coordinator-global MCP only.');
     if (needsWorkspace && (!input.source || !input.executionCwd))
-      throw new Error(
-        'Child MCP requires an execution view matching its fixed source',
-      );
-    const workspace =
-      needsWorkspace && input.source
-        ? await owners.admitWorkspaceRegistration(input.source.workspaceId, signal)
-        : undefined;
-    if (
-      configuration.agent_dir !== owners.agentDir ||
-      (configuration.config_cwd !== owners.agentDir &&
-        configuration.config_cwd !== workspace?.canonicalPath)
-    ) {
-      throw new Error(
-        'Child MCP configuration source is unavailable for its actual execution view',
-      );
+      throw new Error('Child MCP requires an execution view matching its fixed source');
+    const workspace = needsWorkspace && input.source
+      ? await owners.admitWorkspaceRegistration(input.source.workspaceId, signal) : undefined;
+    signal?.throwIfAborted();
+    for (const { owner } of groups) {
+      const configuration = owner.configuration;
+      if (configuration.agent_dir !== owners.agentDir ||
+        (configuration.config_cwd !== owners.agentDir &&
+          (owner.execution_scope !== 'workspace' || configuration.config_cwd !== workspace?.canonicalPath)))
+        throw new Error('Child MCP configuration source is unavailable for its actual execution view');
     }
     const assertTrust = () => {
-      if (
-        configuration.project_trusted &&
-        (!workspace || !owners.projectTrusted(configuration.config_cwd))
-      ) {
-        throw new Error(
-          'Child MCP project trust was revoked or its consistent execution view is unavailable',
-        );
+      for (const { owner } of groups) {
+        const configuration = owner.configuration;
+        if (configuration.project_trusted &&
+          (owner.execution_scope !== 'workspace' || !workspace || !owners.projectTrusted(configuration.config_cwd)))
+          throw new Error('Child MCP project trust was revoked or its consistent execution view is unavailable');
       }
     };
     assertTrust();
-    const directResources = new Set(
-      selection.tools
-        .filter(tool => ['direct','direct_task'].includes(selection.routes[tool.name]?.kind ?? ''))
-        .map((tool) => selection.resources[tool.name])
-        .filter(Boolean),
-    );
-    const servers = Object.entries(selection.provenance.servers)
-      .filter(([, server]) => directResources.has(server.resource_key))
-      .map(([name]) => name);
-    const lease = await owners.authority.acquire(
-      {
-        resourceOwner: owner.resource_owner,
-        agentDir: configuration.agent_dir,
-        configCwd: configuration.config_cwd,
-        projectTrusted: configuration.project_trusted,
-        executionCwd: needsWorkspace ? input.executionCwd! : owners.agentDir,
-        environmentId: workspace
-          ? `${owners.hostId}:${input.source!.executionWorkspaceId}`
-          : `${owners.hostId}:global`,
-        executionScope: owner.execution_scope,
-        sessionId: `agent:${input.threadId}`,
-      },
-      {
-        servers,
-        provenance: selection.provenance,
-        ...(signal ? { signal } : {}),
-      },
-    );
+    // Use only the admitted original project's Host policy merge. A neutral-only
+    // selection keeps global policy even when the child also has a private Source.
+    const projectGroups = groups.filter(group => group.owner.configuration.config_cwd === workspace?.canonicalPath);
+    const policyConfiguration = (projectGroups.find(group => group.owner.configuration.project_trusted)
+      ?? projectGroups[0] ?? groups[0]!).owner.configuration;
+    const directResources = new Set(selection.tools
+      .filter(tool => ['direct', 'direct_task'].includes(selection.routes[tool.name]?.kind ?? ''))
+      .map(tool => selection.resources[tool.name]).filter(Boolean));
+    const attempt = new AbortController();
+    const abort = () => attempt.abort(signal?.reason);
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
+    const acquired: McpAuthorityOwnedLease[] = [];
     try {
-      signal?.throwIfAborted();
+      const prepared = await Promise.allSettled(groups.map(async ({ owner, provenance }) => {
+        try {
+          attempt.signal.throwIfAborted();
+          const configuration = owner.configuration;
+          const workspaceScope = owner.execution_scope === 'workspace';
+          const lease = await owners.authority.acquire({
+            resourceOwner: owner.resource_owner,
+            agentDir: configuration.agent_dir,
+            configCwd: configuration.config_cwd,
+            projectTrusted: configuration.project_trusted,
+            executionCwd: workspaceScope ? input.executionCwd! : owners.agentDir,
+            environmentId: workspaceScope
+              ? `${owners.hostId}:${input.source!.executionWorkspaceId}` : `${owners.hostId}:global`,
+            executionScope: owner.execution_scope,
+            sessionId: `agent:${input.threadId}`,
+          }, {
+            servers: Object.entries(provenance.servers)
+              .filter(([, server]) => directResources.has(server.resource_key)).map(([name]) => name),
+            provenance,
+            signal: attempt.signal,
+          });
+          acquired.push(lease);
+          attempt.signal.throwIfAborted();
+          assertTrust();
+          return { lease, servers: Object.keys(provenance.servers) };
+        } catch (error) {
+          attempt.abort(error);
+          throw error;
+        }
+      }));
+      attempt.signal.throwIfAborted();
+      const parts = prepared.map(result => {
+        if (result.status === 'rejected') throw result.reason;
+        return result.value;
+      });
       assertTrust();
+      // Preserve the original single-owner identity; mixed owners have one composed
+      // binding, validated once against the whole frozen dependency selection.
+      const lease = parts.length === 1 ? parts[0]!.lease : composeMcpAuthorityLeases(parts);
       return createMcpLease({
         lease,
         kernel: owners.kernel,
-        ...(owners.tasks?{tasks:owners.tasks()}:{}),
-        ...(owners.resources?{resources:owners.resources()}:{}),
+        ...(owners.tasks ? { tasks: owners.tasks() } : {}),
+        ...(owners.resources ? { resources: owners.resources() } : {}),
         selection,
         retarget: Boolean(input.delegatedBinding),
         currentPolicy: async () => {
           assertTrust();
-          return owners.currentPolicy(
-            configuration.config_cwd,
-            configuration.project_trusted,
-          );
+          return owners.currentPolicy(policyConfiguration.config_cwd, policyConfiguration.project_trusted);
         },
       });
     } catch (error) {
-      lease.release();
+      attempt.abort(error);
+      // Every acquisition has settled, including late replies. Drain these actual
+      // candidates, never reopen the old parent dependency to perform cleanup.
+      const drained = await Promise.allSettled(acquired.map(async lease => lease.releaseAndDrain()));
+      const failures = drained.filter(result => result.status === 'rejected');
+      if (failures.length) throw new AggregateError([error, ...failures.map(result => result.reason)], 'Child MCP preparation cleanup failed');
       throw error;
+    } finally {
+      signal?.removeEventListener('abort', abort);
     }
   };
 }
