@@ -47,7 +47,7 @@ it('does not consume an initial retained lease when a cancelled caller asks for 
 });
 it('cuts mixed frozen bindings by original owner while retaining only the selected direct resources', () => {
   const server = (resourceOwner: typeof owner | { kind: 'local' }, resource: string) => ({
-    owner: { resource_owner: resourceOwner, configuration: { agent_dir: '/agent', config_cwd: '/project', project_trusted: true }, execution_scope: 'workspace' as const },
+    owner: { resource_owner: resourceOwner, configuration: { agent_dir: '/agent', config_cwd: '/project', project_trusted: true }, execution_scope: 'workspace' as const, source_authority: resourceOwner.kind === 'managed_host' ? { coordinator_host_id: 'A', authority_id: 'original', resource_epoch: 'epoch' } : null },
     definition_version: 'definition', resource_key: resource,
   });
   const binding = { reference: 'mixed', generation: 2,

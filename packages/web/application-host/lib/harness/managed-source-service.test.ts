@@ -36,7 +36,7 @@ function fixture() {
       const params = input as SourceAuthorityOpenParams;
       state.authority = { authorityId: 'authority', resourceEpoch: 'target-epoch', executionOwner: { kind: 'external', identity: 'source', epoch: 'target-epoch' },
         source: params.source, scope: params.scope, phase: 'preparing', purpose: params.purpose, operationId: params.operationId ?? null, grantId: params.grantId,
-        toolBinding: null, physicalRoot: null, firstPreparation: true, materializationOperationId: 'materialize' };
+        toolBinding: null, physicalRoot: null, firstPreparation: true, materializationOperationId: 'materialize', mcpHolders: [] };
       return state.authority;
     }
     if (method === 'source.authority.bind') {
@@ -45,6 +45,7 @@ function fixture() {
       return state.authority;
     }
     if (method === 'source.authority.inspect') return state.authority;
+    if (method === 'source.authority.seal') { state.authority = { ...state.authority!, phase: state.authority!.mcpHolders.some(holder => !holder.released) ? 'retaining' : 'draining' }; return state.authority; }
     if (method === 'source.authority.inspect_scope') return [state.authority];
     if (method === 'source.service.call') return { pathScopes: ['allowed'] };
     if (method === 'source.authority.release') return { authorityId: 'authority', phase: 'retired', grantIds: ['private-grant'] };
@@ -61,13 +62,22 @@ function fixture() {
   const prepareSource = vi.fn(async (input: ThreadPrepareSource) => ({ path: '/target/project', source: { ...source, resourceOwner: input.resourceOwner } }));
   const serviceOperation = vi.fn<ManagedSourceServiceHandler>(async () => { state.trusted = false; return { committed: true }; });
   const releaseSource = vi.fn<(scope: ManagedSourceCleanupScope) => Promise<void | { mcpExecutorStopped: boolean }>>(async () => { events.push('drain-views'); });
-  const service = createManagedSourceService({ kernel, hostId: 'target', documents: {
+  const releaseMcpView = vi.fn(async () => ({ ok: true as const, value: null, executorStopped: true as const }));
+  const service = createManagedSourceService({ kernel, hostId: 'target', releaseMcpView, documents: {
     admitWorkspaceRegistration: async () => {
       events.push('registration'); if (!state.trusted) throw new Error('Trust withdrawn');
       return { workspaceId: 'workspace', canonicalPath: '/target/project', hostId: 'target' };
     },
   } as never, validateLiveSource: async () => {}, prepareSource, serviceOperation, releaseSource });
-  return { service, kernel, state, events, sourceRequest, issueGrant, claimManagedChildSource, readBranch, fileMaterialize, fileRootRegister, prepareSource, serviceOperation, releaseSource };
+  return { service, kernel, state, events, sourceRequest, issueGrant, claimManagedChildSource, readBranch, fileMaterialize, fileRootRegister, prepareSource, serviceOperation, releaseSource, releaseMcpView };
+}
+
+async function bindMcp(f: ReturnType<typeof fixture>) {
+  const root = { hostId: 'target', rootId: 'mcp-root', canonicalRoot: '/target/project' };
+  f.fileRootRegister.mockResolvedValue(root);
+  return f.service.bind({ ...principal, capabilities: [...principal.capabilities, 'terminal:use', 'process:control'] },
+    { ...request, purpose: 'mcp_owner', retention: 'run', scope: { kind: 'run', threadId: 'thread', runId: 'run', epoch: 1 },
+      source: { resourceOwner: source.resourceOwner, workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId, mode: 'live_root', tools: [], liveRoot: root } });
 }
 
 describe('managed Source target admission orchestration', () => {
@@ -336,7 +346,7 @@ describe('managed Source target admission orchestration', () => {
     expect(f.sourceRequest.mock.calls.some(([method]) => method === 'source.authority.release')).toBe(false);
   });
   it('fences the original MCP creation before exact release, including release before admission', async () => {
-    const f = fixture(), binding = await f.service.bind(principal, request);
+    const f = fixture(), binding = await bindMcp(f);
     const address = { coordinatorHostId: 'coordinator', authorityId: binding.authorityId, resourceEpoch: binding.resourceEpoch };
     const snapshot = { ...address, requestId: 'creation', operation: { kind: 'mcp' as const,
       action: { kind: 'snapshot' as const, handleId: 'view', creationRequestId: 'creation' } } };
@@ -345,11 +355,13 @@ describe('managed Source target admission orchestration', () => {
     f.serviceOperation.mockResolvedValue({ ok: true, value: null, executorStopped: true });
     // No current read/trust grant is required to close the old handle.
     f.state.trusted = false;
+    f.kernel.sourceAuthorityGrant = () => { throw new Error('Original grant inactive'); };
     await f.service.service({ ...principal, capabilities: [] }, release);
     await expect(f.service.service(principal, snapshot)).rejects.toBeInstanceOf(DOMException);
-    expect(f.serviceOperation.mock.calls.map(([, operation]) => operation)).toEqual([release.operation]);
+    expect(f.serviceOperation).not.toHaveBeenCalled();
+    expect(f.releaseMcpView).toHaveBeenCalledTimes(1);
 
-    const g = fixture(), opened = await g.service.bind(principal, request);
+    const g = fixture(), opened = await bindMcp(g);
     let entered!: () => void, drain!: () => void;
     const active = new Promise<void>(resolve => { entered = resolve; });
     const stopped = new Promise<void>(resolve => { drain = resolve; });
@@ -361,6 +373,7 @@ describe('managed Source target admission orchestration', () => {
       } else effects.push('released');
       return { ok: true, value: null, executorStopped: true };
     });
+    g.releaseMcpView.mockImplementation(async () => { effects.push('released'); return { ok: true, value: null, executorStopped: true }; });
     const creating = g.service.service(principal, { ...snapshot, authorityId: opened.authorityId }); await active;
     const closing = g.service.service(principal, { ...release, authorityId: opened.authorityId });
     await Promise.resolve(); expect(effects).toEqual([]);
@@ -368,7 +381,7 @@ describe('managed Source target admission orchestration', () => {
   });
 
   it.each([true, false])('uses only original native MCP stop proof to drain unknown executor work (%s)', async nativeStopped => {
-    const f = fixture(), binding = await f.service.bind(principal, request);
+    const f = fixture(), binding = await bindMcp(f);
     const receipt = { ok: false, executorStopped: false, error: { code: 'response-lost', dispatched: true, settlement: 'unknown' } };
     f.serviceOperation.mockResolvedValue(receipt);
     f.releaseSource.mockImplementation(async () => { f.events.push('drain-views'); return { mcpExecutorStopped: nativeStopped }; });

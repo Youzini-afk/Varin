@@ -323,7 +323,7 @@ class Scope {
       },
       resourceEndpoint: service => serverOwner(service.server).lease.resourceEndpoint(service),
       observeResource: (service,uri,options) => serverOwner(service.server).lease.observeResource(service,uri,options),
-      taskOwner: (server,endpoint,signal) => serverOwner(server).lease.taskOwner(server,endpoint,signal),
+      taskOwner: (server,endpoint,signal,origin) => serverOwner(server).lease.taskOwner(server,endpoint,signal,origin),
       discoverServices: (server,signal) => serverOwner(server).lease.discoverServices(server,signal),
       prepareService: (server,kind,version,signal) => serverOwner(server).lease.prepareService(server,kind,version,signal),
       preparePrompt: (server,name,version,signal) => serverOwner(server).lease.preparePrompt(server,name,version,signal),

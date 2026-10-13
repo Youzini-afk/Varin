@@ -5,10 +5,12 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 31;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 32;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
+    "source.authority.seal",
+    "source.mcp.holder",
     "source.script.control",
     "source.authority.release_scope",
     "source.resource.cancel",
@@ -76,6 +78,8 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.calendar.calculation.retry",
 ];
 pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
+    "source.authority.seal",
+    "source.mcp.holder",
     "source.authority.release_scope",
     "source.resource.cancel",
     "source.authority.release",
@@ -2577,9 +2581,11 @@ pub(crate) type SourceCapabilitiesParams = crate::source_resources::SourceCapabi
 
 pub(crate) type SourceAuthorityOpenParams = crate::source_resources::SourceAuthorityOpenParams;
 
-pub(crate) type SourceAuthorityBindParams = crate::source_resources::SourceAuthorityBindParams;
-
 pub(crate) type SourceAuthorityAddress = crate::source_resources::SourceAuthorityAddress;
+
+pub(crate) type SourceMcpHolderParams = crate::source_resources::SourceMcpHolderParams;
+
+pub(crate) type SourceAuthorityBindParams = crate::source_resources::SourceAuthorityBindParams;
 
 pub(crate) type SourceAuthorityReleaseParams =
     crate::source_resources::SourceAuthorityReleaseParams;
@@ -4426,6 +4432,12 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
+        "source.authority.seal" => serde_json::from_value::<SourceAuthorityAddress>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "source.mcp.holder" => serde_json::from_value::<SourceMcpHolderParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "source.authority.bind" => {
             serde_json::from_value::<SourceAuthorityBindParams>(params.clone())
                 .map(|_| ())

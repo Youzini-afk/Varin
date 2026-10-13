@@ -158,3 +158,9 @@ server definition and resource match the frozen snapshot, rather than a newer ga
 Explicit hidden/disabled service withdrawal interrupts admissions; ordinary replacement retains the
 old contribution for its original callers. Resource subscriptions/updates, server interactions and
 negotiated durable MCP Tasks remain separate work.
+
+Managed server provenance also freezes the original Source authority address. Task-owner acquisition
+can carry its coordinator Operation/executor identity through both composition paths. Retained
+connections keep that original source reference; an ordinary Run view release is not daemon drainage.
+The current managed Task/observer transport methods remain unavailable pending their dedicated wire
+adapters and original acceptance/recovery receipts.

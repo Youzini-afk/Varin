@@ -59,7 +59,8 @@ export async function createManagedMcpLease(input: {
       || typeof snapshot.implementationIdentity !== 'string' || !isManagedMcpRevocations(snapshot.revocations)) fail('mcp_source_binding_invalid');
     for (const server of Object.values(snapshot.binding.provenance.servers)) {
       if (!record(server) || !record(server.owner) || !isDeepStrictEqual(server.owner.resource_owner, input.owner)
-        || server.owner.execution_scope !== 'workspace') fail('mcp_source_owner_changed');
+        || server.owner.execution_scope !== 'workspace' || !isDeepStrictEqual(server.owner.source_authority, {
+          coordinator_host_id: input.coordinatorHostId, authority_id: access.binding.authorityId, resource_epoch: access.binding.resourceEpoch })) fail('mcp_source_owner_changed');
     }
     for (const tool of snapshot.binding.tools) {
       if (!record(tool) || typeof tool.name !== 'string' || typeof tool.server !== 'string' || typeof tool.schemaVersion !== 'string'

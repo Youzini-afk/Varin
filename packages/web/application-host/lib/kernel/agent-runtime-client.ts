@@ -144,7 +144,8 @@ export class AgentRuntimeClient {
     this.managedSourceBindings.set(runId, { binding, client });
   }
   async withManagedSourceAuthority<T>(runId: string, source: import('@varin/application-client').ThreadSource,
-    consume: (access: { client: ManagedSourceClient; binding: ManagedSourceBinding }) => Promise<T>, signal?: AbortSignal): Promise<T> {
+    consume: (access: { client: ManagedSourceClient; binding: ManagedSourceBinding }) => Promise<T>, signal?: AbortSignal,
+    options: { purpose?: 'source' | 'mcp_owner'; original?: import('./protocol.generated.js').McpSourceAuthority } = {}): Promise<T> {
     if (source.resourceOwner.kind !== 'managed_host') throw new SourceAdmissionError('source_changed');
     const [run, launch] = await Promise.all([this.run(runId, signal), this.launch(runId, signal)]);
     const original = launch?.selection.source;
@@ -153,18 +154,32 @@ export class AgentRuntimeClient {
       || original.mode !== source.mode || original.branch_id !== (source.branchId ?? null) || original.revision !== (source.revision ?? null)
       || !isDeepStrictEqual(original.live_root, source.liveRoot ?? null)
       || (original.environment_run_id ?? undefined) !== source.environmentRunId) throw new SourceAdmissionError('source_changed');
-    let access = this.managedSourceBindings.get(runId);
+    const purpose = options.purpose ?? 'source';
+    const key = purpose === 'source' ? runId : `mcp:${runId}`;
+    if (options.original && options.original.coordinator_host_id !== this.coordinatorHostId) throw new SourceAdmissionError('source_changed');
+    let access = this.managedSourceBindings.get(key);
     if (!access) {
       const client = await this.managedSource(source.resourceOwner, signal);
       const candidates = await client.inspectScope({ coordinatorHostId: this.coordinatorHostId,
         threadId: run.thread_id, runId }, signal);
-      const originalBinding = candidates.find(candidate => candidate.phase === 'ready' && candidate.purpose === 'source'
+      const originalBinding = candidates.find(candidate => candidate.phase === 'ready' && candidate.purpose === purpose
+        && (!options.original || candidate.binding.authorityId === options.original.authority_id && candidate.binding.resourceEpoch === options.original.resource_epoch)
         && candidate.scope.kind === 'run' && candidate.scope.epoch === run.epoch
         && isDeepStrictEqual(candidate.binding.source, original));
-      if (!originalBinding) throw new SourceAdmissionError('source_authority_denied');
-      access = { client, binding: originalBinding.binding };
-      this.managedSourceBindings.set(runId, access);
+      if (originalBinding) access = { client, binding: originalBinding.binding };
+      else if (purpose === 'mcp_owner' && !options.original) {
+        if (run.cancel_requested || ['completed', 'cancelled', 'failed'].includes(run.state)) throw new SourceAdmissionError('source_authority_denied');
+        // Initial MCP admission owns a separate grant within the same Source authority.
+        // Retaining its daemon must never retain ordinary Run shell/file permissions.
+        const binding = await client.bind({ coordinatorHostId: this.coordinatorHostId,
+          scope: { kind: 'run', threadId: run.thread_id, runId, epoch: run.epoch }, source,
+          purpose: 'mcp_owner', retention: 'run' }, signal);
+        access = { client, binding };
+      } else throw new SourceAdmissionError('source_authority_denied');
+      this.managedSourceBindings.set(key, access);
     }
+    if (options.original && (access.binding.authorityId !== options.original.authority_id
+      || access.binding.resourceEpoch !== options.original.resource_epoch)) throw new SourceAdmissionError('source_changed');
     if (!isDeepStrictEqual(access.binding.source, original)) throw new SourceAdmissionError('source_changed');
     signal?.throwIfAborted();
     return consume(access);
@@ -475,6 +490,7 @@ export class AgentRuntimeClient {
       if (!result || typeof result !== 'object' || !('pendingAuthorities' in result) || !Array.isArray(result.pendingAuthorities)
         || result.pendingAuthorities.length) throw new Error('The original managed source still requires cleanup');
       this.managedSourceBindings.delete(runId);
+      this.managedSourceBindings.delete(`mcp:${runId}`);
       return;
     }
     await this.kernel.releaseLanguageSource(runId);

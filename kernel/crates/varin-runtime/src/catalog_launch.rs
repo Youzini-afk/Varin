@@ -174,14 +174,33 @@ pub enum McpExecutionScope {
     Global,
     Workspace,
 }
+/// Exact original target permit; never rediscovered from a later Run or resource-key string.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct McpSourceAuthority {
+    pub coordinator_host_id: String,
+    pub authority_id: String,
+    pub resource_epoch: String,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct McpServerOwner {
+    pub source_authority: Option<McpSourceAuthority>,
     pub resource_owner: SourceResourceOwner,
     pub configuration: McpConfiguration,
     pub execution_scope: McpExecutionScope,
 }
 impl McpServerOwner {
+    pub fn validate(&self) -> bool {
+        self.resource_owner.validate() && match (&self.resource_owner, &self.source_authority) {
+            (SourceResourceOwner::Local, None) => true,
+            (SourceResourceOwner::ManagedHost { .. }, Some(address)) =>
+                self.execution_scope == McpExecutionScope::Workspace
+                && !address.coordinator_host_id.is_empty() && !address.authority_id.is_empty()
+                && !address.resource_epoch.is_empty(),
+            _ => false,
+        }
+    }
     pub fn accepts_source(&self, source: Option<&SourceSelection>) -> bool {
         self.execution_scope == McpExecutionScope::Global
             || source.is_some_and(|source| source.resource_owner == self.resource_owner)
@@ -208,7 +227,7 @@ impl HostToolBinding {
         if self.reference.is_empty()
             || self.provenance.servers.iter().any(|(name, server)| {
                 name.is_empty()
-                    || !server.owner.resource_owner.validate()
+                    || !server.owner.validate()
                     || server.owner.configuration.agent_dir.is_empty()
                     || server.owner.configuration.config_cwd.is_empty()
                     || server.definition_version.is_empty()

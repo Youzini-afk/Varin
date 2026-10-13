@@ -84,6 +84,8 @@ export function createManagedMcpPreparer(options: {
       if (scope && !isDeepStrictEqual(scope.owner, source.resourceOwner)) { release(input.runId); scope = undefined; }
       const selection = input.requiredBinding ? selectMcpServers(input.requiredBinding,
         owner => isDeepStrictEqual(owner, source.resourceOwner)) : undefined;
+      const originals = Object.values(selection?.provenance.servers ?? {}).map(server => server.owner.source_authority);
+      if (originals.some(original => !original || !isDeepStrictEqual(original, originals[0]))) throw new Error('mcp_original_source_authority_changed');
       if (!scope) {
         const selected: Scope = { owner: source.resourceOwner, controller: new AbortController(), ready: undefined as never, revocations: new Map(), listeners: new Map() };
         scopes.set(input.runId, selected); scope = selected;
@@ -98,7 +100,7 @@ export function createManagedMcpPreparer(options: {
             selected.failure = error; selected.controller.abort(); options.onError();
           });
           options.changed(input.runId);
-        }, selected.controller.signal).catch(error => {
+        }, selected.controller.signal, { purpose: 'mcp_owner', ...(originals[0] ? { original: originals[0] } : {}) }).catch(error => {
           selected.failure = error; if (!selected.controller.signal.aborted) options.onError();
         });
       }

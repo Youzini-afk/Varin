@@ -607,6 +607,7 @@ fn each_new_run_retargets_only_the_original_mcp_definition_and_its_own_recovery_
                 "one".into(),
                 McpServerSelection {
                     owner: McpServerOwner {
+                        source_authority: None,
                         resource_owner: SourceResourceOwner::Local,
                         configuration: McpConfiguration {
                             agent_dir: "/agent".into(),

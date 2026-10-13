@@ -48,7 +48,7 @@ function fixture(owner: string, names: string[], tools: McpAuthorityTool[] = [])
     binding: { reference: `${owner}:reference`, generation: owner === 'A' ? 1 : 2, tools,
       provenance: { servers: Object.fromEntries(names.map(name => [name, {
         owner: { resource_owner: { kind: 'managed_host' as const, hostId: owner, connectionId: `${owner}:connection`, endpointIdentity: `${owner}:endpoint` },
-          configuration: { agent_dir: `/${owner}/agent`, config_cwd: `/${owner}/project`, project_trusted: true }, execution_scope: 'global' as const },
+          configuration: { agent_dir: `/${owner}/agent`, config_cwd: `/${owner}/project`, project_trusted: true }, execution_scope: 'workspace' as const, source_authority: { coordinator_host_id: 'coordinator', authority_id: `${owner}:authority`, resource_epoch: `${owner}:epoch` } },
         definition_version: `${owner}:definition`, resource_key: `${owner}:${name}`,
       }])) }, readiness: inspection, servers,
       serverSelections: names.map(name => ({ name, configurationVersion: `${owner}:definition`, hiddenTools: [] })) },
@@ -159,12 +159,13 @@ test('routes services, prompts, resources and tasks to their retained owner with
   const endpoint = lease.resourceEndpoint(service);
   const observeOptions = { ...options, onChange: () => {} };
   const observer = await lease.observeResource(service, request.uri, observeOptions);
-  const task = await lease.taskOwner('project', endpoint, signal);
+  const task = await lease.taskOwner('project', endpoint, signal, options.interaction);
   assert.equal(observer, b.observer); assert.equal(task, b.tasks);
   assert.equal(a.calls.length, 0);
   assert.deepEqual(b.calls.find(call => call.operation === 'requestService')!.args, [service, request, options]);
   assert.deepEqual(b.calls.find(call => call.operation === 'observeResource')!.args, [service, request.uri, observeOptions]);
-  assert.deepEqual(b.calls.find(call => call.operation === 'taskOwner')!.args, ['project', endpoint, signal]);
+  assert.deepEqual(b.calls.find(call => call.operation === 'taskOwner')!.args, ['project', endpoint, signal, options.interaction]);
+  assert.equal(b.calls.find(call => call.operation === 'taskOwner')!.args[3], options.interaction);
   lease.release();
   assert(!b.calls.some(call => call.operation === 'task.release' || call.operation === 'observer.detach'));
   await task.get('retained', signal); await observer.detach(); task.release();

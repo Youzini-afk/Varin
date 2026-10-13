@@ -31,6 +31,8 @@ export type { McpAuthorityService, McpAuthorityPrompt, McpServiceKind, McpServic
 export interface McpAuthorityScope {
   /** Actual configuration/transport authority; supplied by the trusted host. */
   resourceOwner: SourceResourceOwner;
+  /** Original managed Source permit, absent for local scopes. */
+  sourceAuthority?: NonNullable<McpServerOwner['source_authority']>;
   /** Closed contribution selection; omitted for the Host's ordinary combined scope. */
   configurationScopes?: readonly ('global' | 'project' | 'extension')[];
   agentDir: string;
@@ -159,7 +161,8 @@ export interface McpAuthorityLease {
   callTool(name: string, arguments_: Record<string, unknown>, options: { schemaVersion: string; signal: AbortSignal; beforeDispatch?: () => void | Promise<void>; interaction?: McpInteractionOrigin }): ReturnType<McpServerConnection['callTool']>;
   resourceEndpoint(service:McpAuthorityService):McpEndpoint;
   observeResource(service:McpAuthorityService, uri:string, options:{signal:AbortSignal;beforeDispatch?:()=>void|Promise<void>;onChange:(change:McpResourceChange)=>void;interaction?:McpInteractionOrigin}):Promise<McpResourceObserver>;
-  taskOwner(server: string, endpoint: McpEndpoint | undefined, signal: AbortSignal): Promise<McpTaskLease>;
+  /** Original operation identity for retaining execution authority before Task dispatch. */
+  taskOwner(server: string, endpoint: McpEndpoint | undefined, signal: AbortSignal, origin?: McpInteractionOrigin): Promise<McpTaskLease>;
   release(): void;
 }
 /** Authority-owned scope drainage, distinct from a composed snapshot's reference release. */
@@ -280,13 +283,13 @@ function normalizeScope(input: McpAuthorityScope): McpAuthorityScope {
   return { ...input, ...(input.configurationScopes ? { configurationScopes: Object.freeze([...new Set(input.configurationScopes)].sort()) } : {}), resourceOwner: freeze(structuredClone(input.resourceOwner)), agentDir: resolve(input.agentDir), configCwd: resolve(input.configCwd), executionCwd: resolve(input.executionCwd) };
 }
 function scopeKey(scope: McpAuthorityScope): string {
-  return stable([scope.resourceOwner, scope.configurationScopes ?? null, scope.agentDir, scope.configCwd, scope.executionCwd, scope.environmentId, scope.executionScope, scope.projectTrusted]);
+  return stable([scope.resourceOwner, scope.sourceAuthority ?? null, scope.configurationScopes ?? null, scope.agentDir, scope.configCwd, scope.executionCwd, scope.environmentId, scope.executionScope, scope.projectTrusted]);
 }
 function configuration(scope: McpAuthorityScope): McpServerOwner['configuration'] {
   return { agent_dir: scope.agentDir, config_cwd: scope.configCwd, project_trusted: scope.projectTrusted };
 }
 function serverOwner(scope: McpAuthorityScope): McpServerOwner {
-  return { resource_owner: scope.resourceOwner, configuration: configuration(scope), execution_scope: scope.executionScope };
+  return { resource_owner: scope.resourceOwner, source_authority: scope.sourceAuthority ?? null, configuration: configuration(scope), execution_scope: scope.executionScope };
 }
 function compile(tool: McpTool): ValidateFunction {
   try { return compileToolJsonSchema(tool.inputSchema); }
