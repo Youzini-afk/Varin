@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest';
+import type { McpBinding, SourceMcpChildBinding } from './protocol.generated.js';
 import { HostToolAdmissionError } from './tool-admission.js';
 import { leafHostComposition } from './host-composition.test-helper.js';
 import {
@@ -30,7 +31,8 @@ function fixture() {
   let epoch: string | null = 'epoch';
   const frames: PrivateToolFrame[] = [],
     released: string[] = [],
-    effects: string[] = [];
+    effects: string[] = [],
+    childReleaseErrors: unknown[] = [];
   let acknowledge = true;
   const bridge = new ToolBridge(
     () => epoch,
@@ -50,6 +52,8 @@ function fixture() {
     () => {
       throw new Error('transport failed');
     },
+    () => {},
+    error => { childReleaseErrors.push(error); },
   );
   const lease = (
     identity: string,
@@ -120,6 +124,7 @@ function fixture() {
     frames,
     released,
     effects,
+    childReleaseErrors,
     lease,
     hold,
     request,
@@ -393,6 +398,8 @@ it('keeps accepted child owners through parent completion and channel reset, the
       id: operation,
       parentRunId: 'run',
       childOperationId: operation,
+      executionOwner: { kind: 'kernel' },
+      executionEpoch: 7,
       mcpBinding: null,
       extensionBindings: [original.extensionBinding],
     });
@@ -475,4 +482,236 @@ it('does not retransmit a definitively rejected recovered receipt on another wak
   bridge.reconnect(); await tick();
   await expect(bridge.publishRecoveredReceipt(input)).rejects.toThrow('rejected');
   expect(frames).toHaveLength(1);
+});
+
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+function childFixture(managed = true) {
+  const f = fixture();
+  const binding: McpBinding = {
+    reference: 'original-mcp', generation: 4,
+    provenance: { servers: { original: {
+      owner: { resource_owner: managed
+        ? { kind: 'managed_host', hostId: 'target', connectionId: 'original-connection', endpointIdentity: 'original-endpoint' }
+        : { kind: 'local' },
+      configuration: { agent_dir: '/original', config_cwd: '/original', project_trusted: true },
+      execution_scope: 'workspace',
+      source_authority: managed ? { coordinator_host_id: 'coordinator', authority_id: 'authority', resource_epoch: 'source-epoch' } : null },
+      definition_version: 'original-definition', resource_key: 'original-resource',
+    } } },
+    resources: { original: 'original-resource' }, tools: [schema], routes: { query: { kind: 'direct' } },
+  };
+  const lease: HostToolLease = { ...f.lease('original-mcp'), binding };
+  const original: SourceMcpChildBinding = {
+    parentRunId: 'run', operationId: 'child-operation', executionOwner: { kind: 'kernel' }, executionEpoch: 7,
+  };
+  const frame = (operationId = original.operationId, id = operationId) => ({
+    v: 1, kind: 'host-tool-child-retain', id, kernelEpoch: 'epoch', parentRunId: 'run',
+    childOperationId: operationId, executionOwner: original.executionOwner, executionEpoch: original.executionEpoch,
+    mcpBinding: structuredClone(binding), extensionBindings: [],
+  });
+  return { ...f, binding, lease, original, frame };
+}
+
+it('acknowledges only the exact asynchronous child dependency while independent children retain concurrently', async () => {
+  const f = childFixture();
+  const slow = deferred<{ release(): Promise<void> }>();
+  const calls: { binding: SourceMcpChildBinding; selection: McpBinding }[] = [];
+  const released: string[] = [];
+  f.lease.retainChild = async (binding, selection) => {
+    calls.push({ binding, selection });
+    if (binding.operationId === 'child-operation') return slow.promise;
+    return { release: async () => { released.push(binding.operationId); } };
+  };
+  f.bridge.register('run', f.lease);
+  const request = f.frame();
+  f.bridge.consume(request);
+  request.mcpBinding.provenance.servers.original!.definition_version = 'mutated-after-consume';
+  f.bridge.consume(f.frame('child-operation', 'duplicate-request'));
+  f.bridge.consume(f.frame('independent-child'));
+  await tick();
+  expect(calls).toEqual([
+    { binding: f.original, selection: f.binding },
+    { binding: { ...f.original, operationId: 'independent-child' }, selection: f.binding },
+  ]);
+  expect(f.frames).toEqual([expect.objectContaining({ id: 'independent-child', ok: true })]);
+  const replacement = { ...f.lease, implementationIdentity: 'replacement' };
+  delete replacement.retainChild;
+  f.bridge.register('run', replacement);
+  expect(f.released).toEqual([]);
+  slow.resolve({ release: async () => { released.push('child-operation'); } });
+  await tick();
+  expect(f.frames.filter(frame => frame.kind === 'host-tool-response').map(frame => frame.id))
+    .toEqual(['independent-child', 'child-operation', 'duplicate-request']);
+  expect(f.frames.every(frame => frame.kind === 'host-tool-response' && frame.ok)).toBe(true);
+  await f.bridge.releaseChild('run', 'child-operation');
+  expect(f.released).toEqual([]);
+  await f.bridge.releaseChild('run', 'independent-child');
+  expect(released).toEqual(['child-operation', 'independent-child']);
+  expect(f.released).toEqual(['original-mcp']);
+  f.bridge.close();
+});
+
+it('requires the managed retention hook but retains purely local MCP without one', async () => {
+  for (const managed of [true, false]) {
+    const f = childFixture(managed);
+    f.bridge.register('run', f.lease);
+    f.bridge.consume(f.frame());
+    await tick();
+    expect(f.frames).toEqual([expect.objectContaining({ ok: !managed })]);
+    f.bridge.unregister('run');
+    expect(f.released).toEqual(managed ? ['original-mcp'] : []);
+    await f.bridge.releaseChild('run', 'child-operation');
+    expect(f.released).toEqual(['original-mcp']);
+  }
+});
+
+it('validates exact original schemas, routes, provenance and execution identity before retaining a child', async () => {
+  const f = childFixture();
+  let retains = 0;
+  f.lease.retainChild = async () => { retains++; return { release: async () => {} }; };
+  f.bridge.register('run', f.lease);
+  const variants = [
+    (frame: ReturnType<typeof f.frame>) => { frame.mcpBinding.tools[0]!.description = 'changed'; },
+    (frame: ReturnType<typeof f.frame>) => { frame.mcpBinding.routes.query = { kind: 'discovery', argument: 'other' }; },
+    (frame: ReturnType<typeof f.frame>) => { frame.mcpBinding.provenance.servers.original!.definition_version = 'changed'; },
+    (frame: ReturnType<typeof f.frame>) => { frame.mcpBinding.resources.original = 'changed'; },
+  ];
+  for (const [index, change] of variants.entries()) {
+    const frame = f.frame(`invalid-${index}`); change(frame); f.bridge.consume(frame);
+  }
+  f.bridge.consume({ ...f.frame('invalid-owner'), executionOwner: { kind: 'kernel', identity: 'invented' } });
+  f.bridge.consume({ ...f.frame('invalid-execution-epoch'), executionEpoch: -1 });
+  f.bridge.consume({ ...f.frame('stale-channel'), kernelEpoch: 'old' });
+  await tick();
+  expect(retains).toBe(0);
+  expect(f.frames).toHaveLength(variants.length);
+  expect(f.frames.every(frame => frame.kind === 'host-tool-response' && !frame.ok)).toBe(true);
+  f.bridge.consume(f.frame()); await tick();
+  f.bridge.consume({ ...f.frame('child-operation', 'wrong-operation-epoch'), executionEpoch: 8 });
+  f.bridge.consume({ ...f.frame('child-operation', 'wrong-owner'), executionOwner: { kind: 'external', identity: 'invented', epoch: 'invented' } });
+  await tick();
+  expect(retains).toBe(1);
+  expect(f.frames.slice(-2).every(frame => frame.kind === 'host-tool-response' && !frame.ok)).toBe(true);
+  await f.bridge.releaseChild('run', 'child-operation');
+  f.bridge.close();
+});
+
+it('does not revive a pending child or discard its late asynchronous release after cancellation and lifecycle changes', async () => {
+  for (const action of ['release', 'cancel', 'unregister', 'reset', 'close', 'channel'] as const) {
+    const f = childFixture();
+    const retain = deferred<{ release(): Promise<void> }>();
+    const release = deferred<void>();
+    let releases = 0;
+    f.lease.retainChild = async () => retain.promise;
+    f.bridge.register('run', f.lease);
+    f.bridge.consume(f.frame()); await tick();
+    if (action === 'release') void f.bridge.releaseChild('run', 'child-operation');
+    if (action === 'cancel') f.bridge.consume({ v: 1, kind: 'host-tool-cancel', kernelEpoch: 'epoch', id: 'child-operation', runId: 'run' });
+    if (action === 'unregister') f.bridge.unregister('run');
+    if (action === 'reset') f.bridge.reset();
+    if (action === 'close') f.bridge.close();
+    if (action === 'channel') f.setEpoch('replacement');
+    retain.resolve({ release: async () => { releases++; await release.promise; } });
+    await tick();
+    expect(releases, action).toBe(1);
+    expect(f.frames, action).toEqual([]);
+    expect(f.released, action).toEqual([]);
+    release.resolve(); await tick();
+    expect(f.frames, action).toEqual(action === 'channel' ? [] : [expect.objectContaining({ ok: false })]);
+    f.bridge.unregister('run');
+    expect(f.released, action).toEqual(['original-mcp']);
+    await f.bridge.releaseChild('run', 'child-operation');
+    expect(releases, action).toBe(1);
+  }
+});
+
+it('keeps original accepted child release duties through reset and rejects failed release without taking down the channel', async () => {
+  const f = childFixture();
+  let fail = true, releases = 0;
+  const releaseFailure = new Error('original target unavailable');
+  f.lease.retainChild = async () => ({ release: async () => {
+    releases++; if (fail) throw releaseFailure;
+  } });
+  f.bridge.register('run', f.lease); f.bridge.consume(f.frame()); await tick();
+  expect(f.frames).toEqual([expect.objectContaining({ ok: true })]);
+  f.bridge.unregister('run'); f.setEpoch('replacement'); f.bridge.reset();
+  f.bridge.reconcileChildren([{ operation_id: 'child-operation', report: null }]);
+  expect(releases).toBe(0); expect(f.released).toEqual([]);
+  await expect(f.bridge.releaseChild('run', 'child-operation')).rejects.toThrow('host_tool_child_release_failed');
+  expect(f.childReleaseErrors).toHaveLength(1);
+  expect((f.childReleaseErrors[0] as AggregateError).errors).toEqual([releaseFailure]);
+  expect(f.released).toEqual([]);
+  fail = false;
+  await f.bridge.releaseChild('run', 'child-operation');
+  expect(releases).toBe(2); expect(f.released).toEqual(['original-mcp']);
+  await f.bridge.releaseChild('run', 'child-operation');
+  expect(releases).toBe(2);
+});
+
+it('a rejected hook unpins every selected candidate and never acknowledges original retention', async () => {
+  const f = childFixture();
+  const retain = deferred<{ release(): Promise<void> }>();
+  f.lease.retainChild = async () => retain.promise;
+  const extension: HostToolLease = {
+    ...f.lease, implementationIdentity: 'original-extension', slot: 'extension:helper',
+    extensionBinding: { providerKey: 'extension:helper', extensionId: 'helper', extensionVersion: '1',
+      serviceId: 'helper', serviceVersion: 1, artifactIntegrity: 'artifact',
+      composition: leafHostComposition({ extensionId: 'helper', extensionVersion: '1', artifactIntegrity: 'artifact' }),
+      declarationHash: schema.version, configurationIdentity: null, tool: schema },
+    release: () => { f.released.push('original-extension'); },
+  };
+  delete extension.retainChild;
+  f.bridge.register('run', f.lease); f.bridge.register('run', extension);
+  f.bridge.consume({ ...f.frame(), extensionBindings: [extension.extensionBinding] }); await tick();
+  f.bridge.register('run', { ...extension, implementationIdentity: 'new-extension', release: () => {} });
+  const replacement = { ...f.lease, implementationIdentity: 'replacement' };
+  delete replacement.retainChild;
+  f.bridge.register('run', replacement);
+  expect(f.released).toEqual([]);
+  retain.reject(new Error('original retention unavailable')); await tick();
+  expect(f.frames).toEqual([expect.objectContaining({ ok: false })]);
+  expect(f.released).toEqual(['original-mcp', 'original-extension']);
+  expect(f.childReleaseErrors).toEqual([]);
+  f.bridge.close();
+});
+
+
+it('retains a failed late cleanup handle and returns a failure ACK until its original release succeeds', async () => {
+  const f = childFixture();
+  const retain = deferred<{ release(): Promise<void> }>();
+  let fail = true, releases = 0;
+  f.lease.retainChild = async () => retain.promise;
+  f.bridge.register('run', f.lease); f.bridge.consume(f.frame()); await tick();
+  f.bridge.unregister('run');
+  retain.resolve({ release: async () => { releases++; if (fail) throw new Error('original cleanup unavailable'); } });
+  await tick();
+  expect(f.frames).toEqual([expect.objectContaining({ ok: false, error: { code: 'host_tool_child_release_failed' } })]);
+  expect(f.childReleaseErrors.length).toBeGreaterThan(0);
+  expect(f.released).toEqual([]);
+  fail = false;
+  await f.bridge.releaseChild('run', 'child-operation');
+  expect(releases).toBe(2); expect(f.released).toEqual(['original-mcp']);
+});
+
+it('cannot replace a child dependency with another valid owner after its original release failed', async () => {
+  const f = childFixture();
+  let fail = true, replacements = 0;
+  f.lease.retainChild = async () => ({ release: async () => { if (fail) throw new Error('offline'); } });
+  f.bridge.register('run', f.lease); f.bridge.consume(f.frame()); await tick();
+  await expect(f.bridge.releaseChild('run', 'child-operation')).rejects.toThrow('host_tool_child_release_failed');
+  const replacement = structuredClone(f.binding); replacement.reference = 'replacement';
+  f.bridge.register('run', { ...f.lease, binding: replacement, implementationIdentity: 'replacement',
+    retainChild: async () => { replacements++; return { release: async () => {} }; } });
+  f.bridge.consume({ ...f.frame('child-operation', 'replacement-attempt'), mcpBinding: replacement });
+  await tick();
+  expect(f.frames.at(-1)).toMatchObject({ id: 'replacement-attempt', ok: false });
+  expect(replacements).toBe(0); expect(f.released).toEqual([]);
+  fail = false; await f.bridge.releaseChild('run', 'child-operation');
+  expect(f.released).toEqual(['original-mcp']); f.bridge.close();
 });

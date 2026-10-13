@@ -3240,3 +3240,111 @@ fn original_mcp_delivery_receipts_fence_send_ack_release_and_survive_source_reti
     drop(reopened);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn original_mcp_child_definition_references_fence_release_and_retain_storage_bodies() {
+    let root = std::env::temp_dir().join(format!("varin-mcp-child-{}", uuid::Uuid::new_v4()));
+    let work = root.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let owner = Owner::new(root.join("storage"), "child-host", "child-generation", "child-epoch");
+    let (ordinary, source) = owner.bind_live(&work, "ordinary-child-grant", 1);
+    let grant = "mcp-child-grant";
+    owner.rpc("authority.grant.issue", json!({"grantId":grant,"hostGeneration":owner.generation,
+        "storageIdentity":owner.root,"sessionId":null,"owningWorkspace":"workspace","executionWorkspace":"workspace",
+        "threadId":"thread","runId":"run","capabilities":["storage.read","storage.write","process"],"pathScopes":[""]}), None).unwrap();
+    let physical = owner.rpc("file.root.register", json!({"workspaceId":"workspace",
+        "executionWorkspaceId":"workspace","canonicalRoot":work}), Some(grant)).unwrap();
+    let opened = owner.rpc("source.authority.open", json!({"principalId":"client","coordinatorHostId":"coordinator",
+        "scope":{"kind":"run","threadId":"thread","runId":"run","epoch":1},
+        "source":source,"grantId":grant,"enabledTools":[],"purpose":"mcp_owner"}), None).unwrap();
+    assert_eq!(opened["mcpChildren"], json!([]));
+    let address = json!({"principalId":"client","coordinatorHostId":"coordinator",
+        "authorityId":opened["authorityId"],"resourceEpoch":opened["resourceEpoch"]});
+    let mut bind = address.clone();
+    bind["physicalRoot"] = source["live_root"].clone();
+    bind["toolBinding"] = json!({"resourceOwner":source["resource_owner"],"grantId":grant,
+        "runId":"run","threadId":"thread","workspaceId":"workspace","executionWorkspaceId":"workspace",
+        "rootId":physical["rootId"],"sourceMode":"live_root","liveRoot":source["live_root"],"enabledTools":[]});
+    owner.rpc("source.authority.bind", bind, None).unwrap();
+    let selection = json!({"reference":"original-selection","generation":1,"tools":[],"routes":{},
+        "resources":{"server:deferred":"original-resource"},"provenance":{"servers":{"deferred":{
+            "definition_version":"frozen-definition","resource_key":"original-resource","owner":{
+                "resource_owner":source["resource_owner"],"source_authority":{
+                    "coordinator_host_id":"coordinator","authority_id":address["authorityId"],"resource_epoch":address["resourceEpoch"]},
+                "configuration":{"agent_dir":"/agent","config_cwd":"/project","project_trusted":true},"execution_scope":"workspace"}}}}});
+    let params = |id: &str, action: &str| {
+        let mut params = address.clone();
+        params["binding"] = json!({"operationId":id,"parentRunId":"run","executionOwner":{"kind":"kernel"},"executionEpoch":3});
+        params["action"] = json!(action);
+        if action == "retain" { params["selection"] = selection.clone(); }
+        params
+    };
+    let gc = |owner: &Owner, id: &str| {
+        owner.rpc("authority.grant.issue", json!({"grantId":id,"hostGeneration":owner.generation,
+            "storageIdentity":owner.root,"sessionId":null,"owningWorkspace":"workspace","executionWorkspace":"workspace",
+            "threadId":"thread","runId":"run","operationId":id,
+            "capabilities":["storage.maintenance","storage.gc"],"pathScopes":[""]}), None).unwrap();
+        owner.rpc("storage.gc", json!({"operationId":id}), Some(id)).unwrap();
+    };
+    let mut wrong = params("dispatch", "retain"); wrong["authorityId"] = ordinary["authorityId"].clone();
+    assert!(owner.rpc("source.mcp.child", wrong, None).is_err());
+    for field in ["principalId", "coordinatorHostId", "resourceEpoch"] {
+        let mut wrong = params("dispatch", "retain"); wrong[field] = json!("other");
+        assert!(owner.rpc("source.mcp.child", wrong, None).is_err());
+    }
+    let mut wrong = params("dispatch", "retain"); wrong["selection"]["provenance"]["servers"]["deferred"]["owner"]["source_authority"]["authority_id"] = json!("other");
+    assert!(owner.rpc("source.mcp.child", wrong, None).is_err());
+    let retained = owner.rpc("source.mcp.child", params("dispatch", "retain"), None).unwrap();
+    assert_eq!(retained["reference"]["released"], false);
+    assert!(retained["selection"].is_null(), "control metadata never embeds the full selection");
+    assert_eq!(retained["created"], true);
+    let mut recalled = retained.clone(); recalled["created"] = json!(false);
+    assert_eq!(owner.rpc("source.mcp.child", params("dispatch", "retain"), None).unwrap(), recalled);
+    let body = crate::protocol::object_path(&owner.root, retained["reference"]["selectionRef"]["objectHash"].as_str().unwrap()).unwrap();
+    assert!(body.exists());
+    assert_eq!(owner.rpc("source.mcp.child", params("dispatch", "read"), None).unwrap()["selection"], selection);
+    for field in ["parentRunId", "executionEpoch", "executionOwner"] {
+        let mut wrong = params("dispatch", "release");
+        wrong["binding"][field] = match field { "executionEpoch"=>json!(4), "executionOwner"=>json!({"kind":"external","identity":"other","epoch":"other"}), _=>json!("other") };
+        assert!(owner.rpc("source.mcp.child", wrong, None).is_err());
+    }
+    let mut changed = params("dispatch", "retain"); changed["selection"]["generation"] = json!(2);
+    assert!(owner.rpc("source.mcp.child", changed, None).is_err());
+    // The exact cancel fence wins while hashing/fsync run outside Storage.
+    let staging = source_resources::prepare_request(&mut owner.storage.lock().unwrap(), "source.mcp.child",
+        params("overtaken", "retain"), owner.epoch, owner.host, owner.generation).unwrap();
+    let staged = staging.execute(owner.resources.clone(), CancellationToken::default()).unwrap();
+    let released = owner.rpc("source.mcp.child", params("overtaken", "release"), None).unwrap();
+    assert_eq!(released["reference"]["selectionRef"], Value::Null);
+    assert_eq!(staged.finish(&mut owner.storage.lock().unwrap()).unwrap(), released);
+    assert_eq!(owner.rpc("source.mcp.child", params("overtaken", "retain"), None).unwrap(), released);
+    // Sealing denies a staging worker that had not durably retained a reference.
+    let staging = source_resources::prepare_request(&mut owner.storage.lock().unwrap(), "source.mcp.child",
+        params("not-yet-retained", "retain"), owner.epoch, owner.host, owner.generation).unwrap();
+    let staged = staging.execute(owner.resources.clone(), CancellationToken::default()).unwrap();
+    assert_eq!(owner.rpc("source.authority.seal", address.clone(), None).unwrap()["phase"], "retaining");
+    assert!(staged.finish(&mut owner.storage.lock().unwrap()).is_err());
+    assert!(owner.rpc("source.mcp.child", params("new-after-seal", "retain"), None).is_err());
+    assert_eq!(owner.rpc("source.mcp.child", params("dispatch", "retain"), None).unwrap()["reference"], retained["reference"]);
+    let mut retire = address.clone(); retire["mode"] = json!("retire");
+    let retirement = owner.rpc("source.authority.release", retire, None).unwrap();
+    assert_eq!(retirement["phase"], "retaining"); assert_eq!(retirement["grantIds"], json!([]));
+    gc(&owner, "child-body-live-gc"); assert!(body.exists());
+    owner.rpc("authority.grant.revoke", json!({"grantId":grant}), None).unwrap();
+    assert!(owner.rpc("source.mcp.child", params("dispatch", "retain"), None).is_err());
+    drop(owner);
+    let reopened = Owner::new(root.join("storage"), "child-host", "new-generation", "new-epoch");
+    let recall = reopened.rpc("source.mcp.child", params("dispatch", "read"), None).unwrap();
+    assert_eq!(recall["selection"], selection); assert_eq!(recall["grantState"], "revoked");
+    gc(&reopened, "child-body-reopen-gc"); assert!(body.exists());
+    // A read already captured before release remains a real temporary object root.
+    let reading = source_resources::prepare_request(&mut reopened.storage.lock().unwrap(), "source.mcp.child",
+        params("dispatch", "read"), reopened.epoch, reopened.host, reopened.generation).unwrap();
+    assert_eq!(reopened.rpc("source.mcp.child", params("dispatch", "release"), None).unwrap()["phase"], "draining");
+    gc(&reopened, "child-body-reading-gc"); assert!(body.exists());
+    let read = reading.execute(reopened.resources.clone(), CancellationToken::default()).unwrap().finish(&mut reopened.storage.lock().unwrap()).unwrap();
+    assert_eq!(read["selection"], selection);
+    gc(&reopened, "child-body-released-gc"); assert!(!body.exists());
+    assert_eq!(reopened.rpc("source.mcp.child", params("dispatch", "read"), None).unwrap()["selection"], Value::Null);
+    drop(reopened); std::fs::remove_dir_all(root).unwrap();
+}

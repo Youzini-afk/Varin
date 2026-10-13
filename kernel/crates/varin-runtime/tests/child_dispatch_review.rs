@@ -175,6 +175,9 @@ fn preparation_failure_before_dispatch_exchange_commit_preserves_the_real_receip
     );
     let original_completion = f.db.operation(&child.operation_id).unwrap().call_completion;
     f.db.settle_child_receipts().unwrap();
+    assert!(f.db.capture_unaccepted_child_dependencies().unwrap().load().unwrap().is_empty(),
+        "accepted ChildTask retains cleanup ownership even after its dispatch terminates");
+    assert!(f.db.mark_unaccepted_child_dependencies_released(&child.operation_id).is_err());
     assert_eq!(
         f.db.operation(&child.operation_id).unwrap().outcome,
         Some(Outcome::Failed)
@@ -597,38 +600,336 @@ fn report_delivery_respects_fork_ancestry_instead_of_global_or_current_branch_on
 }
 
 #[test]
-fn a_crash_before_child_admission_discovers_only_the_stopped_origins_exact_source_cleanup() {
+fn a_crash_before_child_admission_discovers_only_the_stopped_origins_exact_dependency_cleanup() {
     let mut f = Fixture::new();
     assert!(
-        f.db.unaccepted_child_sources().unwrap().is_empty(),
+        f.db.capture_unaccepted_child_dependencies()
+            .unwrap()
+            .load()
+            .unwrap()
+            .is_empty(),
         "cleanup must not race the live source admission window"
     );
+    let original = f.db.operation(&f.context.operation_id).unwrap();
+    assert!(f
+        .db
+        .mark_unaccepted_child_dependencies_released(&f.context.operation_id)
+        .is_err());
     let root = f.root.clone();
     drop(f.db);
     f.db = Catalog::open(&root).unwrap();
-    let pending = f.db.unaccepted_child_sources().unwrap();
+    let pending =
+        f.db.capture_unaccepted_child_dependencies()
+            .unwrap()
+            .load()
+            .unwrap();
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].operation_id, f.context.operation_id);
     assert_eq!(pending[0].parent_thread_id, "thread:parent");
+    assert_eq!(pending[0].parent_run_id, original.run_id);
     assert_eq!(
-        pending[0].pin_id,
+        pending[0].execution_owner,
+        original.execution_owner.unwrap()
+    );
+    assert_eq!(pending[0].execution_epoch, original.epoch);
+    assert_ne!(pending[0].execution_epoch, f.db.epoch());
+    assert!(pending[0].mcp_binding.is_none());
+    assert_eq!(
+        pending[0].source_pin.as_ref().unwrap().pin_id,
         format!("child-pin:{}", f.context.operation_id)
     );
-    assert_eq!(pending[0].source, f.pin.source);
+    assert_eq!(pending[0].source_pin.as_ref().unwrap().source, f.pin.source);
     assert!(f.db.child_tasks().unwrap().is_empty());
-    f.db.mark_unaccepted_child_source_released(&f.context.operation_id)
+    f.db.mark_unaccepted_child_dependencies_released(&f.context.operation_id)
         .unwrap();
-    f.db.mark_unaccepted_child_source_released(&f.context.operation_id)
+    f.db.mark_unaccepted_child_dependencies_released(&f.context.operation_id)
         .unwrap();
-    assert!(f.db.unaccepted_child_sources().unwrap().is_empty());
+    assert!(f
+        .db
+        .capture_unaccepted_child_dependencies()
+        .unwrap()
+        .load()
+        .unwrap()
+        .is_empty());
     assert_eq!(
         f.db.events_after(0, 1000)
             .unwrap()
             .iter()
-            .filter(|event| event.kind == "child.source_released")
+            .filter(|event| event.kind == "child.dependencies_released")
             .count(),
         1
     );
+    drop(f);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+fn cleanup_mcp_binding() -> varin_runtime::catalog::launches::HostToolBinding {
+    use varin_runtime::catalog::launches::*;
+    let tool = |name: &str| ToolSchema {
+        requirements: None,
+        name: name.into(),
+        version: "original-schema".into(),
+        description: format!("Original {name}"),
+        schema: json!({"type":"object"}),
+        output_schema: None,
+        metadata: None,
+    };
+    let server = |name: &str| McpServerSelection {
+        owner: McpServerOwner {
+            source_authority: Some(McpSourceAuthority {
+                coordinator_host_id: "coordinator-A".into(),
+                authority_id: format!("original-authority-{name}"),
+                resource_epoch: format!("original-resource-epoch-{name}"),
+            }),
+            resource_owner: SourceResourceOwner::ManagedHost {
+                host_id: format!("host-{name}"),
+                connection_id: format!("connection-{name}"),
+                endpoint_identity: format!("endpoint-{name}"),
+            },
+            configuration: McpConfiguration {
+                agent_dir: "/original/agent".into(),
+                config_cwd: "/original/source".into(),
+                project_trusted: true,
+            },
+            execution_scope: McpExecutionScope::Workspace,
+        },
+        definition_version: format!("original-definition-{name}"),
+        resource_key: format!("original-resource-{name}"),
+    };
+    HostToolBinding {
+        reference: "original-mcp-binding".into(),
+        generation: 3,
+        tools: vec![tool("first"), tool("second")],
+        resources: [
+            ("first".into(), "original-resource-B".into()),
+            ("second".into(), "original-resource-C".into()),
+            ("server:B".into(), "original-resource-B".into()),
+            ("server:C".into(), "original-resource-C".into()),
+        ]
+        .into(),
+        routes: [
+            ("first".into(), McpRoute::Direct),
+            ("second".into(), McpRoute::Direct),
+        ]
+        .into(),
+        provenance: McpProvenance {
+            servers: [("B".into(), server("B")), ("C".into(), server("C"))].into(),
+        },
+    }
+}
+
+#[test]
+fn unaccepted_dependency_cleanup_preserves_the_original_mcp_cut_across_source_modes_and_reopen() {
+    use varin_runtime::catalog::launches::*;
+    for mode in [
+        SourceMode::FixedBranch,
+        SourceMode::LiveRoot,
+        SourceMode::Materialized,
+    ] {
+        for policy in [false, true] {
+            let binding = cleanup_mcp_binding();
+            let expected = binding.delegate(&["first".into()]).unwrap();
+            let mut f = Fixture::new_parent_custom(
+                7,
+                ToolSchema {
+                    requirements: None,
+                    name: "file_read".into(),
+                    version: "1".into(),
+                    description: String::new(),
+                    schema: json!({"type":"object"}),
+                    output_schema: None,
+                    metadata: None,
+                },
+                ToolSchema {
+                    requirements: None,
+                    name: "dispatch".into(),
+                    version: "1".into(),
+                    description: String::new(),
+                    schema: json!({"type":"object"}),
+                    output_schema: None,
+                    metadata: None,
+                },
+                policy,
+                false,
+                false,
+                move |input, launch| {
+                    input.tools = Some(vec!["first".into()]);
+                    launch.tools.extend(binding.tools.iter().cloned());
+                    launch.mcp_binding = Some(binding);
+                    let source = launch.source.as_mut().unwrap();
+                    source.mode = mode;
+                    if mode == SourceMode::LiveRoot {
+                        source.branch_id = None;
+                        source.revision = None;
+                        source.live_root = Some(LiveRoot {
+                            host_id: "source-host".into(),
+                            canonical_root: "/original/source".into(),
+                            root_id: "live-root".into(),
+                        });
+                    }
+                },
+            );
+            if policy {
+                f.context = f.admit_policy_call(ToolCall {
+                    call_id: "dispatch-call".into(),
+                    name: "dispatch".into(),
+                    schema_version: "1".into(),
+                    arguments: serde_json::to_value(&f.input).unwrap(),
+                });
+            }
+            assert!(f
+                .db
+                .capture_unaccepted_child_dependencies()
+                .unwrap()
+                .load()
+                .unwrap()
+                .is_empty());
+            let original = f.db.operation(&f.context.operation_id).unwrap();
+            if !policy {
+                settle_native_child_writer(
+                    &mut f.db,
+                    &f.context,
+                    ToolCompletion::Result {
+                        outcome: Outcome::Failed,
+                        effect: Effect::None,
+                        content: json!({"error":"child_admission_ack_lost"}).into(),
+                    },
+                    true,
+                );
+                let launch =
+                    f.db.launch_intent(&f.context.run_id)
+                        .unwrap()
+                        .unwrap()
+                        .selection;
+                f.db.bind_launch(&f.context.run_id, launch).unwrap();
+                let update =
+                    f.db.capture_tool_update(&f.context.run_id, f.db.epoch())
+                        .unwrap()
+                        .load_base()
+                        .unwrap();
+                let tools = update.base().to_vec();
+                let update = update.load(tools, None, vec![]).unwrap();
+                assert!(f.db.activate_tool_update(&update).unwrap());
+                assert!(f
+                    .db
+                    .launch_metadata(&f.context.run_id)
+                    .unwrap()
+                    .unwrap()
+                    .selection
+                    .mcp_binding_ref
+                    .is_none());
+            }
+            // Changing a caller-side input or the current composition cannot alter the original cut.
+            f.input.tools = Some(vec!["second".into()]);
+            content_collection::collect(|| f.db.prepare_content_collection(Default::default()))
+                .unwrap();
+            let root = f.root.clone();
+            drop(f.db);
+            f.db = Catalog::open(&root).unwrap();
+            let pending =
+                f.db.capture_unaccepted_child_dependencies()
+                    .unwrap()
+                    .load()
+                    .unwrap();
+            assert_eq!(pending.len(), 1, "mode={mode:?}, policy={policy}");
+            let dependency = &pending[0];
+            assert_eq!(dependency.operation_id, original.id);
+            assert_eq!(dependency.parent_run_id, original.run_id);
+            assert_eq!(dependency.parent_thread_id, "thread:parent");
+            assert_eq!(
+                dependency.execution_owner,
+                original.execution_owner.unwrap()
+            );
+            assert_eq!(dependency.execution_epoch, original.epoch);
+            assert_ne!(dependency.execution_epoch, f.db.epoch());
+            assert_eq!(
+                dependency.source_pin.is_some(),
+                mode == SourceMode::FixedBranch
+            );
+            assert_eq!(dependency.mcp_binding.as_ref(), Some(&expected));
+            assert!(f.db.child_tasks().unwrap().is_empty());
+            // The short release acknowledgement must not reload the full immutable input body.
+            let intent = varin_runtime::catalog::tool_content::ToolIntent::from_operation(
+                &f.db.operation(&f.context.operation_id).unwrap(),
+            )
+            .unwrap();
+            let hash = intent.call().arguments_ref["content_object"]
+                .as_str()
+                .unwrap()
+                .strip_prefix("sha256-")
+                .unwrap();
+            std::fs::write(
+                root.join("content/objects")
+                    .join(&hash[..2])
+                    .join(&hash[2..]),
+                b"unreadable input body",
+            )
+            .unwrap();
+            f.db.mark_unaccepted_child_dependencies_released(&f.context.operation_id)
+                .unwrap();
+            f.db.mark_unaccepted_child_dependencies_released(&f.context.operation_id)
+                .unwrap();
+            assert!(f
+                .db
+                .capture_unaccepted_child_dependencies()
+                .unwrap()
+                .load()
+                .unwrap()
+                .is_empty());
+            drop(f);
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+}
+
+#[test]
+fn source_free_dispatch_without_selected_managed_dependencies_has_no_cleanup_duty() {
+    use varin_runtime::catalog::launches::{McpExecutionScope, SourceResourceOwner};
+    let mut binding = cleanup_mcp_binding();
+    let global = &mut binding.provenance.servers.get_mut("B").unwrap().owner;
+    global.resource_owner = SourceResourceOwner::Local;
+    global.source_authority = None;
+    global.execution_scope = McpExecutionScope::Global;
+    let mut f = Fixture::new_parent_custom(
+        7,
+        ToolSchema {
+            requirements: None,
+            name: "file_read".into(),
+            version: "1".into(),
+            description: String::new(),
+            schema: json!({"type":"object"}),
+            output_schema: None,
+            metadata: None,
+        },
+        ToolSchema {
+            requirements: None,
+            name: "dispatch".into(),
+            version: "1".into(),
+            description: String::new(),
+            schema: json!({"type":"object"}),
+            output_schema: None,
+            metadata: None,
+        },
+        false,
+        false,
+        false,
+        move |input, launch| {
+            input.tools = Some(vec!["first".into()]);
+            launch.source = None;
+            launch.tools.extend(binding.tools.iter().cloned());
+            launch.mcp_binding = Some(binding);
+        },
+    );
+    let root = f.root.clone();
+    drop(f.db);
+    f.db = Catalog::open(&root).unwrap();
+    assert!(f
+        .db
+        .capture_unaccepted_child_dependencies()
+        .unwrap()
+        .load()
+        .unwrap()
+        .is_empty());
     drop(f);
     std::fs::remove_dir_all(root).unwrap();
 }

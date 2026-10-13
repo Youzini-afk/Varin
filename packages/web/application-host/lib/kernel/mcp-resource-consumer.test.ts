@@ -226,7 +226,7 @@ async function sourceReleaseFixture() {
         trace.push('listener-release-stored');
         return structuredClone(pending);
       }
-      case 'runtime.observations.reconcile': case 'runtime.child.sources.pending': case 'runtime.child.list': case 'runtime.events.read': return [];
+      case 'runtime.observations.reconcile': case 'runtime.child.dependencies.pending': case 'runtime.child.list': case 'runtime.events.read': return [];
       case 'runtime.child.execution.list': return [structuredClone(child)];
       case 'runtime.child.execution.inspect': return structuredClone(child);
       case 'runtime.child.release':

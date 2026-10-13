@@ -5,7 +5,7 @@ import type { McpAuthorityLease } from '@varin/pi-host/mcp-authority';
 import type { AgentRuntimeClient, McpPreparation } from './agent-runtime-client.js';
 import type { ManagedSourceAccess } from './managed-source-consumers.js';
 import type { McpBinding, SourceResourceOwner } from './protocol.generated.js';
-import type { createManagedMcpLease } from './managed-mcp-lease.js';
+import type { createManagedMcpLease, ManagedMcpLease } from './managed-mcp-lease.js';
 import type { ManagedMcpSnapshot, ManagedMcpRevocations } from '../harness/managed-mcp-contract.js';
 import { isManagedMcpRevocations } from '../harness/managed-mcp-contract.js';
 
@@ -26,7 +26,7 @@ interface Scope {
   revocations: Map<string, ManagedMcpRevocations>;
   listeners: Map<string, (facts: ManagedMcpRevocations) => void>;
   access?: ManagedSourceAccess;
-  initial?: { lease: McpAuthorityLease; snapshot: ManagedMcpSnapshot };
+  initial?: { lease: ManagedMcpLease; snapshot: ManagedMcpSnapshot };
   failure?: unknown;
   incarnation?: string;
   revision?: number;
@@ -75,7 +75,7 @@ export function createManagedMcpPreparer(options: {
         release(runId); options.changed(runId);
       }
     },
-    async prepare(input: McpPreparation, signal?: AbortSignal): Promise<McpAuthorityLease | undefined> {
+    async prepare(input: McpPreparation, signal?: AbortSignal): Promise<ManagedMcpLease | undefined> {
       const source = input.source;
       if (!source || source.resourceOwner.kind !== 'managed_host' || source.mode === 'fixed_branch') return undefined;
       // Child re-derivation needs the original mixed-owner handoff, not a new latest candidate.

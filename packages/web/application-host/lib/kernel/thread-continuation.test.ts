@@ -134,7 +134,7 @@ it('slow startup launch cannot block the existing child/process pump or a later 
   const reconcileObservations = vi.fn(async () => [] as string[]);
   const runtime = Object.assign(f.runtime, {
     onEvent: (handler: typeof listener) => { listener = handler; return () => {}; }, onExit: () => () => {}, onReady: () => () => {},
-    reconcileObservations, children: async () => [], unacceptedChildSources: async () => [],
+    reconcileObservations, children: async () => [], unacceptedChildDependencies: async () => [],
     status: async () => ({ eventCursor: 0 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
   });
   const continues = vi.fn(async (runId: string, signal: AbortSignal) => { if (runId === f.run.id) await f.adapter.continueLaunch(runId, { signal }); });
@@ -161,7 +161,7 @@ it.each(['ingress.run_ready', 'goal.run_ready', 'observation.run_ready'] as cons
   let listener!: (event: AgentRuntimeStreamEvent) => void;
   const runtime = Object.assign(f.runtime, {
     onEvent: (handler: typeof listener) => { listener = handler; return () => {}; }, onExit: () => () => {}, onReady: () => () => {},
-    reconcileObservations: async () => [], children: async () => [], unacceptedChildSources: async () => [],
+    reconcileObservations: async () => [], children: async () => [], unacceptedChildDependencies: async () => [],
     status: async () => ({ eventCursor: 0 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
   });
   const continues = vi.fn((runId: string, signal: AbortSignal) => f.adapter.continueLaunch(runId, { signal }));
@@ -204,7 +204,7 @@ it.each(['ingress.run_ready', 'goal.run_ready', 'observation.run_ready'] as cons
   const runtime = Object.assign(f.runtime, {
     onEvent: (handler: typeof listener) => { listener = handler; return () => {}; },
     onExit: (handler: () => void) => { exit = handler; return () => {}; }, onReady: (handler: () => void) => { ready = handler; return () => {}; },
-    reconcileObservations: async () => [], children: async () => [], unacceptedChildSources: async () => [],
+    reconcileObservations: async () => [], children: async () => [], unacceptedChildDependencies: async () => [],
     status: async () => ({ eventCursor: events.at(-1)?.cursor ?? 0 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
   });
   const collaboration = new ThreadCollaboration({ kernel: { reconcileChildToolHandoffs() {}, releaseChildToolHandoff() {} } as never, storageAdapter: {} as never,
@@ -391,7 +391,7 @@ it.each(['child_revision', 'process_receipt'] as const)('%s observed during an a
   const events: RuntimeEvent[] = [];
   const runtime = Object.assign(f.runtime, {
     onEvent: (handler: typeof listener) => { listener = handler; return () => {}; }, onExit: () => () => {}, onReady: () => () => {},
-    reconcileObservations: async () => [], children, childExecutions: async () => [structuredClone(child)], unacceptedChildSources: async () => [],
+    reconcileObservations: async () => [], children, childExecutions: async () => [structuredClone(child)], unacceptedChildDependencies: async () => [],
     childExecution: async () => structuredClone(child), retireSourceGrants: vi.fn(async () => {}), releaseMcpResourceSource: vi.fn(async () => {}),
     releaseChildResources: vi.fn(async () => { child.resources_released = true; return structuredClone(child); }),
     status: async () => ({ eventCursor: 0 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
@@ -427,7 +427,7 @@ it('domain receipt discovery keeps the new epoch wake while an aborted old disco
   const gate = new Promise<void>(resolve => { release = resolve; });
   const runtime = Object.assign(f.runtime, {
     onEvent: () => () => {}, onExit: (handler: () => void) => { exit = handler; return () => {}; }, onReady: (handler: () => void) => { ready = handler; return () => {}; },
-    reconcileObservations: async () => [], children: async () => [], unacceptedChildSources: async () => [],
+    reconcileObservations: async () => [], children: async () => [], unacceptedChildDependencies: async () => [],
     status: async () => ({ eventCursor: 0 }), events: async () => [],
   });
   const reconcileDomainReceipts = vi.fn(async (_signal: AbortSignal) => {}).mockImplementationOnce(async () => { await gate; });
@@ -473,7 +473,7 @@ it('an unrelated observation error remains visible without blocking original sav
   const events: RuntimeEvent[] = [];
   const runtime = Object.assign(f.runtime, {
     onEvent: (handler: typeof listener) => { listener = handler; return () => {}; }, onExit: () => () => {}, onReady: () => () => {},
-    reconcileObservations, children: async () => [], unacceptedChildSources: async () => [],
+    reconcileObservations, children: async () => [], unacceptedChildDependencies: async () => [],
     status: async () => ({ eventCursor: 0 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
   });
   const continueRun = vi.fn(async (runId: string, signal: AbortSignal) => f.adapter.continueLaunch(runId, { signal }));

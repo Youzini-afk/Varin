@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createMcpToolName } from '@earendil-works/pi-coding-agent';
 import { isDeepStrictEqual } from 'node:util';
 import type { McpProvenance, McpRoute } from '@varin/protocol';
-import { McpAuthorityError, type McpAuthority, type McpAuthorityLease, type McpAuthorityOwnedLease, type McpAuthorityScope, type McpAuthorityTool, type McpChange } from './mcp-authority.js';
+import { McpAuthorityError, type McpAuthority, type McpAuthorityLease, type McpAuthorityOwnedLease, type McpAuthorityScope, type McpAuthorityTool, type McpChange, type McpDefinitionLease } from './mcp-authority.js';
 
 interface Generation {
   identity: string;
@@ -49,9 +49,18 @@ function revoke(generation: Generation, tools?: readonly string[]): void {
     token.abort();
   }
 }
+/** Exact original generations held by one local composition snapshot, never a remote lease. */
+export interface McpCompositionSnapshot extends McpAuthorityLease {
+  retainDefinitions(exactProvenance: McpProvenance): McpCompositionDefinitions;
+}
+export interface McpCompositionDefinitions {
+  readonly provenance: McpProvenance;
+  readonly contributions: readonly McpDefinitionLease[];
+  release(): void;
+}
 export interface McpCompositionScope {
-  snapshot(): McpAuthorityLease;
-  restore(selection: McpCompositionSelection, signal?: AbortSignal): Promise<McpAuthorityLease>;
+  snapshot(): McpCompositionSnapshot;
+  restore(selection: McpCompositionSelection, signal?: AbortSignal): Promise<McpCompositionSnapshot>;
   release(): void;
   /** Release this observation and await its last-owner preparation/SDK transport drainage.
    * Existing snapshot references retain their original lifetimes. No native tree receipt. */
@@ -208,7 +217,7 @@ class Scope {
     if (resources.size) throw new Error('mcp_saved_dependency_unavailable');
     return selected;
   }
-  async restore(selection: McpCompositionSelection, caller?: AbortSignal): Promise<McpAuthorityLease> {
+  async restore(selection: McpCompositionSelection, caller?: AbortSignal): Promise<McpCompositionSnapshot> {
     const signal = caller ? AbortSignal.any([caller, this.lifetime.signal]) : this.lifetime.signal;
     for (;;) {
       signal.throwIfAborted();
@@ -244,7 +253,7 @@ class Scope {
       });
     }
   }
-  snapshot(selection?: McpCompositionSelection): McpAuthorityLease {
+  snapshot(selection?: McpCompositionSelection): McpCompositionSnapshot {
     if (this.closed) throw new Error('mcp_composition_closed');
     if (selection) this.requiredServers(selection);
     const gateway = retain(this.gateway);
@@ -303,6 +312,31 @@ class Scope {
     };
     return {
       binding,
+      retainDefinitions: exact => {
+        if (released) throw new Error('mcp_lease_released');
+        const provenance = freeze(structuredClone(exact));
+        const cuts = new Map<Generation, McpProvenance>();
+        for (const [name, expected] of Object.entries(provenance.servers)) {
+          if (!isDeepStrictEqual(binding.provenance.servers[name], expected)) throw new Error('mcp_saved_definition_unavailable');
+          const owner = serverOwner(name);
+          let cut = cuts.get(owner);
+          if (!cut) { cut = { servers: {} }; cuts.set(owner, cut); }
+          cut.servers[name] = expected;
+        }
+        const retained: McpDefinitionLease[] = [];
+        try {
+          for (const [owner, cut] of cuts) retained.push(owner.lease.retainDefinitions(cut));
+        } catch (error) {
+          for (const contribution of retained) contribution.release();
+          throw error;
+        }
+        let definitionsReleased = false;
+        return Object.freeze({ provenance, contributions: Object.freeze(retained), release: () => {
+          if (definitionsReleased) return;
+          definitionsReleased = true;
+          for (const contribution of retained) contribution.release();
+        } });
+      },
       implementationIdentity:createHash('sha256').update(JSON.stringify([gateway.identity,
         contributions.map(owner=>owner.identity).sort(),tools.map(tool=>[tool.name,tool.schemaVersion])])).digest('hex'),
       inspect: () => { if (released) throw new Error('mcp_lease_released'); return inspect(); },

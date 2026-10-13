@@ -1,13 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
-import type { ChildSourceHandoff, DelegatedExecution, LaunchSource, UnacceptedChildSource } from './protocol.generated.js';
+import type { ChildSourceHandoff, DelegatedExecution, LaunchSource, UnacceptedChildSourcePin } from './protocol.generated.js';
 import { sourceToolSchemas, savedSourceLaunch } from './source-launch.js';
 import { KernelWorkingStateRootStore, type KernelStorageAdapter } from './storage-adapter.js';
 import { prepareChildSourceStore, prepareContinuationSourceStore, type ChildSourcePreparation } from './child-source-store.js';
 import type { StableSourcePreparationOwners } from '../harness/working-state/source-preparation.js';
 import type { ManagedSourceClient } from '../harness/managed-remote-client.js';
 import type { ManagedSourceAddress, ManagedSourceLocalScope, ManagedSourceServiceHandler } from '../harness/managed-remote-types.js';
+
+type ChildSourcePinCleanup = UnacceptedChildSourcePin & { operation_id:string;parent_run_id:string;parent_thread_id:string };
 
 function childPreparationSource(child: DelegatedExecution): LaunchSource {
   if (child.trigger.kind !== 'dispatch') {
@@ -19,7 +21,7 @@ function childPreparationSource(child: DelegatedExecution): LaunchSource {
   return source.handoff.source;
 }
 
-function validateUnacceptedHandoff(source: UnacceptedChildSource, handoff: ChildSourceHandoff): void {
+function validateUnacceptedHandoff(source: ChildSourcePinCleanup, handoff: ChildSourceHandoff): void {
   if (handoff.operation_id !== `child-source-handoff:${source.operation_id}` || !isDeepStrictEqual(handoff.source, source.source)
     || handoff.root.kind !== 'fixed' || handoff.root.pin.pin_id !== source.pin_id
     || source.pin_id !== `child-pin:${source.operation_id}`) {
@@ -60,7 +62,7 @@ export async function withManagedChildSource<T>(
 
 /** A failed dispatch may have persisted its pin before the coordinator accepted its
  * receipt. Read that exact target receipt before releasing the original pin. */
-export async function releaseManagedUnacceptedSource(runtime: AgentRuntimeClient, source: UnacceptedChildSource,
+export async function releaseManagedUnacceptedSource(runtime: AgentRuntimeClient, source: ChildSourcePinCleanup,
   signal: AbortSignal): Promise<void> {
   if (source.source.resource_owner.kind !== 'managed_host') throw new Error('Source has no managed owner');
   const service = await runtime.managedSource(source.source.resource_owner, signal);

@@ -12,6 +12,11 @@ pub(super) fn execute(
         return Err(KernelError::Cancelled);
     }
     let owner = runtime.catalog();
+    if method == "runtime.child.dependencies.pending" {
+        let read = owner.lock().map_err(|_| KernelError::Storage("Catalog unavailable".into()))?
+            .capture_unaccepted_child_dependencies().map_err(domain)?;
+        return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
+    }
     if method == "runtime.host_tool.reconcile" {
         let p: HostToolReconcileParams = serde_json::from_value(params)?;
         let confirmed = crate::integration_reconciliation::reconcile(

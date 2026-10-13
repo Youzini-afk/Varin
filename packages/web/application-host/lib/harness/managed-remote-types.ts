@@ -83,7 +83,7 @@ export interface ManagedSourceScopeRequest { coordinatorHostId: string; threadId
 export interface ManagedSourceScopeReleaseRequest extends ManagedSourceScopeRequest { mode: 'retire' | 'revoke' }
 export interface ManagedSourceReadScopeRequest { coordinatorHostId:string;scope:Extract<SourceAuthorityScope,{kind:'source_read'}>;source:LaunchSource }
 export interface ManagedFileObservationRequest extends ManagedSourceAddress { requestId:string;action:import('../kernel/protocol.generated.js').SourceFileObservationAction }
-export interface ManagedSourceInspection { scope: SourceAuthorityScope; phase: 'preparing' | 'ready' | 'retaining' | 'draining' | 'retired' | 'revoked'; purpose: 'source' | 'read' | 'integration' | 'result' | 'process_view' | 'script_environment' | 'mcp_owner'; operationId: string | null; mcpHolders: import('../kernel/protocol.generated.js').SourceMcpHolder[]; mcpDeliveries: import('../kernel/protocol.generated.js').SourceMcpDeliveryReceipt[]; binding: ManagedSourceBinding }
+export interface ManagedSourceInspection { scope: SourceAuthorityScope; phase: 'preparing' | 'ready' | 'retaining' | 'draining' | 'retired' | 'revoked'; purpose: 'source' | 'read' | 'integration' | 'result' | 'process_view' | 'script_environment' | 'mcp_owner'; operationId: string | null; mcpHolders: import('../kernel/protocol.generated.js').SourceMcpHolder[]; mcpDeliveries: import('../kernel/protocol.generated.js').SourceMcpDeliveryReceipt[]; mcpChildren: import('../kernel/protocol.generated.js').SourceMcpChildReference[]; binding: ManagedSourceBinding }
 
 /** Closed, non-model source services. A command cannot name an arbitrary kernel method,
  * mint a grant, change a source, or select a different physical root. */
@@ -120,7 +120,7 @@ export type SourceServiceOperation =
   | { kind: 'child_result_publish'; execution: DelegatedExecution }
   | { kind: 'child_result_read'; execution: DelegatedExecution }
   | { kind: 'child_release'; execution: DelegatedExecution }
-  | { kind: 'child_unaccepted_release'; source: import('../kernel/protocol.generated.js').UnacceptedChildSource }
+  | { kind: 'child_unaccepted_release'; source: import('../kernel/protocol.generated.js').UnacceptedChildSourcePin & {operation_id:string;parent_run_id:string;parent_thread_id:string} }
   | { kind: 'integration'; invocation: import('../kernel/tool-invocation.js').ToolInvocationAuthority; child: DelegatedExecution; journal: RecoveryAnchor };
 export interface ManagedSourceServiceCancelRequest extends ManagedSourceAddress { requestId: string }
 export interface ManagedSourceServiceCancelReceipt { requestId: string; resourceEpoch: string; status: 'drained' | 'not_started' | 'unknown' }

@@ -49,7 +49,7 @@ import type {
   AdmissionInspectParams,
   AdmissionInspection,
   ChildReportPage,
-  UnacceptedChildSource,
+  UnacceptedChildDependencies,
   ChildTask,
   ChildPrepareParams,
   ChildSourceReadyParams, ChildSettleParams, ChildResultCandidateParams, ChildResultPublishedParams, HostToolReconcileParams,
@@ -583,21 +583,21 @@ export class AgentRuntimeClient {
       signal,
     );
   }
-  unacceptedChildSources(
+  unacceptedChildDependencies(
     signal?: AbortSignal,
-  ): Promise<UnacceptedChildSource[]> {
+  ): Promise<UnacceptedChildDependencies[]> {
     return this.kernel.agentRuntimeRequest(
-      'runtime.child.sources.pending',
+      'runtime.child.dependencies.pending',
       {},
       signal,
     );
   }
-  releaseUnacceptedChildSource(
+  releaseUnacceptedChildDependencies(
     operationId: string,
     signal?: AbortSignal,
   ): Promise<Record<string, never>> {
     return this.kernel.agentRuntimeRequest(
-      'runtime.child.sources.release',
+      'runtime.child.dependencies.release',
       { operationId },
       signal,
     );

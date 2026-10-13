@@ -1,6 +1,6 @@
 /** Closed source-local MCP requests. No paths, credentials or arbitrary Host method names. */
 import type { McpAuthorityBinding, McpAuthorityService, McpServiceRequest, McpInteractionOrigin } from '@varin/pi-host/mcp-authority';
-import type { McpBinding, McpEndpoint, McpResourceBinding, McpInteractionBinding, SourceMcpDeliveryReceipt, SourceMcpHolderBinding, SourceMcpCreationOutcome } from '../kernel/protocol.generated.js';
+import type { McpBinding, McpEndpoint, McpResourceBinding, McpInteractionBinding, SourceMcpDeliveryReceipt, SourceMcpHolderBinding, SourceMcpCreationOutcome, SourceMcpChildBinding } from '../kernel/protocol.generated.js';
 
 /** The body projection crosses the content lane, never an authority control snapshot. */
 export interface ManagedMcpTaskCreationReceipt { requestHash: string; outcome: SourceMcpCreationOutcome | null }
@@ -12,6 +12,13 @@ export type ManagedMcpTaskAction =
   | { kind: 'task_release'; binding: SourceMcpHolderBinding };
 export function isManagedMcpTaskContinuation(action: ManagedMcpAction): action is Exclude<ManagedMcpTaskAction, { kind: 'task_prepare' | 'task_start' }> {
   return ['task_inspect', 'task_get', 'task_result', 'task_cancel', 'task_release'].includes(action.kind);
+}
+/** Original dispatch dependency retention; never an external MCP Task owner. */
+export type ManagedMcpChildAction =
+  | { kind: 'child_retain'; handleId: string; binding: SourceMcpChildBinding; selection: McpBinding }
+  | { kind: 'child_inspect' | 'child_release'; binding: SourceMcpChildBinding };
+export function isManagedMcpChildContinuation(action: ManagedMcpAction): action is Exclude<ManagedMcpChildAction, { kind: 'child_retain' }> {
+  return action.kind === 'child_inspect' || action.kind === 'child_release';
 }
 export type ManagedMcpResourceAction =
   | { kind: 'resource_subscribe'; handleId: string; binding: McpResourceBinding; service: McpAuthorityService }
@@ -52,7 +59,7 @@ export type ManagedMcpInteractionBody =
   | { kind: 'elicitation' | 'sampling'; deliveryId: string; binding: McpInteractionBinding; request: Record<string, unknown> }
   | { kind: 'error'; request: Record<string, unknown>; items: Array<{ deliveryId: string; binding: McpInteractionBinding;
       presentation: Extract<import('@varin/protocol').McpElicitationPresentation, { mode: 'url' }> }> };
-export type ManagedMcpAction = ManagedMcpTaskAction | ManagedMcpResourceAction | ManagedMcpInteractionAction
+export type ManagedMcpAction = ManagedMcpTaskAction | ManagedMcpResourceAction | ManagedMcpInteractionAction | ManagedMcpChildAction
   | { kind: 'snapshot'; handleId: string; creationRequestId: string; selection?: McpBinding }
   | { kind: 'changed'; incarnation: string; after: number }
   | { kind: 'release'; handleId: string; creationRequestId: string }

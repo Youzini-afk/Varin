@@ -1250,65 +1250,157 @@ impl Catalog {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UnacceptedChildSource {
-    pub parent_run_id:String,
-    pub operation_id: String,
-    pub parent_thread_id: String,
+/// A fixed source may have been pinned before its child admission was committed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct UnacceptedChildSourcePin {
     pub source: launches::SourceSelection,
     pub pin_id: String,
 }
+/// Cleanup of a stopped dispatch is bound to its original Operation and dependency cut.
+/// The target's selection receipt is deliberately unnecessary: its ACK may have been lost.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct UnacceptedChildDependencies {
+    pub parent_run_id: String,
+    pub parent_thread_id: String,
+    pub operation_id: String,
+    pub execution_owner: ExecutorOwner,
+    pub execution_epoch: u64,
+    pub source_pin: Option<UnacceptedChildSourcePin>,
+    pub mcp_binding: Option<launches::HostToolBinding>,
+}
+struct UnacceptedChildDependencyRead {
+    dependencies: UnacceptedChildDependencies,
+    call: tool_content::ToolCallMetadata,
+    dispatch: dispatch::ChildInvocationRead,
+}
+/// Short original identities are captured under Catalog; body reads and delegation resolution
+/// run on a worker after releasing its shared lock, just like child admission.
+pub struct UnacceptedChildDependenciesRead {
+    dispatches: Vec<UnacceptedChildDependencyRead>,
+    content: crate::content::ContentStore,
+    _publication: crate::content::ContentPublication,
+}
+impl UnacceptedChildDependenciesRead {
+    pub fn load(self) -> Result<Vec<UnacceptedChildDependencies>> {
+        let mut pending = Vec::new();
+        for read in self.dispatches {
+            let selected = read.dispatch.load()?;
+            let call = read.call.load(&self.content)?;
+            let input: DispatchInput = serde_json::from_value(call.arguments)?;
+            let resolved = selected.resolve(&input)?;
+            let mut dependencies = read.dependencies;
+            dependencies.source_pin = selected
+                .frozen
+                .source
+                .filter(|source| source.mode == SourceMode::FixedBranch)
+                .map(|source| UnacceptedChildSourcePin {
+                    source,
+                    pin_id: format!("child-pin:{}", dependencies.operation_id),
+                });
+            // Local MCP leases disappear with their process. Managed retains are durable on
+            // their exact original Source owners, even for live/materialized file selections.
+            dependencies.mcp_binding = resolved.mcp_binding.filter(|binding| {
+                binding.provenance.servers.values().any(|server| {
+                    matches!(
+                        server.owner.resource_owner,
+                        launches::SourceResourceOwner::ManagedHost { .. }
+                    )
+                })
+            });
+            if dependencies.source_pin.is_some() || dependencies.mcp_binding.is_some() {
+                pending.push(dependencies);
+            }
+        }
+        Ok(pending)
+    }
+}
+fn unaccepted_child_dependency_owner(db: &Connection, op: &Operation) -> Result<bool> {
+    if op.executor.as_deref() != Some(DISPATCH_TOOL)
+        || op.phase != OperationPhase::Terminal
+        || op.execution_owner.is_none()
+    {
+        return Ok(false);
+    }
+    let owned: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM child_tasks WHERE id=?1) OR EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='child.dependencies_released')",
+        [&op.id], |row| row.get(0),
+    )?;
+    Ok(!owned)
+}
 impl Catalog {
-    /// A process can stop after the source owner's durable pin receipt but before child admission.
-    /// The immutable admitted tool + parent launch determine its exact cleanup identity. Only
-    /// stopped/failed original dispatches qualify, so live admission is never raced by cleanup.
-    pub fn unaccepted_child_sources(&self) -> Result<Vec<UnacceptedChildSource>> {
-        let mut sources = Vec::new();
+    /// A target can retain dependencies durably before Catalog accepts the ChildTask. Only a
+    /// terminal original dispatch can request cleanup; neither a later launch nor a current epoch
+    /// may replace the invocation that created those dependencies.
+    pub fn capture_unaccepted_child_dependencies(&self) -> Result<UnacceptedChildDependenciesRead> {
+        let mut dispatches = Vec::new();
         for op in read_all::<Operation>(&self.db, "operations")? {
-            if op.executor.as_deref() != Some(DISPATCH_TOOL) || op.phase != OperationPhase::Terminal
-            {
+            if !unaccepted_child_dependency_owner(&self.db, &op)? {
                 continue;
             }
-            let owned:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM child_tasks WHERE id=?1) OR EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='child.source_released')",[&op.id],|r|r.get(0))?;
-            if owned {
-                continue;
+            let intent = tool_content::ToolIntent::from_operation(&op)?;
+            if intent.call().name != DISPATCH_TOOL {
+                return Err(RuntimeError::Conflict(
+                    "dispatch cleanup invocation changed".into(),
+                ));
             }
             let run = self.run(&op.run_id)?;
-            let Some(source) = self
-                .launch_metadata(&run.id)?
-                .and_then(|launch| launch.selection.source)
-            else {
-                continue;
+            let context = ToolExecutionContext {
+                run_id: run.id.clone(),
+                operation_id: op.id.clone(),
+                origin: intent.origin().clone(),
             };
-            if source.mode != SourceMode::FixedBranch {
-                continue;
-            }
-            sources.push(UnacceptedChildSource {
-                parent_run_id:run.id,
-                pin_id: format!("child-pin:{}", op.id),
-                operation_id: op.id,
-                parent_thread_id: run.thread_id,
-                source,
+            let dispatch = self.capture_child_dispatch_invocation(&context)?;
+            dispatches.push(UnacceptedChildDependencyRead {
+                dependencies: UnacceptedChildDependencies {
+                    parent_run_id: run.id,
+                    parent_thread_id: run.thread_id,
+                    operation_id: op.id,
+                    execution_owner: op.execution_owner.expect("captured execution owner"),
+                    execution_epoch: op.epoch,
+                    source_pin: None,
+                    mcp_binding: None,
+                },
+                call: intent.call().clone(),
+                dispatch,
             });
         }
-        Ok(sources)
+        Ok(UnacceptedChildDependenciesRead {
+            dispatches,
+            content: self.content.clone(),
+            _publication: self.content.begin_publication(),
+        })
     }
-    pub fn mark_unaccepted_child_source_released(&mut self, operation_id: &str) -> Result<()> {
-        if !self
-            .unaccepted_child_sources()?
-            .iter()
-            .any(|source| source.operation_id == operation_id)
+    /// The caller acknowledges only after all original file and managed MCP releases complete.
+    /// This short commit rechecks ownership without decoding immutable input/binding bodies.
+    pub fn mark_unaccepted_child_dependencies_released(
+        &mut self,
+        operation_id: &str,
+    ) -> Result<()> {
+        let tx = self.db.transaction()?;
+        let done: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='child.dependencies_released')",
+            [operation_id], |row| row.get(0),
+        )?;
+        if done {
+            return Ok(());
+        }
+        let op: Operation = record(&tx, "operations", operation_id)?;
+        if !unaccepted_child_dependency_owner(&tx, &op)?
+            || tool_content::ToolIntent::from_operation(&op)?.call().name != DISPATCH_TOOL
         {
-            let done:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='child.source_released')",[operation_id],|r|r.get(0))?;
-            if done {
-                return Ok(());
-            }
             return Err(RuntimeError::Conflict(
-                "source cleanup no longer owns this dispatch".into(),
+                "dependency cleanup no longer owns this dispatch".into(),
             ));
         }
-        let tx = self.db.transaction()?;
-        event(&tx, operation_id, 1, "child.source_released", Value::Null)?;
+        event(
+            &tx,
+            operation_id,
+            1,
+            "child.dependencies_released",
+            Value::Null,
+        )?;
         tx.commit()?;
         Ok(())
     }

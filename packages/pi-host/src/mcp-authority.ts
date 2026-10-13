@@ -129,6 +129,10 @@ export interface McpAuthorityAcquireOptions {
   /** Frozen owner and configuration dependencies, checked before opening any selected transport.
    * Execution location remains the new scope's own authority. */
   provenance?: McpProvenance;
+  /** Trusted Host-only derivation after validating the original Source's child proof. */
+  deriveFrom?: McpDefinitionLease;
+  /** Explicit continuation with a fresh Source proof: exact current definitions only. */
+  deriveExactCurrent?: McpProvenance;
   signal?: AbortSignal;
 }
 export interface McpAuthorityBinding {
@@ -166,8 +170,17 @@ export interface McpAuthorityLease {
   taskOwner(server: string, endpoint: McpEndpoint | undefined, signal: AbortSignal, origin?: McpInteractionOrigin): Promise<McpTaskLease>;
   release(): void;
 }
+declare const definitionLeaseBrand: unique symbol;
+/** In-memory authority token. Its public provenance contains no transport configuration. */
+export interface McpDefinitionLease {
+  readonly [definitionLeaseBrand]: true;
+  readonly provenance: McpProvenance;
+  release(): void;
+}
 /** Authority-owned scope drainage, distinct from a composed snapshot's reference release. */
 export interface McpAuthorityOwnedLease extends McpAuthorityLease {
+  /** Retain this exact selected definition cut, including unconnected deferred servers. */
+  retainDefinitions(exactProvenance: McpProvenance): McpDefinitionLease;
   /** Wait for this scope's preparations, retained holders and last-reference SDK closes.
    * SDK settlement is not a Storage native process-tree stop receipt. */
   releaseAndDrain(): Promise<void>;
@@ -196,6 +209,7 @@ interface ScopeRecord {
   configRevision: string;
   entries: Map<string, McpServerEntry>;
   definitions: Map<string, string>;
+  definitionSources: Map<string, RetainedDefinition>;
   connections: Map<string, ConnectionRecord>;
   released: boolean;
   inflight: number;
@@ -206,6 +220,22 @@ interface ScopeRecord {
   retainedHolders: number;
   closeRequested: boolean;
   shutdown: AbortController;
+}
+interface RetainedDefinition {
+  scope: McpAuthorityScope;
+  entry: McpServerEntry;
+  originalConnection: ConnectionRecord | undefined;
+  oauthUrl: string | undefined;
+  oauthGrant: string;
+  provider: string | undefined;
+  providerGrant: Promise<string | undefined>;
+  references: number;
+  revoked: string | undefined;
+}
+interface DefinitionRetention {
+  provenance: McpProvenance;
+  definitions: Map<string, RetainedDefinition>;
+  released: boolean;
 }
 interface ResourceHolder { active:boolean; scope:ScopeRecord; change:(change:McpResourceChange)=>void }
 interface ResourceGroup { client:McpClient; uri:string; holders:Set<ResourceHolder>; acknowledgement:Promise<Record<string,unknown>>; subscribed:boolean; receivedResponse:boolean; protocolError?:Record<string,unknown>; interactionProblem?:string; closing?:Promise<McpResourceRelease> }
@@ -273,7 +303,7 @@ function normalizeScope(input: McpAuthorityScope): McpAuthorityScope {
   if (!input.resourceOwner || (input.resourceOwner.kind !== 'local' && (input.resourceOwner.kind !== 'managed_host'
     || !input.resourceOwner.hostId || !input.resourceOwner.connectionId || !input.resourceOwner.endpointIdentity))) fail('mcp-scope-invalid');
   if (input.configurationScopes?.some(scope => !['global', 'project', 'extension'].includes(scope))) fail('mcp-scope-invalid');
-  return { ...input, ...(input.configurationScopes ? { configurationScopes: Object.freeze([...new Set(input.configurationScopes)].sort()) } : {}), resourceOwner: freeze(structuredClone(input.resourceOwner)), agentDir: resolve(input.agentDir), configCwd: resolve(input.configCwd), executionCwd: resolve(input.executionCwd) };
+  return { ...input, ...(input.configurationScopes ? { configurationScopes: Object.freeze([...new Set(input.configurationScopes)].sort()) } : {}), resourceOwner: freeze(structuredClone(input.resourceOwner)), ...(input.sourceAuthority ? { sourceAuthority: freeze(structuredClone(input.sourceAuthority)) } : {}), agentDir: resolve(input.agentDir), configCwd: resolve(input.configCwd), executionCwd: resolve(input.executionCwd) };
 }
 function scopeKey(scope: McpAuthorityScope): string {
   return stable([scope.resourceOwner, scope.sourceAuthority ?? null, scope.configurationScopes ?? null, scope.agentDir, scope.configCwd, scope.executionCwd, scope.environmentId, scope.executionScope, scope.projectTrusted]);
@@ -292,6 +322,8 @@ function compile(tool: McpTool): ValidateFunction {
 export class McpAuthority {
   readonly #options: McpAuthorityOptions;
   readonly #scopes = new Map<string, ScopeRecord>();
+  readonly #definitionLeases = new WeakMap<McpDefinitionLease, DefinitionRetention>();
+  readonly #retainedDefinitions = new Set<RetainedDefinition>();
   readonly #pool = new Map<string, ConnectionRecord>();
   readonly #closings = new Set<Promise<void>>();
   readonly #selected = new Map<string, ConnectionRecord>();
@@ -368,7 +400,7 @@ export class McpAuthority {
     const config = scope.configurationScopes ? { ...loaded,
       servers: loaded.servers.filter((entry: McpServerEntry) => scope.configurationScopes!.includes(entry.override ? 'project' : entry.scope ?? 'global')) } : loaded;
     if (configRevision !== this.#configRevision(scope)) fail('mcp-config-changed');
-    const record: ScopeRecord = { handle: randomUUID(), scope, key, config, configRevision, entries: new Map(config.servers.map(entry => [entry.name, entry])), definitions: new Map(), connections: new Map(), released: false, inflight: 0, preparations: 0, closings: new Set(), drain: drain(), retainedHolders: 0, closeRequested: false, shutdown: new AbortController() };
+    const record: ScopeRecord = { handle: randomUUID(), scope, key, config, configRevision, entries: new Map(config.servers.map(entry => [entry.name, entry])), definitions: new Map(), definitionSources: new Map(), connections: new Map(), released: false, inflight: 0, preparations: 0, closings: new Set(), drain: drain(), retainedHolders: 0, closeRequested: false, shutdown: new AbortController() };
     for (const entry of record.entries.values()) record.definitions.set(entry.name, this.#configurationIdentity(record, entry));
     if (configRevision !== this.#configRevision(scope)) fail('mcp-config-changed');
     // Disable/removal is revocation, not an ordinary replacement that may keep old leases alive.
@@ -377,6 +409,7 @@ export class McpAuthority {
       const selected = record.entries.get(connection.entry.name);
       if (!selected || selected.config.enabled === false) this.#revoke(connection);
     }
+    if (config.errors.length === 0) this.#observeDefinitionWithdrawal(scope, config.servers);
     this.#scopes.set(record.handle, record);
     return { scope: record.handle, config: { ...config, errors: config.errors.map(() => 'MCP configuration error; inspect the configured mcp.json'), servers: config.servers.map(publicEntry) } };
   }
@@ -389,6 +422,9 @@ export class McpAuthority {
   }
 
   async acquire(scope: McpAuthorityScope, options: McpAuthorityAcquireOptions): Promise<McpAuthorityOwnedLease> {
+    if ([options.provenance, options.deriveFrom, options.deriveExactCurrent].filter(value => value !== undefined).length > 1) fail('mcp-derivation-options-conflict');
+    const retention = options.deriveFrom === undefined ? undefined : this.#definitionLeases.get(options.deriveFrom);
+    if (options.deriveFrom !== undefined && (!retention || retention.released)) fail('mcp-definition-lease-unavailable');
     const opened = this.open(scope);
     const record = this.#scope(opened.scope);
     const abort = () => this.closeScope(opened.scope);
@@ -396,7 +432,29 @@ export class McpAuthority {
     if (options.signal?.aborted) abort();
     try {
       if (record.released) fail('mcp-preparation-cancelled');
-      if (options.provenance) {
+      if (retention || options.deriveExactCurrent) {
+        const provenance = retention?.provenance ?? options.deriveExactCurrent!;
+        for (const [name, selected] of Object.entries(provenance.servers)) {
+          const owner = serverOwner(record.scope);
+          if (stable({ ...selected.owner, source_authority: owner.source_authority }) !== stable(owner)) fail('mcp_configuration_source_changed');
+          const current = record.entries.get(name);
+          if (!current || current.config.enabled === false || current.config.exposure === 'hidden') fail('mcp_saved_definition_unavailable');
+          const original = retention?.definitions.get(name);
+          if (retention && !original) fail('mcp-definition-lease-unavailable');
+          if (original) {
+            await this.#assertRetainedDefinition(original);
+            if (retention!.released) fail('mcp-definition-lease-unavailable');
+            if (record.released) fail('mcp-preparation-cancelled');
+            original.references++;
+            record.definitionSources.set(name, original);
+            record.entries.set(name, original.entry);
+            record.definitions.set(name, selected.definition_version);
+          } else if (this.#configurationIdentity(record, current) !== selected.definition_version) {
+            fail('mcp_saved_definition_unavailable');
+          }
+        }
+        record.entries = new Map([...record.entries].filter(([name]) => Object.hasOwn(provenance.servers, name)));
+      } else if (options.provenance) {
         for (const [name, selected] of Object.entries(options.provenance.servers)) {
           if (stable(selected.owner) !== stable(serverOwner(record.scope))) fail('mcp_configuration_source_changed');
           const entry = record.entries.get(name);
@@ -426,6 +484,7 @@ export class McpAuthority {
       const entries = [...record.entries.values()].filter(entry => selected.has(entry.name));
       if (entries.some(entry => entry.config.enabled === false)) fail('mcp-selected-server-disabled');
       await Promise.all(entries.map(entry => this.connect(record.handle, publicEntry(entry))));
+      if (retention?.released) fail('mcp-definition-lease-unavailable');
       if (record.released) fail('mcp-preparation-cancelled');
       const handles = [...record.connections.values()];
       if (handles.some(connection => connection.connection.state === 'needs-auth')) fail('mcp-server-needs-auth');
@@ -604,6 +663,10 @@ export class McpAuthority {
           const target = assert(name, options.schemaVersion);
           return this.callTool(record.handle, target.connection.handle, target.tool.name, options.schemaVersion, args, options.signal, options.beforeDispatch, options.interaction);
         },
+        retainDefinitions: provenance => {
+          if (released || record.released || record.closeRequested) fail('mcp-lease-released');
+          return this.#retainDefinitions(record, provenance);
+        },
         release: () => { if (!released) { released = true; this.closeScope(record.handle); } },
         releaseAndDrain: () => { released = true; this.closeScope(record.handle); return record.drain.promise; },
       };
@@ -631,6 +694,8 @@ export class McpAuthority {
       const configured = live.servers.find(candidate => candidate.name === entry.name);
       if (!configured || configured.config.enabled === false) fail('mcp-server-disabled');
     }
+    const definitionSource = scope.definitionSources.get(entry.name);
+    if (definitionSource) await this.#assertRetainedDefinition(definitionSource);
     const key = this.#connectionKey(scope, entry);
     const existing = scope.connections.get(entry.name);
     if (existing && !existing.revoked) await this.#assertCredential(existing).catch(() => undefined);
@@ -646,7 +711,9 @@ export class McpAuthority {
       const provider = 'url' in entry.config ? entry.config.auth?.provider : undefined;
       if (provider && !this.#options.credentialScope) fail('mcp-provider-credential-authority-required');
       const providerGrant = provider ? stable(await this.#options.credentialScope!(scope.scope, provider)) : undefined;
+      if (definitionSource && providerGrant !== await definitionSource.providerGrant) fail('mcp-credential-revoked');
       const runtime = await loadMcpRuntime();
+      if (definitionSource) await this.#assertRetainedDefinition(definitionSource);
       this.#scope(scopeHandle);
       // Concurrent preparation shares the same connection after the lazy module resolves.
       record = this.#pool.get(key);
@@ -697,6 +764,7 @@ export class McpAuthority {
     if (existing && existing !== record) this.#releaseConnection(scope, existing);
     if (scope.connections.get(entry.name) !== record) { record.references++; scope.connections.set(entry.name, record); }
     await record.ready;
+    if (definitionSource) await this.#assertRetainedDefinition(definitionSource);
     return this.snapshot(scopeHandle, record.handle);
     } finally { scope.preparations--; this.#drainScope(scope); }
   }
@@ -1228,6 +1296,7 @@ export class McpAuthority {
         assertCurrent(); await store.save(state); expectedGrant = this.#oauthGrant(scope.scope, connection);
       } },
       settings: connection.oauthSettings(), ...(connection.challenge ? { challenge: connection.challenge } : {}), prompt });
+    this.#revokeDefinitionCredentials(scope.scope.agentDir, record.entry.name, connection.oauthUrl);
     for (const candidate of this.#pool.values()) if (candidate.scope.agentDir === scope.scope.agentDir
       && candidate.entry.name === record.entry.name && candidate.connection.oauthUrl === connection.oauthUrl) this.#revoke(candidate);
   }
@@ -1236,7 +1305,8 @@ export class McpAuthority {
     const scope = this.#scope(scopeHandle); const record = this.#connection(scope, handle);
     if (!record.connection.oauthUrl) return false;
     const removed = this.#store(scope.scope.agentDir).remove(record.connection.name, record.connection.oauthUrl);
-    // Sign-out revokes every connection using this credential source, including other work branches.
+    // Sign-out revokes every connection and retained definition using this credential source.
+    this.#revokeDefinitionCredentials(scope.scope.agentDir, record.entry.name, record.connection.oauthUrl);
     for (const candidate of this.#pool.values()) if (candidate.scope.agentDir === scope.scope.agentDir && candidate.entry.name === record.entry.name
       && candidate.connection.oauthUrl === record.connection.oauthUrl) this.#revoke(candidate);
     await record.connection.signOut(); return removed;
@@ -1260,6 +1330,8 @@ export class McpAuthority {
     }
     const next = { ...entry, ...(override ? { override } : {}), config: { ...entry.config, ...patch } };
     scope.entries.set(name, next);
+    if (patch.enabled === false || patch.exposure === 'hidden') this.#observeDefinitionWithdrawal(scope.scope,
+      [...scope.entries.values()]);
     for (const record of this.#pool.values()) {
       if (record.scopeKey !== scope.key || record.entry.name !== name) continue;
       if (patch.enabled === false) this.#revoke(record);
@@ -1288,6 +1360,111 @@ export class McpAuthority {
     this.#pool.clear(); this.#selected.clear();
     const failure = settled.find(result => result.status === 'rejected');
     if (failure?.status === 'rejected') throw failure.reason;
+  }
+  #retainDefinitions(scope: ScopeRecord, exact: McpProvenance): McpDefinitionLease {
+    const provenance = freeze(structuredClone(exact));
+    const definitions = new Map<string, RetainedDefinition>();
+    // Validate the complete cut before retaining anything. A fabricated resource key or a
+    // definition outside this lease must not turn into authority through this seam.
+    for (const [name, selected] of Object.entries(provenance.servers)) {
+      const entry = scope.entries.get(name);
+      if (!entry || entry.config.enabled === false || entry.config.exposure === 'hidden'
+        || stable(selected) !== stable({ owner: serverOwner(scope.scope),
+          definition_version: this.#configurationIdentity(scope, entry), resource_key: this.#resourceKey(scope, entry) })) fail('mcp_saved_definition_unavailable');
+    }
+    try {
+      for (const name of Object.keys(provenance.servers)) {
+        const entry = scope.entries.get(name)!;
+        let definition = scope.definitionSources.get(name);
+        if (!definition) {
+          const connection = scope.connections.get(name);
+          const config = entry.config;
+          // Match the SDK's OAuth selection without constructing an unneeded deferred connection.
+          const oauthUrl = 'url' in config && !config.auth
+            && !Object.keys(config.headers ?? {}).some(header => header.toLowerCase() === 'authorization') ? config.url : undefined;
+          const provider = 'url' in config ? config.auth?.provider : undefined;
+          if (provider && !this.#options.credentialScope) fail('mcp-provider-credential-authority-required');
+          const providerGrant = connection ? Promise.resolve(connection.providerGrant)
+            : provider ? this.#options.credentialScope!(scope.scope, provider).then(value => stable(value)) : Promise.resolve(undefined);
+          void providerGrant.catch(() => undefined);
+          definition = { scope: scope.scope, entry: freeze(structuredClone(entry)), originalConnection: connection,
+            oauthUrl, oauthGrant: connection?.oauthGrant ?? (oauthUrl ? stable(this.#store(scope.scope.agentDir).binding(name, oauthUrl) ?? null) : 'none'),
+            provider, providerGrant, references: 0, revoked: undefined };
+        }
+        this.#assertRetainedDefinitionCurrent(definition);
+        definition.references++;
+        this.#retainedDefinitions.add(definition);
+        definitions.set(name, definition);
+      }
+    } catch (error) {
+      for (const definition of definitions.values()) this.#releaseDefinition(definition);
+      throw error;
+    }
+    const retained: DefinitionRetention = { provenance, definitions, released: false };
+    scope.retainedHolders++;
+    const token = Object.freeze({ provenance, release: () => {
+      if (retained.released) return;
+      retained.released = true;
+      for (const definition of definitions.values()) this.#releaseDefinition(definition);
+      scope.retainedHolders--;
+      if (scope.closeRequested && !scope.retainedHolders) this.closeScope(scope.handle);
+    } }) as McpDefinitionLease;
+    this.#definitionLeases.set(token, retained);
+    return token;
+  }
+  #releaseDefinition(definition: RetainedDefinition): void {
+    if (--definition.references === 0) this.#retainedDefinitions.delete(definition);
+  }
+  #observeDefinitionWithdrawal(scope: McpAuthorityScope, entries: readonly McpServerEntry[]): void {
+    for (const definition of this.#retainedDefinitions) {
+      if (definition.entry.scope === 'extension' || stable(configuration(definition.scope)) !== stable(configuration(scope))
+        || stable(definition.scope.resourceOwner) !== stable(scope.resourceOwner)) continue;
+      // A closed contribution selection says nothing about other contribution scopes.
+      const kind = definition.entry.override ? 'project' : definition.entry.scope ?? 'global';
+      if (scope.configurationScopes && !scope.configurationScopes.includes(kind)) continue;
+      const current = entries.find(entry => entry.name === definition.entry.name);
+      if (!current || current.config.enabled === false || current.config.exposure === 'hidden') this.#revokeDefinition(definition, 'mcp-owner-revoked');
+    }
+  }
+  #revokeDefinitionCredentials(agentDir: string, name: string, oauthUrl: string): void {
+    for (const definition of this.#retainedDefinitions) if (definition.scope.agentDir === agentDir
+      && definition.entry.name === name && definition.oauthUrl === oauthUrl) this.#revokeDefinition(definition, 'mcp-credential-revoked');
+  }
+  #revokeDefinition(definition: RetainedDefinition, reason: string): void {
+    if (definition.revoked) return;
+    definition.revoked = reason;
+    if (definition.originalConnection) this.#revoke(definition.originalConnection, definition.revoked);
+    // Child Sources have distinct scope keys. Withdrawal still reaches their exact retained
+    // connection, including an already-dispatched operation, without touching unrelated cuts.
+    for (const scope of this.#scopes.values()) if (scope.definitionSources.get(definition.entry.name) === definition) {
+      const connection = scope.connections.get(definition.entry.name);
+      if (connection) this.#revoke(connection, definition.revoked);
+    }
+  }
+  #assertRetainedDefinitionCurrent(definition: RetainedDefinition): void {
+    if (this.#closed) fail('mcp-owner-closed');
+    if (definition.originalConnection?.revoked) this.#revokeDefinition(definition, definition.originalConnection.revocationReason ?? 'mcp-owner-revoked');
+    if (definition.revoked) fail(definition.revoked);
+    const { scope, entry, oauthUrl } = definition;
+    if (oauthUrl && definition.oauthGrant !== stable(this.#store(scope.agentDir).binding(entry.name, oauthUrl) ?? null)) {
+      this.#revokeDefinition(definition, 'mcp-credential-revoked'); fail('mcp-credential-revoked');
+    }
+    if (entry.scope !== 'extension') {
+      const current = loadMcpConfig({ agentDir: scope.agentDir, cwd: scope.configCwd, projectTrusted: scope.projectTrusted });
+      if (current.errors.length) fail('mcp-config-invalid');
+      const configured = current.servers.find(candidate => candidate.name === entry.name);
+      if (!configured || configured.config.enabled === false || configured.config.exposure === 'hidden') {
+        this.#revokeDefinition(definition, 'mcp-owner-revoked'); fail('mcp-owner-revoked');
+      }
+    }
+  }
+  async #assertRetainedDefinition(definition: RetainedDefinition): Promise<void> {
+    this.#assertRetainedDefinitionCurrent(definition);
+    const expected = await definition.providerGrant;
+    if (definition.provider && stable(await this.#options.credentialScope!(definition.scope, definition.provider)) !== expected) {
+      this.#revokeDefinition(definition, 'mcp-credential-revoked'); fail('mcp-credential-revoked');
+    }
+    this.#assertRetainedDefinitionCurrent(definition);
   }
   #fileRevision(paths: readonly string[]): string {
     return stable(paths.map(path => {
@@ -1344,6 +1521,8 @@ export class McpAuthority {
     for (const connection of [...scope.connections.values()]) this.#releaseConnection(scope, connection);
     if (scope.preparations || scope.closings.size) return;
     this.#scopes.delete(scope.handle);
+    for (const definition of scope.definitionSources.values()) this.#releaseDefinition(definition);
+    scope.definitionSources.clear();
     if (scope.closeError !== undefined) scope.drain.reject(scope.closeError);
     else scope.drain.resolve();
   }
@@ -1369,6 +1548,8 @@ export class McpAuthority {
   }
   #assertConnection(scope: ScopeRecord, record: ConnectionRecord, tool?: string, schemaVersion?: string, discovery = false): void {
     if (scope.released || record.revoked || this.#closed) fail('mcp-owner-revoked');
+    const definitionSource = scope.definitionSources.get(record.entry.name);
+    if (definitionSource) this.#assertRetainedDefinitionCurrent(definitionSource);
     if (record.oauthGrant !== this.#oauthGrant(scope.scope, record.connection)) { this.#revoke(record, 'mcp-credential-revoked'); fail('mcp-credential-revoked'); }
     if (record.entry.scope !== 'extension') {
       const current = loadMcpConfig({ agentDir: scope.scope.agentDir, cwd: scope.scope.configCwd, projectTrusted: scope.scope.projectTrusted });
@@ -1385,6 +1566,16 @@ export class McpAuthority {
   #revoke(record: ConnectionRecord, reason = 'mcp-owner-revoked'): void {
     if (record.revoked) return;
     record.revoked = true; record.revocationReason = reason; record.shutdown.abort();
+    // An observed child credential withdrawal is also withdrawal of its exact retained cut.
+    // Deferred originals have no originalConnection, so follow the actual scope association
+    // rather than relying on that optional pointer or comparing a later restored grant.
+    const definitions = new Set<RetainedDefinition>();
+    for (const definition of this.#retainedDefinitions) if (definition.originalConnection === record) definitions.add(definition);
+    for (const scope of this.#scopes.values()) if (scope.connections.get(record.entry.name) === record) {
+      const definition = scope.definitionSources.get(record.entry.name);
+      if (definition) definitions.add(definition);
+    }
+    for (const definition of definitions) this.#revokeDefinition(definition, reason);
     this.#closeConnection(record); this.#collect(record); this.#changed(record.scopeKey,
       {kind:reason==='mcp-credential-revoked'?'credentials':'configuration'});
   }
@@ -1428,6 +1619,6 @@ export class McpAuthority {
 
 export { mcpHostAgentDir, mcpHostProjectTrusted, readMcpHostPermissionPolicy } from './mcp-host-configuration.js';
 export { McpCompositions } from './mcp-compositions.js';
-export type { McpCompositionScope, McpCompositionSelection } from './mcp-compositions.js';
+export type { McpCompositionScope, McpCompositionSelection, McpCompositionSnapshot, McpCompositionDefinitions } from './mcp-compositions.js';
 
 export { composeMcpAuthorityLeases } from './mcp-lease-composition.js';

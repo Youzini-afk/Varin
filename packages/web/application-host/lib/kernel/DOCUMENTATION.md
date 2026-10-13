@@ -1081,6 +1081,14 @@ their original server and disambiguated public name; discovery cannot expand the
 
 The private ToolBridge acknowledges an original-owner child retention before Catalog accepts dispatch.
 Its child holders keep only live resources, independently of parent Run completion and channel reset.
+Managed definition retention also commits an exact dispatch owner/epoch reference on the original
+Source before ACK; frozen selection bodies use Storage objects and short GC-owned references. A lost
+ACK cannot construct a new definition token after Host restart. Release-before-retain tombstones fence
+late preparation. `runtime.child.dependencies.pending` captures terminal unaccepted dispatch identities
+and loads original invocation dependencies off the Catalog lock; its one cleanup acknowledgement waits
+for both file pins and managed definition references. Accepted children retain the same cleanup duty
+until their original dependencies and execution resources are released. Running read-only dispatch
+recovery preserves its original execution epoch, just like dispatched effects.
 After `runtime.run.start` has successfully bound independent child leases, Host releases the handoff.
 The collaboration consumer also releases terminal child holders and old-epoch unaccepted handoffs using
 real Catalog facts. A current-epoch missing ChildTask can still be between ACK and accept and is not
@@ -1352,7 +1360,7 @@ original Source explicitly retires. Recovered finite subscribe ACKs and proven f
 settle the original execution barrier without replacing already-published Unknown conversation history.
 Focused evidence covers actual coordinator/target modules with controlled ports, native receipt fences
 and Catalog persistence; it does not assert a full two-Host SDK lifecycle. The current
-internal formats are Storage 20, Agent Catalog 71 and private wire 35; older formats are rejected by
+internal formats are Storage 21, Agent Catalog 71 and private wire 36; older formats are rejected by
 the existing read-only gate with data preserved, without automatic migration or cleanup.
 
 Managed finite reverse interactions now use the same trusted SDK scope and original Source address.

@@ -134,7 +134,7 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
     hostId: 'host', kind: 'directory' as const, canonicalPath: '/removed/original' })) };
   const runtime = {
     onEvent: (listener: typeof emit) => { emit = listener; return () => {}; }, onExit: () => () => {}, onReady: () => () => {}, reconcileObservations: async () => [],
-    children: async () => [], childExecutions: async () => [structuredClone(child)], unacceptedChildSources: async () => [], status: async () => ({ eventCursor: 7 }), events: async () => [],
+    children: async () => [], childExecutions: async () => [structuredClone(child)], unacceptedChildDependencies: async () => [], status: async () => ({ eventCursor: 7 }), events: async () => [],
     context: vi.fn(async () => checkpoint), childExecution: async () => structuredClone(child),
     readyChildSource: vi.fn(async (input: Parameters<AgentRuntimeClient['readyChildSource']>[0]) => {
       child.source = { kind: 'ready', handoff: null, pin: input.pin, selection: { mode: input.source.mode, resource_owner: input.source.resourceOwner, workspace_id: input.source.workspaceId,
@@ -227,7 +227,7 @@ it.each(['dispatch', 'user_continuation', 'message_request', 'followup', 'calend
   const errors: unknown[] = [];
   const runtime = {
     onEvent: () => () => {}, onExit: () => () => {}, onReady: () => () => {}, reconcileObservations: async () => [],
-    children: async () => [], childExecutions: async () => [structuredClone(child)], unacceptedChildSources: async () => [],
+    children: async () => [], childExecutions: async () => [structuredClone(child)], unacceptedChildDependencies: async () => [],
     status: async () => ({ eventCursor: 1 }), events: async () => [], context: async () => checkpoint,
     thread: async () => ({ bot_id: null }),
     childExecution: async () => structuredClone(child), readyChildSource: vi.fn(),
@@ -301,7 +301,7 @@ it('Bot Sleep joins its original child owner, while Delete retries original reso
   let releasingFails = true;
   const runtime = {
     onEvent: () => () => {}, onExit: () => () => {}, onReady: () => () => {}, reconcileObservations: async () => [],
-    children: async () => [], childExecutions: async () => [structuredClone(child), other], unacceptedChildSources: async () => [],
+    children: async () => [], childExecutions: async () => [structuredClone(child), other], unacceptedChildDependencies: async () => [],
     status: async () => ({ eventCursor: 1 }), events: async () => [], childExecution: async () => structuredClone(child),
     releaseChildResources: vi.fn(async () => {
       if (releasingFails) throw new Error('Original child release is not confirmed');

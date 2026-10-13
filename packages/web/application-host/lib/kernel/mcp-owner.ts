@@ -54,6 +54,7 @@ export interface McpOwnerOptions {
   /** Exact visible dependency set. Retargeting changes only the execution owner/resources. */
   selection?: McpBinding;
   retarget?: boolean;
+  retainChild?: McpToolLease['retainChild'];
 }
 type Target = {kind:'subscribe';service:McpAuthorityService;uri:string;permissionName:string;args:Record<string,unknown>}
   | {kind:'unsubscribe';operationId:string;permissionName:string;args:Record<string,unknown>}
@@ -247,6 +248,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
     // grant read-only status, Smart eligibility, or reusable approvals.
     evaluateGate(selected.kind === 'tool' ? selected.tool.name : selected.permissionName, selected.args, current);
   return {
+    ...(options.retainChild ? { retainChild: options.retainChild } : {}),
     binding,
     implementationIdentity: lease.implementationIdentity,
     available(schema) {

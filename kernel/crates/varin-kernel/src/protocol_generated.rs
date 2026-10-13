@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 35;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 36;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -2602,6 +2602,8 @@ pub(crate) type SourceAuthorityAddress = crate::source_resources::SourceAuthorit
 
 pub(crate) type SourceMcpHolderParams = crate::source_resources::SourceMcpHolderParams;
 
+pub(crate) type SourceMcpChildParams = crate::source_resources::SourceMcpChildParams;
+
 pub(crate) type SourceMcpCreationReceiptParams =
     crate::source_resources::SourceMcpCreationReceiptParams;
 
@@ -4277,12 +4279,12 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
-        "runtime.child.sources.pending" => {
+        "runtime.child.dependencies.pending" => {
             serde_json::from_value::<KernelEmptyParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
-        "runtime.child.sources.release" => {
+        "runtime.child.dependencies.release" => {
             serde_json::from_value::<OperationParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
@@ -4483,6 +4485,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "source.mcp.holder" => serde_json::from_value::<SourceMcpHolderParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "source.mcp.child" => serde_json::from_value::<SourceMcpChildParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "source.mcp.creation_receipt" => {

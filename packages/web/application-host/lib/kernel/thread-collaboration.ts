@@ -1,3 +1,4 @@
+import { releaseManagedChildDependencies } from './managed-mcp-child-retention.js';
 import { sourceFailureCode } from './source-admission-error.js';
 import { parseExplicitSkillCommand } from '../agent-resources/activation.js';
 import { ResourceScopeError } from './thread-resource-scope.js';
@@ -77,7 +78,7 @@ export class ThreadCollaboration {
       active.controller.abort(new DOMException('Bot work suspended', 'AbortError'));
       return [active.work];
     });
-    const sources = await this.owners.runtime.unacceptedChildSources(this.epoch.signal);
+    const sources = await this.owners.runtime.unacceptedChildDependencies(this.epoch.signal);
     work.push(...sources.filter(source => threadIds.has(source.parent_thread_id))
       .flatMap(source => this.cleaningSources.get(source.operation_id) ?? []));
     await Promise.all(work);
@@ -103,12 +104,12 @@ export class ThreadCollaboration {
           throw new Error(`Child ${child.execution_id} still retains its original source or unpublished result. Reconcile that work, then retry Delete.`);
         }
       }
-      for (const source of await this.owners.runtime.unacceptedChildSources(signal)) {
+      for (const source of await this.owners.runtime.unacceptedChildDependencies(signal)) {
         if (!threadIds.has(source.parent_thread_id)) continue;
         const active = this.cleaningSources.get(source.operation_id);
         if (active) await active;
         // Re-read the original receipt after joining; failed release stays retryable.
-        if (!(await this.owners.runtime.unacceptedChildSources(signal)).some(current => current.operation_id === source.operation_id)) continue;
+        if (!(await this.owners.runtime.unacceptedChildDependencies(signal)).some(current => current.operation_id === source.operation_id)) continue;
         await this.releaseUnacceptedSource(source, signal);
       }
     } finally {
@@ -146,7 +147,7 @@ export class ThreadCollaboration {
         const children = await this.owners.runtime.children(epoch.signal);
         this.owners.kernel.reconcileChildToolHandoffs(children);
         const executions = await this.owners.runtime.childExecutions(undefined, epoch.signal);
-        const unaccepted = await this.owners.runtime.unacceptedChildSources(epoch.signal);
+        const unaccepted = await this.owners.runtime.unacceptedChildDependencies(epoch.signal);
         for (const source of unaccepted) {
           if (this.cleaningSources.has(source.operation_id)) continue;
           if (this.owners.canExecuteThread && !await this.owners.canExecuteThread(source.parent_thread_id)) continue;
@@ -221,18 +222,27 @@ export class ThreadCollaboration {
       }
     } while (events.length === 256);
   }
-  private async releaseUnacceptedSource(source: import('./protocol.generated.js').UnacceptedChildSource,
+  private async releaseUnacceptedSource(dependencies: import('./protocol.generated.js').UnacceptedChildDependencies,
     signal: AbortSignal): Promise<void> {
-    if (source.source.resource_owner.kind === 'managed_host') {
-      await releaseManagedUnacceptedSource(this.owners.runtime, source, signal);
-    } else {
-      await this.withSourceStore(source.source, source.parent_thread_id, signal, async store => {
-        if (!store.releaseBranchHandoffPin) throw new Error('Durable source pin release is unavailable');
-        await store.releaseBranchHandoffPin(source.source.branch_id!, source.pin_id);
-      });
+    const pin = dependencies.source_pin;
+    if (pin) {
+      const source = { ...pin, operation_id: dependencies.operation_id,
+        parent_run_id: dependencies.parent_run_id, parent_thread_id: dependencies.parent_thread_id };
+      if (pin.source.resource_owner.kind === 'managed_host') {
+        await releaseManagedUnacceptedSource(this.owners.runtime, source, signal);
+      } else {
+        await this.withSourceStore(pin.source, dependencies.parent_thread_id, signal, async store => {
+          if (!store.releaseBranchHandoffPin) throw new Error('Durable source pin release is unavailable');
+          await store.releaseBranchHandoffPin(pin.source.branch_id!, pin.pin_id);
+        });
+      }
     }
+    await releaseManagedChildDependencies(this.owners.runtime, {
+      operationId: dependencies.operation_id, parentRunId: dependencies.parent_run_id,
+      executionOwner: dependencies.execution_owner, executionEpoch: dependencies.execution_epoch,
+    }, dependencies.mcp_binding, signal);
     signal.throwIfAborted();
-    await this.owners.runtime.releaseUnacceptedChildSource(source.operation_id, signal);
+    await this.owners.runtime.releaseUnacceptedChildDependencies(dependencies.operation_id, signal);
   }
   /** Catalog-selected branch work never acquires a physical project root or tool capability. */
   private async withSourceStore<T>(source: { workspace_id: string; execution_workspace_id: string }, threadId: string,
@@ -391,6 +401,17 @@ export class ThreadCollaboration {
   private async releaseHandoff(child: DelegatedExecution, signal: AbortSignal): Promise<void> {
     if (child.resources_released || (!child.receipt && !child.report) || (child.source?.kind !== 'ready' && child.source?.kind !== 'absent' && !child.report)) return;
     const { kernel, runtime } = this.owners;
+    if (child.trigger.kind === 'dispatch') {
+      const selection = child.launch.mcp_binding;
+      if (selection && Object.values(selection.provenance.servers).some(server => server.owner.resource_owner.kind === 'managed_host')) {
+        const original = await runtime.operation(child.child_operation_id, signal);
+        if (original.id !== child.child_operation_id || original.run_id !== child.parent_run_id || !original.execution_owner)
+          throw new Error('Original child dependency owner is unavailable');
+        await releaseManagedChildDependencies(runtime, { operationId: original.id, parentRunId: original.run_id,
+          executionOwner: original.execution_owner, executionEpoch: original.epoch }, selection, signal);
+      }
+      await kernel.releaseChildToolHandoff(child.parent_run_id, child.child_operation_id);
+    }
     if (child.receipt && child.source?.kind !== 'absent') await runtime.releaseMcpResourceSource(child.receipt.run_id);
     if (child.source?.kind === 'absent') {
       signal.throwIfAborted();

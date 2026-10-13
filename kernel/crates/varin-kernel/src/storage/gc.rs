@@ -240,6 +240,17 @@ impl Storage {
         )?.query_map([], |row| row.get::<_, String>(0))? {
             blobs.insert(row?);
         }
+        // Exact parent definition references own their existing Storage bodies.
+        // A release tombstone never remains a GC root, even after late retain.
+        for row in self.conn.prepare(
+            "SELECT json_extract(child.value,'$.selectionRef.objectHash')
+             FROM domain_records AS source, json_each(source.payload_json,'$.result.mcpChildren') AS child
+             WHERE source.record_type='source.authority'
+               AND json_extract(child.value,'$.released')=0
+               AND json_extract(child.value,'$.selectionRef.objectHash') IS NOT NULL"
+        )?.query_map([], |row| row.get::<_, String>(0))? {
+            blobs.insert(row?);
+        }
         for row in self
             .conn
             .prepare("SELECT object_hash FROM domain_record_refs")?
