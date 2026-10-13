@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type {
+  RecoveryConversation,
   WorkspaceRecoveryCheckpointState,
   WorkspaceRecoveryTurnBinding,
   WorkspaceRecoveryTurnProvenance,
@@ -17,7 +18,7 @@ interface BindingInput {
   executionId: string;
   provenance: WorkspaceRecoveryTurnProvenance;
   runtimeGeneration?: number | undefined;
-  sessionId?: string | undefined;
+  conversation?: RecoveryConversation | undefined;
   userEntryId?: string | undefined;
   workerId?: string | undefined;
   workspaceId: string;
@@ -33,7 +34,7 @@ const binding = (
   provenance: input.provenance,
   runtimeGeneration: input.runtimeGeneration ?? 1,
   runtimeKey: `worker-1@${input.runtimeGeneration ?? 1}`,
-  sessionId: input.sessionId ?? 'session-1',
+  conversation: input.conversation ?? { kind: 'pi', sessionId: 'session-1' },
   startedAt: '2026-08-30T00:00:00.000Z',
   status,
   unrecordedResourceIds: [],
@@ -68,7 +69,7 @@ const createHarness = () => {
     const input = request.args[0] as BindingInput;
     if (request.method === 'recordTurnStart') return { binding: binding(input), status: 'ready' };
     if (request.method === 'recordTurnSettled') {
-      return { binding: binding({ ...input, runtimeGeneration: 1, sessionId: 'session-1', userEntryId: 'user-1', workerId: 'worker-1' }, 'ready'), status: 'ready' };
+      return { binding: binding({ ...input, runtimeGeneration: 1, conversation: { kind: 'pi', sessionId: 'session-1' }, userEntryId: 'user-1', workerId: 'worker-1' }, 'ready'), status: 'ready' };
     }
     if (request.method === 'recordMutationBefore' || request.method === 'recordMutationAfter') {
       return { recorded: true, status: 'ready' };
@@ -126,6 +127,7 @@ describe('recovery turn coordinator', () => {
     await coordinator.processEvent(agentEvent('execution-1', { type: 'agent_settled' }));
 
     expect(calls.map((call) => call.method)).toEqual(['recordTurnStart', 'recordTurnSettled']);
+    expect(calls[0]?.args[0]).toMatchObject({ conversation: { kind: 'pi', sessionId: 'session-1' } });
     expect(calls.some((call) => call.method.includes('Snapshot') || call.method.includes('capture'))).toBe(false);
     expect(calls[1]?.args[0]).toMatchObject({
       assistantEntryId: 'assistant-1',
@@ -274,7 +276,7 @@ describe('recovery turn coordinator', () => {
       const input = request.args[0] as BindingInput;
       if (request.method === 'recordTurnStart') return { binding: binding(input), status: 'ready' };
       if (request.method === 'recordTurnSettled') {
-        return { binding: binding({ ...input, runtimeGeneration: 1, sessionId: 'session-1', userEntryId: 'user-1', workerId: 'worker-1' }, 'ready'), status: 'ready' };
+        return { binding: binding({ ...input, runtimeGeneration: 1, conversation: { kind: 'pi', sessionId: 'session-1' }, userEntryId: 'user-1', workerId: 'worker-1' }, 'ready'), status: 'ready' };
       }
       if (request.method === 'recordMutationBefore' || request.method === 'recordMutationAfter') {
         return { recorded: true, status: 'ready' };

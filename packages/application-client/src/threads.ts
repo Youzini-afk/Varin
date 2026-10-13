@@ -152,6 +152,11 @@ export interface ThreadGoalsAPI {
   list(identity: ThreadIdentity): Promise<Goal[]>;
 }
 export interface ThreadSnapshot {
+  recovery?: {
+    unavailable?: string;
+    navigation: import("@varin/protocol").NavigationReceipt | null;
+    operations: import("@varin/extension-contract").WorkspaceCombinedRecoveryOperation[];
+  };
   identity: ThreadIdentity;
   /** Read before the snapshot's component queries. Replay after this cursor covers concurrent commits. */
   eventCursor: number;
@@ -252,6 +257,10 @@ export interface ThreadsAPI {
   create(key: string): Promise<ThreadIdentity>;
   prepareSource(input: ThreadPrepareSource, signal?: AbortSignal): Promise<ThreadPreparedSource>;
   /** Fork immutable conversation ancestry; live runs and resource grants are not copied. */
+  prepareNavigation(input: ThreadIdentity & { entryId: string }): Promise<import("@varin/protocol").NavigationSelection & { editorImages?: ImageAttachment[] }>;
+  recoverySource(input: ThreadIdentity & { entryId: string }): Promise<{ workspaceId: string; mode: "live_root" | "materialized" | "fixed_branch"; runId: string } | null>;
+  navigate(input: ThreadIdentity & { key: string; expectedHeadId: string | null; targetHeadId: string | null; undoOf?: string }): Promise<import("@varin/protocol").NavigationReceipt>;
+  navigationReceipt(input: ThreadIdentity & { key: string }): Promise<import("@varin/protocol").NavigationReceipt | null>;
   fork(input: ThreadIdentity & { key: string; headId: string | null }): Promise<ThreadIdentity>;
   compact(input: ThreadCompact): Promise<ContextJob>;
   publishContext(identity: ThreadIdentity, runId: string): Promise<ContextCheckpoint>;

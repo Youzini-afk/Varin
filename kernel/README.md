@@ -156,12 +156,12 @@ Original research artifact records have separate partial indexes for artifact id
 attempt/stream/byte offset. `storage.experiment.logChunks` pages the original log records under their actual
 record-read grant; it does not infer publication from the largest stored chunk. ExperimentService's
 original Job CAS owns the published byte high-water, and the shared immutable object reader owns
-body reads and cancellation. Storage format 14 requires these indexes and rejects old internal
+body reads and cancellation. Storage format 15 requires these indexes and rejects old internal
 formats without rewriting user assets.
 
 ## R4 native process resources
 
-The format-v14 catalog keeps process identities, outcomes and grant lifecycle in the same Storage. Scoped
+The format-v15 catalog keeps process identities, outcomes and grant lifecycle in the same Storage. Scoped
 `process.spawn/inspect/list/read/write/resize/kill/release` operate on admitted roots/grants.
 A guardian is another invocation of this packaged executable, not another kernel/database or Node
 PTY shim. It owns a pipe or real PTY and reports a durable native tree-exit receipt.

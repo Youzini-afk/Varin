@@ -1150,9 +1150,9 @@ test("typed recovery turn reads honor actor session identity", { timeout: 30_000
   const makeActor = async (grantId: string, sessionId: string) => host.scoped(await host.issueGrant({ grantId, hostGeneration: "recovery-actor-generation", sessionId, threadId: `${sessionId}-thread`, runId: `${sessionId}-run`, owningWorkspace: "recovery-actor-workspace", executionWorkspace: "recovery-actor-workspace", storageIdentity: host.handshake?.storageRoot, capabilities: ["storage.read", "storage.write", "recovery"], pathScopes: [""] }));
   const owner = await makeActor("recovery-owner", "session-owner");
   const other = await makeActor("recovery-other", "session-other");
-  await owner.recoveryTurnStart({ operationId: "recovery-actor-turn", workspaceId: "recovery-actor-workspace", executionId: "recovery-actor-execution", sessionId: "session-owner", userEntryId: "entry-owner", workerId: "worker", runtimeGeneration: 1, activeWriterScopes: [], provenance: "caused-by" });
+  await owner.recoveryTurnStart({ operationId: "recovery-actor-turn", workspaceId: "recovery-actor-workspace", executionId: "recovery-actor-execution", conversation: { kind: "pi", sessionId: "session-owner" }, userEntryId: "entry-owner", workerId: "worker", runtimeGeneration: 1, activeWriterScopes: [], provenance: "caused-by" });
   await assert.rejects(other.recoveryTurnGet({ workspaceId: "recovery-actor-workspace", executionId: "recovery-actor-execution", sessionId: "session-owner" }), /actor|authorization|session/i);
-  assert.equal((await owner.recoveryTurnGet({ workspaceId: "recovery-actor-workspace", executionId: "recovery-actor-execution", sessionId: "session-owner" }))?.sessionId, "session-owner");
+  assert.deepEqual((await owner.recoveryTurnGet({ workspaceId: "recovery-actor-workspace", executionId: "recovery-actor-execution", sessionId: "session-owner" }))?.conversation, { kind: "pi", sessionId: "session-owner" });
 });
 
 test("branch creation streams a normal input larger than one control frame", { timeout: 60_000 }, async (t) => {
@@ -1290,7 +1290,7 @@ test("real kernel typed recovery storage persists checkpoints, operation files, 
   };
 
   const first = await makeEngine();
-  await first.engine.recordTurnStart({ executionId: "execution-1", workspaceId: "workspace-test", sessionId: "session-1", userEntryId: "user-1", workerId: "worker-1", runtimeGeneration: 1, activeWriterScopes: [], provenance: "caused-by" });
+  await first.engine.recordTurnStart({ executionId: "execution-1", workspaceId: "workspace-test", conversation: { kind: "pi", sessionId: "session-1" }, userEntryId: "user-1", workerId: "worker-1", runtimeGeneration: 1, activeWriterScopes: [], provenance: "caused-by" });
   await first.engine.recordMutationBefore({ executionId: "execution-1", workspaceId: "workspace-test", path: "a.txt", toolName: "edit", mutationId: "mutation-1", toolCallId: "tool-call-1" });
   await fs.writeFile(path.join(workspace, "a.txt"), "after");
   await first.engine.recordMutationAfter({ executionId: "execution-1", workspaceId: "workspace-test", path: "a.txt", toolName: "edit", mutationId: "mutation-1", toolCallId: "tool-call-1", succeeded: true });
@@ -1303,7 +1303,7 @@ test("real kernel typed recovery storage persists checkpoints, operation files, 
   const checkpoints = await second.engine.listCheckpoints({ workspaceId: "workspace-test" });
   assert.equal(checkpoints.status, "ready");
   assert.equal(checkpoints.page.checkpoints.length, 1);
-  const resolved = await second.engine.resolveEntry({ workspaceId: "workspace-test", sessionId: "session-1", entryId: "user-1" });
+  const resolved = await second.engine.resolveEntry({ workspaceId: "workspace-test", conversation: { kind: "pi", sessionId: "session-1" }, entryId: "user-1" });
   assert.equal(resolved.status, "ready");
   assert.equal(resolved.binding?.checkpointId, checkpoints.page.checkpoints[0]?.id);
   await second.engine.dispose();

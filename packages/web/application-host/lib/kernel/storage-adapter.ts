@@ -1904,6 +1904,17 @@ export class KernelStorageAdapter {
     })();
     this.grants.set(key, grant); return grant;
   }
+  /** Original journal metadata survives a missing physical Source. No physical write capability. */
+  async recoveryMetadataClient(workspaceId: string): Promise<Pick<KernelScopedClient, "recoveryOperationGet" | "recoveryOperationList">> {
+    const key = JSON.stringify({workspaceId,purpose:"recovery-metadata"});
+    let grant = this.grants.get(key);
+    if (!grant) {
+      grant = this.client.issueGrant({grantId:`product:${this.options.hostId}:${randomUUID()}`,owningWorkspace:workspaceId,executionWorkspace:workspaceId,pathScopes:[],capabilities:["storage.read","recovery","recovery.maintenance"]});
+      this.grants.set(key,grant);
+    }
+    return this.client.scoped(await grant);
+  }
+
   async context(workspaceId: string, purpose: string, actorOverride?: KernelActorIdentity): Promise<KernelStorageContext & { client: KernelScopedClient }> {
     const identity: RecoveryIdentity = { authorityId: this.options.hostId, canonicalRoot: await this.options.resolveWorkspaceRoot(workspaceId), filesystemProfile: process.platform === "win32" ? "windows-local" : `${process.platform}-local`, workspaceId };
     const grant = await this.grantFor(workspaceId, purpose, actorOverride);

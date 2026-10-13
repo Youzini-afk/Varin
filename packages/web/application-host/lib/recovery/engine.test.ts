@@ -99,7 +99,7 @@ const startTurn = (engine: WorkspaceRecoveryEngine, harness: DocumentAuthorityHa
   executionId: `execution-${suffix}`,
   provenance: 'caused-by',
   runtimeGeneration: 1,
-  sessionId: 'session-1',
+  conversation: { kind: 'pi', sessionId: 'session-1' },
   userEntryId: `user-${suffix}`,
   workerId: 'worker-1',
   workspaceId: harness.identity.workspaceId,
@@ -257,7 +257,7 @@ describe('affected-file workspace recovery journal', () => {
 
     const prepared = await prepareCombined(engine, {
       entryId: 'user-1',
-      sessionId: 'session-1',
+      conversation: { kind: 'pi', sessionId: 'session-1' },
       workspaceId: harness.identity.workspaceId,
     });
     expect(prepared).toMatchObject({
@@ -311,7 +311,7 @@ describe('affected-file workspace recovery journal', () => {
     });
     try {
       const prepared = await prepareCombined(engine, {
-        entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+        entryId: 'user-1', conversation: { kind: 'pi', sessionId: 'session-1' }, workspaceId: harness.identity.workspaceId,
       });
       expect(prepared).toMatchObject({ status: 'ready', plan: { conflicts: [] } });
       const applied = await applyCombined(engine, {
@@ -345,7 +345,7 @@ describe('affected-file workspace recovery journal', () => {
     }, (event) => events.push(event));
     try {
       expect(await engine.prepareCombinedRecovery({
-        entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+        entryId: 'user-1', conversation: { kind: 'pi', sessionId: 'session-1' }, workspaceId: harness.identity.workspaceId,
       })).toMatchObject({
         status: 'failed',
         failure: { code: 'dirty-state-unavailable', retryable: true },
@@ -382,7 +382,7 @@ describe('affected-file workspace recovery journal', () => {
     await settleTurn(engine, harness);
 
     const prepared = await prepareCombined(engine, {
-      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+      entryId: 'user-1', conversation: { kind: 'pi', sessionId: 'session-1' }, workspaceId: harness.identity.workspaceId,
     });
     await engine.applyCombinedRecovery({
       confirmedConflicts: [],
@@ -401,7 +401,7 @@ describe('affected-file workspace recovery journal', () => {
     });
     const prepared = await prepareCombined(engine, {
       entryId: 'user-1',
-      sessionId: 'session-1',
+      conversation: { kind: 'pi', sessionId: 'session-1' },
       workspaceId: harness.identity.workspaceId,
     });
     expect(prepared.plan).toMatchObject({ affectedPaths: [], changedBytes: 0, coverage: 'ready' });
@@ -429,7 +429,7 @@ describe('affected-file workspace recovery journal', () => {
       .toMatchObject({ recorded: false });
     await settleTurn(engine, harness);
     const prepared = await prepareCombined(engine, {
-      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+      entryId: 'user-1', conversation: { kind: 'pi', sessionId: 'session-1' }, workspaceId: harness.identity.workspaceId,
     });
     expect(prepared.plan).toMatchObject({ affectedPaths: [], coverage: 'ready' });
   });
@@ -463,7 +463,7 @@ describe('affected-file workspace recovery journal', () => {
     await fs.promises.writeFile(target, 'user-later');
 
     const prepared = await prepareCombined(engine, {
-      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+      entryId: 'user-1', conversation: { kind: 'pi', sessionId: 'session-1' }, workspaceId: harness.identity.workspaceId,
     });
     expect(prepared.plan.conflicts).toEqual([
       expect.objectContaining({ kind: 'content-changed', path: 'note.txt' }),
@@ -507,7 +507,7 @@ describe('affected-file workspace recovery journal', () => {
     });
 
     const prepared = await prepareCombined(engine, {
-      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+      entryId: 'user-1', conversation: { kind: 'pi', sessionId: 'session-1' }, workspaceId: harness.identity.workspaceId,
     });
     expect(prepared.plan.conflicts).toEqual([
       expect.objectContaining({ kind: 'dirty-buffer', path: 'note.txt' }),
@@ -524,7 +524,7 @@ describe('affected-file workspace recovery journal', () => {
       observedResourceIds: ['shell.txt'],
     });
     const prepared = await prepareCombined(engine, {
-      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+      entryId: 'user-1', conversation: { kind: 'pi', sessionId: 'session-1' }, workspaceId: harness.identity.workspaceId,
     });
     expect(prepared.plan.coverage).toBe('none');
     expect(prepared.plan.uncoveredPaths).toEqual([
@@ -554,7 +554,7 @@ describe('affected-file workspace recovery journal', () => {
       observedResourceIds: ['note.txt', 'shell.txt'],
     });
     const prepared = await prepareCombined(engine, {
-      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+      entryId: 'user-1', conversation: { kind: 'pi', sessionId: 'session-1' }, workspaceId: harness.identity.workspaceId,
     });
     expect(prepared.plan.coverage).toBe('partial');
     expect(prepared.plan.affectedPaths).toEqual(['note.txt']);
@@ -590,7 +590,7 @@ describe('affected-file workspace recovery journal', () => {
       observedResourceIds: ['note.txt'],
     });
     const prepared = await prepareCombined(engine, {
-      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+      entryId: 'user-1', conversation: { kind: 'pi', sessionId: 'session-1' }, workspaceId: harness.identity.workspaceId,
     });
     // The journaled write is still restorable, so coverage is 'partial', not 'ready'.
     expect(prepared.plan.coverage).toBe('partial');
@@ -612,7 +612,7 @@ describe('affected-file workspace recovery journal', () => {
       observedResourceIds: [],
     });
     const prepared = await prepareCombined(engine, {
-      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+      entryId: 'user-1', conversation: { kind: 'pi', sessionId: 'session-1' }, workspaceId: harness.identity.workspaceId,
     });
     expect(prepared.plan.coverage).toBe('none');
     expect(prepared.plan.affectedPaths).toEqual([]);
@@ -638,7 +638,7 @@ describe('affected-file workspace recovery journal', () => {
       activeWriterScopes: ['process/pi-worker:worker-1@1'],
     });
     const prepared = await prepareCombined(engine, {
-      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+      entryId: 'user-1', conversation: { kind: 'pi', sessionId: 'session-1' }, workspaceId: harness.identity.workspaceId,
     });
     expect(prepared.plan.coverage).toBe('partial');
     expect(prepared.plan.uncoveredPaths).toEqual([
@@ -654,7 +654,7 @@ describe('affected-file workspace recovery journal', () => {
     await recordWrite(engine, harness, 'after');
     await settleTurn(engine, harness);
     const prepared = await prepareCombined(engine, {
-      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+      entryId: 'user-1', conversation: { kind: 'pi', sessionId: 'session-1' }, workspaceId: harness.identity.workspaceId,
     });
     const applied = await applyCombined(engine, {
       confirmedConflicts: [],
@@ -684,7 +684,7 @@ describe('affected-file workspace recovery journal', () => {
       result: { objectsDeleted: 0, recordsDeleted: 0, status: 'complete' },
     });
     const prepared = await prepareCombined(engine, {
-      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+      entryId: 'user-1', conversation: { kind: 'pi', sessionId: 'session-1' }, workspaceId: harness.identity.workspaceId,
     });
     const applied = await applyCombined(engine, {
       confirmedConflicts: [],
@@ -696,9 +696,9 @@ describe('affected-file workspace recovery journal', () => {
     expect(await fs.promises.readFile(target, 'utf8')).toBe('before');
   });
 
-  it('keeps restored files and stays resumable when Pi rejects conversation navigation', async () => {
+  it('resumes the original operation after an uncertain Pi navigation response', async () => {
     const navigation: RecoverySessionNavigation = {
-      commit: vi.fn(async () => { throw new Error('leaf changed'); }),
+      commit: vi.fn(async () => { throw new Error('navigation response unavailable'); }),
       commitLeaf: vi.fn(async () => ({ markerId: 'unused' })),
       prepare: vi.fn(async (input) => ({
         expectedLeafId: 'leaf-current',
@@ -718,14 +718,14 @@ describe('affected-file workspace recovery journal', () => {
     await recordWrite(engine, harness, 'after');
     await settleTurn(engine, harness);
     const prepared = await prepareCombined(engine, {
-      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+      entryId: 'user-1', conversation: { kind: 'pi', sessionId: 'session-1' }, workspaceId: harness.identity.workspaceId,
     });
     const result = await engine.applyCombinedRecovery({
       confirmedConflicts: [],
       conflictPolicy: 'abort', expectedRevision: prepared.plan.revision, operationId: prepared.plan.id,
     });
     expect(result).toMatchObject({ status: 'failed', failure: { code: 'navigation-conflict' } });
-    // The file restore already succeeded; only conversation navigation failed.
+    // The response is uncertain, so the original operation keeps its restored files.
     expect(await fs.promises.readFile(target, 'utf8')).toBe('before');
     expect(await engine.getCombinedOperation(prepared.plan.id)).toMatchObject({
       status: 'ready',
@@ -736,19 +736,28 @@ describe('affected-file workspace recovery journal', () => {
       },
     });
 
-    // Retried navigation finishes the operation after restart.
+    // Restart retries the original navigation identity, not a replacement plan.
+    const restartNavigation = createTestNavigation();
     const restartEngine = createWorkspaceRecoveryEngine({
       authorityId: harness.authority.hostId,
       dataDir: harness.dataDir,
       documents: harness.authority,
       durableRecoveryStore: durable,
       fileStore: createRecoveryFileStore({ fsModule: fs, fsPromises: fs.promises, pathModule: path }),
-      sessionNavigation: createTestNavigation(),
+      sessionNavigation: restartNavigation,
     });
     await restartEngine.resumeCombinedOperations();
+    expect(restartNavigation.commit).toHaveBeenCalledWith({
+      conversation: prepared.plan.conversation,
+      entryId: prepared.plan.entryId,
+      expectedLeafId: prepared.plan.expectedLeafId,
+      operationId: prepared.plan.id,
+      preparedTargetLeafId: prepared.plan.targetLeafId,
+      workspaceId: prepared.plan.workspaceId,
+    });
     expect(await restartEngine.getCombinedOperation(prepared.plan.id)).toMatchObject({
       status: 'ready',
-      operation: { conversationState: 'navigated', fileState: 'restored', state: 'complete' },
+      operation: { id: prepared.plan.id, revision: prepared.plan.revision, conversationState: 'navigated', fileState: 'restored', state: 'complete' },
     });
     expect(await fs.promises.readFile(target, 'utf8')).toBe('before');
   });
@@ -774,7 +783,7 @@ describe('affected-file workspace recovery journal', () => {
     }
   });
 
-  it('reports v5 recovery lifecycle capabilities as implemented', async () => {
+  it('reports recovery lifecycle capabilities as implemented', async () => {
     const { engine, harness } = await createHarness();
     const status = await engine.status(harness.identity.workspaceId);
     expect(status).toMatchObject({
@@ -806,7 +815,7 @@ describe('affected-file workspace recovery journal', () => {
     await fs.promises.writeFile(target, 'user-later-v1');
 
     const prepared = await prepareCombined(engine, {
-      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+      entryId: 'user-1', conversation: { kind: 'pi', sessionId: 'session-1' }, workspaceId: harness.identity.workspaceId,
     });
     expect(prepared.plan.conflicts).toHaveLength(1);
     // File changes again after conflict review — fingerprint must differ.
@@ -844,7 +853,7 @@ describe('affected-file workspace recovery journal', () => {
     });
 
     const prepared = await prepareCombined(engine, {
-      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+      entryId: 'user-1', conversation: { kind: 'pi', sessionId: 'session-1' }, workspaceId: harness.identity.workspaceId,
     });
     expect(prepared.plan.conflicts[0]?.kind).toBe('dirty-buffer');
     const rejected = await engine.applyCombinedRecovery({
@@ -868,7 +877,7 @@ describe('affected-file workspace recovery journal', () => {
     await settleTurn(engine, harness);
 
     const prepared = await prepareCombined(engine, {
-      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+      entryId: 'user-1', conversation: { kind: 'pi', sessionId: 'session-1' }, workspaceId: harness.identity.workspaceId,
     });
 
     // Recovery semantics: target = 'before' (rollback destination), safety = 'after' (current).
@@ -977,7 +986,7 @@ describe('affected-file workspace recovery journal', () => {
     await settleTurn(engine, harness, { observedResourceIds: ['extra.txt', 'note.txt'] });
 
     const prepared = await prepareCombined(engine, {
-      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+      entryId: 'user-1', conversation: { kind: 'pi', sessionId: 'session-1' }, workspaceId: harness.identity.workspaceId,
     });
     expect(prepared.plan.affectedPaths).toEqual(['extra.txt', 'note.txt']);
 
@@ -1063,7 +1072,7 @@ describe('affected-file workspace recovery journal', () => {
     await settleTurn(engine, harness);
 
     const prepared = await prepareCombined(engine, {
-      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+      entryId: 'user-1', conversation: { kind: 'pi', sessionId: 'session-1' }, workspaceId: harness.identity.workspaceId,
     });
 
     // Use a crash fileStore to capture safety and crash during applyState.

@@ -20,8 +20,8 @@ pub(crate) const CATALOG_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS metadata (ke
 	     CREATE TABLE IF NOT EXISTS object_owners (owner_id TEXT PRIMARY KEY, blob_hash TEXT NOT NULL, workspace_id TEXT, operation_id TEXT, grant_id TEXT NOT NULL, created_at INTEGER NOT NULL);
      CREATE INDEX IF NOT EXISTS object_owners_blob ON object_owners(blob_hash);
      CREATE INDEX IF NOT EXISTS object_owners_workspace ON object_owners(workspace_id);
-     CREATE TABLE IF NOT EXISTS recovery_checkpoints (id TEXT NOT NULL, workspace_id TEXT NOT NULL, sequence INTEGER NOT NULL, source TEXT NOT NULL, state TEXT NOT NULL, created_at TEXT NOT NULL, label TEXT, session_id TEXT, entry_id TEXT, execution_id TEXT, changed_path_count INTEGER NOT NULL DEFAULT 0, byte_length INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL, PRIMARY KEY(workspace_id, id), UNIQUE(workspace_id, sequence), UNIQUE(workspace_id, execution_id));
-     CREATE TABLE IF NOT EXISTS recovery_turns (execution_id TEXT NOT NULL, workspace_id TEXT NOT NULL, runtime_key TEXT NOT NULL, runtime_generation INTEGER NOT NULL, worker_id TEXT NOT NULL, session_id TEXT NOT NULL, user_entry_id TEXT NOT NULL, assistant_entry_id TEXT, checkpoint_id TEXT NOT NULL, active_writer_scopes_json TEXT NOT NULL, provenance TEXT NOT NULL, status TEXT NOT NULL, observed_resource_ids_json TEXT NOT NULL, unrecorded_resource_ids_json TEXT NOT NULL, failure_json TEXT, started_at TEXT NOT NULL, settled_at TEXT, revision INTEGER NOT NULL, PRIMARY KEY(workspace_id, execution_id), FOREIGN KEY(workspace_id, checkpoint_id) REFERENCES recovery_checkpoints(workspace_id, id) ON DELETE CASCADE);
+     CREATE TABLE IF NOT EXISTS recovery_checkpoints (id TEXT NOT NULL, workspace_id TEXT NOT NULL, sequence INTEGER NOT NULL, source TEXT NOT NULL, state TEXT NOT NULL, created_at TEXT NOT NULL, label TEXT, session_id TEXT, conversation_json TEXT, entry_id TEXT, execution_id TEXT, changed_path_count INTEGER NOT NULL DEFAULT 0, byte_length INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL, PRIMARY KEY(workspace_id, id), UNIQUE(workspace_id, sequence), UNIQUE(workspace_id, execution_id));
+     CREATE TABLE IF NOT EXISTS recovery_turns (execution_id TEXT NOT NULL, workspace_id TEXT NOT NULL, runtime_key TEXT NOT NULL, runtime_generation INTEGER NOT NULL, worker_id TEXT NOT NULL, session_id TEXT, conversation_json TEXT NOT NULL, run_id TEXT, file_target_json TEXT, user_entry_id TEXT NOT NULL, assistant_entry_id TEXT, checkpoint_id TEXT NOT NULL, active_writer_scopes_json TEXT NOT NULL, provenance TEXT NOT NULL, status TEXT NOT NULL, observed_resource_ids_json TEXT NOT NULL, unrecorded_resource_ids_json TEXT NOT NULL, failure_json TEXT, started_at TEXT NOT NULL, settled_at TEXT, revision INTEGER NOT NULL, PRIMARY KEY(workspace_id, execution_id), FOREIGN KEY(workspace_id, checkpoint_id) REFERENCES recovery_checkpoints(workspace_id, id) ON DELETE CASCADE);
      CREATE TABLE IF NOT EXISTS recovery_changes (workspace_id TEXT NOT NULL, checkpoint_id TEXT NOT NULL, path TEXT NOT NULL, execution_id TEXT NOT NULL, tool_name TEXT NOT NULL, mutation_id TEXT NOT NULL, before_json TEXT NOT NULL, after_json TEXT, state TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, revision INTEGER NOT NULL, PRIMARY KEY(workspace_id, checkpoint_id, path), FOREIGN KEY(workspace_id, checkpoint_id) REFERENCES recovery_checkpoints(workspace_id, id) ON DELETE CASCADE);
      CREATE TABLE IF NOT EXISTS recovery_operations (operation_id TEXT NOT NULL, workspace_id TEXT NOT NULL, kind TEXT NOT NULL, state TEXT NOT NULL, session_id TEXT, thread_id TEXT, run_id TEXT, data_json TEXT NOT NULL, result_json TEXT, failure_json TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, revision INTEGER NOT NULL, PRIMARY KEY(workspace_id, operation_id));
      CREATE TABLE IF NOT EXISTS recovery_operation_files (workspace_id TEXT NOT NULL, operation_id TEXT NOT NULL, ordinal INTEGER NOT NULL, path TEXT NOT NULL, expected_json TEXT, target_json TEXT, safety_json TEXT, phase TEXT NOT NULL, observed_fingerprint TEXT, revision INTEGER NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(workspace_id, operation_id, path), FOREIGN KEY(workspace_id, operation_id) REFERENCES recovery_operations(workspace_id, operation_id) ON DELETE CASCADE);
@@ -44,7 +44,7 @@ pub(crate) const CATALOG_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS metadata (ke
      CREATE INDEX IF NOT EXISTS domain_records_thread ON domain_records(workspace_id, thread_id, record_type);
      CREATE INDEX IF NOT EXISTS domain_record_refs_hash ON domain_record_refs(object_hash);";
 
-pub(crate) const CATALOG_USER_VERSION: i64 = 14;
+pub(crate) const CATALOG_USER_VERSION: i64 = 15;
 
 pub(crate) const REQUIRED_TABLES: &[&str] = &[
     "blobs",
@@ -224,6 +224,7 @@ pub(crate) const REQUIRED_COLUMNS: &[(&str, &[&str])] = &[
             "created_at",
             "label",
             "session_id",
+            "conversation_json",
             "entry_id",
             "execution_id",
             "changed_path_count",
@@ -240,6 +241,9 @@ pub(crate) const REQUIRED_COLUMNS: &[(&str, &[&str])] = &[
             "runtime_generation",
             "worker_id",
             "session_id",
+            "conversation_json",
+            "run_id",
+            "file_target_json",
             "user_entry_id",
             "assistant_entry_id",
             "checkpoint_id",

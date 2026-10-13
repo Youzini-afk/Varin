@@ -1241,6 +1241,60 @@ export interface LanguageQuery {
   direction?: "incoming" | "outgoing";
 }
 
+export interface RecoveryAnchor {
+  executionId: string;
+  threadId: string;
+  branchId: string;
+  runId: string;
+  entryId: string;
+  epoch: number;
+}
+
+export interface RecoveryRangeTurn {
+  anchor: RecoveryAnchor;
+  entryIds: string[];
+  source: LaunchSource | null;
+  uncovered: boolean;
+  settled: boolean;
+}
+
+export interface NavigationSelectParams {
+  threadId: string;
+  branchId: string;
+  entryId: string;
+}
+
+export interface NavigationParams {
+  threadId: string;
+  branchId: string;
+  key: string;
+  expectedHeadId: string | null;
+  targetHeadId: string | null;
+  undoOf?: string;
+}
+
+export interface NavigationReceiptParams {
+  threadId: string;
+  branchId: string;
+  key?: string;
+}
+
+export interface NavigationSelection {
+  expectedHeadId: string | null;
+  targetHeadId: string | null;
+  removedEntryIds: string[];
+  editorText?: string;
+}
+
+export interface NavigationReceipt {
+  threadId: string;
+  branchId: string;
+  key: string;
+  previousHeadId: string | null;
+  headId: string | null;
+  alreadyApplied: boolean;
+}
+
 export interface HistoryPageParams {
   branchId: string;
   headId?: string;
@@ -1325,7 +1379,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 24; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 25; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 

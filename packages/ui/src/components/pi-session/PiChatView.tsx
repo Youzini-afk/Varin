@@ -1,11 +1,12 @@
 import { HarnessThreadParentLink } from './HarnessThreadConversation';
 import React from 'react';
 import type {
+  WorkspaceCombinedRecoveryApplyInput,
   WorkspaceCombinedRecoveryOperation,
   WorkspaceCombinedRecoveryPlan,
 } from '@varin/extension-contract';
 import { isPiRequestOutcomeUnknown } from '@/lib/pi-runtime/request-outcome';
-import { getRuntimeKey, runtimeFetch } from '@varin/application-client';
+import { getRuntimeEndpointGeneration, getRuntimeKey, runtimeFetch } from '@varin/application-client';
 import type {
   CompactionTrace,
   ModelDescriptor,
@@ -76,6 +77,7 @@ import { projectPiAssistantWaiting } from './piAssistantWaiting';
 import { PiRecoveryDialog } from './PiRecoveryDialog';
 import { parsePiLocalCommand } from './piLocalCommands';
 import { shouldOpenRecoveryDialog } from './piRecoveryPolicy';
+import { applyCombinedRecoveryAndRead, assertCombinedRecoveryIdentity, combinedRecoveryStatus } from './combinedRecoveryResult';
 import { HarnessThreadsPanel, type WorkOverviewView } from './HarnessThreadsPanel';
 import { HarnessThreadStateProvider } from './HarnessThreadState';
 import { parseHarnessThreadMutation } from './harnessThreadPresentation';
@@ -260,7 +262,14 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const workFocusChangeInFlight = React.useRef(false);
   const [recoveryEntry, setRecoveryEntry] = React.useState<PiSessionMessageEntry | null>(null);
   const [recoveryPlan, setRecoveryPlan] = React.useState<WorkspaceCombinedRecoveryPlan | null>(null);
+  const [recoveryAttempt, setRecoveryAttempt] = React.useState<WorkspaceCombinedRecoveryApplyInput>();
+  const [recoveryDialogOpen, setRecoveryDialogOpen] = React.useState(false);
   const [recoveryBusyEntryId, setRecoveryBusyEntryId] = React.useState<string | null>(null);
+  const recoveryInFlight = React.useRef(false);
+  React.useEffect(() => {
+    setRecoveryEntry(null); setRecoveryPlan(null); setRecoveryAttempt(undefined); setRecoveryBusyEntryId(null); setRecoveryDialogOpen(false);
+    recoveryInFlight.current = false;
+  }, [conversationIdentity]);
   const [forkBusyEntryId, setForkBusyEntryId] = React.useState<string | null>(null);
   const [threadBusyEntryId, setThreadBusyEntryId] = React.useState<string | null>(null);
   const [treeInitialQuery, setTreeInitialQuery] = React.useState('');
@@ -664,10 +673,12 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   }, [pendingCwd, runtimeKey, setPendingPiDraft, submitPendingDraft]);
 
   const runConversationRecovery = React.useCallback(async (entry: PiSessionMessageEntry) => {
-    if (!currentSessionId) return;
+    if (!currentSessionId || latestConversationIdentity.current !== conversationIdentity) return;
     setRecoveryBusyEntryId(entry.id);
+    const host = getRuntimeEndpointGeneration();
     try {
       const result = await recoverTo(currentSessionId, entry.id, 'conversation');
+      if (latestConversationIdentity.current !== conversationIdentity || getRuntimeKey() !== runtimeKey || getRuntimeEndpointGeneration() !== host) return;
       if (result.editorText !== undefined || result.editorImages !== undefined) {
         updateDraft(currentSessionId, {
           ...(result.editorImages === undefined ? {} : { images: result.editorImages }),
@@ -679,18 +690,20 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         toast.success(t('settings.varin.recovery.preference.conversation.label'));
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      if (latestConversationIdentity.current === conversationIdentity && getRuntimeEndpointGeneration() === host) toast.error(error instanceof Error ? error.message : String(error));
       throw error;
     } finally {
-      setRecoveryBusyEntryId(null);
+      if (latestConversationIdentity.current === conversationIdentity && getRuntimeEndpointGeneration() === host) { setRecoveryBusyEntryId(null); recoveryInFlight.current = false; }
     }
-  }, [currentSessionId, recoverTo, t, updateDraft]);
+  }, [conversationIdentity, currentSessionId, recoverTo, runtimeKey, t, updateDraft]);
 
   const handleCombinedRecoveryResult = React.useCallback(async (
     operation: WorkspaceCombinedRecoveryOperation,
   ) => {
-    if (!currentSessionId) return;
+    if (!currentSessionId || latestConversationIdentity.current !== conversationIdentity || getRuntimeKey() !== runtimeKey
+      || operation.conversation.kind !== 'pi' || operation.conversation.sessionId !== currentSessionId) return;
     if (operation.state === 'complete') {
+      setRecoveryAttempt(undefined); setRecoveryPlan(null); setRecoveryEntry(null); setRecoveryDialogOpen(false);
       if (operation.editorText !== undefined || operation.editorImages !== undefined) {
         updateDraft(currentSessionId, {
           ...(operation.editorImages === undefined ? {} : { images: operation.editorImages }),
@@ -702,47 +715,64 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       toast.success(t('chat.recoveryDialog.completed'));
     }
     setRecoveryBusyEntryId(null);
-  }, [currentSessionId, refreshEntries, t, updateDraft]);
+  }, [conversationIdentity, currentSessionId, refreshEntries, runtimeKey, t, updateDraft]);
 
   const runCombinedRecovery = React.useCallback(async (entry: PiSessionMessageEntry) => {
     if (!currentSessionId || currentRecord?.snapshot?.workspace?.kind !== 'workspace') return;
     setRecoveryBusyEntryId(entry.id);
+    let plan: WorkspaceCombinedRecoveryPlan | undefined;
+    let attempt: WorkspaceCombinedRecoveryApplyInput | undefined;
+    const host = getRuntimeEndpointGeneration();
+    const current = () => latestConversationIdentity.current === conversationIdentity && getRuntimeKey() === runtimeKey && getRuntimeEndpointGeneration() === host;
     try {
       const workspace = currentRecord.snapshot.workspace;
+      const api = getWorkspaceRecoveryAPI();
       const prepared = requireWorkspaceRecoveryResult(
-        await getWorkspaceRecoveryAPI().prepareCombinedRecovery({
+        await api.prepareCombinedRecovery({
           entryId: entry.id,
-          sessionId: currentSessionId,
+          conversation: { kind: 'pi', sessionId: currentSessionId },
           workspaceId: workspace.authorityId ?? workspace.id,
         }),
       );
+      plan = prepared.plan;
+      if (!current()) { if (getRuntimeEndpointGeneration() === host) void api.cancelCombinedOperation(plan.id).catch(() => undefined); return; }
       if (shouldOpenRecoveryDialog(recoveryPreference, prepared.plan)) {
+        setRecoveryDialogOpen(true);
         setRecoveryPlan(prepared.plan);
         setRecoveryEntry(entry);
         return;
       }
-      const applied = requireWorkspaceRecoveryResult(
-        await getWorkspaceRecoveryAPI().applyCombinedRecovery({
+      attempt = {
           confirmedConflicts: [],
           conflictPolicy: 'abort',
           expectedRevision: prepared.plan.revision,
           operationId: prepared.plan.id,
-        }),
-      );
-      await handleCombinedRecoveryResult(applied.operation);
+        };
+      const operation = await applyCombinedRecoveryAndRead(api, attempt);
+      if (!current()) return;
+      assertCombinedRecoveryIdentity(operation, prepared.plan);
+      await handleCombinedRecoveryResult(operation);
+      if (operation.state !== 'complete') throw new Error(combinedRecoveryStatus(operation));
     } catch (error) {
+      if (!current()) return;
       toast.error(error instanceof Error ? error.message : String(error));
+      if (plan && attempt) { setRecoveryPlan(plan); setRecoveryEntry(entry); setRecoveryAttempt(attempt); setRecoveryDialogOpen(true); }
       setRecoveryBusyEntryId(null);
+    } finally {
+      if (current()) recoveryInFlight.current = false;
     }
-  }, [currentRecord?.snapshot, currentSessionId, handleCombinedRecoveryResult, recoveryPreference]);
+  }, [conversationIdentity, currentRecord?.snapshot, currentSessionId, handleCombinedRecoveryResult, recoveryPreference, runtimeKey]);
 
   const handleRecover = React.useCallback((entry: PiSessionMessageEntry) => {
+    if (recoveryInFlight.current) return;
+    if (recoveryPlan) { setRecoveryDialogOpen(true); return; }
+    recoveryInFlight.current = true;
     if (recoveryPreference === 'conversation' || currentRecord?.snapshot?.workspace?.kind !== 'workspace') {
-      void runConversationRecovery(entry);
+      void runConversationRecovery(entry).catch(() => undefined);
       return;
     }
     void runCombinedRecovery(entry);
-  }, [currentRecord?.snapshot?.workspace?.kind, recoveryPreference, runCombinedRecovery, runConversationRecovery]);
+  }, [currentRecord?.snapshot?.workspace?.kind, recoveryPlan, recoveryPreference, runCombinedRecovery, runConversationRecovery]);
 
   const handleFork = React.useCallback(async (entry: PiSessionMessageEntry) => {
     if (!currentSessionId || forkBusyEntryId) return;
@@ -1045,17 +1075,24 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         </React.Suspense>
       ) : null}
 
-      {recoveryEntry && recoveryPlan && currentSessionId && snapshot?.workspace?.kind === 'workspace' ? (
+      {recoveryPlan && !recoveryDialogOpen && <button type="button" className="px-4 py-2 text-sm underline" onClick={() => setRecoveryDialogOpen(true)}>Check recovery status</button>}
+      {recoveryDialogOpen && recoveryEntry && recoveryPlan && currentSessionId && snapshot?.workspace?.kind === 'workspace' ? (
         <PiRecoveryDialog
+          key={`${conversationIdentity}:${recoveryPlan.id}`}
           open
           plan={recoveryPlan}
+          initialAttempt={recoveryAttempt}
+          onAttempt={setRecoveryAttempt}
           onClose={() => {
-            setRecoveryEntry(null);
-            setRecoveryPlan(null);
+            setRecoveryDialogOpen(false);
+            if (!recoveryAttempt) { setRecoveryEntry(null); setRecoveryPlan(null); }
             setRecoveryBusyEntryId(null);
           }}
           onCombinedResult={handleCombinedRecoveryResult}
-          onConversationOnly={() => runConversationRecovery(recoveryEntry)}
+          onConversationOnly={async () => {
+            setRecoveryPlan(null); setRecoveryAttempt(undefined); setRecoveryEntry(null); setRecoveryDialogOpen(false);
+            await runConversationRecovery(recoveryEntry);
+          }}
         />
       ) : null}
       </HarnessThreadStateProvider>

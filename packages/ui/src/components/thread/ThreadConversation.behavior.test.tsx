@@ -10,9 +10,24 @@ import type { ContextCheckpoint, ThreadIdentity, ThreadSnapshot, ThreadSubmit, T
 import type { ChildTask, DelegatedExecution, StoredMedia, McpInteractionView } from '@varin/protocol';
 import { ThreadConversation } from './ThreadConversation';
 import { AgentWorkspaceShell } from '@/workbenches/agent/AgentWorkspaceShell';
+import { useUIStore } from '@/stores/useUIStore';
+import type { WorkspaceCombinedRecoveryOperation, WorkspaceCombinedRecoveryPlan, WorkspaceRecoveryAPI } from '@varin/extension-contract';
 
 const runtimeState = vi.hoisted(() => ({ api: undefined as ThreadsAPI | undefined }));
 const endpoint = vi.hoisted(() => ({ generation: 1, listeners: new Set<() => void>() }));
+const recoveryService = vi.hoisted(() => ({ api: undefined as WorkspaceRecoveryAPI | undefined }));
+vi.mock('@/lib/recovery/workspaceRecovery', async original => ({
+  ...await original<typeof import('@/lib/recovery/workspaceRecovery')>(),
+  getWorkspaceRecoveryAPI: () => { if (!recoveryService.api) throw new Error('Recovery unavailable'); return recoveryService.api; },
+}));
+vi.mock('@/components/ui/dialog', () => ({
+  Dialog: ({ open, children }: React.PropsWithChildren<{ open: boolean }>) => open ? <div role="dialog">{children}</div> : null,
+  DialogContent: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  DialogHeader: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  DialogFooter: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  DialogTitle: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  DialogDescription: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+}));
 vi.mock('@varin/application-client', async original => ({
   ...await original<typeof import('@varin/application-client')>(),
   getRuntimeEndpointGeneration: () => endpoint.generation,
@@ -62,6 +77,7 @@ function fixture(active = false) {
     listMcpInteractions: vi.fn(async () => ({ items: [], nextCursor: null })), readMcpInteraction: unused, respondMcpInteraction: unused,
     reviewMcpSamplingRequest: unused, reviewMcpSamplingOutput: unused,
     snapshot: async () => structuredClone(view), submit, enqueue, editInput, cancelInput, cancelRun,
+    recoverySource: unused, prepareNavigation: unused, navigate: unused, navigationReceipt: unused,
     inspectTools: unused, inspectPolicy: unused, restartPolicy: unused, cancelPolicyUpdate: unused, selectModel: unused, decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, retryPreparation: unused, events: async () => [],
     observe: async (_cursor, onEvent, { signal }) => new Promise<void>(resolve => { listener = onEvent; if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true }); }),
   };
@@ -73,6 +89,8 @@ beforeEach(() => {
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test-image');
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
   endpoint.generation = 1;
+  recoveryService.api = undefined;
+  useUIStore.setState({ recoveryPreference: 'conversation' });
   runtimeState.api = undefined; vi.mocked(attachProcessTerminal).mockClear();
   const documents: Pick<DocumentsAPI, 'resolveWorkspace'> = { resolveWorkspace: async () => ({ workspaceId: 'canonical-source-workspace', hostId: 'fixture-host', epoch: 1 }) };
   registerRuntimeAPIs({ documents } as RuntimeAPIs);
@@ -2440,4 +2458,359 @@ it('applies a changed Bot model to the next draft after a cancelled Run and pres
   await edit('[aria-label="Message thread"]', 'Use my later draft selection');
   await submitForm(container.querySelector('form')!);
   expect(f.submit).toHaveBeenLastCalledWith(expect.objectContaining({ model: { providerId: 'fixture-provider', modelId: 'fixture-model', thinkingLevel: 'off' } }));
+});
+
+function navigationFixture() {
+  const f = fixture();
+  const user = { id: 'restore-user', thread_id: identity.threadId, run_id: 'finished-run', parent: 'retained-assistant', source: 'user' as const, provider: null, content: { text: 'Original user instruction', attachments: [storedImage] } };
+  const assistant = { ...user, id: 'retained-assistant', parent: null, source: 'assistant' as const, content: { id: 'retained-assistant', content: { kind: 'text', text: 'Retained assistant answer' } } };
+  f.view.history = [assistant, user]; f.view.historyPage.head = user.id; f.view.thread.branches[0]!.head = user.id;
+  const prepareNavigation = vi.fn<ThreadsAPI['prepareNavigation']>(async input => ({ expectedHeadId: user.id, targetHeadId: assistant.id, removedEntryIds: [user.id],
+    ...(input.entryId === user.id ? { editorText: user.content.text, editorImages: [{ data: imageData, mimeType: 'image/png' }] } : {}) }));
+  const navigate = vi.fn<ThreadsAPI['navigate']>(async input => {
+    f.view.history = input.targetHeadId === user.id ? [assistant, user] : [assistant];
+    f.view.historyPage.head = input.targetHeadId; f.view.thread.branches[0]!.head = input.targetHeadId;
+    return { threadId: input.threadId, branchId: input.branchId, previousHeadId: input.expectedHeadId, headId: input.targetHeadId, key: input.key, alreadyApplied: false };
+  });
+  const navigationReceipt = vi.fn<ThreadsAPI['navigationReceipt']>(async () => null);
+  const recoverySource = vi.fn<ThreadsAPI['recoverySource']>(async () => ({ workspaceId: 'actual-source-owner', mode: 'materialized', runId: 'finished-run' }));
+  const fork = vi.fn<ThreadsAPI['fork']>(async () => identity);
+  Object.assign(f.api, { prepareNavigation, navigate, navigationReceipt, recoverySource, fork });
+  return { ...f, user, assistant, prepareNavigation, navigate, navigationReceipt, recoverySource, fork };
+}
+
+function combinedFixture(f: ReturnType<typeof navigationFixture>, patch: Partial<WorkspaceCombinedRecoveryPlan> = {}) {
+  const plan: WorkspaceCombinedRecoveryPlan = { id: 'original-recovery', revision: 'original-revision', workspaceId: 'actual-source-owner',
+    conversation: { kind: 'thread', threadId: identity.threadId, branchId: identity.branchId }, entryId: f.user.id,
+    expectedLeafId: f.user.id, targetLeafId: f.assistant.id, removedEntryIds: [f.user.id], affectedPaths: ['result.txt'], changedBytes: 4,
+    conflicts: [], coverage: 'ready', uncoveredPaths: [], uncoveredReasons: [], createdAt: '2026-10-12T00:00:00Z', ...patch };
+  const operation: WorkspaceCombinedRecoveryOperation = { id: plan.id, revision: plan.revision, workspaceId: plan.workspaceId, conversation: plan.conversation,
+    entryId: plan.entryId, expectedLeafId: plan.expectedLeafId, targetLeafId: plan.targetLeafId, state: 'complete', fileState: 'restored', conversationState: 'navigated',
+    affectedPathCount: 1, appliedPathCount: 1, createdAt: plan.createdAt, updatedAt: plan.createdAt, editorText: f.user.content.text, editorImages: [] };
+  const prepareCombinedRecovery = vi.fn<WorkspaceRecoveryAPI['prepareCombinedRecovery']>(async () => ({ status: 'ready', plan }));
+  const applyCombinedRecovery = vi.fn<WorkspaceRecoveryAPI['applyCombinedRecovery']>(async input => {
+    f.view.history = [f.assistant]; f.view.historyPage.head = plan.targetLeafId; f.view.thread.branches[0]!.head = plan.targetLeafId;
+    return { status: 'ready', operation: { ...operation, id: input.operationId } };
+  });
+  const getCombinedOperation = vi.fn<WorkspaceRecoveryAPI['getCombinedOperation']>(async () => ({ status: 'ready', operation }));
+  const cancelCombinedOperation = vi.fn<WorkspaceRecoveryAPI['cancelCombinedOperation']>(async () => ({ status: 'ready', operation: { ...operation, state: 'aborted', fileState: 'unchanged', conversationState: 'unchanged' } }));
+  const prepareCombinedUndo = vi.fn<WorkspaceRecoveryAPI['prepareCombinedUndo']>(async () => ({ status: 'ready', plan: { ...plan, id: 'undo-recovery', undoOf: plan.id } }));
+  recoveryService.api = { prepareCombinedRecovery, applyCombinedRecovery, getCombinedOperation, cancelCombinedOperation, prepareCombinedUndo } as unknown as WorkspaceRecoveryAPI;
+  return { plan, operation, prepareCombinedRecovery, applyCombinedRecovery, getCombinedOperation, cancelCombinedOperation, prepareCombinedUndo };
+}
+
+it('thread recovery restores the owner-selected head and original image draft, then undoes the same branch without running work', async () => {
+  const f = navigationFixture();
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} onBranchCreated={vi.fn()} />));
+  await edit('[aria-label="Message thread"]', 'Current draft');
+  await act(async () => button('Restore before this message').click());
+  expect(f.prepareNavigation).toHaveBeenCalledWith({ ...identity, entryId: f.user.id });
+  expect(f.navigate).toHaveBeenCalledWith({ ...identity, key: expect.any(String), expectedHeadId: f.user.id, targetHeadId: f.assistant.id });
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('Original user instruction');
+  expect(container.querySelector('img')).not.toBeNull();
+  expect(container.querySelectorAll('article')).toHaveLength(1);
+  const original = f.navigate.mock.calls[0]![0];
+  await act(async () => button('Undo conversation recovery').click());
+  expect(f.navigate.mock.calls[1]![0]).toMatchObject({ ...identity, expectedHeadId: f.assistant.id, targetHeadId: f.user.id, undoOf: original.key });
+  expect(f.navigate.mock.calls[1]![0].key).not.toBe(original.key);
+  expect(container.querySelectorAll('article')).toHaveLength(2);
+  expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled(); expect(f.fork).not.toHaveBeenCalled(); expect(f.api.goals.start).not.toHaveBeenCalled();
+});
+
+it('thread recovery retains assistant content and current draft while respecting the owner-selected boundary', async () => {
+  const f = navigationFixture();
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await edit('[aria-label="Message thread"]', 'Keep this draft');
+  await act(async () => button('Restore through this message').click());
+  expect(f.prepareNavigation).toHaveBeenCalledWith({ ...identity, entryId: f.assistant.id });
+  expect(container.querySelectorAll('article')).toHaveLength(1);
+  expect(container.textContent).toContain('Retained assistant answer');
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('Keep this draft');
+});
+
+it('thread recovery freezes an uncertain navigation and retries the original key and head after reading its receipt', async () => {
+  const f = navigationFixture(); f.navigate.mockRejectedValueOnce(new Error('Response lost'));
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await edit('[aria-label="Message thread"]', 'Unsaved current draft');
+  await act(async () => button('Restore before this message').click());
+  expect(container.querySelectorAll('article')).toHaveLength(2);
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('Unsaved current draft');
+  expect(button('Send').disabled).toBe(true);
+  await act(async () => button('Retry conversation recovery').click());
+  expect(f.prepareNavigation).toHaveBeenCalledOnce(); expect(f.navigate).toHaveBeenCalledTimes(2);
+  expect(f.navigate.mock.calls[1]![0]).toEqual(f.navigate.mock.calls[0]![0]);
+  expect(f.navigationReceipt).toHaveBeenCalledTimes(2);
+  expect(container.querySelectorAll('article')).toHaveLength(1);
+});
+
+it('thread recovery reads an applied receipt after a lost response without sending navigation again', async () => {
+  const f = navigationFixture(); const originalNavigate = f.navigate.getMockImplementation()!;
+  f.navigate.mockImplementationOnce(async input => {
+    const receipt = await originalNavigate(input);
+    f.navigationReceipt.mockResolvedValue({ ...receipt, alreadyApplied: true });
+    throw new Error('Reply lost after commit');
+  });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Restore before this message').click());
+  expect(f.navigate).toHaveBeenCalledOnce(); expect(f.navigationReceipt).toHaveBeenCalledOnce();
+  expect(container.querySelectorAll('article')).toHaveLength(1);
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('Original user instruction');
+});
+
+it.each(['thread', 'host'] as const)('thread recovery cannot submit a late prepared selection after switching %s', async changed => {
+  const f = navigationFixture(); let resolve!: (selection: Awaited<ReturnType<ThreadsAPI['prepareNavigation']>>) => void;
+  f.prepareNavigation.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Restore before this message').click());
+  const next = { ...identity, threadId: changed === 'thread' ? 'another-thread' : identity.threadId };
+  if (changed === 'host') { endpoint.generation += 1; await act(async () => endpoint.listeners.forEach(listener => listener())); }
+  else await act(async () => root.render(<ThreadConversation api={f.api} identity={next} />));
+  await act(async () => resolve({ expectedHeadId: f.user.id, targetHeadId: f.assistant.id, removedEntryIds: [f.user.id], editorText: 'Old conversation' }));
+  expect(f.navigate).not.toHaveBeenCalled(); expect(f.recoverySource).not.toHaveBeenCalled();
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).not.toBe('Old conversation');
+});
+
+it('thread recovery uses the actual materialized source owner for automatic combined restore and operation-based undo', async () => {
+  const f = navigationFixture(); const recovery = combinedFixture(f); useUIStore.setState({ recoveryPreference: 'both' });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} initialWorkspacePath="/unrelated-sidebar" />));
+  await act(async () => button('Restore before this message').click());
+  expect(recovery.prepareCombinedRecovery).toHaveBeenCalledWith({ workspaceId: 'actual-source-owner', conversation: { kind: 'thread', threadId: identity.threadId, branchId: identity.branchId }, entryId: f.user.id });
+  expect(recovery.applyCombinedRecovery).toHaveBeenCalledWith({ operationId: recovery.plan.id, expectedRevision: recovery.plan.revision, conflictPolicy: 'abort', confirmedConflicts: [] });
+  expect(container.querySelector('[role="dialog"]')).toBeNull(); expect(f.navigate).not.toHaveBeenCalled();
+  expect(container.querySelectorAll('article')).toHaveLength(1);
+  await act(async () => button('Undo conversation and file recovery').click());
+  expect(recovery.prepareCombinedUndo).toHaveBeenCalledWith('original-recovery');
+  expect(recovery.applyCombinedRecovery).toHaveBeenLastCalledWith(expect.objectContaining({ operationId: 'undo-recovery' }));
+});
+
+it('thread recovery keeps fixed-branch sources conversation-only even when combined recovery is preferred', async () => {
+  const f = navigationFixture(); const recovery = combinedFixture(f); useUIStore.setState({ recoveryPreference: 'both' });
+  f.recoverySource.mockResolvedValue({ workspaceId: 'read-only-source', mode: 'fixed_branch', runId: 'finished-run' });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Restore before this message').click());
+  expect(f.navigate).toHaveBeenCalledOnce(); expect(recovery.prepareCombinedRecovery).not.toHaveBeenCalled();
+});
+
+it('thread recovery observes the original combined operation after uncertain file and history commits', async () => {
+  const f = navigationFixture(); const recovery = combinedFixture(f); useUIStore.setState({ recoveryPreference: 'both' });
+  recovery.applyCombinedRecovery.mockRejectedValueOnce(new Error('Connection lost'));
+  recovery.getCombinedOperation.mockRejectedValueOnce(new Error('Offline'));
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Restore before this message').click());
+  expect(container.querySelectorAll('article')).toHaveLength(2);
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('');
+  f.view.history = [f.assistant]; f.view.historyPage.head = f.assistant.id;
+  await act(async () => button('Check recovery status').click());
+  expect(recovery.getCombinedOperation).toHaveBeenLastCalledWith('original-recovery');
+  expect(recovery.prepareCombinedRecovery).toHaveBeenCalledOnce(); expect(recovery.applyCombinedRecovery).toHaveBeenCalledOnce();
+  expect(f.navigate).not.toHaveBeenCalled(); expect(container.querySelectorAll('article')).toHaveLength(1);
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('Original user instruction');
+});
+
+it('thread recovery requires dirty buffers to be resolved and cancels the unused file plan before conversation-only navigation', async () => {
+  const f = navigationFixture(); const recovery = combinedFixture(f, { conflicts: [{ kind: 'dirty-buffer', path: 'result.txt', message: 'Unsaved editor', fingerprint: 'dirty-revision' }] });
+  useUIStore.setState({ recoveryPreference: 'both' });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Restore before this message').click());
+  expect(container.textContent).toContain('Save or discard the affected editor buffers first');
+  expect(button('settings.varin.recovery.preference.both.label')).toBeUndefined();
+  const conversation = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.conversation.label'))!;
+  await act(async () => conversation.click());
+  expect(recovery.cancelCombinedOperation).toHaveBeenCalledWith('original-recovery');
+  expect(recovery.applyCombinedRecovery).not.toHaveBeenCalled(); expect(f.navigate).toHaveBeenCalledOnce();
+  expect(recovery.cancelCombinedOperation.mock.invocationCallOrder[0]).toBeLessThan(f.navigate.mock.invocationCallOrder[0]!);
+});
+
+it('thread recovery retains its key when a kernel disconnect is returned as HTTP 400 and receipt observation is unavailable', async () => {
+  const f = navigationFixture();
+  f.navigate.mockRejectedValueOnce(new ThreadRequestError(400, 'kernel-response-discarded'));
+  f.navigationReceipt.mockRejectedValueOnce(new Error('Kernel unavailable'));
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Restore before this message').click());
+  expect(button('Retry conversation recovery')).toBeDefined();
+  expect(button('Send').disabled).toBe(true);
+  await act(async () => button('Retry conversation recovery').click());
+  expect(f.navigate.mock.calls[1]![0]).toEqual(f.navigate.mock.calls[0]![0]);
+  expect(f.prepareNavigation).toHaveBeenCalledOnce();
+});
+
+it('thread recovery preserves incomplete combined operation facts without moving the displayed history', async () => {
+  const f = navigationFixture(); const recovery = combinedFixture(f); useUIStore.setState({ recoveryPreference: 'both' });
+  recovery.applyCombinedRecovery.mockResolvedValueOnce({ status: 'ready', operation: { ...recovery.operation, state: 'needs-attention', fileState: 'needs-attention', conversationState: 'unchanged', appliedPathCount: 1 } });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Restore before this message').click());
+  expect(container.textContent).toContain('needs-attention');
+  expect(container.textContent).toContain('conversation: unchanged');
+  expect(container.querySelectorAll('article')).toHaveLength(2);
+  expect(f.navigate).not.toHaveBeenCalled(); expect(button('Check recovery status')).toBeDefined();
+});
+
+it('thread recovery freezes a confirmed conflict acknowledgement and observes that operation after the modal is dismissed', async () => {
+  const f = navigationFixture(); const recovery = combinedFixture(f, { coverage: 'partial', uncoveredPaths: [{ path: 'shell.txt', source: 'shell' }],
+    conflicts: [{ kind: 'content-changed', path: 'result.txt', message: 'External edit', fingerprint: 'external-revision' }] });
+  useUIStore.setState({ recoveryPreference: 'both' });
+  recovery.applyCombinedRecovery.mockRejectedValueOnce(new Error('Reply lost'));
+  recovery.getCombinedOperation.mockRejectedValueOnce(new Error('Offline'));
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Restore before this message').click());
+  expect(container.textContent).toContain('shell.txt');
+  const apply = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.both.label'))!;
+  await act(async () => apply.click());
+  expect(recovery.applyCombinedRecovery).toHaveBeenCalledWith({ operationId: recovery.plan.id, expectedRevision: recovery.plan.revision, conflictPolicy: 'overwrite-confirmed', confirmedConflicts: [{ path: 'result.txt', fingerprint: 'external-revision' }] });
+  const conversation = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.conversation.label'))!;
+  expect(conversation.disabled).toBe(true);
+  await act(async () => button('sessions.sidebar.dialogs.cancel').click());
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+  recovery.getCombinedOperation.mockResolvedValueOnce({ status: 'ready', operation: { ...recovery.operation, state: 'planned', conversationState: 'unchanged', fileState: 'unchanged' } });
+  await act(async () => button('Check recovery status').click());
+  expect(recovery.prepareCombinedRecovery).toHaveBeenCalledOnce();
+  expect(recovery.applyCombinedRecovery.mock.calls[1]![0]).toEqual(recovery.applyCombinedRecovery.mock.calls[0]![0]);
+});
+
+it('thread recovery refuses conversation-only navigation when cancellation of its prepared file operation is unconfirmed', async () => {
+  const f = navigationFixture(); const recovery = combinedFixture(f); useUIStore.setState({ recoveryPreference: 'ask' });
+  recovery.cancelCombinedOperation.mockRejectedValueOnce(new Error('Cancellation unconfirmed'));
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Restore before this message').click());
+  const conversation = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.conversation.label'))!;
+  await act(async () => conversation.click());
+  expect(f.navigate).not.toHaveBeenCalled(); expect(recovery.applyCombinedRecovery).not.toHaveBeenCalled();
+  expect(container.textContent).toContain('Cancellation unconfirmed');
+});
+
+it('thread recovery keeps an uncertain conversation-only choice after its file dialog has closed', async () => {
+  const f = navigationFixture(); combinedFixture(f); useUIStore.setState({ recoveryPreference: 'ask' });
+  f.navigate.mockRejectedValueOnce(new Error('Navigation response lost'));
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Restore before this message').click());
+  const conversation = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.conversation.label'))!;
+  await act(async () => conversation.click());
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+  expect(button('Retry conversation recovery')).toBeDefined(); expect(button('Send').disabled).toBe(true);
+  await act(async () => button('Retry conversation recovery').click());
+  expect(f.navigate.mock.calls[1]![0]).toEqual(f.navigate.mock.calls[0]![0]);
+});
+
+it('thread recovery runs one combined action for repeated modal clicks and survives strict effect replay', async () => {
+  const f = navigationFixture(); const recovery = combinedFixture(f); useUIStore.setState({ recoveryPreference: 'ask' });
+  let resolve!: (result: Awaited<ReturnType<WorkspaceRecoveryAPI['applyCombinedRecovery']>>) => void;
+  recovery.applyCombinedRecovery.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  await act(async () => root.render(<React.StrictMode><ThreadConversation api={f.api} identity={identity} /></React.StrictMode>));
+  await act(async () => button('Restore before this message').click());
+  expect(recovery.cancelCombinedOperation).not.toHaveBeenCalled();
+  const apply = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.both.label'))!;
+  await act(async () => { apply.click(); apply.click(); });
+  expect(recovery.applyCombinedRecovery).toHaveBeenCalledOnce();
+  await act(async () => resolve({ status: 'ready', operation: recovery.operation }));
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+});
+
+it('thread recovery does not publish a late committed navigation into another conversation draft', async () => {
+  const f = navigationFixture(); let resolve!: (receipt: Awaited<ReturnType<ThreadsAPI['navigate']>>) => void;
+  f.navigate.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Restore before this message').click());
+  const request = f.navigate.mock.calls[0]![0];
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={{ ...identity, threadId: 'new-conversation' }} />));
+  await edit('[aria-label="Message thread"]', 'New conversation draft');
+  await act(async () => resolve({ threadId: request.threadId, branchId: request.branchId, key: request.key, previousHeadId: request.expectedHeadId, headId: request.targetHeadId, alreadyApplied: false }));
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('New conversation draft');
+  expect(container.textContent).not.toContain('Conversation restored.');
+});
+
+it('thread recovery never sends an old operation readback to a newly selected Host', async () => {
+  const f = navigationFixture(); const recovery = combinedFixture(f); useUIStore.setState({ recoveryPreference: 'both' });
+  let reject!: (error: Error) => void;
+  recovery.applyCombinedRecovery.mockImplementationOnce(() => new Promise((_done, fail) => { reject = fail; }));
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Restore before this message').click());
+  endpoint.generation += 1; await act(async () => endpoint.listeners.forEach(listener => listener()));
+  await edit('[aria-label="Message thread"]', 'New Host draft');
+  await act(async () => reject(new Error('Old Host disconnected')));
+  expect(recovery.getCombinedOperation).not.toHaveBeenCalled();
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('New Host draft');
+  expect(container.textContent).not.toContain('Old Host disconnected');
+});
+
+it('thread recovery resumes a stopped nonterminal combined operation using its original revision and acknowledgement', async () => {
+  const f = navigationFixture(); const recovery = combinedFixture(f); useUIStore.setState({ recoveryPreference: 'both' });
+  const interrupted = { ...recovery.operation, state: 'navigating-conversation' as const, conversationState: 'unchanged' as const };
+  recovery.applyCombinedRecovery.mockResolvedValueOnce({ status: 'ready', operation: interrupted });
+  recovery.getCombinedOperation.mockResolvedValueOnce({ status: 'ready', operation: interrupted });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Restore before this message').click());
+  expect(container.querySelectorAll('article')).toHaveLength(2);
+  await act(async () => button('Check recovery status').click());
+  expect(recovery.prepareCombinedRecovery).toHaveBeenCalledOnce();
+  expect(recovery.applyCombinedRecovery.mock.calls[1]![0]).toEqual(recovery.applyCombinedRecovery.mock.calls[0]![0]);
+  expect(f.navigate).not.toHaveBeenCalled(); expect(container.querySelectorAll('article')).toHaveLength(1);
+});
+
+it('thread recovery rebuilds independent navigation Undo from the original owner after reopening without replaying its old draft', async () => {
+  const f = navigationFixture();
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Restore before this message').click());
+  const receipt = await f.navigate.mock.results[0]!.value;
+  f.view.recovery = { navigation: receipt, operations: [] };
+  await act(async () => { root.unmount(); }); root = createRoot(container);
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('');
+  expect(f.navigate).toHaveBeenCalledOnce();
+  await edit('[aria-label="Message thread"]', 'Fresh draft after reopening');
+  await act(async () => button('Undo conversation recovery').click());
+  expect(f.navigate.mock.calls[1]![0]).toMatchObject({ undoOf: receipt.key, expectedHeadId: receipt.headId, targetHeadId: receipt.previousHeadId });
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('Fresh draft after reopening');
+});
+
+it('thread recovery reopens combined recovery through its original operation and never offers a conversation-only undo for it', async () => {
+  const f = navigationFixture(); const recovery = combinedFixture(f); useUIStore.setState({ recoveryPreference: 'both' });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Restore before this message').click());
+  f.view.recovery = { navigation: null, operations: [recovery.operation] };
+  await act(async () => { root.unmount(); }); root = createRoot(container);
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  expect(button('Undo conversation recovery')).toBeUndefined();
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('');
+  await act(async () => button('Undo saved conversation and file recovery').click());
+  expect(recovery.prepareCombinedUndo).toHaveBeenCalledWith(recovery.operation.id);
+  expect(f.navigate).not.toHaveBeenCalled();
+});
+
+it('thread recovery rediscovers and reconciles an interrupted combined operation after reopening without replaying the old user draft', async () => {
+  const f = navigationFixture(); const recovery = combinedFixture(f);
+  const interrupted = { ...recovery.operation, state: 'files-restored' as const, conversationState: 'unchanged' as const };
+  f.view.recovery = { navigation: null, operations: [interrupted] };
+  recovery.getCombinedOperation.mockResolvedValueOnce({ status: 'ready', operation: interrupted });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await edit('[aria-label="Message thread"]', 'New draft while reviewing recovery');
+  expect(button('Send').disabled).toBe(true);
+  expect(recovery.applyCombinedRecovery).not.toHaveBeenCalled();
+  await act(async () => button('Resume saved recovery').click());
+  expect(recovery.applyCombinedRecovery).toHaveBeenCalledWith({ operationId: interrupted.id, expectedRevision: interrupted.revision, conflictPolicy: 'abort', confirmedConflicts: [] });
+  expect(recovery.prepareCombinedRecovery).not.toHaveBeenCalled(); expect(f.navigate).not.toHaveBeenCalled();
+  expect(container.querySelectorAll('article')).toHaveLength(1);
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('New draft while reviewing recovery');
+});
+
+it('thread recovery never applies a rediscovered inert file plan without its conflict review', async () => {
+  const f = navigationFixture(); const recovery = combinedFixture(f);
+  const planned = { ...recovery.operation, state: 'planned' as const, conversationState: 'unchanged' as const, fileState: 'unchanged' as const };
+  f.view.recovery = { navigation: null, operations: [planned] };
+  recovery.getCombinedOperation.mockResolvedValueOnce({ status: 'ready', operation: planned });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Check saved recovery').click());
+  expect(recovery.applyCombinedRecovery).not.toHaveBeenCalled(); expect(f.navigate).not.toHaveBeenCalled();
+  expect(container.textContent).toContain('This plan has not been applied.');
+  await act(async () => button('Cancel saved recovery').click());
+  expect(recovery.cancelCombinedOperation).toHaveBeenCalledWith(planned.id);
+});
+
+it('thread recovery offers an explicit conversation-only choice when file preparation is unavailable', async () => {
+  const f = navigationFixture(); useUIStore.setState({ recoveryPreference: 'both' });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Restore before this message').click());
+  expect(f.navigate).not.toHaveBeenCalled(); expect(container.textContent).toContain('Recovery unavailable');
+  await act(async () => button('Restore conversation only').click());
+  expect(f.navigate).toHaveBeenCalledOnce(); expect(f.prepareNavigation).toHaveBeenCalledOnce();
+  expect(container.querySelectorAll('article')).toHaveLength(1);
 });

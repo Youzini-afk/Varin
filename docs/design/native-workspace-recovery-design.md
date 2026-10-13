@@ -2,13 +2,13 @@
 
 Status: built-in kernel provider delivered; Rust system-kernel Stage R complete through D-282.
 
-Last updated: 2026-10-06
+Last updated: 2026-10-13
 
 ## Decision
 
 Varin owns combined conversation and file rollback through the selected versioned
-`varin.workspace-recovery` Host service. Pi remains authoritative for its append-only conversation
-tree. The official provider is the statically distributed, replaceable
+`varin.workspace-recovery` Host service. A tagged conversation selects its original navigation owner:
+Pi's append-only session tree or the agent runtime's HistoryBranch. The official provider is the statically distributed, replaceable
 `varin.builtin.recovery` extension; it is not a Pi package or a separately published application
 package.
 
@@ -17,7 +17,7 @@ the workspace and does not schedule a background archive.
 
 The built-in provider delegates immutable objects, recovery records, conditional file operations and
 process-writer gates to the private Rust kernel. Stage R is complete; it has no production TS storage
-fallback. The Host coordinates Pi navigation and Documents, whose Registry remains the buffer owner.
+fallback. The Host coordinates the selected conversation owner and Documents, whose Registry remains the buffer owner.
 Current resource ownership is in [the Rust design](rust-kernel-design.md); implementation and capability
 flags are in [the Recovery module](../../packages/web/application-host/lib/recovery/DOCUMENTATION.md).
 
@@ -52,8 +52,12 @@ Varin follows the first two patterns and keeps Git out of the authority path.
 
 ### Conversation rollback
 
-Conversation-only rollback branches Pi's native session tree and restores editable user text/images.
-It never waits for or modifies workspace history.
+Conversation-only rollback moves the selected conversation head and restores editable user text/images.
+Pi uses its session-tree navigation; a Thread uses the Catalog's original head-CAS command receipt.
+Repeating a successful command returns that receipt even after later legal history changes, without
+moving the new head. Returning to a removed descendant requires the exact original undo receipt.
+Navigation does not undo usage, effects, Goal cancellation, or source selection, and does not restart
+old work. It never waits for or modifies workspace history.
 
 ### Combined rollback
 
@@ -97,6 +101,13 @@ The first before-image and final after-image are authoritative when one path is 
 a turn. A write returning the file to its original state removes its change record. Unsaved surface
 writes remain unsaved and require their fixed owner/revision; a disk watcher is not their authority.
 
+Thread file mutations enter this same affected-file journal from the original tool invocation and its
+frozen history range. The latest actual input, including Environment or Agent input, identifies the
+checkpoint; a model request ID is not substituted for that identity. Before-images and final file
+receipts are referenced in the original Storage transaction. Reconciliation completes the same journal
+entry rather than executing the tool again. Each physical target retains its source workspace, root,
+execution workspace and Run; equal relative paths in different roots are different files.
+
 ## Turn binding and branch selection
 
 Each accepted user entry creates a checkpoint and binding keyed by the broker execution ID. The broker
@@ -106,6 +117,9 @@ retains that execution correlation from prompt acceptance through `agent_start`,
 Recovery navigation preparation returns `removedEntryIds` for the current branch. Combined recovery
 loads only checkpoints whose user or assistant entry is in that set. Recovery to another non-ancestor
 branch is conversation-only until a forward file journal exists for that branch.
+Thread preparation discovers the removed ancestry's original sources, not only the selected entry's
+source or the currently selected sidebar workspace. Selecting a boundary inside an input checkpoint
+does not make its retained and removed file effects independently reversible; that coverage is explicit.
 
 ## Path state and storage
 
@@ -127,7 +141,7 @@ WorkingState's kernel root at `<VARIN_DATA_DIR>/kernel/<hostId>`, reports `appli
 `storageManagement: false`; it has no project override or independent transfer because R1 keeps WorkingState,
 Recovery, and their object references in one transaction authority.
 
-Replacement providers may advertise `storageManagement` and the v5 application-data, workspace-local,
+Replacement providers may advertise `storageManagement` and the v6 application-data, workspace-local,
 workspace-adjacent or custom location contract. Their transfer, retention and cleanup remain provider-owned.
 The built-in provider advertises neither storage management nor configurable history retention or
 workspace-history deletion. Shared kernel size is Host-wide, not reclaimable per-workspace history size.
@@ -148,13 +162,17 @@ path, and verifies the target identity. A disconnected or unresponsive surface p
 `dirty-state-unavailable` result rather than an empty dirty set. The acknowledgement deadline defaults to
 one document-watch heartbeat and can be changed with `VARIN_DIRTY_BARRIER_TIMEOUT_MS`.
 
-If a later path fails, or Pi rejects the expected conversation leaf, Varin restores already-applied
+If a later path fails, or the conversation owner rejects the expected head, Varin restores already-applied
 paths from the safety set when their current identity still matches the attempted target. A concurrent
 external edit is never overwritten by compensation; the operation becomes `needs-attention` with the
 exact path. No global workspace maintenance bit survives a crash.
 
-On Host startup, a planned operation stays inert. An interrupted file operation is compensated from its
-recorded affected-path safety set before new recovery work is accepted.
+On Host startup, a planned operation stays inert. An interrupted file operation is reconciled from its
+recorded path phases and safety set. Once files have been restored, the original conversation command
+receipt decides whether navigation already committed, may still be pending, or definitively failed.
+Transport uncertainty is not a reason to compensate a successful navigation. Discovery can precede
+owner readiness; resumption waits for the tagged conversation owner. UI reconnection projects the same
+operation and revision rather than creating a new restore attempt.
 
 The built-in kernel has one OS-held storage-owner lock and Rust file-resource gates; it does not use the
 retired TS recovery engine's shared-root sidecar lease. Optional replacement-provider lease contracts do
@@ -175,16 +193,16 @@ full turn-start scan is not an acceptable fallback.
 
 ## Replaceability and remaining design targets
 
-The public recovery service remains version 5, with capability-negotiated checkpoint, mutation,
+The public recovery service is version 6, with capability-negotiated checkpoint, mutation,
 combined recovery, operation, retention and storage-management methods. Fixed Host code owns identity,
-path admission, Documents coordination and Pi navigation; a selected provider owns its advertised
-recovery implementation. Disabling it never removes Pi-native conversation rollback.
+path admission, Documents coordination and the tagged conversation navigation; a selected provider owns
+its advertised recovery implementation. Disabling it never removes conversation-only rollback.
 
 Public service version and private catalog format are separate. The production Rust catalog has no
-v4-to-v5 migration path: obsolete internal formats are recreated under the kernel lock; corrupt,
-unknown or future formats fail. Workspace files, Git, native Pi data and external configuration are
-outside that recreation. The old local-SQLite migration narrative belongs to retired implementation
-history, not the current provider contract.
+historical-format migration path: older, corrupt, unknown or future formats are rejected before
+cleanup or mutation. Rejection preserves retained objects and pending streams. Workspace files, Git,
+native Pi data and external configuration remain assets. The old local-SQLite migration narrative
+belongs to retired implementation history, not the current provider contract.
 
 Two earlier accepted improvements are still **design targets**, not current combined-restore behavior:
 
@@ -195,7 +213,7 @@ Two earlier accepted improvements are still **design targets**, not current comb
 
 These targets do not authorize bypassing the current barrier. See `validateConflicts` and `dirtyBarrier`
 in [journal-engine.ts](../../packages/web/application-host/lib/recovery/journal-engine.ts).
-Storage transfer/retention features of replacement providers likewise cannot be inferred from a v5 label.
+Storage transfer/retention features of replacement providers likewise cannot be inferred from a v6 label.
 
 ## Verification
 

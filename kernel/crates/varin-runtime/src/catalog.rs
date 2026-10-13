@@ -1723,6 +1723,10 @@ pub mod history_views;
 #[path = "catalog_media.rs"]
 pub mod media;
 
+#[path = "catalog_journal.rs"]
+pub mod journal;
+#[path = "catalog_navigation.rs"]
+pub mod navigation;
 #[path = "catalog_fork.rs"]
 pub mod forks;
 

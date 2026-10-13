@@ -2,7 +2,8 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { PiSessionEntry, SessionSnapshot } from '@varin/protocol';
+import type { PiSessionEntry, PiSessionMessageEntry, RecoveryPreference, SessionSnapshot } from '@varin/protocol';
+import type { WorkspaceCombinedRecoveryPlan, WorkspaceCombinedRecoveryOperation, WorkspaceRecoveryAPI } from '@varin/extension-contract';
 import type { ProjectEntry } from '@varin/application-client';
 import type { WorkbenchWorkspaceState } from '@/lib/extensions/workbench-workspace';
 import type { PiSessionStoreState, PiSessionViewState } from '@/stores/usePiSessionStore';
@@ -17,6 +18,9 @@ const mocks = vi.hoisted(() => ({
   projectId: null as string | null,
   projects: [] as ProjectEntry[],
   directory: '/repo',
+  recoveryPreference: 'conversation' as RecoveryPreference,
+  recovery: undefined as WorkspaceRecoveryAPI | undefined,
+  recover: undefined as ((entry: PiSessionMessageEntry) => void) | undefined,
   home: '/repo',
   workspace: {} as WorkbenchWorkspaceState,
   composer: {} as {
@@ -38,7 +42,11 @@ vi.mock('@/stores/useProjectsStore', () => ({ useProjectsStore: (select: (state:
 vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: (select: (state: unknown) => unknown) => select({ currentDirectory: mocks.directory, homeDirectory: mocks.home, setDirectory: vi.fn() }) }));
 vi.mock('@/stores/messageQueueStore', () => ({ useMessageQueueStore: (select: (state: unknown) => unknown) => select({ followUpBehavior: 'queue' }) }));
 vi.mock('@/stores/usePiInteractionStore', () => ({ usePiInteractionStore: (select: (state: unknown) => unknown) => select({ sessions: {} }) }));
-vi.mock('@/stores/useUIStore', () => ({ useUIStore: (select: (state: unknown) => unknown) => select({ isTimelineDialogOpen: false, recoveryPreference: 'conversation', setTimelineDialogOpen: vi.fn() }) }));
+vi.mock('@/stores/useUIStore', () => ({ useUIStore: (select: (state: unknown) => unknown) => select({ isTimelineDialogOpen: false, recoveryPreference: mocks.recoveryPreference, setTimelineDialogOpen: vi.fn() }) }));
+vi.mock('@/lib/recovery/workspaceRecovery', async original => ({
+  ...await original<typeof import('@/lib/recovery/workspaceRecovery')>(),
+  getWorkspaceRecoveryAPI: () => { if (!mocks.recovery) throw new Error('Recovery unavailable'); return mocks.recovery; },
+}));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/ui', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
@@ -67,9 +75,10 @@ vi.mock('./PiComposer', () => ({ PiComposer: (props: typeof mocks.composer & { d
   React.useEffect(() => { mocks.mounts += 1; }, []);
   return <textarea aria-label="draft" value={props.draft} onChange={(event) => props.onChangeDraft(event.target.value)} />;
 } }));
-vi.mock('./PiTimeline', () => ({ PiTimeline: ({ entries }: { entries: PiSessionEntry[] }) => (
-  <div data-testid="history">{entries.map(entry => entry.type === 'message' && entry.message.role === 'user' && typeof entry.message.content === 'string' ? entry.message.content : '').join(' ')}</div>
-) }));
+vi.mock('./PiTimeline', () => ({ PiTimeline: ({ entries, onRecover }: { entries: PiSessionEntry[]; onRecover: (entry: PiSessionMessageEntry) => void }) => {
+  mocks.recover = onRecover;
+  return <div data-testid="history">{entries.map(entry => entry.type === 'message' && entry.message.role === 'user' && typeof entry.message.content === 'string' ? entry.message.content : '').join(' ')}</div>;
+} }));
 vi.mock('./usePiComposerDefaults', () => ({ usePiComposerDefaults: () => ({ loading: false, model: { id: 'default-model', provider: 'test' } }) }));
 vi.mock('./usePiMessageHandoff', () => ({ usePiMessageHandoff: () => ({ ref: undefined, captureDraft: vi.fn(), submit: vi.fn(), cancelSubmission: vi.fn() }) }));
 vi.mock('./HarnessThreadState', () => ({ HarnessThreadStateProvider: ({ children }: React.PropsWithChildren) => children }));
@@ -108,6 +117,7 @@ beforeEach(() => {
   root = createRoot(container);
   mocks.mounts = 0;
   mocks.runtimeEpoch = 1;
+  mocks.recoveryPreference = 'conversation'; mocks.recovery = undefined; mocks.recover = undefined;
   mocks.projectId = null;
   mocks.projects = [];
   mocks.directory = '/repo';
@@ -245,4 +255,48 @@ it('keeps the chat mounted when leaving a project for a new draft and entering a
   await renderHost();
   expect(container.querySelector('textarea')).toBeNull();
   expect(container.textContent).toContain('Loading workspace');
+});
+
+function piRecoveryFixture() {
+  mocks.state.currentSessionId = 'pi-original';
+  const record = history('pi-original', 'Original Pi message'); record.open = true;
+  record.snapshot = { sessionId: 'pi-original', cwd: '/original-root', workspace: { kind: 'workspace', id: 'display-workspace', authorityId: 'pi-owner' } } as SessionSnapshot;
+  mocks.state.records['pi-original'] = record;
+  const refreshEntries = vi.fn<PiSessionStoreState['refreshEntries']>(async () => record.branchEntries!);
+  mocks.state.refreshEntries = refreshEntries;
+  const plan: WorkspaceCombinedRecoveryPlan = { id: 'pi-recovery', revision: 'revision', workspaceId: 'pi-owner', conversation: { kind: 'pi', sessionId: 'pi-original' }, entryId: 'entry',
+    expectedLeafId: 'entry', targetLeafId: null, removedEntryIds: ['entry'], affectedPaths: ['file.txt'], changedBytes: 4, conflicts: [], coverage: 'ready', uncoveredPaths: [], uncoveredReasons: [], createdAt: '2026-10-12T00:00:00Z' };
+  const operation: WorkspaceCombinedRecoveryOperation = { id: plan.id, revision: plan.revision, workspaceId: plan.workspaceId, conversation: plan.conversation, entryId: plan.entryId,
+    expectedLeafId: plan.expectedLeafId, targetLeafId: plan.targetLeafId, affectedPathCount: 1, appliedPathCount: 1, state: 'complete', conversationState: 'navigated', fileState: 'restored', createdAt: plan.createdAt, updatedAt: plan.createdAt,
+    editorText: 'Recovered Pi draft', editorImages: [{ data: 'original-image', mimeType: 'image/png' }] };
+  const prepareCombinedRecovery = vi.fn<WorkspaceRecoveryAPI['prepareCombinedRecovery']>(async () => ({ status: 'ready', plan }));
+  const applyCombinedRecovery = vi.fn<WorkspaceRecoveryAPI['applyCombinedRecovery']>(async () => ({ status: 'ready', operation }));
+  const getCombinedOperation = vi.fn<WorkspaceRecoveryAPI['getCombinedOperation']>(async () => ({ status: 'ready', operation }));
+  const cancelCombinedOperation = vi.fn<WorkspaceRecoveryAPI['cancelCombinedOperation']>(async () => ({ status: 'ready', operation: { ...operation, state: 'aborted', conversationState: 'unchanged', fileState: 'unchanged' } }));
+  mocks.recovery = { prepareCombinedRecovery, applyCombinedRecovery, getCombinedOperation, cancelCombinedOperation } as unknown as WorkspaceRecoveryAPI;
+  mocks.recoveryPreference = 'both';
+  return { plan, operation, refreshEntries, prepareCombinedRecovery, applyCombinedRecovery, getCombinedOperation, cancelCombinedOperation, entry: record.branchEntries!.entries[0] as PiSessionMessageEntry };
+}
+
+it('Pi recovery keeps the original session owner in the combined contract and restores its image draft after receipt readback', async () => {
+  const f = piRecoveryFixture(); f.applyCombinedRecovery.mockRejectedValueOnce(new Error('Response lost'));
+  await render();
+  await act(async () => mocks.recover!(f.entry));
+  expect(f.prepareCombinedRecovery).toHaveBeenCalledWith({ conversation: { kind: 'pi', sessionId: 'pi-original' }, workspaceId: 'pi-owner', entryId: 'entry' });
+  expect(f.getCombinedOperation).toHaveBeenCalledWith('pi-recovery');
+  expect(f.refreshEntries).toHaveBeenCalledWith('pi-original');
+  expect(readPiDraft('pi-original', 'host-a')).toMatchObject({ text: 'Recovered Pi draft', images: f.operation.editorImages });
+});
+
+it.each(['session', 'host'] as const)('Pi recovery does not apply a late file plan after switching %s', async changed => {
+  const f = piRecoveryFixture(); let resolve!: (value: Awaited<ReturnType<WorkspaceRecoveryAPI['prepareCombinedRecovery']>>) => void;
+  f.prepareCombinedRecovery.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  await render(); await act(async () => mocks.recover!(f.entry));
+  if (changed === 'session') { mocks.state.currentSessionId = 'pi-other'; mocks.state.records['pi-other'] = history('pi-other', 'Other history'); }
+  else { mocks.state.runtimeKey = 'host-b'; mocks.runtimeEpoch += 1; }
+  await render();
+  await act(async () => resolve({ status: 'ready', plan: f.plan }));
+  expect(f.applyCombinedRecovery).not.toHaveBeenCalled();
+  expect(readPiDraft('pi-original', 'host-a').text).toBe('');
+  if (changed === 'host') expect(f.cancelCombinedOperation).not.toHaveBeenCalled();
 });

@@ -837,6 +837,7 @@ fn bot_summary_freezes_original_knowledge_and_publishes_only_its_baseline_with_g
     let start = configure_compaction_start(RunStart { context_preparation: Arc::new(NoopContextPreparation), binding: binding(), policy_state: Value::Null, provider: Arc::new(Provider { mode: Mode::Text, seen: seen.clone(), entered: tx }), tools: Arc::new(NoTools), policy: Arc::new(DefaultAgentPolicy), progress: ProgressSink::default() }, 1);
     assert_eq!(supervisor.start(&job.receipt.run_id, start).unwrap().wait().unwrap().state, RunState::Completed);
     let summary_request = serde_json::to_string(&seen.lock().unwrap()[0]).unwrap();
+    let summary_request_id = seen.lock().unwrap()[0].request_id.clone();
     assert!(summary_request.contains("FROZEN_ORIGINAL_KNOWLEDGE") && summary_request.contains("UNCHANGED_KNOWLEDGE"));
     assert!(!summary_request.contains("LATE_CORRECTED_KNOWLEDGE"));
     let owner = supervisor.catalog();
@@ -867,5 +868,38 @@ fn bot_summary_freezes_original_knowledge_and_publishes_only_its_baseline_with_g
     assert!(!final_request.contains("FROZEN_ORIGINAL_KNOWLEDGE") && !final_request.contains("UNCHANGED_KNOWLEDGE"));
     assert!(final_request.contains("forgotten"));
     assert!(summary_request.contains("FROZEN_ORIGINAL_KNOWLEDGE"), "Frozen summary input remains unchanged");
+
+    // Removing the summary's source range also removes only its deduplication baseline.
+    // The current Knowledge owner must still supply unchanged facts to the next request.
+    let mut db = owner.lock().unwrap();
+    let memory_before_navigation = db.memory_state("main").unwrap();
+    let retained_snapshot = checkpoint.bot_memory_snapshot.as_ref().unwrap().state["content_object"].as_str().unwrap();
+    let command = varin_runtime::catalog::navigation::NavigationCommand {
+        key: "before-bot-summary".into(), thread_id: "thread".into(), branch_id: "main".into(),
+        expected_head_id: db.head("main").unwrap(), target_head_id: None, undo_of: None,
+    };
+    let navigation = db.prepare_navigation(command).unwrap().load().unwrap();
+    db.commit_navigation(navigation).unwrap();
+    let navigated = db.active_context("main").unwrap().unwrap();
+    assert!(navigated.proposal.through_id.is_none() && navigated.proposal.summary.is_empty());
+    assert!(navigated.bot_memory_snapshot.is_none(), "A removed summary cannot suppress current Knowledge");
+    assert!(navigated.proposal.memory_checkpoint.is_none(), "The removed Bot baseline must not remain the request's memory identity");
+    assert_eq!(db.memory_state("main").unwrap(), memory_before_navigation, "History navigation does not mutate Knowledge");
+    let collection = db.prepare_content_collection(Default::default()).run();
+    assert_eq!(collection.status, varin_runtime::ContentCollectionStatus::Completed, "{collection:?}");
+    assert!(varin_runtime::content::object_path(&f.0.join("content"), retained_snapshot).unwrap().is_file(), "The original summary still owns its immutable Bot memory snapshot after GC");
+    let original_request = db.capture_model_step_read(&summary_request_id).unwrap().load_request().unwrap();
+    assert!(serde_json::to_string(&original_request).unwrap().contains("FROZEN_ORIGINAL_KNOWLEDGE"), "Navigation and GC preserve the original summary request");
+    let next = db.submit(&SubmitInput {
+        key: "after-bot-navigation".into(), thread_id: "thread".into(), branch_id: "main".into(),
+        expected_head: None, input: json!({"text":"Continue after navigation"}), configuration: json!({}),
+    }).unwrap();
+    let projected = db.prepare_context_read(&next.run_id, db.epoch(), Some(&next.input_id)).unwrap().unwrap().load().unwrap();
+    let projected_text = serde_json::to_string(&projected.history).unwrap();
+    assert!(projected_text.contains("UNCHANGED_KNOWLEDGE"), "The real next context restores facts previously carried only by the removed summary");
+    assert!(!projected_text.contains("FROZEN_ORIGINAL_KNOWLEDGE") && !projected_text.contains("LATE_CORRECTED_KNOWLEDGE"));
+    assert!(projected_text.contains("forgotten"));
+    assert_eq!(db.memory_state("main").unwrap(), memory_before_navigation);
+    drop(db);
     supervisor.shutdown().unwrap();
 }

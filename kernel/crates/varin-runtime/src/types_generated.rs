@@ -318,3 +318,10 @@ pub enum McpRoute {
     ResourceSubscribe { argument: String },
     ResourceUnsubscribe { argument: String },
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RecoveryConversation {
+    Pi { sessionId: String },
+    Thread { threadId: String, branchId: String },
+}

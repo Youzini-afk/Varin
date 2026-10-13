@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { WorkspaceRecoveryTurnProvenance } from "@varin/extension-contract";
+import type { RecoveryConversation, WorkspaceRecoveryTurnProvenance } from "@varin/extension-contract";
 import type { DurableRecoveryChangeSelection, RecoveryDurableMetadataPort } from "./journal-engine.js";
 import { sameState } from "./journal-files.js";
 import type { RecoveryState } from "./journal-files.js";
@@ -23,6 +23,7 @@ type MemoryTurn = DurableRecoveryChangeSelection["turns"][number] & {
   provenance?: WorkspaceRecoveryTurnProvenance;
   runtimeGeneration?: number;
   runtimeKey?: string;
+  conversation?: RecoveryConversation;
   sessionId?: string;
   settledAt?: string;
   startedAt?: string;
@@ -32,6 +33,7 @@ type MemoryTurn = DurableRecoveryChangeSelection["turns"][number] & {
 
 type MemoryChange = DurableRecoveryChangeSelection["changes"][number] & {
   workspaceId: string;
+  conversation?: RecoveryConversation;
   sessionId?: string;
 };
 
@@ -104,7 +106,7 @@ export const createInMemoryRecoveryDurablePort = (
     provenance: turn.provenance ?? "observed-during",
     runtimeGeneration: turn.runtimeGeneration ?? 0,
     runtimeKey: turn.runtimeKey ?? "",
-    sessionId: turn.sessionId ?? "",
+    conversation: turn.conversation,
     startedAt: turn.startedAt ?? "",
     status: turn.status,
     unrecordedResourceIds: [...turn.unrecordedResourceIds],
@@ -220,7 +222,7 @@ export const createInMemoryRecoveryDurablePort = (
     async listChanges(input): Promise<DurableRecoveryChangeSelection> {
       const selectedTurns = [...turns.values()].filter((turn) => {
         if (turn.workspaceId !== input.workspaceId) return false;
-        if (input.sessionId && turn.sessionId !== input.sessionId) return false;
+        if (input.conversation && JSON.stringify(turn.conversation) !== JSON.stringify(input.conversation)) return false;
         if (input.executionId && turn.executionId !== input.executionId) return false;
         if (input.entryIds && input.entryIds.length > 0) {
           const entries = new Set(input.entryIds);
@@ -234,7 +236,7 @@ export const createInMemoryRecoveryDurablePort = (
           .filter((change) => {
             if (change.workspaceId !== input.workspaceId) return false;
             if (input.executionId) return change.executionId === input.executionId;
-            if (input.sessionId && change.sessionId !== input.sessionId) return false;
+            if (input.conversation && !executionIds.has(change.executionId)) return false;
             if (input.entryIds && input.entryIds.length > 0) return executionIds.has(change.executionId);
             return true;
           })
@@ -386,7 +388,8 @@ export const createInMemoryRecoveryDurablePort = (
         executionId: input.executionId,
         checkpointId: `turn-${input.executionId}`,
         sequence: ++turnSequence,
-        sessionId: input.sessionId,
+        conversation: input.conversation,
+        ...(input.conversation.kind === "pi" ? { sessionId: input.conversation.sessionId } : {}),
         userEntryId: input.userEntryId,
         workerId: input.workerId,
         runtimeGeneration: input.runtimeGeneration,
@@ -418,7 +421,7 @@ export const createInMemoryRecoveryDurablePort = (
     },
     async resolveEntry(input) {
       const turn = [...turns.values()]
-        .filter((candidate) => candidate.workspaceId === input.workspaceId && candidate.sessionId === input.sessionId)
+        .filter((candidate) => candidate.workspaceId === input.workspaceId && JSON.stringify(candidate.conversation) === JSON.stringify(input.conversation))
         .find((candidate) => candidate.userEntryId === input.entryId || candidate.assistantEntryId === input.entryId);
       if (!turn) {
         return { status: "unbound", reason: "entry-unbound" } as never;

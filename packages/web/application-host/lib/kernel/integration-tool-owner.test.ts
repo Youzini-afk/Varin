@@ -11,7 +11,7 @@ import { retainExtensionTool } from './extension-tool-owner.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { ToolBridge, type HostToolCall, type PrivateToolFrame } from './tool-bridge.js';
 import type { KernelClient } from './kernel-client.js';
-import type { DelegatedExecution, ExecutorOwner, LaunchIntent, LaunchSource, Run } from './protocol.generated.js';
+import type { DelegatedExecution, ExecutorOwner, LaunchIntent, LaunchSource, RecoveryAnchor, Run } from './protocol.generated.js';
 import type { IntegrationOperationReceipt, IntegrationPlanInput } from '../harness/working-state/integration-coordinator.js';
 import type { WorkspaceWorkingStateRootAccess } from '../harness/working-state/types.js';
 import { UnconfirmedIntegrationCommitError } from '../recovery/durable-file-operation.js';
@@ -83,13 +83,17 @@ async function openHarness(options: { callback?: 'mask' | 'early' | 'tamper'; re
       code_result: { kind: 'published', effect: 'confirmed', result: { publication_id: input.publicationId,
         workspace_id: 'workspace', branch_id: 'child-source', result_revision: 7, root: 'fixed-result-root',
         base_root: 'fixed-base-root', record_id: 'original-result-record' } } } as DelegatedExecution;
+    // The target opener returns the original invocation's latest input anchor in this Run.
+    const parentInputEntryId = 'parent-input-entry';
+    const journalAnchor: RecoveryAnchor = { executionId: `${run.id}:${parentInputEntryId}`, runId: run.id,
+      threadId: run.thread_id, branchId: run.branch_id, entryId: parentInputEntryId, epoch: run.epoch };
     const entered = deferred<void>();
     const targetRelease = vi.fn(async () => {});
     const onCleanupError = vi.fn();
     const workingStates: WorkspaceWorkingStateRootAccess = { withBranchStore: async () => {
       throw new Error('Coordinator is a port fixture; no real storage access belongs in this component test');
     } };
-    const openTarget = vi.fn(async () => ({ directory: '/fixture/parent-source', documentWorkspaceId: 'documents-workspace',
+    const openTarget = vi.fn(async () => ({ executionId: journalAnchor.executionId, directory: '/fixture/parent-source', documentWorkspaceId: 'documents-workspace',
       workingStates, release: targetRelease }));
     const mergeResult = vi.fn(async (request: IntegrationPlanInput) => {
       entered.resolve();
@@ -146,7 +150,7 @@ async function openHarness(options: { callback?: 'mask' | 'early' | 'tamper'; re
         schemaVersion: retained!.binding.tool.version, arguments: args };
       return invocation;
     };
-    return { runtime, retained, run, launch, child, sourceBinding, runtimePort, workingStates, openTarget, mergeResult,
+    return { runtime, retained, run, launch, child, sourceBinding, journalAnchor, runtimePort, workingStates, openTarget, mergeResult,
       inspectIntegration, targetRelease, onCleanupError, entered, callbackReplies, prepareCall,
       setOwner: (value: ExecutorOwner) => { owner = value; },
       setManagementArguments: (value: unknown) => { managementArguments = value; },
@@ -174,7 +178,8 @@ it('the installed example integrates a fixed publication from a later Run of the
       const admitted = h.mergeResult.mock.lastCall![0];
       expect(receipt).toEqual({ completion: { kind: 'result', outcome: 'succeeded', effect: 'confirmed',
         content: domainReceipt(admitted.operationId!) }, executor_stopped: true });
-      expect(admitted).toMatchObject({ workspaceId: 'workspace', threadId: 'child-thread', branchId: 'child-source', resultRevision: 7,
+      expect(admitted).toMatchObject({ executionId: h.journalAnchor.executionId, requireTurnBinding: true,
+        workspaceId: 'workspace', threadId: 'child-thread', branchId: 'child-source', resultRevision: 7,
         parentAuthority: { kind: 'directory', directory: '/fixture/parent-source', workspaceId: 'documents-workspace' },
         operationBinding: { kind: 'runtime_operation', parentRunId: 'later-parent-run', parentThreadId: 'parent-thread',
           parentBranchId: 'parent-history-branch', childOperationId: input.childOperationId, childExecutionId: input.executionId, childThreadId: 'child-thread',

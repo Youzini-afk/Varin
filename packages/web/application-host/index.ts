@@ -1,3 +1,4 @@
+import { createThreadRecoveryNavigation, createThreadRecoveryFileResolver } from './lib/recovery/thread-navigation.js';
 import { createBotMemoryOwner } from './lib/kernel/bot-memory-owner.js';
 import { createBotHistory } from './lib/memory/bot-history.js';
 import { createThreadMemory } from './lib/memory/thread-memory.js';
@@ -1349,48 +1350,55 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       );
     }
   };
+  let threadRecoveryNavigation: RecoverySessionNavigation;
+  let threadRecoveryReady = false;
   const recoverySessionNavigation: RecoverySessionNavigation = {
+    ready: conversation => conversation.kind === 'pi' || threadRecoveryReady,
     async commit(input) {
-      await assertRecoverySessionWorkspace(input.sessionId, input.workspaceId);
+      if (input.conversation.kind === 'thread') return threadRecoveryNavigation.commit(input);
+      await assertRecoverySessionWorkspace(input.conversation.sessionId, input.workspaceId);
       return piRuntimeBroker.requestForSession(
-        input.sessionId,
+        input.conversation.sessionId,
         'session.recovery.navigation.commit',
         {
           expectedLeafId: input.expectedLeafId,
           operationId: input.operationId,
           preparedTargetLeafId: input.preparedTargetLeafId,
-          sessionId: input.sessionId,
+          sessionId: input.conversation.sessionId,
           targetId: input.entryId,
         },
       );
     },
     async commitLeaf(input) {
-      await assertRecoverySessionWorkspace(input.sessionId, input.workspaceId);
+      if (input.conversation.kind === 'thread') return threadRecoveryNavigation.commitLeaf(input);
+      await assertRecoverySessionWorkspace(input.conversation.sessionId, input.workspaceId);
       return piRuntimeBroker.requestForSession(
-        input.sessionId,
+        input.conversation.sessionId,
         'session.recovery.navigation.commitLeaf',
         {
           expectedLeafId: input.expectedLeafId,
           operationId: input.operationId,
           preparedTargetLeafId: input.preparedTargetLeafId,
-          sessionId: input.sessionId,
+          sessionId: input.conversation.sessionId,
         },
       );
     },
     async prepare(input) {
-      await assertRecoverySessionWorkspace(input.sessionId, input.workspaceId);
+      if (input.conversation.kind === 'thread') return threadRecoveryNavigation.prepare(input);
+      await assertRecoverySessionWorkspace(input.conversation.sessionId, input.workspaceId);
       return piRuntimeBroker.requestForSession(
-        input.sessionId,
+        input.conversation.sessionId,
         'session.recovery.navigation.prepare',
-        { sessionId: input.sessionId, targetId: input.entryId },
+        { sessionId: input.conversation.sessionId, targetId: input.entryId },
       );
     },
     async prepareLeaf(input) {
-      await assertRecoverySessionWorkspace(input.sessionId, input.workspaceId);
+      if (input.conversation.kind === 'thread') return threadRecoveryNavigation.prepareLeaf(input);
+      await assertRecoverySessionWorkspace(input.conversation.sessionId, input.workspaceId);
       return piRuntimeBroker.requestForSession(
-        input.sessionId,
+        input.conversation.sessionId,
         'session.recovery.navigation.prepareLeaf',
-        { sessionId: input.sessionId, targetLeafId: input.targetLeafId },
+        { sessionId: input.conversation.sessionId, targetLeafId: input.targetLeafId },
       );
     },
   };
@@ -1443,7 +1451,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       (context) => operation(context),
     )
   ));
-  let fencedRecoveryOperations = [];
+  let fencedRecoveryOperations: import("@varin/extension-contract").WorkspaceCombinedRecoveryOperation[] = [];
   try {
     fencedRecoveryOperations = await foundationalRecoveryEngine.fenceUnfinishedOperations();
     await foundationalRecoveryEngine.resumeWorkspaceOperations();
@@ -1451,14 +1459,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     console.error('[WorkspaceRecovery] Startup workspace recovery requires attention:', errorMessage(error));
   }
   const piRuntimeStartup = startPiRuntime();
-  if (requirePiRuntime || fencedRecoveryOperations.length > 0) await piRuntimeStartup;
+  if (requirePiRuntime || fencedRecoveryOperations.some(value => value.conversation.kind === 'pi')) await piRuntimeStartup;
   else void piRuntimeStartup;
   const combinedRecoveryStartup = piRuntimeStartup.then(() => (
     foundationalRecoveryEngine.resumeCombinedOperations()
   )).catch((error) => {
     console.error('[WorkspaceRecovery] Startup combined recovery requires attention:', errorMessage(error));
   });
-  if (fencedRecoveryOperations.length > 0) await combinedRecoveryStartup;
+  if (fencedRecoveryOperations.some(value => value.conversation.kind === 'pi')) await combinedRecoveryStartup;
   else void combinedRecoveryStartup;
   extensionRuntime.workbench.setWorkspaceScopeResolver((scopeId: unknown) => documentsAuthority.resolveScopeId(scopeId));
   const kernelProcesses = createKernelProcessService({
@@ -3241,6 +3249,23 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       settings: () => hostCredentialAuthority.readGlobalInferenceSettings(),
       capabilities: signal => agentRuntime.childCapabilities(signal),
     }));
+  const threadRecoveryOwners = { threads, runtime: agentRuntime, store: kernelRecoveryStore, storage: kernelStorageAdapter, kernel: kernelClient, liveSources };
+  threadRecoveryNavigation = createThreadRecoveryNavigation(threadRecoveryOwners);
+  kernelRecoveryContentStore.bindTargetResources(createThreadRecoveryFileResolver(threadRecoveryOwners));
+  threads.bindRecoveryReader(async identity => {
+    try {
+    const workspaces = await agentRuntime.recoveryWorkspaces(identity);
+    const operations = (await Promise.all(workspaces.map(async workspaceId => {
+      const result = await foundationalRecoveryEngine.listCombinedOperations(workspaceId);
+      if (result.status !== 'ready') throw new Error('Recovery status unavailable');
+      return result.operations.map(({editorText: _text,editorImages: _images,...operation}) => operation).filter(operation => operation.conversation.kind === 'thread' && operation.conversation.threadId === identity.threadId && operation.conversation.branchId === identity.branchId);
+    }))).flat();
+    const receipt = await agentRuntime.navigationReceipt(identity);
+    return { navigation: receipt && !operations.some(operation => operation.id === receipt.key) ? receipt : null, operations };
+    } catch { return {navigation:null,operations:[],unavailable:"Recovery status is unavailable; conversation history remains readable"}; }
+  });
+  threadRecoveryReady = true;
+  await foundationalRecoveryEngine.resumeCombinedOperations();
   const reconcileIntegrationReceipts = createIntegrationReceiptReconciler({ runtime: agentRuntime,
     onError: (_operationId, _error) => console.error('[Integration] Original effect receipt requires attention') });
   const reconcileMaterialReceipts = createMaterialReceiptReconciler({ runtime: agentRuntime, kernel: kernelClient, collections: materialCollectionsService,

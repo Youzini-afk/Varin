@@ -9,6 +9,7 @@ import {
 } from '../workspace/path-safety.js';
 
 export interface RecoveryIdentity {
+  fileTarget?: import("@varin/extension-contract").RecoveryFileTarget;
   authorityId: string;
   canonicalRoot: string;
   filesystemProfile: string;
@@ -92,6 +93,7 @@ export interface RecoveryFileStore {
     root: string,
     relativePath: string,
     state: RecoveryState,
+    options?: {reservationOperationId?:string},
   ) => Promise<void>;
   captureState: (
     identity: RecoveryIdentity,

@@ -367,7 +367,7 @@ export class IntegrationCoordinator {
   private validateOperationInput(input: IntegrationPlanInput): void {
     const binding = input.operationBinding;
     if (!binding) return;
-    if (!input.scopedWorkingStates || input.executionId || input.requireTurnBinding
+    if (!input.scopedWorkingStates || !input.executionId || input.requireTurnBinding !== true
       || input.operationId !== `integration:${binding.operationId}`
       || input.workspaceId !== binding.result.workspaceId || input.branchId !== binding.result.branchId
       || input.threadId !== binding.childThreadId || input.resultRevision !== binding.result.resultRevision) {
@@ -693,7 +693,7 @@ export class IntegrationCoordinator {
       }
       if (input.requireTurnBinding && input.executionId) {
         const changes = await context.durableRecoveryStore.listChanges?.({ workspaceId: input.workspaceId, executionId: input.executionId });
-        if (!changes?.turns.some(turn => turn.executionId === input.executionId && turn.status === "pending")) {
+        if (!changes?.turns.some(turn => turn.executionId === input.executionId && ["pending","incomplete"].includes(turn.status))) {
           throw new Error("Parent turn recovery binding is unavailable for integration");
         }
       }

@@ -1093,6 +1093,59 @@ pub(crate) fn spawn(
                             deferred = true;
                             return Ok(Value::Null);
                         }
+                        if method == "runtime.branch.navigation.receipt" || method == "runtime.branch.recovery.workspaces" {
+                            let p: NavigationReceiptParams = serde_json::from_value(params)?;
+                            let catalog=runtime.catalog(); let owner=catalog.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?;
+                            if method == "runtime.branch.recovery.workspaces" { return Ok(serde_json::to_value(owner.recovery_workspaces(&p.thread_id,&p.branch_id).map_err(domain)?)?); }
+                            return Ok(serde_json::to_value(match p.key { Some(key)=>owner.navigation_receipt(&p.thread_id,&p.branch_id,&key), None=>owner.latest_navigation_receipt(&p.thread_id,&p.branch_id) }.map_err(domain)?)?);
+                        }
+                        if method == "runtime.branch.navigation.prepare" || method == "runtime.branch.navigate" || method == "runtime.branch.recovery.range" || method == "runtime.operation.recovery.anchor" {
+                            let method = method.to_string();
+                            let catalog = runtime.catalog();
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            let cancelled = cancellation.clone();
+                            let order = input_order;
+                            thread::spawn(move || {
+                                let result = (|| -> Result<Value, KernelError> {
+                                    if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+                                    if method == "runtime.operation.recovery.anchor" {
+                                        let p: OperationInspectParams = serde_json::from_value(params)?;
+                                        let read = {
+                                            let owner = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+                                            let operation = owner.operation(&p.operation_id).map_err(domain)?;
+                                            let intent = varin_runtime::catalog::tool_content::ToolIntent::from_operation(&operation).map_err(domain)?;
+                                            owner.capture_journal_anchor(&varin_runtime::execution::ToolExecutionContext { run_id:operation.run_id, origin:intent.origin().clone(), operation_id:operation.id }).map_err(domain)?
+                                        };
+                                        return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
+                                    }
+                                    if method == "runtime.branch.recovery.range" {
+                                        let p: NavigationSelectParams = serde_json::from_value(params)?;
+                                        let read = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.capture_recovery_range(&p.thread_id, &p.branch_id, &p.entry_id).map_err(domain)?;
+                                        return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
+                                    }
+                                    if method == "runtime.branch.navigation.prepare" {
+                                        let p: NavigationSelectParams = serde_json::from_value(params)?;
+                                        let read = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.capture_navigation(&p.thread_id, &p.branch_id, &p.entry_id).map_err(domain)?;
+                                        return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
+                                    }
+                                    let p: NavigationParams = serde_json::from_value(params)?;
+                                    let command = varin_runtime::catalog::navigation::NavigationCommand { key:p.key, thread_id:p.thread_id, branch_id:p.branch_id, expected_head_id:p.expected_head_id.0, target_head_id:p.target_head_id.0, undo_of:p.undo_of };
+                                    let preparation = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.prepare_navigation(command).map_err(domain)?;
+                                    let prepared = preparation.load().map_err(domain)?;
+                                    let _order = input_commands::await_input_order(order)?;
+                                    if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+                                    let result = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.commit_navigation(prepared).map_err(domain)?;
+                                    Ok(serde_json::to_value(result)?)
+                                })();
+                                let response = match result { Ok(value) => response_ok(&response_id, value), Err(error) => response_error(&response_id, &error) };
+                                done(&response_id);
+                                let _ = response_sender.send(response);
+                            });
+                            deferred = true;
+                            return Ok(Value::Null);
+                        }
                         if method == "runtime.branch.fork" {
                             let order = input_order;
                             if let Some(capture) = params.get("planCapture") {

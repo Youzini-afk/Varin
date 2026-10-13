@@ -1,6 +1,9 @@
 import React from 'react';
+import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import type {
+  WorkspaceCombinedRecoveryApplyInput,
   WorkspaceCombinedRecoveryOperation,
+  WorkspaceCombinedRecoveryPlan,
   WorkspaceRecoveryCheckpointSummary,
   WorkspaceRecoveryStatus,
 } from '@varin/extension-contract';
@@ -17,6 +20,9 @@ import { cn } from '@/lib/utils';
 import { formatWorkspaceArchiveBytes } from '@/lib/workspaceArchive';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { PiRecoveryDialog } from '@/components/pi-session/PiRecoveryDialog';
+import { applyCombinedRecoveryAndRead, assertCombinedRecoveryIdentity, combinedRecoveryStatus, isCombinedRecoverySettled } from '@/components/pi-session/combinedRecoveryResult';
+import { shouldOpenRecoveryDialog } from '@/components/pi-session/piRecoveryPolicy';
 
 const operationTone = (operation: WorkspaceCombinedRecoveryOperation): string => {
   if (operation.state === 'complete') {
@@ -33,6 +39,7 @@ const checkpointTitle = (checkpoint: WorkspaceRecoveryCheckpointSummary): string
 
 export const PiRecoveryPanel: React.FC = () => {
   const { t } = useI18n();
+  const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const sessionId = usePiSessionStore((state) => state.currentSessionId);
   const snapshot = usePiSessionStore((state) => (
     state.currentSessionId ? state.records[state.currentSessionId]?.snapshot : undefined
@@ -40,6 +47,7 @@ export const PiRecoveryPanel: React.FC = () => {
   const refreshEntries = usePiSessionStore((state) => state.refreshEntries);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
+  const preference = useUIStore(state => state.recoveryPreference);
   const workspaceId = snapshot?.workspace?.kind === 'workspace'
     ? snapshot.workspace.authorityId ?? snapshot.workspace.id
     : null;
@@ -49,6 +57,19 @@ export const PiRecoveryPanel: React.FC = () => {
   const [checkpointName, setCheckpointName] = React.useState('');
   const [busy, setBusy] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [undoIntent, setUndoIntent] = React.useState<{ plan: WorkspaceCombinedRecoveryPlan; attempt?: WorkspaceCombinedRecoveryApplyInput }>();
+  const [undoDialogOpen, setUndoDialogOpen] = React.useState(false);
+  const undoInFlight = React.useRef(false);
+  const scope = JSON.stringify([host, workspaceId, sessionId]);
+  const latestScope = React.useRef(scope); latestScope.current = scope;
+  const dataScope = React.useRef<string | null>(null);
+  const current = React.useCallback(() => latestScope.current === scope && host === getRuntimeEndpointGeneration(), [host, scope]);
+  React.useEffect(() => {
+    latestScope.current = scope;
+    setUndoIntent(undefined); setUndoDialogOpen(false); undoInFlight.current = false;
+    setStatus(null); setCheckpoints([]); setOperations([]); setError(null);
+    return () => { if (latestScope.current === scope) latestScope.current = ''; };
+  }, [scope]);
 
   const refresh = React.useCallback(async () => {
     if (!workspaceId) {
@@ -66,15 +87,17 @@ export const PiRecoveryPanel: React.FC = () => {
         api.listCheckpoints({ workspaceId }),
         api.listCombinedOperations(workspaceId),
       ]);
+      if (!current()) return;
+      dataScope.current = scope;
       setStatus(requireWorkspaceRecoveryResult(nextStatus));
       setCheckpoints(requireWorkspaceRecoveryResult(nextCheckpoints).page.checkpoints);
       setOperations(requireWorkspaceRecoveryResult(nextOperations).operations);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      if (current()) setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setBusy(null);
+      if (current()) setBusy(null);
     }
-  }, [workspaceId]);
+  }, [current, scope, workspaceId]);
 
   React.useEffect(() => {
     void refresh();
@@ -98,31 +121,72 @@ export const PiRecoveryPanel: React.FC = () => {
     }
   }, [busy, checkpointName, refresh, t, workspaceId]);
 
+  const acceptUndoResult = React.useCallback(async (operation: WorkspaceCombinedRecoveryOperation) => {
+    if (!current()) return;
+    setOperations(items => [...items.filter(item => item.id !== operation.id), operation]);
+    if (operation.state !== 'complete') { setError(combinedRecoveryStatus(operation)); return; }
+    setUndoIntent(undefined); setUndoDialogOpen(false);
+    if (operation.conversation.kind === 'pi' && operation.conversation.sessionId === sessionId) await refreshEntries(sessionId).catch(() => undefined);
+    if (!current()) return;
+    toast.success(t('contextPanel.recovery.native.undoComplete'));
+    await refresh();
+  }, [current, refresh, refreshEntries, sessionId, t]);
+
+  const resumeUndo = React.useCallback(async (original: WorkspaceCombinedRecoveryOperation) => {
+    if (!current() || dataScope.current !== scope || busy || undoInFlight.current || undoIntent) return;
+    undoInFlight.current = true; setBusy(original.id); setError(null);
+    try {
+      const api = getWorkspaceRecoveryAPI();
+      let operation = requireWorkspaceRecoveryResult(await api.getCombinedOperation(original.id)).operation;
+      if (!current()) return;
+      assertCombinedRecoveryIdentity(operation, original);
+      if (operation.state !== 'planned' && !isCombinedRecoverySettled(operation)) {
+        operation = await applyCombinedRecoveryAndRead(api, { operationId: operation.id, expectedRevision: operation.revision, conflictPolicy: 'abort', confirmedConflicts: [] });
+        if (!current()) return;
+        assertCombinedRecoveryIdentity(operation, original);
+      }
+      await acceptUndoResult(operation);
+    } catch (cause) { if (current()) setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { if (current()) { setBusy(null); undoInFlight.current = false; } }
+  }, [acceptUndoResult, busy, current, scope, undoIntent]);
+
   const undo = React.useCallback(async (operation: WorkspaceCombinedRecoveryOperation) => {
-    if (!workspaceId || busy || typeof window === 'undefined') return;
+    if (!current() || dataScope.current !== scope || !workspaceId || busy || undoInFlight.current || typeof window === 'undefined') return;
+    if (undoIntent) { setUndoDialogOpen(true); return; }
+    const interrupted = operations.find(item => item.undoOf === operation.id && !isCombinedRecoverySettled(item));
+    if (interrupted) { await resumeUndo(interrupted); return; }
     if (!window.confirm(t('contextPanel.recovery.native.undoConfirm'))) return;
+    undoInFlight.current = true;
     setBusy(operation.id);
+    let preparedPlan: WorkspaceCombinedRecoveryPlan | undefined;
     try {
       const api = getWorkspaceRecoveryAPI();
       const prepared = requireWorkspaceRecoveryResult(await api.prepareCombinedUndo(operation.id));
-      const result = requireWorkspaceRecoveryResult(await api.applyCombinedRecovery({
+      if (!current()) { if (host === getRuntimeEndpointGeneration()) void api.cancelCombinedOperation(prepared.plan.id).catch(() => undefined); return; }
+      preparedPlan = prepared.plan;
+      setUndoIntent({ plan: prepared.plan });
+      if (shouldOpenRecoveryDialog(preference, prepared.plan)) { setUndoDialogOpen(true); return; }
+      const attempt: WorkspaceCombinedRecoveryApplyInput = {
         confirmedConflicts: [],
         conflictPolicy: 'abort',
         expectedRevision: prepared.plan.revision,
         operationId: prepared.plan.id,
-      }));
-      if (result.operation.state !== 'complete') {
-        throw new Error(result.operation.failure?.message ?? result.operation.state);
-      }
-      if (sessionId) await refreshEntries(sessionId).catch(() => undefined);
-      toast.success(t('contextPanel.recovery.native.undoComplete'));
-      await refresh();
+      };
+      setUndoIntent({ plan: prepared.plan, attempt });
+      const result = await applyCombinedRecoveryAndRead(api, attempt);
+      if (!current()) return;
+      assertCombinedRecoveryIdentity(result, prepared.plan);
+      await acceptUndoResult(result);
+      if (current() && result.state !== 'complete') setUndoDialogOpen(true);
     } catch (cause) {
+      if (!current()) return;
       toast.error(cause instanceof Error ? cause.message : String(cause));
+      setError(cause instanceof Error ? cause.message : String(cause));
+      if (preparedPlan) setUndoDialogOpen(true);
     } finally {
-      setBusy(null);
+      if (current()) { setBusy(null); undoInFlight.current = false; }
     }
-  }, [busy, refresh, refreshEntries, sessionId, t, workspaceId]);
+  }, [acceptUndoResult, busy, current, host, operations, preference, resumeUndo, scope, t, undoIntent, workspaceId]);
 
   if (!sessionId || !snapshot || !workspaceId) {
     return (
@@ -243,6 +307,7 @@ export const PiRecoveryPanel: React.FC = () => {
           <h3 className="typography-ui-label font-medium text-foreground">
             {t('contextPanel.recovery.native.operations')}
           </h3>
+          {undoIntent && !undoDialogOpen && <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => setUndoDialogOpen(true)}>Check undo recovery status</Button>}
           <div className="mt-3 space-y-2">
             {operations.map((operation) => (
               <div key={operation.id} className="rounded-xl border border-border/60 p-3">
@@ -262,12 +327,14 @@ export const PiRecoveryPanel: React.FC = () => {
                       type="button"
                       variant="outline"
                       size="xs"
-                      disabled={busy !== null}
+                      disabled={busy !== null || Boolean(undoIntent)}
                       onClick={() => void undo(operation)}
                     >
                       {t('contextPanel.recovery.actions.undo')}
                     </Button>
                   ) : null}
+                  {operation.undoOf && !isCombinedRecoverySettled(operation) && <Button type="button" variant="outline" size="xs"
+                    disabled={busy !== null || Boolean(undoIntent)} onClick={() => void resumeUndo(operation)}>Check original undo</Button>}
                 </div>
                 {operation.failure ? (
                   <p className="mt-2 typography-meta text-[var(--status-error)]">{operation.failure.message}</p>
@@ -319,6 +386,11 @@ export const PiRecoveryPanel: React.FC = () => {
           </div>
         ) : null}
       </div>
+      {undoIntent && undoDialogOpen && <PiRecoveryDialog key={`${scope}:${undoIntent.plan.id}`} open
+        plan={undoIntent.plan} initialAttempt={undoIntent.attempt} allowConversationOnly={false}
+        onAttempt={attempt => setUndoIntent(value => value ? { ...value, attempt } : value)}
+        onCombinedResult={acceptUndoResult} onConversationOnly={async () => {}}
+        onClose={() => { setUndoDialogOpen(false); if (!undoIntent.attempt) setUndoIntent(undefined); }} />}
     </div>
   );
 };

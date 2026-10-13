@@ -3,15 +3,15 @@
  * Do not hand-edit the wire shapes; run `node scripts/generate-kernel-protocol.mjs`.
  */
 
-export const KERNEL_PROTOCOL_VERSION = 24 as const;
+export const KERNEL_PROTOCOL_VERSION = 25 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
 export const KERNEL_CONTROL_METHODS = ["runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status","runtime.mcp.interaction.inspect","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.source.tools","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
 export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.generate","runtime.inference.receipt_pending","runtime.inference.admit","runtime.inference.dispatch","runtime.inference.status","runtime.inference.settle","runtime.mcp.interaction.inspect","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.source.tools","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["process.write","process.resize","runtime.tools.invoke"] as const;
-export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
+export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.branch.navigate":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.memory_work.admit","runtime.memory_work.read","runtime.memory_work.status","runtime.memory_work.list","runtime.memory_work.update","runtime.inference.generate","runtime.inference.admit","runtime.inference.settle","runtime.mcp.sampling.review_output","runtime.mcp.sampling.review_request","runtime.mcp.sampling.generate","runtime.mcp.interaction.open","runtime.mcp.interaction.error.open","runtime.mcp.interaction.list","runtime.mcp.interaction.read","runtime.mcp.interaction.respond","runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
-export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v24" as const;
+export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v25" as const;
 
 export type KernelMethod =
   | "runtime.bot.scope.remove"
@@ -95,6 +95,12 @@ export type KernelMethod =
   | "recovery.operation.conflicts"
   | "runtime.host_tool.reconcile"
   | "source.handoff.claim"
+  | "runtime.branch.recovery.range"
+  | "runtime.branch.navigation.prepare"
+  | "runtime.branch.navigate"
+  | "runtime.branch.navigation.receipt"
+  | "runtime.branch.recovery.workspaces"
+  | "runtime.operation.recovery.anchor"
   | "runtime.branch.fork"
   | "runtime.plan.view"
   | "runtime.plan.contains"
@@ -1941,6 +1947,60 @@ export interface LanguageQuery {
   direction?: "incoming" | "outgoing";
 }
 
+export interface RecoveryAnchor {
+  executionId: string;
+  threadId: string;
+  branchId: string;
+  runId: string;
+  entryId: string;
+  epoch: number;
+}
+
+export interface RecoveryRangeTurn {
+  anchor: RecoveryAnchor;
+  entryIds: string[];
+  source: LaunchSource | null;
+  uncovered: boolean;
+  settled: boolean;
+}
+
+export interface NavigationSelectParams {
+  threadId: string;
+  branchId: string;
+  entryId: string;
+}
+
+export interface NavigationParams {
+  threadId: string;
+  branchId: string;
+  key: string;
+  expectedHeadId: string | null;
+  targetHeadId: string | null;
+  undoOf?: string;
+}
+
+export interface NavigationReceiptParams {
+  threadId: string;
+  branchId: string;
+  key?: string;
+}
+
+export interface NavigationSelection {
+  expectedHeadId: string | null;
+  targetHeadId: string | null;
+  removedEntryIds: string[];
+  editorText?: string;
+}
+
+export interface NavigationReceipt {
+  threadId: string;
+  branchId: string;
+  key: string;
+  previousHeadId: string | null;
+  headId: string | null;
+  alreadyApplied: boolean;
+}
+
 export interface HistoryPageParams {
   branchId: string;
   headId?: string;
@@ -2030,7 +2090,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 24; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 25; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -3337,6 +3397,7 @@ export interface KernelFileCaptureBatchParams {
 export interface KernelFileApplyParams {
   operationId: string;
   workspaceId: string;
+  reservationOperationId?: string;
   rootId: string;
   path: string;
   targetJson: string;
@@ -3892,6 +3953,8 @@ export interface KernelPinReadParams {
   pageSize?: number;
 }
 
+export type RecoveryConversation = {kind:"pi";sessionId:string} | {kind:"thread";threadId:string;branchId:string};
+
 export interface KernelRecoveryReference {
   slot: string;
   objectHash: string;
@@ -3902,7 +3965,9 @@ export interface KernelRecoveryTurnStartParams {
   operationId: string;
   workspaceId: string;
   executionId: string;
-  sessionId: string;
+  conversation: RecoveryConversation;
+  fileTarget?: Record<string, unknown>;
+  runId?: string;
   userEntryId: string;
   workerId: string;
   runtimeGeneration: number;
@@ -3914,7 +3979,7 @@ export interface KernelRecoveryTurnStartParams {
 export interface KernelRecoveryTurnGetParams {
   workspaceId: string;
   executionId: string;
-  sessionId?: string;
+  conversation?: RecoveryConversation;
 }
 
 export interface KernelRecoveryTurnSettleParams {
@@ -3946,14 +4011,14 @@ export interface KernelRecoveryCheckpointListParams {
 
 export interface KernelRecoveryEntryResolveParams {
   workspaceId: string;
-  sessionId: string;
+  conversation: RecoveryConversation;
   entryId: string;
 }
 
 export interface KernelRecoveryChangeBeforeParams {
   operationId: string;
   workspaceId: string;
-  sessionId: string;
+  conversation: RecoveryConversation;
   executionId: string;
   checkpointId: string;
   path: string;
@@ -3971,7 +4036,7 @@ export interface KernelRecoveryChangeGetParams {
 
 export interface KernelRecoveryChangeListParams {
   workspaceId: string;
-  sessionId?: string;
+  conversation?: RecoveryConversation;
   executionId?: string;
   entryIds?: string[];
 }
@@ -3979,7 +4044,7 @@ export interface KernelRecoveryChangeListParams {
 export interface KernelRecoveryChangeAfterParams {
   operationId: string;
   workspaceId: string;
-  sessionId: string;
+  conversation: RecoveryConversation;
   executionId: string;
   checkpointId: string;
   path: string;
@@ -5331,6 +5396,12 @@ export type KernelMethodParams = {
   "runtime.followup.occurrences": FollowupOccurrencesParams;
   "runtime.followup.occurrence": FollowupOccurrenceGetParams;
   "runtime.followup.control": FollowupControlParams;
+  "runtime.branch.recovery.range": NavigationSelectParams;
+  "runtime.branch.navigation.prepare": NavigationSelectParams;
+  "runtime.branch.navigate": NavigationParams;
+  "runtime.branch.navigation.receipt": NavigationReceiptParams;
+  "runtime.branch.recovery.workspaces": NavigationReceiptParams;
+  "runtime.operation.recovery.anchor": OperationInspectParams;
   "runtime.branch.fork": BranchForkParams;
   "runtime.plan.view": PlanViewParams;
   "runtime.plan.contains": PlanContainsParams;
@@ -6397,6 +6468,60 @@ export type KernelRequest =
       id: string;
       method: "runtime.followup.control";
       params: FollowupControlParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.branch.recovery.range";
+      params: NavigationSelectParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.branch.navigation.prepare";
+      params: NavigationSelectParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.branch.navigate";
+      params: NavigationParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.branch.navigation.receipt";
+      params: NavigationReceiptParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.branch.recovery.workspaces";
+      params: NavigationReceiptParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.operation.recovery.anchor";
+      params: OperationInspectParams;
       epoch?: string;
       grantId?: string;
     }

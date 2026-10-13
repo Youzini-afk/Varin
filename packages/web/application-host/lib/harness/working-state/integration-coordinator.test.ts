@@ -940,7 +940,7 @@ describe("IntegrationCoordinator", () => {
         executionId: "parent-execution",
         provenance: "caused-by",
         runtimeGeneration: 1,
-        sessionId: "parent-session",
+        conversation: { kind: "pi", sessionId: "parent-session" },
         userEntryId: "parent-user-entry",
         workerId: "parent-worker",
         workspaceId: "ws",

@@ -183,7 +183,7 @@ export const createRecoveryTurnCoordinator = ({
         ...(failure ? { failure } : {}),
         provenance: turn.provenance,
         runtimeGeneration: turn.runtimeGeneration,
-        sessionId: turn.sessionId,
+        conversation: { kind: 'pi', sessionId: turn.sessionId },
         userEntryId,
         workerId: turn.workerId,
         workspaceId: turn.workspaceId,

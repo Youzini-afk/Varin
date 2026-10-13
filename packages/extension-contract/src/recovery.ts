@@ -4,7 +4,7 @@ import {
 } from "./services.js";
 import type { JsonObject, JsonValue, VarinExtensionServiceInvocationRequest } from "./types.js";
 
-export const VARIN_WORKSPACE_RECOVERY_CONTRACT_VERSION = 5 as const;
+export const VARIN_WORKSPACE_RECOVERY_CONTRACT_VERSION = 6 as const;
 
 export type WorkspaceRecoveryFailureCode =
   | "invalid-request" | "workspace-not-found" | "workspace-untrusted"
@@ -27,6 +27,9 @@ export interface WorkspaceRecoveryFailure {
   retryable: boolean;
 }
 
+export type RecoveryConversation = { kind: "pi"; sessionId: string } | { kind: "thread"; threadId: string; branchId: string };
+export type RecoveryFileTarget = { kind: "workspace" } | { kind: "physical"; workspaceId: string; threadId: string; runId: string; rootId: string; canonicalRoot: string; executionWorkspaceId: string; sourceMode: "live_root" | "materialized" } | { kind: "fixed"; branchId: string; revision: number };
+
 export interface WorkspaceRecoveryIdentity {
   authorityId: string;
   canonicalRoot: string;
@@ -46,7 +49,7 @@ export interface WorkspaceRecoveryCheckpointSummary {
   id: string;
   label?: string;
   sequence: number;
-  sessionId?: string;
+  conversation?: RecoveryConversation;
   source: WorkspaceRecoveryCheckpointSource;
   state: WorkspaceRecoveryCheckpointState;
   workspaceId: string;
@@ -67,7 +70,9 @@ export interface WorkspaceRecoveryTurnStartInput {
   failure?: WorkspaceRecoveryFailure;
   provenance: WorkspaceRecoveryTurnProvenance;
   runtimeGeneration: number;
-  sessionId: string;
+  conversation: RecoveryConversation;
+  fileTarget?: RecoveryFileTarget;
+  runId?: string;
   userEntryId: string;
   workerId: string;
   workspaceId: string;
@@ -107,17 +112,19 @@ export interface WorkspaceRecoveryTurnBinding {
   provenance: WorkspaceRecoveryTurnProvenance;
   runtimeGeneration: number;
   runtimeKey: string;
-  sessionId: string;
+  conversation: RecoveryConversation;
   settledAt?: string;
   startedAt: string;
   status: WorkspaceRecoveryCheckpointState;
   unrecordedResourceIds: string[];
+  fileTarget?: RecoveryFileTarget;
+  runId?: string;
   userEntryId: string;
   workerId: string;
   workspaceId: string;
 }
 
-export interface WorkspaceRecoveryEntryTarget { entryId: string; sessionId: string; workspaceId: string }
+export interface WorkspaceRecoveryEntryTarget { entryId: string; conversation: RecoveryConversation; workspaceId: string }
 export type WorkspaceRecoveryEntryBindingResult =
   | { binding: WorkspaceRecoveryTurnBinding; checkpoint: WorkspaceRecoveryCheckpointSummary; position: "before" | "after"; status: "ready" }
   | { binding?: WorkspaceRecoveryTurnBinding; reason: "entry-unbound" | "session-unbound" | "checkpoint-incomplete"; status: "unbound" | "incomplete" }
@@ -126,7 +133,7 @@ export type WorkspaceRecoveryEntryBindingResult =
 export type WorkspaceRecoveryConflictKind = "content-changed" | "dirty-buffer" | "unsupported";
 export interface WorkspaceRecoveryConflict { fingerprint: string; kind: WorkspaceRecoveryConflictKind; message: string; path: string }
 export interface WorkspaceRecoveryConfirmedConflict { fingerprint: string; path: string }
-export interface WorkspaceCombinedRecoveryPrepareInput { entryId: string; sessionId: string; workspaceId: string }
+export interface WorkspaceCombinedRecoveryPrepareInput { entryId: string; conversation: RecoveryConversation; workspaceId: string }
 
 export type WorkspaceRecoveryUncoveredSource = "shell" | "external" | "unknown";
 export interface WorkspaceRecoveryUncoveredPath { path: string; source: WorkspaceRecoveryUncoveredSource }
@@ -135,6 +142,7 @@ export type WorkspaceCombinedRecoveryCoverage = "ready" | "partial" | "none";
 
 export interface WorkspaceCombinedRecoveryPlan {
   affectedPaths: string[];
+  fileTargets?: Record<string, { path: string; target: RecoveryFileTarget }>;
   changedBytes: number;
   conflicts: WorkspaceRecoveryConflict[];
   coverage: WorkspaceCombinedRecoveryCoverage;
@@ -144,7 +152,7 @@ export interface WorkspaceCombinedRecoveryPlan {
   id: string;
   removedEntryIds: string[];
   revision: string;
-  sessionId: string;
+  conversation: RecoveryConversation;
   targetLeafId: string | null;
   uncoveredPaths: WorkspaceRecoveryUncoveredPath[];
   uncoveredReasons: string[];
@@ -179,7 +187,7 @@ export interface WorkspaceCombinedRecoveryOperation {
   id: string;
   navigationMarkerId?: string;
   revision: string;
-  sessionId: string;
+  conversation: RecoveryConversation;
   state: WorkspaceCombinedRecoveryOperationState;
   targetLeafId: string | null;
   undoOf?: string;
@@ -398,7 +406,7 @@ export const parseWorkspaceRecoveryCheckpointSummary = (value: unknown): Workspa
     ...(optionalText(raw.entryId, "checkpoint.entryId") ? { entryId: raw.entryId as string } : {}),
     ...(optionalText(raw.executionId, "checkpoint.executionId") ? { executionId: raw.executionId as string } : {}),
     ...(optionalText(raw.label, "checkpoint.label") ? { label: raw.label as string } : {}),
-    ...(optionalText(raw.sessionId, "checkpoint.sessionId") ? { sessionId: raw.sessionId as string } : {}),
+    ...(raw.conversation === undefined ? {} : { conversation: parseRecoveryConversation(raw.conversation) }),
   };
 };
 
@@ -410,14 +418,30 @@ export const parseWorkspaceRecoveryCheckpointQuery = (value: unknown): Workspace
   return { workspaceId: text(raw.workspaceId, "query.workspaceId"), ...(raw.cursor === undefined ? {} : { cursor: positive(raw.cursor, "query.cursor") }), ...(raw.limit === undefined ? {} : { limit: positive(raw.limit, "query.limit") }) };
 };
 
+export const parseRecoveryConversation = (value: unknown): RecoveryConversation => {
+  const raw = record(value, "Recovery conversation");
+  if (raw.kind === "pi") return { kind: "pi", sessionId: text(raw.sessionId, "conversation.sessionId") };
+  if (raw.kind === "thread") return { kind: "thread", threadId: text(raw.threadId, "conversation.threadId"), branchId: text(raw.branchId, "conversation.branchId") };
+  throw new WorkspaceRecoveryContractError("conversation.kind must identify pi or thread");
+};
+export const parseRecoveryFileTarget = (value: unknown): RecoveryFileTarget => {
+  const raw = record(value, "Recovery file target");
+  if (raw.kind === "workspace") return { kind: "workspace" };
+  if (raw.kind === "fixed") return { kind: "fixed", branchId: text(raw.branchId, "target.branchId"), revision: count(raw.revision, "target.revision") };
+  if (raw.kind === "physical") return { kind: "physical", workspaceId: text(raw.workspaceId, "target.workspaceId"), threadId: text(raw.threadId, "target.threadId"), runId: text(raw.runId, "target.runId"), rootId: text(raw.rootId, "target.rootId"), canonicalRoot: text(raw.canonicalRoot, "target.canonicalRoot"), executionWorkspaceId: text(raw.executionWorkspaceId, "target.executionWorkspaceId"), sourceMode: oneOf(raw.sourceMode, ["live_root", "materialized"] as const, "target.sourceMode") };
+  throw new WorkspaceRecoveryContractError("invalid recovery file target");
+};
+
 const TURN_PROVENANCE = ["caused-by", "observed-during", "overlapped"] as const;
 export const parseWorkspaceRecoveryTurnStartInput = (value: unknown): WorkspaceRecoveryTurnStartInput => {
   const raw = record(value, "Workspace recovery turn start");
   return {
     activeWriterScopes: stringList(raw.activeWriterScopes, "turn.activeWriterScopes"), executionId: text(raw.executionId, "turn.executionId"),
     provenance: oneOf(raw.provenance, TURN_PROVENANCE, "turn.provenance"), runtimeGeneration: positive(raw.runtimeGeneration, "turn.runtimeGeneration"),
-    sessionId: text(raw.sessionId, "turn.sessionId"), userEntryId: text(raw.userEntryId, "turn.userEntryId"), workerId: text(raw.workerId, "turn.workerId"), workspaceId: text(raw.workspaceId, "turn.workspaceId"),
+    conversation: parseRecoveryConversation(raw.conversation), userEntryId: text(raw.userEntryId, "turn.userEntryId"), workerId: text(raw.workerId, "turn.workerId"), workspaceId: text(raw.workspaceId, "turn.workspaceId"),
     ...(raw.failure === undefined ? {} : { failure: parseWorkspaceRecoveryFailure(raw.failure) }),
+    ...(raw.fileTarget === undefined ? {} : { fileTarget: parseRecoveryFileTarget(raw.fileTarget) }),
+    ...(raw.runId === undefined ? {} : { runId: text(raw.runId, "turn.runId") }),
   };
 };
 
@@ -446,7 +470,9 @@ export const parseWorkspaceRecoveryTurnBinding = (value: unknown): WorkspaceReco
     activeWriterScopes: stringList(raw.activeWriterScopes, "binding.activeWriterScopes"), checkpointId: text(raw.checkpointId, "binding.checkpointId"),
     executionId: text(raw.executionId, "binding.executionId"), provenance: oneOf(raw.provenance, TURN_PROVENANCE, "binding.provenance"),
     runtimeGeneration: positive(raw.runtimeGeneration, "binding.runtimeGeneration"), runtimeKey: text(raw.runtimeKey, "binding.runtimeKey"),
-    sessionId: text(raw.sessionId, "binding.sessionId"), startedAt: isoTimestamp(raw.startedAt, "binding.startedAt"),
+    conversation: parseRecoveryConversation(raw.conversation),
+    ...(raw.fileTarget === undefined ? {} : { fileTarget: parseRecoveryFileTarget(raw.fileTarget) }),
+    ...(raw.runId === undefined ? {} : { runId: text(raw.runId, "binding.runId") }), startedAt: isoTimestamp(raw.startedAt, "binding.startedAt"),
     status: oneOf(raw.status, ["pending", "ready", "incomplete"] as const, "binding.status"), unrecordedResourceIds: stringList(raw.unrecordedResourceIds, "binding.unrecordedResourceIds"),
     userEntryId: text(raw.userEntryId, "binding.userEntryId"), workerId: text(raw.workerId, "binding.workerId"), workspaceId: text(raw.workspaceId, "binding.workspaceId"),
     ...(optionalText(raw.assistantEntryId, "binding.assistantEntryId") ? { assistantEntryId: raw.assistantEntryId as string } : {}),
@@ -456,7 +482,7 @@ export const parseWorkspaceRecoveryTurnBinding = (value: unknown): WorkspaceReco
 };
 
 export const parseWorkspaceRecoveryEntryTarget = (value: unknown): WorkspaceRecoveryEntryTarget => {
-  const raw = record(value, "Workspace recovery entry target"); return { entryId: text(raw.entryId, "target.entryId"), sessionId: text(raw.sessionId, "target.sessionId"), workspaceId: text(raw.workspaceId, "target.workspaceId") };
+  const raw = record(value, "Workspace recovery entry target"); return { entryId: text(raw.entryId, "target.entryId"), conversation: parseRecoveryConversation(raw.conversation), workspaceId: text(raw.workspaceId, "target.workspaceId") };
 };
 export const parseWorkspaceCombinedRecoveryPrepareInput = (value: unknown): WorkspaceCombinedRecoveryPrepareInput => parseWorkspaceRecoveryEntryTarget(value);
 export const parseWorkspaceRecoveryConflict = (value: unknown): WorkspaceRecoveryConflict => {
@@ -478,10 +504,11 @@ export const parseWorkspaceCombinedRecoveryPlan = (value: unknown): WorkspaceCom
   if (!Array.isArray(raw.uncoveredPaths)) throw new WorkspaceRecoveryContractError("plan.uncoveredPaths must be an array");
   if (!Array.isArray(raw.uncoveredReasons)) throw new WorkspaceRecoveryContractError("plan.uncoveredReasons must be an array");
   return {
+    ...(raw.fileTargets === undefined ? {} : { fileTargets: Object.fromEntries(Object.entries(record(raw.fileTargets, "plan.fileTargets")).map(([id, value]) => { const entry = record(value, "fileTarget"); return [id, { path: text(entry.path, "fileTarget.path"), target: parseRecoveryFileTarget(entry.target) }]; })) }),
     affectedPaths: stringList(raw.affectedPaths, "plan.affectedPaths"), changedBytes: count(raw.changedBytes, "plan.changedBytes"), conflicts: raw.conflicts.map(parseWorkspaceRecoveryConflict),
     coverage: oneOf(raw.coverage, ["ready", "partial", "none"] as const, "plan.coverage"), createdAt: isoTimestamp(raw.createdAt, "plan.createdAt"), entryId: text(raw.entryId, "plan.entryId"),
     expectedLeafId: raw.expectedLeafId === null ? null : text(raw.expectedLeafId, "plan.expectedLeafId"), id: text(raw.id, "plan.id"), removedEntryIds: stringList(raw.removedEntryIds, "plan.removedEntryIds"),
-    revision: text(raw.revision, "plan.revision"), sessionId: text(raw.sessionId, "plan.sessionId"), targetLeafId: raw.targetLeafId === null ? null : text(raw.targetLeafId, "plan.targetLeafId"),
+    revision: text(raw.revision, "plan.revision"), conversation: parseRecoveryConversation(raw.conversation), targetLeafId: raw.targetLeafId === null ? null : text(raw.targetLeafId, "plan.targetLeafId"),
     uncoveredPaths: raw.uncoveredPaths.map(parseWorkspaceRecoveryUncoveredPath),
     uncoveredReasons: stringList(raw.uncoveredReasons, "plan.uncoveredReasons"),
     workspaceId: text(raw.workspaceId, "plan.workspaceId"), ...(optionalText(raw.undoOf, "plan.undoOf") ? { undoOf: raw.undoOf as string } : {}),
@@ -507,7 +534,7 @@ export const parseWorkspaceCombinedRecoveryOperation = (value: unknown): Workspa
     conversationState: oneOf(raw.conversationState, ["unchanged", "navigated", "diverged"] as const, "operation.conversationState"), createdAt: isoTimestamp(raw.createdAt, "operation.createdAt"),
     entryId: text(raw.entryId, "operation.entryId"), expectedLeafId: raw.expectedLeafId === null ? null : text(raw.expectedLeafId, "operation.expectedLeafId"),
     fileState: oneOf(raw.fileState, ["unchanged", "restored", "compensated", "needs-attention"] as const, "operation.fileState"), id: text(raw.id, "operation.id"),
-    revision: text(raw.revision, "operation.revision"), sessionId: text(raw.sessionId, "operation.sessionId"),
+    revision: text(raw.revision, "operation.revision"), conversation: parseRecoveryConversation(raw.conversation),
     state: oneOf(raw.state, ["planned", "applying-files", "files-restored", "navigating-conversation", "compensating-files", "compensated", "complete", "aborted", "needs-attention"] as const, "operation.state"),
     targetLeafId: raw.targetLeafId === null ? null : text(raw.targetLeafId, "operation.targetLeafId"), updatedAt: isoTimestamp(raw.updatedAt, "operation.updatedAt"), workspaceId: text(raw.workspaceId, "operation.workspaceId"),
     ...(raw.editorImages === undefined ? {} : { editorImages: parseEditorImages(raw.editorImages) }),
