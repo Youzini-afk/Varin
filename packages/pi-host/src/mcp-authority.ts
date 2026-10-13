@@ -1118,7 +1118,9 @@ export class McpAuthority {
       const acknowledgement=await group!.acknowledgement;
       return {endpoint,listenerId:randomUUID(),acknowledgement,detach};
     }catch(error){
-      if(holder)void detach();else release();
+      // Failed acquisition must also drain its original hidden URI-holder cleanup;
+      // callers receive no observer handle with which to await that work later.
+      if(holder)await detach();else release();
       if(error instanceof McpAuthorityError)throw error;
       throw new McpAuthorityError('mcp-resource-subscribe-unavailable',!!group,error instanceof McpSessionExpiredError ? 'session_expired' : group?.receivedResponse ? 'rpc_response' : 'unknown', group?.protocolError ?? (error instanceof McpError ? {code:error.code,message:error.message,...(error.data===undefined?{}:{data:error.data})} : undefined),group?.interactionProblem);
     }

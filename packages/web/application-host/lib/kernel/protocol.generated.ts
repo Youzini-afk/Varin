@@ -3,7 +3,7 @@
  * Do not hand-edit the wire shapes; run `node scripts/generate-kernel-protocol.mjs`.
  */
 
-export const KERNEL_PROTOCOL_VERSION = 33 as const;
+export const KERNEL_PROTOCOL_VERSION = 34 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
 export const KERNEL_CONTROL_METHODS = ["source.authority.seal","source.mcp.holder","source.script.control","source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status","runtime.mcp.interaction.inspect","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.source.tools","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
@@ -11,7 +11,7 @@ export const KERNEL_CONTROL_RESPONSE_METHODS = ["source.authority.seal","source.
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["process.write","process.resize","runtime.tools.invoke","file.lease.wait"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.branch.navigate":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.memory_work.admit","runtime.memory_work.read","runtime.memory_work.status","runtime.memory_work.list","runtime.memory_work.update","runtime.inference.generate","runtime.inference.admit","runtime.inference.settle","runtime.mcp.sampling.review_output","runtime.mcp.sampling.review_request","runtime.mcp.sampling.generate","runtime.mcp.interaction.open","runtime.mcp.interaction.error.open","runtime.mcp.interaction.list","runtime.mcp.interaction.read","runtime.mcp.interaction.respond","runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
-export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v33" as const;
+export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v34" as const;
 
 export type KernelMethod =
   | "runtime.followup.registration.prepare"
@@ -340,6 +340,8 @@ export type KernelMethod =
   | "runtime.mcp.resource.notify"
   | "runtime.mcp.resource.pending"
   | "runtime.mcp.resource.context"
+  | "runtime.mcp.resource.creation_failed"
+  | "runtime.mcp.resource.holder_released"
   | "runtime.mcp.resource.access"
   | "runtime.mcp.resource.release_source"
   | "source.authority.inspect_scope"
@@ -356,7 +358,7 @@ export type KernelMethod =
   | "source.authority.bind"
   | "source.authority.seal"
   | "source.mcp.holder"
-  | "source.mcp.task_receipt"
+  | "source.mcp.creation_receipt"
   | "source.authority.open"
   | "source.capabilities"
   | "source.authority.handoff"
@@ -2146,7 +2148,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 33; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 34; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -4917,6 +4919,7 @@ export interface McpResourceSubscription {
   listenerId: string | null;
   availability: McpResourceAvailability;
   localReleased: boolean;
+  mcpHolderReleased: boolean;
   remoteCleanup: McpResourceCleanup;
   lastEventCursor: number | null;
   problem: string | null;
@@ -4940,6 +4943,15 @@ export type McpResourceFactKind = 'updated' | 'unresolved_association' | 'gap';
 
 export interface McpResourceBeginParams {
   binding: McpResourceBinding;
+}
+
+export interface McpResourceHolderReleasedParams {
+  binding: McpResourceBinding;
+}
+
+export interface McpResourceCreationFailedParams {
+  binding: McpResourceBinding;
+  error: SourceMcpCreationError;
 }
 
 export interface McpResourceAcceptParams {
@@ -4992,21 +5004,23 @@ export interface SourceScriptControlParams { principalId:string;coordinatorHostI
 
 export interface SourceMcpHolderBinding { operationId:string;executionOwner:ExecutorOwner;purpose:'task'|'resource_observer';endpoint:McpEndpoint; }
 
-export interface SourceMcpHolder { binding:SourceMcpHolderBinding;released:boolean;creationReceipt:SourceMcpTaskCreationReceipt|null; }
+export interface SourceMcpHolder { binding:SourceMcpHolderBinding;released:boolean;creationReceipt:SourceMcpCreationReceipt|null; }
+
+export interface SourceMcpHolderResult { holder:SourceMcpHolder;authority:SourceAuthorityResult;grantState:'active'|'retired'|'revoked'; }
 
 export interface SourceMcpTaskCreationResponse { task:McpTaskState;result:Record<string,unknown>; }
 
-export interface SourceMcpTaskCreationError { code:string;dispatched:boolean;settlement:'unknown'|'session_expired'|'rpc_response';taskKind?:'protocol'|'transport'|'unsupported'|'owner';rpcCode?:number;protocolError?:Record<string,unknown>;interactionProblem?:string; }
+export interface SourceMcpCreationError { code:string;dispatched:boolean;settlement:'unknown'|'session_expired'|'rpc_response';taskKind?:'protocol'|'transport'|'unsupported'|'owner';rpcCode?:number;protocolError?:Record<string,unknown>;interactionProblem?:string; }
 
-export type SourceMcpTaskCreationOutcome = {kind:'accepted';response:SourceMcpTaskCreationResponse}|{kind:'failed';error:SourceMcpTaskCreationError};
+export type SourceMcpCreationOutcome = {kind:'accepted';response:SourceMcpTaskCreationResponse}|{kind:'subscribed';listenerId:string;acknowledgement:Record<string,unknown>}|{kind:'failed';error:SourceMcpCreationError};
 
-export interface SourceMcpTaskCreationReceipt { requestHash:string;outcomeRef:SourceMcpTaskReceiptBodyRef|null; }
+export interface SourceMcpCreationReceipt { requestHash:string;outcomeRef:SourceMcpCreationReceiptBodyRef|null; }
 
-export interface SourceMcpTaskReceiptBodyRef { objectHash:string;byteLength:number; }
+export interface SourceMcpCreationReceiptBodyRef { objectHash:string;byteLength:number; }
 
-export type SourceMcpTaskReceiptParams = SourceAuthorityAddress & {binding:SourceMcpHolderBinding} & ({action:'inspect';requestHash?:string}|{action:'begin';requestHash:string}|{action:'settle';requestHash:string;outcome:SourceMcpTaskCreationOutcome});
+export type SourceMcpCreationReceiptParams = SourceAuthorityAddress & {binding:SourceMcpHolderBinding} & ({action:'inspect';requestHash?:string}|{action:'begin';requestHash:string}|{action:'settle';requestHash:string;outcome:SourceMcpCreationOutcome});
 
-export interface SourceMcpTaskReceiptResult { dispatch:boolean;holder:SourceMcpHolder;authority:SourceAuthorityResult;outcome:SourceMcpTaskCreationOutcome|null; }
+export interface SourceMcpCreationReceiptResult { dispatch:boolean;holder:SourceMcpHolder;authority:SourceAuthorityResult;outcome:SourceMcpCreationOutcome|null; }
 
 export interface SourceMcpHolderParams extends SourceAuthorityAddress { binding:SourceMcpHolderBinding;action:'retain'|'inspect'|'release'|'release_unstarted'; }
 
@@ -5781,6 +5795,8 @@ export type KernelMethodParams = {
   "runtime.host_job.task.finish": HostJobBeginParams;
   "runtime.host_job.task.holder_released": HostJobBeginParams;
   "runtime.mcp.resource.begin": McpResourceBeginParams;
+  "runtime.mcp.resource.holder_released": McpResourceHolderReleasedParams;
+  "runtime.mcp.resource.creation_failed": McpResourceCreationFailedParams;
   "runtime.mcp.resource.accept": McpResourceAcceptParams;
   "runtime.mcp.resource.listener": McpResourceListenerParams;
   "runtime.mcp.resource.notify": McpResourceNotifyParams;
@@ -5792,7 +5808,7 @@ export type KernelMethodParams = {
   "source.authority.open": SourceAuthorityOpenParams;
   "source.authority.seal": SourceAuthorityAddress;
   "source.mcp.holder": SourceMcpHolderParams;
-  "source.mcp.task_receipt": SourceMcpTaskReceiptParams;
+  "source.mcp.creation_receipt": SourceMcpCreationReceiptParams;
   "source.authority.bind": SourceAuthorityBindParams;
   "source.authority.inspect": SourceAuthorityAddress;
   "source.authority.release": SourceAuthorityReleaseParams;
@@ -8705,6 +8721,24 @@ export type KernelRequest =
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
       id: string;
+      method: "runtime.mcp.resource.holder_released";
+      params: McpResourceHolderReleasedParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.mcp.resource.creation_failed";
+      params: McpResourceCreationFailedParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
       method: "runtime.mcp.resource.accept";
       params: McpResourceAcceptParams;
       epoch?: string;
@@ -8804,8 +8838,8 @@ export type KernelRequest =
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
       id: string;
-      method: "source.mcp.task_receipt";
-      params: SourceMcpTaskReceiptParams;
+      method: "source.mcp.creation_receipt";
+      params: SourceMcpCreationReceiptParams;
       epoch?: string;
       grantId?: string;
     }

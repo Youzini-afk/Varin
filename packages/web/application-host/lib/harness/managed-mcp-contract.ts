@@ -1,9 +1,9 @@
 /** Closed source-local MCP requests. No paths, credentials or arbitrary Host method names. */
 import type { McpAuthorityBinding, McpAuthorityService, McpServiceRequest } from '@varin/pi-host/mcp-authority';
-import type { McpBinding, McpEndpoint, SourceMcpHolderBinding, SourceMcpTaskCreationOutcome } from '../kernel/protocol.generated.js';
+import type { McpBinding, McpEndpoint, McpResourceBinding, SourceMcpHolderBinding, SourceMcpCreationOutcome } from '../kernel/protocol.generated.js';
 
 /** The body projection crosses the content lane, never an authority control snapshot. */
-export interface ManagedMcpTaskCreationReceipt { requestHash: string; outcome: SourceMcpTaskCreationOutcome | null }
+export interface ManagedMcpTaskCreationReceipt { requestHash: string; outcome: SourceMcpCreationOutcome | null }
 export type ManagedMcpTaskAction =
   | { kind: 'task_prepare'; handleId: string; server: string; endpoint?: McpEndpoint }
   | { kind: 'task_start'; handleId: string; binding: SourceMcpHolderBinding; name: string; schemaVersion: string; arguments: Record<string, unknown>; ttl?: number }
@@ -13,7 +13,20 @@ export type ManagedMcpTaskAction =
 export function isManagedMcpTaskContinuation(action: ManagedMcpAction): action is Exclude<ManagedMcpTaskAction, { kind: 'task_prepare' | 'task_start' }> {
   return ['task_inspect', 'task_get', 'task_result', 'task_cancel', 'task_release'].includes(action.kind);
 }
-export type ManagedMcpAction = ManagedMcpTaskAction
+export type ManagedMcpResourceAction =
+  | { kind: 'resource_subscribe'; handleId: string; binding: McpResourceBinding; service: McpAuthorityService }
+  | { kind: 'resource_inspect'; binding: McpResourceBinding; fenceUnstarted?: boolean }
+  | { kind: 'resource_watch'; binding: McpResourceBinding; listenerId: string; after: number }
+  | { kind: 'resource_release'; binding: McpResourceBinding };
+export function isManagedMcpResourceContinuation(action: ManagedMcpAction): action is Exclude<ManagedMcpResourceAction, { kind: 'resource_subscribe' }> {
+  return ['resource_inspect', 'resource_watch', 'resource_release'].includes(action.kind);
+}
+export interface ManagedMcpResourceSnapshot {
+  listenerId: string;
+  revision: number;
+  changes: Array<{ revision: number; change: import('@varin/pi-host/mcp-authority').McpResourceChange }>;
+}
+export type ManagedMcpAction = ManagedMcpTaskAction | ManagedMcpResourceAction
   | { kind: 'snapshot'; handleId: string; creationRequestId: string; selection?: McpBinding }
   | { kind: 'changed'; incarnation: string; after: number }
   | { kind: 'release'; handleId: string; creationRequestId: string }

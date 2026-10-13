@@ -4,7 +4,7 @@
 use super::*;
 use crate::source_resources::{
     AuthorityRecord, SourceAuthorityAddress, SourceDispatch, SourceMcpHolderBinding,
-    SourceMcpTaskCreationOutcome, SourceMcpTaskReceiptBodyRef,
+    SourceMcpCreationOutcome, SourceMcpCreationReceiptBodyRef,
 };
 
 pub(crate) struct McpReceiptPreparation {
@@ -12,7 +12,7 @@ pub(crate) struct McpReceiptPreparation {
     pub(super) binding: SourceMcpHolderBinding,
     pub(super) request_hash: String,
     pub(super) epoch: String,
-    pub(super) outcome: SourceMcpTaskCreationOutcome,
+    pub(super) outcome: SourceMcpCreationOutcome,
     pub(super) root: PathBuf,
 }
 pub(crate) struct StagedMcpReceipt {
@@ -21,7 +21,7 @@ pub(crate) struct StagedMcpReceipt {
     pub(super) request_hash: String,
     pub(super) epoch: String,
     pub(super) staged: PathBuf,
-    pub(super) reference: SourceMcpTaskReceiptBodyRef,
+    pub(super) reference: SourceMcpCreationReceiptBodyRef,
 }
 impl Drop for StagedMcpReceipt {
     fn drop(&mut self) {
@@ -41,7 +41,7 @@ impl McpReceiptPreparation {
                 .root
                 .join("staging")
                 .join(format!("source-mcp-receipt-{}", Uuid::new_v4())),
-            reference: SourceMcpTaskReceiptBodyRef {
+            reference: SourceMcpCreationReceiptBodyRef {
                 object_hash: format!("sha256-{}", hex::encode(Sha256::digest(&bytes))),
                 byte_length: bytes.len() as u64,
             },
@@ -58,7 +58,7 @@ impl McpReceiptPreparation {
 pub(crate) struct McpReceiptBody {
     value: Value,
     path: PathBuf,
-    reference: SourceMcpTaskReceiptBodyRef,
+    reference: SourceMcpCreationReceiptBodyRef,
     _retention: blob_reads::BlobReadRetention,
 }
 impl McpReceiptBody {
@@ -69,7 +69,7 @@ impl McpReceiptBody {
                 != self.reference.object_hash
         {
             return Err(KernelError::Storage(
-                "Original MCP task receipt object is corrupt".into(),
+                "Original MCP creation receipt object is corrupt".into(),
             ));
         }
         self.value["outcome"] = serde_json::from_slice(&bytes)?;
@@ -77,7 +77,7 @@ impl McpReceiptBody {
     }
 }
 impl Storage {
-    pub(super) fn recall_source_mcp_task_receipt(
+    pub(super) fn recall_source_mcp_creation_receipt(
         &mut self,
         record: AuthorityRecord,
         index: usize,
@@ -94,7 +94,7 @@ impl Storage {
         // Release acknowledges that the original coordinator no longer needs the
         // creation body. Its immutable hash is still a late-settlement fence.
         if let Some(reference) = reference.filter(|_| !released) {
-            return Ok(SourceDispatch::McpTaskReceiptObserve(McpReceiptBody {
+            return Ok(SourceDispatch::McpCreationReceiptObserve(McpReceiptBody {
                 path: object_path(&self.root, &reference.object_hash)?,
                 _retention: self.blob_read_roots.retain(&reference.object_hash),
                 reference,

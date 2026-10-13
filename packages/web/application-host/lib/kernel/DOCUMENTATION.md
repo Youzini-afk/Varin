@@ -1341,13 +1341,19 @@ facts. A awaits exact target release, final source retirement where required, th
 acknowledgement. Target release fences new control calls and awaits actual SDK control callbacks;
 that local drain does not change remote Task effect or stop facts. Shutdown detaches local projections without discarding that obligation. Original
 source-reconnect notifications wake paused Task reconciliation. Target Task polling still uses A's
-existing scheduler; remote reverse-interaction and persistent resource-observer bridges remain separate.
+existing scheduler. Managed resource observers use the same original creation-receipt holder: B keeps
+its SDK observer and coalesces only unpublished invalidations by kind; A owns durable ACKs, gaps,
+listener incarnations and cleanup acknowledgement. Projection disconnect never unsubscribes B.
+Recovery starts a new A listener at B's current watch revision after publishing a gap; it does not
+claim remote replay or create a replacement SDK heap. Workspace observers still close when their
+original Source explicitly retires. Recovered finite subscribe ACKs and proven failed RPC receipts
+settle the original execution barrier without replacing already-published Unknown conversation history.
 Focused evidence covers actual coordinator/target modules with controlled ports, native receipt fences
 and Catalog persistence; it does not assert a full two-Host SDK lifecycle. The current
-internal formats are Storage 19, Agent Catalog 69 and private wire 33; older formats are rejected by
+internal formats are Storage 19, Agent Catalog 70 and private wire 34; older formats are rejected by
 the existing read-only gate with data preserved, without automatic migration or cleanup.
 
-Managed MCP persistent resource observers, finite reverse interactions and mixed-owner child
+Managed MCP finite reverse interactions and mixed-owner child
 preparation, explicit managed cold calendar starts and broader combined cross-Host file recovery
 still have separate implementation work. Computer assignments, Agent/Bot identity, global settings and model
 credentials remain with their original owners; selecting a file Host does not silently redirect them.

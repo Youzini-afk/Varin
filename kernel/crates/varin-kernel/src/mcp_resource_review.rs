@@ -1129,7 +1129,9 @@ fn acknowledged_resource_rpc_releases_dispatch_while_original_local_acceptance_r
     );
     let recovered = runtime.catalog().lock().unwrap().operation(&id).unwrap();
     assert_eq!(recovered.call_completion, original.call_completion);
-    assert_eq!(recovered.external_receipt, original.external_receipt);
+    let receipt = recovered.external_receipt.as_ref().unwrap();
+    assert!(receipt.executor_stopped);
+    assert_eq!((receipt.outcome, receipt.effect), (Outcome::Succeeded, Effect::Confirmed));
     assert_eq!(
         trace(&root)
             .iter()

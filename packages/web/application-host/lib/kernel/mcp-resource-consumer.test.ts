@@ -27,7 +27,7 @@ function observation(): Operation {
       endpoint: { server: 'original-resource-server', resourceKey: 'original-server-key', configurationVersion: 'frozen-configuration', credentialVersion: 'original-grant' },
       schemaVersion: 'frozen-resources-version', uri: 'file:///opaque/server-resource?original=1' },
       sourceScope: 'workspace', acceptanceRef: { content_object: 'original-acceptance' }, listenerId: 'original-listener',
-      availability: 'active', localReleased: false, remoteCleanup: 'not_requested', lastEventCursor: 11, problem: null },
+      availability: 'active', localReleased: false, mcpHolderReleased: true, remoteCleanup: 'not_requested', lastEventCursor: 11, problem: null },
   };
 }
 

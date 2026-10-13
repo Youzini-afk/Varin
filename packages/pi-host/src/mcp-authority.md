@@ -165,4 +165,8 @@ connections keep that original source reference; an ordinary Run view release is
 Managed Task adapters now retain that original holder through a one-shot Source creation receipt and
 A's Catalog HostJob cleanup acknowledgement. A owns status/result scheduling and cancellation; a lost
 reply recalls only the original creation outcome. Local projection release is separate from durable
-holder cleanup. Managed persistent observers and reverse interactions still require their own bridge.
+holder cleanup. Managed resource observers likewise retain the original SDK holder and creation ACK;
+A listener projections disconnect independently, while explicit withdrawal awaits original unsubscribe
+and callback drainage. Failed SDK observer acquisition drains its hidden URI holder before rejecting.
+The coordinator records gaps rather than claiming notification replay. Managed reverse interactions
+still require their own bridge.

@@ -3285,6 +3285,196 @@ fn external_result_outlives_kernel_until_original_stop_receipt() {
 }
 
 #[test]
+fn original_mcp_resource_holder_cleanup_and_late_ack_preserve_invocation() {
+    use crate::execution::*;
+    use super::mcp_resources::{McpResourceBinding, McpResourceSubscription};
+    for (managed, failure, early_ack) in [(false, None, true), (true, None, false),
+        (true, Some(false), false), (true, Some(true), false)] {
+        let f = Fixture::new();
+        let mut db = f.open();
+        let run = submit(&mut db);
+        let epoch = db.epoch();
+        let mut request = request_snapshot(&run);
+        request.view.binding.tools = vec![ToolSchema {
+            name: "mcp_subscribe_resource".into(), version: "1".into(),
+            description: "Observe original resource".into(), schema: json!({"type":"object","properties":{"server":{"type":"string"},"schemaVersion":{"type":"string"},"uri":{"type":"string"}},"required":["server","schemaVersion","uri"],"additionalProperties":false}),
+            requirements: None, output_schema: None, metadata: None,
+        }];
+        let resource_owner = if managed {
+            json!({"kind":"managed_host","hostId":"original-host","connectionId":"original-connection","endpointIdentity":"original-endpoint"})
+        } else { json!({"kind":"local"}) };
+        let source = serde_json::from_value(json!({"resource_owner":resource_owner,
+            "workspace_id":"workspace","execution_workspace_id":"workspace","mode":"live_root",
+            "live_root":{"hostId":"original-host","canonicalRoot":"/original","rootId":"original-root"},
+            "branch_id":null,"revision":null})).unwrap();
+        let mcp: launches::HostToolBinding = serde_json::from_value(json!({
+            "reference":"original-mcp","generation":1,"tools":request.view.binding.tools,
+            "routes":{"mcp_subscribe_resource":{"kind":"resource_subscribe","argument":"server"}},
+            "resources":{"server:original":"original-resource"},"provenance":{"servers":{"original":{
+                "owner":{"resource_owner":resource_owner,"source_authority":if managed {
+                    json!({"coordinator_host_id":"coordinator","authority_id":"original-authority","resource_epoch":"source-epoch"})
+                } else { Value::Null },"configuration":{"agent_dir":"/original","config_cwd":"/original","project_trusted":false},
+                    "execution_scope":"workspace"},"definition_version":"configuration","resource_key":"original-resource"}}}
+        })).unwrap();
+        let model: dispatch::ChildModelBinding = serde_json::from_value(json!({
+            "configuration":{"providerFamily":"openai-responses","endpoint":"https://fixture.invalid",
+                "allowAnonymous":true,"model":"fixture","configurationGeneration":1},"credential_scope":null})).unwrap();
+        request.view.binding.connection_identity = model.connection_identity().unwrap();
+        request.view.binding.provider_family = "openai-responses".into();
+        request.view.binding.model = "fixture".into();
+        let mut launch = launches::LaunchSelection::from_binding(&request.view.binding,
+            PolicyIdentity { name: "fixture".into(), version: "1".into() }, Some(source));
+        launch.mcp_binding = Some(mcp);
+        db.bind_launch(&run.run_id, launch).unwrap();
+        let prepared = db.prepare_child_dispatch_binding(&run.run_id, model, 1,
+            request.view.binding.tools.clone()).unwrap().load().unwrap();
+        request.view.binding.child_dispatch = db.bind_child_dispatch(&run.run_id, prepared).unwrap();
+        independent_prepare(&mut db, &run, request);
+        let call = ToolCall { call_id: "subscribe".into(), name: "mcp_subscribe_resource".into(),
+            schema_version: "1".into(), arguments: json!({"server":"original","schemaVersion":"resources-v1","uri":"original:resource"}) };
+        db.commit_execution(&run.run_id, epoch, &ExecutionRecord::ModelFinished {
+            request_id: "model-1".into(), outcome: ModelOutcome::Completed,
+            finish_reason: Some(FinishReason::ToolCalls), items: vec![ProviderItem {
+                id: "subscribe-call".into(), content: Content::ToolCall { call: call.clone() }, opaque: None,
+            }], interrupted_deltas: vec![], usage: UsageReceipt::default(), failure: None,
+        }).unwrap();
+        let context = ToolExecutionContext { run_id: run.run_id.clone(), operation_id: "model-1:tool:subscribe".into(),
+            origin: ToolOrigin::ModelStep { request_id: "model-1".into() } };
+        let owner = ExecutorOwner::External { identity: "original-host-owner".into(), epoch: "original-owner-epoch".into() };
+        db.commit_execution(&run.run_id, epoch, &ExecutionRecord::ToolAdmitted { context: context.clone(),
+            tool: AdmittedTool { call, contract: ToolContract { name: "mcp_subscribe_resource".into(),
+                schema_version: "1".into(), read_only: false, completion: CompletionKind::Result,
+                lifetime: Lifetime::Thread, resources: vec![ResourceClaim { key: "original-resource".into(), access: Access::Write }] } },
+        }).unwrap();
+        db.commit_execution(&run.run_id, epoch, &ExecutionRecord::ToolDispatched {
+            context: context.clone(), executor_owner: owner.clone(),
+        }).unwrap();
+        assert!(db.mcp_resource_context_operation(&context.operation_id).is_err());
+        let (snapshot, frozen) = db.capture_tool_invocation(&context, "subscribe").unwrap().load_mcp().unwrap();
+        let binding: McpResourceBinding = serde_json::from_value(json!({"operationId":context.operation_id,
+            "executionOwner":owner,"endpoint":{"server":"original","resourceKey":"original-resource",
+                "configurationVersion":"configuration","credentialVersion":"credential"},
+            "schemaVersion":"resources-v1","uri":"original:resource"})).unwrap();
+        let begun = db.begin_mcp_resource(binding.clone(), &snapshot, &frozen).unwrap();
+        assert_eq!(begun.mcp_resource_subscription.as_ref().unwrap().mcp_holder_released, !managed);
+        let mut missing = serde_json::to_value(begun.mcp_resource_subscription.unwrap()).unwrap();
+        missing.as_object_mut().unwrap().remove("mcpHolderReleased");
+        assert!(serde_json::from_value::<McpResourceSubscription>(missing).is_err());
+        if early_ack {
+            let ack = json!({"_meta":{"original":"subscribe ACK"}});
+            let data = db.prepare_result_content().write_data(&ack).unwrap();
+            let receipt = db.prepare_result_content().write_external_receipt(ExternalReceipt {
+                executor: "mcp_subscribe_resource".into(), identity: context.operation_id.clone(), epoch: "original-owner-epoch".into(),
+                outcome: Outcome::Succeeded, effect: Effect::Confirmed,
+                result: json!({"operationId":context.operation_id,"server":"original","uri":"original:resource","acknowledgement":ack}).into(),
+            }).unwrap();
+            let accepted = db.accept_mcp_resource(&binding, "original-listener", data, receipt).unwrap();
+            assert_eq!(accepted.phase, OperationPhase::Running);
+            assert!(accepted.external_receipt.unwrap().executor_stopped);
+        }
+        let unknown = ToolCompletion::Result { outcome: Outcome::Indeterminate, effect: Effect::Unknown,
+            content: json!({"error":"original subscribe response lost"}).into() };
+        db.commit_execution(&run.run_id, epoch, &ExecutionRecord::ToolSettled {
+            context: context.clone(), completion: unknown.clone(), executor_stopped: false,
+        }).unwrap();
+        let before = db.operation(&context.operation_id).unwrap();
+        let history = db.history("main").unwrap();
+        db.release_mcp_resource_source(&run.run_id).unwrap();
+        if early_ack {
+            assert!(super::mcp_resources::require_source_released(&db.db, &run.run_id).is_err(),
+                "local observers must actually detach even when their finite RPC stopped");
+            db.update_mcp_resource_listener(&binding, Some("original-listener"), None,
+                crate::McpResourceAvailability::Closed, true, crate::McpResourceCleanup::Acknowledged, None).unwrap();
+        }
+        assert_eq!(db.pending_mcp_resources().unwrap().iter().any(|v| v.operation_id == context.operation_id), managed,
+            "cancelled locally released managed facets still owe original holder cleanup");
+        assert_eq!(super::mcp_resources::require_source_released(&db.db, &run.run_id).is_ok(), !managed);
+        drop(db);
+        let mut db = f.open();
+        let (snapshot, frozen) = db.capture_tool_invocation(&context, "subscribe").unwrap().load_mcp().unwrap();
+        db.validate_mcp_resource_context(&context.operation_id, &snapshot, &frozen).unwrap();
+        let mut wrong_frozen = frozen.clone();
+        wrong_frozen.provenance.servers.get_mut("original").unwrap().definition_version = "replacement".into();
+        assert!(db.validate_mcp_resource_context(&context.operation_id, &snapshot, &wrong_frozen).is_err());
+        let ack = json!({"_meta":{"original":"subscribe ACK"}});
+        let weaker = ExternalReceipt { executor: "mcp_subscribe_resource".into(), identity: context.operation_id.clone(),
+            epoch: "original-owner-epoch".into(), outcome: Outcome::Indeterminate, effect: Effect::Unknown,
+            result: json!({"error":"original caller transport uncertainty"}).into() };
+        let prepared = db.prepare_result_content().write_external_receipt(weaker).unwrap();
+        db.record_external_tool_receipt_prepared(&context.operation_id, &owner, prepared, false).unwrap();
+        let receipt = ExternalReceipt { executor: "mcp_subscribe_resource".into(), identity: context.operation_id.clone(),
+            epoch: "original-owner-epoch".into(),
+            outcome: if failure.is_none() { Outcome::Succeeded } else if failure == Some(false) { Outcome::Failed } else { Outcome::Indeterminate },
+            effect: if failure.is_none() { Effect::Confirmed } else if failure == Some(false) { Effect::None } else { Effect::Unknown },
+            result: if let Some(dispatched) = failure {
+                json!({"operationId":context.operation_id,"server":"original","uri":"original:resource",
+                    "error":{"code":"original-rejection","dispatched":dispatched,"settlement":"rpc_response","protocolError":{"data":"preserved detail"}}}).into()
+            } else {
+                json!({"operationId":context.operation_id,"server":"original","uri":"original:resource","acknowledgement":ack}).into()
+            } };
+        let expected_effect = receipt.effect;
+        let confirmed = if failure.is_some() {
+            let prepared = db.prepare_result_content().write_external_receipt(receipt.clone()).unwrap();
+            let failed = db.fail_mcp_resource_creation(&binding, prepared).unwrap();
+            let prepared = db.prepare_result_content().write_external_receipt(receipt.clone()).unwrap();
+            assert_eq!(db.fail_mcp_resource_creation(&binding, prepared).unwrap(), failed);
+            let mut different = receipt.clone();
+            different.result = json!({"error":"recalled no-send diagnostic"}).into();
+            let prepared = db.prepare_result_content().write_external_receipt(different).unwrap();
+            let recalled = db.fail_mcp_resource_creation(&binding, prepared);
+            assert_eq!(recalled.unwrap(), failed, "already-stopped original failure preserves its body when diagnostic wrappers differ");
+            failed
+        } else {
+            let mut wrong = receipt.clone();
+            wrong.epoch = "replacement-epoch".into();
+            let data = db.prepare_result_content().write_data(&ack).unwrap();
+            let prepared = db.prepare_result_content().write_external_receipt(wrong).unwrap();
+            assert!(db.accept_mcp_resource(&binding, "original-listener", data, prepared).is_err());
+            assert_eq!(db.operation(&context.operation_id).unwrap().mcp_resource_subscription.unwrap().acceptance_ref.is_some(), early_ack,
+                "ACK and stop evidence roll back together when original receipt validation fails");
+            let data = db.prepare_result_content().write_data(&ack).unwrap();
+            let prepared = db.prepare_result_content().write_external_receipt(receipt).unwrap();
+            let accepted = db.accept_mcp_resource(&binding, "original-listener", data, prepared).unwrap();
+            let failure = ExternalReceipt { executor: "mcp_subscribe_resource".into(), identity: context.operation_id.clone(),
+                epoch: "original-owner-epoch".into(), outcome: Outcome::Failed, effect: Effect::None, result: json!({"failure":true}).into() };
+            let prepared = db.prepare_result_content().write_external_receipt(failure.clone()).unwrap();
+            assert!(db.fail_mcp_resource_creation(&binding, prepared).is_err(), "failure cannot overwrite an accepted facet");
+            accepted
+        };
+        let sub = confirmed.mcp_resource_subscription.as_ref().unwrap();
+        assert!(confirmed.cancel_requested && sub.local_released && sub.listener_id.is_none());
+        assert!(db.update_mcp_resource_listener(&binding, None, Some("replacement-listener".into()),
+            crate::McpResourceAvailability::Active, false, crate::McpResourceCleanup::NotRequested, None).is_err());
+        assert!(confirmed.external_receipt.as_ref().unwrap().executor_stopped);
+        assert_eq!(confirmed.effect, expected_effect);
+        assert_eq!(confirmed.call_completion, before.call_completion);
+        assert_eq!(db.history("main").unwrap(), history);
+        assert!(db.resource_admission.inspect(&context.operation_id).is_none());
+        let weaker = ExternalReceipt { executor: "mcp_subscribe_resource".into(), identity: context.operation_id.clone(),
+            epoch: "original-owner-epoch".into(), outcome: Outcome::Indeterminate, effect: Effect::Unknown,
+            result: json!({"error":"late caller transport uncertainty"}).into() };
+        let prepared = db.prepare_result_content().write_external_receipt(weaker.clone()).unwrap();
+        assert_eq!(db.record_external_tool_receipt_prepared(&context.operation_id, &owner, prepared, false).unwrap(), confirmed);
+        let mut forged = weaker;
+        forged.epoch = "other-owner-epoch".into();
+        let prepared = db.prepare_result_content().write_external_receipt(forged).unwrap();
+        assert!(db.record_external_tool_receipt_prepared(&context.operation_id, &owner, prepared, false).is_err());
+        let mut wrong = binding.clone();
+        wrong.endpoint.credential_version = "replacement".into();
+        assert!(db.acknowledge_mcp_resource_holder_released(&wrong).is_err());
+        let released = db.acknowledge_mcp_resource_holder_released(&binding).unwrap();
+        assert_eq!(released.effect, confirmed.effect);
+        assert_eq!(released.outcome, confirmed.outcome);
+        assert_eq!(released.external_receipt, confirmed.external_receipt);
+        assert_eq!(released.call_completion, confirmed.call_completion);
+        assert_eq!(released.mcp_resource_subscription.as_ref().unwrap().availability, sub.availability);
+        assert_eq!(db.acknowledge_mcp_resource_holder_released(&binding).unwrap(), released);
+        assert!(db.pending_mcp_resources().unwrap().is_empty());
+        super::mcp_resources::require_source_released(&db.db, &run.run_id).unwrap();
+    }
+}
+
+#[test]
 fn reply_deadline_short_facts_recheck_clock_and_catch_up_without_replacing_a_winner() {
     use messages::reply_wait::{REPLY_EVENT, resolve};
     let fixture = Fixture::new();

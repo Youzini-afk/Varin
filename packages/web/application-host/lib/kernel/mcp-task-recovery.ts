@@ -7,7 +7,7 @@ import { createMcpOriginalOwnerRecovery } from './mcp-original-owner.js';
 import { createManagedMcpTaskLease, requestManagedMcpTask } from './managed-mcp-task-lease.js';
 import type { KernelClient } from './kernel-client.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
-import type { HostJobPending, LaunchSource, McpBinding, Operation, SourceMcpHolderBinding, SourceMcpTaskCreationOutcome } from './protocol.generated.js';
+import type { HostJobPending, LaunchSource, McpBinding, Operation, SourceMcpHolderBinding, SourceMcpCreationOutcome } from './protocol.generated.js';
 export function createMcpTaskRecovery(options: {
   kernel: KernelClient; authority: McpAuthority; agentDir: string; hostId: string;
   runtime?: Pick<AgentRuntimeClient, 'managedSource' | 'coordinatorHostId'>;
@@ -55,7 +55,7 @@ export function createMcpTaskRecovery(options: {
       { operationId: pending.binding.operationId, executionOwner: pending.binding.executionOwner }); } finally { lease.release(); }
   };
   return Object.assign(recover, {
-    async recoverCreation(pending: HostJobPending, signal: AbortSignal): Promise<SourceMcpTaskCreationOutcome | null> {
+    async recoverCreation(pending: HostJobPending, signal: AbortSignal): Promise<SourceMcpCreationOutcome | null> {
       if (!pending.accepted && pending.executorStopped) {
         const operation = await options.kernel.agentRuntimeRequest<Operation, 'runtime.operation.inspect'>(
           'runtime.operation.inspect', { operationId: pending.binding.operationId }, signal);
