@@ -45,6 +45,18 @@ Native Storage ownership remains held until its real workers stop, independently
 Promise. See the [finite blob-reader acceptance](../../../../../docs/reviews/runtime-blob-reader-2026-10-11.md)
 for the native/consumer evidence and the separately unverified full IPC boundary.
 
+## Experiment inputs from managed Sources
+
+`managed-research-source.ts` fixes input in the target Storage; `research-source.ts` transfers verified
+bytes into the coordinator's original Experiment input branch. Target paths are provenance, never
+coordinator filesystem paths. The target's `experiment.input-capture` record and native branch receipts
+retain the original source Operation, including its cleanup command. Live service handles drain before
+durable cleanup; after a Host restart, cleanup uses the original address and maintenance authority rather
+than recreating a source reader. Input capture does not choose the Experiment execution machine.
+
+See the [implementation evidence](../../../../../docs/reviews/runtime-managed-experiment-input-2026-10-13.md)
+for the real two-kernel coverage and the controlled admission/transport boundary.
+
 ## Same-task conversation views
 
 The four authenticated `/api/threads/family/{list,runs,read,item}` routes use the original

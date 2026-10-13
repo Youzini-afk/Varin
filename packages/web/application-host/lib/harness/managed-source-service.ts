@@ -15,6 +15,7 @@ import { ManagedSourceDrainedError } from './managed-source-drain.js';
 import type { ManagedSourceAddress, ManagedSourceBindRequest, ManagedSourceBinding, ManagedSourceCapabilities,
   ManagedSourcePrincipal, ManagedSourceService, ManagedSourceServiceHandler, ManagedSourceLocalScope,
   ManagedSourceServiceRequest, ManagedSourceServiceCancelReceipt } from './managed-remote-types.js';
+import type { ManagedSourceCleanupScope } from './managed-remote-types.js';
 
 export interface ManagedSourceServiceOptions {
   kernel: KernelClient;
@@ -25,6 +26,7 @@ export interface ManagedSourceServiceOptions {
   prepareSource(input: ThreadPrepareSource, signal?: AbortSignal): Promise<ThreadPreparedSource>;
   serviceOperation?: ManagedSourceServiceHandler;
   releaseSource?(scope: ManagedSourceLocalScope): Promise<void>;
+  cleanupSource?(scope: ManagedSourceCleanupScope): Promise<void>;
   languageAvailable?: boolean;
 }
 
@@ -125,6 +127,9 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     }
     await options.releaseSource(scope);
   };
+  const cleanupArtifacts = (principal: ManagedSourcePrincipal, coordinatorHostId: string, authority: SourceAuthorityResult) =>
+    options.cleanupSource?.({ principal, coordinatorHostId, authorityId: authority.authorityId, resourceEpoch: authority.resourceEpoch,
+      source: authority.source, scope: authority.scope, physicalRoot: authority.physicalRoot, operationId: authority.operationId });
   const admit = async (principal: ManagedSourcePrincipal, input: ManagedSourceAddress, signal?: AbortSignal, enabledTools: string[] = []) => {
     if (closing.has(authorityKey(principal, input))) throw new SourceAdmissionError('source_authority_denied');
     const authority = await inspect(principal, input, signal);
@@ -317,13 +322,14 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
             nativeDispatch = true;
             return kernel.sourceRequest('source.service.call', { ...address(principal, input), requestId: input.requestId,
               clientCapabilities: [...principal.capabilities], operation }, controller.signal);
-          default:
+          default: {
             if (!options.serviceOperation) throw new SourceAdmissionError('source_unavailable');
             // The original domain owns promotion and drain. No post-effect
             // cancellation/trust check may discard its committed receipt.
             const scope = localScope(principal, input.coordinatorHostId, authority);
             dispatched = true;
             return options.serviceOperation(scope, operation, controller.signal);
+          }
         }
       }).finally(() => signal?.removeEventListener('abort', abort));
       const drain = work.then(result => {
@@ -387,6 +393,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       await kernel.start();
       const authority = await inspect(principal, input, signal);
       await drainViews(principal, input.coordinatorHostId, authority);
+      await cleanupArtifacts(principal, input.coordinatorHostId, authority);
       const result = await kernel.sourceRequest<NativeRelease>('source.authority.release', { ...address(principal, input), mode: input.mode }, signal);
       closing.delete(authorityKey(principal, input));
       return projectRelease(result);
@@ -415,7 +422,10 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       // Match native retirement's original lifetime selection. A caller-owned
       // operation can outlive its Run; retirement must not close its Host work.
       const authorities = inspected.filter(authority => input.mode === 'revoke' || authority.operationId === null);
-      await Promise.all(authorities.map(authority => drainViews(principal, input.coordinatorHostId, authority)));
+      await Promise.all(authorities.map(async authority => {
+        await drainViews(principal, input.coordinatorHostId, authority);
+        await cleanupArtifacts(principal, input.coordinatorHostId, authority);
+      }));
       const result = await kernel.sourceRequest<{ released: NativeRelease[]; pendingAuthorities: string[] }>(
         'source.authority.release_scope', { ...params, mode: input.mode }, signal);
       for (const authority of authorities) if (result.released.some(item => item.authorityId === authority.authorityId)) {

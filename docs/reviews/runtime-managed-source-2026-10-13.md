@@ -24,7 +24,11 @@
 
 - 跨 Host 组合文件恢复。需将原 journal 与对象传输按 owner 接通；历史读取和仅对话导航已有路径。
 - B 文件 followup 的事件回传、交互 PTY 的目标终端接入、managed persistent script 环境。
-- 从 managed source 捕获 Experiment 输入、扩展包 stage，以及项目绑定 MCP / scheduled task 的目标配置消费者。已有独立远端 Experiment 执行并未因此删除。
+- 项目绑定 MCP / scheduled task 的目标配置消费者。
+
+来源扩展包 staging 和 Experiment 输入已经接入，分别见[包捕获](runtime-managed-package-2026-10-13.md)
+和[实验输入](runtime-managed-experiment-input-2026-10-13.md)。来源身份与实验执行机器独立，原有远端
+Experiment backend 继续消费协调端已固定的输入。
 
 这些是本设计的真实后续接入工作。Computer 的分配目标仍独立于文件 Source，应用工具接入另沿原 Computer owner 推进。真实双机认证/网络故障、部署安装、平台行为、实际模型与长期负载仍需要相应外层环境验收。
 

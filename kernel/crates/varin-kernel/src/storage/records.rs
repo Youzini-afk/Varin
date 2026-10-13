@@ -219,6 +219,25 @@ impl Storage {
                 }
                 state_in(&["available", "retired"])?;
             }
+            "experiment.input-capture" => {
+                derived("experiment.input-capture")?;
+                same("workspaceId", workspace_id)?;
+                state_in(&["capturing"])?;
+                let identity = object.get("identity").and_then(Value::as_object).ok_or_else(|| {
+                    KernelError::Operation("experiment input capture owner is required".into())
+                })?;
+                for field in ["principalId", "coordinatorHostId", "authorityId", "resourceEpoch", "operationId"] {
+                    if identity.get(field).and_then(Value::as_str).is_none_or(str::is_empty) {
+                        return Err(KernelError::Operation(format!("experiment input capture {field} is required")));
+                    }
+                }
+                if identity.get("source").and_then(|source| source.get("workspace_id")).and_then(Value::as_str) != Some(workspace_id)
+                    || !object.get("cwd").is_some_and(Value::is_string)
+                    || !object.get("captureScopes").and_then(Value::as_array).is_some_and(|values| values.iter().all(Value::is_string))
+                {
+                    return Err(KernelError::Operation("experiment input capture selection is invalid".into()));
+                }
+            }
             "experiment.spec" => {
                 derived("experiment.spec")?;
                 same("workspaceId", workspace_id)?;
@@ -795,6 +814,7 @@ impl Storage {
             "recovery.operation-file",
             "research.source",
             "experiment.spec",
+            "experiment.input-capture",
             "experiment.attempt",
             "experiment.job",
             "experiment.artifact",

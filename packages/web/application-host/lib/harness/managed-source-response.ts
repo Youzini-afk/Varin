@@ -1,5 +1,6 @@
 import type { ManagedSourceReceiptRelease, ManagedSourceServiceCancelReceipt, SourceServiceOperation, SourceServiceResponse } from './managed-remote-types.js';
 import { parseExtensionSourceSnapshot } from '../kernel/extension-source.js';
+import { parseManagedExperimentInput } from './experiment-workspace.js';
 
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown): value is string => typeof value === 'string';
@@ -35,6 +36,12 @@ export function decodeManagedSourceResponse<Operation extends SourceServiceOpera
       && (value.status !== 'ready' || text(value.content) && text(value.revision) && text(value.source)); break;
     case 'document_read': valid = record(value) && text(value.bytesBase64) && Number.isSafeInteger(value.byteLength)
       && Number(value.byteLength) >= 0 && text(value.sourceUrl) && text(value.title) && value.contentType === 'application/pdf'; break;
+    case 'experiment_admit': valid = record(value) && text(value.cwd); break;
+    case 'experiment_capture': return parseManagedExperimentInput(value) as SourceServiceResponse<Operation>;
+    case 'experiment_read':
+      valid = record(value) && text(value.bytesBase64) && text(value.hash) && Number.isSafeInteger(value.byteLength)
+        && Number(value.byteLength) >= 0 && value.offset === operation.offset
+        && Number.isSafeInteger(value.nextOffset) && typeof value.eof === 'boolean'; break;
     case 'package_capture':
       if (record(value) && value.captureId === operation.captureId) {
         return { captureId: operation.captureId, snapshot: parseExtensionSourceSnapshot(value.snapshot) } as SourceServiceResponse<Operation>;

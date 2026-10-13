@@ -9,7 +9,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { KernelBranchState } from "../kernel/protocol.generated.js";
+import { isDeepStrictEqual } from "node:util";
+import type { KernelBranchState, KernelObjectSlice, LaunchSource } from "../kernel/protocol.generated.js";
 import { KernelClientError, type KernelClient, type KernelScopedClient } from "../kernel/kernel-client.js";
 import { canonicalizePathIdentity, isPathWithinRoot } from "../workspace/path-safety.js";
 
@@ -65,7 +66,8 @@ export interface ExperimentInputSnapshot {
   capturedPathCount: number | null;
   inventoryFingerprint: string | null;
   /** The source file authority does not apply Git ignore rules. */
-  source: { kind: "physical-capture" } | { kind: "fixed-branch"; branchId: string; revision: number; root: string };
+  source: ExperimentInputOrigin | { kind: 'managed-source'; selection: LaunchSource; origin: ExperimentInputOrigin;
+    sourceBranchId: string; resourceEpoch: string };
   captureSemantics: {
     excludedDirectories: readonly [".git", ".varin"];
     gitignore: "not-applied";
@@ -73,6 +75,7 @@ export interface ExperimentInputSnapshot {
   } | null;
   cwd?: string;
 }
+export type ExperimentInputOrigin = { kind: 'physical-capture' } | { kind: 'fixed-branch'; branchId: string; revision: number; root: string };
 
 export interface MaterializedExperimentAttempt {
   attemptId: string;
@@ -744,6 +747,110 @@ export async function openExperimentInputTransfer(client: KernelClient, caller: 
     await grant.release();
     throw error;
   }
+}
+
+/** Decode source-owner facts once at the network boundary. Object bytes are verified by Storage. */
+export function parseManagedExperimentInput(value: unknown): import('../kernel/managed-research-source.js').ManagedExperimentInput {
+  const raw = value as import('../kernel/managed-research-source.js').ManagedExperimentInput;
+  const snapshot = raw?.snapshot;
+  if (!snapshot || snapshot.schemaVersion !== 2 || typeof snapshot.branchId !== 'string' || !snapshot.branchId
+    || typeof snapshot.root !== 'string' || !/^sha256-[0-9a-f]{64}$/u.test(snapshot.root) || !snapshot.workspaceId || typeof snapshot.workspaceId !== 'string'
+    || !snapshot.executionWorkspaceId || typeof snapshot.executionWorkspaceId !== 'string'
+    || snapshot.sourceRoot !== null && typeof snapshot.sourceRoot !== 'string'
+    || !Array.isArray(snapshot.captureScopes) || !snapshot.captureScopes.every(scope => typeof scope === 'string')
+    || snapshot.capturedPathCount !== null && (!Number.isSafeInteger(snapshot.capturedPathCount) || snapshot.capturedPathCount < 0)
+    || snapshot.inventoryFingerprint !== null && typeof snapshot.inventoryFingerprint !== 'string'
+    || snapshot.cwd !== undefined && typeof snapshot.cwd !== 'string' || !Array.isArray(raw.entries)) throw new Error('Managed experiment input is unconfirmed');
+  if (snapshot.source?.kind !== 'physical-capture' && (snapshot.source?.kind !== 'fixed-branch'
+    || !snapshot.source.branchId || typeof snapshot.source.branchId !== 'string' || !Number.isSafeInteger(snapshot.source.revision) || snapshot.source.revision < 0
+    || typeof snapshot.source.root !== 'string' || !/^sha256-[0-9a-f]{64}$/u.test(snapshot.source.root))) throw new Error('Managed experiment input origin is unconfirmed');
+  if (snapshot.captureSemantics !== null && (!snapshot.captureSemantics
+    || !isDeepStrictEqual(snapshot.captureSemantics.excludedDirectories, CAPTURE_EXCLUDED_DIRECTORIES)
+    || snapshot.captureSemantics.gitignore !== 'not-applied' || snapshot.captureSemantics.ignoredFilesIncluded !== true))
+    throw new Error('Managed experiment input capture semantics are unconfirmed');
+  snapshot.captureScopes.forEach(scope => normalizeRelative(scope, 'Experiment capture scope'));
+  if (snapshot.cwd !== undefined) normalizeRelative(snapshot.cwd, 'Experiment cwd');
+  const names = new Set<string>();
+  const entries = raw.entries.map(entry => {
+    const name = normalizeRelative(entry?.path, 'Experiment input path');
+    if (names.has(name)) throw new Error('Managed experiment input has duplicate paths');
+    names.add(name);
+    return { path: name, state: parseState(entry.state, name) };
+  });
+  return { snapshot, entries };
+}
+
+/** Install the original source's stream into this Storage before publishing an input branch. */
+export async function installExperimentInput(client: KernelClient, caller: ExperimentWorkspaceCaller,
+  input: import('../kernel/managed-research-source.js').ManagedExperimentInput,
+  source: LaunchSource, resourceEpoch: string,
+  read: (name: string, offset: number, length: number, signal?: AbortSignal) => Promise<KernelObjectSlice>,
+  options: PrepareExperimentInputOptions,
+): Promise<ExperimentInputSnapshot> {
+  if (!options.branchId || input.snapshot.workspaceId !== caller.workspaceId || input.snapshot.executionWorkspaceId !== caller.executionWorkspaceId)
+    throw new ExperimentInputCaptureError('Managed experiment input attribution changed', false, { drained: true, retryable: false, cause: undefined });
+  if (input.snapshot.source.kind === 'managed-source') throw new Error('Experiment input must come from its original source owner');
+  const grant = await issueExperimentGrant(client, caller, 'prepare', options.signal);
+  const owners = new Map<string, string>();
+  let dispatched = false;
+  let outcome: { snapshot: ExperimentInputSnapshot } | { error: unknown };
+  try {
+    const candidate: ExperimentInputCapture = { schemaVersion: 2, branchId: options.branchId, sourceRoot: null,
+      workspaceId: caller.workspaceId, executionWorkspaceId: caller.executionWorkspaceId,
+      captureScopes: [...input.snapshot.captureScopes], capturedPathCount: input.snapshot.capturedPathCount,
+      inventoryFingerprint: input.snapshot.inventoryFingerprint, captureSemantics: input.snapshot.captureSemantics,
+      ...(input.snapshot.cwd ? { cwd: input.snapshot.cwd } : {}),
+      source: { kind: 'managed-source', selection: source, origin: input.snapshot.source,
+        sourceBranchId: input.snapshot.branchId, resourceEpoch } };
+    // The remote root is provenance until local Storage verifies and owns every referenced byte.
+    for (const entry of input.entries) {
+      if (entry.state.kind !== 'regular-file' || owners.has(entry.state.objectHash)) continue;
+      const state = entry.state;
+      const chunks = (async function* () {
+        let offset = 0;
+        while (offset < state.byteLength) {
+          options.signal?.throwIfAborted();
+          const page = await read(entry.path, offset, Math.min(256 * 1024, state.byteLength - offset), options.signal);
+          const bytes = Buffer.from(page.bytesBase64, 'base64');
+          if (page.hash !== state.objectHash || page.offset !== offset || page.byteLength !== state.byteLength || page.nextOffset !== offset + bytes.length || !bytes.length
+            || page.nextOffset > state.byteLength || page.eof !== (page.nextOffset === state.byteLength)) throw new Error('Managed experiment input page changed');
+          offset = page.nextOffset;
+          yield bytes;
+        }
+      })();
+      const blob = await grant.scoped.putBlobStream(chunks, { operationId: `experiment-input-object:${randomUUID()}`,
+        byteLength: state.byteLength, expectedHash: state.objectHash }, options.signal);
+      if (blob.hash !== state.objectHash || blob.byteLength !== state.byteLength) throw new Error('Installed experiment object differs from its source');
+      owners.set(state.objectHash, blob.ownerId);
+    }
+    await options.beforeBranchCreate?.(candidate);
+    options.signal?.throwIfAborted();
+    dispatched = true;
+    const created = await grant.scoped.createBranch({ operationId: `experiment-input-branch:${candidate.branchId}`, branchId: candidate.branchId,
+      workspaceId: caller.workspaceId, entries: input.entries.map(entry => ({ ...entry,
+        ...(entry.state.kind === 'regular-file' ? { ownerId: owners.get(entry.state.objectHash)! } : {}) })),
+      draftBasePaths: [], captureScopes: candidate.captureScopes });
+    if (created.root !== input.snapshot.root || created.branchId !== candidate.branchId) throw new Error('Installed experiment input root differs from its source');
+    const branch = await grant.scoped.readBranch({ branchId: candidate.branchId, includeEntries: false });
+    if (branch.workspaceId !== caller.workspaceId || branch.root !== created.root || branch.currentRoot !== created.root) throw new Error('Installed experiment input branch changed');
+    outcome = { snapshot: { ...candidate, root: input.snapshot.root } };
+  } catch (error) {
+    outcome = { error };
+  }
+  try {
+    // Native retirement discards this grant's upload streams and temporary
+    // object owners together. Committed branches retain their own roots.
+    await grant.release();
+  } catch (cleanup) {
+    // The transfer loop and its remote reader have ended. Local uploads and
+    // branch commits are joined Storage metadata requests, not retained file
+    // workers. Keep a lost cleanup ACK retryable, without inventing a live reader.
+    throw new ExperimentInputCaptureError('Experiment input transfer cleanup is unconfirmed', dispatched,
+      { drained: true, retryable: true, cause: 'error' in outcome ? new AggregateError([outcome.error, cleanup]) : cleanup });
+  }
+  if ('error' in outcome) throw new ExperimentInputCaptureError(outcome.error instanceof Error ? outcome.error.message : String(outcome.error), dispatched,
+    { drained: true, retryable: dispatched || outcome.error instanceof KernelClientError, cause: outcome.error });
+  return outcome.snapshot;
 }
 
 export const experimentManagedDirectoryName = MANAGED_EXPERIMENTS_DIRECTORY;
