@@ -745,6 +745,23 @@ pub(super) fn storage_rpc(
             let mut storage = owner.lock().unwrap();
             let (grant, params) =
                 storage.authorize(grant_id, epoch, host, generation, method, &params)?;
+            if method == "file.lease.wait" {
+                // These capture fixtures have no competing path writer. Exercise
+                // the original owner; queued/event-driven delivery has its own runtime tests.
+                return storage
+                    .wait_file_lease(
+                        &uuid::Uuid::new_v4().to_string(),
+                        &params,
+                        &grant,
+                        Arc::new(AtomicBool::new(false)),
+                    )?
+                    .ok_or_else(|| {
+                        KernelError::Operation(
+                            "this synchronous Storage fixture cannot deliver a queued lease waiter"
+                                .into(),
+                        )
+                    });
+            }
             if method == "file.materialize" || method == "file.materializedView.prepare" {
                 use crate::storage::materialization::Admission;
                 let admission = if method == "file.materializedView.prepare" {

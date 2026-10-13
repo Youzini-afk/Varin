@@ -240,6 +240,38 @@ describe('managed Source target admission orchestration', () => {
     await queries.dispose();
   });
 
+  it('joins language admission before releasing its views while unrelated source reads continue', async () => {
+    const f = fixture();
+    const binding = await f.service.bind(principal, { ...request, purpose: 'source', retention: 'run',
+      scope: { kind: 'run', threadId: 'thread', runId: 'run', epoch: 1 } });
+    let entered!: () => void, finish!: () => void, first = true;
+    const atAdmission = new Promise<void>(resolve => { entered = resolve; });
+    const admitted = new Promise<void>(resolve => { finish = resolve; });
+    const supervisor = { retainSourceView: vi.fn(), releaseSourceViews: vi.fn(async () => {}) };
+    const queries = createSourceQueryService({ kernel: f.kernel, documents: {
+      async admitWorkspaceRegistration() {
+        if (first) { first = false; entered(); await admitted; }
+        return { workspaceId: 'workspace', canonicalPath: '/target/project', hostId: 'target' };
+      },
+    } as never, validateLiveSource: async () => {}, storage: {} as never, languageSupervisor: supervisor as never,
+    resourceOwners: { agentDir: '/unused-query-assets', homeDir: '/unused-query-home' } as never });
+    f.serviceOperation.mockImplementation(queries);
+    const address = { coordinatorHostId: 'coordinator', authorityId: binding.authorityId, resourceEpoch: binding.resourceEpoch };
+    const language = f.service.service(principal, { ...address, requestId: 'language-preparing',
+      operation: { kind: 'language', query: { method: 'hover', path: 'source.ts', line: 0, character: 0 } } }).catch(error => error);
+    await atAdmission;
+    let released = false;
+    const release = f.service.service(principal, { ...address, requestId: 'language-release', operation: { kind: 'language_release' } })
+      .then(value => { released = true; return value; });
+    await f.service.service(principal, { ...address, requestId: 'unrelated-read', operation: { kind: 'check_path', path: 'other.ts' } });
+    expect(released).toBe(false); expect(supervisor.releaseSourceViews).not.toHaveBeenCalled();
+    expect(supervisor.retainSourceView).not.toHaveBeenCalled();
+    finish();
+    expect(await language).toMatchObject({ name: 'AbortError' }); await release;
+    expect(supervisor.releaseSourceViews).toHaveBeenCalledWith({ runId: 'run', grantId: f.state.authority!.grantId });
+    await queries.dispose();
+  });
+
   for (const releaseFails of [false, true]) it(`keeps original compute cancellation ${releaseFails ? 'unknown when release fails' : 'pending until terminal and release'}`, async () => {
     const f = fixture(); const binding = await f.service.bind(principal, request);
     const queries = createSourceQueryService({ kernel: f.kernel, documents: {} as never,

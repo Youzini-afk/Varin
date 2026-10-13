@@ -826,11 +826,23 @@ export class BrokeredHostSupervisor {
   }
   async reconcileCandidatePreparations(): Promise<void> {
     const snapshot = await this.#catalog.snapshot(); if (!snapshot.authoritative) return;
+    this.#cancelWithdrawnCandidatePreparations(snapshot);
     for (const group of [...this.#staged.values()]) {
       const entry = snapshot.extensions.find(entry => entry.manifest.id === group.extensionId);
       if (entry?.desired.enabled && entry.desired.revision === group.desiredRevision
         && (entry.candidate?.integrity === group.integrity || entry.integrity === group.integrity)) continue;
       await this.discardPreparedCandidate(group.extensionId, group.integrity);
+    }
+  }
+  #cancelWithdrawnCandidatePreparations(snapshot: VarinExtensionCatalogSnapshot): void {
+    for (const pending of this.#pending.values()) {
+      const { node, slot } = pending.node;
+      if (slot !== 'candidate') continue;
+      const entry = snapshot.extensions.find(entry => entry.manifest.id === node.extensionId);
+      // A completed publication is a winner, not a withdrawn preparation.
+      // Ordinary selected calls and shared dependency nodes keep their owners.
+      if (entry?.candidate?.integrity === node.artifactIntegrity || entry?.integrity === node.artifactIntegrity) continue;
+      pending.controller.abort(new Error(`Host candidate preparation cancelled: ${node.extensionId}`));
     }
   }
   prepareCandidate(extensionId: string, integrity: string): Promise<VarinExtensionCandidatePreparationResult> {
@@ -971,9 +983,18 @@ export class BrokeredHostSupervisor {
     } finally { this.#candidateSelections.delete(extensionId); }
   }
   async discardPreparedCandidate(extensionId: string, integrity: string): Promise<void> {
+    const snapshot = await this.#catalog.snapshot();
+    const entry = snapshot.extensions.find(value => value.manifest.id === extensionId);
+    if (entry?.integrity === integrity) return;
+    if (entry?.candidate?.integrity !== integrity) {
+      this.#cancelWithdrawnCandidatePreparations(snapshot);
+      // An explicit withdrawal owns this original preparation's completion even
+      // before a CandidateGroup exists. Generic reconciliation only signals it.
+      const preparing = this.#candidatePreparations.get(`${extensionId}\0${integrity}`);
+      if (preparing) await preparing.catch(() => undefined);
+    }
     const group = this.#staged.get(extensionId);
     if (!group || group.integrity !== integrity || this.#candidateSelections.has(extensionId)) return;
-    const entry = (await this.#catalog.snapshot()).extensions.find(value => value.manifest.id === extensionId);
     // A failed Surface releases its own preparation. The accepted grouped update
     // still owns the shared Host candidate until it is replaced or withdrawn.
     if (entry?.desired.enabled && entry.desired.revision === group.desiredRevision

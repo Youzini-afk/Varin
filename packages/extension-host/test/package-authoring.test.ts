@@ -12,7 +12,7 @@ import { ApplicationExtensionRuntime } from '../src/application-runtime.js';
 import { ExtensionArtifactStore } from '../src/artifact-store.js';
 
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
-const source = (suffix = 'a'): VarinExtensionSourceViewProvenance => ({ workspaceId: 'workspace', executionWorkspaceId: 'workspace',
+const source = (suffix = 'a'): VarinExtensionSourceViewProvenance => ({ resourceOwner: { kind: 'local' }, workspaceId: 'workspace', executionWorkspaceId: 'workspace',
   runId: 'original-run', operationId: 'original-operation', mode: 'materialized', branchId: 'branch', revision: 0,
   rootId: 'actual-working-copy', packagePath: 'extension', captureIntegrity: `sha256-${suffix.repeat(64)}` });
 async function fixture() {
@@ -23,11 +23,12 @@ async function fixture() {
   let activations = 0;
   let forced = 0;
   let failActivation = false;
+  const terminated: number[] = [];
   const crashes: Array<(error: Error) => void> = [];
   const observerErrors: unknown[] = [];
   const options = { dataDir: join(root, 'data'), varinVersion: '1.2.3', brokerScript: 'never-spawned',
     onObserverError: (error: unknown) => { observerErrors.push(error); },
-    transportFactory: ({ onCrash }) => { crashes.push(onCrash); return { forceTerminate() { forced++; }, terminate: async () => {}, async request(method, params) {
+    transportFactory: ({ onCrash, owner }) => { crashes.push(onCrash); return { forceTerminate() { forced++; }, terminate: async () => { terminated.push(owner.generation); }, async request(method, params) {
       if (method === "migrate") return { value: (params as { input: { toSchemaVersion: number } }).input.toSchemaVersion };
       if (method === 'activate') {
         activations++; entered?.resolve(); await blocked?.promise;
@@ -45,7 +46,7 @@ async function fixture() {
     await writeFile(join(directory, 'host.js'), `export default { activate() { ${body} } };`);
     if (withSurface) await writeFile(join(directory, 'surface.cjs'), 'exports.activate = () => {};');
   };
-  return { root, directory, get runtime() { return runtime; }, write, observerErrors, activations: () => activations, forced: () => forced, crashLatest: () => crashes.at(-1)!(new Error("prepared broker exited")),
+  return { root, directory, get runtime() { return runtime; }, write, observerErrors, activations: () => activations, forced: () => forced, terminated: () => [...terminated], crashLatest: () => crashes.at(-1)!(new Error("prepared broker exited")),
     restart: async (failCandidate = false) => { await runtime.stop(); failActivation = failCandidate;
       runtime = await ApplicationExtensionRuntime.create(options); await runtime.supervisor.reconcile(); },
     block: () => { blocked = deferred(); entered = deferred(); return { release: blocked.resolve, entered: entered.promise }; },
@@ -272,10 +273,12 @@ test('required group preparation belongs to pending application intent and stagi
     assert.equal(f.activations(), 2);
     await f.write('return 3;', [], true, true);
     const replacement = await f.runtime.stageCapturedPackage(f.directory, source('c'), requested.catalogRevision);
-    assert.equal(f.forced(), 1, 'superseding the pending artifact cancels its exact prepared owner');
+    assert(prepared.hostPreparation);
+    assert.deepEqual(f.terminated(), [prepared.hostPreparation.generation], 'superseding the pending artifact retires its exact prepared owner');
     assert.equal(f.activations(), 2, 'staging neither cold-activates the new candidate nor replaces the valid selected Host');
     assert.equal((await f.runtime.catalog.snapshot()).extensions[0]!.integrity, installed.artifactIntegrity);
-    await assert.rejects(f.runtime.prepareCandidate(installed.extensionId, staged.artifactIntegrity), /no longer current/);
+    assert.deepEqual(f.runtime.supervisor.activeExtensions(), [installed.extensionId]);
+    await assert.rejects(f.runtime.prepareCandidate(installed.extensionId, staged.artifactIntegrity), /stale/);
     assert.equal((await f.runtime.catalog.snapshot()).extensions[0]!.candidate!.integrity, replacement.artifactIntegrity);
   } finally { await f.close(); }
 });
