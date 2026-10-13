@@ -89,7 +89,7 @@ fn second_process(f: &mut Fixture) -> String {
                 history: vec![],
             },
             serialized: json!({}),
-        },
+        }.into(),
     });
     f.record(ExecutionRecord::ModelDispatched {
         request_id: request.into(),

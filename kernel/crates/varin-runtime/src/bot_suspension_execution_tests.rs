@@ -114,7 +114,7 @@ fn bot_scope_waits_for_real_provider_and_operation_workers_then_preserves_unknow
             .commit_execution(
                 &receipt.run_id,
                 epoch,
-                &ExecutionRecord::RequestPrepared { snapshot },
+                &ExecutionRecord::RequestPrepared { snapshot: snapshot.into() },
             )
             .unwrap();
         owner

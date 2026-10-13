@@ -183,7 +183,7 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
                             history: vec![],
                         },
                         serialized: json!({"fixture":true}),
-                    },
+                    }.into(),
                 },
             )
             .unwrap();

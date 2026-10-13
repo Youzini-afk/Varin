@@ -112,7 +112,7 @@ fn settle(
             waiting_on: None,
         },
         ExecutionRecord::RequestPrepared {
-            snapshot: snapshot.clone(),
+            snapshot: snapshot.clone().into(),
         },
         ExecutionRecord::ModelDispatched {
             request_id: snapshot.view.request_id.clone(),

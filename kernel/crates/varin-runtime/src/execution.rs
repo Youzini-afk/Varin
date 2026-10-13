@@ -415,10 +415,11 @@ pub enum RequestOrigin {
 }
 
 /// The provider receives an immutable reference to the exact durably prepared request.
+/// Storage projections may borrow the serialized body while replacing media references.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RequestSnapshot<M = ResolvedMedia> {
+pub struct RequestSnapshot<M = ResolvedMedia, S = Value> {
     pub view: RequestView<M>,
-    pub serialized: Value,
+    pub serialized: S,
 }
 
 /// Semantic history is portable; opaque continuation items are confined to their protocol family.
@@ -1045,7 +1046,9 @@ pub enum ExecutionRecord {
         failure: ExecutionError,
     },
     RequestPrepared {
-        snapshot: RequestSnapshot,
+        // The executor and durable writer observe one frozen ModelStep, not
+        // separate deep copies of its history and complete provider payload.
+        snapshot: Arc<RequestSnapshot>,
     },
     /// Positive nonexecution evidence, committed only from the original Prepared state.
     RequestNotDispatched {
@@ -1718,7 +1721,9 @@ impl<
         {
             Some(recovery) => (
                 recovery.event,
-                recovery.pending,
+                recovery
+                    .pending
+                    .map(|(snapshot, calls)| (Arc::new(snapshot), calls)),
                 recovery.receipts,
                 recovery.decision,
             ),
@@ -2380,7 +2385,7 @@ impl<
                             finish!('agent, RunState::Failed, None, Some(error));
                         }
                     }
-                    let snapshot = RequestSnapshot { view, serialized };
+                    let snapshot = Arc::new(RequestSnapshot { view, serialized });
                     match self.commit(
                         &input,
                         ExecutionRecord::RequestPrepared {

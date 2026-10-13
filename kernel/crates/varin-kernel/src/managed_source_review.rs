@@ -804,7 +804,7 @@ fn coordinator_read(
                         history: vec![],
                     },
                     serialized: json!({"fixture":true}),
-                },
+                }.into(),
             },
         )?;
         catalog.commit(
@@ -1698,7 +1698,7 @@ fn environment_forward_canonical_acceptance_survives_unknown_and_terminal_host_r
                     history: vec![],
                 },
                 serialized: json!({"fixture":true}),
-            },
+            }.into(),
         },
     )
     .unwrap();
@@ -1937,7 +1937,7 @@ fn native_file_followup(
                     history: vec![],
                 },
                 serialized: json!({"fixture":true}),
-            },
+            }.into(),
         },
     )?;
     catalog.commit(

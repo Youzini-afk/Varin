@@ -1320,7 +1320,7 @@ fn recovered_completed_output_never_resends_model_or_reexecutes_cached_receipts(
                 .unwrap();
         };
         commit(ExecutionRecord::RequestPrepared {
-            snapshot: snapshot.clone(),
+            snapshot: snapshot.clone().into(),
         });
         commit(ExecutionRecord::ModelDispatched {
             request_id: "saved-first".into(),
@@ -1513,7 +1513,7 @@ fn active_context_compiles_summary_and_tail_without_destroying_original_history(
         }),
     };
     let mut catalog = db.lock().unwrap();
-    catalog
+    let tail_row = catalog
         .append_history(
             &prepared.run_id,
             prepared.owner_generation,
@@ -1579,7 +1579,7 @@ fn active_context_compiles_summary_and_tail_without_destroying_original_history(
     assert_eq!(
         history
             .iter()
-            .find(|item| item.id == "context-tail")
+            .find(|item| item.id == tail_row.id)
             .unwrap()
             .opaque,
         tail.opaque

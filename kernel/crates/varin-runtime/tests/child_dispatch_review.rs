@@ -1126,7 +1126,7 @@ fn admit_native_child_writer(
                     history: vec![],
                 },
                 serialized: json!({"fixture":"native child writer"}),
-            },
+            }.into(),
         },
     )
     .unwrap();

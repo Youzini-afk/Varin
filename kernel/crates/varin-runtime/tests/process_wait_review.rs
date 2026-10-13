@@ -77,7 +77,7 @@ impl Fixture {
                     history: vec![],
                 },
                 serialized: json!({}),
-            },
+            }.into(),
         });
         self.record(ExecutionRecord::ModelDispatched {
             request_id: "spawn-request".into(),
@@ -199,7 +199,7 @@ impl Fixture {
                     history: vec![],
                 },
                 serialized: json!({}),
-            },
+            }.into(),
         });
         self.record(ExecutionRecord::ModelDispatched {
             request_id: request.clone(),

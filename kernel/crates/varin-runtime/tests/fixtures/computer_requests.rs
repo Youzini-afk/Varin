@@ -295,7 +295,7 @@ pub fn admit_call(
                         history: vec![],
                     },
                     serialized: json!({}),
-                },
+                }.into(),
             },
         )
         .unwrap();

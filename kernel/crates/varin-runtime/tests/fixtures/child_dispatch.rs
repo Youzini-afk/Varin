@@ -499,7 +499,7 @@ impl Fixture {
             },
         )
         .unwrap();
-        db.commit_execution(&run, epoch, &ExecutionRecord::RequestPrepared { snapshot })
+        db.commit_execution(&run, epoch, &ExecutionRecord::RequestPrepared { snapshot: snapshot.into() })
             .unwrap();
         db.commit_execution(
             &run,
@@ -687,7 +687,7 @@ impl Fixture {
             .commit_execution(
                 &self.context.run_id,
                 epoch,
-                &ExecutionRecord::RequestPrepared { snapshot },
+                &ExecutionRecord::RequestPrepared { snapshot: snapshot.into() },
             )
             .unwrap();
         self.db

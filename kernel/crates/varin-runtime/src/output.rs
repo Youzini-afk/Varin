@@ -259,11 +259,11 @@ impl<M> crate::execution::ConversationItem<M> {
         })
     }
 }
-impl<M> crate::execution::RequestSnapshot<M> {
+impl<M, S> crate::execution::RequestSnapshot<M, S> {
     pub fn map_media<N, E>(
         self,
         mut map: impl FnMut(M) -> Result<N, E>,
-    ) -> Result<crate::execution::RequestSnapshot<N>, E> {
+    ) -> Result<crate::execution::RequestSnapshot<N, S>, E> {
         use crate::execution::{RequestSnapshot, RequestView};
         let view = self.view;
         Ok(RequestSnapshot {
@@ -288,7 +288,11 @@ impl crate::content::ContentStore {
         snapshot: &crate::execution::RequestSnapshot,
     ) -> Result<Value, crate::catalog::RuntimeError> {
         let mut dependencies = Vec::new();
-        let stored = snapshot.clone().map_media(|media| {
+        let stored = crate::execution::RequestSnapshot {
+            view: snapshot.view.clone(),
+            serialized: &snapshot.serialized,
+        }
+        .map_media(|media| {
             let stored = self.store_media(media)?;
             dependencies.push(stored.content_ref.content_object.clone());
             Ok::<_, crate::catalog::RuntimeError>(stored)

@@ -44,3 +44,14 @@ Kernel 构建、Host/UI 类型检查、改动 lint、生成协议核对和实际
 
 入口：`runtime_file_lease_review.rs`、`file-lease-wait.native.test.ts`、
 `extension-host/test/runtime-contracts.test.ts`、`recovery/dirty-recovery.native.test.ts`。
+
+## 固定请求的共享与持久化
+
+执行器与 `RequestPrepared` 共用不可变 RequestSnapshot；媒体持久化仅投影语义视图，借用原
+provider 正文。当前存储形状、取消边界和已派发请求不重放规则保持。历史编译和序列化仍访问完整
+输入，本项没有测得吞吐量或远端缓存收益。
+
+独立 hack 运行 execution 14 项、prepared request recovery 12 项、content 8 项，并补一项真实
+RequestPrepared → load_snapshot → GC → Catalog 重开的媒体用例，共 35 项通过。新增用例核对
+700KB 媒体、Unicode、文本顺序与 provider opaque JSON 的完整内容；不以指针或源码形状作验收。
+两 crate 的测试构造编译通过。旧夹具改用 Catalog 外层历史 ID，保留原文断言。

@@ -181,7 +181,7 @@ fn model_call(db: &mut Catalog, receipt: &Receipt, checkpoint: &str) -> ToolOrig
     db.commit_execution(
         &receipt.run_id,
         epoch,
-        &ExecutionRecord::RequestPrepared { snapshot },
+        &ExecutionRecord::RequestPrepared { snapshot: snapshot.into() },
     )
     .unwrap();
     db.commit_execution(
@@ -712,7 +712,7 @@ fn compaction_copies_original_resource_bytes_even_before_previous_summary_bounda
     };
     let epoch = db.epoch();
     for record in [
-        ExecutionRecord::RequestPrepared { snapshot },
+        ExecutionRecord::RequestPrepared { snapshot: snapshot.into() },
         ExecutionRecord::ModelDispatched {
             request_id: "summary-step".into(),
         },

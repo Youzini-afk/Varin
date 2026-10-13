@@ -87,7 +87,7 @@ fn bot_suspend_preserves_prepared_candidate_until_original_recovery_closes_it() 
         &r.run_id,
         epoch,
         &ExecutionRecord::RequestPrepared {
-            snapshot: snapshot.clone(),
+            snapshot: snapshot.clone().into(),
         },
     )
     .unwrap();
@@ -137,7 +137,7 @@ fn bot_readonly_invocation_needs_original_stop_evidence_and_late_refinement_is_i
     db.commit_execution(
         &r.run_id,
         epoch,
-        &ExecutionRecord::RequestPrepared { snapshot },
+        &ExecutionRecord::RequestPrepared { snapshot: snapshot.into() },
     )
     .unwrap();
     db.commit_execution(
