@@ -60,7 +60,7 @@ function fixture() {
   } as unknown as KernelClient;
   const prepareSource = vi.fn(async (input: ThreadPrepareSource) => ({ path: '/target/project', source: { ...source, resourceOwner: input.resourceOwner } }));
   const serviceOperation = vi.fn<ManagedSourceServiceHandler>(async () => { state.trusted = false; return { committed: true }; });
-  const releaseSource = vi.fn<(scope: ManagedSourceLocalScope) => Promise<void>>(async () => { events.push('drain-views'); });
+  const releaseSource = vi.fn<(scope: ManagedSourceLocalScope) => Promise<void | { mcpExecutorStopped: boolean }>>(async () => { events.push('drain-views'); });
   const service = createManagedSourceService({ kernel, hostId: 'target', documents: {
     admitWorkspaceRegistration: async () => {
       events.push('registration'); if (!state.trusted) throw new Error('Trust withdrawn');
@@ -335,4 +335,55 @@ describe('managed Source target admission orchestration', () => {
     await expect(f.service.release(principal, { ...address, mode: 'retire' })).rejects.toThrow('termination is unconfirmed');
     expect(f.sourceRequest.mock.calls.some(([method]) => method === 'source.authority.release')).toBe(false);
   });
+  it('fences the original MCP creation before exact release, including release before admission', async () => {
+    const f = fixture(), binding = await f.service.bind(principal, request);
+    const address = { coordinatorHostId: 'coordinator', authorityId: binding.authorityId, resourceEpoch: binding.resourceEpoch };
+    const snapshot = { ...address, requestId: 'creation', operation: { kind: 'mcp' as const,
+      action: { kind: 'snapshot' as const, handleId: 'view', creationRequestId: 'creation' } } };
+    const release = { ...address, requestId: 'cleanup', operation: { kind: 'mcp' as const,
+      action: { kind: 'release' as const, handleId: 'view', creationRequestId: 'creation' } } };
+    f.serviceOperation.mockResolvedValue({ ok: true, value: null, executorStopped: true });
+    // No current read/trust grant is required to close the old handle.
+    f.state.trusted = false;
+    await f.service.service({ ...principal, capabilities: [] }, release);
+    await expect(f.service.service(principal, snapshot)).rejects.toBeInstanceOf(DOMException);
+    expect(f.serviceOperation.mock.calls.map(([, operation]) => operation)).toEqual([release.operation]);
+
+    const g = fixture(), opened = await g.service.bind(principal, request);
+    let entered!: () => void, drain!: () => void;
+    const active = new Promise<void>(resolve => { entered = resolve; });
+    const stopped = new Promise<void>(resolve => { drain = resolve; });
+    const effects: string[] = [];
+    g.serviceOperation.mockImplementation(async (_scope, operation, signal) => {
+      if (operation.kind !== 'mcp') throw new Error('expected MCP');
+      if (operation.action.kind === 'snapshot') {
+        entered(); await stopped; expect(signal?.aborted).toBe(true); effects.push('creation drained');
+      } else effects.push('released');
+      return { ok: true, value: null, executorStopped: true };
+    });
+    const creating = g.service.service(principal, { ...snapshot, authorityId: opened.authorityId }); await active;
+    const closing = g.service.service(principal, { ...release, authorityId: opened.authorityId });
+    await Promise.resolve(); expect(effects).toEqual([]);
+    drain(); await Promise.all([creating, closing]); expect(effects).toEqual(['creation drained', 'released']);
+  });
+
+  it.each([true, false])('uses only original native MCP stop proof to drain unknown executor work (%s)', async nativeStopped => {
+    const f = fixture(), binding = await f.service.bind(principal, request);
+    const receipt = { ok: false, executorStopped: false, error: { code: 'response-lost', dispatched: true, settlement: 'unknown' } };
+    f.serviceOperation.mockResolvedValue(receipt);
+    f.releaseSource.mockImplementation(async () => { f.events.push('drain-views'); return { mcpExecutorStopped: nativeStopped }; });
+    const address = { coordinatorHostId: 'coordinator', authorityId: binding.authorityId, resourceEpoch: binding.resourceEpoch };
+    const response = await f.service.service(principal, { ...address, requestId: 'entered-call', operation: { kind: 'mcp', action: {
+      kind: 'call', handleId: 'view', name: 'write', schemaVersion: 'v1', arguments: {},
+    } } });
+    expect(await f.service.cancelService(principal, { ...address, requestId: 'entered-call' })).toMatchObject({ status: 'unknown' });
+    const releasing = f.service.release(principal, { ...address, mode: 'retire' });
+    if (nativeStopped) await releasing;
+    else await expect(releasing).rejects.toThrow('termination is unconfirmed');
+    expect(f.releaseSource).toHaveBeenCalledTimes(1);
+    expect(f.sourceRequest.mock.calls.some(([method]) => method === 'source.authority.release')).toBe(nativeStopped);
+    expect(response).toEqual(receipt); expect(receipt.executorStopped).toBe(false); // The unknown effect was never rewritten.
+    expect(f.serviceOperation).toHaveBeenCalledTimes(1);
+  });
+
 });

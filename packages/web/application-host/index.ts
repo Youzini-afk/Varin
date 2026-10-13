@@ -43,6 +43,10 @@ import { createLiveSourceOwner } from './lib/kernel/live-source.js';
 import { createThreadSourcePreparer, createThreadSourceAdmission, createThreadSourceDirectory } from './lib/kernel/thread-sources.js';
 import { createManagedSourceConsumers } from './lib/kernel/managed-source-consumers.js';
 import { createSourceQueryService } from './lib/kernel/source-query-service.js';
+import { createManagedMcpService } from './lib/harness/managed-mcp-service.js';
+import { createManagedMcpProcesses } from './lib/kernel/managed-mcp-processes.js';
+import { createManagedMcpLease } from './lib/kernel/managed-mcp-lease.js';
+import { createManagedMcpPreparer, selectMcpServers } from './lib/kernel/managed-mcp-preparation.js';
 import { createManagedSourceService } from './lib/harness/managed-source-service.js';
 import { createManagedChildSourceService } from './lib/kernel/managed-source-collaboration.js';
 import { createManagedIntegrationService, createManagedIntegrationOwner } from './lib/kernel/managed-source-integration.js';
@@ -55,7 +59,7 @@ import { createContextComposition } from './lib/kernel/context-composition.js';
 import { createPolicyModelPreparer } from './lib/kernel/policy-models.js';
 import { createAgentPolicy } from './lib/kernel/agent-policy.js';
 import { RunObservers } from './lib/kernel/run-observers.js';
-import { McpAuthority, McpCompositions, type McpCompositionScope, mcpHostAgentDir, mcpHostProjectTrusted, readMcpHostPermissionPolicy } from '@varin/pi-host/mcp-authority';
+import { McpAuthority, McpCompositions, composeMcpAuthorityLeases, type McpCompositionScope, mcpHostAgentDir, mcpHostProjectTrusted, readMcpHostPermissionPolicy } from '@varin/pi-host/mcp-authority';
 import { createMcpInteractionRuntime } from './lib/kernel/mcp-interaction-runtime.js';
 import { createMcpResourceRuntime } from './lib/kernel/mcp-resource-runtime.js';
 import { createMcpResourceRecovery } from './lib/kernel/mcp-resource-recovery.js';
@@ -1582,6 +1586,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // records already carry the backend job identity, so the experiment
     // reconcile inspects and re-polls rather than resubmitting.
     onSourceReachable: (owner) => {
+      managedMcpOwner.current?.sourceReached(owner);
       void scriptRuntimeOwner.current?.recoverSource(owner).catch(() => console.error("[Script] Original target stop remains pending"));
       void agentRuntime.reconcileSourceCleanup().catch((error: unknown) => {
         console.error("[VarinManagedTarget] Original source cleanup remains pending:", errorMessage(error));
@@ -2015,6 +2020,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     updateSettings: (mutator) => updateSettingsOnDisk((current) => mutator(current as Record<string, unknown>) as typeof current),
   });
   const desktopControlHolder = `desktop:${hostId}`;
+  const managedMcpOwner: { current?: ReturnType<typeof createManagedMcpPreparer> } = {};
   const scriptRuntimeOwner: { current?: ReturnType<typeof createScriptRuntime> } = {};
   const computerRuntimeOwner: { current?: ReturnType<typeof createComputerRuntime> } = {};
   const researchDecisionOwner: { current?: ReturnType<typeof createResearchDecisionRuntime> } = {};
@@ -3069,6 +3075,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const hostCredentialAuthority = options.piRuntimeBroker?.credentialAuthority ?? sharedHostCredentialAuthority(process.env.VARIN_AGENT_DIR);
   const mcpAgentDir = mcpHostAgentDir(process.env.VARIN_AGENT_DIR);
   const mcpAuthority = new McpAuthority({
+    adaptTransport: (scope, transport) => scope.resourceOwner.kind === 'managed_host'
+      ? targetMcpService.adaptTransport(scope, transport) : transport,
     interactions: input => mcpInteractionRuntime.receiver(input),
     sampling: input => mcpInteractionRuntime.samplingReceiver(input),
     interactionErrors: input => mcpInteractionRuntime.errorReceiver(input),
@@ -3078,6 +3086,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const mcpCompositions = new McpCompositions(mcpAuthority, (code, reference) => { console.error('[MCP]', code, reference); });
   const agentMcpScopes = new Map<string, { identity: string; ready: Promise<McpCompositionScope> }>();
   const releaseAgentMcpScope = (runId: string) => {
+    managedMcpOwner.current?.release(runId);
     const entry = agentMcpScopes.get(runId); agentMcpScopes.delete(runId);
     if (entry) void entry.ready.then(scope => scope.release(), () => undefined);
   };
@@ -3097,6 +3106,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     admitWorkspaceRegistration: (id, signal) => documentsAuthority.admitWorkspaceRegistration(id, signal),
     projectTrusted: cwd => mcpHostProjectTrusted(mcpAgentDir, cwd),
     currentPolicy: async (cwd, trusted) => readMcpHostPermissionPolicy(mcpAgentDir, cwd, trusted),
+  });
+  managedMcpOwner.current = createManagedMcpPreparer({ runtime: () => agentRuntime, createLease: createManagedMcpLease,
+    changed: runId => { void agentRuntime.refreshMcp(runId).catch(() => console.error('[MCP] Target contribution preparation requires attention')); },
+    onError: () => console.error('[MCP] Target contribution is unavailable; original calls are not replayed'),
   });
   const agentRuntime: AgentRuntimeClient = new AgentRuntimeClient(kernelClient, async (input, signal) => {
     if (input.fixed) return prepareChildMcp(input, signal);
@@ -3131,12 +3144,32 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }
     const owner = await selected.ready;
     signal?.throwIfAborted();
-    const lease = input.requiredBinding?await owner.restore(input.requiredBinding,signal):owner.snapshot();
+    const managed = input.source?.resourceOwner.kind === 'managed_host' && input.source.mode !== 'fixed_branch';
+    const localSelection = input.requiredBinding && managed
+      ? selectMcpServers(input.requiredBinding, owner => owner.kind === 'local') : input.requiredBinding;
+    const localLease = localSelection ? await owner.restore(localSelection, signal) : owner.snapshot();
+    let lease = localLease;
+    let targetReady = false;
+    if (managed) {
+      let targetLease: import('@varin/pi-host/mcp-authority').McpAuthorityLease | undefined;
+      try {
+        targetLease = await managedMcpOwner.current!.prepare(input, signal);
+        if (targetLease) {
+          targetReady = true;
+          const targetNames = Object.keys(targetLease.binding.provenance.servers);
+          const shadowed = new Set(targetLease.binding.servers.map(server => server.name));
+          lease = composeMcpAuthorityLeases([
+            { lease: localLease, servers: Object.keys(localLease.binding.provenance.servers).filter(name => !shadowed.has(name)) },
+            { lease: targetLease, servers: targetNames },
+          ]);
+        } else lease = composeMcpAuthorityLeases([{ lease: localLease, servers: Object.keys(localLease.binding.provenance.servers) }]);
+      } catch (error) { localLease.release(); targetLease?.release(); throw error; }
+    }
     try { return createMcpLease({ lease, kernel: kernelClient, tasks:mcpTaskRuntime,resources:mcpResourceRuntime,
       ...(input.requiredBinding ? { selection: input.requiredBinding } : {}),
-      ...(input.source && !workspace ? { unavailableWorkspaceScope: {
+      ...(input.source && !workspace && (!managed || !targetReady) ? { unavailableWorkspaceScope: {
         workspaceId: input.source.workspaceId,
-        reason: 'Project MCP capabilities require a prepared execution environment matching the pinned source. Only global Host MCP capabilities are available for this read-only source.',
+        reason: managed ? 'The selected Host project MCP contribution is preparing or unavailable. Its tools are not being executed on this Host.' : 'Project MCP capabilities require a prepared execution environment matching the pinned source. Only global Host MCP capabilities are available for this read-only source.',
       } } : {}),
       currentPolicy: async () => {
         const trusted = Boolean(workspace) && mcpHostProjectTrusted(mcpAgentDir, configCwd);
@@ -3293,11 +3326,27 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const targetIntegrations = createManagedIntegrationService({ kernel: kernelClient, storage: kernelStorageAdapter,
     documents: documentsAuthority, recovery: foundationalRecoveryEngine, metadataReader: kernelRecoveryStore,
     coordinator: threadIntegrationCoordinator });
+  const targetMcpService = createManagedMcpService({ compositions: mcpCompositions, agentDir: mcpAgentDir, hostId,
+    admitSource: async (scope, signal) => {
+      await kernelClient.sourceRequest('source.service.call', { principalId: scope.principal.principalId,
+        coordinatorHostId: scope.coordinatorHostId, authorityId: scope.authorityId, resourceEpoch: scope.resourceEpoch,
+        requestId: `mcp-validate:${crypto.randomUUID()}`, clientCapabilities: [...scope.principal.capabilities], operation: { kind: 'validate' } }, signal);
+    },
+    transportOwner: (scope, readmit) => createManagedMcpProcesses({ kernel: kernelClient, scope, readmit,
+      onError: () => console.error('[MCP] Original target process observation is unavailable') }),
+    admitWorkspaceRegistration: (id, signal) => documentsAuthority.admitWorkspaceRegistration(id, signal),
+    projectTrusted: cwd => mcpHostProjectTrusted(mcpAgentDir, cwd),
+  });
+  kernelClient.subscribeExit(() => { void targetMcpService.close(); });
   managedRemoteExecution.setSourceOwner(createManagedSourceService({ kernel: kernelClient, hostId,
     documents: documentsAuthority, validateLiveSource: liveSources.validate, prepareSource: prepareThreadSource,
-    languageAvailable: true, releaseSource: targetSourceQuery.release, cleanupSource: targetSourceQuery.cleanup,
+    languageAvailable: true, releaseSource: async scope => {
+      const [, mcp] = await Promise.all([targetSourceQuery.release(scope), targetMcpService.release(scope)]);
+      return { mcpExecutorStopped: mcp.executorStopped };
+    }, cleanupSource: targetSourceQuery.cleanup,
     serviceOperation: (scope, operation, signal) => {
       switch (operation.kind) {
+        case 'mcp': return targetMcpService.request(scope, operation.action, signal);
         case 'child_prepare': case 'child_result_prepare': case 'child_result_publish': case 'child_result_read': case 'child_release': case 'child_unaccepted_release':
           return targetChildSources(scope, operation, signal);
         case 'integration': return targetIntegrations(scope, operation, signal);
@@ -5106,6 +5155,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     stop: async (shutdownOptions: { exitProcess?: boolean | undefined } = {}) => {
       // Stop timer/watcher producers before their runtime and storage
       // dependencies begin shutting down.
+      managedMcpOwner.current?.close();
+      await targetMcpService.close();
       await scriptRuntimeOwner.current?.dispose();
       await environmentForwardJobs.dispose();
       computerRuntimeOwner.current?.stop();

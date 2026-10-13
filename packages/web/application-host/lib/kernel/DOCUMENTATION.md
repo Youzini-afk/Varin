@@ -1307,8 +1307,18 @@ attempts are independently dispatched per original environment, so a slow target
 notifications for unrelated Runs. Current-Host lost-open callbacks, Host-ready recovery and actual source
 reconnection reuse original pending Operations; no replacement task or evaluator is created.
 
-Project-bound managed MCP, explicit managed cold calendar starts and broader combined cross-Host file
-recovery still have separate implementation work. Computer assignments, Agent/Bot identity, global settings and model
+Managed MCP composes A's ready global tools with B's independent project contribution. The closed
+source service retains exact views, definitions and revocation tokens. A release fences the original
+creation request before disposing its view; it cannot race a late preparation into a new owner. SDK
+configuration resolves command/environment only on B. Its stdio adapter spawns with the original
+Source grant and root, so Storage retains the process identity across Host restart. Cancellation and
+source retirement await original scoped preparations and native guardian completion, not SDK close
+alone. A lost reply remains unknown and is never replayed. The focused evidence covers adapters and
+controlled owner ports, not a full two-Host SDK/Kernel lifecycle.
+
+Managed MCP Tasks, persistent resource observers, finite reverse interactions and mixed-owner child
+preparation, explicit managed cold calendar starts and broader combined cross-Host file recovery
+still have separate implementation work. Computer assignments, Agent/Bot identity, global settings and model
 credentials remain with their original owners; selecting a file Host does not silently redirect them.
 
 ## Managed extension package cleanup
