@@ -17,6 +17,24 @@ Text editors and workspace text helpers consume DocumentsAPI. `FilesAPI` remains
 - `capability.ts`: `createDocumentsCapabilityHandler(authority)` — resource-scoped `workspace.documents` Host capability.
 - `contract-fixtures.ts`: shared Web contract fixtures.
 
+## Filesystem observation
+
+`watch.ts` projects filesystem hints into invalidation generations; it never establishes content revisions.
+Windows uses `windows-watch.ts` and the packaged kernel's private `--watch-directories` mode. This helper
+owns notification handles independently of Catalog, Storage and tool execution. It subscribes separately
+to names/attributes/security and content changes, excludes access time, and lets Documents ignore
+directory-only content timestamps. Windows can emit a delayed directory LAST_WRITE notification on
+first enumeration with unchanged metadata; directory modes still arrive through the attribute stream.
+The parent subscription observes root metadata/replacement, and flush validates the named root identity.
+No directory inventory or file body cache is needed. Other platforms retain their Node watcher.
+
+Documents capture, language views and managed file observation await subscription readiness. `settle()`
+joins native notification delivery and Host metadata processing; it does not wait for the directory to
+become quiet. Overflow or handle loss invalidates the generation. A reconnect replaces readiness, and
+closing a subscription settles its pending callers. Idle subscriptions do not keep the Host process alive;
+the last close or Host pipe EOF releases the helper. Stable capture retains its two state reads and inventory
+check in addition to these observation hints.
+
 ## Routes
 
 - `POST /api/documents/workspace/resolve`

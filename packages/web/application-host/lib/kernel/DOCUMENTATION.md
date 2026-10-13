@@ -19,6 +19,11 @@ stops queued admission or signals the active kernel operation without returning 
 child to exit. A missing executable, protocol mismatch, malformed response, revoked grant, or child exit is
 an explicit Host failure; it never selects the old backend as a fallback.
 
+`kernel-launch.ts` shares executable selection and manifest checks with private helper modes.
+On Windows, Documents starts `--watch-directories` as a separate notification process using the same
+artifact. Its private JSON-line pipe carries subscription control and metadata only, with no Catalog,
+storage owner, file body or tool request. See [Documents observation](../documents/DOCUMENTATION.md#filesystem-observation).
+
 ## Immutable object reader settlement
 
 The unchanged `getBlob` API uses the original scoped source and byte-range DTO. Abort sends the

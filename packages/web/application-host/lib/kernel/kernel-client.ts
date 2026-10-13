@@ -23,7 +23,9 @@ import { KernelRequestWindow } from "./request-window.js";
 import fs from "node:fs";
 import path from "node:path";
 import { KernelTransport, CONTROL_METHODS, CONTROL_RESPONSE_METHODS, controlFrame } from "./kernel-transport.js";
-import { fileURLToPath } from "node:url";
+import { prepareKernelCommand } from './kernel-launch.js';
+import { KernelClientError } from './kernel-error.js';
+export { KernelClientError } from './kernel-error.js';
 import {
   KERNEL_PROTOCOL_VERSION,
   KERNEL_REQUEST_WINDOW,
@@ -36,7 +38,6 @@ import {
   type KernelWorkingResultPublication,
   type KernelWorkingResultCandidateReleased,
   type KernelCreateEntry,
-  type KernelError,
   type KernelHandshakeResult,
   type KernelGrantIssueParams,
   type KernelHealthResult,
@@ -134,18 +135,6 @@ interface ProcessSubscriptionEntry {
 
 interface InternalGrantHandle extends KernelGrantHandle {
   readonly clientToken: symbol;
-}
-
-export class KernelClientError extends Error {
-  readonly code: string;
-  readonly retryable: boolean;
-
-  constructor(error: KernelError | { code: string; message: string; retryable?: boolean }) {
-    super(error.message);
-    this.name = "KernelClientError";
-    this.code = error.code;
-    this.retryable = error.retryable ?? false;
-  }
 }
 
 export class KernelScopedClient {
@@ -537,58 +526,6 @@ const canonicalStoragePath = (value: string): string => {
   }
 };
 
-interface KernelManifest {
-  schema: number;
-  executable: string;
-  targetTriple: string;
-  platform: string;
-  arch: string;
-  binaryFormat: "pe" | "elf" | "macho";
-  buildIdentity: string;
-  protocolVersion: number;
-  kernelVersion: string;
-  sha256: string;
-}
-
-const defaultKernelCandidates = (): string[] => {
-  const extension = process.platform === "win32" ? ".exe" : "";
-  const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
-  return [
-    process.env.VARIN_KERNEL_PATH?.trim() || "",
-    path.resolve(moduleDirectory, "../../../../../kernel", `varin-kernel${extension}`),
-    path.resolve(moduleDirectory, "../../../../../../kernel", `varin-kernel${extension}`),
-    path.resolve(moduleDirectory, "../../../../../kernel", "target", "release", `varin-kernel${extension}`),
-    path.resolve(moduleDirectory, "../../../../../kernel", "target", "debug", `varin-kernel${extension}`),
-    path.resolve(moduleDirectory, "../../../../kernel", `varin-kernel${extension}`),
-    path.resolve(moduleDirectory, "../../../kernel", `varin-kernel${extension}`),
-    path.resolve(process.cwd(), "kernel", `varin-kernel${extension}`),
-    path.resolve(process.cwd(), "kernel", "target", "release", `varin-kernel${extension}`),
-    path.resolve(process.cwd(), "kernel", "target", "debug", `varin-kernel${extension}`),
-  ].filter(Boolean);
-};
-
-const resolveKernelCommand = (options: KernelClientOptions): { command: string; args: string[]; manifestPath?: string } => {
-  const explicit = options.kernelPath?.trim() || defaultKernelCandidates().find((candidate) => fs.existsSync(candidate));
-  if (explicit) {
-    const manifestPath = path.join(path.dirname(explicit), "manifest.json");
-    return { command: explicit, args: [], ...(fs.existsSync(manifestPath) ? { manifestPath } : {}) };
-  }
-  const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
-  const manifest = [
-    path.resolve(moduleDirectory, "../../../../../kernel/Cargo.toml"),
-    path.resolve(process.cwd(), "kernel", "Cargo.toml"),
-  ].find((candidate) => fs.existsSync(candidate));
-  const allowCargo = options.allowCargoDevRunner ?? process.env.NODE_ENV !== "production";
-  if (allowCargo && manifest) {
-    return { command: process.platform === "win32" ? "cargo.exe" : "cargo", args: ["run", "--quiet", "--manifest-path", manifest, "--bin", "varin-kernel"] };
-  }
-  throw new KernelClientError({
-    code: "kernel-entry-unavailable",
-    message: "Varin Rust kernel executable is unavailable; build the kernel or set VARIN_KERNEL_PATH",
-    retryable: false,
-  });
-};
-
 export class KernelClient {
   private readonly options: KernelClientOptions;
   private readonly spawnProcess: typeof spawn;
@@ -867,26 +804,8 @@ export class KernelClient {
 
   private async startInternal(): Promise<KernelHandshakeResult> {
     if (this.closed) throw new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closed" });
-    const command = resolveKernelCommand(this.options);
-    let manifest: KernelManifest | null = null;
-    if (command.manifestPath) {
-      try {
-        manifest = JSON.parse(await fs.promises.readFile(command.manifestPath, "utf8")) as KernelManifest;
-        const bytes = await fs.promises.readFile(command.command);
-        const digest = createHash("sha256").update(bytes).digest("hex");
-        if (manifest.schema !== 3 || manifest.sha256 !== digest || manifest.protocolVersion !== KERNEL_PROTOCOL_VERSION
-          || manifest.platform !== process.platform || manifest.arch !== (this.options.targetArch ?? process.arch)
-          || (this.options.targetTriple !== undefined && manifest.targetTriple !== this.options.targetTriple)
-          || (this.options.kernelBuildIdentity !== undefined && manifest.buildIdentity !== this.options.kernelBuildIdentity)) {
-          throw new KernelClientError({ code: "kernel-manifest-mismatch", message: "Rust kernel manifest does not match this Host", retryable: false });
-        }
-      } catch (error) {
-        if (error instanceof KernelClientError) throw error;
-        throw new KernelClientError({ code: "kernel-manifest-invalid", message: `Rust kernel manifest is invalid: ${String(error)}`, retryable: false });
-      }
-    } else if (this.options.requireKernelManifest ?? process.env.NODE_ENV === "production") {
-      throw new KernelClientError({ code: "kernel-manifest-missing", message: "Rust kernel manifest is required for this Host", retryable: false });
-    }
+    const command = await prepareKernelCommand(this.options);
+    const { manifest } = command;
     this.window = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
     this.controlWindow = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
     this.transportFailed = false;

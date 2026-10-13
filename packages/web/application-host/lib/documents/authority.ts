@@ -1325,7 +1325,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     if (!record) {
       const newRecord: WatcherRecord = { listeners: new Set(), controller: null, ready: null };
       watchers.set(workspaceId, newRecord);
-      newRecord.ready = Promise.all([loadWorkspace(workspaceId), mutations.inspect(workspaceId)]).then(([workspace]) => {
+      newRecord.ready = Promise.all([loadWorkspace(workspaceId), mutations.inspect(workspaceId)]).then(async ([workspace]) => {
         const controller = createWorkspaceWatcher({
           workspaceId,
           rootPath: workspace.root,
@@ -1343,8 +1343,10 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
           return null;
         }
         newRecord.controller = controller;
+        await controller.ready;
         return controller;
       }).catch(() => {
+        newRecord.controller?.close();
         if (watchers.get(workspaceId) === newRecord) watchers.delete(workspaceId);
         return null;
       });

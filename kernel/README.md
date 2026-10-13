@@ -6,6 +6,12 @@ endpoints and a one-time bearer through stdin bootstrap. Windows uses named pipe
 I/O; Unix uses local sockets. Both connections authenticate the same fresh kernel epoch. Stderr
 is diagnostics only; requests and output no longer share stdin/stdout.
 
+On Windows the same executable also supplies `--watch-directories`, a separate private Host helper.
+It owns asynchronous directory-notification handles and exchanges subscription/flush metadata over
+its stdin/stdout pipes. It does not initialize the runtime, acquire a storage owner or process tool
+requests. Documents owns admission, invalidation and capture decisions; see the
+[observation boundary](../packages/web/application-host/lib/documents/DOCUMENTATION.md#filesystem-observation).
+
 Control envelopes use length-framed JSON. Content uses separately acknowledged UUID/sequence chunks,
 rotating between ready streams at the selected socket-buffer granularity. Frame size bounds individual
 packets, not total content. JSON body encoding/decoding runs outside the control readers and domain
