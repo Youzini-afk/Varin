@@ -31,7 +31,8 @@
   },
   "scripts": {
     "build:dependencies": "bun run --cwd ../extension-sdk build",
-    "build": "bun run build:dependencies && tsc -p tsconfig.build.json",
+    "build": "bun run build:dependencies && bun run build:raw",
+    "build:raw": "tsc -p tsconfig.build.json",
     "lint": "eslint \"./src/**/*.ts\" --config ../../eslint.config.js",
     "test": "tsx --test \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit -p tsconfig.json",

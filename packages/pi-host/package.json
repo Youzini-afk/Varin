@@ -58,7 +58,8 @@
     }
   },
   "scripts": {
-    "build": "bun run build:dependencies && tsc -p tsconfig.build.json",
+    "build": "bun run build:dependencies && bun run build:raw",
+    "build:raw": "tsc -p tsconfig.build.json",
     "build:dependencies": "bun run --cwd ../protocol build && bun run --cwd ../script-runtime build",
     "lint": "eslint \"./src/**/*.ts\" --config ../../eslint.config.js",
     "test": "tsx --test \"test/**/*.test.ts\"",

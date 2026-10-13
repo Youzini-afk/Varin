@@ -46,6 +46,11 @@ code. Native Vitest resolves those same imports to the original Host source, so 
 declarations or a mock implementation at runtime. `*.native.test.ts` still runs only through the
 [dedicated kernel acceptance entry](../../docs/development.md#repository-and-build-facts).
 
+The root aggregate prepares the same shared outputs and Host declarations once, then uses
+`type-check:prepared` for Web's remaining checks. That entry requires fresh dependencies and declarations.
+Similarly, `build:raw` builds Host, kernel, CLI and browser artifacts from prepared shared packages;
+use the self-contained `build` or `type-check` entries when working on this package directly.
+
 The ordered extension-routing consumer check uses real settings controls, the original Web client,
 the authenticated Express Router and extension-routing file CAS, without a listener or kernel process.
 After preparing the shared dependencies, run it from the repository root:
