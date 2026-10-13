@@ -27,7 +27,7 @@ export interface ManagedSourceServiceOptions {
   /** The target's local original preparer, never the coordinator's remote dispatcher. */
   prepareSource(input: ThreadPrepareSource, signal?: AbortSignal): Promise<ThreadPreparedSource>;
   serviceOperation?: ManagedSourceServiceHandler;
-  releaseSource?(scope: ManagedSourceLocalScope): Promise<void>;
+  releaseSource?(scope: ManagedSourceLocalScope): Promise<void | { mcpExecutorStopped: boolean }>;
   cleanupSource?(scope: ManagedSourceCleanupScope): Promise<void>;
   languageAvailable?: boolean;
 }
@@ -38,6 +38,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     principalId: string;
     address: ManagedSourceAddress;
     operation: ManagedSourceServiceRequest['operation'] | null;
+    domain: ManagedSourceServiceRequest['operation']['kind'] | null;
     controller: AbortController;
     work: Promise<unknown> | null;
     settled: boolean;
@@ -118,17 +119,23 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       && flight.address.resourceEpoch === authority.resourceEpoch);
     for (const [, flight] of retained) flight.controller.abort();
     const drained = await Promise.all(retained.map(([, flight]) => flight.drain));
+    let stopped: void | { mcpExecutorStopped: boolean } = undefined;
+    if (options.releaseSource) {
+      let scope: ManagedSourceLocalScope | undefined;
+      try { scope = localScope(principal, coordinatorHostId, authority); }
+      catch { /* Native retirement still checks the previous lifetime's persisted writers. */ }
+      if (scope) stopped = await options.releaseSource(scope);
+    }
+    // Stopping an original native MCP executor settles only its physical lifetime.
+    // Catalog's unknown effect stays unknown; HTTP work has no such native tree receipt.
+    for (let index = 0; index < retained.length; index++) {
+      const flight = retained[index]![1];
+      if (drained[index] === 'unknown' && flight.domain === 'mcp' && stopped?.mcpExecutorStopped) {
+        drained[index] = 'drained'; flight.drain = Promise.resolve('drained');
+      }
+    }
     if (drained.includes('unknown')) throw new Error('Managed source service termination is unconfirmed');
     for (const [key] of retained) services.delete(key);
-    if (!options.releaseSource) return;
-    let scope: ManagedSourceLocalScope;
-    try { scope = localScope(principal, coordinatorHostId, authority); }
-    catch {
-      // A previous Host lifetime has no local supervisor references to retire.
-      // The native release still checks that lifetime's real process writers.
-      return;
-    }
-    await options.releaseSource(scope);
   };
   const cleanupArtifacts = (principal: ManagedSourcePrincipal, coordinatorHostId: string, authority: SourceAuthorityResult) =>
     options.cleanupSource?.({ principal, coordinatorHostId, authorityId: authority.authorityId, resourceEpoch: authority.resourceEpoch,
@@ -167,6 +174,30 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       const authority = await inspect(principal, input);
       if (authority.purpose === 'process_view') await kernel.sourceRequest('source.authority.release', { ...address(principal, input), mode: 'retire' });
     } });
+
+  const cancelServiceFlight = async (principal: ManagedSourcePrincipal, input: Parameters<ManagedSourceService['cancelService']>[1]): Promise<ManagedSourceServiceCancelReceipt> => {
+    requirePrincipal(principal, input.coordinatorHostId);
+    const key = serviceKey(principal, input);
+    let flight = services.get(key);
+    if (!flight) {
+      const authority = await inspect(principal, input);
+      // Recheck after the native observation: a service may have arrived
+      // while its original authority was being inspected.
+      flight = services.get(key);
+      if (!flight) {
+        if (authority.resourceEpoch !== kernel.kernelEpoch || authority.phase !== 'ready') {
+          return { requestId: input.requestId, resourceEpoch: input.resourceEpoch, status: 'unknown' };
+        }
+        const controller = new AbortController(); controller.abort();
+        flight = { principalId: principal.principalId, address: { coordinatorHostId: input.coordinatorHostId,
+          authorityId: input.authorityId, resourceEpoch: input.resourceEpoch }, operation: null, controller,
+          domain: null, work: null, settled: false, drain: Promise.resolve('not_started') };
+        services.set(key, flight);
+      }
+    }
+    flight.controller.abort();
+    return { requestId: input.requestId, resourceEpoch: input.resourceEpoch, status: await flight.drain };
+  };
 
   return {
     async scriptControl(principal, input, signal) {
@@ -357,7 +388,9 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         ...(input.journal ? { journal: input.journal } : {}) }, signal);
     },
     async service(principal, input, signal) {
-      requireReadPrincipal(principal, input.coordinatorHostId);
+      const mcpRelease = input.operation.kind === 'mcp' && input.operation.action.kind === 'release';
+      if (mcpRelease) requirePrincipal(principal, input.coordinatorHostId);
+      else requireReadPrincipal(principal, input.coordinatorHostId);
       const key = serviceKey(principal, input);
       const original = services.get(key);
       if (original) {
@@ -377,7 +410,21 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       let nativeDispatch = false;
       const work = Promise.resolve().then(async () => {
         controller.signal.throwIfAborted();
-        const authority = await admit(principal, input, controller.signal);
+        if (operation.kind === 'mcp') {
+          const action = operation.action;
+          if (action.kind === 'snapshot' && action.creationRequestId !== input.requestId)
+            throw new SourceAdmissionError('source_changed');
+          if (action.kind === 'release') {
+            if (!action.creationRequestId || action.creationRequestId === input.requestId) throw new SourceAdmissionError('source_changed');
+            // Fence and drain the exact creation attempt before releasing its resulting view.
+            // cancelServiceFlight also records an early cancellation in the original request map.
+            const original = await cancelServiceFlight(principal, { ...input, requestId: action.creationRequestId });
+            if (original.status === 'unknown') return { ok: false, executorStopped: false,
+              error: { code: 'mcp_original_preparation_unconfirmed', dispatched: true, settlement: 'unknown' } };
+          }
+        }
+        // Cleanup uses the original authenticated address even after read/trust withdrawal.
+        const authority = mcpRelease ? await inspect(principal, input, controller.signal) : await admit(principal, input, controller.signal);
         if (authority.purpose === 'process_view' || authority.purpose === 'script_environment'
           && !(operation.kind === 'native_resource' && operation.action.kind === 'process_observation')) throw new SourceAdmissionError('source_authority_denied');
         switch (operation.kind) {
@@ -415,32 +462,10 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         return status;
       });
       services.set(key, { principalId: principal.principalId, address: { coordinatorHostId: input.coordinatorHostId,
-        authorityId: input.authorityId, resourceEpoch: input.resourceEpoch }, operation, controller, work, settled: false, drain });
+        authorityId: input.authorityId, resourceEpoch: input.resourceEpoch }, operation, domain: operation.kind, controller, work, settled: false, drain });
       return work;
     },
-    async cancelService(principal, input) {
-      requirePrincipal(principal, input.coordinatorHostId);
-      const key = serviceKey(principal, input);
-      let flight = services.get(key);
-      if (!flight) {
-        const authority = await inspect(principal, input);
-        // Recheck after the native observation: a service may have arrived
-        // while its original authority was being inspected.
-        flight = services.get(key);
-        if (!flight) {
-          if (authority.resourceEpoch !== kernel.kernelEpoch || authority.phase !== 'ready') {
-            return { requestId: input.requestId, resourceEpoch: input.resourceEpoch, status: 'unknown' };
-          }
-          const controller = new AbortController(); controller.abort();
-          flight = { principalId: principal.principalId, address: { coordinatorHostId: input.coordinatorHostId,
-            authorityId: input.authorityId, resourceEpoch: input.resourceEpoch }, operation: null, controller,
-            work: null, settled: false, drain: Promise.resolve('not_started') };
-          services.set(key, flight);
-        }
-      }
-      flight.controller.abort();
-      return { requestId: input.requestId, resourceEpoch: input.resourceEpoch, status: await flight.drain };
-    },
+    cancelService: cancelServiceFlight,
     async observe(principal, input, signal) {
       await kernel.start();
       return kernel.sourceRequest('source.resource.observe', { ...address(principal, input), operationId: input.operationId }, signal);

@@ -23,7 +23,7 @@ Each server selection requires its own frozen `owner`: resource location, config
 execution scope. Scope and resource keys include that location; the combined provenance has no
 shared configuration owner. Native child delegation preserves these owners and exact definitions
 separately from execution resource identities. Mixed-owner child preparation currently reports
-unavailable until the managed MCP contribution adapter is connected. The original authority prepares the
+unavailable until exact multi-owner child preparation is connected. The original authority prepares the
 child's own execution binding and the runtime commits it once before first use. A global configuration
 file may still describe a workspace execution dependency; a fixed read-only child cannot borrow the
 parent's mutable cwd. Neutral global dependencies remain neutral even when a child has a private cwd.
@@ -40,6 +40,27 @@ Config writes use the existing revision-checked `ConfigTextFileEditor`. OAuth us
 refresh preserves it, while a new OAuth authorization state rotates it. Provider-token servers
 use the shared Host credential authority's token and scope callbacks. No token-derived durable
 identity or second plugin/configuration store is introduced.
+
+## Managed project contributions
+
+The coordinator keeps its global contribution while a target Host independently prepares its own
+project configuration against the admitted physical source. The target filters project definitions
+before starting any connection, and a same-name project definition shadows the global definition.
+Combined tools retain per-server owners and collision-safe public names; restoration validates the
+original server/resource/schema, not an owner-local spelling of that public name.
+
+A target view is a live reference under the original Source principal, authority and epoch. Its
+immutable creation request is cancelled and drained before exact release, including a lost preparation
+reply. Explicit withdrawal propagates original target tokens to permission waits and in-flight RPCs;
+failed configuration candidates do not permanently revoke an older valid contribution. Source closure
+awaits pending preparation, retained generations and scoped transport close without closing siblings.
+The Host can adapt a resolved transport through the trusted scope seam. Target stdio uses the original
+Source grant/root and Kernel process guardian; SDK close alone is not a native process-tree receipt.
+Unknown dispatched effects are not replayed after reconnection.
+
+This continuation supports ordinary tools, resource reads and prompts. Managed Tasks, persistent
+resource observers, finite reverse interactions and mixed-owner child preparation remain explicit
+unavailable boundaries; local owners retain their existing support.
 
 ## Preparation, binding and revocation
 

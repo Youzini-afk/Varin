@@ -88,6 +88,7 @@ export interface ManagedSourceInspection { scope: SourceAuthorityScope; phase: '
 /** Closed, non-model source services. A command cannot name an arbitrary kernel method,
  * mint a grant, change a source, or select a different physical root. */
 export type SourceServiceOperation =
+  | { kind: 'mcp'; action: import('./managed-mcp-contract.js').ManagedMcpAction }
   | {kind:'native_resource';context:{run_id:string;origin:import('../kernel/protocol.generated.js').ToolOrigin;operation_id:string};action:import('../kernel/protocol.generated.js').SourceResourceAction;authorizeOnly:boolean}
   | { kind: 'language'; query: Omit<import('../kernel/protocol.generated.js').LanguageQuery, 'runId' | 'threadId' | 'grantId' | 'source' | 'physicalRoot'> }
   | { kind: 'language_release' }
@@ -179,6 +180,7 @@ export interface ManagedSourceService {
 }
 
 export interface SourceServiceResults {
+  mcp: import('./managed-mcp-contract.js').ManagedMcpReply;
   native_resource: unknown;
   validate: { pathScopes: string[] };
   read: import('./explore-file-reader.js').ExploreFileSnapshot;

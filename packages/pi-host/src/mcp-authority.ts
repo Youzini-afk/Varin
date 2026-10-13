@@ -15,6 +15,8 @@ import type { McpOwnerConfig, McpOwnerConnectionSnapshot, McpOwnerEntry, McpServ
 import { ConfigTextFileEditor, resolveConfigDocumentPath } from './config-text-file-editor.js';
 import { ConfigWatchManager } from './config-watch-manager.js';
 import { McpSessionExpiredError, McpError, type McpClient, type McpRequestOptions, type McpRequestHandlerContext } from '@earendil-works/pi-mcp';
+export { StdioTransport, StreamableHttpTransport, McpMessageTooLargeError, McpConnectionClosedError, parseJsonRpcMessage } from '@earendil-works/pi-mcp';
+export type { StdioTransportOptions, McpTransport, JsonRpcMessage } from '@earendil-works/pi-mcp';
 import { serviceKind, validateServiceResult, validatePromptArguments, type McpAuthorityService, type McpAuthorityPrompt, type McpPromptDeclaration, type McpServiceKind, type McpServiceRequest, type McpServiceResult } from './mcp-native-protocol.js';
 import { taskCapabilities, taskSupport, requiresMcpTask, validateTaskResponse, validateTaskResult, object as taskObject, type McpTaskLease, type McpEndpoint, type McpTaskSupport, type McpTaskResponse } from './mcp-tasks.js';
 import { decodeElicitationRequest, decodeUrlElicitationError } from './mcp-interactions.js';
@@ -29,6 +31,8 @@ export type { McpAuthorityService, McpAuthorityPrompt, McpServiceKind, McpServic
 export interface McpAuthorityScope {
   /** Actual configuration/transport authority; supplied by the trusted host. */
   resourceOwner: SourceResourceOwner;
+  /** Closed contribution selection; omitted for the Host's ordinary combined scope. */
+  configurationScopes?: readonly ('global' | 'project' | 'extension')[];
   agentDir: string;
   /** Admitted original project location. Never a materialized work branch. */
   configCwd: string;
@@ -76,6 +80,8 @@ export interface McpAuthorityOptions {
   }>;
   /** Test/embedding transport seam. Production defaults to the SDK's stdio/HTTP transports. */
   createTransport?: McpTransportFactory;
+  /** Trusted Host adapter over the SDK's not-yet-started transport for this exact scope. */
+  adaptTransport?: (scope: McpAuthorityScope, transport: ReturnType<McpTransportFactory>) => ReturnType<McpTransportFactory>;
 }
 export interface McpAuthorityTool {
   name: string;
@@ -156,6 +162,24 @@ export interface McpAuthorityLease {
   taskOwner(server: string, endpoint: McpEndpoint | undefined, signal: AbortSignal): Promise<McpTaskLease>;
   release(): void;
 }
+/** Authority-owned scope drainage, distinct from a composed snapshot's reference release. */
+export interface McpAuthorityOwnedLease extends McpAuthorityLease {
+  /** Wait for this scope's preparations, retained holders and last-reference SDK closes.
+   * SDK settlement is not a Storage native process-tree stop receipt. */
+  releaseAndDrain(): Promise<void>;
+}
+interface Drain {
+  promise: Promise<void>;
+  resolve(): void;
+  reject(error: unknown): void;
+}
+function drain(): Drain {
+  let resolve!: () => void, reject!: (error: unknown) => void;
+  const promise = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
+  // Ordinary release remains fire-and-forget. Keep the original outcome for explicit drainage.
+  void promise.catch(() => undefined);
+  return { promise, resolve, reject };
+}
 /** A pre-dispatch rejection is safe to record as no effect; an entered transport is uncertain. */
 export class McpAuthorityError extends Error {
   constructor(readonly code: string, readonly dispatched = false,
@@ -179,6 +203,10 @@ interface ScopeRecord {
   connections: Map<string, ConnectionRecord>;
   released: boolean;
   inflight: number;
+  preparations: number;
+  closings: Set<Promise<void>>;
+  drain: Drain;
+  closeError?: unknown;
   retainedHolders: number;
   closeRequested: boolean;
   shutdown: AbortController;
@@ -248,10 +276,11 @@ function normalizeScope(input: McpAuthorityScope): McpAuthorityScope {
   if (!input.agentDir || !input.configCwd || !input.executionCwd || !input.environmentId || !input.sessionId) fail('mcp-scope-invalid');
   if (!input.resourceOwner || (input.resourceOwner.kind !== 'local' && (input.resourceOwner.kind !== 'managed_host'
     || !input.resourceOwner.hostId || !input.resourceOwner.connectionId || !input.resourceOwner.endpointIdentity))) fail('mcp-scope-invalid');
-  return { ...input, resourceOwner: freeze(structuredClone(input.resourceOwner)), agentDir: resolve(input.agentDir), configCwd: resolve(input.configCwd), executionCwd: resolve(input.executionCwd) };
+  if (input.configurationScopes?.some(scope => !['global', 'project', 'extension'].includes(scope))) fail('mcp-scope-invalid');
+  return { ...input, ...(input.configurationScopes ? { configurationScopes: Object.freeze([...new Set(input.configurationScopes)].sort()) } : {}), resourceOwner: freeze(structuredClone(input.resourceOwner)), agentDir: resolve(input.agentDir), configCwd: resolve(input.configCwd), executionCwd: resolve(input.executionCwd) };
 }
 function scopeKey(scope: McpAuthorityScope): string {
-  return stable([scope.resourceOwner, scope.agentDir, scope.configCwd, scope.executionCwd, scope.environmentId, scope.executionScope, scope.projectTrusted]);
+  return stable([scope.resourceOwner, scope.configurationScopes ?? null, scope.agentDir, scope.configCwd, scope.executionCwd, scope.environmentId, scope.executionScope, scope.projectTrusted]);
 }
 function configuration(scope: McpAuthorityScope): McpServerOwner['configuration'] {
   return { agent_dir: scope.agentDir, config_cwd: scope.configCwd, project_trusted: scope.projectTrusted };
@@ -339,9 +368,11 @@ export class McpAuthority {
     const scope = normalizeScope(input);
     const key = scopeKey(scope);
     const configRevision = this.#configRevision(scope);
-    const config = loadMcpConfig({ agentDir: scope.agentDir, cwd: scope.configCwd, projectTrusted: scope.projectTrusted });
+    const loaded = loadMcpConfig({ agentDir: scope.agentDir, cwd: scope.configCwd, projectTrusted: scope.projectTrusted });
+    const config = scope.configurationScopes ? { ...loaded,
+      servers: loaded.servers.filter((entry: McpServerEntry) => scope.configurationScopes!.includes(entry.override ? 'project' : entry.scope ?? 'global')) } : loaded;
     if (configRevision !== this.#configRevision(scope)) fail('mcp-config-changed');
-    const record: ScopeRecord = { handle: randomUUID(), scope, key, config, configRevision, entries: new Map(config.servers.map(entry => [entry.name, entry])), definitions: new Map(), connections: new Map(), released: false, inflight: 0, retainedHolders: 0, closeRequested: false, shutdown: new AbortController() };
+    const record: ScopeRecord = { handle: randomUUID(), scope, key, config, configRevision, entries: new Map(config.servers.map(entry => [entry.name, entry])), definitions: new Map(), connections: new Map(), released: false, inflight: 0, preparations: 0, closings: new Set(), drain: drain(), retainedHolders: 0, closeRequested: false, shutdown: new AbortController() };
     for (const entry of record.entries.values()) record.definitions.set(entry.name, this.#configurationIdentity(record, entry));
     if (configRevision !== this.#configRevision(scope)) fail('mcp-config-changed');
     // Disable/removal is revocation, not an ordinary replacement that may keep old leases alive.
@@ -361,7 +392,7 @@ export class McpAuthority {
     finally { this.closeScope(opened.scope); }
   }
 
-  async acquire(scope: McpAuthorityScope, options: McpAuthorityAcquireOptions): Promise<McpAuthorityLease> {
+  async acquire(scope: McpAuthorityScope, options: McpAuthorityAcquireOptions): Promise<McpAuthorityOwnedLease> {
     const opened = this.open(scope);
     const record = this.#scope(opened.scope);
     const abort = () => this.closeScope(opened.scope);
@@ -578,13 +609,16 @@ export class McpAuthority {
           return this.callTool(record.handle, target.connection.handle, target.tool.name, options.schemaVersion, args, options.signal, options.beforeDispatch, options.interaction);
         },
         release: () => { if (!released) { released = true; this.closeScope(record.handle); } },
+        releaseAndDrain: () => { released = true; this.closeScope(record.handle); return record.drain.promise; },
       };
-    } catch (error) { this.closeScope(record.handle); throw error; }
+    } catch (error) { this.closeScope(record.handle); await record.drain.promise; throw error; }
     finally { options.signal?.removeEventListener('abort', abort); }
   }
 
   async connect(scopeHandle: string, requested: McpOwnerEntry): Promise<McpOwnerConnectionSnapshot> {
     const scope = this.#scope(scopeHandle);
+    scope.preparations++;
+    try {
     let entry = scope.entries.get(requested.name);
     if (!entry) {
       if (requested.scope !== 'extension' || !requested.source) fail('mcp-server-not-configured');
@@ -604,8 +638,10 @@ export class McpAuthority {
     const key = this.#connectionKey(scope, entry);
     const existing = scope.connections.get(entry.name);
     if (existing && !existing.revoked) await this.#assertCredential(existing).catch(() => undefined);
+    this.#scope(scopeHandle);
     if (existing?.key === key && !existing.revoked) {
       await existing.ready;
+      this.#scope(scopeHandle);
       if (existing.connection.state !== 'connected') await existing.connection.getClient().catch(() => undefined);
       return this.snapshot(scopeHandle, existing.handle);
     }
@@ -622,7 +658,10 @@ export class McpAuthority {
         const connection = new runtime.McpServerConnection({ entry, cwd: scope.scope.executionCwd,
           ...((this.#options.interactions || this.#options.sampling) ? { clientCapabilities: { ...(this.#options.interactions ? { elicitation: { form: {}, url: {} } } : {}), ...(this.#options.sampling ? { sampling: {} } : {}) } } : {}),
           onClientCreated: client => { const current = this.#pool.get(key); if (current?.connection === connection) this.#observeNativeClient(current, client); },
-          createTransport: this.#options.createTransport ?? runtime.createDefaultTransport,
+          createTransport: (...args) => {
+            const transport = (this.#options.createTransport ?? runtime.createDefaultTransport)(...args);
+            return this.#options.adaptTransport ? this.#options.adaptTransport(scope.scope, transport) : transport;
+          },
           credentials: this.#store(scope.scope.agentDir),
           providerToken: async requestedProvider => {
             if (!provider || requestedProvider !== provider || !this.#options.credentialScope) fail('mcp-provider-credential-authority-required');
@@ -648,14 +687,14 @@ export class McpAuthority {
         const selected = record;
         record.ready = connection.getClient().then(client => {
           this.#observeNativeClient(selected, client);
-          if (selected.revoked) return;
+          if (selected.revoked || selected.closing) return;
           const selectionKey = stable([selected.scopeKey, selected.entry.name]);
           const previous = this.#selected.get(selectionKey);
           this.#selected.set(selectionKey, selected);
           if (previous && previous !== selected) { previous.retired = true; this.#collect(previous); }
         }).catch(() => undefined).finally(() => {
           // Initialization may create OAuth discovery state. No tool declaration has been leased yet.
-          if (!selected.revoked) selected.oauthGrant = this.#oauthGrant(selected.scope, connection);
+          if (!selected.revoked && !selected.closing) selected.oauthGrant = this.#oauthGrant(selected.scope, connection);
         }); // The explicit connection state preserves auth/connection failures.
       }
     }
@@ -663,6 +702,7 @@ export class McpAuthority {
     if (scope.connections.get(entry.name) !== record) { record.references++; scope.connections.set(entry.name, record); }
     await record.ready;
     return this.snapshot(scopeHandle, record.handle);
+    } finally { scope.preparations--; this.#drainScope(scope); }
   }
 
   snapshot(scopeHandle: string, handle: string): McpOwnerConnectionSnapshot {
@@ -1232,15 +1272,19 @@ export class McpAuthority {
     const scope = this.#scopes.get(handle); if (!scope || scope.released) return;
     scope.closeRequested = true;
     if (scope.retainedHolders > 0 && !this.#closed) return;
-    scope.released = true; scope.shutdown.abort(); this.#scopes.delete(handle);
+    scope.released = true; scope.shutdown.abort();
     this.#drainScope(scope);
   }
   disposeSession(sessionId: string): void { for (const scope of this.#scopes.values()) if (scope.scope.sessionId === sessionId) this.closeScope(scope.handle); }
   async close(): Promise<void> {
     this.#closed = true; this.#configWatches.close(); this.#fileWatches.clear(); this.#subscribers.clear();
-    for (const scope of [...this.#scopes.values()]) this.closeScope(scope.handle);
+    const scopes = [...this.#scopes.values()];
+    for (const scope of scopes) this.closeScope(scope.handle);
     const records = [...this.#pool.values()]; for (const record of records) this.#revoke(record);
-    await Promise.all(this.#closings); this.#pool.clear(); this.#selected.clear();
+    const settled = await Promise.allSettled([...scopes.map(scope => scope.drain.promise), ...this.#closings]);
+    this.#pool.clear(); this.#selected.clear();
+    const failure = settled.find(result => result.status === 'rejected');
+    if (failure?.status === 'rejected') throw failure.reason;
   }
   #fileRevision(paths: readonly string[]): string {
     return stable(paths.map(path => {
@@ -1295,6 +1339,10 @@ export class McpAuthority {
   #drainScope(scope: ScopeRecord): void {
     if (!scope.released || scope.inflight > 0) return;
     for (const connection of [...scope.connections.values()]) this.#releaseConnection(scope, connection);
+    if (scope.preparations || scope.closings.size) return;
+    this.#scopes.delete(scope.handle);
+    if (scope.closeError !== undefined) scope.drain.reject(scope.closeError);
+    else scope.drain.resolve();
   }
   #scope(handle: string): ScopeRecord { const scope = this.#scopes.get(handle); if (!scope || scope.released) fail('mcp-scope-released'); return scope; }
   #connection(scope: ScopeRecord, handle: string): ConnectionRecord {
@@ -1340,6 +1388,18 @@ export class McpAuthority {
   #releaseConnection(scope: ScopeRecord, record: ConnectionRecord): void {
     if (scope.connections.get(record.entry.name) !== record) return;
     scope.connections.delete(record.entry.name); record.references--; this.#collect(record);
+    // A sibling's live reference is not ours to stop or wait for. An already closing or
+    // last-reference connection belongs to this scope's original drainage barrier.
+    const closing = record.closing;
+    if (closing && !scope.closings.has(closing)) {
+      scope.closings.add(closing);
+      void closing.then(() => {
+        scope.closings.delete(closing); this.#drainScope(scope);
+      }, error => {
+        scope.closeError ??= error;
+        scope.closings.delete(closing); this.#drainScope(scope);
+      });
+    }
   }
   #collect(record: ConnectionRecord): void {
     if (record.references > 0) return;
@@ -1351,12 +1411,20 @@ export class McpAuthority {
   }
   #closeConnection(record: ConnectionRecord): void {
     if (record.closing) return;
-    const closing = record.connection.close().catch(() => undefined).finally(() => this.#closings.delete(closing));
+    // SDK close waits for its opening connection, but internally suppresses some transport
+    // failures. Its settlement is never promoted to native whole-process-tree evidence.
+    const closing = Promise.resolve().then(() => record.connection.close()).catch(cause => {
+      throw Object.assign(new McpAuthorityError('mcp-close-failed'), { cause });
+    });
     record.closing = closing;
     this.#closings.add(closing);
+    // Preserve a failed outcome for explicit drains/Host shutdown; never replace it with success.
+    void closing.then(() => this.#closings.delete(closing), () => undefined);
   }
 }
 
 export { mcpHostAgentDir, mcpHostProjectTrusted, readMcpHostPermissionPolicy } from './mcp-host-configuration.js';
 export { McpCompositions } from './mcp-compositions.js';
 export type { McpCompositionScope, McpCompositionSelection } from './mcp-compositions.js';
+
+export { composeMcpAuthorityLeases } from './mcp-lease-composition.js';

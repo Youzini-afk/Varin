@@ -31,6 +31,11 @@ export function decodeManagedSourceReceiptRelease(input: { operationId: string; 
 export function decodeManagedSourceResponse<Operation extends SourceServiceOperation>(operation: Operation, value: unknown): SourceServiceResponse<Operation> {
   let valid = false;
   switch (operation.kind) {
+    case 'mcp': valid = record(value) && typeof value.executorStopped === 'boolean'
+      && (value.ok === true && value.executorStopped === true && Object.hasOwn(value, 'value')
+        || value.ok === false && record(value.error) && text(value.error.code) && typeof value.error.dispatched === 'boolean'
+        && ['unknown', 'session_expired', 'rpc_response'].includes(String(value.error.settlement))
+        && value.executorStopped === (!value.error.dispatched || value.error.settlement !== 'unknown')); break;
     case 'validate': valid = record(value) && strings(value.pathScopes); break;
     case 'read': valid = record(value) && ['ready', 'unavailable', 'stale', 'failed', 'forbidden'].includes(String(value.status))
       && (value.status !== 'ready' || text(value.content) && text(value.revision) && text(value.source)); break;

@@ -4,11 +4,14 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createMcpToolName } from '@earendil-works/pi-coding-agent';
 import { isDeepStrictEqual } from 'node:util';
 import type { McpProvenance, McpRoute } from '@varin/protocol';
-import type { McpAuthority, McpAuthorityLease, McpAuthorityScope, McpAuthorityTool, McpChange } from './mcp-authority.js';
+import { McpAuthorityError, type McpAuthority, type McpAuthorityLease, type McpAuthorityOwnedLease, type McpAuthorityScope, type McpAuthorityTool, type McpChange } from './mcp-authority.js';
 
 interface Generation {
   identity: string;
-  lease: McpAuthorityLease;
+  lease: McpAuthorityOwnedLease;
+  drained: Promise<void>;
+  resolveDrain(): void;
+  rejectDrain(error: unknown): void;
   references: number;
   revoked: Map<string, AbortController>;
 }
@@ -18,8 +21,15 @@ interface ServerSlot {
   preparation?: AbortController;
 }
 const retain = (generation: Generation) => { generation.references++; return generation; };
-const release = (generation: Generation) => { if (--generation.references === 0) generation.lease.release(); };
-const generation = (lease: McpAuthorityLease): Generation => ({ identity: randomUUID(), lease, references: 1, revoked: new Map() });
+const release = (generation: Generation) => {
+  if (--generation.references === 0) generation.lease.releaseAndDrain().then(generation.resolveDrain, generation.rejectDrain);
+};
+function generation(lease: McpAuthorityOwnedLease): Generation {
+  let resolveDrain!: () => void, rejectDrain!: (error: unknown) => void;
+  const drained = new Promise<void>((resolve, reject) => { resolveDrain = resolve; rejectDrain = reject; });
+  return { identity: randomUUID(), lease, references: 1, revoked: new Map(), drained, resolveDrain, rejectDrain };
+}
+const failedDrain = (error: unknown) => error instanceof McpAuthorityError && error.code === 'mcp-close-failed';
 const targetKey = (name: string, version: string) => JSON.stringify([name, version]);
 function freeze<T>(value: T): T {
   if (value && typeof value === 'object') { for (const child of Object.values(value)) freeze(child); Object.freeze(value); }
@@ -43,6 +53,9 @@ export interface McpCompositionScope {
   snapshot(): McpAuthorityLease;
   restore(selection: McpCompositionSelection, signal?: AbortSignal): Promise<McpAuthorityLease>;
   release(): void;
+  /** Release this observation and await its last-owner preparation/SDK transport drainage.
+   * Existing snapshot references retain their original lifetimes. No native tree receipt. */
+  releaseAndDrain(): Promise<void>;
 }
 export interface McpCompositionSelection {
   provenance: McpProvenance;
@@ -62,19 +75,29 @@ class Scope {
   private readonly changedTools = new Set<string>();
   private credentialsChanged = false;
   private readonly waiters = new Set<() => void>();
+  private readonly pending = new Set<Promise<void>>();
+  private draining?: Promise<void>;
 
-  constructor(readonly authority: McpAuthority, readonly scope: McpAuthorityScope, gateway: McpAuthorityLease,
+  constructor(readonly authority: McpAuthority, readonly scope: McpAuthorityScope, gateway: McpAuthorityOwnedLease,
     private readonly failed: (code: string, reference: string) => void) {
     this.scope = freeze(structuredClone(scope));
-    this.gateway = generation(gateway);
+    this.gateway = this.own(gateway);
     this.apply(gateway, false);
-    void authority.subscribe(this.scope, change => this.refresh(change)).then(unsubscribe => {
+    this.track(authority.subscribe(this.scope, change => this.refresh(change)).then(unsubscribe => {
       if (this.closed) unsubscribe(); else {
         this.unsubscribe = unsubscribe;
         // Close the initial read/watch-registration gap using the same configuration owner.
         this.refresh({ kind: 'configuration' });
       }
-    }, () => { if (!this.closed) failed('mcp_configuration_watch_failed', gateway.binding.reference); });
+    }, () => { if (!this.closed) failed('mcp_configuration_watch_failed', gateway.binding.reference); }));
+  }
+  private track(pending: Promise<void>): void {
+    this.pending.add(pending);
+    // Fulfilled work can be discarded; a rejected close remains part of the drain outcome.
+    void pending.then(() => this.pending.delete(pending), () => undefined);
+  }
+  private own(lease: McpAuthorityOwnedLease): Generation {
+    const owned = generation(lease); this.track(owned.drained); return owned;
   }
   notify(): void {
     queueMicrotask(() => {
@@ -87,21 +110,24 @@ class Scope {
     if (change.kind === 'tools') this.changedTools.add(change.server);
     if (change.kind === 'credentials') this.credentialsChanged = true;
     const revision = this.revision = Symbol();
-    void this.authority.acquire(this.scope, { servers: [], signal: this.lifetime.signal }).then(lease => {
-      if (this.closed || revision !== this.revision) { lease.release(); return; }
+    this.track(this.authority.acquire(this.scope, { servers: [], signal: this.lifetime.signal }).then(lease => {
+      if (this.closed || revision !== this.revision) return lease.releaseAndDrain();
       const credentials = this.credentialsChanged; this.credentialsChanged = false;
       const tools = new Set(this.changedTools); this.changedTools.clear();
-      if (lease.binding.generation === this.gateway.lease.binding.generation && !credentials && !tools.size) lease.release();
+      if (lease.binding.generation === this.gateway.lease.binding.generation && !credentials && !tools.size) this.track(lease.releaseAndDrain());
       else this.replaceGateway(lease);
       this.apply(this.gateway.lease, credentials, tools);
       this.notify();
-    }, () => { if (!this.closed && revision === this.revision) this.failed('mcp_configuration_preparation_failed', this.gateway.lease.binding.reference); });
+    }, error => {
+      if (failedDrain(error)) throw error;
+      if (!this.closed && revision === this.revision) this.failed('mcp_configuration_preparation_failed', this.gateway.lease.binding.reference);
+    }));
   }
-  update(gateway: McpAuthorityLease): void {
-    if (gateway.binding.generation === this.gateway.lease.binding.generation) { gateway.release(); return; }
+  update(gateway: McpAuthorityOwnedLease): void {
+    if (gateway.binding.generation === this.gateway.lease.binding.generation) { this.track(gateway.releaseAndDrain()); return; }
     this.replaceGateway(gateway); this.apply(gateway, false); this.notify();
   }
-  private replaceGateway(lease: McpAuthorityLease): void {
+  private replaceGateway(lease: McpAuthorityOwnedLease): void {
     const previous = this.gateway;
     // Explicit withdrawal also interrupts new service admissions retained by deferred snapshots.
     // Ordinary replacement retires the old binding without changing its granted lifetime.
@@ -114,7 +140,7 @@ class Scope {
         token.abort();
       }
     }
-    this.gateway = generation(lease); release(previous);
+    this.gateway = this.own(lease); release(previous);
   }
   private apply(lease: McpAuthorityLease, credentials: boolean, changedTools: ReadonlySet<string> = new Set()): void {
     // Malformed configuration does not establish that an existing dependency was removed.
@@ -151,20 +177,21 @@ class Scope {
       const controller = new AbortController(); slot.preparation = controller;
       const selected = slot;
       const signal = AbortSignal.any([controller.signal, this.lifetime.signal]);
-      void this.authority.acquire(this.scope, { servers: [server.name], signal }).then(candidate => {
-        if (this.closed || signal.aborted || this.servers.get(server.name) !== selected || selected.preparation !== controller) { candidate.release(); return; }
+      this.track(this.authority.acquire(this.scope, { servers: [server.name], signal }).then(candidate => {
+        if (this.closed || signal.aborted || this.servers.get(server.name) !== selected || selected.preparation !== controller) return candidate.releaseAndDrain();
         delete selected.preparation;
         const previous = selected.current;
         // Other configuration files or sibling readiness do not replace an unchanged endpoint.
         if (previous && previous.lease.implementationIdentity === candidate.implementationIdentity
           && ![...previous.revoked.values()].some(token => token.signal.aborted)
-          && JSON.stringify(previous.lease.binding.tools) === JSON.stringify(candidate.binding.tools)) { candidate.release(); return; }
-        selected.current = generation(candidate);
+          && JSON.stringify(previous.lease.binding.tools) === JSON.stringify(candidate.binding.tools)) return candidate.releaseAndDrain();
+        selected.current = this.own(candidate);
         if (previous) release(previous);
         this.notify();
-      }, () => {
+      }, error => {
+        if (failedDrain(error)) throw error;
         if (!this.closed && !signal.aborted && selected.preparation === controller) { delete selected.preparation; this.notify(); }
-      });
+      }));
     }
   }
   private requiredServers(selection: McpCompositionSelection): Set<string> {
@@ -196,8 +223,14 @@ class Scope {
       }
       if (!preparing) {
         const result = this.snapshot(selection);
-        const versions = new Set(result.binding.tools.filter(tool => tool.exposure === 'direct').map(tool => targetKey(tool.name, tool.schemaVersion)));
-        if (selection.tools.some(tool => selection.resources[tool.name] && !versions.has(targetKey(tool.name, tool.version)))) {
+        if (selection.tools.some(tool => {
+          const resource = selection.resources[tool.name];
+          if (!resource) return false;
+          const server = Object.entries(selection.provenance.servers).find(([, selected]) => selected.resource_key === resource)?.[0];
+          // A cross-owner composition may disambiguate the public name. Restore by its exact
+          // original server/schema; the outer adapter preserves that frozen public alias.
+          return !result.binding.tools.some(actual => actual.exposure === 'direct' && actual.server === server && actual.schemaVersion === tool.version);
+        })) {
           result.release(); throw new Error('mcp_saved_schema_unavailable');
         }
         return result;
@@ -315,6 +348,17 @@ class Scope {
       release: () => { if (released) return; released=true;release(gateway);for (const owner of contributions) release(owner); },
     };
   }
+  closeAndDrain(): Promise<void> {
+    this.close();
+    if (!this.draining) {
+      this.draining = Promise.allSettled([...this.pending]).then(results => {
+        const failure = results.find(result => result.status === 'rejected');
+        if (failure?.status === 'rejected') throw failure.reason;
+      });
+      void this.draining.catch(() => undefined);
+    }
+    return this.draining;
+  }
   close(): void {
     if (this.closed) return; this.closed=true;this.lifetime.abort();this.unsubscribe?.();this.observers.clear();
     release(this.gateway);
@@ -330,18 +374,25 @@ export class McpCompositions {
   async observe(scope: McpAuthorityScope, notify: () => void, signal?: AbortSignal): Promise<McpCompositionScope> {
     if (this.closed) throw new Error('mcp_compositions_closed');
     const gateway=await this.authority.acquire(scope,{servers:[],...(signal?{signal}:{})});
-    if (this.closed || signal?.aborted) {gateway.release();throw new Error('mcp_composition_cancelled');}
+    if (this.closed || signal?.aborted) {await gateway.releaseAndDrain();throw new Error('mcp_composition_cancelled');}
     const key=gateway.binding.reference;
     let owner=this.scopes.get(key);
     if (!owner) {owner=new Scope(this.authority,scope,gateway,this.failed);this.scopes.set(key,owner);}
     else owner.update(gateway);
     const observer=()=>notify();owner.observers.add(observer);
     const selected=owner;let released=false;
+    let draining: Promise<void> | undefined;
+    const release = () => {
+      if (released) return; released=true;selected.observers.delete(observer);
+      if (selected.closed || !selected.observers.size && this.scopes.get(key)===selected) {
+        this.scopes.delete(key);draining=selected.closeAndDrain();
+      }
+    };
     return {snapshot:()=>{if(released)throw new Error('mcp_composition_released');return selected.snapshot();},
-      restore:(selection,signal)=>{if(released)throw new Error('mcp_composition_released');return selected.restore(selection,signal);},release:()=>{
-      if(released)return;released=true;selected.observers.delete(observer);
-      if(!selected.observers.size && this.scopes.get(key)===selected){this.scopes.delete(key);selected.close();}
-    }};
+      restore:(selection,signal)=>{if(released)throw new Error('mcp_composition_released');return selected.restore(selection,signal);},
+      release,
+      releaseAndDrain:()=>{release();return draining ?? Promise.resolve();},
+    };
   }
   close():void {if(this.closed)return;this.closed=true;for(const scope of this.scopes.values())scope.close();this.scopes.clear();}
 }
