@@ -3,13 +3,13 @@ import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { McpAuthorityLease, McpTaskLease, McpTaskResponse } from '@varin/pi-host/mcp-authority';
 import type { KernelClient } from '../kernel/kernel-client.js';
-import type { SourceAuthorityAddress, SourceMcpHolderBinding, SourceMcpHolder, SourceMcpTaskCreationOutcome,
-  SourceMcpTaskReceiptResult } from '../kernel/protocol.generated.js';
+import type { SourceAuthorityAddress, SourceMcpHolderBinding, SourceMcpHolder, SourceMcpCreationOutcome,
+  SourceMcpCreationReceiptResult, SourceMcpHolderResult } from '../kernel/protocol.generated.js';
 import type { ManagedSourceCleanupScope } from './managed-remote-types.js';
 import type { ManagedMcpTaskAction, ManagedMcpTaskCreationReceipt } from './managed-mcp-contract.js';
 
 type Scope = Pick<ManagedSourceCleanupScope, 'principal' | 'coordinatorHostId' | 'authorityId' | 'resourceEpoch'>;
-export type ManagedMcpTaskFailure = Extract<SourceMcpTaskCreationOutcome, { kind: 'failed' }>['error'];
+export type ManagedMcpTaskFailure = Extract<SourceMcpCreationOutcome, { kind: 'failed' }>['error'];
 export function mcpTaskFailure(error: unknown, dispatchedFallback = false): ManagedMcpTaskFailure {
   const e = error as Partial<ManagedMcpTaskFailure> & { kind?: string } | null;
   const taskKind = e?.taskKind ?? e?.kind;
@@ -22,9 +22,10 @@ export function mcpTaskFailure(error: unknown, dispatchedFallback = false): Mana
 function failure(code: string, dispatched = false): never {
   throw Object.assign(new Error(code), { code, dispatched, taskKind: 'owner', settlement: 'unknown' });
 }
-function outcomeValue(outcome: SourceMcpTaskCreationOutcome | null): McpTaskResponse {
+function outcomeValue(outcome: SourceMcpCreationOutcome | null): McpTaskResponse {
   if (!outcome) return failure('mcp_task_original_creation_unknown', true);
   if (outcome.kind === 'failed') throw Object.assign(new Error(outcome.error.code), outcome.error);
+  if (outcome.kind !== 'accepted') return failure('mcp_task_original_identity_unavailable');
   return outcome.response;
 }
 function stable(value: unknown): string {
@@ -37,14 +38,14 @@ export function createManagedMcpTasks(options: {
   view(scope: Scope, handleId: string, signal: AbortSignal): Promise<{ lease: McpAuthorityLease; beforeDispatch(): Promise<void> }>;
 }) {
   interface Entry { binding: SourceMcpHolderBinding; requestHash: string; lease?: McpTaskLease;
-    work: Promise<McpTaskResponse>; outcome?: SourceMcpTaskCreationOutcome; settled?: boolean; controller: AbortController; released: boolean; controls: Set<Promise<unknown>>; }
+    work: Promise<McpTaskResponse>; outcome?: SourceMcpCreationOutcome; settled?: boolean; controller: AbortController; released: boolean; controls: Set<Promise<unknown>>; }
   const entries = new Map<string, Entry>();
   const address = (scope: Scope): SourceAuthorityAddress => ({ principalId: scope.principal.principalId,
     coordinatorHostId: scope.coordinatorHostId, authorityId: scope.authorityId, resourceEpoch: scope.resourceEpoch });
   const scopeKey = (scope: Scope) => JSON.stringify(Object.values(address(scope)));
   const key = (scope: Scope, binding: SourceMcpHolderBinding) => `${scopeKey(scope)}:${binding.operationId}`;
-  const inspect = async (scope: Scope, binding: SourceMcpHolderBinding) => options.kernel.sourceRequest<SourceMcpTaskReceiptResult>(
-    'source.mcp.task_receipt', { ...address(scope), binding, action: 'inspect' });
+  const inspect = async (scope: Scope, binding: SourceMcpHolderBinding) => options.kernel.sourceRequest<SourceMcpCreationReceiptResult>(
+    'source.mcp.creation_receipt', { ...address(scope), binding, action: 'inspect' });
   const entry = (scope: Scope, binding: SourceMcpHolderBinding) => {
     const original = entries.get(key(scope, binding));
     if (original && !isDeepStrictEqual(original.binding, binding)) failure('mcp_task_holder_changed');
@@ -76,14 +77,14 @@ export function createManagedMcpTasks(options: {
           const lease = await view.lease.taskOwner(binding.endpoint.server, binding.endpoint, active);
           selected.lease = lease;
           if (selected.released) return failure('mcp_task_holder_released');
-          const original = await options.kernel.sourceRequest<SourceMcpTaskReceiptResult>('source.mcp.task_receipt', {
+          const original = await options.kernel.sourceRequest<SourceMcpCreationReceiptResult>('source.mcp.creation_receipt', {
             ...address(scope), binding, requestHash, action: 'begin' });
           if (!original.dispatch) {
             lease.release(); delete selected.lease;
             return outcomeValue(original.outcome);
           }
           began = true;
-          let outcome: SourceMcpTaskCreationOutcome;
+          let outcome: SourceMcpCreationOutcome;
           try {
             // Never bind A's Operation to B's Catalog interaction receiver. Reverse
             // interactions require their own authenticated A delivery bridge.
@@ -99,7 +100,7 @@ export function createManagedMcpTasks(options: {
           // An interrupted requester cannot discard the original response before Storage
           // owns it. A later inspect may recall this response, never repeat tools/call.
           selected.outcome = outcome;
-          try { await options.kernel.sourceRequest('source.mcp.task_receipt', { ...address(scope), binding,
+          try { await options.kernel.sourceRequest('source.mcp.creation_receipt', { ...address(scope), binding,
             requestHash, action: 'settle', outcome }); selected.settled = true; }
           catch { failure('mcp_task_creation_receipt_pending', outcome.kind === 'accepted' || outcome.error.dispatched); }
           return outcomeValue(outcome);
@@ -122,17 +123,18 @@ export function createManagedMcpTasks(options: {
         if (signal?.aborted) abort(); else void selected.work.then(finish, finish);
       });
       if (selected?.outcome && !selected.settled) {
-        try { await options.kernel.sourceRequest('source.mcp.task_receipt', { ...address(scope), binding,
+        try { await options.kernel.sourceRequest('source.mcp.creation_receipt', { ...address(scope), binding,
           requestHash: selected.requestHash, action: 'settle', outcome: selected.outcome }); selected.settled = true; }
-        catch { failure('mcp_task_creation_receipt_pending', selected.outcome.kind === 'accepted' || selected.outcome.error.dispatched); }
+        catch { failure('mcp_task_creation_receipt_pending', selected.outcome.kind === 'accepted' || selected.outcome.kind === 'failed' && selected.outcome.error.dispatched); }
       }
       const original = await inspect(scope, binding);
       return { receipt: original.holder.creationReceipt ? { requestHash: original.holder.creationReceipt.requestHash, outcome: original.outcome } : null, released: original.holder.released,
         live: !!selected?.lease && !selected.released };
     },
     async control(scope: Scope, action: Extract<ManagedMcpTaskAction, { kind: 'task_get' | 'task_result' | 'task_cancel' }>, signal: AbortSignal) {
-      const original = await options.kernel.sourceRequest<{ holder: SourceMcpHolder }>('source.mcp.holder', {
+      const original = await options.kernel.sourceRequest<SourceMcpHolderResult>('source.mcp.holder', {
         ...address(scope), binding: action.binding, action: 'inspect' });
+      if (action.kind !== 'task_cancel' && original.grantState !== 'active') return failure('mcp_task_original_owner_revoked');
       const selected = entry(scope, action.binding), receipt = selected?.outcome;
       if (!selected?.lease || selected.released) return failure('mcp_task_original_transport_unavailable');
       if (!selected.settled || !original.holder.creationReceipt?.outcomeRef || original.holder.released || receipt?.kind !== 'accepted' || receipt.response.task.taskId !== action.taskId)

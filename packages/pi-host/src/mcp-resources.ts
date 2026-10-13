@@ -18,6 +18,8 @@ export interface McpResourceObserver {
     readonly endpoint: McpEndpoint;
     readonly listenerId: string;
     readonly acknowledgement: Record<string, unknown>;
+    /** Detach only a remote projection; the original target holder remains recoverable. */
+    disconnect?(): void;
     /** Synchronously fences/removes this holder. Remote cleanup is a separate bounded request. */
     detach(options?: { interaction: McpInteractionOrigin; signal: AbortSignal }): Promise<McpResourceRelease>;
 }

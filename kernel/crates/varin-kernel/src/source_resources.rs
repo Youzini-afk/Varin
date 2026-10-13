@@ -128,27 +128,32 @@ pub(crate) struct SourceMcpHolder {
     pub released: bool,
     /// The original creation attempt only. Null is not evidence that dispatch is safe.
     #[serde(deserialize_with = "Option::deserialize")]
-    pub creation_receipt: Option<SourceMcpTaskCreationReceipt>,
+    pub creation_receipt: Option<SourceMcpCreationReceipt>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct SourceMcpTaskCreationReceipt {
+pub(crate) struct SourceMcpCreationReceipt {
     pub request_hash: String,
     /// A begun, unsettled attempt cannot be dispatched again.
     #[serde(deserialize_with = "Option::deserialize")]
-    pub outcome_ref: Option<SourceMcpTaskReceiptBodyRef>,
+    pub outcome_ref: Option<SourceMcpCreationReceiptBodyRef>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct SourceMcpTaskReceiptBodyRef {
+pub(crate) struct SourceMcpCreationReceiptBodyRef {
     pub object_hash: String,
     pub byte_length: u64,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub(crate) enum SourceMcpTaskCreationOutcome {
+pub(crate) enum SourceMcpCreationOutcome {
     Accepted { response: SourceMcpTaskCreationResponse },
-    Failed { error: SourceMcpTaskCreationError },
+    Subscribed {
+        #[serde(rename = "listenerId")]
+        listener_id: String,
+        acknowledgement: serde_json::Map<String, Value>,
+    },
+    Failed { error: SourceMcpCreationError },
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -158,12 +163,12 @@ pub(crate) struct SourceMcpTaskCreationResponse {
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct SourceMcpTaskCreationError {
+pub(crate) struct SourceMcpCreationError {
     pub code: String,
     pub dispatched: bool,
-    pub settlement: SourceMcpTaskCreationSettlement,
+    pub settlement: SourceMcpCreationSettlement,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub task_kind: Option<SourceMcpTaskCreationProblemKind>,
+    pub task_kind: Option<SourceMcpCreationProblemKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rpc_code: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -173,14 +178,14 @@ pub(crate) struct SourceMcpTaskCreationError {
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum SourceMcpTaskCreationSettlement {
+pub(crate) enum SourceMcpCreationSettlement {
     Unknown,
     SessionExpired,
     RpcResponse,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum SourceMcpTaskCreationProblemKind {
+pub(crate) enum SourceMcpCreationProblemKind {
     Protocol,
     Transport,
     Unsupported,
@@ -188,22 +193,22 @@ pub(crate) enum SourceMcpTaskCreationProblemKind {
 }
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum SourceMcpTaskReceiptAction {
+pub(crate) enum SourceMcpCreationReceiptAction {
     Begin,
     Inspect,
     Settle,
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct SourceMcpTaskReceiptParams {
+pub(crate) struct SourceMcpCreationReceiptParams {
     pub principal_id: String,
     pub coordinator_host_id: String,
     pub authority_id: String,
     pub resource_epoch: String,
     pub binding: SourceMcpHolderBinding,
     pub request_hash: Option<String>,
-    pub action: SourceMcpTaskReceiptAction,
-    pub outcome: Option<SourceMcpTaskCreationOutcome>,
+    pub action: SourceMcpCreationReceiptAction,
+    pub outcome: Option<SourceMcpCreationOutcome>,
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -546,8 +551,8 @@ pub(crate) enum SourceDispatch {
         action: SourceFileObservationAction,
     },
     ReadObserve(crate::storage::source_read_receipts::ReadReceipt),
-    McpTaskReceiptStage(crate::storage::source_mcp_receipts::McpReceiptPreparation),
-    McpTaskReceiptObserve(crate::storage::source_mcp_receipts::McpReceiptBody),
+    McpCreationReceiptStage(crate::storage::source_mcp_receipts::McpReceiptPreparation),
+    McpCreationReceiptObserve(crate::storage::source_mcp_receipts::McpReceiptBody),
     InteractionObserve {
         record: AuthorityRecord,
         native: crate::storage::process_interactions::Native,
@@ -582,8 +587,8 @@ impl SourceDispatch {
                 address.authority_id, request_id
             )),
             Self::ReadObserve(_) => Some(format!("source-read-observe:{}", uuid::Uuid::new_v4())),
-            Self::McpTaskReceiptStage(_) | Self::McpTaskReceiptObserve(_) =>
-                Some(format!("mcp-task-receipt:{}", uuid::Uuid::new_v4())),
+            Self::McpCreationReceiptStage(_) | Self::McpCreationReceiptObserve(_) =>
+                Some(format!("mcp-creation-receipt:{}", uuid::Uuid::new_v4())),
             Self::InteractionObserve {
                 record, address, ..
             } => Some(format!(
@@ -606,7 +611,7 @@ impl SourceDispatch {
         resources: crate::tools::KernelResourceClient,
         cancel: varin_runtime::execution::CancellationToken,
     ) -> Result<SourceWorkResult, KernelError> {
-        if let Self::McpTaskReceiptStage(preparation) = self {
+        if let Self::McpCreationReceiptStage(preparation) = self {
             let (value, staged) = preparation.stage()?;
             return Ok(SourceWorkResult { value, read: None, mcp_receipt: Some(staged) });
         }
@@ -628,8 +633,8 @@ impl SourceDispatch {
                 .ok_or_else(|| denied("Original file observation owner unavailable"))?
                 .execute_managed(address, action, &cancel),
             Self::ReadObserve(read) => read.load(),
-            Self::McpTaskReceiptObserve(receipt) => receipt.load(),
-            Self::McpTaskReceiptStage(_) => unreachable!("settlement staged above"),
+            Self::McpCreationReceiptObserve(receipt) => receipt.load(),
+            Self::McpCreationReceiptStage(_) => unreachable!("settlement staged above"),
             Self::InteractionObserve {
                 record,
                 native,
@@ -701,7 +706,7 @@ impl SourceWorkResult {
             storage.publish_source_read(read)?;
         }
         if let Some(receipt) = self.mcp_receipt {
-            let mut value = storage.publish_source_mcp_task_receipt(receipt)?;
+            let mut value = storage.publish_source_mcp_creation_receipt(receipt)?;
             if value["holder"]["released"] != true {
                 value["outcome"] = self.value;
             }
@@ -817,8 +822,8 @@ pub(crate) fn prepare_request(
         "source.mcp.holder" => {
             storage.source_mcp_holder(serde_json::from_value(params)?, epoch)?
         }
-        "source.mcp.task_receipt" => {
-            return storage.source_mcp_task_receipt(serde_json::from_value(params)?, epoch);
+        "source.mcp.creation_receipt" => {
+            return storage.source_mcp_creation_receipt(serde_json::from_value(params)?, epoch);
         }
         "source.authority.inspect" => serde_json::to_value(
             storage

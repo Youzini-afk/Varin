@@ -2644,6 +2644,7 @@ fn original_mcp_holders_seal_scope_retirement_fence_replay_and_survive_reopen() 
     };
     let (address, bind) = open_mcp("original-mcp-grant");
     let (revocable, _) = open_mcp("revocable-mcp-grant");
+    let (directly_revoked, _) = open_mcp("directly-revoked-mcp-grant");
     let grant = |id: &str| -> Value {
         let conn = rusqlite::Connection::open_with_flags(root.join("storage/catalog.sqlite"),
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
@@ -2684,6 +2685,12 @@ fn original_mcp_holders_seal_scope_retirement_fence_replay_and_survive_reopen() 
         "interactionProblem":"original-interaction"}});
     let task = binding("original-task", "task");
     let observer = binding("original-observer", "resource_observer");
+    owner.rpc("source.mcp.holder", holder(&directly_revoked, &observer, "retain"), None).unwrap();
+    owner.rpc("authority.grant.revoke", json!({"grantId":"directly-revoked-mcp-grant"}), None).unwrap();
+    let revoked_projection = owner.rpc("source.mcp.holder", holder(&directly_revoked, &observer, "inspect"), None).unwrap();
+    assert_eq!(revoked_projection["grantState"], "revoked", "direct grant revocation remains visible outside Source authority release");
+    assert_eq!(owner.rpc("source.mcp.holder", holder(&directly_revoked, &observer, "release"), None).unwrap()["holder"]["released"], true);
+
     assert!(owner.rpc("source.mcp.holder", holder(&ordinary, &task, "retain"), None).is_err());
     assert!(owner.rpc("source.mcp.holder", holder(&address, &task, "inspect"), None).is_err());
     for malformed in [json!({"kind":"kernel"}), json!({"kind":"external","identity":"","epoch":"epoch"})] {
@@ -2695,28 +2702,30 @@ fn original_mcp_holders_seal_scope_retirement_fence_replay_and_survive_reopen() 
     let fenced = owner.rpc("source.mcp.holder", holder(&address, &unstarted, "release_unstarted"), None).unwrap();
     assert_eq!(fenced["holder"]["released"], true);
     assert_eq!(fenced["holder"]["creationReceipt"], Value::Null);
-    assert!(owner.rpc("source.mcp.task_receipt", receipt(&address, &unstarted, "begin", None), None).is_err());
-    assert!(owner.rpc("source.mcp.holder", holder(&address, &observer, "release_unstarted"), None).is_err());
+    assert!(owner.rpc("source.mcp.creation_receipt", receipt(&address, &unstarted, "begin", None), None).is_err());
+    let unstarted_observer = binding("unstarted-observer", "resource_observer");
+    assert_eq!(owner.rpc("source.mcp.holder", holder(&address, &unstarted_observer, "release_unstarted"), None).unwrap()["holder"]["released"], true);
+    assert!(owner.rpc("source.mcp.creation_receipt", receipt(&address, &unstarted_observer, "begin", None), None).is_err());
     let cancelled = binding("cancelled-before-retain", "task");
     let closed = owner.rpc("source.mcp.holder", holder(&address, &cancelled, "release"), None).unwrap();
     assert_eq!(closed["holder"]["released"], true);
     assert_eq!(owner.rpc("source.mcp.holder", holder(&address, &cancelled, "retain"), None).unwrap(), closed);
-    assert!(owner.rpc("source.mcp.task_receipt", receipt(&address, &cancelled, "begin", None), None).is_err(),
+    assert!(owner.rpc("source.mcp.creation_receipt", receipt(&address, &cancelled, "begin", None), None).is_err(),
         "a released tombstone must never readmit an unbegun task");
-    assert!(owner.rpc("source.mcp.task_receipt", receipt(&address, &task, "settle", Some(&accepted)), None).is_err());
+    assert!(owner.rpc("source.mcp.creation_receipt", receipt(&address, &task, "settle", Some(&accepted)), None).is_err());
     assert!(owner.rpc("source.mcp.holder", holder(&address, &task, "inspect"), None).is_err(),
         "settlement must not allocate a missing holder");
     let retained = owner.rpc("source.mcp.holder", holder(&address, &task, "retain"), None).unwrap();
     assert_eq!(retained["holder"]["binding"], task);
     assert_eq!(retained["holder"]["released"], false);
     assert_eq!(retained["holder"]["creationReceipt"], Value::Null);
-    assert_eq!(owner.rpc("source.mcp.task_receipt", receipt(&address, &task, "inspect", None), None).unwrap()["holder"], retained["holder"]);
-    assert!(owner.rpc("source.mcp.task_receipt", receipt(&address, &task, "settle", Some(&accepted)), None).is_err(),
+    assert_eq!(owner.rpc("source.mcp.creation_receipt", receipt(&address, &task, "inspect", None), None).unwrap()["holder"], retained["holder"]);
+    assert!(owner.rpc("source.mcp.creation_receipt", receipt(&address, &task, "settle", Some(&accepted)), None).is_err(),
         "settlement must not manufacture the original dispatch intent");
-    let retained = owner.rpc("source.mcp.task_receipt", receipt(&address, &task, "begin", None), None).unwrap();
+    let retained = owner.rpc("source.mcp.creation_receipt", receipt(&address, &task, "begin", None), None).unwrap();
     assert_eq!(retained["dispatch"], true);
     assert_eq!(retained["holder"]["creationReceipt"], json!({"requestHash":"original-request-hash","outcomeRef":null}));
-    let replay = owner.rpc("source.mcp.task_receipt", receipt(&address, &task, "begin", None), None).unwrap();
+    let replay = owner.rpc("source.mcp.creation_receipt", receipt(&address, &task, "begin", None), None).unwrap();
     assert_eq!(replay["dispatch"], false, "a lost begin reply never permits replay");
     assert_eq!(replay["holder"], retained["holder"]);
     assert_eq!(owner.rpc("source.mcp.holder", holder(&address, &task, "release_unstarted"), None).unwrap()["holder"]["released"], false,
@@ -2730,18 +2739,27 @@ fn original_mcp_holders_seal_scope_retirement_fence_replay_and_survive_reopen() 
     for action in ["begin", "inspect", "settle"] {
         let mut changed = receipt(&address, &task, action, if action == "settle" { Some(&accepted) } else { None });
         changed["requestHash"] = json!("different-request");
-        assert!(owner.rpc("source.mcp.task_receipt", changed, None).is_err());
+        assert!(owner.rpc("source.mcp.creation_receipt", changed, None).is_err());
     }
     for bad in [json!({"kind":"accepted","response":{"task":accepted["response"]["task"],"result":[]}}),
         json!({"kind":"failed","error":{"code":"failed","dispatched":true,"settlement":"stopped"}}),
         json!({"kind":"failed","error":{"code":"failed","dispatched":true,"settlement":"unknown","taskKind":"expired"}}),
         json!({"kind":"failed","error":{"code":"failed","dispatched":true,"settlement":"unknown","protocolError":[]}})] {
-        assert!(owner.rpc("source.mcp.task_receipt", receipt(&address, &task, "settle", Some(&bad)), None).is_err());
+        assert!(owner.rpc("source.mcp.creation_receipt", receipt(&address, &task, "settle", Some(&bad)), None).is_err());
     }
-    assert!(owner.rpc("source.mcp.task_receipt", receipt(&ordinary, &task, "begin", None), None).is_err());
-    assert!(owner.rpc("source.mcp.task_receipt", receipt(&address, &observer, "begin", None), None).is_err());
-    owner.rpc("source.mcp.holder", holder(&address, &observer, "retain"), None).unwrap();
-    let revocable_receipt = owner.rpc("source.mcp.task_receipt", receipt(&revocable, &task, "begin", None), None).unwrap();
+    assert!(owner.rpc("source.mcp.creation_receipt", receipt(&ordinary, &task, "begin", None), None).is_err());
+    let subscribed = json!({"kind":"subscribed","listenerId":"original-listener",
+        "acknowledgement":{"_meta":{"body":"original subscribe acknowledgement ".repeat(4096)}}});
+    let observer_receipt = owner.rpc("source.mcp.creation_receipt", receipt(&address, &observer, "begin", None), None).unwrap();
+    assert_eq!(observer_receipt["dispatch"], true);
+    assert_eq!(owner.rpc("source.mcp.creation_receipt", receipt(&address, &observer, "begin", None), None).unwrap()["dispatch"], false);
+    assert_eq!(owner.rpc("source.mcp.holder", holder(&address, &observer, "release_unstarted"), None).unwrap()["holder"]["released"], false);
+    assert!(owner.rpc("source.mcp.creation_receipt", receipt(&address, &task, "settle", Some(&subscribed)), None).is_err());
+    for bad in [accepted.clone(), json!({"kind":"subscribed","listenerId":"","acknowledgement":{}}),
+        json!({"kind":"subscribed","listenerId":"listener","acknowledgement":[]})] {
+        assert!(owner.rpc("source.mcp.creation_receipt", receipt(&address, &observer, "settle", Some(&bad)), None).is_err());
+    }
+    let revocable_receipt = owner.rpc("source.mcp.creation_receipt", receipt(&revocable, &task, "begin", None), None).unwrap();
     assert_eq!(revocable_receipt["dispatch"], true, "one save acquires the original holder and creation intent");
     assert_eq!(revocable_receipt["holder"]["released"], false);
     let unbegun = binding("retained-without-creation", "task");
@@ -2759,7 +2777,7 @@ fn original_mcp_holders_seal_scope_retirement_fence_replay_and_survive_reopen() 
         for action in ["begin", "inspect", "settle"] {
             let mut foreign = receipt(&address, &task, action, if action == "settle" { Some(&accepted) } else { None });
             foreign[field] = json!("foreign");
-            assert!(owner.rpc("source.mcp.task_receipt", foreign, None).is_err());
+            assert!(owner.rpc("source.mcp.creation_receipt", foreign, None).is_err());
         }
     }
     for path in [vec!["purpose"], vec!["executionOwner", "identity"], vec!["executionOwner", "epoch"],
@@ -2771,18 +2789,18 @@ fn original_mcp_holders_seal_scope_retirement_fence_replay_and_survive_reopen() 
             assert!(owner.rpc("source.mcp.holder", holder(&address, &changed, action), None).is_err());
         }
         for action in ["begin", "inspect", "settle"] {
-            assert!(owner.rpc("source.mcp.task_receipt", receipt(&address, &changed, action,
+            assert!(owner.rpc("source.mcp.creation_receipt", receipt(&address, &changed, action,
                 if action == "settle" { Some(&accepted) } else { None }), None).is_err());
         }
     }
     // Staging does not publish an object or reserve another Task ledger. A
     // concurrent exact release must fence even a first settlement's publication.
     let racing = binding("creation-settlement-release-race", "task");
-    owner.rpc("source.mcp.task_receipt", receipt(&address, &racing, "begin", None), None).unwrap();
+    owner.rpc("source.mcp.creation_receipt", receipt(&address, &racing, "begin", None), None).unwrap();
     let mut racing_outcome = accepted.clone();
     racing_outcome["response"]["task"]["taskId"] = json!("release-raced-task");
     let staging = source_resources::prepare_request(&mut owner.storage.lock().unwrap(),
-        "source.mcp.task_receipt", receipt(&address, &racing, "settle", Some(&racing_outcome)), owner.epoch,
+        "source.mcp.creation_receipt", receipt(&address, &racing, "settle", Some(&racing_outcome)), owner.epoch,
         owner.host, owner.generation).unwrap();
     let staged = staging.execute(owner.resources.clone(), CancellationToken::default()).unwrap();
     owner.rpc("source.mcp.holder", holder(&address, &racing, "release"), None).unwrap();
@@ -2793,8 +2811,8 @@ fn original_mcp_holders_seal_scope_retirement_fence_replay_and_survive_reopen() 
     let racing_path = crate::protocol::object_path(&owner.root,
         raced["holder"]["creationReceipt"]["outcomeRef"]["objectHash"].as_str().unwrap()).unwrap();
     assert!(!racing_path.exists(), "release overtaking settlement cannot publish a retained body");
-    assert_eq!(owner.rpc("source.mcp.task_receipt", receipt(&address, &racing, "settle", Some(&racing_outcome)), None).unwrap(), raced);
-    assert!(owner.rpc("source.mcp.task_receipt", receipt(&address, &racing, "settle", Some(&accepted)), None).is_err());
+    assert_eq!(owner.rpc("source.mcp.creation_receipt", receipt(&address, &racing, "settle", Some(&racing_outcome)), None).unwrap(), raced);
+    assert!(owner.rpc("source.mcp.creation_receipt", receipt(&address, &racing, "settle", Some(&accepted)), None).is_err());
     let sealed = owner.rpc("source.authority.seal", address.clone(), None).unwrap();
     assert_eq!(sealed["phase"], "retaining");
     assert_eq!(sealed["grantId"], "original-mcp-grant");
@@ -2803,10 +2821,10 @@ fn original_mcp_holders_seal_scope_retirement_fence_replay_and_survive_reopen() 
     assert!(owner.rpc("source.authority.bind", bind, None).is_err());
     assert!(owner.rpc("source.service.call", validate, None).is_err());
     assert!(owner.rpc("source.mcp.holder", holder(&address, &binding("late-holder", "task"), "retain"), None).is_err());
-    assert!(owner.rpc("source.mcp.task_receipt", receipt(&address, &binding("late-holder", "task"), "begin", None), None).is_err());
-    assert!(owner.rpc("source.mcp.task_receipt", receipt(&revocable, &unbegun, "begin", None), None).is_err(),
+    assert!(owner.rpc("source.mcp.creation_receipt", receipt(&address, &binding("late-holder", "task"), "begin", None), None).is_err());
+    assert!(owner.rpc("source.mcp.creation_receipt", receipt(&revocable, &unbegun, "begin", None), None).is_err(),
         "a retained holder without a creation intent cannot bypass the sealed scope");
-    assert_eq!(owner.rpc("source.mcp.task_receipt", receipt(&address, &task, "begin", None), None).unwrap()["dispatch"], false);
+    assert_eq!(owner.rpc("source.mcp.creation_receipt", receipt(&address, &task, "begin", None), None).unwrap()["dispatch"], false);
     assert_eq!(owner.rpc("source.mcp.holder", holder(&address, &task, "retain"), None).unwrap()["holder"], retained["holder"]);
     let scope = json!({"principalId":"client","coordinatorHostId":"coordinator","threadId":"thread","runId":"run","mode":"retire"});
     let retired_scope = owner.rpc("source.authority.release_scope", scope, None).unwrap();
@@ -2822,13 +2840,13 @@ fn original_mcp_holders_seal_scope_retirement_fence_replay_and_survive_reopen() 
     revoke["mode"] = json!("revoke");
     assert_eq!(owner.rpc("source.authority.release", revoke, None).unwrap()["phase"], "revoked");
     assert_eq!(grant("revocable-mcp-grant")["state"], "revoked");
-    assert!(owner.rpc("source.mcp.task_receipt", receipt(&revocable, &unbegun, "begin", None), None).is_err());
-    assert_eq!(owner.rpc("source.mcp.task_receipt", receipt(&revocable, &task, "begin", None), None).unwrap()["dispatch"], false);
-    let rejected = owner.rpc("source.mcp.task_receipt", receipt(&revocable, &task, "settle", Some(&failed)), None).unwrap();
+    assert!(owner.rpc("source.mcp.creation_receipt", receipt(&revocable, &unbegun, "begin", None), None).is_err());
+    assert_eq!(owner.rpc("source.mcp.creation_receipt", receipt(&revocable, &task, "begin", None), None).unwrap()["dispatch"], false);
+    let rejected = owner.rpc("source.mcp.creation_receipt", receipt(&revocable, &task, "settle", Some(&failed)), None).unwrap();
     assert_eq!(rejected["dispatch"], false);
     assert_eq!(rejected["outcome"], failed, "late original failure settles after grant revocation");
-    assert_eq!(owner.rpc("source.mcp.task_receipt", receipt(&revocable, &task, "settle", Some(&failed)), None).unwrap(), rejected);
-    assert!(owner.rpc("source.mcp.task_receipt", receipt(&revocable, &task, "settle", Some(&accepted)), None).is_err());
+    assert_eq!(owner.rpc("source.mcp.creation_receipt", receipt(&revocable, &task, "settle", Some(&failed)), None).unwrap(), rejected);
+    assert!(owner.rpc("source.mcp.creation_receipt", receipt(&revocable, &task, "settle", Some(&accepted)), None).is_err());
     assert!(owner.rpc("source.mcp.holder", holder(&revocable, &task, "retain"), None).is_err());
     assert_eq!(owner.rpc("source.mcp.holder", holder(&revocable, &task, "inspect"), None).unwrap()["holder"]["released"], false);
     let rejected_ref = rejected["holder"]["creationReceipt"]["outcomeRef"].clone();
@@ -2842,22 +2860,29 @@ fn original_mcp_holders_seal_scope_retirement_fence_replay_and_survive_reopen() 
     let reopened = Owner::new(root.join("storage"), "mcp-host", "new-generation", "new-epoch");
     let recalled = reopened.rpc("source.mcp.holder", holder(&address, &task, "inspect"), None).unwrap();
     assert_eq!(recalled["authority"]["resourceEpoch"], "mcp-epoch");
+    assert_eq!(recalled["grantState"], "active", "old epoch inspection does not reacquire or reject the original active grant");
     assert_eq!(recalled["authority"]["grantId"], "original-mcp-grant");
     assert_eq!(recalled["holder"], retained["holder"]);
-    let unknown = reopened.rpc("source.mcp.task_receipt", receipt(&address, &task, "inspect", None), None).unwrap();
+    let unknown = reopened.rpc("source.mcp.creation_receipt", receipt(&address, &task, "inspect", None), None).unwrap();
     assert_eq!(unknown["holder"], retained["holder"]);
-    assert_eq!(reopened.rpc("source.mcp.task_receipt", receipt(&address, &task, "begin", None), None).unwrap()["dispatch"], false,
+    assert_eq!(reopened.rpc("source.mcp.creation_receipt", receipt(&address, &task, "begin", None), None).unwrap()["dispatch"], false,
         "reopening an unknown creation never dispatches again");
-    let settled = reopened.rpc("source.mcp.task_receipt", receipt(&address, &task, "settle", Some(&accepted)), None).unwrap();
+    let settled = reopened.rpc("source.mcp.creation_receipt", receipt(&address, &task, "settle", Some(&accepted)), None).unwrap();
     assert_eq!(settled["dispatch"], false);
     assert_eq!(settled["outcome"], accepted);
-    assert_eq!(reopened.rpc("source.mcp.task_receipt", receipt(&address, &task, "settle", Some(&accepted)), None).unwrap(), settled,
+    assert_eq!(reopened.rpc("source.mcp.creation_receipt", receipt(&address, &task, "settle", Some(&accepted)), None).unwrap(), settled,
         "a lost settlement reply recalls exactly the original response");
     let mut newer_task_status = accepted.clone();
     newer_task_status["response"]["task"]["status"] = json!("completed");
-    assert!(reopened.rpc("source.mcp.task_receipt", receipt(&address, &task, "settle", Some(&newer_task_status)), None).is_err(),
+    assert!(reopened.rpc("source.mcp.creation_receipt", receipt(&address, &task, "settle", Some(&newer_task_status)), None).is_err(),
         "subsequent Task status cannot rewrite the creation receipt");
-    assert_eq!(reopened.rpc("source.mcp.task_receipt", receipt(&revocable, &task, "inspect", None), None).unwrap()["outcome"], failed);
+    assert_eq!(reopened.rpc("source.mcp.creation_receipt", receipt(&revocable, &task, "inspect", None), None).unwrap()["outcome"], failed);
+    let subscribed_settled = reopened.rpc("source.mcp.creation_receipt", receipt(&address, &observer, "settle", Some(&subscribed)), None).unwrap();
+    assert_eq!(subscribed_settled["outcome"], subscribed, "the original observer settles across owner restart and Source retirement");
+    assert_eq!(reopened.rpc("source.mcp.creation_receipt", receipt(&address, &observer, "inspect", None), None).unwrap(), subscribed_settled);
+    let subscribed_ref = subscribed_settled["holder"]["creationReceipt"]["outcomeRef"].clone();
+    let subscribed_path = crate::protocol::object_path(&reopened.root, subscribed_ref["objectHash"].as_str().unwrap()).unwrap();
+    assert_eq!(std::fs::read(&subscribed_path).unwrap(), serde_json::to_vec(&subscribed).unwrap());
     let accepted_ref = settled["holder"]["creationReceipt"]["outcomeRef"].clone();
     let accepted_path = crate::protocol::object_path(&reopened.root, accepted_ref["objectHash"].as_str().unwrap()).unwrap();
     let accepted_bytes = serde_json::to_vec(&accepted).unwrap();
@@ -2874,12 +2899,12 @@ fn original_mcp_holders_seal_scope_retirement_fence_replay_and_survive_reopen() 
         assert!(!control.to_string().contains("failed protocol data"));
     }
     assert_eq!(reopened.rpc("source.mcp.holder", holder(&revocable, &task, "release"), None).unwrap()["authority"]["phase"], "revoked");
-    let revoked_released = reopened.rpc("source.mcp.task_receipt", receipt(&revocable, &task, "inspect", None), None).unwrap();
+    let revoked_released = reopened.rpc("source.mcp.creation_receipt", receipt(&revocable, &task, "inspect", None), None).unwrap();
     assert_eq!(revoked_released["holder"]["creationReceipt"]["outcomeRef"], rejected_ref);
     assert_eq!(revoked_released["outcome"], Value::Null);
     // Admission retains the exact hash while a body worker is still pending.
     let reader = source_resources::prepare_request(&mut reopened.storage.lock().unwrap(),
-        "source.mcp.task_receipt", receipt(&address, &task, "inspect", None), reopened.epoch,
+        "source.mcp.creation_receipt", receipt(&address, &task, "inspect", None), reopened.epoch,
         reopened.host, reopened.generation).unwrap();
     assert_eq!(grant("original-mcp-grant"), initial_grant, "reopening does not recreate or reissue the original owner");
     assert!(reopened.rpc("source.mcp.holder", holder(&address, &task, "retain"), None).is_err());
@@ -2894,7 +2919,7 @@ fn original_mcp_holders_seal_scope_retirement_fence_replay_and_survive_reopen() 
     gc(&reopened, "mcp-receipt-gc-released");
     assert!(!accepted_path.exists(), "body is reclaimed after both holder release and reader completion");
     for action in ["inspect", "begin", "settle"] {
-        let recalled = reopened.rpc("source.mcp.task_receipt", receipt(&address, &task, action,
+        let recalled = reopened.rpc("source.mcp.creation_receipt", receipt(&address, &task, action,
             if action == "settle" { Some(&accepted) } else { None }), None).unwrap();
         assert_eq!(recalled["dispatch"], false);
         assert_eq!(recalled["holder"]["released"], true);
@@ -2902,10 +2927,22 @@ fn original_mcp_holders_seal_scope_retirement_fence_replay_and_survive_reopen() 
         assert_eq!(recalled["outcome"], Value::Null);
         assert!(!accepted_path.exists(), "late exact settle cannot resurrect a released body");
     }
-    assert!(reopened.rpc("source.mcp.task_receipt", receipt(&address, &task, "settle", Some(&newer_task_status)), None).is_err());
+    assert!(reopened.rpc("source.mcp.creation_receipt", receipt(&address, &task, "settle", Some(&newer_task_status)), None).is_err());
 
     let drained = reopened.rpc("source.mcp.holder", holder(&address, &observer, "release"), None).unwrap();
     assert_eq!(drained["authority"]["phase"], "draining");
+    gc(&reopened, "mcp-observer-receipt-gc-released");
+    assert!(!subscribed_path.exists());
+    for action in ["inspect", "begin", "settle"] {
+        let recalled = reopened.rpc("source.mcp.creation_receipt", receipt(&address, &observer, action,
+            if action == "settle" { Some(&subscribed) } else { None }), None).unwrap();
+        assert_eq!(recalled["dispatch"], false);
+        assert_eq!(recalled["outcome"], Value::Null);
+        assert_eq!(recalled["holder"]["creationReceipt"]["outcomeRef"], subscribed_ref);
+    }
+    let mut changed_subscribed = subscribed.clone();
+    changed_subscribed["listenerId"] = json!("replacement-listener");
+    assert!(reopened.rpc("source.mcp.creation_receipt", receipt(&address, &observer, "settle", Some(&changed_subscribed)), None).is_err());
     assert_eq!(grant("original-mcp-grant"), initial_grant, "last release cannot claim actual daemon drainage or retire its grant");
     assert_eq!(reopened.rpc("source.mcp.holder", holder(&address, &observer, "retain"), None).unwrap()["holder"]["released"], true);
     let mut retire = address.clone();
@@ -2914,7 +2951,8 @@ fn original_mcp_holders_seal_scope_retirement_fence_replay_and_survive_reopen() 
     assert_eq!(done["phase"], "retired");
     assert_eq!(done["grantIds"], json!(["original-mcp-grant"]));
     assert_eq!(grant("original-mcp-grant")["state"], "retired");
-    assert_eq!(reopened.rpc("source.mcp.task_receipt", receipt(&address, &task, "begin", None), None).unwrap()["dispatch"], false);
+    assert_eq!(reopened.rpc("source.mcp.holder", holder(&address, &observer, "inspect"), None).unwrap()["grantState"], "retired");
+    assert_eq!(reopened.rpc("source.mcp.creation_receipt", receipt(&address, &task, "begin", None), None).unwrap()["dispatch"], false);
     drop(reopened);
     std::fs::remove_dir_all(root).unwrap();
 }

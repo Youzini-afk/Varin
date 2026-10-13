@@ -1588,6 +1588,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onSourceReachable: (owner) => {
       managedMcpOwner.current?.sourceReached(owner);
       mcpTaskRuntimeOwner.current?.sourceReached();
+      mcpResourceRuntimeOwner.current?.sourceReached();
       void scriptRuntimeOwner.current?.recoverSource(owner).catch(() => console.error("[Script] Original target stop remains pending"));
       void agentRuntime.reconcileSourceCleanup().catch((error: unknown) => {
         console.error("[VarinManagedTarget] Original source cleanup remains pending:", errorMessage(error));
@@ -2023,6 +2024,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const desktopControlHolder = `desktop:${hostId}`;
   const managedMcpOwner: { current?: ReturnType<typeof createManagedMcpPreparer> } = {};
   const mcpTaskRuntimeOwner: { current?: ReturnType<typeof createMcpTaskRuntime> } = {};
+  const mcpResourceRuntimeOwner: { current?: ReturnType<typeof createMcpResourceRuntime> } = {};
   const scriptRuntimeOwner: { current?: ReturnType<typeof createScriptRuntime> } = {};
   const computerRuntimeOwner: { current?: ReturnType<typeof createComputerRuntime> } = {};
   const researchDecisionOwner: { current?: ReturnType<typeof createResearchDecisionRuntime> } = {};
@@ -3344,6 +3346,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     documents: documentsAuthority, validateLiveSource: liveSources.validate, prepareSource: prepareThreadSource,
     releaseMcpView: (scope, action) => targetMcpService.releaseView(scope, action),
     mcpTaskContinuation: (scope, action, signal) => targetMcpService.taskContinuation(scope, action, signal),
+    mcpResourceContinuation: (scope, action, signal) => targetMcpService.resourceContinuation(scope, action, signal),
     languageAvailable: true, releaseSource: async (scope, retention) => {
       const [, mcp] = await Promise.all([targetSourceQuery.release(scope), targetMcpService.release(scope, retention)]);
       return { mcpExecutorStopped: mcp.executorStopped, mcpTaskControlsDrained: mcp.taskControlsDrained };
@@ -3429,14 +3432,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError:()=>console.error('[MCP] Original task reconciliation requires attention'),
   });
   mcpTaskRuntimeOwner.current = mcpTaskRuntime;
-  const mcpResourceRuntime=createMcpResourceRuntime({kernel:kernelClient,runtime:agentRuntime,
-    recover:createMcpResourceRecovery({kernel:kernelClient,authority:mcpAuthority,agentDir:mcpAgentDir,hostId,
+  const mcpResourceRecovery=createMcpResourceRecovery({kernel:kernelClient,authority:mcpAuthority,agentDir:mcpAgentDir,hostId,runtime:agentRuntime,
       admitWorkspaceRegistration:(id,signal)=>documentsAuthority.admitWorkspaceRegistration(id,signal),projectTrusted:cwd=>mcpHostProjectTrusted(mcpAgentDir,cwd),
       currentPolicy:async(cwd,trusted)=>readMcpHostPermissionPolicy(mcpAgentDir,cwd,trusted),
       validateLiveSource:async(source,signal)=>{if(source.mode!=='live_root'||!source.live_root)throw new Error('MCP resource original live source missing');
         await liveSources.validate({workspaceId:source.workspace_id,executionWorkspaceId:source.execution_workspace_id,liveRoot:source.live_root},signal);},
-    }),onError:()=>console.error('[MCP] Original resource observation requires reconciliation'),
+    });
+  const mcpResourceRuntime=createMcpResourceRuntime({kernel:kernelClient,runtime:agentRuntime,
+    recover:mcpResourceRecovery,recoverCreation:mcpResourceRecovery.recoverCreation,cleanup:mcpResourceRecovery.cleanup,
+    onError:()=>console.error('[MCP] Original resource observation requires reconciliation'),
   });
+  mcpResourceRuntimeOwner.current=mcpResourceRuntime;
   agentRuntime.setMcpResourceOwner(mcpResourceRuntime);
   const researchRuntime = createResearchRuntime({ kernel: kernelClient, runtime: agentRuntime,
     experiments: experimentService, resources: resourceService, sources: sourceService,

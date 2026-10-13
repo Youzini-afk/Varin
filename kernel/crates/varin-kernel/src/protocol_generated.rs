@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 33;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 34;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -2541,6 +2541,19 @@ pub(crate) struct McpResourceBeginParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpResourceHolderReleasedParams {
+    pub(crate) binding: varin_runtime::catalog::mcp_resources::McpResourceBinding,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpResourceCreationFailedParams {
+    pub(crate) binding: varin_runtime::catalog::mcp_resources::McpResourceBinding,
+    pub(crate) error: crate::source_resources::SourceMcpCreationError,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct McpResourceAcceptParams {
     pub(crate) binding: varin_runtime::catalog::mcp_resources::McpResourceBinding,
     pub(crate) listener_id: String,
@@ -2585,7 +2598,8 @@ pub(crate) type SourceAuthorityAddress = crate::source_resources::SourceAuthorit
 
 pub(crate) type SourceMcpHolderParams = crate::source_resources::SourceMcpHolderParams;
 
-pub(crate) type SourceMcpTaskReceiptParams = crate::source_resources::SourceMcpTaskReceiptParams;
+pub(crate) type SourceMcpCreationReceiptParams =
+    crate::source_resources::SourceMcpCreationReceiptParams;
 
 pub(crate) type SourceAuthorityBindParams = crate::source_resources::SourceAuthorityBindParams;
 
@@ -4398,6 +4412,16 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
+        "runtime.mcp.resource.holder_released" => {
+            serde_json::from_value::<McpResourceHolderReleasedParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.mcp.resource.creation_failed" => {
+            serde_json::from_value::<McpResourceCreationFailedParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.mcp.resource.accept" => {
             serde_json::from_value::<McpResourceAcceptParams>(params.clone())
                 .map(|_| ())
@@ -4445,8 +4469,8 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "source.mcp.holder" => serde_json::from_value::<SourceMcpHolderParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "source.mcp.task_receipt" => {
-            serde_json::from_value::<SourceMcpTaskReceiptParams>(params.clone())
+        "source.mcp.creation_receipt" => {
+            serde_json::from_value::<SourceMcpCreationReceiptParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

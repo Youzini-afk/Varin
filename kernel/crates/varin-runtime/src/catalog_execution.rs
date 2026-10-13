@@ -2403,6 +2403,138 @@ pub(super) fn apply_external_terminal(op: &mut Operation, receipt: &ExternalRece
         reference: receipt.result_ref.clone(),
     });
 }
+/// Existing receipt mutation shared with domain publications that must commit
+/// their short facet and finite-executor evidence in the same transaction.
+pub(super) fn record_external_receipt_in(
+    tx: &Transaction<'_>,
+    operation_id: &str,
+    mut receipt: ExternalReceiptMetadata,
+    executor_stopped: bool,
+    refine_resource_failure: bool,
+) -> Result<Operation> {
+    receipt.executor_stopped = executor_stopped;
+    let mut op: Operation = super::record(tx, "operations", operation_id)?;
+    if super::policy_body::PolicyActionMetadata::from_operation(&op)?.is_some() {
+        return Err(RuntimeError::Invalid(
+            "policy actions cannot accept external executor receipts".into(),
+        ));
+    }
+    if receipt.identity != op.id
+        || op.executor.as_deref() != Some(receipt.executor.as_str())
+        || receipt.epoch.is_empty()
+        || matches!(&op.execution_owner, Some(ExecutorOwner::External { epoch, .. }) if epoch != &receipt.epoch)
+    {
+        return Err(RuntimeError::Conflict(
+            "external receipt does not identify this admitted operation".into(),
+        ));
+    }
+    if receipt.effect == Effect::Unknown && receipt.outcome != Outcome::Indeterminate {
+        return Err(RuntimeError::Invalid(
+            "unknown external effect requires indeterminate outcome".into(),
+        ));
+    }
+    let settle = op.host_job.is_some()
+        || op.handed_off
+        || (op.phase == OperationPhase::Terminal && op.outcome == Some(Outcome::Indeterminate));
+    if let Some(previous) = &op.external_receipt {
+        let mut same_receipt = receipt.clone();
+        same_receipt.executor_stopped = previous.executor_stopped;
+        if previous == &same_receipt {
+            let newly_stopped = executor_stopped && !previous.executor_stopped;
+            receipt.executor_stopped |= previous.executor_stopped;
+            if newly_stopped {
+                op.external_receipt = Some(receipt.clone());
+                op.revision += 1;
+                put(tx, "operations", operation_id, &op)?;
+                record_executor_stopped(tx, &op, &receipt)?;
+            }
+            // The receipt can precede ToolSettled/handoff and survive a crash. Recovery's
+            // uncertain Operation is not proof that this already-known fact was applied.
+            let applied = op.phase == OperationPhase::Terminal
+                && op.outcome == Some(receipt.outcome)
+                && op.effect == receipt.effect
+                && op.result.as_ref()
+                    == Some(&OperationResultMetadata::Content {
+                        reference: receipt.result_ref.clone(),
+                    });
+            if settle && !applied {
+                apply_external_terminal(&mut op, &receipt);
+                op.revision += 1;
+                put(tx, "operations", operation_id, &op)?;
+                event(
+                    tx,
+                    operation_id,
+                    op.revision,
+                    "operation.settled",
+                    serde_json::to_value(&op)?,
+                )?;
+            }
+            // Stop evidence may arrive after an identical uncertain business receipt.
+            if executor_stopped {
+                tx.execute(
+                    "DELETE FROM resource_occupancy WHERE operation_id=?1",
+                    [operation_id],
+                )?;
+            }
+            return Ok(op);
+        }
+        if previous.outcome != Outcome::Indeterminate
+            || previous.effect != Effect::Unknown
+            || previous.epoch != receipt.epoch
+            || (receipt.effect == Effect::Unknown
+                && !(refine_resource_failure && executor_stopped && !previous.executor_stopped))
+        {
+            return Err(RuntimeError::Conflict(
+                "external terminal receipt changed".into(),
+            ));
+        }
+    }
+    if op.phase == OperationPhase::Terminal
+        && op.outcome != Some(Outcome::Indeterminate)
+        && (op.outcome != Some(receipt.outcome)
+            || op.effect != receipt.effect
+            || op.result.as_ref()
+                != Some(&OperationResultMetadata::Content {
+                    reference: receipt.result_ref.clone(),
+                }))
+    {
+        return Err(RuntimeError::Conflict(
+            "job is already settled with another receipt".into(),
+        ));
+    }
+    let previously_stopped = op
+        .external_receipt
+        .as_ref()
+        .is_some_and(|old| old.executor_stopped);
+    receipt.executor_stopped |= previously_stopped;
+    op.external_receipt = Some(receipt.clone());
+    op.revision += 1;
+    if settle {
+        apply_external_terminal(&mut op, &receipt);
+    }
+    put(tx, "operations", operation_id, &op)?;
+    event(
+        tx,
+        operation_id,
+        op.revision,
+        if settle {
+            "operation.settled"
+        } else {
+            "operation.external_receipt"
+        },
+        serde_json::to_value(&op)?,
+    )?;
+    if receipt.executor_stopped && !previously_stopped {
+        record_executor_stopped(tx, &op, &receipt)?;
+    }
+    if executor_stopped {
+        tx.execute(
+            "DELETE FROM resource_occupancy WHERE operation_id=?1",
+            [operation_id],
+        )?;
+    }
+    Ok(op)
+}
 impl Catalog {
     /// Only a trusted execution-end receipt consumer may call this. It is not exposed as a
     /// model/tool/Host wire command. Receipt identity belongs to the actual resource authority.
@@ -2424,6 +2556,23 @@ impl Catalog {
                 "external receipt execution owner changed".into(),
             ));
         }
+        // Original resource creation/stop evidence can overtake a weaker Host
+        // transport completion. Keep the existing result and caller history.
+        if operation.mcp_resource_subscription.as_ref().is_some_and(|sub| &sub.binding.execution_owner == owner)
+            && prepared.receipt.outcome == Outcome::Indeterminate && prepared.receipt.effect == Effect::Unknown
+            && prepared.receipt.identity == operation.id
+            && operation.executor.as_deref() == Some(prepared.receipt.executor.as_str())
+            && matches!(owner, ExecutorOwner::External { epoch, .. } if epoch == &prepared.receipt.epoch)
+        {
+            let known_receipt = operation.external_receipt.as_ref().is_some_and(|known| {
+                known.executor_stopped
+                    && ((known.outcome == Outcome::Succeeded && known.effect == Effect::Confirmed
+                        && operation.mcp_resource_subscription.as_ref().unwrap().acceptance_ref.is_some())
+                        || (known.outcome == Outcome::Failed && known.effect == Effect::None)
+                        || (known.outcome == Outcome::Indeterminate && known.effect == Effect::Unknown))
+            });
+            if known_receipt { return Ok(operation); }
+        }
         self.record_external_receipt_prepared(operation_id, prepared, executor_stopped)
     }
 
@@ -2433,131 +2582,9 @@ impl Catalog {
         prepared: super::result_content::PreparedExternalReceipt,
         executor_stopped: bool,
     ) -> Result<Operation> {
-        let mut receipt = prepared.receipt;
-        receipt.executor_stopped = executor_stopped;
         let tx = self.db.transaction()?;
-        let mut op: Operation = super::record(&tx, "operations", operation_id)?;
-        if super::policy_body::PolicyActionMetadata::from_operation(&op)?.is_some() {
-            return Err(RuntimeError::Invalid(
-                "policy actions cannot accept external executor receipts".into(),
-            ));
-        }
-        if receipt.identity != op.id
-            || op.executor.as_deref() != Some(receipt.executor.as_str())
-            || receipt.epoch.is_empty()
-            || matches!(&op.execution_owner, Some(ExecutorOwner::External { epoch, .. }) if epoch != &receipt.epoch)
-        {
-            return Err(RuntimeError::Conflict(
-                "external receipt does not identify this admitted operation".into(),
-            ));
-        }
-        if receipt.effect == Effect::Unknown && receipt.outcome != Outcome::Indeterminate {
-            return Err(RuntimeError::Invalid(
-                "unknown external effect requires indeterminate outcome".into(),
-            ));
-        }
-        let settle = op.host_job.is_some()
-            || op.handed_off
-            || (op.phase == OperationPhase::Terminal && op.outcome == Some(Outcome::Indeterminate));
-        if let Some(previous) = &op.external_receipt {
-            let mut same_receipt = receipt.clone();
-            same_receipt.executor_stopped = previous.executor_stopped;
-            if previous == &same_receipt {
-                let newly_stopped = executor_stopped && !previous.executor_stopped;
-                receipt.executor_stopped |= previous.executor_stopped;
-                if newly_stopped {
-                    op.external_receipt = Some(receipt.clone());
-                    op.revision += 1;
-                    put(&tx, "operations", operation_id, &op)?;
-                    record_executor_stopped(&tx, &op, &receipt)?;
-                }
-                // The receipt can precede ToolSettled/handoff and survive a crash. Recovery's
-                // uncertain Operation is not proof that this already-known fact was applied.
-                let applied = op.phase == OperationPhase::Terminal
-                    && op.outcome == Some(receipt.outcome)
-                    && op.effect == receipt.effect
-                    && op.result.as_ref()
-                        == Some(&OperationResultMetadata::Content {
-                            reference: receipt.result_ref.clone(),
-                        });
-                if settle && !applied {
-                    apply_external_terminal(&mut op, &receipt);
-                    op.revision += 1;
-                    put(&tx, "operations", operation_id, &op)?;
-                    event(
-                        &tx,
-                        operation_id,
-                        op.revision,
-                        "operation.settled",
-                        serde_json::to_value(&op)?,
-                    )?;
-                }
-                // Stop evidence may arrive after an identical uncertain business receipt.
-                if executor_stopped {
-                    tx.execute(
-                        "DELETE FROM resource_occupancy WHERE operation_id=?1",
-                        [operation_id],
-                    )?;
-                }
-                tx.commit()?;
-                self.release_unoccupied_resource_owner(operation_id)?;
-                self.reconcile_waits()?;
-                return Ok(op);
-            }
-            if previous.outcome != Outcome::Indeterminate
-                || previous.effect != Effect::Unknown
-                || previous.epoch != receipt.epoch
-                || receipt.effect == Effect::Unknown
-            {
-                return Err(RuntimeError::Conflict(
-                    "external terminal receipt changed".into(),
-                ));
-            }
-        }
-        if op.phase == OperationPhase::Terminal
-            && op.outcome != Some(Outcome::Indeterminate)
-            && (op.outcome != Some(receipt.outcome)
-                || op.effect != receipt.effect
-                || op.result.as_ref()
-                    != Some(&OperationResultMetadata::Content {
-                        reference: receipt.result_ref.clone(),
-                    }))
-        {
-            return Err(RuntimeError::Conflict(
-                "job is already settled with another receipt".into(),
-            ));
-        }
-        let previously_stopped = op
-            .external_receipt
-            .as_ref()
-            .is_some_and(|old| old.executor_stopped);
-        receipt.executor_stopped |= previously_stopped;
-        op.external_receipt = Some(receipt.clone());
-        op.revision += 1;
-        if settle {
-            apply_external_terminal(&mut op, &receipt);
-        }
-        put(&tx, "operations", operation_id, &op)?;
-        event(
-            &tx,
-            operation_id,
-            op.revision,
-            if settle {
-                "operation.settled"
-            } else {
-                "operation.external_receipt"
-            },
-            serde_json::to_value(&op)?,
-        )?;
-        if receipt.executor_stopped && !previously_stopped {
-            record_executor_stopped(&tx, &op, &receipt)?;
-        }
-        if executor_stopped {
-            tx.execute(
-                "DELETE FROM resource_occupancy WHERE operation_id=?1",
-                [operation_id],
-            )?;
-        }
+        let op = record_external_receipt_in(&tx, operation_id, prepared.receipt,
+            executor_stopped, false)?;
         tx.commit()?;
         self.release_unoccupied_resource_owner(operation_id)?;
         self.reconcile_waits()?;

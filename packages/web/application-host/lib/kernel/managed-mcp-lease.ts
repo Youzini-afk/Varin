@@ -6,6 +6,7 @@ import { McpAuthorityError, type McpAuthorityLease, type McpAuthorityTool, type 
 import { compileToolJsonSchema } from '@varin/pi-host/tool-schema';
 import type { ManagedSourceAccess } from './managed-source-consumers.js';
 import { createManagedMcpTaskLease } from './managed-mcp-task-lease.js';
+import { createManagedMcpResourceObserver, requestManagedMcpResource } from './managed-mcp-resource-observer.js';
 import type { McpBinding, McpEndpoint, SourceResourceOwner } from './protocol.generated.js';
 import type { ManagedMcpAction, ManagedMcpSnapshot, ManagedMcpRevocations } from '../harness/managed-mcp-contract.js';
 import { isManagedMcpRevocations } from '../harness/managed-mcp-contract.js';
@@ -83,6 +84,7 @@ export async function createManagedMcpLease(input: {
   const validators = new Map<string, ReturnType<typeof compileToolJsonSchema>>();
   const tools = new Map<string, McpAuthorityTool>();
   const services = new Map<string, McpAuthorityService>();
+  const resourceEndpoints = new Map<string, McpEndpoint>();
   const key = (name: string, version: string) => JSON.stringify([name, version]);
   const assertLive = () => { if (released || input.lifetime.aborted) fail('mcp_source_view_unavailable'); };
   const admitTools = (values: readonly McpAuthorityTool[]) => {
@@ -123,7 +125,18 @@ export async function createManagedMcpLease(input: {
       admitTools([selected]); return selected;
     },
     discoverServices: async (server, signal) => (await call<McpAuthorityService[]>({ kind: 'discover_services', handleId, server }, signal)).map(admitService),
-    prepareService: async (server, serviceKind, schemaVersion, signal) => admitService(await call({ kind: 'prepare_service', handleId, server, serviceKind, schemaVersion }, signal)),
+    prepareService: async (server, serviceKind, schemaVersion, signal) => {
+      const prepared = await call<{ service: McpAuthorityService; endpoint?: McpEndpoint }>({ kind: 'prepare_service', handleId, server, serviceKind, schemaVersion }, signal);
+      const service = admitService(prepared.service);
+      if (serviceKind === 'resources') {
+        const endpoint = prepared.endpoint;
+        if (!endpoint || endpoint.server !== server || endpoint.resourceKey !== service.resourceKey
+          || endpoint.configurationVersion !== snapshot.binding.provenance.servers[server]?.definition_version
+          || !endpoint.credentialVersion) fail('mcp_resource_original_endpoint_changed');
+        resourceEndpoints.set(key(server, schemaVersion), endpoint!);
+      }
+      return service;
+    },
     preparePrompt: async (server, name, schemaVersion, signal) => {
       const prompt = await call<McpAuthorityPrompt>({ kind: 'prepare_prompt', handleId, server, name, schemaVersion }, signal);
       admitService(prompt.service); return prompt;
@@ -154,8 +167,25 @@ export async function createManagedMcpLease(input: {
         authorityId: access.binding.authorityId, resourceEpoch: access.binding.resourceEpoch },
         binding: { ...origin, purpose: 'task', endpoint: selected }, creation: { handleId, lifetime: input.lifetime } });
     },
-    resourceEndpoint: () => fail('mcp_managed_observer_owner_unavailable'),
-    observeResource: async () => fail('mcp_managed_observer_owner_unavailable'),
+    resourceEndpoint(service) {
+      assertService(service); const endpoint = resourceEndpoints.get(key(service.server, service.schemaVersion));
+      if (!endpoint) return fail('mcp_resource_original_endpoint_unprepared'); return endpoint;
+    },
+    async observeResource(service, uri, options) {
+      assertService(service);
+      if (!options.interaction) return fail('mcp_resource_original_identity_missing');
+      const endpoint = lease.resourceEndpoint(service);
+      await options.beforeDispatch?.(); assertService(service); options.signal.throwIfAborted();
+      const binding = { ...options.interaction, endpoint, schemaVersion: service.schemaVersion, uri };
+      const address = { coordinatorHostId: input.coordinatorHostId, authorityId: access.binding.authorityId, resourceEpoch: access.binding.resourceEpoch };
+      const subscribed = await requestManagedMcpResource<{ listenerId: string; acknowledgement: Record<string, unknown>; revision: number }>(access.client, address,
+        { kind: 'resource_subscribe', handleId, binding, service }, AbortSignal.any([options.signal, input.lifetime]));
+      if (!subscribed.listenerId || !record(subscribed.acknowledgement) || !Number.isSafeInteger(subscribed.revision) || subscribed.revision < 0)
+        throw new McpAuthorityError('mcp_resource_subscribe_response_invalid', true);
+      // Initial pre-ACK invalidations may be delivered; recovery instead starts at
+      // its current revision after A has durably published an observation gap.
+      return createManagedMcpResourceObserver({ client: access.client, address, binding, ...subscribed, revision: 0, onChange: options.onChange });
+    },
     release() {
       if (released) return; released = true; unobserve(); localLifetime.abort();
       void call({ kind: 'release', handleId, creationRequestId }).catch(() => undefined);

@@ -1,10 +1,11 @@
 /** Live handles only. Original Operations, passive inputs and ContentStore own durable facts. */
 import { randomUUID } from 'node:crypto';
-import { McpAuthorityError, type McpAuthorityLease, type McpAuthorityService, type McpResourceObserver, type McpResourceChange } from '@varin/pi-host/mcp-authority';
+import { McpAuthorityError } from '@varin/pi-host/mcp-errors';
+import type { McpAuthorityLease, McpAuthorityService, McpResourceObserver, McpResourceChange, McpResourceRelease } from '@varin/pi-host/mcp-authority';
 import type { KernelClient } from './kernel-client.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { HostToolCall, ToolExecutionReceipt } from './tool-bridge.js';
-import type { ExecutorOwner, McpEndpoint, McpResourceBinding, McpResourcePending, McpResourceListenerParams, McpResourceNotifyParams, KernelMethod, KernelMethodParams } from './protocol.generated.js';
+import type { ExecutorOwner, McpEndpoint, McpResourceBinding, McpResourcePending, McpResourceListenerParams, McpResourceNotifyParams, SourceMcpCreationOutcome, SourceMcpCreationError, KernelMethod, KernelMethodParams } from './protocol.generated.js';
 interface Entry {
   op: McpResourcePending;
   cleanupInteraction?: { interaction: { operationId: string; executionOwner: ExecutorOwner }; signal: AbortSignal };
@@ -20,6 +21,15 @@ interface Entry {
   };
   acceptanceFlight?: Promise<void>;
   recovery?: Promise<void>;
+  creationFlight?: Promise<void>;
+  creationFailure?: SourceMcpCreationError;
+  creationAttempted: boolean;
+  creationInspected: boolean;
+  creationRetry: boolean;
+  sourceRevision: number;
+  cleanupPending: boolean;
+  cleanupFlight?: Promise<void>;
+  release?: McpResourceRelease;
   metadata: Promise<unknown>;
   facts: Map<McpResourceNotifyParams['kind'], McpResourceNotifyParams>;
   sending?: McpResourceNotifyParams;
@@ -29,15 +39,19 @@ interface Entry {
   retryDelay: number;
 }
 export type McpResourceRuntime = ReturnType<typeof createMcpResourceRuntime>;
-export function createMcpResourceRuntime(options: {
+export type McpResourceCreationRecovery = SourceMcpCreationOutcome | { kind: 'cleanup_pending' };
+export interface McpResourceRuntimeOptions {
   kernel: KernelClient;
   runtime: Pick<AgentRuntimeClient, 'onReady' | 'onEvent'>;
   recover(op: McpResourcePending, signal: AbortSignal, onChange: (change: McpResourceChange) => void): Promise<McpResourceObserver>;
+  recoverCreation?(op: McpResourcePending, signal: AbortSignal): Promise<McpResourceCreationRecovery | null>;
+  cleanup?(op: McpResourcePending, signal: AbortSignal, interaction?: Parameters<McpResourceObserver['detach']>[0]): Promise<McpResourceRelease>;
   onError?: (error: Error) => void;
-}) {
+}
+export function createMcpResourceRuntime(options: McpResourceRuntimeOptions) {
   const entries = new Map<string, Entry>(), admitting = new Set<string>(), removers: Array<() => void> = [], flights = new Set<Promise<unknown>>();
   const lifetime = new AbortController();
-  let started = false, disposed = false, work: Promise<void> | undefined, dirty = false;
+  let started = false, disposed = false, work: Promise<void> | undefined, dirty = false, sourceRevision = 0;
   const report = (e: unknown) => {
     if (!disposed) {
       options.onError?.(e instanceof Error ? e : new Error(String(e)));
@@ -55,6 +69,11 @@ export function createMcpResourceRuntime(options: {
     closed: false,
     attempted: false,
     attaching: false,
+    creationAttempted: false,
+    creationInspected: false,
+    creationRetry: false,
+    sourceRevision,
+    cleanupPending: false,
     retryDelay: 250,
     metadata: Promise.resolve(),
     facts: new Map(),
@@ -67,12 +86,15 @@ export function createMcpResourceRuntime(options: {
       e.op = { ...op, cancelRequested: e.op.cancelRequested || op.cancelRequested };
     }
   };
-  const state = (e: Entry, change: Omit<McpResourceListenerParams, 'binding' | 'expectedListenerId'>): Promise<void> => {
+  const state = (e: Entry, change: Omit<McpResourceListenerParams, 'binding' | 'expectedListenerId'>, replaceListener = false): Promise<void> => {
     const run = async () => {
       const op = await request<McpResourcePending, 'runtime.mcp.resource.listener'>('runtime.mcp.resource.listener', {
         binding: e.op.subscription.binding,
         expectedListenerId: e.op.subscription.listenerId,
-        ...change
+        ...change,
+        // Closure can queue behind a new listener's in-flight publication. Echo the
+        // current incarnation, not the stale listener captured before that ACK.
+        listenerId: replaceListener ? change.listenerId : e.op.subscription.listenerId
       });
       adoptLatest(e, op);
     };
@@ -84,12 +106,12 @@ export function createMcpResourceRuntime(options: {
     if (e.publishing) {
       return e.publishing;
     }
-    if (disposed || !e.acceptance && (e.closed || !e.op.subscription.acceptanceRef)) {
+    if (disposed || !e.acceptance && !e.creationRetry && !e.cleanupPending && (e.closed || !e.op.subscription.acceptanceRef)) {
       return Promise.resolve(false);
     }
     e.publishing = track((async () => {
-      while ((e.acceptance || e.sending || e.facts.size) && !disposed) {
-        if (!e.acceptance && e.closed) {
+      while ((e.acceptance || e.creationRetry || e.cleanupPending || e.sending || e.facts.size) && !disposed) {
+        if (!e.acceptance && !e.creationRetry && !e.cleanupPending && e.closed) {
           break;
         }
         try {
@@ -97,6 +119,10 @@ export function createMcpResourceRuntime(options: {
           // Both ACKs and notifications use this one live local publication lane.
           if (e.acceptance) {
             await accept(e);
+          } else if (e.creationRetry) {
+            await recoverCreation(e);
+          } else if (e.cleanupPending) {
+            await cleanupManaged(e);
           } else {
             if (!e.sending) {
               const [kind, next] = e.facts.entries().next().value!;
@@ -107,7 +133,7 @@ export function createMcpResourceRuntime(options: {
             delete e.sending;
           }
         } catch (error) {
-          const signal = e.acceptance ? lifetime.signal : e.controller.signal;
+          const signal = e.acceptance || e.creationRetry || e.cleanupPending ? lifetime.signal : e.controller.signal;
           if (!signal.aborted && !disposed) {
             report(error);
             await new Promise<void>(resolve => {
@@ -159,10 +185,43 @@ export function createMcpResourceRuntime(options: {
     });
     void flush(e);
   };
+  // A managed observer is only a projection of B's retained holder. Observation
+  // loss and Host disposal must never turn a projection disconnect into unsubscribe.
+  const disconnect = (observer: McpResourceObserver): void => {
+    if (observer.disconnect) observer.disconnect();
+    else void observer.detach().catch(report);
+  };
+  const cleanupManaged = (e: Entry): Promise<void> => {
+    if (e.cleanupFlight) return e.cleanupFlight;
+    if (disposed || !e.cleanupPending) return Promise.resolve();
+    e.cleanupFlight = track((async () => {
+      if (!e.op.subscription.mcpHolderReleased && !e.release) {
+        if (!options.cleanup) throw new McpAuthorityError('mcp-resource-original-cleanup-unavailable');
+        // The hook proves exact original holder release and drained local callbacks.
+        // Remote unsubscribe remains its separate shared/acknowledged/unknown fact.
+        e.release = await options.cleanup(e.op, lifetime.signal, e.cleanupInteraction);
+      }
+      if (disposed) return;
+      await state(e, {
+        listenerId: e.op.subscription.listenerId,
+        availability: 'closed',
+        localReleased: true,
+        remoteCleanup: e.release?.status ?? e.op.subscription.remoteCleanup,
+        problem: e.op.subscription.problem
+      });
+      if (!e.op.subscription.mcpHolderReleased) {
+        const op = await request<McpResourcePending, 'runtime.mcp.resource.holder_released'>(
+          'runtime.mcp.resource.holder_released', { binding: e.op.subscription.binding }, lifetime.signal);
+        adoptLatest(e, op);
+      }
+      e.cleanupPending = false;
+    })()).finally(() => { delete e.cleanupFlight; });
+    return e.cleanupFlight;
+  };
   const close = (e: Entry): Promise<void> => {
     if (!e.closed) {
       e.closed = true;
-      // Abort only observation publication. A known ACK owns the Host lifetime.
+      // Abort only observation publication. Known ACK and cleanup own the Host lifetime.
       e.controller.abort();
       e.facts.clear();
       e.preAck.clear();
@@ -171,7 +230,25 @@ export function createMcpResourceRuntime(options: {
     }
     const observer = e.observer;
     delete e.observer;
-    // detach is synchronous up to returning its independent remote cleanup promise.
+    if (!e.op.subscription.mcpHolderReleased || e.cleanupPending) {
+      // The explicit original cleanup hook owns B release, even with no live projection.
+      // Calling detach as well would duplicate the same remote cleanup operation.
+      observer?.disconnect?.();
+      // Explicit unsubscribe/source retirement can arrive before reconciliation.
+      // Preserve a known or recoverable original ACK before release drops its body.
+      if (e.acceptance) return accept(e);
+      if (e.creationFailure) return recoverCreation(e);
+      if (!e.op.subscription.acceptanceRef && !e.creationInspected) {
+        if (!options.recoverCreation) return Promise.reject(new McpAuthorityError('mcp-resource-original-creation-recovery-unavailable'));
+        const inspection = recoverCreation(e).then(() => close(e));
+        void inspection.catch(() => { if (e.creationRetry && !disposed) void flush(e); });
+        return inspection;
+      }
+      e.cleanupPending = true;
+      const pending = cleanupManaged(e);
+      void pending.catch(() => { if (!disposed) void flush(e); });
+      return pending;
+    }
     const cleanup = observer?.detach(e.cleanupInteraction);
     const local = state(e, {
       listenerId: e.op.subscription.listenerId,
@@ -181,7 +258,8 @@ export function createMcpResourceRuntime(options: {
       problem: e.op.subscription.problem
     });
     if (cleanup) {
-      void track(cleanup.then(async (release) => {
+      e.cleanupFlight = track(cleanup.then(async (release) => {
+        e.release = release;
         await local;
         await state(e, {
           listenerId: e.op.subscription.listenerId,
@@ -190,9 +268,56 @@ export function createMcpResourceRuntime(options: {
           remoteCleanup: release.status,
           problem: e.op.subscription.problem
         });
-      })).catch(report);
+      })).finally(() => { delete e.cleanupFlight; });
+      void e.cleanupFlight.catch(report);
     }
     return local;
+  };
+  const recoverCreation = (e: Entry): Promise<void> => {
+    if (e.creationFlight) return e.creationFlight;
+    if (disposed || e.op.subscription.acceptanceRef || e.acceptance || !options.recoverCreation) {
+      e.creationRetry = false;
+      return Promise.resolve();
+    }
+    e.creationAttempted = true;
+    const revision = e.sourceRevision;
+    e.creationFlight = track((async () => {
+      try {
+        const outcome = e.creationFailure ? { kind: 'failed' as const, error: e.creationFailure }
+          : await options.recoverCreation!(e.op, lifetime.signal);
+        if (disposed) return;
+        e.creationRetry = false;
+        e.creationInspected = true;
+        if (outcome?.kind === 'subscribed') {
+          e.attempted = false;
+          e.acceptance = { listenerId: outcome.listenerId, content: outcome.acknowledgement };
+          await accept(e);
+        } else if (outcome?.kind === 'cleanup_pending') {
+          // Original target release plus Catalog stop evidence preserves a cleanup
+          // duty after receipt GC; it supplies no new acceptance or effect fact.
+          await close(e);
+        } else if (outcome?.kind === 'failed' && (!outcome.error.dispatched || outcome.error.settlement !== 'unknown')) {
+          // Preserve the original finite RPC proof before release drops its receipt.
+          // A protocol response or expired original transport proves this finite
+          // RPC stopped, while its remote effect remains Unknown.
+          e.creationFailure = outcome.error;
+          const op = await request<McpResourcePending, 'runtime.mcp.resource.creation_failed'>(
+            'runtime.mcp.resource.creation_failed', { binding: e.op.subscription.binding, error: outcome.error }, lifetime.signal);
+          adoptLatest(e, op);
+          delete e.creationFailure;
+          await close(e);
+        }
+      } catch (error) {
+        e.creationRetry = !!e.creationFailure || !e.op.subscription.acceptanceRef && !e.acceptance
+          && error instanceof McpAuthorityError && error.code === 'mcp_resource_creation_receipt_pending';
+        throw error;
+      }
+    })()).finally(() => {
+      delete e.creationFlight;
+      if (e.sourceRevision !== revision) e.creationAttempted = false;
+      wake();
+    });
+    return e.creationFlight;
   };
   const recover = (e: Entry, recordGap = true): Promise<void> => {
     if (e.recovery) {
@@ -202,6 +327,7 @@ export function createMcpResourceRuntime(options: {
       return Promise.resolve();
     }
     e.attempted = true;
+    const revision = e.sourceRevision;
     e.recovery = track((async () => {
       try {
         // Persist the gap using the old local incarnation before publishing a replacement.
@@ -218,6 +344,7 @@ export function createMcpResourceRuntime(options: {
           remoteCleanup: e.op.subscription.remoteCleanup,
           problem: null
         });
+        if (e.closed || disposed) return;
         const receiver = randomUUID();
         e.receiving = receiver;
         e.attaching = true;
@@ -227,7 +354,7 @@ export function createMcpResourceRuntime(options: {
           }
         });
         if (e.closed || disposed) {
-          void observer.detach();
+          disconnect(observer);
           return;
         }
         e.observer = observer;
@@ -237,7 +364,7 @@ export function createMcpResourceRuntime(options: {
           localReleased: false,
           remoteCleanup: 'not_requested',
           problem: null
-        });
+        }, true);
         e.attaching = false;
         const pending = [...e.preAck.values()];
         e.preAck.clear();
@@ -252,7 +379,7 @@ export function createMcpResourceRuntime(options: {
         const observer = e.observer;
         delete e.observer;
         if (observer) {
-          void observer.detach();
+          disconnect(observer);
         }
         if (!e.closed && !disposed) {
           await state(e, {
@@ -266,6 +393,7 @@ export function createMcpResourceRuntime(options: {
       }
     })()).finally(() => {
       delete e.recovery;
+      if (e.sourceRevision !== revision) { e.attempted = false; wake(); }
     });
     return e.recovery;
   };
@@ -287,7 +415,7 @@ export function createMcpResourceRuntime(options: {
       delete e.observer;
       delete e.receiving;
       if (observer) {
-        void observer.detach();
+        disconnect(observer);
       }
       if (!e.recovery) {
         e.attempted = false;
@@ -299,7 +427,7 @@ export function createMcpResourceRuntime(options: {
     delete e.observer;
     delete e.receiving;
     if (observer) {
-      void observer.detach();
+      disconnect(observer);
     }
     void state(e, {
       listenerId: e.op.subscription.listenerId,
@@ -324,6 +452,8 @@ export function createMcpResourceRuntime(options: {
     }, lifetime.signal).then(async (op) => {
       adoptLatest(e, op);
       delete e.acceptance;
+      e.creationRetry = false;
+      e.creationInspected = true;
       if (e.closed || e.op.cancelRequested) {
         await close(e);
       } else {
@@ -336,6 +466,7 @@ export function createMcpResourceRuntime(options: {
       }
     })).finally(() => {
       delete e.acceptanceFlight;
+      wake();
     });
     return e.acceptanceFlight;
   };
@@ -359,8 +490,21 @@ export function createMcpResourceRuntime(options: {
           } else {
             adoptLatest(e, op);
           }
+          if (!admitting.has(op.operationId) && !e.op.subscription.mcpHolderReleased && !e.op.subscription.acceptanceRef
+            && !e.acceptance && !e.cleanupPending && !e.creationAttempted && options.recoverCreation) {
+            void recoverCreation(e).catch(error => {
+              report(error);
+              if (e!.creationRetry || e!.acceptance || e!.cleanupPending) void flush(e!);
+            });
+            continue;
+          }
+          if (e.creationFlight) continue;
+          // Never release a receipt body after an uncertain original inspection.
+          if (!e.op.subscription.mcpHolderReleased && !e.op.subscription.acceptanceRef && !e.acceptance
+            && options.recoverCreation && !e.creationInspected) continue;
           if (e.op.cancelRequested) {
-            if (!e.closed || !e.op.subscription.localReleased) {
+            if (e.cleanupPending) { void flush(e); continue; }
+            if (!e.closed || !e.op.subscription.localReleased || !e.op.subscription.mcpHolderReleased) {
               void close(e).catch(report);
             }
             if (e.acceptance) {
@@ -371,7 +515,7 @@ export function createMcpResourceRuntime(options: {
           if (admitting.has(op.operationId)) {
             continue;
           }
-          if (e.acceptance) {
+          if (e.acceptance || e.creationRetry || e.cleanupPending) {
             void flush(e);
           } else if (!e.observer && !e.attempted && e.op.subscription.acceptanceRef) {
             void recover(e).catch(report);
@@ -391,24 +535,28 @@ export function createMcpResourceRuntime(options: {
       void reconcile().catch(report);
     }
   };
+  const sourceReached = () => {
+    if (disposed) return;
+    sourceRevision++;
+    for (const e of entries.values()) {
+      e.sourceRevision = sourceRevision;
+      e.creationAttempted = false;
+      if (!e.observer) e.attempted = false;
+      void flush(e);
+    }
+    wake();
+  };
   return {
     start() {
       if (started || disposed) {
         return;
       }
       started = true;
-      removers.push(options.runtime.onEvent(wake), options.runtime.onReady(() => {
-        for (const e of entries.values()) {
-          if (!e.observer) {
-            e.attempted = false;
-          }
-          void flush(e);
-        }
-        wake();
-      }));
+      removers.push(options.runtime.onEvent(wake), options.runtime.onReady(sourceReached));
       wake();
     },
     reconcile,
+    sourceReached,
     async subscribe(input: {
       call: HostToolCall;
       owner: ExecutorOwner;
@@ -474,7 +622,10 @@ export function createMcpResourceRuntime(options: {
           }
         });
         acknowledged = true;
-        e.observer = observer;
+        // A late managed subscribe reply may arrive after explicit cleanup or Host
+        // disposal. Disconnect that projection without releasing its holder again.
+        if (disposed || e.closed && observer.disconnect) disconnect(observer);
+        else e.observer = observer;
         e.acceptance = { listenerId: observer.listenerId, content: observer.acknowledgement };
         await accept(e);
         return {
@@ -557,10 +708,9 @@ export function createMcpResourceRuntime(options: {
       await request('runtime.operation.cancel', { operationId: input.operationId }, input.signal);
       adoptLatest(e, op);
       e.op = { ...e.op, cancelRequested: true };
-      const observer = e.observer;
-      const cleanup = observer?.detach(e.cleanupInteraction);
       await close(e);
-      const release = cleanup ? await cleanup : { status: e.op.subscription.remoteCleanup };
+      await e.cleanupFlight;
+      const release = e.release ?? { status: e.op.subscription.remoteCleanup };
       const remoteCleanup = release.status;
       return {
         executor_stopped: true,
@@ -609,7 +759,7 @@ export function createMcpResourceRuntime(options: {
         e.controller.abort();
         e.facts.clear();
         if (e.observer) {
-          void e.observer.detach();
+          disconnect(e.observer);
         }
       }
       await Promise.allSettled([...(work ? [work] : []), ...flights]);

@@ -532,7 +532,6 @@ impl Storage {
         let mut record = self.source_authority(&address, false, epoch)?;
         if record.purpose != "mcp_owner" || !p.binding.validate()
             || !matches!(p.action.as_str(), "retain" | "inspect" | "release" | "release_unstarted")
-            || p.action == "release_unstarted" && p.binding.purpose != "task"
         {
             return Err(denied("Original MCP holder identity is incomplete"));
         }
@@ -587,14 +586,17 @@ impl Storage {
             self.save_source_record("source.authority", &address.authority_id,
                 &record.result.source.workspace_id, &record.result.phase, &record)?;
         }
-        Ok(json!({"holder":record.result.mcp_holders[index],"authority":record.result}))
+        // Grant records are retained tombstones. Projection is allowed across
+        // owner epochs, but observation consumers must still see direct revocation.
+        let grant_state = self.load_grant(&record.result.grant_id)?.state;
+        Ok(json!({"holder":record.result.mcp_holders[index],"authority":record.result,"grantState":grant_state}))
     }
     /// One creation dispatch and its immutable response on the original holder.
     /// Storage serializes admission, and one record write commits the holder and
     /// the unknown receipt together before the caller may send the remote request.
-    pub(crate) fn source_mcp_task_receipt(
+    pub(crate) fn source_mcp_creation_receipt(
         &mut self,
-        p: SourceMcpTaskReceiptParams,
+        p: SourceMcpCreationReceiptParams,
         epoch: &str,
     ) -> Result<SourceDispatch, KernelError> {
         let address = SourceAuthorityAddress {
@@ -607,12 +609,17 @@ impl Storage {
         // revocation or restart. They never reacquire a grant or reopen admission.
         let mut record = self.source_authority(&address, false, epoch)?;
         if record.purpose != "mcp_owner" || !p.binding.validate()
-            || p.binding.purpose != "task"
             || p.request_hash.as_ref().is_some_and(|hash| hash.is_empty())
-            || (p.action != SourceMcpTaskReceiptAction::Inspect && p.request_hash.is_none())
-            || (p.action == SourceMcpTaskReceiptAction::Settle) != p.outcome.is_some()
+            || (p.action != SourceMcpCreationReceiptAction::Inspect && p.request_hash.is_none())
+            || (p.action == SourceMcpCreationReceiptAction::Settle) != p.outcome.is_some()
+            || p.outcome.as_ref().is_some_and(|outcome| match outcome {
+                SourceMcpCreationOutcome::Accepted { .. } => p.binding.purpose != "task",
+                SourceMcpCreationOutcome::Subscribed { listener_id, .. } =>
+                    p.binding.purpose != "resource_observer" || listener_id.is_empty(),
+                SourceMcpCreationOutcome::Failed { .. } => false,
+            })
         {
-            return Err(denied("Original MCP task creation identity is incomplete"));
+            return Err(denied("Original MCP creation identity is incomplete"));
         }
         let previous = record.result.mcp_holders.iter()
             .position(|holder| holder.binding.operation_id == p.binding.operation_id);
@@ -621,17 +628,17 @@ impl Storage {
         }
         let receipt = previous.and_then(|index| record.result.mcp_holders[index].creation_receipt.as_ref());
         if receipt.is_some_and(|receipt| p.request_hash.as_ref().is_some_and(|hash| &receipt.request_hash != hash)) {
-            return Err(denied("Original MCP task creation request changed"));
+            return Err(denied("Original MCP creation request changed"));
         }
-        if p.action == SourceMcpTaskReceiptAction::Inspect {
+        if p.action == SourceMcpCreationReceiptAction::Inspect {
             let index = previous.ok_or_else(|| denied("Original MCP holder is unavailable"))?;
-            return self.recall_source_mcp_task_receipt(record, index, false);
+            return self.recall_source_mcp_creation_receipt(record, index, false);
         }
-        if p.action == SourceMcpTaskReceiptAction::Settle {
+        if p.action == SourceMcpCreationReceiptAction::Settle {
             if receipt.is_none() {
-                return Err(denied("Original MCP task creation receipt is unavailable"));
+                return Err(denied("Original MCP creation receipt is unavailable"));
             }
-            return Ok(SourceDispatch::McpTaskReceiptStage(super::source_mcp_receipts::McpReceiptPreparation {
+            return Ok(SourceDispatch::McpCreationReceiptStage(super::source_mcp_receipts::McpReceiptPreparation {
                 address,
                 binding: p.binding,
                 request_hash: p.request_hash.expect("settlement requires a request hash"),
@@ -645,18 +652,18 @@ impl Storage {
         let index = if receipt.is_some() {
             previous.expect("receipt belongs to an original holder")
         } else {
-            if p.action != SourceMcpTaskReceiptAction::Begin {
-                return Err(denied("Original MCP task creation receipt is unavailable"));
+            if p.action != SourceMcpCreationReceiptAction::Begin {
+                return Err(denied("Original MCP creation receipt is unavailable"));
             }
             if previous.is_some_and(|index| record.result.mcp_holders[index].released) {
-                return Err(denied("Released MCP holder cannot admit task creation"));
+                return Err(denied("Released MCP holder cannot admit creation"));
             }
             self.source_authority(&address, true, epoch)?;
             let grant = self.load_grant(&record.result.grant_id)?;
             if record.result.phase != "ready" || grant.kernel_epoch != epoch
                 || grant.state != crate::model::GrantState::Active
             {
-                return Err(denied("Original MCP owner no longer admits task creation"));
+                return Err(denied("Original MCP owner no longer admits creation"));
             }
             let index = match previous {
                 Some(index) => index,
@@ -669,7 +676,7 @@ impl Storage {
                     record.result.mcp_holders.len() - 1
                 }
             };
-            record.result.mcp_holders[index].creation_receipt = Some(SourceMcpTaskCreationReceipt {
+            record.result.mcp_holders[index].creation_receipt = Some(SourceMcpCreationReceipt {
                 request_hash: p.request_hash.expect("begin requires a creation request hash"),
                 outcome_ref: None,
             });
@@ -681,11 +688,11 @@ impl Storage {
             self.save_source_record("source.authority", &address.authority_id,
                 &record.result.source.workspace_id, &record.result.phase, &record)?;
         }
-        self.recall_source_mcp_task_receipt(record, index, dispatch)
+        self.recall_source_mcp_creation_receipt(record, index, dispatch)
     }
     /// Publish only the staged object's identity under Storage. Exact holder
     /// release may have overtaken this worker; it never restores a body GC root.
-    pub(crate) fn publish_source_mcp_task_receipt(
+    pub(crate) fn publish_source_mcp_creation_receipt(
         &mut self,
         staged: super::source_mcp_receipts::StagedMcpReceipt,
     ) -> Result<Value, KernelError> {
@@ -695,13 +702,13 @@ impl Storage {
             .ok_or_else(|| denied("Original MCP holder binding changed"))?;
         let holder = &mut record.result.mcp_holders[index];
         let receipt = holder.creation_receipt.as_mut()
-            .ok_or_else(|| denied("Original MCP task creation receipt is unavailable"))?;
+            .ok_or_else(|| denied("Original MCP creation receipt is unavailable"))?;
         if receipt.request_hash != staged.request_hash {
-            return Err(denied("Original MCP task creation request changed"));
+            return Err(denied("Original MCP creation request changed"));
         }
         match &receipt.outcome_ref {
             Some(original) if original != &staged.reference => {
-                return Err(denied("Original MCP task creation outcome changed"));
+                return Err(denied("Original MCP creation outcome changed"));
             }
             Some(_) => {}
             None => {

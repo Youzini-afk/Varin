@@ -21,6 +21,7 @@ pub struct McpResourceSubscription {
     pub listener_id: Option<String>,
     pub availability: crate::McpResourceAvailability,
     pub local_released: bool,
+    pub mcp_holder_released: bool,
     pub remote_cleanup: crate::McpResourceCleanup,
     pub last_event_cursor: Option<u64>,
     pub problem: Option<String>,
@@ -42,6 +43,43 @@ fn linked(op: &Operation, binding: &McpResourceBinding) -> Result<()> {
     {
         return Err(RuntimeError::Conflict(
             "MCP resource observer owner changed".into(),
+        ));
+    }
+    Ok(())
+}
+fn validate_original_binding(
+    op: &Operation,
+    binding: &McpResourceBinding,
+    snapshot: &tool_content::ToolInvocationSnapshot,
+    frozen: &launches::HostToolBinding,
+) -> Result<()> {
+    let intent = tool_content::ToolIntent::from_operation(&op)?;
+    let selected = frozen.provenance.servers.get(&binding.endpoint.server);
+    if snapshot.context.operation_id != binding.operation_id
+        || op.execution_owner.as_ref() != Some(&binding.execution_owner)
+        || !matches!(binding.execution_owner, ExecutorOwner::External { .. })
+        || binding.uri.is_empty()
+        || binding.schema_version.is_empty()
+        || binding.endpoint.credential_version.is_empty()
+        || intent.contract().completion != CompletionKind::Result
+        || intent.contract().lifetime != Lifetime::Thread
+        || snapshot.call.arguments["uri"].as_str() != Some(binding.uri.as_str())
+        || snapshot.call.arguments["schemaVersion"].as_str()
+            != Some(binding.schema_version.as_str())
+        || !matches!(frozen.routes.get(&snapshot.call.name), Some(crate::McpRoute::ResourceSubscribe {argument}) if snapshot.call.arguments[argument].as_str()==Some(binding.endpoint.server.as_str()))
+        || selected.is_none_or(|s| {
+            s.definition_version != binding.endpoint.configuration_version
+                || s.resource_key != binding.endpoint.resource_key
+                || !s.owner.accepts_source(snapshot.frozen.source.as_ref())
+        })
+        || intent.contract().resources
+            != vec![crate::execution::ResourceClaim {
+                key: binding.endpoint.resource_key.clone(),
+                access: crate::execution::Access::Write,
+            }]
+    {
+        return Err(RuntimeError::Conflict(
+            "MCP resource subscription differs from original invocation".into(),
         ));
     }
     Ok(())
@@ -95,35 +133,8 @@ impl Catalog {
     ) -> Result<Operation> {
         self.validate_tool_invocation(snapshot, true)?;
         let mut op = self.operation(&binding.operation_id)?;
-        let intent = tool_content::ToolIntent::from_operation(&op)?;
+        validate_original_binding(&op, &binding, snapshot, frozen)?;
         let selected = frozen.provenance.servers.get(&binding.endpoint.server);
-        if snapshot.context.operation_id != binding.operation_id
-            || op.execution_owner.as_ref() != Some(&binding.execution_owner)
-            || !matches!(binding.execution_owner, ExecutorOwner::External { .. })
-            || binding.uri.is_empty()
-            || binding.schema_version.is_empty()
-            || binding.endpoint.credential_version.is_empty()
-            || intent.contract().completion != CompletionKind::Result
-            || intent.contract().lifetime != Lifetime::Thread
-            || snapshot.call.arguments["uri"].as_str() != Some(binding.uri.as_str())
-            || snapshot.call.arguments["schemaVersion"].as_str()
-                != Some(binding.schema_version.as_str())
-            || !matches!(frozen.routes.get(&snapshot.call.name), Some(crate::McpRoute::ResourceSubscribe {argument}) if snapshot.call.arguments[argument].as_str()==Some(binding.endpoint.server.as_str()))
-            || selected.is_none_or(|s| {
-                s.definition_version != binding.endpoint.configuration_version
-                    || s.resource_key != binding.endpoint.resource_key
-                    || !s.owner.accepts_source(snapshot.frozen.source.as_ref())
-            })
-            || intent.contract().resources
-                != vec![crate::execution::ResourceClaim {
-                    key: binding.endpoint.resource_key.clone(),
-                    access: crate::execution::Access::Write,
-                }]
-        {
-            return Err(RuntimeError::Conflict(
-                "MCP resource subscription differs from original invocation".into(),
-            ));
-        }
         if let Some(old) = &op.mcp_resource_subscription {
             if old.binding != binding {
                 return Err(RuntimeError::Conflict(
@@ -155,6 +166,9 @@ impl Catalog {
             listener_id: None,
             availability: crate::McpResourceAvailability::Pending,
             local_released: true,
+            mcp_holder_released: selected.is_some_and(|server| {
+                matches!(server.owner.resource_owner, launches::SourceResourceOwner::Local)
+            }),
             remote_cleanup: crate::McpResourceCleanup::NotRequested,
             last_event_cursor: None,
             problem: None,
@@ -170,48 +184,88 @@ impl Catalog {
         binding: &McpResourceBinding,
         listener_id: &str,
         prepared: result_content::PreparedOperationResult,
+        receipt: result_content::PreparedExternalReceipt,
     ) -> Result<Operation> {
-        if listener_id.is_empty() {
-            return Err(RuntimeError::Invalid(
-                "MCP listener identity missing".into(),
-            ));
+        if listener_id.is_empty() || receipt.receipt.outcome != Outcome::Succeeded
+            || receipt.receipt.effect != Effect::Confirmed
+        {
+            return Err(RuntimeError::Invalid("MCP subscribe acknowledgement evidence missing".into()));
         }
         let tx = self.db.transaction()?;
         let mut op: Operation = record(&tx, "operations", &binding.operation_id)?;
         linked(&op, binding)?;
-        if let Some(old) = &op
-            .mcp_resource_subscription
-            .as_ref()
-            .unwrap()
-            .acceptance_ref
-        {
+        if let Some(old) = &op.mcp_resource_subscription.as_ref().unwrap().acceptance_ref {
             if old != &prepared.reference {
-                return Err(RuntimeError::Conflict(
-                    "MCP subscribe acknowledgement changed".into(),
-                ));
+                return Err(RuntimeError::Conflict("MCP subscribe acknowledgement changed".into()));
             }
+        } else {
+            // The ACK already happened. Preserve it even if local observation was withdrawn.
+            let source_available = match source_live(&tx, &op) {
+                Ok(()) => true,
+                Err(RuntimeError::Conflict(_)) => false,
+                Err(error) => return Err(error),
+            };
+            let live = source_available && !op.cancel_requested;
+            let sub = op.mcp_resource_subscription.as_mut().unwrap();
+            sub.acceptance_ref = Some(prepared.reference);
+            if live {
+                sub.listener_id = Some(listener_id.into());
+                sub.local_released = false;
+            }
+            sub.availability = if live {
+                crate::McpResourceAvailability::Active
+            } else {
+                crate::McpResourceAvailability::Closed
+            };
+            publish(&tx, &mut op, "mcp.resource_accepted")?;
+        }
+        // No crash window can leave a durable ACK without its finite-RPC stop fact.
+        let op = super::execution_persistence::record_external_receipt_in(&tx, &binding.operation_id,
+            receipt.receipt, true, false)?;
+        tx.commit()?;
+        self.release_unoccupied_resource_owner(&binding.operation_id)?;
+        self.reconcile_waits()?;
+        Ok(op)
+    }
+    pub fn fail_mcp_resource_creation(
+        &mut self,
+        binding: &McpResourceBinding,
+        receipt: result_content::PreparedExternalReceipt,
+    ) -> Result<Operation> {
+        if !matches!((receipt.receipt.outcome, receipt.receipt.effect),
+            (Outcome::Failed, Effect::None) | (Outcome::Indeterminate, Effect::Unknown))
+        {
+            return Err(RuntimeError::Invalid("MCP creation failure evidence changed".into()));
+        }
+        let tx = self.db.transaction()?;
+        let op: Operation = record(&tx, "operations", &binding.operation_id)?;
+        linked(&op, binding)?;
+        if op.mcp_resource_subscription.as_ref().unwrap().acceptance_ref.is_some() {
+            return Err(RuntimeError::Conflict("Accepted MCP subscription cannot fail creation".into()));
+        }
+        if receipt.receipt.identity != op.id
+            || op.executor.as_deref() != Some(receipt.receipt.executor.as_str())
+            || !matches!(&binding.execution_owner, ExecutorOwner::External { epoch, .. } if epoch == &receipt.receipt.epoch)
+        {
+            return Err(RuntimeError::Conflict("MCP failure receipt owner changed".into()));
+        }
+        // A released Source tombstone may require recalling an already-proven
+        // stopped failure through a different diagnostic wrapper. Keep the
+        // original receipt instead of manufacturing a new body or stronger effect.
+        if op.external_receipt.as_ref().is_some_and(|known| {
+                known.executor_stopped
+                    && known.outcome == receipt.receipt.outcome && known.effect == receipt.receipt.effect
+                    && known.executor == receipt.receipt.executor
+                    && known.identity == receipt.receipt.identity && known.epoch == receipt.receipt.epoch
+            })
+        {
             return Ok(op);
         }
-        // The ACK already happened. Preserve it even if local observation was withdrawn while it arrived.
-        let source_available = match source_live(&tx, &op) {
-            Ok(()) => true,
-            Err(RuntimeError::Conflict(_)) => false,
-            Err(error) => return Err(error),
-        };
-        let live = source_available && !op.cancel_requested;
-        let sub = op.mcp_resource_subscription.as_mut().unwrap();
-        sub.acceptance_ref = Some(prepared.reference);
-        if live {
-            sub.listener_id = Some(listener_id.into());
-            sub.local_released = false;
-        }
-        sub.availability = if live {
-            crate::McpResourceAvailability::Active
-        } else {
-            crate::McpResourceAvailability::Closed
-        };
-        publish(&tx, &mut op, "mcp.resource_accepted")?;
+        let op = super::execution_persistence::record_external_receipt_in(&tx, &binding.operation_id,
+            receipt.receipt, true, true)?;
         tx.commit()?;
+        self.release_unoccupied_resource_owner(&binding.operation_id)?;
+        self.reconcile_waits()?;
         Ok(op)
     }
     pub fn update_mcp_resource_listener(
@@ -256,7 +310,7 @@ impl Catalog {
         Ok(op)
     }
     pub fn pending_mcp_resources(&self) -> Result<Vec<McpResourcePending>> {
-        let mut q=self.db.prepare("SELECT body FROM operations WHERE json_extract(body,'$.mcp_resource_subscription') IS NOT NULL AND (coalesce(json_extract(body,'$.cancel_requested'),0)=0 OR coalesce(json_extract(body,'$.mcp_resource_subscription.localReleased'),0)=0) ORDER BY id")?;
+        let mut q=self.db.prepare("SELECT body FROM operations WHERE json_extract(body,'$.mcp_resource_subscription') IS NOT NULL AND (coalesce(json_extract(body,'$.cancel_requested'),0)=0 OR coalesce(json_extract(body,'$.mcp_resource_subscription.localReleased'),0)=0 OR coalesce(json_extract(body,'$.mcp_resource_subscription.mcpHolderReleased'),0)=0) ORDER BY id")?;
         let operations = q
             .query_map([], |r| r.get::<_, String>(0))?
             .map(|v| Ok(serde_json::from_str(&v?)?))
@@ -287,19 +341,43 @@ impl Catalog {
         }
         Ok(target)
     }
-    pub fn require_mcp_resource_source(&self, id: &str) -> Result<Operation> {
+    /// The original begun facet remains readable for late ACK and cleanup. This
+    /// does not grant live listener admission or reactivate a withdrawn observer.
+    pub fn mcp_resource_context_operation(&self, id: &str) -> Result<Operation> {
         let op = self.operation(id)?;
-        source_live(&self.db, &op)?;
-        if op.cancel_requested
-            || op
-                .mcp_resource_subscription
-                .as_ref()
-                .is_none_or(|s| s.acceptance_ref.is_none())
-        {
-            return Err(RuntimeError::Conflict(
-                "Original MCP resource observation was not accepted or is withdrawn".into(),
-            ));
+        let sub = op.mcp_resource_subscription.as_ref()
+            .ok_or_else(|| RuntimeError::NotFound("MCP resource observer".into()))?;
+        linked(&op, &sub.binding)?;
+        Ok(op)
+    }
+    pub fn validate_mcp_resource_context(
+        &self,
+        id: &str,
+        snapshot: &tool_content::ToolInvocationSnapshot,
+        frozen: &launches::HostToolBinding,
+    ) -> Result<Operation> {
+        self.validate_tool_invocation(snapshot, false)?;
+        let op = self.mcp_resource_context_operation(id)?;
+        validate_original_binding(&op, &op.mcp_resource_subscription.as_ref().unwrap().binding,
+            snapshot, frozen)?;
+        Ok(op)
+    }
+    /// Acknowledges only exact original Source holder cleanup. It does not
+    /// settle the finite RPC, detach a listener, or change remote cleanup facts.
+    pub fn acknowledge_mcp_resource_holder_released(
+        &mut self,
+        binding: &McpResourceBinding,
+    ) -> Result<Operation> {
+        let tx = self.db.transaction()?;
+        let mut op: Operation = record(&tx, "operations", &binding.operation_id)?;
+        linked(&op, binding)?;
+        let sub = op.mcp_resource_subscription.as_mut().unwrap();
+        if sub.mcp_holder_released {
+            return Ok(op);
         }
+        sub.mcp_holder_released = true;
+        publish(&tx, &mut op, "mcp.resource_holder_released")?;
+        tx.commit()?;
         Ok(op)
     }
     pub fn release_mcp_resource_source(&mut self, run_id: &str) -> Result<Vec<McpResourcePending>> {
@@ -338,10 +416,10 @@ pub(super) fn cancel_run(tx: &Transaction<'_>, run_id: &str, workspace_only: boo
     Ok(())
 }
 pub(super) fn require_source_released(db: &Connection, run_id: &str) -> Result<()> {
-    let open:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.mcp_resource_subscription.sourceScope')='workspace' AND (coalesce(json_extract(body,'$.cancel_requested'),0)=0 OR coalesce(json_extract(body,'$.mcp_resource_subscription.localReleased'),0)=0))",[run_id],|r|r.get(0))?;
+    let open:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.mcp_resource_subscription.sourceScope')='workspace' AND (coalesce(json_extract(body,'$.cancel_requested'),0)=0 OR coalesce(json_extract(body,'$.mcp_resource_subscription.localReleased'),0)=0 OR coalesce(json_extract(body,'$.mcp_resource_subscription.mcpHolderReleased'),0)=0))",[run_id],|r|r.get(0))?;
     if open {
         return Err(RuntimeError::Conflict(
-            "Original workspace MCP resource listeners must detach before source release".into(),
+            "Original workspace MCP resource listeners and Source holders must release before source release".into(),
         ));
     }
     Ok(())

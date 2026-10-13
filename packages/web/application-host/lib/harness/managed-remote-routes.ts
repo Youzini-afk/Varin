@@ -113,7 +113,7 @@ export function registerManagedRemoteRoutes(
   for (const method of sourceMethods) {
     const methodAuth: RequestHandler = (request, response, next) => {
       const operation = value(value(request.body).operation);
-      const cleanup = method === 'service' && operation.kind === 'mcp' && ['release', 'task_inspect', 'task_cancel', 'task_release'].includes(String(value(operation.action).kind));
+      const cleanup = method === 'service' && operation.kind === 'mcp' && ['release', 'task_inspect', 'task_cancel', 'task_release', 'resource_inspect', 'resource_release'].includes(String(value(operation.action).kind));
       return (receiptMethods.has(method) || cleanup ? requireReceiptAuth : requireSourceAuth)(request, response, next);
     };
     app.post(`${base}/sources/${method}`, requireAuth, methodAuth, route(async (request, response) => {

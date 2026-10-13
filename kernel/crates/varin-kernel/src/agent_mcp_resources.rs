@@ -52,16 +52,74 @@ pub(super) fn execute(
         }
         "runtime.mcp.resource.accept" => {
             let p: McpResourceAcceptParams = serde_json::from_value(params)?;
-            let prep = owner
-                .lock()
-                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                .prepare_result_content();
+            let (prep, receipt_prep, executor) = {
+                let db = owner.lock()
+                    .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+                let op = db.mcp_resource_context_operation(&p.binding.operation_id).map_err(domain)?;
+                let executor = op.executor.ok_or_else(|| KernelError::Protocol("MCP original executor missing".into()))?;
+                (db.prepare_result_content(), db.prepare_result_content(), executor)
+            };
+            let varin_runtime::ExecutorOwner::External { epoch, .. } = &p.binding.execution_owner else {
+                return Err(KernelError::Protocol("MCP original external owner required".into()));
+            };
             let body = prep.write_data(&p.content).map_err(domain)?;
+            // The original subscribe ACK proves this finite RPC stopped, even
+            // when its caller already published an immutable Unknown completion.
+            // Both bodies are staged outside Catalog and use existing result ownership.
+            let receipt = receipt_prep.write_external_receipt(varin_runtime::ExternalReceipt {
+                executor,
+                identity: p.binding.operation_id.clone(),
+                epoch: epoch.clone(),
+                outcome: varin_runtime::Outcome::Succeeded,
+                effect: varin_runtime::Effect::Confirmed,
+                result: json!({"operationId":p.binding.operation_id,
+                    "server":p.binding.endpoint.server,"uri":p.binding.uri,
+                    "acknowledgement":p.content}).into(),
+            }).map_err(domain)?;
+            let mut db = owner
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+            let op = db.accept_mcp_resource(&p.binding, &p.listener_id, body, receipt)
+                .map_err(domain)?;
+            pending(&db, op)
+        }
+        "runtime.mcp.resource.creation_failed" => {
+            let p: McpResourceCreationFailedParams = serde_json::from_value(params)?;
+            if p.error.dispatched && p.error.settlement == crate::source_resources::SourceMcpCreationSettlement::Unknown {
+                return Err(KernelError::Protocol("MCP creation failure does not prove finite RPC stopped".into()));
+            }
+            let (prep, executor) = {
+                let db = owner.lock()
+                    .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+                let op = db.mcp_resource_context_operation(&p.binding.operation_id).map_err(domain)?;
+                let executor = op.executor.ok_or_else(|| KernelError::Protocol("MCP original executor missing".into()))?;
+                (db.prepare_result_content(), executor)
+            };
+            let varin_runtime::ExecutorOwner::External { epoch, .. } = &p.binding.execution_owner else {
+                return Err(KernelError::Protocol("MCP original external owner required".into()));
+            };
+            let dispatched = p.error.dispatched;
+            let receipt = prep.write_external_receipt(varin_runtime::ExternalReceipt {
+                executor,
+                identity: p.binding.operation_id.clone(),
+                epoch: epoch.clone(),
+                outcome: if dispatched { varin_runtime::Outcome::Indeterminate } else { varin_runtime::Outcome::Failed },
+                effect: if dispatched { varin_runtime::Effect::Unknown } else { varin_runtime::Effect::None },
+                result: json!({"operationId":p.binding.operation_id,
+                    "server":p.binding.endpoint.server,"uri":p.binding.uri,"error":p.error}).into(),
+            }).map_err(domain)?;
+            let mut db = owner.lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+            let op = db.fail_mcp_resource_creation(&p.binding, receipt).map_err(domain)?;
+            pending(&db, op)
+        }
+        "runtime.mcp.resource.holder_released" => {
+            let p: McpResourceHolderReleasedParams = serde_json::from_value(params)?;
             let mut db = owner
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
             let op = db
-                .accept_mcp_resource(&p.binding, &p.listener_id, body)
+                .acknowledge_mcp_resource_holder_released(&p.binding)
                 .map_err(domain)?;
             pending(&db, op)
         }
@@ -141,7 +199,7 @@ pub(super) fn execute(
                     .lock()
                     .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
                 let op = db
-                    .require_mcp_resource_source(&p.operation_id)
+                    .mcp_resource_context_operation(&p.operation_id)
                     .map_err(domain)?;
                 (
                     invocation(&db, &p.operation_id)?,
@@ -149,6 +207,10 @@ pub(super) fn execute(
                 )
             };
             let (snapshot, binding) = read.load_mcp().map_err(domain)?;
+            owner.lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                .validate_mcp_resource_context(&p.operation_id, &snapshot, &binding)
+                .map_err(domain)?;
             Ok(json!({"threadId":thread_id,"source":snapshot.frozen.source,"binding":binding}))
         }
         _ => Err(KernelError::Protocol(

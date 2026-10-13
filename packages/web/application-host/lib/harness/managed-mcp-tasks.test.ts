@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { createManagedMcpTasks } from './managed-mcp-tasks.js';
-import type { SourceMcpHolder, SourceMcpHolderBinding, SourceMcpTaskCreationOutcome } from '../kernel/protocol.generated.js';
+import type { SourceMcpHolder, SourceMcpHolderBinding, SourceMcpCreationOutcome } from '../kernel/protocol.generated.js';
 import type { ManagedMcpTaskAction } from './managed-mcp-contract.js';
 const binding: SourceMcpHolderBinding = { operationId: 'a-operation', executionOwner: { kind: 'external', identity: 'b', epoch: 'b-kernel' }, purpose: 'task',
   endpoint: { server: 'peer', resourceKey: 'original-daemon', configurationVersion: 'definition', credentialVersion: 'credential' } };
@@ -9,7 +9,7 @@ const response = { task: { taskId: 'remote-task', status: 'working' as const, cr
 const start: Extract<ManagedMcpTaskAction, { kind: 'task_start' }> = { kind: 'task_start', handleId: 'view', binding, name: 'compute', schemaVersion: 'schema', arguments: { x: 1 } };
 function fixture() {
   let holder: SourceMcpHolder | undefined, dispatches = 0, releases = 0, acquisitions = 0, sealed = false, failedSettle = false;
-  let outcome: SourceMcpTaskCreationOutcome | null = null;
+  let outcome: SourceMcpCreationOutcome | null = null;
   const controls: string[] = [];
   let run = async () => response, get = async (_signal: AbortSignal) => response;
   const kernel = { async sourceRequest(method: string, params: any) {
@@ -18,7 +18,7 @@ function fixture() {
     if (method === 'source.mcp.holder') {
       if (!holder) holder = { binding: params.binding, released: false, creationReceipt: null };
       if (params.action === 'release' || params.action === 'release_unstarted' && !holder.creationReceipt) holder.released = true;
-      return { holder: structuredClone(holder), authority: {} };
+      return { holder: structuredClone(holder), authority: {}, grantState: 'active' };
     }
     if (params.action === 'begin') {
       if (holder?.released) throw new Error('holder released');

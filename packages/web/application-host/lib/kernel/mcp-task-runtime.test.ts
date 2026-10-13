@@ -3,7 +3,7 @@ import { McpTaskRequestError } from '@varin/pi-host/mcp-errors';
 import type { McpTaskLease, McpAuthorityTool } from '@varin/pi-host/mcp-authority';
 import { createMcpTaskRuntime } from './mcp-task-runtime.js';
 import type { KernelClient } from './kernel-client.js';
-import type { HostJobPending, HostJobTaskUpdateParams, HostToolCall, McpTaskState, SourceMcpTaskCreationOutcome } from './protocol.generated.js';
+import type { HostJobPending, HostJobTaskUpdateParams, HostToolCall, McpTaskState, SourceMcpCreationOutcome } from './protocol.generated.js';
 
 // Fault-injection at the Host/Catalog request boundary. Actual Catalog persistence, original
 // admission and remote stdio behavior are covered by the kernel MCP Task integration tests.
@@ -15,11 +15,11 @@ const tool:McpAuthorityTool={name:'task',server:'peer',tool:'task',schemaVersion
 const failure=(code:number)=>new McpTaskRequestError('remote-error',true,'protocol',code,{code,message:'Original receiver error'});
 async function until(predicate:()=>boolean,attempts=200){for(let n=0;n<attempts;n++){if(predicate())return;await new Promise(resolve=>setTimeout(resolve,5));}throw new Error('Expected observation did not arrive');}
 function fixture(options:{acceptFailures?:number;commitFailedAccept?:boolean;startError?:McpTaskRequestError;recoverLease?:boolean|(()=>Promise<McpTaskLease>);
-  recoverCreation?:(count:number)=>Promise<SourceMcpTaskCreationOutcome|null>;cleanup?:(count:number)=>Promise<void>;
+  recoverCreation?:(count:number)=>Promise<SourceMcpCreationOutcome|null>;cleanup?:(count:number)=>Promise<void>;
   afterHolderReleased?:(count:number)=>Promise<void>;get?:(count:number)=>Promise<McpTaskState>;
   result?:()=>Promise<Record<string,unknown>>;cancel?:()=>Promise<McpTaskState>;afterUpdate?:(change:HostJobTaskUpdateParams)=>Promise<void>}={}){
   let op:HostJobPending|undefined,accepts=0,starts=0,gets=0,results=0,cancels=0,released=0,accesses=0,recoveries=0,creationReads=0,cleanups=0,holderAcks=0,terminals=0;
-  let creation:SourceMcpTaskCreationOutcome|null=null;
+  let creation:SourceMcpCreationOutcome|null=null;
   const cleanupOrder:string[]=[];
   const updates:HostJobTaskUpdateParams[]=[],errors:Error[]=[];
   const finishes:string[]=[],unbinds:Array<string|undefined>=[];

@@ -1385,7 +1385,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 33; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 34; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -2833,6 +2833,7 @@ export interface McpResourceSubscription {
   listenerId: string | null;
   availability: McpResourceAvailability;
   localReleased: boolean;
+  mcpHolderReleased: boolean;
   remoteCleanup: McpResourceCleanup;
   lastEventCursor: number | null;
   problem: string | null;
@@ -2856,6 +2857,15 @@ export type McpResourceFactKind = 'updated' | 'unresolved_association' | 'gap';
 
 export interface McpResourceBeginParams {
   binding: McpResourceBinding;
+}
+
+export interface McpResourceHolderReleasedParams {
+  binding: McpResourceBinding;
+}
+
+export interface McpResourceCreationFailedParams {
+  binding: McpResourceBinding;
+  error: SourceMcpCreationError;
 }
 
 export interface McpResourceAcceptParams {

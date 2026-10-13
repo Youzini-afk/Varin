@@ -5,7 +5,7 @@ import type { McpTaskLease, McpAuthorityTool, McpTaskResponse } from '@varin/pi-
 import type { KernelClient } from './kernel-client.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { HostToolCall, ToolExecutionReceipt } from './tool-bridge.js';
-import type { ExecutorOwner, HostJobBinding, HostJobPending, HostJobTaskUpdateParams, KernelMethod, KernelMethodParams, McpTaskAction, McpTaskProblem, McpTaskStage, Operation, OutputBody, ResolvedMedia, SourceMcpTaskCreationError, SourceMcpTaskCreationOutcome } from './protocol.generated.js';
+import type { ExecutorOwner, HostJobBinding, HostJobPending, HostJobTaskUpdateParams, KernelMethod, KernelMethodParams, McpTaskAction, McpTaskProblem, McpTaskStage, Operation, OutputBody, ResolvedMedia, SourceMcpCreationError, SourceMcpCreationOutcome } from './protocol.generated.js';
 import { projectMcpOutput } from './mcp-output.js';
 const DOMAIN = 'mcp.task';
 const terminal = (status: string) => ['completed','failed','cancelled'].includes(status);
@@ -15,7 +15,7 @@ interface Entry {
   op: HostJobPending;
   acceptance?:McpTaskResponse;
   acceptanceFlight?:Promise<void>;
-  creationFailure?:SourceMcpTaskCreationError;
+  creationFailure?:SourceMcpCreationError;
   lease?: McpTaskLease;
   unobserve?:()=>void;
   unbindInteraction?:(reason?:'rpc_closed')=>void;
@@ -37,7 +37,7 @@ export function createMcpTaskRuntime(options:{
   kernel:KernelClient;
   runtime:Pick<AgentRuntimeClient,'onReady'|'onEvent'|'reconcileObservations'>;
   recover(pending:HostJobPending,signal:AbortSignal):Promise<McpTaskLease>;
-  recoverCreation?(pending:HostJobPending,signal:AbortSignal):Promise<SourceMcpTaskCreationOutcome|null>;
+  recoverCreation?(pending:HostJobPending,signal:AbortSignal):Promise<SourceMcpCreationOutcome|null>;
   cleanup?(pending:HostJobPending,signal:AbortSignal):Promise<void>;
   onError?:(error:Error)=>void;
 }) {
