@@ -156,11 +156,26 @@ For every affected path, preparation folds chronological turn changes into:
 
 Preparation hashes only those current paths and reports content or dirty-buffer conflicts. Before either
 preparation or apply inspects files, the Host asks every connected document surface to fence the affected
-paths, wait for in-flight saves, publish its latest dirty-buffer revision, and acknowledge the barrier.
+paths, wait for in-flight reads and saves, publish its latest dirty-buffer revision, and acknowledge the barrier.
 Apply holds that barrier while it rechecks each path, stores its safety state, atomically replaces the
 path, and verifies the target identity. A disconnected or unresponsive surface produces the retryable
 `dirty-state-unavailable` result rather than an empty dirty set. The acknowledgement deadline defaults to
 one document-watch heartbeat and can be changed with `VARIN_DIRTY_BARRIER_TIMEOUT_MS`.
+
+A confirmed dirty-buffer conflict captures the actual buffer and its disk base through that same
+registered surface. Both texts become owned ContentStore objects referenced by the path's recovery
+safety row. After the disk replacement, a barrier-bound, version-checked surface restore updates the
+buffer and its base together; it does not save a second file. Undo restores the former disk state and
+unsaved buffer, including a file whose rollback target was missing. A changed document instance or
+revision requires a new confirmation. A closed or disconnected owner cannot be treated as an empty draft.
+
+Surface dispatch and acknowledgement are recorded with the disk path. Interrupted work observes the
+recorded before/after bindings before compensation; an unknown editor state remains `needs-attention`.
+Compensation restores only this operation's confirmed outputs. The affected Registry defers actual
+watch reloads until barrier release; a preparation-only barrier does not itself trigger a reload.
+Retries and resumption coordinate by recovery operation ID. Documents obtains the shared kernel
+storage context and orders actual file effects through path leases. The separate workspace metadata
+coordinator is reserved for compound metadata changes; it does not enclose restore I/O or surface waits.
 
 If a later path fails, or the conversation owner rejects the expected head, Varin restores already-applied
 paths from the safety set when their current identity still matches the attempted target. A concurrent
@@ -204,14 +219,10 @@ cleanup or mutation. Rejection preserves retained objects and pending streams. W
 native Pi data and external configuration remain assets. The old local-SQLite migration narrative
 belongs to retired implementation history, not the current provider contract.
 
-Two earlier accepted improvements are still **design targets**, not current combined-restore behavior:
-
-- Restore through an affected dirty buffer after confirmation, preserving that buffer for undo. The
-  current journal engine reports the conflict but requires saving or discarding the buffer first
-- Degrade an unresponsive surface into a confirmable `unknown-dirty-state` conflict. The current engine
-  returns retryable `dirty-state-unavailable` when synchronization or inspection cannot establish state
-
-These targets do not authorize bypassing the current barrier. See `validateConflicts` and `dirtyBarrier`
+Degrading an unresponsive surface into a confirmable `unknown-dirty-state` conflict remains a design
+target. The current engine returns retryable `dirty-state-unavailable` when synchronization or inspection
+cannot establish state. That target does not authorize bypassing the current barrier or replacing a
+buffer whose current content is unknown. See `validateConflicts` and `dirtyBarrier`
 in [journal-engine.ts](../../packages/web/application-host/lib/recovery/journal-engine.ts).
 Storage transfer/retention features of replacement providers likewise cannot be inferred from a v6 label.
 

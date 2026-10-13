@@ -84,7 +84,7 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
   }, [allowConversationOnly, api, current, onClose, onConversationOnly, plan]);
 
   const dirty = plan.conflicts.some(conflict => conflict.kind === 'dirty-buffer');
-  const canRestoreFiles = !dirty && (plan.coverage === 'ready' || plan.coverage === 'partial');
+  const canRestoreFiles = plan.coverage === 'ready' || plan.coverage === 'partial';
   const fileLabel = (key: string) => {
     const file = plan.fileTargets?.[key];
     if (!file) return key;
@@ -217,7 +217,7 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
           </div>
         ) : null}
 
-        {dirty && <p role="alert" className="typography-meta">Save or discard the affected editor buffers first, then close this dialog and prepare recovery again. Confirming a file conflict cannot overwrite unsaved edits.</p>}
+        {dirty && <p role="alert" className="typography-meta">Recovery replaces the affected unsaved edits. They are preserved for undo.</p>}
         {started && operation?.state !== 'complete' && <p role="status" className="typography-meta">This recovery has been submitted. Check its original operation before starting another recovery.</p>}
 
         {phase === 'applying' ? (

@@ -834,7 +834,7 @@ describe('affected-file workspace recovery journal', () => {
     expect(await fs.promises.readFile(target, 'utf8')).toBe('user-later-v2');
   });
 
-  it('rejects overwrite-confirmed for an acknowledged dirty-buffer conflict', async () => {
+  it('requires a connected complete surface binding before restoring an acknowledged dirty-buffer conflict', async () => {
     const { engine, harness } = await createHarness();
     const target = path.join(harness.workspaceRoot, 'note.txt');
     await fs.promises.writeFile(target, 'before');
@@ -865,7 +865,7 @@ describe('affected-file workspace recovery journal', () => {
       expectedRevision: prepared.plan.revision,
       operationId: prepared.plan.id,
     });
-    expect(rejected).toMatchObject({ status: 'failed', failure: { code: 'dirty-buffers' } });
+    expect(rejected).toMatchObject({ status: 'failed', failure: { code: 'dirty-state-unavailable' } });
   });
 
   it('reconciles a crash in the apply-intent window by detecting the target was already written', async () => {
@@ -992,17 +992,16 @@ describe('affected-file workspace recovery journal', () => {
 
     // Recovery semantics: target = 'before*', safety = 'after*'.
     // Phase 1: extra.txt applyState writes 'before-extra' — succeeds.
-    // Phase 2: note.txt applyState writes 'before' — then crashes. extra.txt is
-    //          already applied, so the engine must compensate it.
-    // Phase 3: compensation applyState writes 'after-extra' — then crashes,
-    //          leaving extra.txt in 'compensate-intent' with safety on disk.
+    // Phase 2: note.txt applyState writes 'before' — then crashes. Compensation
+    //          observes that intent and restores note.txt to its safety state.
+    // Phase 3: compensation writes 'after-extra' — then crashes, leaving that
+    //          path in 'compensate-intent' even though its safety is on disk.
     const realFileStore = createRecoveryFileStore({ fsModule: fs, fsPromises: fs.promises, pathModule: path });
-    let applyCallCount = 0;
     const crashApplyState = vi.fn(async (...args: Parameters<RecoveryFileStore['applyState']>) => {
-      applyCallCount += 1;
       await realFileStore.applyState(...args);
-      if (applyCallCount >= 2) {
-        throw new Error(`SIMULATED_CRASH_ON_APPLY_${applyCallCount}`);
+      const written = await fs.promises.readFile(path.join(args[1], args[2]), 'utf8');
+      if ((args[2] === 'note.txt' && written === 'before') || (args[2] === 'extra.txt' && written === 'after-extra')) {
+        throw new Error(`SIMULATED_CRASH_AFTER_WRITE_${args[2]}`);
       }
     });
     const crashFileStore: RecoveryFileStore = {
@@ -1024,27 +1023,24 @@ describe('affected-file workspace recovery journal', () => {
       operationId: prepared.plan.id,
     });
     expect(crashed.status).toBe('failed');
-    expect(crashApplyState).toHaveBeenCalledTimes(3);
-
-    // After the crash: extra.txt was compensated back to safety; note.txt's
-    // crashed apply left the target on disk with an unresolved intent phase.
+    // After the crash: both files are back at safety, but extra.txt's
+    // compensation acknowledgement is still unresolved.
     // The runtime failure path correctly persists needs-attention.
     expect(await fs.promises.readFile(extraPath, 'utf8')).toBe('after-extra');
-    expect(await fs.promises.readFile(notePath, 'utf8')).toBe('before');
+    expect(await fs.promises.readFile(notePath, 'utf8')).toBe('after');
     const crashedOperation = durable.snapshot(harness.identity.workspaceId, prepared.plan.id);
     expect(crashedOperation).not.toBeNull();
     expect(crashedOperation!.state).toBe('needs-attention');
     expect(crashedOperation!.files.find((file) => file.path === 'extra.txt')?.phase).toBe('compensate-intent');
-    expect(crashedOperation!.files.find((file) => file.path === 'note.txt')?.phase).toBe('apply-intent');
+    expect(crashedOperation!.files.find((file) => file.path === 'note.txt')?.phase).toBe('safety-observed');
 
     // A host kill mid-compensation (instead of a catchable exception) leaves
     // the same file phases but never reaches the terminal persist. Rewind the
     // catalog state to 'compensating-files' to stage that post-mortem shape.
     durable.debugSetOperationState(harness.identity.workspaceId, prepared.plan.id, 'compensating-files');
 
-    // Restart: extra.txt reconciles compensate-intent → safety-observed;
-    // note.txt reconciles apply-intent → target-observed; the operation then
-    // finishes compensating note.txt back to safety.
+    // Restart recognizes extra.txt's completed write and finishes this same
+    // compensation without replaying either file mutation.
     const restartEngine = createWorkspaceRecoveryEngine({
       authorityId: harness.authority.hostId,
       dataDir: harness.dataDir,
@@ -1118,6 +1114,7 @@ describe('affected-file workspace recovery journal', () => {
 
     // Now force the file to needs-attention in the durable store.
     durable.debugSetFilePhase(harness.identity.workspaceId, prepared.plan.id, 'note.txt', 'needs-attention');
+    durable.debugSetOperationState(harness.identity.workspaceId, prepared.plan.id, 'applying-files');
 
     // Reset the file to safety state ('after').
     await fs.promises.writeFile(notePath, 'after');
@@ -1130,7 +1127,9 @@ describe('affected-file workspace recovery journal', () => {
       expectedRevision: prepared.plan.revision,
       operationId: prepared.plan.id,
     });
-    expect(result).toMatchObject({ status: 'failed', failure: { code: 'needs-attention' } });
+    expect(result).toMatchObject({ status: 'ready', operation: {
+      state: 'needs-attention', fileState: 'needs-attention', failure: { code: 'needs-attention' },
+    } });
     expect(await engine.getCombinedOperation(prepared.plan.id)).toMatchObject({
       status: 'ready',
       operation: {

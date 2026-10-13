@@ -52,6 +52,13 @@ Watch events carry resource metadata only. Agent-input capture bodies use the au
 
 Thread Integration uses Host-directed surface capture/apply/undo requests. The dirty-owner connection carries the request ID; the authenticated surface-operation routes carry bodies and receipts. Authority checks owner registration, generation, workspace and document identity. Integration persists its intent before dispatch and only completes after a valid receipt; caller-provided paths cannot acknowledge a write. Confirmed own writes update matching active Pi agent-input sources. An uncertain dispatched write invalidates those Pi paths, so reads cannot silently return either the old draft or old disk. Thread source snapshots and ordinary later user edits do not participate in that Pi own-write replacement rule.
 
+Combined recovery adds `restore` under its original affected-path barrier. It replaces the live buffer
+and disk base with one version-checked Registry transaction; it does not issue an editor save. Capture
+under that barrier also reads a now-clean or missing document for undo. The recovery row retains original
+draft/base content and each dispatch receipt through the kernel's existing object references. Registry
+waits for affected reads and saves before acknowledging, defers related file notifications while held,
+and replays only actual deferred reloads on release. Unchanged disk revisions preserve unsaved edits.
+
 Thread source selection resolves the chosen directory through Documents once, then freezes its
 `workspaceId`, preparation key, explicit saved-files or surface-drafts choice, and capture scopes.
 The Registry includes dirty buffers only from that selected physical root, including verified aliases;

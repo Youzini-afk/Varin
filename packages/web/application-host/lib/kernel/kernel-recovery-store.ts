@@ -18,6 +18,7 @@ import type {
   RecoveryFileStore,
   RecoveryIdentity,
   RecoveryState,
+  RegularFileState,
 } from "../recovery/journal-files.js";
 import { parseRecoveryConversation, parseRecoveryFileTarget } from "@varin/extension-contract";
 import { normalizeResourceId, parseRecoveryState, sameState } from "../recovery/journal-files.js";
@@ -186,6 +187,29 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
     if (result.status === "conflict") {
       throw new Error(`Kernel file apply conflicted after resource admission: ${relativePath}`);
     }
+  }
+
+  async storeContent(identity: RecoveryIdentity, bytes: Buffer): Promise<{ state: RegularFileState; release(): Promise<void> }> {
+    if (this.scopedActor && identity.workspaceId !== this.scopedActor.identity.workspaceId) {
+      throw new Error('Recovery content does not match its admitted actor');
+    }
+    const context = this.scopedActor ?? await this.adapter.context(identity.workspaceId, 'recovery-maintenance', {
+      owningWorkspace: identity.workspaceId, executionWorkspace: identity.workspaceId,
+      pathScopes: [''], capabilities: ['recovery.maintenance'],
+    });
+    const stored = await context.client.putBlob(bytes, `recovery-content:${randomUUID()}`);
+    this.registerObjectOwner(identity.workspaceId, stored.hash, stored.ownerId);
+    return { state: { kind: 'regular-file', objectHash: stored.hash, byteLength: stored.byteLength }, release: async () => {
+      if (!this.owners.get(this.key(identity.workspaceId, stored.hash))?.has(stored.ownerId)) return;
+      await context.client.releaseBlob(stored.ownerId);
+      this.consumeOwner(stored.ownerId);
+    } };
+  }
+
+  async readContent(identity: RecoveryIdentity, state: RegularFileState): Promise<Buffer> {
+    const bytes = await this.objectBytes(identity.workspaceId, state.objectHash);
+    if (bytes.byteLength !== state.byteLength) throw new Error('Recovery content length changed');
+    return bytes;
   }
 
   hashFile(filePath: string) {
@@ -856,9 +880,10 @@ export class KernelRecoveryStore {
       const recordId = `operation-file:${operationId}:${file.path}`;
       for (const [field, name] of [["expectedJson", "expected"], ["targetJson", "target"], ["safetyJson", "safety"]] as const) {
         if (typeof file[field] !== "string") continue;
-        const state = parseRecoveryState(JSON.parse(file[field] as string) as unknown);
-        if (state.kind === "regular-file") {
-          this.content.registerRecord(workspaceId, recordId, { slot: `${file.path}.${name}`, objectHash: state.objectHash });
+        const states = JSON.parse(file[field] as string) as unknown;
+        parseRecoveryState(states);
+        for (const reference of this.stateReferences(workspaceId, states, `${file.path}.${name}`)) {
+          this.content.registerRecord(workspaceId, recordId, reference);
         }
       }
     }
@@ -995,7 +1020,7 @@ export const createKernelRecoveryDirectFacade = (
   } = {},
 ): WorkspaceRecoveryEngine => {
   const facade = { ...base } as WorkspaceRecoveryEngine;
-  facade.withWorkspaceStorage = (workspaceId, accessOptions, operation) => base.withWorkspaceStorage(workspaceId, accessOptions, async () => operation(
+  facade.withWorkspaceStorage = (workspaceId, accessOptions, operation) => base.coordinateWorkspaceStorage(workspaceId, accessOptions, async () => operation(
     await store.workspaceStorageContext(workspaceId, {
       ...(options.resourceOperationGateFor ? { resourceOperationGate: options.resourceOperationGateFor(workspaceId) } : {}),
       ...(options.resolveDirectoryApplyContext ? { resolveDirectoryApplyContext: options.resolveDirectoryApplyContext } : {}),

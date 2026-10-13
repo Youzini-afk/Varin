@@ -46,6 +46,9 @@ import {
   type WorkspaceRecoveryUncoveredPath,
 } from "@varin/extension-contract";
 import { failedRecoveryResult, RecoveryPrimitiveError, recoveryFailure } from "./errors.js";
+import type { DocumentSurfaceBinding, DocumentSurfaceOperationRequest, DocumentSurfaceOperationResult } from '../documents/authority.js';
+import { createSurfaceRecovery, parseCombinedSafety, parseCombinedTarget, surfaceOwnerKey,
+  type CombinedRecoverySafety, type CombinedRecoveryTarget, type RecoverySurfaceOwner, type RecoverySurfaceTarget } from './surface-recovery.js';
 import {
   normalizeResourceId,
   parseRecoveryState,
@@ -66,23 +69,31 @@ import {
 
 interface WorkspaceRegistration { canonicalPath: string; workspaceId: string }
 interface DirtyBufferResource {
+  bufferHash?: string;
+  documentInstanceId?: string;
+  encoding?: string;
+  bom?: boolean;
+  lineEnding?: 'lf' | 'crlf' | 'cr';
   baseRevision: string | null;
   localEditRevision: number;
   resource: { resourceId: string; workspaceId?: string };
 }
 interface DirtyBufferPublication {
+  registrationId?: string;
   generation: number;
   ownerId: string;
   resources: DirtyBufferResource[];
   workspaceId: string;
 }
-interface DirtyBarrierHandle { release(): Promise<void>; settle(): Promise<void> }
+interface DirtyBarrierHandle { barrierId?: string; release(): Promise<void>; settle(): Promise<void> }
+interface TargetBarrierHandle extends DirtyBarrierHandle { barrierFor(workspaceId: string): string }
 interface RecoveryDocumentsAuthority {
   beginDirtyStateBarrier?: (workspaceId: string, paths: string[], options: { caseSensitive: boolean }) => Promise<DirtyBarrierHandle>;
   inspectDirtyBuffers(workspaceId: string): Promise<DirtyBufferPublication[]>;
   inspectWorkspace(workspaceId: string): Promise<{ root: string; workspaceId: string }>;
   listWorkspaceRegistrations(): Promise<WorkspaceRegistration[]>;
   runResourceOperation?<T>(workspaceId: string, resources: readonly HostResourceOperation[], operation: () => Promise<T>): Promise<T>;
+  requestSurfaceOperation?(request: DocumentSurfaceOperationRequest): Promise<DocumentSurfaceOperationResult[]>;
 }
 interface NavigationPrepared {
   journalTurns?: Array<{ workspaceId: string; executionId: string; restore: boolean }>;
@@ -198,7 +209,7 @@ export interface WorkspaceRecoveryEngine {
   dispose(): Promise<void>;
 }
 
-interface RecoveryTargetStates { sources?: Array<{path:string;target:RecoveryFileTarget}>; expected: RecoveryState; target: RecoveryState; resourcePath?: string; fileTarget?: RecoveryFileTarget }
+interface RecoveryTargetStates { sources?: Array<{path:string;target:RecoveryFileTarget}>; expected: RecoveryState; target: CombinedRecoveryTarget; resourcePath?: string; fileTarget?: RecoveryFileTarget }
 type RecoveryTargets = Record<string, RecoveryTargetStates>;
 type OperationFilePhase = "pending" | "apply-intent" | "target-observed" | "compensate-intent" | "safety-observed" | "needs-attention";
 interface DurableFileRow { path: string; phase: OperationFilePhase; revision: number; safetyJson: string | null }
@@ -213,7 +224,7 @@ interface CombinedOperationRecord extends Record<string, unknown> {
   id: string;
   navigationMarkerId: string | null;
   plan: WorkspaceCombinedRecoveryPlan;
-  safety: Record<string, RecoveryState>;
+  safety: Record<string, CombinedRecoverySafety>;
   state: WorkspaceCombinedRecoveryOperationState;
   targets: RecoveryTargets;
   updatedAt: string;
@@ -233,13 +244,13 @@ const requireString = (value: unknown, label: string): string => {
   if (typeof value !== "string") throw new RecoveryPrimitiveError("storage-malformed", `${label} is malformed`, { origin: "storage" });
   return value;
 };
-const parseStateRecord = (value: unknown, label: string): Record<string, RecoveryState> => Object.fromEntries(
-  Object.entries(requireRecord(value, label)).map(([relativePath, state]) => [relativePath, parseRecoveryState(state)]),
+const parseStateRecord = (value: unknown, label: string): Record<string, CombinedRecoverySafety> => Object.fromEntries(
+  Object.entries(requireRecord(value, label)).map(([relativePath, state]) => [relativePath, parseCombinedSafety(state)]),
 );
 const parseTargets = (value: unknown): RecoveryTargets => Object.fromEntries(
   Object.entries(requireRecord(value, "Recovery operation targets")).map(([relativePath, raw]) => {
     const states = requireRecord(raw, `Recovery target ${relativePath}`);
-    return [relativePath, { expected: parseRecoveryState(states.expected), target: parseRecoveryState(states.target), ...(typeof states.resourcePath === "string" ? { resourcePath: states.resourcePath } : {}), ...(states.fileTarget ? { fileTarget: states.fileTarget as RecoveryFileTarget } : {}), ...(Array.isArray(states.sources) ? {sources:states.sources as Array<{path:string;target:RecoveryFileTarget}>} : {}) }];
+    return [relativePath, { expected: parseRecoveryState(states.expected), target: parseCombinedTarget(states.target), ...(typeof states.resourcePath === "string" ? { resourcePath: states.resourcePath } : {}), ...(states.fileTarget ? { fileTarget: states.fileTarget as RecoveryFileTarget } : {}), ...(Array.isArray(states.sources) ? {sources:states.sources as Array<{path:string;target:RecoveryFileTarget}>} : {}) }];
   }),
 );
 const parseCombined = (operation: Record<string, unknown>): CombinedOperationRecord => {
@@ -274,7 +285,7 @@ const parseCombined = (operation: Record<string, unknown>): CombinedOperationRec
   };
   for (const value of Array.isArray(operation.files) ? operation.files : []) {
     if (!isRecord(value) || typeof value.path !== "string") continue;
-    if (typeof value.safetyJson === "string") record.safety[value.path] = parseRecoveryState(JSON.parse(value.safetyJson) as unknown);
+    if (typeof value.safetyJson === "string") record.safety[value.path] = parseCombinedSafety(JSON.parse(value.safetyJson) as unknown);
     if ((value.phase === "target-observed" || value.phase === "compensate-intent") && !record.appliedPaths.includes(value.path)) record.appliedPaths.push(value.path);
   }
   return record;
@@ -339,6 +350,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
     sessionNavigation,
     resolveDirectoryApplyContext,
   } = options;
+  const surfaceRecovery = createSurfaceRecovery(fileStore, documents.requestSurfaceOperation?.bind(documents));
   const queues = new Map<string, Promise<unknown>>();
   const inFlight = new Set<Promise<unknown>>();
   const startupFailures = new Map<string, WorkspaceRecoveryFailure[]>();
@@ -352,18 +364,20 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
     return current;
   };
 
-  const runWorkspace = <T>(workspaceId: string, callback: () => Promise<T> | T): Promise<T> => {
-    const previous = queues.get(workspaceId) ?? Promise.resolve();
+  const runSerialized = <T>(key: string, callback: () => Promise<T> | T): Promise<T> => {
+    const previous = queues.get(key) ?? Promise.resolve();
     const current = previous.catch(() => undefined).then(async () => {
       if (disposed) throw new RecoveryPrimitiveError("unavailable", "Workspace recovery engine is disposed", { origin: "internal", retryable: true });
       return callback();
     });
-    queues.set(workspaceId, current);
+    queues.set(key, current);
     void current.finally(() => {
-      if (queues.get(workspaceId) === current) queues.delete(workspaceId);
+      if (queues.get(key) === current) queues.delete(key);
     }).catch(() => undefined);
     return current;
   };
+  const runWorkspace = <T>(workspaceId: string, callback: () => Promise<T> | T) => runSerialized(`metadata\0${workspaceId}`, callback);
+  const runOperation = <T>(operationId: string, callback: () => Promise<T> | T) => track(() => runSerialized(`operation\0${operationId}`, callback));
   const coordinateWorkspaceStorage: WorkspaceRecoveryEngine["coordinateWorkspaceStorage"] = (workspaceId, access, callback) => (
     access.mode === "shared" ? track(callback) : track(() => runWorkspace(workspaceId, callback))
   );
@@ -406,7 +420,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
   const applyTarget = async (identity: RecoveryIdentity, targets: RecoveryTargets, key: string, state: RecoveryState) => {
     const target = targets[key]!; const selected = targetIdentity(identity, target);
     await adoptState(identity.workspaceId,selected.workspaceId,state);
-    return fileStore.applyState(selected, selected.canonicalRoot, target.resourcePath ?? key, state);
+    return fileStore.applyState(selected, selected.canonicalRoot, target.resourcePath ?? key, parseRecoveryState(state));
   };
   const targetWorkspaces = async (identity: RecoveryIdentity, target: RecoveryTargetStates, key: string): Promise<Array<{workspaceId:string;path:string}>> => {
     const root = target.fileTarget?.kind === "physical" ? target.fileTarget.canonicalRoot : identity.canonicalRoot;
@@ -424,13 +438,22 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
     }
     return result.sort((a,b)=>a.workspaceId.localeCompare(b.workspaceId));
   };
-  const targetBarrier = async (identity: RecoveryIdentity, targets: RecoveryTargets): Promise<DirtyBarrierHandle> => {
+  const targetBarrier = async (identity: RecoveryIdentity, targets: RecoveryTargets): Promise<TargetBarrierHandle> => {
     const groups = new Map<string, string[]>();
     for (const [key, target] of Object.entries(targets)) for (const owner of await targetWorkspaces(identity,target,key)) groups.set(owner.workspaceId,[...(groups.get(owner.workspaceId)??[]),owner.path]);
     const barriers: DirtyBarrierHandle[] = [];
-    try { for (const [workspaceId, paths] of [...groups].sort(([a],[b])=>a.localeCompare(b))) barriers.push(await dirtyBarrier({ ...identity, workspaceId }, paths)); }
+    const byWorkspace = new Map<string, DirtyBarrierHandle>();
+    try { for (const [workspaceId, paths] of [...groups].sort(([a],[b])=>a.localeCompare(b))) {
+      const barrier = await dirtyBarrier({ ...identity, workspaceId }, paths);
+      barriers.push(barrier); byWorkspace.set(workspaceId, barrier);
+    } }
     catch (error) { await Promise.allSettled(barriers.map(value => value.release())); throw error; }
-    return { release: async () => { await Promise.all(barriers.map(value => value.release())); }, settle: async () => { await Promise.all(barriers.map(value => value.settle())); } };
+    return { release: async () => { await Promise.all(barriers.map(value => value.release())); }, settle: async () => { await Promise.all(barriers.map(value => value.settle())); },
+      barrierFor(workspaceId) {
+        const id = byWorkspace.get(workspaceId)?.barrierId;
+        if (!id) throw new RecoveryPrimitiveError('dirty-state-unavailable', 'The affected editor recovery barrier is unavailable', { origin: 'conflict', retryable: true });
+        return id;
+      } };
   };
   const gateTarget = (identity: RecoveryIdentity, targets: RecoveryTargets, key: string): HostResourceOperationGate => ({ run: async (_resources, callback) => {
     const target = targets[key]!; const selected = targetIdentity(identity, target); const resource = { resourceId: target.resourcePath ?? key, scope: "subtree" as const };
@@ -451,7 +474,10 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
           const publications = await documents.inspectDirtyBuffers(surface.workspaceId);
           return publications.flatMap(publication => publication.resources
             .filter(entry => key(normalizeResourceId(entry.resource.resourceId)) === key(surface.path))
-            .map(entry => ({ workspaceId:surface.workspaceId, baseRevision:entry.baseRevision, generation:publication.generation, localEditRevision:entry.localEditRevision, ownerId:publication.ownerId })));
+            .map(entry => ({ workspaceId:surface.workspaceId, baseRevision:entry.baseRevision, generation:publication.generation,
+              registrationId: publication.registrationId, documentInstanceId: entry.documentInstanceId, bufferHash: entry.bufferHash,
+              encoding: entry.encoding, bom: entry.bom, lineEnding: entry.lineEnding,
+              localEditRevision:entry.localEditRevision, ownerId:publication.ownerId })));
         }))).flat();
         if (owners.length > 0) {
           conflicts.push({
@@ -485,8 +511,6 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
       if (planned.length > 0 || current.length > 0) throw new RecoveryPrimitiveError("path-conflict", "Some affected files changed after the checkpoint", { origin: "conflict" });
       return;
     }
-    const dirty = [...planned, ...current].filter((value) => value.kind === "dirty-buffer").map((value) => value.path);
-    if (dirty.length > 0) throw new RecoveryPrimitiveError("dirty-buffers", "Unsaved editor changes must be saved or discarded before recovery", { details: { paths: [...new Set(dirty)] }, origin: "conflict" });
     const confirmed = new Map(input.confirmedConflicts.map((value) => [value.path, value]));
     if (confirmed.size !== input.confirmedConflicts.length) throw new RecoveryPrimitiveError("invalid-request", "Confirmed conflicts contain duplicate paths", { origin: "conflict" });
     const paths = new Set([...plannedByPath.keys(), ...currentByPath.keys(), ...confirmed.keys()]);
@@ -554,6 +578,50 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
     targets: record.targets,
     ...(record.plan.conversation.kind === "pi" ? { sessionId: record.plan.conversation.sessionId } : { threadId: record.plan.conversation.threadId }),
   });
+  const prepareSurfaceSafety = async (identity: RecoveryIdentity, record: CombinedOperationRecord, key: string, barrier: TargetBarrierHandle) => {
+    const target = record.targets[key]!;
+    const desired = new Map((target.target.surfaceTargets ?? []).map(value => [surfaceOwnerKey(value), value]));
+    const candidates = new Map<string, { owner: RecoverySurfaceOwner; binding: DocumentSurfaceBinding }>();
+    for (const surface of await targetWorkspaces(identity, target, key)) {
+      for (const publication of await documents.inspectDirtyBuffers(surface.workspaceId)) {
+        for (const entry of publication.resources) {
+          const same = process.platform === 'win32' ? entry.resource.resourceId.toLowerCase() === surface.path.toLowerCase() : entry.resource.resourceId === surface.path;
+          if (!same) continue;
+          if (!publication.registrationId || !entry.documentInstanceId || !entry.bufferHash || entry.encoding !== 'utf-8'
+            || typeof entry.bom !== 'boolean' || !entry.lineEnding) {
+            throw new RecoveryPrimitiveError('dirty-state-unavailable', 'The affected editor owner has no complete recovery binding', { origin: 'conflict', retryable: true });
+          }
+          const owner = { ownerId: publication.ownerId, generation: publication.generation,
+            registrationId: publication.registrationId, workspaceId: publication.workspaceId };
+          const binding: DocumentSurfaceBinding = { ...entry, resource: { ...entry.resource, workspaceId: publication.workspaceId },
+            documentInstanceId: entry.documentInstanceId, bufferHash: entry.bufferHash, encoding: entry.encoding,
+            bom: entry.bom, lineEnding: entry.lineEnding };
+          candidates.set(surfaceOwnerKey({ ...owner, binding }), { owner, binding });
+        }
+      }
+    }
+    // Undo must restore the original draft even when the forward recovery made
+    // that document clean, so it may no longer appear in dirty publications.
+    for (const [ownerKey, original] of desired) if (!candidates.has(ownerKey)) {
+      candidates.set(ownerKey, { owner: original, binding: original.binding });
+    }
+    if (!candidates.size) return;
+    const safety = record.safety[key]!;
+    safety.surfaces = [];
+    for (const [ownerKey, candidate] of candidates) {
+      const prepared = await surfaceRecovery.prepare(identity, record.id, barrier.barrierFor(candidate.owner.workspaceId),
+        candidate.owner, candidate.binding, target.target, desired.get(ownerKey)?.text);
+      try {
+        safety.surfaces.push(prepared.safety);
+        await transitionFile(record, key, 'apply-intent', { safety });
+      } finally { await prepared.release(); }
+    }
+  };
+  const saveSurfaceSafety = async (record: CombinedOperationRecord, key: string) => {
+    const row = rowsFor(await getOperation(record.workspaceId, record.id)).find(value => value.path === key);
+    if (!row) throw new RecoveryPrimitiveError('storage-malformed', 'Editor recovery path has no journal row', { origin: 'storage' });
+    await transitionFile(record, key, row.phase, { safety: record.safety[key]! });
+  };
   const findCombined = async (operationId: string): Promise<CombinedOperationRecord> => {
     let inspectionFailure: unknown;
     for (const registration of await documents.listWorkspaceRegistrations()) {
@@ -686,21 +754,27 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
     });
     return plan;
   };
-  const compensate = async (record: CombinedOperationRecord, identity: RecoveryIdentity, _root: string): Promise<void> => {
+  const compensate = async (record: CombinedOperationRecord, identity: RecoveryIdentity, _root: string, barrier: TargetBarrierHandle): Promise<void> => {
     record.state = "compensating-files";
     await persist(record);
     for (const row of rowsFor(await getOperation(record.plan.workspaceId, record.id)).reverse()) {
-      if (row.phase === "safety-observed" || row.phase === "pending" || row.phase === "apply-intent") continue;
+      if (row.phase === "safety-observed" || row.phase === "pending") continue;
       if (row.phase === "needs-attention") throw new RecoveryPrimitiveError("needs-attention", `File ${row.path} is in needs-attention state and blocks compensation`, { origin: "storage" });
-      if (row.phase !== "target-observed" && row.phase !== "compensate-intent") continue;
+      if (row.phase !== "target-observed" && row.phase !== "compensate-intent" && row.phase !== 'apply-intent') continue;
       await gateTarget(identity, record.targets, row.path).run([{ resourceId: row.path, scope: "subtree" }], async () => {
+        await barrier.settle();
         const current = (await captureTarget(identity, record.targets, row.path, false)).state;
-        if (!sameState(current, targetFor(record, row.path).target)) {
+        const atSafety = sameState(current, safetyFor(record, row.path));
+        if (!atSafety && !sameState(current, targetFor(record, row.path).target)) {
           await transitionFile(record, row.path, "needs-attention");
           throw new RecoveryPrimitiveError("needs-attention", `Cannot compensate a file changed after recovery: ${row.path}`, { origin: "storage" });
         }
         if (row.phase !== "compensate-intent") await transitionFile(record, row.path, "compensate-intent");
-        await applyTarget(identity, record.targets, row.path, safetyFor(record, row.path));
+        for (const surface of record.safety[row.path]?.surfaces ?? []) {
+          await surfaceRecovery.replace(identity, record.id, barrier.barrierFor(surface.workspaceId), surface,
+            'compensate', () => saveSurfaceSafety(record, row.path));
+        }
+        if (!atSafety) await applyTarget(identity, record.targets, row.path, safetyFor(record, row.path));
         const restored = (await captureTarget(identity, record.targets, row.path, false)).state;
         if (!sameState(restored, safetyFor(record, row.path))) {
           await transitionFile(record, row.path, "needs-attention");
@@ -725,7 +799,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
   const applyCombined = async (located: LocatedOperation, input: WorkspaceCombinedRecoveryApplyInput): Promise<WorkspaceCombinedRecoveryOperation> => {
     const { identity, root } = located;
     const record = parseCombined(await getOperation(identity.workspaceId, input.operationId));
-    let barrier: DirtyBarrierHandle | undefined;
+    let barrier: TargetBarrierHandle | undefined;
     try {
       if (record.plan.revision !== input.expectedRevision) throw new RecoveryPrimitiveError("stale-plan", "Recovery plan changed before it was applied", { origin: "conflict", retryable: true });
       if (TERMINAL_STATES.has(record.state)) return publicOperation(record);
@@ -738,7 +812,10 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
           const safety = (await captureTarget(identity, record.targets, relativePath, true)).state;
           record.safety[relativePath] = safety;
           await transitionFile(record, relativePath, "apply-intent", { safety });
+          await prepareSurfaceSafety(identity, record, relativePath, barrier);
         }
+        await barrier.settle();
+        validateConflicts(record.plan.conflicts, await conflictsFor(identity, root, record.targets), input);
         record.state = "applying-files";
         await persist(record);
       }
@@ -764,6 +841,11 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
               await transitionFile(record, row.path, "needs-attention");
               throw new RecoveryPrimitiveError("needs-attention", `Restored file did not match its checkpoint: ${row.path}`, { origin: "storage" });
             }
+            if (!record.appliedPaths.includes(row.path)) record.appliedPaths.push(row.path);
+            for (const surface of record.safety[row.path]?.surfaces ?? []) {
+              await surfaceRecovery.replace(identity, record.id, barrier!.barrierFor(surface.workspaceId), surface,
+                'apply', () => saveSurfaceSafety(record, row.path));
+            }
             await transitionFile(record, row.path, "target-observed");
           });
           if (!record.appliedPaths.includes(row.path)) record.appliedPaths.push(row.path);
@@ -775,7 +857,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
       } catch (error) {
         if (record.appliedPaths.length > 0) {
           try {
-            await compensate(record, identity, root);
+            await compensate(record, identity, root, barrier);
           } catch (compensationError) {
             record.failure = recoveryFailure(compensationError, "needs-attention");
             record.fileState = "needs-attention";
@@ -798,7 +880,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
         await navigate(record);
       } catch (error) {
         record.failure = recoveryFailure(error, "navigation-conflict");
-        if (error instanceof RecoveryPrimitiveError && error.code === "navigation-conflict" && !error.retryable) { await compensate(record, identity, root); throw error; }
+        if (error instanceof RecoveryPrimitiveError && error.code === "navigation-conflict" && !error.retryable) { await compensate(record, identity, root, barrier); throw error; }
         record.state = "navigating-conversation";
         await persist(record);
         throw new RecoveryPrimitiveError("navigation-conflict", error instanceof Error ? error.message : "Conversation navigation failed", { cause: error, operationId: record.id, origin: "navigation" });
@@ -820,7 +902,14 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
     const targets: RecoveryTargets = {};
     for (const relativePath of original.plan.affectedPaths) {
       const originalStates = targetFor(original, relativePath);
-      targets[relativePath] = { ...originalStates, expected: originalStates.target, target: safetyFor(original, relativePath) };
+      const surfaces = original.safety[relativePath]?.surfaces ?? [];
+      const surfaceTargets: RecoverySurfaceTarget[] = surfaces.map(surface => {
+        if (surface.phase !== 'applied' || !surface.appliedBinding) throw new RecoveryPrimitiveError('needs-attention', 'The original editor restore is not confirmed', { origin: 'storage' });
+        return { ownerId: surface.ownerId, generation: surface.generation, registrationId: surface.registrationId,
+          workspaceId: surface.workspaceId, binding: surface.appliedBinding, text: surface.text };
+      });
+      targets[relativePath] = { ...originalStates, expected: parseRecoveryState(originalStates.target),
+        target: { ...parseRecoveryState(safetyFor(original, relativePath)), ...(surfaceTargets.length ? { surfaceTargets } : {}) } };
     }
     const id = randomUUID();
     const createdAt = new Date().toISOString();
@@ -871,18 +960,23 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
   const reconcileCombined = async (workspaceId: string, identity: RecoveryIdentity, stored: Record<string, unknown>): Promise<WorkspaceCombinedRecoveryOperation | null> => {
     const record = parseCombined(stored);
     if (record.state === "planned" || TERMINAL_STATES.has(record.state)) return null;
+    let barrier: TargetBarrierHandle | undefined;
     try {
+      barrier = await targetBarrier(identity, record.targets);
       if (record.state === "files-restored" || record.state === "navigating-conversation") {
         const rows = rowsFor(stored);
         if (rows.some((row) => row.phase !== "target-observed" && row.phase !== "safety-observed")) {
           throw new RecoveryPrimitiveError("needs-attention", "Conversation recovery reached navigation with unresolved file phases", { origin: "storage" });
+        }
+        if (Object.values(record.safety).some(safety => safety.surfaces?.some(surface => surface.phase !== 'applied'))) {
+          throw new RecoveryPrimitiveError('needs-attention', 'Conversation recovery has an unconfirmed editor restore', { origin: 'storage' });
         }
         if (record.state === "files-restored") {
           record.state = "navigating-conversation";
           await persist(record);
         }
         try { await navigate(record); } catch (error) {
-          if (error instanceof RecoveryPrimitiveError && error.code === "navigation-conflict" && !error.retryable) { record.failure = recoveryFailure(error); await compensate(record, identity, identity.canonicalRoot); return publicOperation(record); }
+          if (error instanceof RecoveryPrimitiveError && error.code === "navigation-conflict" && !error.retryable) { record.failure = recoveryFailure(error); await compensate(record, identity, identity.canonicalRoot, barrier); return publicOperation(record); }
           throw error;
         }
         record.failure = null;
@@ -894,10 +988,15 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
       const phases: OperationFilePhase[] = [];
       for (const row of rowsFor(stored)) {
         let phase = row.phase;
+        for (const surface of record.safety[row.path]?.surfaces ?? []) {
+          await surfaceRecovery.observe(record.id, barrier.barrierFor(surface.workspaceId), surface);
+        }
+        if (record.safety[row.path]?.surfaces?.length) await saveSurfaceSafety(record, row.path);
+        const surfaceApplied = record.safety[row.path]?.surfaces?.some(surface => surface.phase === 'applied') ?? false;
         if (row.phase === "apply-intent" || row.phase === "compensate-intent") {
           const current = (await captureTarget(identity, record.targets, row.path, false)).state;
           if (row.phase === "apply-intent") {
-            if (sameState(current, targetFor(record, row.path).target)) {
+            if (sameState(current, targetFor(record, row.path).target) || (surfaceApplied && sameState(current, safetyFor(record, row.path)))) {
               await transitionFile(record, row.path, "target-observed");
               phase = "target-observed";
               if (!record.appliedPaths.includes(row.path)) record.appliedPaths.push(row.path);
@@ -905,10 +1004,10 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
               await transitionFile(record, row.path, "needs-attention");
               phase = "needs-attention";
             }
-          } else if (sameState(current, safetyFor(record, row.path))) {
+          } else if (sameState(current, safetyFor(record, row.path)) && !surfaceApplied) {
             await transitionFile(record, row.path, "safety-observed");
             phase = "safety-observed";
-          } else if (!sameState(current, targetFor(record, row.path).target)) {
+          } else if (!sameState(current, targetFor(record, row.path).target) && !sameState(current, safetyFor(record, row.path))) {
             await transitionFile(record, row.path, "needs-attention");
             phase = "needs-attention";
           }
@@ -921,7 +1020,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
         record.state = "needs-attention";
         await persist(record);
       } else if (phases.includes("compensate-intent") || phases.includes("target-observed")) {
-        await compensate(record, identity, identity.canonicalRoot);
+        await compensate(record, identity, identity.canonicalRoot, barrier);
       } else if (phases.includes("safety-observed")) {
         record.fileState = "compensated";
         record.state = "compensated";
@@ -935,6 +1034,8 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
       if (error instanceof RecoveryPrimitiveError && error.code === "navigation-conflict" && error.retryable) { record.state = "navigating-conversation"; }
       else { record.fileState = "needs-attention"; record.state = "needs-attention"; }
       await persist(record).catch(() => undefined);
+    } finally {
+      await barrier?.release();
     }
     return publicOperation(record);
   };
@@ -942,15 +1043,15 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
   const resume = async (): Promise<WorkspaceCombinedRecoveryOperation[]> => {
     const output: WorkspaceCombinedRecoveryOperation[] = [];
     for (const registration of await documents.listWorkspaceRegistrations()) {
-      await runWorkspace(registration.workspaceId, async () => {
+      await track(() => runSerialized(`resume\0${registration.workspaceId}`, async () => {
         const identity = await identityFor(registration.workspaceId);
         for (const summary of await durable.listOperations(registration.workspaceId, "combined")) {
           if (TERMINAL_STATES.has(String(summary.state)) || summary.state === "planned") continue;
           const candidate = await durable.getOperation(registration.workspaceId, requireString(summary.operationId, "Recovery operation id"));
           if (candidate && sessionNavigation.ready?.(parseCombined(candidate).plan.conversation) === false) continue;
           const operationId = requireString(summary.operationId, "Recovery operation id");
-          const stored = await getOperation(registration.workspaceId, operationId);
-          const reconciled = await reconcileCombined(registration.workspaceId, identity, stored);
+          const reconciled = await runOperation(operationId, async () => reconcileCombined(registration.workspaceId, identity,
+            await getOperation(registration.workspaceId, operationId)));
           if (reconciled) output.push(reconciled);
         }
         const context: DurableFileOperationContext = {
@@ -969,7 +1070,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
           failures.push(recoveryFailure(new RecoveryPrimitiveError("needs-attention", `Agent surface mutation recovery requires attention (${mutations.needsAttention.join(", ")})`, { operationId: mutations.needsAttention[0], origin: "storage" }), "needs-attention"));
           startupFailures.set(registration.workspaceId, failures);
         }
-      }).catch((error) => {
+      })).catch((error) => {
         const failures = startupFailures.get(registration.workspaceId) ?? [];
         failures.push(recoveryFailure(error, "needs-attention"));
         startupFailures.set(registration.workspaceId, failures);
@@ -1016,16 +1117,18 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
   return {
     applyCombinedRecovery: (input) => safe(async () => {
       const located = await locate(input.operationId);
-      return { operation: await runWorkspace(located.identity.workspaceId, () => applyCombined(located, input)), status: "ready" };
+      return { operation: await runOperation(input.operationId, () => applyCombined(located, input)), status: "ready" };
     }),
     cancelCombinedOperation: (operationId) => safe(async () => {
       const located = await locate(operationId);
-      const record = parseCombined(await getOperation(located.identity.workspaceId, operationId));
-      if (record.state === "planned") {
-        record.state = "aborted";
-        await persist(record);
-      }
-      return { operation: publicOperation(record), status: "ready" };
+      return runOperation(operationId, async () => {
+        const record = parseCombined(await getOperation(located.identity.workspaceId, operationId));
+        if (record.state === "planned") {
+          record.state = "aborted";
+          await persist(record);
+        }
+        return { operation: publicOperation(record), status: "ready" as const };
+      });
     }),
     clearStorageLocationOverride: async () => unavailable("Rust recovery storage has no workspace location override"),
     cleanupStorage: (input) => safe(async () => {
@@ -1094,10 +1197,9 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
       }));
       return { status: "ready", workspaces: workspaces.filter((workspace) => workspace !== null) };
     }),
-    prepareCombinedRecovery: (input) => safe(async () => ({ plan: await runWorkspace(input.workspaceId, () => prepareCombined(input)), status: "ready" })),
+    prepareCombinedRecovery: (input) => safe(async () => ({ plan: await track(() => prepareCombined(input)), status: "ready" })),
     prepareCombinedUndo: (operationId) => safe(async () => {
-      const located = await locate(operationId);
-      return { plan: await runWorkspace(located.identity.workspaceId, () => prepareUndo(operationId)), status: "ready" };
+      return { plan: await runOperation(operationId, () => prepareUndo(operationId)), status: "ready" };
     }),
     recordMutationAfter: (input) => safe(async () => ({ recorded: await durable.recordMutationAfter(input), status: "ready" })),
     recordMutationBefore: (input) => safe(async () => ({ recorded: await durable.recordMutationBefore(input), status: "ready" })),

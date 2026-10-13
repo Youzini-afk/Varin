@@ -202,6 +202,50 @@ impl Storage {
         Ok(())
     }
 
+    /// Combined recovery keeps editor safety beside its disk state. Host Documents
+    /// owns the editor binding contract; Storage owns every attached content root.
+    fn require_operation_state_references(
+        state: &Value,
+        label: &str,
+        references: &[(String, String, Option<String>)],
+        operation_kind: &str,
+    ) -> Result<(), KernelError> {
+        if operation_kind != "combined" {
+            return Self::require_recovery_state_reference(state, label, references);
+        }
+        let mut disk = state.clone();
+        let attachment_key = match label {
+            "safetyJson" => "surfaces",
+            "targetJson" => "surfaceTargets",
+            _ => return Self::require_recovery_state_reference(state, label, references),
+        };
+        let attachments = disk.as_object_mut().and_then(|object| object.remove(attachment_key));
+        Self::require_recovery_state_reference(&disk, label, references)?;
+        fn visit(value: &Value, label: &str, references: &[(String, String, Option<String>)]) -> Result<(), KernelError> {
+            match value {
+                Value::Object(object) if object.contains_key("objectHash") => {
+                    Storage::require_recovery_state_reference(value, label, references)
+                }
+                Value::Object(object) => {
+                    for child in object.values() { visit(child, label, references)?; }
+                    Ok(())
+                }
+                Value::Array(values) => {
+                    for child in values { visit(child, label, references)?; }
+                    Ok(())
+                }
+                _ => Ok(()),
+            }
+        }
+        if let Some(attachments) = attachments {
+            if !attachments.is_array() {
+                return Err(KernelError::Operation(format!("{label}.{attachment_key} must be an array")));
+            }
+            visit(&attachments, label, references)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn recovery_json_object(
         params_value: &Value,
         field: &str,
@@ -1206,7 +1250,7 @@ impl Storage {
                 for field in ["expectedJson", "targetJson", "safetyJson"] {
                     if let Some(raw) = file.get(field).and_then(Value::as_str) {
                         let value = serde_json::from_str::<Value>(raw)?;
-                        Self::require_recovery_state_reference(&value, field, &normalized)?;
+                        Self::require_operation_state_references(&value, field, &normalized, kind)?;
                     }
                 }
                 let phase = file
@@ -1300,12 +1344,12 @@ impl Storage {
                 )
             })
             .ok_or_else(|| KernelError::Operation("operation file phase is invalid".to_string()))?;
-        let owner: Option<(Option<String>, Option<String>, Option<String>)> = self.conn.query_row(
-            "SELECT session_id, thread_id, run_id FROM recovery_operations WHERE workspace_id = ?1 AND operation_id = ?2",
+        let owner: Option<(Option<String>, Option<String>, Option<String>, String)> = self.conn.query_row(
+            "SELECT session_id, thread_id, run_id, kind FROM recovery_operations WHERE workspace_id = ?1 AND operation_id = ?2",
             params![workspace_id, operation_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         ).optional()?;
-        let Some((session_id, thread_id, run_id)) = owner else {
+        let Some((session_id, thread_id, run_id, operation_kind)) = owner else {
             return Err(KernelError::Operation(
                 "recovery operation is not found".to_string(),
             ));
@@ -1339,7 +1383,7 @@ impl Storage {
                 let refs = normalized.as_ref().ok_or_else(|| {
                     KernelError::Operation(format!("{field} update requires references"))
                 })?;
-                Self::require_recovery_state_reference(&value, field, refs)?;
+                Self::require_operation_state_references(&value, field, refs, &operation_kind)?;
             }
         }
         recovery_fault("file-phase-cas")?;

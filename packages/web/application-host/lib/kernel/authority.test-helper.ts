@@ -53,7 +53,7 @@ export async function createAuthorityTestRuntime(options: {
   const engine = createKernelRecoveryDirectFacade(base, recovery);
   const workingStates = createKernelWorkspaceWorkingStateAccess(adapter, engine, recovery);
   options.documents.bindDurableMutationStorage((id, operation) => engine.withWorkspaceStorage(
-    id, { mode: "exclusive", purpose: "document-mutation", create: true }, operation,
+    id, { mode: "shared", purpose: "document-mutation", create: true }, operation,
   ));
   return {
     client, adapter, backend, content, recovery, engine, workingStates, storageRoot,
