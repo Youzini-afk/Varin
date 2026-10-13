@@ -1,5 +1,5 @@
 import { ComputerError } from './computer-error.js';
-import { sameComputerWork, sameComputerExecution, type ComputerWorkRef, type ComputerExecutionRef, type ComputerWorkScope } from '@varin/protocol';
+import { parseComputerWorkRef, sameComputerWork, sameComputerExecution, type ComputerWorkRef, type ComputerExecutionRef, type ComputerWorkScope } from '@varin/protocol';
 import { decodeComputerRuntime, type ComputerPhysicalControl, type PendingComputerControlEvent, type PendingComputerControlCancellation, type ComputerInterrupted } from './computer-records.js';
 /**
  * BC4 Computer Use service.
@@ -37,6 +37,7 @@ import type {
   ComputerDesktopStopResult,
   ComputerDesktopFrame,
   ComputerDesktopPrepareParams,
+  ComputerDesktopChangeResult,
   ComputerElement,
   ComputerHumanInput,
   ComputerInputResult,
@@ -75,7 +76,7 @@ import { createLibvirtProvider } from "./libvirt-provider.js";
 import { createDesktopDriverPool } from "./desktop-drivers.js";
 import { createComputerEvidence } from "./computer-evidence.js";
 import { createComputerAutomation } from './computer-automation.js';
-import { createLinuxDesktop, LinuxSoftwareError, type LinuxDesktopState, type LinuxSoftwareResult } from "./linux-desktop.js";
+import { createLinuxDesktop, LinuxDesktopChangeError, LinuxSoftwareError, type LinuxDesktopState, type LinuxSoftwareResult } from "./linux-desktop.js";
 import { inspectDesktopFile, openDesktopFile, writeDesktopFile, DesktopFileWriteError, type DesktopArtifactVersion } from "./desktop-artifact-files.js";
 import { prepareVmGuestSeed } from "./vm-guest-seed.js";
 import { resolveDebianCloudImage, downloadDebianCloudImage } from "./vm-guest-image.js";
@@ -461,8 +462,8 @@ export interface ComputerServiceOptions {
   registerVmGuest?: (input: { connectionId: string; label: string; apiUrl: string; password: string;
     hostId: string }) => Promise<void>;
   removeVmGuest?: (connectionId: string) => Promise<void>;
-  /** Resolve the real durable work owning a Pi session. */
-  resolveWork?: (sessionId: string) => Promise<{ scopeId: string; threadId: string } | null>;
+  /** Resolve the actual durable work owner; never synthesize a Pi Registry identity. */
+  resolveWork?: (work: ComputerWorkRef) => Promise<{ scopeId: string; threadId: string } | null>;
   /** Deliver an idempotent work continuation through the existing Thread ledger. */
   onControlEvent?: (event: PendingControlEvent) => Promise<void>;
   onControlEventCancel?: (command: PendingComputerControlCancellation) => Promise<void>;
@@ -510,6 +511,13 @@ const hasExecutionEvidence = (value: unknown): value is ComputerExecutionEvidenc
   && typeof value.inputWriterStopped === 'boolean' && isObject(value.receipt)
   && ['none', 'dispatched', 'partial', 'verified', 'unknown'].includes(String(value.receipt.effect));
 
+export interface ComputerDesktopDispatch {
+  automated?: boolean;
+  desktopId?: string;
+  automationEpoch?: string;
+  signal?: AbortSignal;
+}
+
 export interface ComputerService {
   /** The existing physical owner generation, never a replacement runtime identity. */
   controlOwnerEpoch: string;
@@ -520,14 +528,15 @@ export interface ComputerService {
   claimDesktop(origin: string, assignmentId: string, actor: ComputerActor, desktopId: string, access: ComputerAccess): Promise<string>;
   dropDesktopClaim(origin: string, assignmentId: string, actor: ComputerActor, desktopId: string, access: ComputerAccess): Promise<void>;
   activities(sessionId?: string): ComputerActivityEntry[];
-  prepareDesktop(params: ComputerDesktopPrepareParams, automation?: boolean): Promise<ComputerDesktop>;
-  desktopLifecycle(desktopId: string, action: "start" | "stop", automation?: boolean): Promise<ComputerDesktop>;
+  preparationTarget(connectionId?: string): Promise<ComputerDesktop>;
+  prepareDesktop(params: ComputerDesktopPrepareParams, dispatch?: ComputerDesktopDispatch): Promise<ComputerDesktopChangeResult>;
+  desktopLifecycle(desktopId: string, action: "start" | "stop", dispatch?: ComputerDesktopDispatch): Promise<ComputerDesktopChangeResult>;
   mediaTarget(desktopId: string): Promise<{ socketPath: string } | { url: string; headers: Record<string, string> }>;
   list(options?: { localOnly?: boolean }): Promise<ComputerListResult>;
   workDesktops(scopeId: string): Promise<ComputerDesktop[]>;
   reconcileControlEvents(): Promise<void>;
   inspectArtifact(desktopId: string, relativePath: string): Promise<DesktopArtifactVersion>;
-  registerArtifact(sessionId: string, desktopId: string | undefined, relativePath: string): Promise<ComputerArtifact>;
+  registerArtifact(work: ComputerWorkRef, desktopId: string | undefined, relativePath: string): Promise<ComputerArtifact>;
   listArtifacts(scopeId: string): Promise<ComputerArtifact[]>;
   openDesktopArtifact(desktopId: string, relativePath: string, sha256: string): Promise<{ stream: Readable; cancel(): void }>;
   openArtifact(id: string): Promise<{ artifact: ComputerArtifact; stream: Readable; cancel(): void }>;
@@ -786,7 +795,11 @@ export function createComputerService(options: ComputerServiceOptions): Computer
    */
   const usageOrder = new Map<string, number>();
   const recordUsage = async (desktopId: string, sessionId: string | undefined): Promise<void> => {
-    const actor = automation.context.getStore()?.actor ?? (sessionId ? await options.resolveActor?.({ runtime: 'pi', sessionId }) : null);
+    const admission = automation.context.getStore();
+    // Peer work belongs to the source Host's catalog mirror. Its actor still appears in
+    // the target's control/evidence projections, but cannot alias a target-local Thread.
+    if (admission?.lease && automation.delegation(admission.lease)) return;
+    const actor = admission?.actor ?? (sessionId ? await options.resolveActor?.({ runtime: 'pi', sessionId }) : null);
     if (!actor) return;
     const order = (usageOrder.get(desktopId) ?? 0) + 1; usageOrder.set(desktopId, order);
     const client = await scoped();
@@ -830,7 +843,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     open: ['open'], fileWrite: ['fileWrite'], installSoftware: ['install'],
     browser: ['status', 'launch', 'tabs', 'snapshot', 'act'],
     office: ['status', 'launch', 'docs', 'open', 'act'],
-    control: ['takeover', 'handback', 'cancel', 'release'],
+    control: ['takeover', 'handback', 'cancel', 'release', 'prepare', 'start', 'stop'],
   };
 
   const journalOutcomeOf = (result: unknown): ComputerEvidenceEntry["outcome"] => {
@@ -1622,8 +1635,17 @@ export function createComputerService(options: ComputerServiceOptions): Computer
 
   const workDesktops: ComputerService["workDesktops"] = async (scopeId) => {
     await ensureLocal();
-    return (await listRecords("computer.desktop")).map(parseDesktop)
-      .filter((desktop): desktop is ComputerDesktop => desktop !== null && desktop.work?.some((work) => work.registry?.scopeId === scopeId) === true);
+    const matches = new Map<string, Promise<boolean>>();
+    const owns = (work: ComputerWorkRef) => {
+      const key = JSON.stringify(work);
+      let result = matches.get(key);
+      if (!result) { result = Promise.resolve(options.resolveWork?.(work)).then(owner => owner?.scopeId === scopeId); matches.set(key, result); }
+      return result;
+    };
+    const desktops = (await listRecords('computer.desktop')).map(parseDesktop).filter((desktop): desktop is ComputerDesktop => desktop !== null);
+    const results = await Promise.all(desktops.map(async desktop => ({ desktop, included: (await Promise.all((desktop.work ?? []).map(association =>
+      association.work.runtime === 'pi' ? association.registry?.scopeId === scopeId : owns(association.work)))).some(Boolean) })));
+    return results.filter(result => result.included).map(result => result.desktop);
   };
 
   const targetFile = options.dataDir ? join(options.dataDir, "computer-target.json") : null;
@@ -3054,63 +3076,146 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       });
     return parseDesktop(record)!;
   };
-  const prepareDesktop: ComputerService["prepareDesktop"] = async (params, automation = false) => {
-    if (params.connectionId) {
-      const connection = (await remoteConnections()).find((connection) => connection.id === params.connectionId);
-      if (!connection) throw new HarnessServiceError("not-found", "Unknown Host connection");
-      const result = await remoteJson<{ desktop: ComputerDesktop }>(connection, "POST", "/api/computers/desktops/prepare", {
-        automation,
-        ...(params.width !== undefined ? { width: params.width } : {}), ...(params.height !== undefined ? { height: params.height } : {}),
-      });
+  /** Resolve the actual managed-session catalog identity without preparing or starting it. */
+  const preparationTarget: ComputerService['preparationTarget'] = async (connectionId) => {
+    if (connectionId) {
+      const connection = (await remoteConnections()).find(entry => entry.id === connectionId);
+      if (!connection) throw new HarnessServiceError('not-found', 'Unknown Host connection');
+      const prepared = await remoteJson<{ desktop: ComputerDesktop; hostId: string }>(connection, 'POST', '/api/computers/desktops/prepare-target');
+      if (!asString(prepared.hostId) || !prepared.desktop?.id || prepared.desktop.managed !== 'linux-xvnc') throw new RemoteTransportError('Host returned no managed desktop preparation target');
       await syncRemote(true);
-      const mirrored = (await listRecords("computer.desktop")).map(parseDesktop).find((desktop) =>
-        desktop?.remote?.connectionId === params.connectionId && desktop?.remote?.desktopId === result.desktop.id);
-      if (!mirrored) throw new HarnessServiceError("unavailable", "Prepared desktop could not be rediscovered");
+      const mirrored = (await listRecords('computer.desktop')).map(parseDesktop).find(desktop =>
+        desktop?.remote?.connectionId === connectionId && desktop.remote.desktopId === prepared.desktop.id && desktop.remote.hostId === prepared.hostId);
+      if (!mirrored) throw new HarnessServiceError('unavailable', 'Managed desktop preparation target could not be rediscovered');
       return mirrored;
     }
-    const desktop = await refreshManagedDesktop(await linuxDesktop.change("prepare", params));
-    if (!desktop) throw new HarnessServiceError("unavailable", "Desktop preparation did not finish");
-    await replaceDesktopRuntime(desktop.id, async () => {}, automation);
-    return probe(desktop.id);
+    if (platform !== 'linux') throw new HarnessServiceError('unavailable', 'Persistent Linux desktops must be prepared on a Linux Host');
+    const state = await linuxDesktop.status();
+    const current = await refreshManagedDesktop(state);
+    if (current) return current;
+    await ensureLocal();
+    const previous = await (await scoped()).getRecord(COMPUTER_CATALOG_WORKSPACE_ID, 'computer.desktop:managed-linux');
+    const record = await putRecord('computer.desktop:managed-linux', 'computer.desktop', 'unavailable', {
+      ...(previous ? JSON.parse(previous.payloadJson) as Record<string, unknown> : {}),
+      id: 'managed-linux', machineId: LOCAL_MACHINE_ID, label: 'Persistent Linux desktop', kind: 'virtual-display',
+      managed: 'linux-xvnc', statusDetail: state.detail ?? 'unprepared',
+    });
+    return parseDesktop(record)!;
   };
-  const replaceDesktopRuntime = async (id: string, change: () => Promise<void>, automation = false) => {
-    await desktopRecord(id);
-    const lane = laneFor(id);
-    if (automation && lane.control.owner === "human") throw new HarnessServiceError("forbidden", "A human currently controls this desktop");
-    if (lane.transitioning) throw new HarnessServiceError("forbidden", "Desktop control is already changing");
-    lane.transitioning = true; lane.generation += 1; lane.needsObservation = true;
-    const pending = lane.queue.filter((op) => op.kind !== "observe");
-    lane.queue = lane.queue.filter((op) => op.kind === "observe");
-    for (const op of pending) op.cancel();
-    clearObservations(id); broadcastControl(id);
-    try {
-      await cancel(id);
-      await change();
-      await driverPool.reset(id);
-    } finally { lane.transitioning = false; broadcastControl(id); }
-  };
-  const desktopLifecycle: ComputerService["desktopLifecycle"] = async (id, action, automated = false) => {
-    if (action !== "start" && action !== "stop") throw new HarnessServiceError("invalid-params", "Unknown desktop lifecycle action");
+  const changeDesktop = async (id: string, action: 'prepare' | 'start' | 'stop', dimensions: ComputerDesktopPrepareParams,
+    dispatch: ComputerDesktopDispatch): Promise<ComputerDesktopChangeResult> => {
+    dispatch.signal?.throwIfAborted();
+    const { desktop } = await desktopRecord(id);
+    if (desktop.managed !== 'linux-xvnc') throw new HarnessServiceError('invalid-params', 'This desktop is not a managed graphical session');
+    const automated = dispatch.automated === true || Boolean(automation.context.getStore());
+    const admission = automation.context.getStore();
+    if (automated && (!admission?.lease || admission.lease.desktopId !== id || admission.lease.access !== 'control')) {
+      throw new HarnessServiceError('forbidden', 'Desktop lifecycle requires its original control assignment');
+    }
+    admission?.assert();
     const remote = await remoteTargetFor(id);
     if (remote) {
-      await remoteJson(remote.connection, "POST", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/lifecycle`, { action, automation: automated });
-      await syncRemote(true); return (await desktopRecord(id)).desktop;
-    }
-    const { desktop } = await desktopRecord(id);
-    if (desktop.managed !== "linux-xvnc") throw new HarnessServiceError("invalid-params", "This desktop is not a managed graphical session");
-    let updated: ComputerDesktop | null = null;
-    await replaceDesktopRuntime(id, async () => {
-      const actual = await linuxDesktop.change(action);
-      updated = await refreshManagedDesktop(actual);
-      if (action === 'stop' && actual.state === 'stopped') {
-        const lane = laneFor(id);
-        if (lane.physicalControl) await persistPhysicalControl(id, lane.physicalControl, undefined);
-        lane.inputReleaseUnconfirmed = false;
-        automation.resetDesktop(id);
+      try {
+        await recordUsage(id, undefined).catch(() => undefined);
+        const value = await remoteJson<ComputerDesktopChangeResult>(remote.connection, 'POST',
+          `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/${action === 'prepare' ? 'prepare' : 'lifecycle'}`,
+          { action, automation: automated, automationEpoch: dispatch.automationEpoch,
+            ...(dimensions.width === undefined ? {} : { width: dimensions.width }), ...(dimensions.height === undefined ? {} : { height: dimensions.height }) }, dispatch.signal);
+        if (!value.desktop || value.desktop.id !== remote.remoteId || !hasExecutionEvidence(value)) throw new RemoteTransportError('Remote Host returned no valid desktop lifecycle receipt');
+        let assignmentReleases: ComputerDesktopChangeResult['assignmentReleases'];
+        if (action === 'stop' && value.desktop.status === 'stopped' && value.inputWriterStopped && value.receipt.effect === 'verified' && admission?.lease) {
+          // The target reports the exact original assignments it actually ended, including
+          // observers admitted while this stop was pending. Later grants remain untouched.
+          const ended = value.endedAssignments;
+          if (!ended || ended.origin !== origin || !Array.isArray(ended.assignmentIds) || !ended.assignmentIds.every(asString)) {
+            assignmentReleases = [{ assignmentId: admission.lease.id, confirmed: false, detail: 'The target stopped, but its original assignment-release identities are unavailable; reconcile the existing assignments before using them again' }];
+          } else assignmentReleases = await Promise.all([...new Set(ended.assignmentIds)].map(async assignmentId => {
+            const claim = remoteClaims.get(assignmentId);
+            if (!claim || claim.target.remoteId !== remote.remoteId || claim.target.desktop.remote?.hostId !== remote.desktop.remote?.hostId || claim.target.connection.id !== remote.connection.id) {
+              return { assignmentId, confirmed: automation.assignmentState(assignmentId) === 'released' };
+            }
+            try { await automation.releaseRequest(assignmentId); return { assignmentId, confirmed: true }; }
+            catch (error) { return { assignmentId, confirmed: false, detail: error instanceof Error ? error.message : String(error) }; }
+          }));
+        }
+        // Receipt truth survives a failed catalog refresh. No second desktop mutation is attempted.
+        try { await automation.context.exit(() => syncRemote(true)); } catch { /* the original receipt is still authoritative */ }
+        const projected = (await desktopRecord(id)).desktop;
+        return { ...value, ...(assignmentReleases ? { assignmentReleases } : {}), desktop: { ...projected, status: value.desktop.status,
+          ...(value.desktop.statusDetail ? { statusDetail: value.desktop.statusDetail } : {}) } };
+      } catch (error) {
+        if (error instanceof ComputerBeforeDispatchError || error instanceof ComputerEffectError) throw error;
+        throw new ComputerEffectError(error, false);
       }
-    }, automated);
-    if (!updated) throw new HarnessServiceError("unavailable", "Desktop configuration is unavailable");
-    return action === "start" ? probe(id) : updated;
+    }
+    const lane = laneFor(id);
+    if (automated) assertAutomation(id, lane.generation, dispatch.automationEpoch);
+    if (lane.transitioning) throw new HarnessServiceError('forbidden', 'Desktop control is already changing');
+    lane.transitioning = true; lane.generation += 1; lane.needsObservation = true;
+    const pending = lane.queue.filter(op => op.kind !== 'observe');
+    lane.queue = lane.queue.filter(op => op.kind === 'observe');
+    for (const op of pending) op.cancel();
+    clearObservations(id); broadcastControl(id);
+    let helperEntered = false, helperStopped = false;
+    let endedAssignments: ComputerDesktopChangeResult['endedAssignments'];
+    const peer = admission?.lease ? automation.delegation(admission.lease) : undefined;
+    try {
+      const cancelGeneration = lane.generation + 1;
+      const released = await cancelImpl(id);
+      if (lane.generation !== cancelGeneration) throw new CancelledActionError();
+      if (!released.released && action !== 'stop') throw new HarnessServiceError('unavailable', 'The previous input owner has not confirmed release; stop the original desktop before starting another session');
+      const generation = lane.generation;
+      const updated = await enqueue(id, 'action', async () => {
+        dispatch.signal?.throwIfAborted(); admission?.assert();
+        if (generation !== lane.generation) throw new CancelledActionError();
+        // The original lane remains occupied until this exact helper exits. Cancellation
+        // cannot turn an observer rejection into a completed desktop transition.
+        await recordUsage(id, undefined).catch(() => undefined);
+        dispatch.signal?.throwIfAborted(); admission?.assert();
+        if (generation !== lane.generation) throw new CancelledActionError();
+        helperEntered = true;
+        const actual = await linuxDesktop.change(action, dimensions);
+        helperStopped = true;
+        const updated = await refreshManagedDesktop(actual);
+        if (!updated) throw new HarnessServiceError('unavailable', 'Desktop preparation did not finish');
+        if (action === 'stop' && actual.state === 'stopped') {
+          if (lane.physicalControl) await persistPhysicalControl(id, lane.physicalControl, undefined);
+          lane.inputReleaseUnconfirmed = false;
+          const ended = automation.resetDesktop(id);
+          if (peer) endedAssignments = { origin: peer.origin, assignmentIds: ended.flatMap(lease => {
+            const delegated = automation.delegation(lease);
+            return delegated?.origin === peer.origin ? [delegated.assignmentId] : [];
+          }) };
+        }
+        await driverPool.reset(id);
+        return updated;
+      }, generation);
+      const cancelled = dispatch.signal?.aborted || admission?.signal.aborted || generation !== lane.generation;
+      // Lifecycle readiness is returned directly if cancellation won; a probe must not
+      // respawn a helper while the original Stop is draining this callback.
+      const verified = action === 'stop' || cancelled ? updated : await probe(id);
+      return { desktop: verified, inputWriterStopped: true, receipt: { effect: 'verified' }, ...(endedAssignments ? { endedAssignments } : {}), ...(cancelled ? { cancelled: true } : {}) };
+    } catch (error) {
+      if (error instanceof LinuxDesktopChangeError) {
+        if (error.phase === 'before-dispatch') throw new ComputerBeforeDispatchError(error);
+        helperStopped = error.phase === 'stopped';
+      }
+      if (helperEntered) {
+        if (!helperStopped) lane.inputReleaseUnconfirmed = true;
+        throw new ComputerEffectError(error, helperStopped);
+      }
+      throw error;
+    } finally { lane.transitioning = false; broadcastControl(id); }
+  };
+  const prepareDesktop: ComputerService['prepareDesktop'] = async (params, dispatch = {}) => {
+    const target = dispatch.desktopId ?? (await preparationTarget(params.connectionId)).id;
+    return journaledOp({ desktopId: target }, undefined, { lane: 'action', tool: 'control', op: 'prepare' },
+      () => changeDesktop(target, 'prepare', params, { ...dispatch, ...(params.automationEpoch === undefined ? {} : { automationEpoch: params.automationEpoch }) }), target).catch(applicationFailure);
+  };
+  const desktopLifecycle: ComputerService['desktopLifecycle'] = (id, action, dispatch = {}) => {
+    if (action !== 'start' && action !== 'stop') return Promise.reject(new HarnessServiceError('invalid-params', 'Unknown desktop lifecycle action'));
+    return journaledOp({ desktopId: id }, undefined, { lane: 'action', tool: 'control', op: action },
+      () => changeDesktop(id, action, {}, dispatch), id).catch(applicationFailure);
   };
   const mediaTarget: ComputerService["mediaTarget"] = async (id) => {
     const remote = await remoteTargetFor(id);
@@ -3154,20 +3259,25 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     if (desktop.managed !== "linux-xvnc") throw new HarnessServiceError("unavailable", "Artifact access requires a managed Linux desktop");
     return inspectDesktopFile(await linuxDesktop.status(), relativePath);
   };
-  const registerArtifact: ComputerService["registerArtifact"] = async (sessionId, desktopId, relativePath) => {
-    if (!sessionId) throw new HarnessServiceError("forbidden", "Artifact registration requires an active work session");
-    const work = await options.resolveWork?.(sessionId);
+  const registerArtifact: ComputerService["registerArtifact"] = async (identity, desktopId, relativePath) => {
+    const ref = parseComputerWorkRef(identity);
+    const admission = automation.context.getStore();
+    if (admission && !sameComputerWork(admission.actor.execution.work, ref)) throw new HarnessServiceError('forbidden', 'Artifact owner must match the original Computer invocation');
+    admission?.assert();
+    const work = await options.resolveWork?.(ref);
     if (!work) throw new HarnessServiceError("forbidden", "Artifact registration requires a durable Thread work owner");
     const id = await resolveDesktopId(desktopId);
     const remote = await remoteTargetFor(id);
     const version = await inspectArtifact(id, relativePath);
+    admission?.assert();
     const artifact: ComputerArtifact = { id: randomUUID(), desktopId: id,
       sourceHostId: remote?.desktop.remote?.hostId ?? options.hostId, scopeId: work.scopeId, threadId: work.threadId,
       relativePath, ...version, registeredAt: new Date().toISOString() };
     const client = await scoped();
     await client.putRecord({ operationId: `computer.artifact:${randomUUID()}`,
       workspaceId: COMPUTER_CATALOG_WORKSPACE_ID, recordId: `computer.artifact:${artifact.id}`,
-      recordType: "computer.artifact", state: "active", payloadJson: JSON.stringify(artifact), ownerIds: [], references: [] });
+      recordType: "computer.artifact", state: "active", payloadJson: JSON.stringify(artifact), ownerIds: [], references: [] })
+      .catch(error => { throw new ComputerEffectError(error, true); });
     return artifact;
   };
   const listArtifacts: ComputerService["listArtifacts"] = async (scopeId) =>
@@ -3762,7 +3872,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       if (access === 'control' && laneFor(desktopId).inputReleaseUnconfirmed) throw new HarnessServiceError('unavailable', 'Assignment is revoked, but native input release is still unconfirmed');
     },
     activities: (sessionId) => [...lanes.entries()].flatMap(([desktopId, lane]) => lane.activity && (!sessionId || lane.activity.sessionId === sessionId) ? [{ desktopId, activity: { ...lane.activity } }] : []),
-    prepareDesktop, desktopLifecycle, mediaTarget,
+    preparationTarget, prepareDesktop, desktopLifecycle, mediaTarget,
     inspectArtifact, registerArtifact, listArtifacts, openDesktopArtifact, openArtifact,
     list, workDesktops, reconcileControlEvents,
     ensureLocal,

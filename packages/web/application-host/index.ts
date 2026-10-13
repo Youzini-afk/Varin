@@ -226,7 +226,7 @@ import { getGhCliToken } from './lib/github/gh-cli-credential.js';
 import { getStatus as getGitStatus, resolvePrimaryWorktreeRoot } from './lib/git/service.js';
 import { createVerificationCoordinator } from './lib/harness/verification-coordinator.js';
 import { createSourceViewStore, SOURCE_VIEW_STORAGE_SCOPE } from './lib/harness/source-view-store.js';
-import { createKernelClient, type KernelClient } from './lib/kernel/kernel-client.js';
+import { createKernelClient, KernelClientError, type KernelClient } from './lib/kernel/kernel-client.js';
 import { registerHarnessExperimentRoutes } from './lib/harness/experiment-routes.js';
 import { registerHarnessFollowUpRoutes } from './lib/harness/follow-up-routes.js';
 import { registerHarnessThreadRoutes } from './lib/harness/thread-routes.js';
@@ -2052,9 +2052,18 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     appVersion: VARIN_VERSION,
     registerVmGuest: vmGuestRegistration.register,
     removeVmGuest: vmGuestRegistration.remove,
-    resolveWork: async (sessionId) => {
-      const owner = await threadRegistry.resolveSessionOwner(sessionId);
-      return owner ? { scopeId: owner.owningScopeId, threadId: owner.threadId } : null;
+    resolveWork: async (work) => {
+      if (work.runtime === 'pi') {
+        const owner = await threadRegistry.resolveSessionOwner(work.sessionId);
+        return owner ? { scopeId: owner.owningScopeId, threadId: owner.threadId } : null;
+      }
+      const thread = await agentRuntime.thread(work.threadId).catch(error => {
+        if (error instanceof KernelClientError && error.code === 'not-found') return null;
+        throw error;
+      });
+      if (!thread) return null;
+      if (!thread.branches.some(branch => branch.branch_id === work.branchId)) return null;
+      return { scopeId: thread.bot_id ? botScopeId(thread.bot_id) : threadScopeId(thread.thread_id), threadId: thread.thread_id };
     },
     onControlEventCancel: async (command) => {
       if (!computerRuntimeOwner.current) throw new ComputerError('computer-owner-unavailable', 'The Agent Computer input owner is unavailable');

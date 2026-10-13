@@ -103,12 +103,13 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
   // takeover identity; a raw automatic endpoint is never a second bypass around Thread admission.
   app.use('/api/computers/desktops/:desktopId', requireAuth, (request, response, next) => {
     const operation = request.path.slice(1);
-    const automatic = request.method === 'POST' && ['observe', 'act', 'open', 'cancel', 'release', 'browser', 'office', 'software', 'artifacts/write'].includes(operation);
+    const automatic = request.method === 'POST' && ['observe', 'act', 'open', 'cancel', 'release', 'browser', 'office', 'software', 'artifacts/write'].includes(operation)
+      || request.method === 'POST' && ['prepare', 'lifecycle'].includes(operation) && request.body?.automation === true;
     const token = request.get('X-Varin-Computer-Lease');
     if (!automatic && !token) { next(); return; }
     if (!token) { sendError(response, new ComputerBeforeDispatchError(new HarnessServiceError('forbidden', 'Automatic input requires a Host desktop assignment')), 'Assignment required'); return; }
     const body = request.body;
-    const read = request.method === 'GET' || operation === 'observe' || operation === 'evidence'
+    const read = request.method === 'GET' || operation === 'observe' || operation === 'evidence' || operation === 'artifacts/inspect'
       || operation === 'browser' && (['status', 'tabs', 'snapshot'].includes(body?.op) || body?.op === 'act' && body?.act?.kind === 'screenshot')
       || operation === 'office' && (['status', 'docs'].includes(body?.op) || body?.op === 'act' && body?.act?.kind === 'read');
     let entered = false;
@@ -156,14 +157,30 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
     } catch (error) { sendError(response, error, "Unable to download computer artifact"); }
   });
 
-  /** Re-probe a desktop's driver and persist the real capability table. */
-  app.post("/api/computers/desktops/prepare", requireAuth, async (request, response) => {
-    try { response.json({ desktop: await computers.prepareDesktop(request.body ?? {}, request.body?.automation === true) }); }
-    catch (error) { sendError(response, error, "Unable to prepare desktop"); }
+  /** Discover the existing managed backend without starting its setup helper. */
+  app.post('/api/computers/desktops/prepare-target', requireAuth, async (_request, response) => {
+    try { response.json({ desktop: await computers.preparationTarget(), hostId }); }
+    catch (error) { sendError(response, error, 'Unable to resolve managed desktop target'); }
   });
-  app.post("/api/computers/desktops/:desktopId/lifecycle", requireAuth, async (request, response) => {
-    try { response.json({ desktop: await computers.desktopLifecycle(String(request.params.desktopId), request.body?.action, request.body?.automation === true) }); }
-    catch (error) { sendError(response, error, "Unable to change desktop lifecycle"); }
+  const changeSignal = (response: Response) => {
+    const controller = new AbortController();
+    response.once('close', () => { if (!response.writableEnded) controller.abort(); });
+    return controller.signal;
+  };
+  app.post('/api/computers/desktops/prepare', requireAuth, async (request, response) => {
+    try {
+      if (request.body?.automation === true) throw new ComputerBeforeDispatchError(new HarnessServiceError('forbidden', 'Automated preparation requires the managed target and its original assignment'));
+      response.json(await computers.prepareDesktop(request.body ?? {}, { signal: changeSignal(response) }));
+    } catch (error) { sendError(response, error, 'Unable to prepare desktop'); }
+  });
+  app.post('/api/computers/desktops/:desktopId/prepare', requireAuth, async (request, response) => {
+    try { response.json(await computers.prepareDesktop(request.body ?? {}, { desktopId: String(request.params.desktopId), automated: request.body?.automation === true, signal: changeSignal(response) })); }
+    catch (error) { sendError(response, error instanceof ComputerEffectError ? error : new ComputerBeforeDispatchError(error), 'Unable to prepare desktop'); }
+  });
+  app.post('/api/computers/desktops/:desktopId/lifecycle', requireAuth, async (request, response) => {
+    try { response.json(await computers.desktopLifecycle(String(request.params.desktopId), request.body?.action, {
+      automated: request.body?.automation === true, ...(typeof request.body?.automationEpoch === 'string' ? { automationEpoch: request.body.automationEpoch } : {}), signal: changeSignal(response) })); }
+    catch (error) { sendError(response, error instanceof ComputerEffectError ? error : new ComputerBeforeDispatchError(error), 'Unable to change desktop lifecycle'); }
   });
 
   app.post("/api/computers/desktops/:desktopId/probe", requireAuth, async (request: Request, response: Response) => {

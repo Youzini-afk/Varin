@@ -28,6 +28,13 @@ export interface LinuxSoftwareResult {
   packages?: string[];
 }
 
+/** The lifecycle helper owns dispatch and process-exit evidence, not its caller. */
+export class LinuxDesktopChangeError extends HarnessServiceError {
+  constructor(error: unknown, readonly phase: 'before-dispatch' | 'unknown' | 'stopped') {
+    super(error instanceof HarnessServiceError ? error.harnessCode : 'unavailable', error instanceof Error ? error.message : String(error));
+  }
+}
+
 /** The installer owner, rather than its caller, knows whether its original helper exited. */
 export class LinuxSoftwareError extends HarnessServiceError {
   constructor(error: unknown, readonly phase: 'before-dispatch' | 'unknown' | 'stopped') {
@@ -69,30 +76,38 @@ export function createLinuxDesktop(options: { dataDir: string; driverDir: string
     child.once('close', (code) => resolve({ code: code ?? 1, stdout, stderr }));
   }));
   const invoke = async (action: 'prepare' | 'start' | 'stop' | 'status', dimensions?: { width?: number; height?: number }): Promise<LinuxDesktopState> => {
-    if (options.platform !== 'linux') throw new HarnessServiceError('unavailable', 'Persistent Linux desktops must be prepared on a Linux Host');
-    const args = action === 'prepare' ? [join(options.driverDir, 'linux', 'prepare-desktop.sh')] : [script, action];
-    args.push('--data-dir', data);
-    for (const field of ['width', 'height'] as const) {
-      const value = dimensions?.[field];
-      if (value === undefined) continue;
-      if (!Number.isSafeInteger(value) || value <= 0) throw new HarnessServiceError('invalid-params', `${field} must be a positive integer`);
-      args.push(`--${field}`, String(value));
+    let phase: 'before-dispatch' | 'unknown' | 'stopped' = 'before-dispatch';
+    try {
+      if (options.platform !== 'linux') throw new HarnessServiceError('unavailable', 'Persistent Linux desktops must be prepared on a Linux Host');
+      const args = action === 'prepare' ? [join(options.driverDir, 'linux', 'prepare-desktop.sh')] : [script, action];
+      args.push('--data-dir', data);
+      for (const field of ['width', 'height'] as const) {
+        const value = dimensions?.[field];
+        if (value === undefined) continue;
+        if (!Number.isSafeInteger(value) || value <= 0) throw new HarnessServiceError('invalid-params', `${field} must be a positive integer`);
+        args.push(`--${field}`, String(value));
+      }
+      phase = 'unknown';
+      const result = await execute(action === 'prepare' ? 'sh' : '/usr/bin/python3', args);
+      phase = 'stopped';
+      const lastLine = result.stdout.trim().split(/\r?\n/u).at(-1);
+      let state: LinuxDesktopState | undefined;
+      try { state = JSON.parse(lastLine ?? '') as LinuxDesktopState; } catch { /* component error below */ }
+      if (!state || !['unprepared', 'starting', 'running', 'stopped', 'failed'].includes(state.state)) {
+        throw new HarnessServiceError('unavailable', result.stderr.trim() || 'Desktop component returned no valid status');
+      }
+      if (result.code !== 0) throw new HarnessServiceError('unavailable', state.detail || result.stderr.trim() || 'Desktop preparation failed');
+      if (state.state === 'running' && (typeof state.socket !== 'string' || typeof state.driver !== 'string'
+        || typeof state.user !== 'string' || !Number.isSafeInteger(state.uid) || !state.environment
+        || !Object.values(state.environment).every((value) => typeof value === 'string')
+        || !Number.isSafeInteger(state.width) || !Number.isSafeInteger(state.height))) {
+        throw new HarnessServiceError('unavailable', 'Desktop component returned incomplete session identity');
+      }
+      return { ...state, software: await software() };
+    } catch (error) {
+      if (action === 'status') throw error;
+      throw new LinuxDesktopChangeError(error, phase);
     }
-    const result = await execute(action === 'prepare' ? 'sh' : '/usr/bin/python3', args);
-    const lastLine = result.stdout.trim().split(/\r?\n/u).at(-1);
-    let state: LinuxDesktopState | undefined;
-    try { state = JSON.parse(lastLine ?? '') as LinuxDesktopState; } catch { /* component error below */ }
-    if (!state || !['unprepared', 'starting', 'running', 'stopped', 'failed'].includes(state.state)) {
-      throw new HarnessServiceError('unavailable', result.stderr.trim() || 'Desktop component returned no valid status');
-    }
-    if (result.code !== 0) throw new HarnessServiceError('unavailable', state.detail || result.stderr.trim() || 'Desktop preparation failed');
-    if (state.state === 'running' && (typeof state.socket !== 'string' || typeof state.driver !== 'string'
-      || typeof state.user !== 'string' || !Number.isSafeInteger(state.uid) || !state.environment
-      || !Object.values(state.environment).every((value) => typeof value === 'string')
-      || !Number.isSafeInteger(state.width) || !Number.isSafeInteger(state.height))) {
-      throw new HarnessServiceError('unavailable', 'Desktop component returned incomplete session identity');
-    }
-    return { ...state, software: await software() };
   };
   const status = async (): Promise<LinuxDesktopState> => {
     if (options.platform !== 'linux') return { state: 'unprepared' };

@@ -19,7 +19,8 @@ The caller cannot supply a parent, Run or role to the model-facing API.
 Native calls use the shipped `varin.builtin.computer` ordinary extension. Its single declaration
 owns `computer_list/apps/observe/act/cancel/release/request/access/grant/deny/wait`,
 `computer_control/open/put/install`, `computer_browser_read/browser`, `computer_office_read/office`,
-`computer_evidence` and `computer_environment`,
+`computer_evidence`, `computer_environment`, `computer_prepare`, `computer_desktop_lifecycle` and
+`computer_artifact`,
 their schemas, completion modes and read/effect classification.
 The original extension capability review, immutable binding and ToolInvocationAuthority remain in
 force. `computer.use` dispatches through this service, not a separate desktop backend. Actual global
@@ -72,9 +73,29 @@ An authenticated remote observer can read this same journal without requesting c
 `computer_environment` inspects the accepted Run's frozen source and original desktop assignments.
 It explicitly reports that native placement mutation and service forwarding are unavailable.
 The existing Pi placement/forward owners require a Pi Registry session; Native work does not invent
-one or represent a still-live listener as a completed short tool. Native placement/forward Jobs,
-desktop prepare/start/stop and artifact registration remain separate integration work; the existing
-product/Pi capabilities are unchanged.
+one or represent a still-live listener as a completed short tool. Native placement/forward Jobs
+remain separate integration work.
+
+Managed desktop preparation and start/stop use this same service and assignment. Discovery may
+register the real configured Linux session as unprepared/unavailable, but does not install or start
+it. An automatic transition first acquires its real control assignment and checks its epoch. The
+original lane invalidates old observations and pending input before calling the lifecycle helper.
+Human product and Pi harness consumers use that same lifecycle owner. A setup helper without a
+cooperative cancellation protocol remains pending until its actual exit; cancelling an observer does
+not prove apt/bootstrap or its descendants stopped. The independent physical input stop stays separate.
+The target's completed stop reports the assignment IDs its original reset actually ended, restricted
+to the calling peer origin. The source releases only those exact original claims. This includes an
+observer admitted during setup, while leaving a new claim admitted after the reset intact. Assignment
+release ACK failures remain separately visible; they do not erase the confirmed desktop-stop receipt.
+
+Artifact registration accepts the actual `ComputerWorkRef`, resolves the original Thread/branch and
+Bot or Thread scope, and stores the existing `computer.artifact` record. Bot work views use native work
+identity rather than fabricating a Pi Registry association. Peer operations do not register a foreign
+Thread as local work on the resource Host; the coordinating Host's mirror retains its own association,
+while the resource Host keeps the original peer control and evidence. A missing local Thread is an
+explicit absence; storage/transport failures are not swallowed. Artifact downloads retain the source
+Host and registered revision and the original UI checks the received byte length and SHA-256 before
+delivery. A file changing during transfer is rejected rather than accepted as the registered revision.
 
 Native child tasks, with or without a file source, request a desktop through their real ModelStep or PolicyAction
 Operation. Catalog owns the request, original decision and durable Wait; reasons and notification
