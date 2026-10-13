@@ -47,31 +47,22 @@ fn excerpts(
         }]);
     }
     // Tool-free summary evidence preserves explicitly ordered parts without inventing calls.
-    let output = match &item.content {
-        Content::Output { output } => Some(output.clone()),
-        Content::ToolResult { result } => match &result.completion {
-            ToolCompletion::Result { content, .. } => Some(content.clone()),
-            ToolCompletion::JobAccepted { content, .. } => content.clone(),
-            _ => None,
+    let parts = match &mut item.content {
+        Content::Output { output } => std::mem::take(&mut output.parts),
+        Content::ToolResult { result } => match &mut result.completion {
+            ToolCompletion::Result { content, .. }
+            | ToolCompletion::JobAccepted {
+                content: Some(content),
+                ..
+            } => std::mem::take(&mut content.parts),
+            _ => Vec::new(),
         },
-        _ => None,
+        _ => Vec::new(),
     };
-    if let Some(output) = output.filter(|output| !output.parts.is_empty()) {
-        let mut metadata = item.clone();
-        match &mut metadata.content {
-            Content::Output { output } => output.parts.clear(),
-            Content::ToolResult { result } => match &mut result.completion {
-                ToolCompletion::Result { content, .. } => content.parts.clear(),
-                ToolCompletion::JobAccepted {
-                    content: Some(content),
-                    ..
-                } => content.parts.clear(),
-                _ => (),
-            },
-            _ => (),
-        }
-        let mut result = excerpts(key, metadata, budget)?;
-        for (index, part) in output.parts.into_iter().enumerate() {
+    if !parts.is_empty() {
+        let source_id = item.id.clone();
+        let mut result = excerpts(key, item, budget)?;
+        for (index, part) in parts.into_iter().enumerate() {
             let content = match part {
                 OutputPart::Text { text } => Content::Text { text },
                 OutputPart::Media { media } => Content::Media { media },
@@ -80,9 +71,9 @@ fn excerpts(
                 key,
                 ConversationItem {
                     resource_activation: None,
-                    id: format!("{}:part:{index}", item.id),
+                    id: format!("{source_id}:part:{index}"),
                     provenance: Provenance::ExternalData {
-                        source: format!("history:{}", item.id),
+                        source: format!("history:{source_id}"),
                     },
                     content,
                     opaque: None,
@@ -307,5 +298,150 @@ mod tests {
                 .flatten()
                 .any(|item| item.content == image.content)
         );
+    }
+
+    #[test]
+    fn mixed_output_excerpts_keep_original_receipts_parts_and_media_without_executable_tools() {
+        use crate::output::{IncomingMedia, OutputBody, OutputPart, OutputSource};
+        let mut originals = Vec::new();
+        let mut metadata = Vec::new();
+        let mut media = Vec::new();
+        for kind in ["output", "result", "job"] {
+            let id = format!("original-{kind}");
+            let image = IncomingMedia {
+                media_type: "image/png".into(),
+                data_base64: "iVBORw0KGgo=".into(),
+            }
+            .admit(OutputSource::Tool {
+                context: ToolExecutionContext {
+                    run_id: "original-run".into(),
+                    origin: ToolOrigin::ModelStep {
+                        request_id: "original-request".into(),
+                    },
+                    operation_id: format!("original-request:tool:{kind}"),
+                },
+            })
+            .unwrap();
+            let output: OutputBody =
+                json!({"kind":kind,"nested":{"unicode":"中文 🎉","array":[null,1,true]}}).into();
+            let content = match kind {
+                "output" => Content::Output { output },
+                "result" => Content::ToolResult {
+                    result: ToolResult {
+                        request_id: "original-request".into(),
+                        call_id: kind.into(),
+                        completion: ToolCompletion::Result {
+                            outcome: crate::Outcome::Failed,
+                            effect: crate::Effect::Partial,
+                            content: output,
+                        },
+                    },
+                },
+                "job" => Content::ToolResult {
+                    result: ToolResult {
+                        request_id: "original-request".into(),
+                        call_id: kind.into(),
+                        completion: ToolCompletion::JobAccepted {
+                            operation_id: "original-job".into(),
+                            phase: "running".into(),
+                            effect: crate::Effect::Confirmed,
+                            lifetime: crate::Lifetime::Thread,
+                            content: Some(output),
+                        },
+                    },
+                },
+                _ => unreachable!(),
+            };
+            let mut item = ConversationItem {
+                resource_activation: None,
+                id,
+                provenance: Provenance::ExternalData {
+                    source: format!("original-source:{kind}"),
+                },
+                content,
+                opaque: None,
+            };
+            metadata.push(item.clone());
+            let parts = match &mut item.content {
+                Content::Output { output } => &mut output.parts,
+                Content::ToolResult { result } => match &mut result.completion {
+                    ToolCompletion::Result { content, .. }
+                    | ToolCompletion::JobAccepted {
+                        content: Some(content),
+                        ..
+                    } => &mut content.parts,
+                    _ => unreachable!(),
+                },
+                _ => unreachable!(),
+            };
+            *parts = vec![
+                OutputPart::Text {
+                    text: format!("before-{kind} 中文"),
+                },
+                OutputPart::Media {
+                    media: image.clone(),
+                },
+                OutputPart::Text {
+                    text: format!("after-{kind} 🎉"),
+                },
+            ];
+            item.opaque = Some(OpaqueProviderItem {
+                family: "original-family".into(),
+                adapter_version: "1".into(),
+                connection_identity: "original-connection".into(),
+                value: json!({"secret":"do not summarize private continuation"}),
+            });
+            media.push(image);
+            originals.push(item);
+        }
+        let parts = partition(
+            "original-summary",
+            &json!({}),
+            &ContextSummaryRecipe::manual(),
+            None,
+            originals,
+        )
+        .unwrap();
+        let items: Vec<_> = parts.iter().flatten().collect();
+        assert_eq!(items.len(), 12);
+        for (index, group) in items.chunks_exact(4).enumerate() {
+            let decode = |item: &ConversationItem| {
+                let Content::Text { text } = &item.content else {
+                    panic!("expected summary evidence text")
+                };
+                serde_json::from_str::<ConversationItem>(text).unwrap()
+            };
+            assert_eq!(decode(group[0]), metadata[index]);
+            let kind = ["output", "result", "job"][index];
+            for (part, text) in [
+                (0, format!("before-{kind} 中文")),
+                (2, format!("after-{kind} 🎉")),
+            ] {
+                let item = decode(group[if part == 0 { 1 } else { 3 }]);
+                assert_eq!(item.content, Content::Text { text });
+                assert_eq!(
+                    item.provenance,
+                    Provenance::ExternalData {
+                        source: format!("history:original-{kind}")
+                    }
+                );
+                assert_eq!(item.id, format!("original-{kind}:part:{part}"));
+            }
+            assert_eq!(
+                group[2].content,
+                Content::Media {
+                    media: media[index].clone()
+                }
+            );
+            assert_eq!(
+                group[2].provenance,
+                Provenance::ExternalData {
+                    source: format!("history:original-{kind}:part:1")
+                }
+            );
+        }
+        assert!(items.iter().all(|item| item.opaque.is_none()
+            && matches!(item.provenance, Provenance::ExternalData { .. })
+            && matches!(item.content, Content::Text { .. } | Content::Media { .. })));
     }
 }

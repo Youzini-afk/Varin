@@ -86,19 +86,23 @@ fn push_block(messages: &mut Vec<Value>, role: &str, block: Value) {
             .expect("constructed array")
             .push(block);
     } else {
-        messages.push(json!({"role":role,"content":[block]}));
+        let mut message = json!({"role":role});
+        message["content"] = Value::Array(vec![block]);
+        messages.push(message);
     }
 }
-fn anthropic_parts(parts: Vec<crate::output::OutputPart>) -> Result<Vec<Value>, ExecutionError> {
+fn anthropic_parts(parts: Vec<ProviderPart<'_>>) -> Result<Vec<Value>, ExecutionError> {
     let mut blocks = Vec::new();
     for part in parts {
         match part {
-            crate::output::OutputPart::Text { text } => {
-                blocks.push(json!({"type":"text","text":text}))
+            ProviderPart::Text { text } => {
+                let mut block = json!({"type":"text"});
+                block["text"] = Value::String(text.into_owned());
+                blocks.push(block);
             }
-            crate::output::OutputPart::Media { media } => {
+            ProviderPart::Media { media } => {
                 require_media_type(
-                    &media,
+                    media,
                     &[
                         "image/png",
                         "image/jpeg",
@@ -118,7 +122,7 @@ fn anthropic_parts(parts: Vec<crate::output::OutputPart>) -> Result<Vec<Value>, 
                         "Anthropic media type is unsupported",
                     ));
                 };
-                blocks.push(json!({"type":"text","text":media_label(&media)}));
+                blocks.push(json!({"type":"text","text":media_label(media)}));
                 blocks.push(json!({"type":kind,"source":{"type":"base64","media_type":media.media_type,"data":media.data_base64}}));
             }
         }
@@ -149,15 +153,16 @@ impl ModelProvider for AnthropicProvider {
         if self.oauth {
             system.push(json!({"type":"text","text":"You are Claude Code, Anthropic's official CLI for Claude."}));
         }
-        for item in compile_history(&view.history, FAMILY, &view.binding.connection_identity) {
-            if let Some(original) = item.opaque {
+        for projected in project_history(&view.history, FAMILY, &view.binding.connection_identity) {
+            let item = projected.item;
+            if let Some(original) = projected.opaque {
                 if original.adapter_version != "1" {
                     return Err(ExecutionError::new(
                         "opaque_version",
                         "unsupported Anthropic continuation version",
                     ));
                 }
-                push_block(&mut messages, "assistant", original.value);
+                push_block(&mut messages, "assistant", original.value.clone());
                 continue;
             }
             let role = if item.provenance.is_assistant() {
@@ -165,7 +170,7 @@ impl ModelProvider for AnthropicProvider {
             } else {
                 "user"
             };
-            let block = match item.content {
+            let block = match &item.content {
                 Content::Text { text } | Content::ReasoningSummary { text } => {
                     let block = json!({"type":"text","text":text});
                     if item.provenance.is_system() {
@@ -178,18 +183,20 @@ impl ModelProvider for AnthropicProvider {
                     json!({"type":"tool_use","id":call.call_id,"name":if self.oauth { oauth_tool_name(&call.name) } else { &call.name },"input":call.arguments})
                 }
                 Content::ToolResult { result } => {
-                    json!({"type":"tool_result","tool_use_id":result.call_id,"content":anthropic_parts(completion_parts(&result.completion))?,"is_error":matches!(result.completion,ToolCompletion::Result{outcome:crate::types::Outcome::Failed|crate::types::Outcome::Cancelled|crate::types::Outcome::Indeterminate,..})})
+                    let mut block = json!({"type":"tool_result","tool_use_id":result.call_id,"is_error":matches!(result.completion,ToolCompletion::Result{outcome:crate::types::Outcome::Failed|crate::types::Outcome::Cancelled|crate::types::Outcome::Indeterminate,..})});
+                    block["content"] =
+                        Value::Array(anthropic_parts(completion_parts(&result.completion))?);
+                    block
                 }
                 Content::Media { media } => {
-                    for block in anthropic_parts(vec![crate::output::OutputPart::Media { media }])?
-                    {
+                    for block in anthropic_parts(vec![ProviderPart::Media { media }])? {
                         push_block(&mut messages, "user", block);
                     }
                     continue;
                 }
                 Content::Output { output } => {
                     let role = evidence_role(&item.provenance, role);
-                    for block in anthropic_parts(evidence_parts(&output, &item.provenance))? {
+                    for block in anthropic_parts(evidence_parts(output, &item.provenance))? {
                         push_block(&mut messages, role, block);
                     }
                     continue;
@@ -209,7 +216,11 @@ impl ModelProvider for AnthropicProvider {
             .iter()
             .map(|t| json!({"name":if self.oauth { oauth_tool_name(&t.name) } else { &t.name },"description":t.description,"input_schema":t.schema}))
             .collect();
-        let mut result = json!({"model":view.binding.model,"messages":messages,"system":system,"tools":tools,"max_tokens":self.max_tokens,"stream":true});
+        let mut result =
+            json!({"model":view.binding.model,"max_tokens":self.max_tokens,"stream":true});
+        result["messages"] = Value::Array(messages);
+        result["system"] = Value::Array(system);
+        result["tools"] = Value::Array(tools);
         if let Some(thinking) = &self.thinking {
             result["thinking"] = thinking.clone();
         }

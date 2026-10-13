@@ -25,25 +25,94 @@ impl ResponsesProvider {
         provider
     }
 }
-fn response_parts(parts: Vec<crate::output::OutputPart>) -> Result<Vec<Value>, ExecutionError> {
+fn response_parts(parts: Vec<ProviderPart<'_>>) -> Result<Vec<Value>, ExecutionError> {
     let mut blocks = Vec::new();
     for part in parts {
         match part {
-            crate::output::OutputPart::Text { text } => {
-                blocks.push(json!({"type":"input_text","text":text}))
+            ProviderPart::Text { text } => {
+                let mut block = json!({"type":"input_text"});
+                block["text"] = Value::String(text.into_owned());
+                blocks.push(block);
             }
-            crate::output::OutputPart::Media { media } => {
+            ProviderPart::Media { media } => {
                 require_media_type(
-                    &media,
+                    media,
                     &["image/png", "image/jpeg", "image/webp", "image/gif"],
                     FAMILY,
                 )?;
-                blocks.push(json!({"type":"input_text","text":media_label(&media)}));
-                blocks.push(json!({"type":"input_image","image_url":inline_image(&media)?}));
+                blocks.push(json!({"type":"input_text","text":media_label(media)}));
+                let mut block = json!({"type":"input_image"});
+                block["image_url"] = Value::String(inline_image(media));
+                blocks.push(block);
             }
         }
     }
     Ok(blocks)
+}
+impl ResponsesProvider {
+    pub(super) fn serialize_history<'a>(
+        &self,
+        view: &RequestView,
+        history: impl IntoIterator<Item = ProjectedHistoryItem<'a>>,
+    ) -> Result<Value, ExecutionError> {
+        validate_view(view, self.family)?;
+        validate_images(view, &self.connection)?;
+        let mut input = Vec::new();
+        for projected in history {
+            let item = projected.item;
+            if let Some(original) = projected.opaque {
+                if original.adapter_version != "1" {
+                    return Err(ExecutionError::new(
+                        "opaque_version",
+                        "unsupported Responses continuation version",
+                    ));
+                }
+                input.push(original.value.clone());
+                continue;
+            }
+            let role = match item.provenance {
+                ref p if p.is_system() => "system",
+                ref p if p.is_assistant() => "assistant",
+                _ => "user",
+            };
+            match &item.content {
+                Content::Text{text} | Content::ReasoningSummary{text} => input.push(json!({"role":role,"content":text})),
+                Content::ToolCall{call}=>input.push(json!({"type":"function_call","call_id":call.call_id,"name":call.name,"arguments":call.arguments.to_string()})),
+                Content::ToolResult { result } => {
+                    let mut value = json!({"type":"function_call_output","call_id":result.call_id});
+                    value["output"] = Value::Array(response_parts(completion_parts(&result.completion))?);
+                    input.push(value);
+                }
+                Content::Media { media } => {
+                    let mut value = json!({"role":"user"});
+                    value["content"] = Value::Array(response_parts(vec![ProviderPart::Media { media }])?);
+                    input.push(value);
+                }
+                Content::Output { output } => {
+                    let mut value = json!({"role":evidence_role(&item.provenance,role)});
+                    value["content"] = Value::Array(response_parts(evidence_parts(output,&item.provenance))?);
+                    input.push(value);
+                }
+                Content::ProviderOnly=>return Err(ExecutionError::new("missing_opaque", "provider-only content requires continuation data")),
+            }
+        }
+        let tools: Vec<_> = view
+            .binding
+            .tools
+            .iter()
+            .map(|t| json!({"type":"function","name":t.name,"description":t.description,"parameters":t.schema}))
+            .collect();
+        let mut value = json!({"model":view.binding.model,"stream":true,"store":false,"include":["reasoning.encrypted_content"]});
+        value["input"] = Value::Array(input);
+        value["tools"] = Value::Array(tools);
+        if let Some(max) = self.max_output_tokens {
+            value["max_output_tokens"] = json!(max);
+        }
+        if let Some(reasoning) = &self.reasoning {
+            value["reasoning"] = reasoning.clone();
+        }
+        Ok(value)
+    }
 }
 impl ModelProvider for ResponsesProvider {
     fn request_budget_protocol(&self) -> Option<crate::context_capacity::RequestBudgetProtocol> {
@@ -55,52 +124,14 @@ impl ModelProvider for ResponsesProvider {
     }
 
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
-        validate_view(view, self.family)?;
-        validate_images(view, &self.connection)?;
-        let mut input = Vec::new();
-        for item in compile_history(
-            &view.history,
-            self.family,
-            &view.binding.connection_identity,
-        ) {
-            if let Some(original) = item.opaque {
-                if original.adapter_version != "1" {
-                    return Err(ExecutionError::new(
-                        "opaque_version",
-                        "unsupported Responses continuation version",
-                    ));
-                }
-                input.push(original.value);
-                continue;
-            }
-            let role = match item.provenance {
-                ref p if p.is_system() => "system",
-                ref p if p.is_assistant() => "assistant",
-                _ => "user",
-            };
-            match item.content {
-                Content::Text{text} | Content::ReasoningSummary{text} => input.push(json!({"role":role,"content":text})),
-                Content::ToolCall{call}=>input.push(json!({"type":"function_call","call_id":call.call_id,"name":call.name,"arguments":call.arguments.to_string()})),
-                Content::ToolResult{result}=>input.push(json!({"type":"function_call_output","call_id":result.call_id,"output":response_parts(completion_parts(&result.completion))?})),
-                Content::Media{media}=>input.push(json!({"role":"user","content":response_parts(vec![crate::output::OutputPart::Media{media}])?})),
-                Content::Output{output}=>input.push(json!({"role":evidence_role(&item.provenance,role),"content":response_parts(evidence_parts(&output,&item.provenance))?})),
-                Content::ProviderOnly=>return Err(ExecutionError::new("missing_opaque", "provider-only content requires continuation data")),
-            }
-        }
-        let tools: Vec<_> = view
-            .binding
-            .tools
-            .iter()
-            .map(|t| json!({"type":"function","name":t.name,"description":t.description,"parameters":t.schema}))
-            .collect();
-        let mut value = json!({"model":view.binding.model,"input":input,"tools":tools,"stream":true,"store":false,"include":["reasoning.encrypted_content"]});
-        if let Some(max) = self.max_output_tokens {
-            value["max_output_tokens"] = json!(max);
-        }
-        if let Some(reasoning) = &self.reasoning {
-            value["reasoning"] = reasoning.clone();
-        }
-        Ok(value)
+        self.serialize_history(
+            view,
+            project_history(
+                &view.history,
+                self.family,
+                &view.binding.connection_identity,
+            ),
+        )
     }
     fn generate(
         &self,

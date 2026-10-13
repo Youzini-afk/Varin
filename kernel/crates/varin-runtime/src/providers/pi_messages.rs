@@ -21,27 +21,32 @@ fn push(messages: &mut Vec<Value>, role: &str, block: Value, model: &str) {
             .as_array_mut()
             .expect("message content")
             .push(block);
-    } else if role == "assistant" {
-        messages.push(json!({"role":role,"content":[block],"api":FAMILY,"provider":"varin","model":model,"usage":empty_usage(),"stopReason":"stop","timestamp":0}));
     } else {
-        messages.push(json!({"role":role,"content":[block],"timestamp":0}));
+        let mut message = if role == "assistant" {
+            json!({"role":role,"api":FAMILY,"provider":"varin","model":model,"usage":empty_usage(),"stopReason":"stop","timestamp":0})
+        } else {
+            json!({"role":role,"timestamp":0})
+        };
+        message["content"] = Value::Array(vec![block]);
+        messages.push(message);
     }
 }
-fn pi_parts(parts: Vec<crate::output::OutputPart>) -> Result<Vec<Value>, ExecutionError> {
+fn pi_parts(parts: Vec<ProviderPart<'_>>) -> Result<Vec<Value>, ExecutionError> {
     let mut blocks = Vec::new();
     for part in parts {
         match part {
-            crate::output::OutputPart::Text { text } => {
-                blocks.push(json!({"type":"text","text":text}))
+            ProviderPart::Text { text } => {
+                let mut block = json!({"type":"text"});
+                block["text"] = Value::String(text.into_owned());
+                blocks.push(block);
             }
-            crate::output::OutputPart::Media { media } => {
+            ProviderPart::Media { media } => {
                 require_media_type(
-                    &media,
+                    media,
                     &["image/png", "image/jpeg", "image/webp", "image/gif"],
                     FAMILY,
                 )?;
-                inline_image(&media)?;
-                blocks.push(json!({"type":"text","text":media_label(&media)}));
+                blocks.push(json!({"type":"text","text":media_label(media)}));
                 blocks.push(
                     json!({"type":"image","mimeType":media.media_type,"data":media.data_base64}),
                 );
@@ -64,8 +69,9 @@ impl ModelProvider for PiMessagesProvider {
         validate_images(view, &self.connection)?;
         let mut messages = Vec::new();
         let mut calls = BTreeMap::new();
-        for item in compile_history(&view.history, FAMILY, &view.binding.connection_identity) {
-            if let Some(original) = &item.opaque {
+        for projected in project_history(&view.history, FAMILY, &view.binding.connection_identity) {
+            let item = projected.item;
+            if let Some(original) = projected.opaque {
                 if original.adapter_version != "1" {
                     return Err(ExecutionError::new(
                         "opaque_version",
@@ -92,7 +98,7 @@ impl ModelProvider for PiMessagesProvider {
             } else {
                 "user"
             };
-            match item.content {
+            match &item.content {
                 Content::Text { text } | Content::ReasoningSummary { text } => {
                     if item.provenance.is_system() {
                         messages.push(json!({"role":"system","content":[{"type":"text","text":text}],"timestamp":0}));
@@ -128,16 +134,19 @@ impl ModelProvider for PiMessagesProvider {
                             ..
                         } | ToolCompletion::JobAccepted { .. }
                     );
-                    messages.push(json!({"role":"toolResult","toolCallId":result.call_id,"toolName":name,"isError":error,"content":pi_parts(completion_parts(&result.completion))?,"timestamp":0}));
+                    let mut message = json!({"role":"toolResult","toolCallId":result.call_id,"toolName":name,"isError":error,"timestamp":0});
+                    message["content"] =
+                        Value::Array(pi_parts(completion_parts(&result.completion))?);
+                    messages.push(message);
                 }
                 Content::Media { media } => {
-                    for block in pi_parts(vec![crate::output::OutputPart::Media { media }])? {
+                    for block in pi_parts(vec![ProviderPart::Media { media }])? {
                         push(&mut messages, "user", block, &view.binding.model);
                     }
                 }
                 Content::Output { output } => {
                     let role = evidence_role(&item.provenance, role);
-                    for block in pi_parts(evidence_parts(&output, &item.provenance))? {
+                    for block in pi_parts(evidence_parts(output, &item.provenance))? {
                         push(&mut messages, role, block, &view.binding.model);
                     }
                 }
@@ -151,13 +160,13 @@ impl ModelProvider for PiMessagesProvider {
             .map(|t| json!({"name":t.name,"description":t.description,"parameters":t.schema}))
             .collect();
         if !tools.is_empty() {
-            messages.insert(
-                0,
-                json!({"role":"system","content":"","toolsAdded":tools,"timestamp":0}),
-            );
+            let mut message = json!({"role":"system","content":"","timestamp":0});
+            message["toolsAdded"] = Value::Array(tools);
+            messages.insert(0, message);
         }
         let session_id = match &view.origin {
-            RequestOrigin::McpSampling { operation_id, .. } | RequestOrigin::AuxiliaryInference { operation_id, .. } => operation_id,
+            RequestOrigin::McpSampling { operation_id, .. }
+            | RequestOrigin::AuxiliaryInference { operation_id, .. } => operation_id,
             _ => &view.binding.history_range.branch_id,
         };
         let mut options = json!({"sessionId":session_id});
@@ -170,7 +179,10 @@ impl ModelProvider for PiMessagesProvider {
         if let Some(retention) = &self.cache_retention {
             options["cacheRetention"] = json!(retention);
         }
-        Ok(json!({"model":view.binding.model,"context":{"messages":messages},"options":options}))
+        let mut body = json!({"model":view.binding.model,"context":{}});
+        body["context"]["messages"] = Value::Array(messages);
+        body["options"] = options;
+        Ok(body)
     }
     fn generate(
         &self,

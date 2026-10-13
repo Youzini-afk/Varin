@@ -122,7 +122,7 @@ impl ModelProvider for MistralProvider {
             if let Some(parts) = message["content"].as_array_mut() {
                 for part in parts {
                     if part["type"] == "image_url" && part["image_url"].is_object() {
-                        part["image_url"] = part["image_url"]["url"].clone();
+                        part["image_url"] = part["image_url"]["url"].take();
                     }
                 }
             }
