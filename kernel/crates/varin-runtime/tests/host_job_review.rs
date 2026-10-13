@@ -5,7 +5,11 @@ use input_admission::InputAdmission;
 use serde_json::{Value, json};
 use varin_runtime::{
     catalog::{
-        host_jobs::{HostJobBinding, HostJobSubject},
+        dispatch::ChildModelBinding,
+        host_jobs::{
+            HostJobBinding, HostJobPending, HostJobSubject, McpEndpoint, McpTaskState,
+            McpTaskStatus,
+        },
         launches::LaunchSelection,
     },
     execution::*,
@@ -15,14 +19,18 @@ struct Fixture {
     root: std::path::PathBuf,
     db: Catalog,
     run: String,
+    dispatch: Option<Value>,
 }
 impl Fixture {
     fn new() -> Self {
+        let launch:LaunchSelection=serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"fixture","provider_family":"fixture","model":"model","configuration_generation":1,"tool_schema_generation":1,
+   "tools":[{"name":"research_submit","version":"1","description":"Research submit","schema":{"type":"object"},"output_schema":null,"metadata":null},{"name":"research_wait","version":"1","description":"Observe research","schema":{"type":"object"},"output_schema":null,"metadata":null}],"policy":{"name":"fixture","version":"1"},"source":{"resource_owner":{"kind":"local"},"workspace_id":"ws","execution_workspace_id":"exec","mode":"fixed_branch","branch_id":"source","revision":1,"live_root":null}})).unwrap();
+        Self::with_launch(launch, json!({}))
+    }
+    fn with_launch(launch: LaunchSelection, configuration: Value) -> Self {
         let root = std::env::temp_dir().join(format!("varin-host-job-{}", uuid::Uuid::new_v4()));
         let mut db = Catalog::open(&root).unwrap();
         db.create_thread("thread", "branch").unwrap();
-        let launch:LaunchSelection=serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"fixture","provider_family":"fixture","model":"model","configuration_generation":1,"tool_schema_generation":1,
-   "tools":[{"name":"research_submit","version":"1","description":"Research submit","schema":{"type":"object"},"output_schema":null,"metadata":null},{"name":"research_wait","version":"1","description":"Observe research","schema":{"type":"object"},"output_schema":null,"metadata":null}],"policy":{"name":"fixture","version":"1"},"source":{"resource_owner":{"kind":"local"},"workspace_id":"ws","execution_workspace_id":"exec","mode":"fixed_branch","branch_id":"source","revision":1,"live_root":null}})).unwrap();
         let receipt = db
             .submit_with_launch(
                 &SubmitInput {
@@ -31,7 +39,7 @@ impl Fixture {
                     branch_id: "branch".into(),
                     expected_head: None,
                     input: json!("Research"),
-                    configuration: json!({}),
+                    configuration,
                 },
                 Some(launch),
             )
@@ -40,12 +48,66 @@ impl Fixture {
             root,
             db,
             run: receipt.run_id,
+            dispatch: None,
         };
         f.record(ExecutionRecord::StateChanged {
             state: RunState::Runnable,
             waiting_on: None,
         });
         f
+    }
+    fn mcp() -> (Self, HostJobBinding) {
+        let configuration = json!({"providerFamily":"openai-responses","endpoint":"https://fixture.invalid","allowAnonymous":true,"model":"fixture","configurationGeneration":1});
+        let model: ChildModelBinding =
+            serde_json::from_value(json!({"configuration":configuration,"credential_scope":null}))
+                .unwrap();
+        let connection = model.connection_identity().unwrap();
+        let schemas: Vec<ToolSchema> = serde_json::from_value(json!([{"name":"task","version":"1","description":"Original Task","schema":{"type":"object"},"output_schema":null,"metadata":null}])).unwrap();
+        let mcp = json!({"reference":"original-mcp-owner","generation":1,"tools":schemas,"routes":{"task":{"kind":"direct_task"}},"resources":{"task":"mcp:peer","server:peer":"mcp:peer"},"provenance":{"servers":{"peer":{"owner":{"source_authority":null,"resource_owner":{"kind":"local"},"configuration":{"agent_dir":"/fixture","config_cwd":"/fixture","project_trusted":false},"execution_scope":"global"},"definition_version":"configuration","resource_key":"mcp:peer"}}}});
+        let launch: LaunchSelection = serde_json::from_value(json!({"extension_bindings":[],"mcp_binding":mcp,"connection_identity":connection,"provider_family":"openai-responses","model":"fixture","configuration_generation":1,"tool_schema_generation":1,"tools":schemas,"policy":{"name":"fixture","version":"1"},"source":null})).unwrap();
+        let mut fixture = Self::with_launch(launch, configuration);
+        let prepared = fixture
+            .db
+            .prepare_child_dispatch_binding(&fixture.run, model, 1, schemas)
+            .unwrap()
+            .load()
+            .unwrap();
+        fixture.dispatch = fixture
+            .db
+            .bind_child_dispatch(&fixture.run, prepared)
+            .unwrap();
+        let (context, call) = fixture.tool("task", "task-request");
+        let (snapshot, frozen) = fixture
+            .db
+            .capture_tool_invocation(&context, &call.call_id)
+            .unwrap()
+            .load_mcp()
+            .unwrap();
+        let binding = HostJobBinding {
+            operation_id: context.operation_id.clone(),
+            execution_owner: fixture
+                .db
+                .operation(&context.operation_id)
+                .unwrap()
+                .execution_owner
+                .unwrap(),
+            domain: "mcp.task".into(),
+            domain_version: 1,
+            subject: HostJobSubject::Mcp {
+                endpoint: McpEndpoint {
+                    server: "peer".into(),
+                    resource_key: "mcp:peer".into(),
+                    configuration_version: "configuration".into(),
+                    credential_version: "original-credential".into(),
+                },
+                dispatch_id: context.operation_id,
+            },
+        };
+        fixture
+            .db
+            .begin_mcp_host_job(binding.clone(), &snapshot, &frozen)
+            .unwrap();
+        (fixture, binding)
     }
     fn record(&mut self, r: ExecutionRecord) {
         self.db
@@ -77,7 +139,19 @@ impl Fixture {
             ancestor_id: None,
             leaf_id: self.db.head("branch").unwrap(),
         };
-        let binding:RequestBinding=serde_json::from_value(json!({"child_dispatch":null,"goal":null,"resource_activations":[],"resource_checkpoint_id":null,"connection_identity":"fixture","provider_family":"fixture","model":"model","credential_ref":null,"configuration_generation":1,"tool_schema_generation":1,"tools":self.db.launch_intent(&self.run).unwrap().unwrap().selection.tools,"instruction_sources":[],"memory_checkpoint":null,"attachment_refs":[],"environment_cursor":0,"history_range":range})).unwrap();
+        let launch = self.db.launch_intent(&self.run).unwrap().unwrap().selection;
+        let resources = launch
+            .mcp_binding
+            .as_ref()
+            .and_then(|binding| binding.resources.get(name))
+            .map(|key| {
+                vec![ResourceClaim {
+                    key: key.clone(),
+                    access: Access::Write,
+                }]
+            })
+            .unwrap_or_default();
+        let binding:RequestBinding=serde_json::from_value(json!({"child_dispatch":self.dispatch,"goal":null,"resource_activations":[],"resource_checkpoint_id":null,"connection_identity":launch.connection_identity,"provider_family":launch.provider_family,"model":launch.model,"credential_ref":null,"configuration_generation":launch.configuration_generation,"tool_schema_generation":launch.tool_schema_generation,"tools":launch.tools,"instruction_sources":[],"memory_checkpoint":null,"attachment_refs":[],"environment_cursor":0,"history_range":range})).unwrap();
         let call = ToolCall {
             call_id: "call".into(),
             name: name.into(),
@@ -97,7 +171,8 @@ impl Fixture {
                     history: vec![],
                 },
                 serialized: json!({}),
-            }.into(),
+            }
+            .into(),
         });
         self.record(ExecutionRecord::ModelDispatched {
             request_id: request.into(),
@@ -132,7 +207,7 @@ impl Fixture {
                     read_only: false,
                     completion: CompletionKind::Job,
                     lifetime: Lifetime::Thread,
-                    resources: vec![],
+                    resources,
                 },
             },
         });
@@ -460,6 +535,17 @@ fn durable_wait_requires_actual_stop_and_cancel_only_closes_observation() {
 fn user_atomic_domain_link_is_discoverable_before_the_first_domain_call() {
     let mut f = Fixture::new();
     let user = f.user("pre-dispatch");
+    assert!(user.host_job.as_ref().unwrap().mcp_holder_released);
+    assert!(
+        HostJobPending::from_operation(user.clone())
+            .unwrap()
+            .mcp_holder_released
+    );
+    assert!(f.db.capture_mcp_host_job_context(&user.id).is_err());
+    assert!(
+        f.db.acknowledge_mcp_holder_released(&user.host_job.as_ref().unwrap().binding)
+            .is_err()
+    );
     assert!(user.host_job.as_ref().unwrap().acceptance_ref.is_none());
     assert!(
         f.db.pending_host_jobs()
@@ -835,4 +921,232 @@ fn planned_user_command_does_not_hold_its_source_run_foreground_open() {
     })
     .unwrap();
     assert!(f.db.operation(&command.id).unwrap().cancel_requested);
+}
+
+#[test]
+fn original_mcp_holder_cleanup_is_binding_fenced_durable_and_independent_of_task_facts() {
+    for status in [
+        McpTaskStatus::Completed,
+        McpTaskStatus::Failed,
+        McpTaskStatus::Cancelled,
+    ] {
+        let (mut f, binding) = Fixture::mcp();
+        let begun = f.db.operation(&binding.operation_id).unwrap();
+        assert!(!begun.host_job.as_ref().unwrap().mcp_holder_released);
+        assert!(
+            !HostJobPending::from_operation(begun)
+                .unwrap()
+                .mcp_holder_released
+        );
+        let (read, thread) =
+            f.db.capture_mcp_host_job_context(&binding.operation_id)
+                .unwrap();
+        let (snapshot, frozen) = read.load_mcp().unwrap();
+        assert_eq!(thread, "thread");
+        assert_eq!(snapshot.context.operation_id, binding.operation_id);
+        assert!(snapshot.frozen.source.is_none());
+        assert_eq!(frozen.reference, "original-mcp-owner");
+        f.db.validate_tool_invocation(&snapshot, false).unwrap();
+        assert!(
+            f.db.operation(&binding.operation_id)
+                .unwrap()
+                .host_job
+                .unwrap()
+                .mcp_task
+                .is_none(),
+            "original cleanup context is readable before Task acceptance"
+        );
+        let task = McpTaskState {
+            task_id: "original-remote-task".into(),
+            status: McpTaskStatus::Working,
+            created_at: "created".into(),
+            last_updated_at: "created".into(),
+            ttl: None,
+            poll_interval: None,
+        };
+        let acceptance =
+            f.db.prepare_result_content()
+                .write_data(&json!({"accepted":true}))
+                .unwrap();
+        f.db.accept_host_job_task(binding.clone(), acceptance, Some(task.clone()))
+            .unwrap();
+        let observation =
+            f.db.prepare_result_content()
+                .write_data(&json!({"status":status}))
+                .unwrap();
+        let outcome = if status == McpTaskStatus::Completed {
+            Outcome::Succeeded
+        } else if status == McpTaskStatus::Failed {
+            Outcome::Failed
+        } else {
+            Outcome::Indeterminate
+        };
+        let effect = if status == McpTaskStatus::Cancelled {
+            Effect::Unknown
+        } else {
+            Effect::Confirmed
+        };
+        let result =
+            f.db.prepare_result_content()
+                .write_external_receipt(ExternalReceipt {
+                    executor: "task".into(),
+                    identity: binding.operation_id.clone(),
+                    epoch: "host-1".into(),
+                    outcome,
+                    effect,
+                    result: json!({"original":"result"}).into(),
+                })
+                .unwrap();
+        let settled =
+            f.db.update_mcp_task(
+                &binding,
+                1,
+                McpTaskState {
+                    status,
+                    last_updated_at: "settled".into(),
+                    ..task
+                },
+                McpTaskAvailability::Available,
+                None,
+                Some((McpTaskResultKind::Response, result)),
+                observation,
+            )
+            .unwrap();
+        assert_eq!(
+            settled.external_receipt.as_ref().unwrap().executor_stopped,
+            status != McpTaskStatus::Cancelled
+        );
+        assert!(
+            f.db.pending_host_jobs()
+                .unwrap()
+                .iter()
+                .any(|op| op.id == binding.operation_id),
+            "terminal result and stop do not acknowledge cleanup"
+        );
+        let mut wrong_version = binding.clone();
+        wrong_version.domain_version = 2;
+        assert!(
+            f.db.acknowledge_mcp_holder_released(&wrong_version)
+                .is_err()
+        );
+        let mut wrong_domain = binding.clone();
+        wrong_domain.domain = "another-domain".into();
+        assert!(f.db.acknowledge_mcp_holder_released(&wrong_domain).is_err());
+        let mut wrong_owner = binding.clone();
+        wrong_owner.execution_owner = ExecutorOwner::External {
+            identity: "selected-tool".into(),
+            epoch: "another-owner".into(),
+        };
+        assert!(f.db.acknowledge_mcp_holder_released(&wrong_owner).is_err());
+        let mut wrong_subject = binding.clone();
+        if let HostJobSubject::Mcp { endpoint, .. } = &mut wrong_subject.subject {
+            endpoint.credential_version = "new-credential".into();
+        }
+        assert!(
+            f.db.acknowledge_mcp_holder_released(&wrong_subject)
+                .is_err()
+        );
+        drop(read);
+        drop(snapshot);
+        drop(frozen);
+        let old = std::mem::replace(
+            &mut f.db,
+            Catalog::open(f.root.join("replacement")).unwrap(),
+        );
+        drop(old);
+        f.db = Catalog::open(&f.root).unwrap();
+        let reopened = &mut f.db;
+        assert!(
+            !reopened
+                .operation(&binding.operation_id)
+                .unwrap()
+                .host_job
+                .unwrap()
+                .mcp_holder_released
+        );
+        let before = reopened.operation(&binding.operation_id).unwrap();
+        let acknowledged = reopened.acknowledge_mcp_holder_released(&binding).unwrap();
+        let mut expected = before;
+        expected.host_job.as_mut().unwrap().mcp_holder_released = true;
+        expected.revision += 1;
+        assert_eq!(
+            acknowledged, expected,
+            "cleanup acknowledgement changes no execution or result facts"
+        );
+        assert_eq!(
+            reopened.acknowledge_mcp_holder_released(&binding).unwrap(),
+            acknowledged,
+            "same original cleanup retry is idempotent"
+        );
+        assert_eq!(
+            reopened
+                .pending_host_jobs()
+                .unwrap()
+                .iter()
+                .any(|op| op.id == binding.operation_id),
+            status == McpTaskStatus::Cancelled,
+            "cancelled is still not stop evidence after holder cleanup"
+        );
+        let old = std::mem::replace(
+            &mut f.db,
+            Catalog::open(f.root.join("replacement")).unwrap(),
+        );
+        drop(old);
+        f.db = Catalog::open(&f.root).unwrap();
+        assert!(
+            f.db.operation(&binding.operation_id)
+                .unwrap()
+                .host_job
+                .unwrap()
+                .mcp_holder_released,
+            "acknowledged cleanup survives reopening"
+        );
+        assert!(
+            f.db.finish_mcp_task(&binding)
+                .unwrap()
+                .host_job
+                .unwrap()
+                .mcp_holder_released,
+            "finishing the original result cannot reopen cleanup"
+        );
+    }
+}
+
+#[test]
+fn original_unaccepted_mcp_intent_retains_cleanup_after_an_unstarted_terminal_receipt() {
+    let (mut f, binding) = Fixture::mcp();
+    let original = f.db.operation(&binding.operation_id).unwrap();
+    let receipt =
+        f.db.prepare_result_content()
+            .write_external_receipt(ExternalReceipt {
+                executor: original.executor.unwrap(),
+                identity: binding.operation_id.clone(),
+                epoch: "host-1".into(),
+                outcome: Outcome::Failed,
+                effect: Effect::None,
+                result: json!({"reason":"target proved creation never began"}).into(),
+            })
+            .unwrap();
+    let terminal =
+        f.db.record_host_job_terminal(&binding, receipt, true)
+            .unwrap();
+    assert!(terminal.host_job.as_ref().unwrap().mcp_task.is_none());
+    assert!(
+        f.db.pending_host_jobs()
+            .unwrap()
+            .iter()
+            .any(|op| op.id == binding.operation_id)
+    );
+    let (read, _) =
+        f.db.capture_mcp_host_job_context(&binding.operation_id)
+            .unwrap();
+    let (snapshot, binding_body) = read.load_mcp().unwrap();
+    assert_eq!(binding_body.reference, "original-mcp-owner");
+    f.db.validate_tool_invocation(&snapshot, false).unwrap();
+    let released = f.db.acknowledge_mcp_holder_released(&binding).unwrap();
+    let mut expected = terminal;
+    expected.host_job.as_mut().unwrap().mcp_holder_released = true;
+    expected.revision += 1;
+    assert_eq!(released, expected);
+    assert!(f.db.pending_host_jobs().unwrap().is_empty());
 }

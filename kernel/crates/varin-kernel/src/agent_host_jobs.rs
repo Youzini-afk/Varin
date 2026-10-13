@@ -248,38 +248,30 @@ pub(super) fn execute(
                 HostJobPending::from_operation(op).map_err(domain)?,
             )?)
         }
+        "runtime.host_job.task.holder_released" => {
+            let p: HostJobBeginParams = serde_json::from_value(params)?;
+            let op = owner
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                .acknowledge_mcp_holder_released(&p.binding)
+                .map_err(domain)?;
+            Ok(serde_json::to_value(
+                HostJobPending::from_operation(op).map_err(domain)?,
+            )?)
+        }
         "runtime.host_job.task.context" => {
             let p: OperationParams = serde_json::from_value(params)?;
-            let (read, thread_id) = {
-                let db = owner
-                    .lock()
-                    .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
-                let op = db.operation(&p.operation_id).map_err(domain)?;
-                if op
-                    .host_job
-                    .as_ref()
-                    .and_then(|link| link.mcp_task.as_ref())
-                    .is_none()
-                {
-                    return Err(KernelError::Protocol(
-                        "Task has no accepted identity".into(),
-                    ));
-                }
-                let intent = varin_runtime::catalog::tool_content::ToolIntent::from_operation(&op)
-                    .map_err(domain)?;
-                let thread_id = db.run(&op.run_id).map_err(domain)?.thread_id;
-                let context = varin_runtime::execution::ToolExecutionContext {
-                    run_id: op.run_id,
-                    operation_id: op.id,
-                    origin: intent.origin().clone(),
-                };
-                (
-                    db.capture_tool_invocation(&context, &intent.call().call_id)
-                        .map_err(domain)?,
-                    thread_id,
-                )
-            };
+            let (read, thread_id) = owner
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                .capture_mcp_host_job_context(&p.operation_id)
+                .map_err(domain)?;
             let (snapshot, binding) = read.load_mcp().map_err(domain)?;
+            owner
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                .validate_tool_invocation(&snapshot, false)
+                .map_err(domain)?;
             Ok(
                 serde_json::json!({"threadId":thread_id,"source":snapshot.frozen.source,"binding":binding}),
             )

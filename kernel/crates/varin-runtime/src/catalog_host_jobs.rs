@@ -103,6 +103,8 @@ pub struct HostJobLink {
     pub binding: HostJobBinding,
     /// Null is a dispatched domain intent, never an acceptance or a stopped receipt.
     pub acceptance_ref: Option<Value>,
+    /// Original MCP holder cleanup acknowledgement, independent of execution/result facts.
+    pub mcp_holder_released: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mcp_task: Option<McpTaskLink>,
 }
@@ -145,6 +147,7 @@ pub struct HostJobPending {
     pub cancel_requested: bool,
     pub phase: OperationPhase,
     pub executor_stopped: bool,
+    pub mcp_holder_released: bool,
     pub origin: HostJobOrigin,
 }
 /// Discovery metadata only. source_run_id is target attribution, never a continuation source.
@@ -183,6 +186,7 @@ impl HostJobPending {
         };
         Ok(Self {
             mcp_task: link.mcp_task,
+            mcp_holder_released: link.mcp_holder_released,
             binding: link.binding,
             run_id: op.run_id,
             accepted: link.acceptance_ref.is_some(),
@@ -388,6 +392,7 @@ impl Catalog {
                     },
                 },
                 acceptance_ref: None,
+                mcp_holder_released: domain != "mcp.task",
                 mcp_task: None,
             }),
             external_receipt: None,
@@ -510,8 +515,12 @@ impl Catalog {
             _ => None,
         };
         if key != Some(&endpoint.resource_key)
-            || frozen.provenance.servers.get(&endpoint.server)
-                .is_none_or(|server| !server.owner.accepts_source(snapshot.frozen.source.as_ref())) {
+            || frozen
+                .provenance
+                .servers
+                .get(&endpoint.server)
+                .is_none_or(|server| !server.owner.accepts_source(snapshot.frozen.source.as_ref()))
+        {
             return Err(RuntimeError::Conflict(
                 "Task server differs from the selected invocation".into(),
             ));
@@ -661,6 +670,7 @@ impl Catalog {
             ));
         }
         op.host_job = Some(HostJobLink {
+            mcp_holder_released: binding.domain != "mcp.task",
             binding,
             acceptance_ref: None,
             mcp_task: None,
@@ -973,6 +983,75 @@ impl Catalog {
         };
         self.record_host_job_terminal(binding, prepared, stopped)
     }
+    /// Capture the begun original Task intent, including dispatches whose acceptance is unknown.
+    /// Its frozen body is loaded outside Catalog; no current configuration is consulted.
+    pub fn capture_mcp_host_job_context(
+        &self,
+        id: &str,
+    ) -> Result<(tool_content::ToolInvocationRead, String)> {
+        let op = self.operation(id)?;
+        let link = op.host_job.as_ref().ok_or_else(|| {
+            RuntimeError::Conflict("Task has no original dispatched intent".into())
+        })?;
+        Self::require_mcp_host_job_binding(&op, &link.binding)?;
+        let intent = tool_content::ToolIntent::from_operation(&op)?;
+        if intent.contract().completion != CompletionKind::Job {
+            return Err(RuntimeError::Conflict(
+                "Task intent is not a Job declaration".into(),
+            ));
+        }
+        let thread_id = self.run(&op.run_id)?.thread_id;
+        let context = crate::execution::ToolExecutionContext {
+            run_id: op.run_id,
+            operation_id: op.id,
+            origin: intent.origin().clone(),
+        };
+        Ok((
+            self.capture_tool_invocation(&context, &intent.call().call_id)?,
+            thread_id,
+        ))
+    }
+    fn require_mcp_host_job_binding(op: &Operation, binding: &HostJobBinding) -> Result<()> {
+        if binding.domain != "mcp.task"
+            || binding.domain_version != 1
+            || binding.operation_id != op.id
+            || op.host_job.as_ref().map(|link| &link.binding) != Some(binding)
+            || op.execution_owner.as_ref() != Some(&binding.execution_owner)
+            || !matches!(&binding.execution_owner, ExecutorOwner::External { .. })
+            || !matches!(&binding.subject, HostJobSubject::Mcp { dispatch_id, .. } if dispatch_id == &op.id)
+        {
+            return Err(RuntimeError::Conflict(
+                "Task original binding changed".into(),
+            ));
+        }
+        Ok(())
+    }
+    /// The Host acknowledges only the exact original holder's successful release.
+    /// This monotone cleanup fact is not task completion or executor-stop evidence.
+    pub fn acknowledge_mcp_holder_released(
+        &mut self,
+        binding: &HostJobBinding,
+    ) -> Result<Operation> {
+        let tx = self.db.transaction()?;
+        let mut op: Operation = record(&tx, "operations", &binding.operation_id)?;
+        Self::require_mcp_host_job_binding(&op, binding)?;
+        let link = op.host_job.as_mut().expect("checked Task link");
+        if link.mcp_holder_released {
+            return Ok(op);
+        }
+        link.mcp_holder_released = true;
+        op.revision += 1;
+        put(&tx, "operations", &op.id, &op)?;
+        event(
+            &tx,
+            &op.id,
+            op.revision,
+            "host_job.task.holder_released",
+            json!({"binding":binding}),
+        )?;
+        tx.commit()?;
+        Ok(op)
+    }
     /// A control caller may act only on its own Thread subtree. Reads use the original family.
     pub fn access_host_job(
         &self,
@@ -993,7 +1072,7 @@ impl Catalog {
         Ok(target)
     }
     pub fn pending_host_jobs(&self) -> Result<Vec<Operation>> {
-        let mut query=self.db.prepare("SELECT body FROM operations WHERE json_extract(body,'$.host_job') IS NOT NULL AND (coalesce(json_extract(body,'$.external_receipt.executor_stopped'),0)=0 OR json_extract(body,'$.phase')!='terminal' OR (json_extract(body,'$.host_job.mcpTask') IS NOT NULL AND json_extract(body,'$.host_job.mcpTask.resultRef') IS NULL)) ORDER BY rowid")?;
+        let mut query=self.db.prepare("SELECT body FROM operations WHERE json_extract(body,'$.host_job') IS NOT NULL AND ((json_extract(body,'$.host_job.binding.domain')='mcp.task' AND json_extract(body,'$.host_job.mcpHolderReleased')=0) OR coalesce(json_extract(body,'$.external_receipt.executor_stopped'),0)=0 OR json_extract(body,'$.phase')!='terminal' OR (json_extract(body,'$.host_job.mcpTask') IS NOT NULL AND json_extract(body,'$.host_job.mcpTask.resultRef') IS NULL)) ORDER BY rowid")?;
         let rows = query.query_map([], |r| r.get::<_, String>(0))?;
         rows.map(|raw| Ok(serde_json::from_str(&raw?)?)).collect()
     }

@@ -55,6 +55,10 @@
     "./settings-authority": {
       "types": "./dist/settings-authority.d.ts",
       "import": "./dist/settings-authority.js"
+    },
+    "./mcp-errors": {
+      "types": "./dist/mcp-errors.d.ts",
+      "import": "./dist/mcp-errors.js"
     }
   },
   "scripts": {

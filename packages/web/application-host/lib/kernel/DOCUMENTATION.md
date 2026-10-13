@@ -1326,11 +1326,28 @@ ordinary Run shell grant. Admitted Operation holders are immutable reference/fen
 Catalog remains the only Task/observer state owner. Storage seals new admission before Run retirement,
 preserves existing holders without changing resource keys or grants, and explicit revocation bypasses
 retention. Final holder release still requires the original native stop before grant retirement.
-These are lifetime prerequisites; managed Task/observer SDK forwarding is not enabled yet. The current
-internal formats are Storage 18, Agent Catalog 68 and private wire 32; older formats are rejected by
+Managed Task creation now enters one immutable receipt on that original holder before `tools/call`.
+Receipt bodies use the original Storage immutable-object store and content lane; holder/control
+projections keep short hash/length references. Staging, hashing and hydration occur outside Storage,
+and the unreleased holder owns the body's GC root. The receiving Host retains the original SDK handle
+without a Task scheduler. A's existing Task owner
+polls, cancels and retrieves results, and can recover the original acceptance after a lost response.
+An inspection joins a still-running original creation; reopening a missing SDK heap never starts a
+replacement daemon. A no-dispatch recovery fence closes only holders without a creation receipt.
+Status `cancelled`, a lost session and an absent response do not prove an unidentified Task stopped.
+
+The original Catalog HostJob retains a holder-cleanup obligation independently of its result and stop
+facts. A awaits exact target release, final source retirement where required, then records cleanup
+acknowledgement. Target release fences new control calls and awaits actual SDK control callbacks;
+that local drain does not change remote Task effect or stop facts. Shutdown detaches local projections without discarding that obligation. Original
+source-reconnect notifications wake paused Task reconciliation. Target Task polling still uses A's
+existing scheduler; remote reverse-interaction and persistent resource-observer bridges remain separate.
+Focused evidence covers actual coordinator/target modules with controlled ports, native receipt fences
+and Catalog persistence; it does not assert a full two-Host SDK lifecycle. The current
+internal formats are Storage 19, Agent Catalog 69 and private wire 33; older formats are rejected by
 the existing read-only gate with data preserved, without automatic migration or cleanup.
 
-Managed MCP Tasks, persistent resource observers, finite reverse interactions and mixed-owner child
+Managed MCP persistent resource observers, finite reverse interactions and mixed-owner child
 preparation, explicit managed cold calendar starts and broader combined cross-Host file recovery
 still have separate implementation work. Computer assignments, Agent/Bot identity, global settings and model
 credentials remain with their original owners; selecting a file Host does not silently redirect them.

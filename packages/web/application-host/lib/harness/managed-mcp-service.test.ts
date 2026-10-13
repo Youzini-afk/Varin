@@ -127,9 +127,9 @@ it('seals ordinary views without draining the retained original daemon, then dra
   const f = fixture(() => ({ adapt: value => value, drain: async () => { nativeDrains++; }, executorsStopped: () => nativeDrains > 0 }));
   const scope = original();
   await f.service.request(scope, { kind: 'snapshot', handleId: 'original-view', creationRequestId: 'open' });
-  expect(await f.service.release(scope, { retainMcpHolders: true })).toEqual({ executorStopped: false });
+  expect(await f.service.release(scope, { retainMcpHolders: true })).toEqual({ executorStopped: false, taskControlsDrained: false });
   expect(nativeDrains).toBe(0); expect(f.counts().releases).toBe(1);
   expect(await f.service.request(scope, { kind: 'snapshot', handleId: 'late', creationRequestId: 'late' })).toMatchObject({ ok: false });
-  expect(await f.service.release(scope)).toEqual({ executorStopped: true });
+  expect(await f.service.release(scope)).toEqual({ executorStopped: true, taskControlsDrained: true });
   expect(nativeDrains).toBe(1);
 });

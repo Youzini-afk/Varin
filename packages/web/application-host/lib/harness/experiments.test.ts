@@ -535,7 +535,7 @@ it('installed ordinary research tools hand original model and policy invocations
       const subject=binding.subject;
       const original=[...ops.values()].find(op=>op.link?.binding.subject.kind==='workspace'&&op.link.binding.subject.subjectId===subject.subjectId);
       if(original)return structuredClone(original.link);
-      saved.link={binding,runId:'run',accepted:false,cancelRequested:false,phase:'running',executorStopped:false,origin:{kind:'tool',origin:saved.call.origin,call_id:saved.call.callId,tool_name:saved.call.name,schema_version:saved.call.schemaVersion}};return structuredClone(saved.link);
+      saved.link={binding,runId:'run',accepted:false,cancelRequested:false,phase:'running',executorStopped:false,mcpHolderReleased:true,origin:{kind:'tool',origin:saved.call.origin,call_id:saved.call.callId,tool_name:saved.call.name,schema_version:saved.call.schemaVersion}};return structuredClone(saved.link);
     }
     if(method==='runtime.host_job.accept'){
       const saved=ops.get((params.binding as Pending['binding']).operationId)!;assert.deepEqual(saved.link!.binding,params.binding);

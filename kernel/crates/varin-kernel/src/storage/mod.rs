@@ -58,6 +58,7 @@ pub(crate) mod result_publication;
 mod state_tree;
 mod source_authorities;
 pub(crate) mod source_read_receipts;
+pub(crate) mod source_mcp_receipts;
 
 pub(crate) fn sync_directory(path: &Path) -> io::Result<()> {
     #[cfg(unix)]

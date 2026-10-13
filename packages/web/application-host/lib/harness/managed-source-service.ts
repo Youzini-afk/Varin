@@ -13,6 +13,7 @@ import { normalizeThreadSourcePreparation } from '../kernel/thread-sources.js';
 import { normalizePathIdentity } from '../workspace/path-safety.js';
 import { ManagedSourceDrainedError } from './managed-source-drain.js';
 import { resolveScriptNodeBinding, scriptNodeSpawnInput } from '../kernel/script-node-binding.js';
+import { isManagedMcpTaskContinuation } from './managed-mcp-contract.js';
 import { createManagedSourceProcesses } from './managed-source-processes.js';
 import type { ManagedSourceAddress, ManagedSourceBindRequest, ManagedSourceBinding, ManagedSourceCapabilities,
   ManagedSourcePrincipal, ManagedSourceService, ManagedSourceServiceHandler, ManagedSourceLocalScope,
@@ -29,7 +30,9 @@ export interface ManagedSourceServiceOptions {
   serviceOperation?: ManagedSourceServiceHandler;
   releaseMcpView?(scope: ManagedSourceCleanupScope,
     action: Extract<import('./managed-mcp-contract.js').ManagedMcpAction, { kind: 'release' }>): Promise<import('./managed-mcp-contract.js').ManagedMcpReply>;
-  releaseSource?(scope: ManagedSourceCleanupScope, options?: { retainMcpHolders: boolean }): Promise<void | { mcpExecutorStopped: boolean }>;
+  mcpTaskContinuation?(scope: ManagedSourceCleanupScope,
+    action: Extract<import('./managed-mcp-contract.js').ManagedMcpAction, { kind: 'task_inspect' | 'task_get' | 'task_result' | 'task_cancel' | 'task_release' }>, signal?: AbortSignal): Promise<import('./managed-mcp-contract.js').ManagedMcpReply>;
+  releaseSource?(scope: ManagedSourceCleanupScope, options?: { retainMcpHolders: boolean }): Promise<void | { mcpExecutorStopped: boolean; mcpTaskControlsDrained?: boolean }>;
   cleanupSource?(scope: ManagedSourceCleanupScope): Promise<void>;
   languageAvailable?: boolean;
 }
@@ -44,6 +47,9 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     controller: AbortController;
     work: Promise<unknown> | null;
     settled: boolean;
+    continuingMcp: boolean;
+    taskCreation?: import('../kernel/protocol.generated.js').SourceMcpHolderBinding;
+    taskControl?: import('../kernel/protocol.generated.js').SourceMcpHolderBinding;
     drain: Promise<ManagedSourceServiceCancelReceipt['status']>;
   }
   // Live request handles only. Durable effects and recovery remain in their
@@ -118,15 +124,18 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     await processViews.release(principal, { coordinatorHostId, authorityId: authority.authorityId, resourceEpoch: authority.resourceEpoch });
     const retained = [...services.entries()].filter(([, flight]) => flight.principalId === principal.principalId
       && flight.address.coordinatorHostId === coordinatorHostId && flight.address.authorityId === authority.authorityId
-      && flight.address.resourceEpoch === authority.resourceEpoch);
+      && flight.address.resourceEpoch === authority.resourceEpoch
+      && !(retainMcpHolders && flight.continuingMcp));
     for (const [, flight] of retained) flight.controller.abort();
     const drained = await Promise.all(retained.map(([, flight]) => flight.drain));
     const stopped = await options.releaseSource?.(cleanupScope(principal, coordinatorHostId, authority), { retainMcpHolders });
     // Stopping an original native MCP executor settles only its physical lifetime.
-    // Catalog's unknown effect stays unknown; HTTP work has no such native tree receipt.
+    // Catalog's unknown effect stays unknown. Separately, closed Task controls
+    // may release their local references after their original SDK callbacks drained.
     for (let index = 0; index < retained.length; index++) {
       const flight = retained[index]![1];
-      if (drained[index] === 'unknown' && flight.domain === 'mcp' && stopped?.mcpExecutorStopped) {
+      if (drained[index] === 'unknown' && flight.domain === 'mcp'
+        && (stopped?.mcpExecutorStopped || flight.taskControl && stopped?.mcpTaskControlsDrained === true)) {
         drained[index] = 'drained'; flight.drain = Promise.resolve('drained');
       }
     }
@@ -189,7 +198,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         const controller = new AbortController(); controller.abort();
         flight = { principalId: principal.principalId, address: { coordinatorHostId: input.coordinatorHostId,
           authorityId: input.authorityId, resourceEpoch: input.resourceEpoch }, operation: null, controller,
-          domain: null, work: null, settled: false, drain: Promise.resolve('not_started') };
+          domain: null, work: null, settled: false, continuingMcp: false, drain: Promise.resolve('not_started') };
         services.set(key, flight);
       }
     }
@@ -389,7 +398,8 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     },
     async service(principal, input, signal) {
       const mcpRelease = input.operation.kind === 'mcp' && input.operation.action.kind === 'release';
-      if (mcpRelease) requirePrincipal(principal, input.coordinatorHostId);
+      const mcpContinuation = input.operation.kind === 'mcp' && isManagedMcpTaskContinuation(input.operation.action);
+      if (mcpRelease || mcpContinuation && input.operation.kind === 'mcp' && ['task_inspect', 'task_release', 'task_cancel'].includes(input.operation.action.kind)) requirePrincipal(principal, input.coordinatorHostId);
       else requireReadPrincipal(principal, input.coordinatorHostId);
       const key = serviceKey(principal, input);
       const original = services.get(key);
@@ -400,7 +410,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         original.controller.signal.throwIfAborted();
         throw new SourceAdmissionError('source_changed');
       }
-      if (closing.has(authorityKey(principal, input))) throw new SourceAdmissionError('source_authority_denied');
+      if (!mcpRelease && !mcpContinuation && closing.has(authorityKey(principal, input))) throw new SourceAdmissionError('source_authority_denied');
       const controller = new AbortController();
       const abort = () => controller.abort(signal?.reason);
       signal?.addEventListener('abort', abort, { once: true });
@@ -424,11 +434,16 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
           }
         }
         // Cleanup uses the original authenticated address even after read/trust withdrawal.
-        const authority = mcpRelease ? await inspect(principal, input, controller.signal) : await admit(principal, input, controller.signal);
+        const authority = mcpRelease || mcpContinuation ? await inspect(principal, input, controller.signal) : await admit(principal, input, controller.signal);
         if (authority.purpose === 'process_view' || authority.purpose === 'script_environment'
           && !(operation.kind === 'native_resource' && operation.action.kind === 'process_observation')) throw new SourceAdmissionError('source_authority_denied');
         if (authority.purpose === 'mcp_owner' && operation.kind !== 'mcp' && operation.kind !== 'validate'
           || operation.kind === 'mcp' && authority.purpose !== 'mcp_owner') throw new SourceAdmissionError('source_authority_denied');
+        if (operation.kind === 'mcp' && isManagedMcpTaskContinuation(operation.action)) {
+          if (!options.mcpTaskContinuation) throw new SourceAdmissionError('source_unavailable');
+          dispatched = true;
+          return options.mcpTaskContinuation(cleanupScope(principal, input.coordinatorHostId, authority), operation.action, controller.signal);
+        }
         if (operation.kind === 'mcp' && operation.action.kind === 'release') {
           if (!options.releaseMcpView) throw new SourceAdmissionError('source_unavailable');
           dispatched = true;
@@ -451,6 +466,29 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         }
       }).finally(() => signal?.removeEventListener('abort', abort));
       const drain = work.then(result => {
+        if (operation.kind === 'mcp' && operation.action.kind === 'task_inspect') {
+          const recalled = result as { ok?: boolean; value?: { receipt?: { outcome?: { kind: string; error?: { dispatched: boolean; settlement: string } } } } };
+          const outcome = recalled?.ok ? recalled.value?.receipt?.outcome : undefined;
+          if (outcome && (outcome.kind === 'accepted' || outcome.error && (!outcome.error.dispatched || outcome.error.settlement === 'rpc_response'))) {
+            // The original creation response is now durable. Refine only that finite
+            // RPC's drain fact; its continuing Task is still held independently.
+            for (const prior of services.values()) if (prior.principalId === principal.principalId
+              && prior.address.coordinatorHostId === input.coordinatorHostId && prior.address.authorityId === input.authorityId
+              && prior.address.resourceEpoch === input.resourceEpoch && isDeepStrictEqual(prior.taskCreation, operation.action.binding))
+              prior.drain = Promise.resolve('drained');
+          }
+        }
+        if (operation.kind === 'mcp' && operation.action.kind === 'task_release') {
+          const released = result as { ok?: boolean; value?: { controlsDrained?: boolean } };
+          if (released?.ok && released.value?.controlsDrained === true) {
+            // Original holder release awaited its actual local SDK controls. Their
+            // local references may close; remote Task/effect facts remain in Catalog.
+            for (const prior of services.values()) if (prior.principalId === principal.principalId
+              && prior.address.coordinatorHostId === input.coordinatorHostId && prior.address.authorityId === input.authorityId
+              && prior.address.resourceEpoch === input.resourceEpoch && isDeepStrictEqual(prior.taskControl, operation.action.binding))
+              prior.drain = Promise.resolve('drained');
+          }
+        }
         if (result && typeof result === 'object') {
           const receipt = result as { executorStopped?: boolean; effect?: string };
           if (receipt.executorStopped === false || receipt.effect === 'unknown' && receipt.executorStopped !== true) return 'unknown' as const;
@@ -469,7 +507,11 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         return status;
       });
       services.set(key, { principalId: principal.principalId, address: { coordinatorHostId: input.coordinatorHostId,
-        authorityId: input.authorityId, resourceEpoch: input.resourceEpoch }, operation, domain: operation.kind, controller, work, settled: false, drain });
+        authorityId: input.authorityId, resourceEpoch: input.resourceEpoch }, operation, domain: operation.kind, controller, work, settled: false,
+        continuingMcp: operation.kind === 'mcp' && (isManagedMcpTaskContinuation(operation.action) || operation.action.kind === 'task_start'),
+        ...(operation.kind === 'mcp' && operation.action.kind === 'task_start' ? { taskCreation: operation.action.binding } : {}),
+        ...(operation.kind === 'mcp' && (operation.action.kind === 'task_get' || operation.action.kind === 'task_result' || operation.action.kind === 'task_cancel')
+          ? { taskControl: operation.action.binding } : {}), drain });
       return work;
     },
     cancelService: cancelServiceFlight,
