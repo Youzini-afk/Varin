@@ -1174,6 +1174,49 @@ impl KernelResourceClient {
         }
         Ok(Some(receipt))
     }
+    /// Original staged-package delivery proves compilation has stopped. Only the
+    /// saved Source/Operation is released; no package code or stage call is replayed.
+    pub(crate) fn release_delivered_package_source(&self, id: &str) -> Result<(), KernelError> {
+        let Some(catalog) = &self.journal_catalog else {
+            return Ok(());
+        };
+        let original = {
+            let db = catalog.lock().map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?;
+            let operation = db.operation(id).map_err(|e| KernelError::Operation(e.to_string()))?;
+            if operation.executor.as_deref() != Some("extension_package")
+                || !db.external_delivery_persisted(id).map_err(|e| KernelError::Operation(e.to_string()))?
+            {
+                return Ok(());
+            }
+            let Some(source) = db.launch_metadata(&operation.run_id)
+                .map_err(|e| KernelError::Operation(e.to_string()))?
+                .and_then(|launch| launch.selection.source) else { return Ok(()); };
+            if source.resource_owner.is_local() { return Ok(()); }
+            let run = db.run(&operation.run_id).map_err(|e| KernelError::Operation(e.to_string()))?;
+            (db.capture_operation_read(operation), source, run.thread_id)
+        };
+        // Hydration and all remote work stay outside the Catalog lock.
+        let operation = original.0.load().map_err(|e| KernelError::Operation(e.to_string()))?;
+        let invocation: varin_runtime::execution::ToolInvocation = serde_json::from_value(operation.intent)?;
+        if invocation.call.name != "extension_package" || invocation.call.arguments["action"] != "stage" {
+            return Ok(());
+        }
+        let receipt = self.source_query(json!({"kind":"package_cleanup", "operationId":id,
+            "runId":operation.run_id, "threadId":original.2, "source":original.1}), &CancellationToken::default())
+            .map_err(|e| KernelError::Operation(e.to_string()))?;
+        if receipt["operationId"] != id || receipt["released"] != true {
+            return Err(KernelError::Authorization("Original package cleanup receipt changed".into()));
+        }
+        Ok(())
+    }
+    pub(crate) fn schedule_package_source_release(&self, id: String) {
+        let resources = self.clone();
+        let _ = std::thread::Builder::new().name("package-source-delivery".into()).spawn(move || {
+            if let Err(error) = resources.release_delivered_package_source(&id) {
+                eprintln!("Original package source cleanup remains pending: {error}");
+            }
+        });
+    }
     pub(crate) fn release_delivered_read_receipt(&self, id: &str) -> Result<(), KernelError> {
         let Some(catalog) = &self.journal_catalog else {
             return Ok(());
@@ -1211,7 +1254,7 @@ impl KernelResourceClient {
                 }
             });
     }
-    pub(crate) fn replay_read_receipt_releases(&self) -> Result<(), KernelError> {
+    pub(crate) fn replay_source_delivery_releases(&self) -> Result<(), KernelError> {
         let Some(catalog) = &self.journal_catalog else {
             return Ok(());
         };
@@ -1222,10 +1265,14 @@ impl KernelResourceClient {
             .map_err(|e| KernelError::Operation(e.to_string()))?;
         let resources = self.clone();
         std::thread::Builder::new()
-            .name("source-read-delivery-replay".into())
+            .name("source-delivery-replay".into())
             .spawn(move || {
                 for operation in delivered {
-                    if crate::reconcile::is_managed_read(&operation) {
+                    if operation.executor.as_deref() == Some("extension_package") {
+                        if let Err(error) = resources.release_delivered_package_source(&operation.id) {
+                            eprintln!("Original package source cleanup remains pending: {error}");
+                        }
+                    } else if crate::reconcile::is_managed_read(&operation) {
                         if let Err(error) = resources.release_delivered_read_receipt(&operation.id)
                         {
                             eprintln!(

@@ -1296,3 +1296,41 @@ interactive PTY attachment, persistent script environments, Experiment
 input capture, package staging from that source, and project-bound MCP/scheduled tasks. Their existing
 local paths remain separate. Computer assignments, Agent/Bot identity, global settings and model
 credentials remain with their original owners; selecting a file Host does not silently redirect them.
+
+## Managed extension package cleanup
+
+`extension-package-owner.ts` retains a confirmed stage result when source release fails. The original
+Catalog Operation and actual executor-stopped delivery receipt drive cleanup independently of staging:
+the bound Host tool callback schedules only that Operation, startup replays delivered source cleanup,
+and `runtime.source.cleanup` is the explicit source-reconnect wake. None recompiles or restages a package.
+The private `package_cleanup` request carries the original saved launch. `managed-package-source.ts`
+inspects the original remote scope and retires only the matching source-purpose authority with the same
+Operation, Run/Thread and complete Source identity. Remote waits and intent hydration occur outside the
+Catalog lock; unconfirmed cleanup leaves the original authority available for a later recovery pass.
+
+On the source Host, `extension.package-capture` records the full authority attribution, capture identity
+and package path before acquiring its deterministic revision pin. These are Storage resource cleanup
+addresses, not another installation result. Live capture readers drain before cleanup. A reopened Host
+uses maintenance authority to release only those recorded pins, without reopening the original project
+or reconstructing a capture closure. Native retirement then releases temporary object owners belonging
+to that exact original source grant. Other consumers' durable pins retain their existing lifetime.
+
+## Original process terminals across managed Sources
+
+`thread-processes.ts` opens a view of the original Catalog process Operation. For a managed Source it
+admits a caller-retained `process_view`, validates the original process through `runtime.process.access`
+and `source.process.access`, then gives `KernelManagedProcess` the narrow `managed-process-client.ts`
+projection port. The B Storage owner still authorizes the original process, source, principal and Run;
+view authorities cannot execute unrelated tools or generic service actions.
+
+`managed-source-processes.ts` and `managed-process-stream.ts` carry the original native stream with
+separate data/control acknowledgement. HTTP body reads do not release credits. Input/resize preserve
+original native operation receipts and are never replayed after unknown delivery. The original job is
+cancelled only through its Catalog Operation. Closing a remote subscription retires its exact view;
+UI detach may retain the A terminal projection under the existing TerminalRuntime lifetime.
+
+Native `replayCursor` freezes retained output at subscribe time. Thread views suppress automatic input
+responses to historical terminal queries while fresh output keeps normal terminal behavior. Process
+creation epoch and current subscription epoch remain distinct after B reopens: retained output can be
+observed, but Storage still denies old-epoch control. A failed projection is rebound through original
+`openTerminal` before UI reattaches; it is never replaced with a new shell job.

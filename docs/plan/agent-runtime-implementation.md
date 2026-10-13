@@ -8,6 +8,21 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-13 增量：原 managed PTY 与包来源清理恢复
+
+原 Thread/branch/Operation 的 PTY 可沿冻结 B 来源重新准入仅供视图的 authority，通过原
+Storage 进程流、独立 data/control credit 和写入回执投影到现有 Terminal。UI 关闭只 detach；
+停止仍取消原 Operation。历史输出带固定 replay 边界，重新打开不重复回答历史终端查询；
+B cwd 与资源 owner 保留，不用于 A 本地目录解析或 localhost 预览。断连后的重试重新准入
+原进程视图，旧进程的创建 epoch 与当前查看 epoch 分开。
+
+包 stage 后首次 B 清理失败现在沿原已交付 Operation 在恢复时推进；B 的原 package capture
+清理身份与确切 revision pin 进入已有 Storage record，重开不依赖 Host 内存 map，也不重放 stage。
+wire **29**。[PTY 证据](../reviews/runtime-managed-pty-2026-10-13.md)和
+[包清理审查及修复](../reviews/runtime-managed-package-lifecycle-audit-2026-10-13.md)分别记录
+实际定点证据与未执行路径。本轮按用户调整暂不安排实机/物理多机验收；这些未验事实保留，
+不作为代码阶段继续推进的阻碍。完整类型/Host集成证据因当前依赖不可取得而有限。
+
 ## 2026-10-13 增量：资源等待与受确认的草稿恢复
 
 文件租约改为原 Storage owner 的事件等待，移除 Host 的 5ms 重试；原取消、撤权及 worker 排空回执
@@ -900,7 +915,7 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 | 总设 §12–13、§18、§24：推理用途、记忆与 Bot | 多 API 家族原生适配及原 credential owner；规划模型、embedding、TypeSafe/Cloudflare/llama.cpp decision 与真实 research_decide；自动容量水位、可替换预算 Decision/冻结摘要配方、分段摘要、普通 notes/计划和稳定 memory checkpoint；同绑定成功 usage 校准；Goal/预算/暂停/各种持久触发；原 Bot 自动整理/选文、native 主入口/身份/召回/Plan/Sleep，冻结摘要基线与原自适应准备水位 | 完整压缩算法替换，当前摘要执行仍为固定 ContextJob/SummaryPolicy；现有实际模型配置、协议特定回执、长期睡眠恢复及产品组合的外部验收。图像生成按用户本轮指令暂缓；不另设建议/评估新产品、材料重排产品或其他用途本地包 | 每次实际外发按用途、原凭据、来源和 Goal 受理；未知 usage 不变成零；不重放潜在收费请求；原记忆 revision 和祖先压缩边界保持 |
 | 扩设 §4–9：完整能力组合与作者接口 | Provider/Transform/Decision/Observer 已有真实切片；ToolGraph、直接 child、Deliver/Pause、运行中策略换绑；SDK tools.invoke；原冻结tools.list/describe与普通runtime_contract、同源service/method/event/UI slot/props/准备状态及精确不可变包源码有限查询；Agent产包/原授权候选/实际工作台挂载释放、显式Host/Surface就绪组；有序纯Context Transform、同名来源隔离与未变成员复用；唯一 scoped 选择、冻结依赖 DAG、同图实例共享及实际 Surface lease；本地/managed Source 共用原捕获与产包链，未就绪候选的精确撤回和排空 | 其余当前异构 service 的元数据声明、完整API/更广UI贡献查询；更广领域Provider/Transform和结构化patch冲突合同、更多实际作用域组合验证；trusted-native不能并存实例的热交接仍需沿原owner实现 | 不另养能力名单或第二安装器；失败候选保留旧实例；旧调用保留真实绑定；关闭 UI 不取消后台业务；仅依赖自己的工作等待准备 |
 | 总设 §14–16、§21、§24：文件与产品工作流 | 原文件工具/CAS/捕获、child 报告与 WorkingResult、family 消息/读取/Wait、历史引用与分支、Storage 与 Catalog GC 锁外准备；Documents 草稿/BOM/行尾与同源资源闭包、Git 子目录捕获；原输入 checkpoint、Thread 导航和原 journal 组合恢复；受确认草稿恢复及原磁盘/未保存内容撤销，Storage 事件租约等待 | Rust/Host 多物理来源组合恢复及跨平台文件行为的实际验收；未知草稿状态的可确认冲突；现有 IDE/Research/Bot、Documents/Git/overview/通知的组合消费核对。Git index 恢复不是聊天回退的隐含能力 | 草稿不是聊天回滚副作用；重开保留真实副本与效果；报告和代码集成各有事实；各视图不能有第二份状态权威 |
-| 总设 §19–20、§22：环境、Computer 与 MCP | Computer 原本地/远端操作、assignment/精确 stop、source-less child request/Wait/handback、持久 async 脚本；MCP tools/content/Tasks/resource observers/有限交互和两次审阅 sampling；typed media 的存储与跨层消费；managed Source 文件/进程/检索/语言、文件跟进与服务转发；Computer open/put/browser/office/evidence/environment 工具消费者 | managed Source 的交互 PTY、持久脚本、Experiment 输入、项目 MCP/日历和跨 Host 组合文件恢复；平台组件及实际产品组合。Wayland 仍需正式 RemoteDesktop/ScreenCast 会话组件；macOS 实机与稳定 bundle/ScreenCaptureKit 继续闭合 | 同物理桌面共享占用、独立桌面并行；失联不证明停止；旧 epoch 不续发；MCP 可选音频/toolChoice 等明确有限支持不自动扩成整份协议实现任务；实际配置与权限流程不能被省略 |
+| 总设 §19–20、§22：环境、Computer 与 MCP | Computer 原本地/远端操作、assignment/精确 stop、source-less child request/Wait/handback、持久 async 脚本；MCP tools/content/Tasks/resource observers/有限交互和两次审阅 sampling；typed media 的存储与跨层消费；managed Source 文件/进程/检索/语言、原 PTY 视图、Experiment 输入、文件跟进与服务转发；Computer open/put/browser/office/evidence/environment 工具消费者 | managed Source 的持久脚本、项目 MCP、新建日历工作的显式资源 owner 和跨 Host 组合文件恢复；已接 PTY 与 Experiment 输入的更广组合证据。平台组件及实际产品组合。Wayland 仍需正式 RemoteDesktop/ScreenCast 会话组件；macOS 实机与稳定 bundle/ScreenCaptureKit 继续闭合 | 同物理桌面共享占用、独立桌面并行；失联不证明停止；旧 epoch 不续发；MCP 可选音频/toolChoice 等明确有限支持不自动扩成整份协议实现任务；实际配置与权限流程不能被省略 |
 | 总设 §7–9、§23、§27–28，扩设 §10–12：全局组合与发行实证 | 跨 Run 原子资源/FIFO、FileSearch 任务族公平、事件背压、正文/回执 ContentStore、锁外捕获/GC、分层产品投影已各有真实纵切；同 ModelStep 共享不可变请求、provider 正文借用与事件文件租约 | 稳定前缀编译/序列化和非 Git 增量目录账本；原始控制隔离的组合负载；Web/Electron/Mobile/无 UI Host 的完整后端寿命、安装升级/数据保留；代表性冷/热/并发/更新成本 | 只跑源码或受控 stdio 不称产品 IPC/真机/真账号通过；不预设性能倍数或任意门槛；未用扩展不增加热路径扫描；旧世代按实际引用释放；验证中发现的产品缺陷仍需修复 |
 
 ### 实现与验证的边界

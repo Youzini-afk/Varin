@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 28;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 29;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -2585,6 +2585,8 @@ pub(crate) type SourceAuthorityReleaseParams =
 
 pub(crate) type SourceResourceCallParams = crate::source_resources::SourceResourceCallParams;
 
+pub(crate) type SourceProcessAccessParams = crate::source_resources::SourceProcessAccessParams;
+
 pub(crate) type SourceResourceControlParams = crate::source_resources::SourceResourceControlParams;
 
 pub(crate) type SourceServiceCallParams = crate::source_resources::SourceServiceCallParams;
@@ -4354,6 +4356,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
+        "runtime.source.cleanup" => serde_json::from_value::<KernelEmptyParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.child.wait.cancel" => serde_json::from_value::<ChildWaitParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
@@ -4464,6 +4469,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         }
         "source.resource.authorize" => {
             serde_json::from_value::<SourceResourceCallParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "source.process.access" => {
+            serde_json::from_value::<SourceProcessAccessParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

@@ -731,6 +731,9 @@ export class AgentRuntimeClient {
   reconcileObservations(signal?: AbortSignal): Promise<string[]> {
     return this.kernel.agentRuntimeRequest('runtime.observations.reconcile', {}, signal);
   }
+  reconcileSourceCleanup(signal?: AbortSignal): Promise<Record<string, never>> {
+    return this.kernel.agentRuntimeRequest('runtime.source.cleanup', {}, signal);
+  }
   syncCalendar(input: CalendarProtocol.CalendarSyncParams, signal?: AbortSignal): Promise<CalendarProtocol.CalendarProject> {
     return this.kernel.agentRuntimeRequest('runtime.calendar.sync', input, signal);
   }

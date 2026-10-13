@@ -19,6 +19,7 @@ import { resourceFailure } from '../agent-resources/source-reader.js';
 import { ManagedSourceDrainedError } from '../harness/managed-source-drain.js';
 import { waitWithSignal } from '../cancellation.js';
 import { createManagedResearchSource } from './managed-research-source.js';
+import { createManagedPackageSource } from './managed-package-source.js';
 
 export interface SourceQueryServiceOptions {
   kernel: KernelClient;
@@ -43,6 +44,7 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
   // These are live service handles only. Native Storage retains authority/effect facts.
   const services = new Map<string, Services>();
   const research = createManagedResearchSource(options.kernel);
+  const packages = createManagedPackageSource(options.kernel);
   const keyOf = (scope: ManagedSourceLocalScope) => JSON.stringify([scope.authorityId, scope.resourceEpoch, scope.grant.grantId]);
   const queryOf = (scope: ManagedSourceLocalScope): SourceQueryAccess => ({ source: scope.source, physicalRoot: scope.physicalRoot,
     threadId: scope.scope.threadId, ...(scope.scope.kind === 'run' ? { runId: scope.scope.runId, grantId: scope.grant.grantId } : {}) });
@@ -202,6 +204,7 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
         if (owner.packages.has(operation.captureId)) throw new ManagedSourceDrainedError(new Error('Package capture already exists'));
         const runId = scope.scope.runId;
         const work = (async () => {
+          const captured = await packages.capture(scope, operation.captureId, operation.packagePath);
           const common = { grant: scope.grant, owningWorkspaceId: scope.source.workspace_id, executionWorkspaceId: scope.source.execution_workspace_id };
           if (scope.source.mode !== 'fixed_branch' && !scope.physicalRoot) throw new Error('The original physical package source is unavailable');
           const context = scope.source.mode === 'fixed_branch' ? await options.storage.contextFromBranchGrant(common)
@@ -209,7 +212,7 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
               canonicalRoot: scope.physicalRoot!.canonicalRoot });
           return captureExtensionSource({ store: new KernelWorkingStateRootStore(context), client: options.kernel.scoped(scope.grant),
             source: scope.source, physicalRoot: scope.physicalRoot, runId,
-            operationId: operation.operationId, packagePath: operation.packagePath, signal: active });
+            operationId: operation.operationId, packagePath: operation.packagePath, signal: active, pinId: captured.pinId });
         })();
         owner.packages.set(operation.captureId, work);
         void work.catch(error => {
@@ -304,7 +307,9 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
     owner.pending.add(work);
     return work.finally(() => { owner.pending.delete(work); });
   };
-  return Object.assign(handler, { release, cleanup: (scope: ManagedSourceCleanupScope) => research.release(scope), async dispose() {
+  return Object.assign(handler, { release, async cleanup(scope: ManagedSourceCleanupScope) {
+    await packages.release(scope); await research.release(scope);
+  }, async dispose() {
     unsubscribeExit(); await Promise.all([...services.values()].map(owner => release(owner.scope)));
     research.clearViews();
   } });

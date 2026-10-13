@@ -310,6 +310,10 @@ impl ControlCommands {
                 }
                 Ok(operation_cancellation_receipt(&operation))
             }
+            "runtime.source.cleanup" => {
+                self.resources.replay_source_delivery_releases()?;
+                Ok(json!({}))
+            }
             "runtime.observations.reconcile" => Ok(serde_json::to_value(
                 runtime
                     .reconcile_observations()

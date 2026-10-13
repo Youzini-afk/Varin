@@ -20,6 +20,7 @@ interface Options {
 export interface ProcessAddress { workspaceId: string; processId: string; rootId?: string }
 type Address = ProcessAddress;
 interface ProjectionOptions { retainOutput?: boolean; terminate?: (force: boolean) => Promise<void> }
+export type ProcessProjectionClient = Pick<KernelScopedClient, 'processSubscribe' | 'processWrite' | 'processResize' | 'processKill' | 'processRelease'>;
 const asError = (value: unknown): Error => value instanceof Error ? value : new Error(String(value));
 const nativeSignal = (value: string | null): NodeJS.Signals | null => {
   if (!value) return null;
@@ -62,8 +63,9 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
   private closed = false;
   private ignoreOutput = false;
   private readonly epoch: string;
+  private replayEnd: number | undefined;
 
-  constructor(private readonly scoped: KernelScopedClient, readonly address: Address, initial: KernelProcessSnapshot,
+  constructor(private readonly scoped: ProcessProjectionClient, readonly address: Address, initial: KernelProcessSnapshot,
     private readonly reportError: (error: Error) => void, private readonly released: () => void,
     private readonly options: ProjectionOptions = {}) {
     super();
@@ -95,6 +97,7 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
   get exitConfirmed(): boolean { return this.finishing && !this.current.writerActive; }
   get killed(): boolean { return this.stopRequested; }
   get snapshot(): KernelProcessSnapshot { return { ...this.current }; }
+  get replayCursor(): number { return this.replayEnd ?? 0; }
   ownedBy(scoped: KernelScopedClient): boolean { return this.scoped === scoped; }
 
   async start(): Promise<void> {
@@ -139,6 +142,9 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
   private receive(event: KernelProcessStreamEvent, acknowledge: () => Promise<void>): void {
     if (this.closed || this.lost) return;
     try {
+      if (!Number.isSafeInteger(event.replayCursor) || event.replayCursor < 0
+        || this.replayEnd !== undefined && event.replayCursor !== this.replayEnd) throw new Error('Native process replay boundary changed');
+      this.replayEnd = event.replayCursor;
       if (event.stream === "closed") throw new Error(event.error ?? "Native process subscription closed");
       const result = event.result;
       if (!result || !Array.isArray(result.chunks) || !Number.isSafeInteger(result.endCursor) || !Number.isSafeInteger(result.nextCursor)
@@ -251,10 +257,15 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
 }
 
 /** Terminal projection of the same process handle; no shell is launched here. */
-export function projectProcessTerminal(child: KernelManagedProcess) {
+export function projectProcessTerminal(child: KernelManagedProcess, options: { replayHistory?: boolean } = {}) {
   const decoder = new StringDecoder("utf8");
   const events = new EventEmitter();
-  const pending: string[] = [];
+  const pending: Array<{ data: string; replay: boolean }> = [];
+  let outputCursor = 0;
+  const emitData = (data: string, replay: boolean) => {
+    if (!data) return;
+    if (attached) events.emit('data', data, { replay }); else pending.push({ data, replay });
+  };
   let attached = false;
   let outputEnded = child.stdout.readableEnded;
   let exited: { exitCode: number | null; signal: number } | undefined = child.exitConfirmed
@@ -268,14 +279,15 @@ export function projectProcessTerminal(child: KernelManagedProcess) {
     if (!outputEnded || !exited || exitDelivered) return;
     exitDelivered = true;
     const remaining = decoder.end();
-    if (remaining) { if (attached) events.emit("data", remaining); else pending.push(remaining); }
+    emitData(remaining, options.replayHistory === true && outputCursor <= child.replayCursor);
     events.emit("exit", exited);
     resolveExit();
   };
   child.stdout.on("data", (bytes: Buffer) => {
-    const data = decoder.write(bytes);
-    if (!data) return;
-    if (!attached) pending.push(data); else events.emit("data", data);
+    const replayLength = options.replayHistory ? Math.min(bytes.length, Math.max(0, child.replayCursor - outputCursor)) : 0;
+    if (replayLength) emitData(decoder.write(bytes.subarray(0, replayLength)), true);
+    if (replayLength < bytes.length) emitData(decoder.write(bytes.subarray(replayLength)), false);
+    outputCursor += bytes.length;
   });
   child.stdout.on("end", () => {
     outputEnded = true;
@@ -296,10 +308,10 @@ export function projectProcessTerminal(child: KernelManagedProcess) {
     resize: (cols: number, rows: number) => child.resize(cols, rows),
     write: (data: string, operationId?: string) => child.writeInput(data, operationId),
     detach: () => child.detach(),
-    onData(handler: (data: string) => void) {
+    onData(handler: (data: string, delivery?: { replay: boolean }) => void) {
       events.on("data", handler);
       attached = true;
-      for (const data of pending.splice(0)) handler(data);
+      for (const entry of pending.splice(0)) handler(entry.data, { replay: entry.replay });
       return { dispose: () => { events.off("data", handler); } };
     },
     onExit(handler: (event: { exitCode: number | null; signal: number }) => void) {

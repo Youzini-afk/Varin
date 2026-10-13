@@ -32,7 +32,7 @@ export interface ManagedSourceBindRequest {
   coordinatorHostId: string;
   scope: SourceAuthorityScope;
   source: ThreadSource;
-  purpose: 'source' | 'read' | 'integration' | 'result';
+  purpose: 'source' | 'read' | 'integration' | 'result' | 'process_view';
   operationId?: string;
   retention: 'run' | 'caller';
   handoff?: ChildSourceHandoff;
@@ -52,6 +52,13 @@ export interface ManagedSourceAddress {
   authorityId: string;
   resourceEpoch: string;
 }
+export interface ManagedSourceProcessAddress extends ManagedSourceAddress { processId: string }
+export interface ManagedSourceProcessSubscription extends ManagedSourceProcessAddress { subscriptionId: string; cursor: number }
+export type ManagedSourceProcessControl = ManagedSourceProcessAddress & { subscriptionId: string } & (
+  { kind: 'close' } | { kind: 'ack'; stream: 'data' | 'control'; sequence: number }
+);
+export type ManagedSourceProcessWrite = ManagedSourceProcessAddress & { operationId: string; bytesBase64: string; eof?: boolean };
+export type ManagedSourceProcessResize = ManagedSourceProcessAddress & { operationId: string; cols: number; rows: number };
 /** Models use the original accepted invocation; service reads below never invent a ToolCall. */
 export interface ManagedSourceToolRequest extends ManagedSourceAddress {
   call: HostToolCall;
@@ -72,7 +79,7 @@ export interface ManagedSourceScopeRequest { coordinatorHostId: string; threadId
 export interface ManagedSourceScopeReleaseRequest extends ManagedSourceScopeRequest { mode: 'retire' | 'revoke' }
 export interface ManagedSourceReadScopeRequest { coordinatorHostId:string;scope:Extract<SourceAuthorityScope,{kind:'source_read'}>;source:LaunchSource }
 export interface ManagedFileObservationRequest extends ManagedSourceAddress { requestId:string;action:import('../kernel/protocol.generated.js').SourceFileObservationAction }
-export interface ManagedSourceInspection { scope: SourceAuthorityScope; phase: 'preparing' | 'ready' | 'retired' | 'revoked'; purpose: 'source' | 'read' | 'integration' | 'result'; operationId: string | null; binding: ManagedSourceBinding }
+export interface ManagedSourceInspection { scope: SourceAuthorityScope; phase: 'preparing' | 'ready' | 'retired' | 'revoked'; purpose: 'source' | 'read' | 'integration' | 'result' | 'process_view'; operationId: string | null; binding: ManagedSourceBinding }
 
 /** Closed, non-model source services. A command cannot name an arbitrary kernel method,
  * mint a grant, change a source, or select a different physical root. */
@@ -137,6 +144,12 @@ export type ManagedSourceServiceHandler = (scope: ManagedSourceLocalScope, opera
 /** The target Host composes its existing Documents, WorkingState and native resource owners.
  * Network routes only supply authenticated principal and the closed request. */
 export interface ManagedSourceService {
+  processAccess(principal: ManagedSourcePrincipal, input: ManagedSourceProcessAddress, signal?: AbortSignal): Promise<import('../kernel/protocol.generated.js').KernelProcessSnapshot>;
+  processSubscribe(principal: ManagedSourcePrincipal, input: ManagedSourceProcessSubscription,
+    observer: import('../kernel/kernel-client.js').KernelProcessObserver, signal?: AbortSignal): Promise<import('../kernel/kernel-client.js').KernelProcessSubscription>;
+  processControl(principal: ManagedSourcePrincipal, input: ManagedSourceProcessControl): Promise<{ subscriptionId: string; closed: boolean }>;
+  processWrite(principal: ManagedSourcePrincipal, input: ManagedSourceProcessWrite): Promise<import('../kernel/protocol.generated.js').KernelProcessInteractionReceipt>;
+  processResize(principal: ManagedSourcePrincipal, input: ManagedSourceProcessResize): Promise<import('../kernel/protocol.generated.js').KernelProcessInteractionReceipt>;
   inspectReadScope(principal:ManagedSourcePrincipal,input:ManagedSourceReadScopeRequest,signal?:AbortSignal):Promise<import('../kernel/protocol.generated.js').SourceReadScopeResult>;
   closeReadScope(principal:ManagedSourcePrincipal,input:ManagedSourceReadScopeRequest,signal?:AbortSignal):Promise<import('../kernel/protocol.generated.js').SourceReadScopeResult>;
   fileObservation(principal:ManagedSourcePrincipal,input:ManagedFileObservationRequest,signal?:AbortSignal):Promise<unknown>;

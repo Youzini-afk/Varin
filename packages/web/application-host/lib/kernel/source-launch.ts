@@ -115,7 +115,7 @@ export async function admitRunSourceAuthority(
   kernel: KernelClient,
   runtime: AgentRuntimeClient,
   selection: SourceLaunch,
-  options: { signal?: AbortSignal; resolveLiveSource?: LiveSourceResolver; allowMaterialization?: boolean; purpose?: 'source' | 'integration' | 'result'; operationId?: string; retention?: 'run' | 'caller' } = {},
+  options: { signal?: AbortSignal; resolveLiveSource?: LiveSourceResolver; allowMaterialization?: boolean; purpose?: 'source' | 'integration' | 'result' | 'process_view'; operationId?: string; retention?: 'run' | 'caller' } = {},
 ) {
   const signal = options.signal;
   signal?.throwIfAborted();

@@ -1582,6 +1582,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // records already carry the backend job identity, so the experiment
     // reconcile inspects and re-polls rather than resubmitting.
     onTargetReachable: (workspaceId) => {
+      void agentRuntime.reconcileSourceCleanup().catch((error: unknown) => {
+        console.error("[VarinManagedTarget] Original source cleanup remains pending:", errorMessage(error));
+      });
       void experimentService.ensureReconciled(workspaceId).catch((error: unknown) => {
         console.error("[VarinManagedTarget] Post-reconnect reconcile failed:", errorMessage(error));
       });

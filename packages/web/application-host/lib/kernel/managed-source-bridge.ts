@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { ManagedSourceClient } from '../harness/managed-remote-client.js';
 import type { ManagedHostSourceOwner, ManagedSourceReceipt, ManagedSourceToolRequest } from '../harness/managed-remote-types.js';
 import type { SourceToolBinding, SourceResourceAction, ToolOrigin, LaunchSource } from './protocol.generated.js';
+import { releaseManagedPackageSource, type ManagedPackageCleanup } from './managed-package-source.js';
 
 export type ManagedSourceOwner = (owner: ManagedHostSourceOwner) => Promise<ManagedSourceClient>;
 export type PrivateManagedSourceFrame = { v: 1; kind: 'source-resource-response'; id: string; kernelEpoch: string; result: { ok: boolean; value?: unknown; message?: string } }
@@ -71,7 +72,21 @@ export class ManagedSourceBridge {
     void (async () => {
       let result: { ok: boolean; value?: unknown; message?: string };
       try {
-        if(record(value.query)&&value.query.kind==='file_observation_address') {
+        if (record(value.query) && value.query.kind === 'package_cleanup') {
+          const query = value.query;
+          if (!record(query.source) || !record(query.source.resource_owner) || query.source.resource_owner.kind !== 'managed_host'
+            || !text(query.operationId) || !text(query.runId) || !text(query.threadId) || !this.owner || !this.coordinator)
+            throw new Error('Original managed package cleanup owner unavailable');
+          const client = await this.owner(query.source.resource_owner as unknown as ManagedHostSourceOwner);
+          result = { ok: true, value: await releaseManagedPackageSource(client, this.coordinator(), query as unknown as ManagedPackageCleanup) };
+        } else if (record(value.query) && value.query.kind === 'process_access') {
+          const binding = value.query.binding as SourceToolBinding;
+          if (!binding?.remoteAuthority || binding.resourceOwner.kind !== 'managed_host' || !text(value.query.processId) || !this.owner || !this.coordinator)
+            throw new Error('Original managed process binding unavailable');
+          const client = await this.owner(binding.resourceOwner);
+          result = { ok: true, value: await client.processAccess({ coordinatorHostId: this.coordinator(),
+            authorityId: binding.remoteAuthority.authorityId, resourceEpoch: binding.remoteAuthority.resourceEpoch, processId: value.query.processId }) };
+        } else if(record(value.query)&&value.query.kind==='file_observation_address') {
           const binding=value.query.binding as SourceToolBinding;
           if(!binding?.remoteAuthority||binding.resourceOwner.kind!=='managed_host'||!this.coordinator)throw new Error('Original file source binding unavailable');
           result={ok:true,value:{kind:'managed_host',coordinatorHostId:this.coordinator(),authorityId:binding.remoteAuthority.authorityId,resourceEpoch:binding.remoteAuthority.resourceEpoch}};

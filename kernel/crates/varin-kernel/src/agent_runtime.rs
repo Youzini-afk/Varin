@@ -343,12 +343,14 @@ pub(crate) fn spawn(
                     };
                     let catalog = runtime.catalog();
                     let responses = responses.clone();
+                    let cleanup = resources.clone();
                     let _=content_tasks.send(Box::new(move||{
                         let id=receipt.id.clone();let epoch=receipt.kernel_epoch.clone();
+                        let package_operation = (receipt.call.name == "extension_package").then(|| receipt.call.operation_id.clone());
                         let result=receipt.apply(&catalog);
                         // Only a committed receipt or a definitive identity/shape rejection ends retries.
                         let accepted=match result {
-                            Ok(())=>true,
+                            Ok(())=>{ if let Some(id) = package_operation { cleanup.schedule_package_source_release(id); } true },
                             Err(KernelError::Authorization(_)|KernelError::Protocol(_)|KernelError::Operation(_))=>false,
                             Err(_)=>return,
                         };
@@ -467,6 +469,7 @@ pub(crate) fn spawn(
                         let catalog = result?;
                         let owner = Arc::new(RunSupervisor::new(catalog));
                         resources=resources.clone().with_journal_catalog(owner.catalog());
+                        mcp_bridge.set_source_cleanup(resources.clone());
                         let (notify, notifications) = mpsc::sync_channel(1);
                         let (continuation_notify, continuation_wakes) =
                             crate::continuation_wake::channel()?;
@@ -554,7 +557,7 @@ pub(crate) fn spawn(
                                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
                             catalog.pending_managed_processes().map_err(domain)?
                         };
-                        resources.replay_read_receipt_releases()?;
+                        resources.replay_source_delivery_releases()?;
                         if let Err(error) = resources.replay_process_terminals(pending) {
                             let catalog = owner.catalog();
                             if let Ok(mut catalog) = catalog.lock() {
@@ -912,6 +915,7 @@ pub(crate) fn spawn(
                                 | "runtime.child.cancel"
                                 | "runtime.tree.cancel"
                                 | "runtime.observations.reconcile"
+                                | "runtime.source.cleanup"
                                 | "runtime.child.wait.cancel"
                                 | "runtime.followup.control"
                                 | "runtime.goal.control"
@@ -1858,14 +1862,18 @@ pub(crate) fn spawn(
                                     return Err(KernelError::Authorization("process access does not match the original Run/Thread/branch/source".into()));
                                 }
                             }
-                            let client = resources.interactions.clone().ok_or_else(|| {
-                                KernelError::Storage("process interaction owner unavailable".into())
-                            })?;
+                            let resources = resources.clone();
                             let responses = responses.clone();
                             let finished = finished.clone();
                             let id = id.clone();
                             thread::spawn(move || {
-                                let result=client.access(binding.clone(),p.operation_id.clone()).map(|process|json!({"operationId":p.operation_id,"runId":binding.run_id,"threadId":p.thread_id,"branchId":p.branch_id,"workspaceId":binding.workspace_id,"rootId":binding.root_id,"process":process}));
+                                let result = if binding.resource_owner.is_local() {
+                                    resources.interactions.as_ref().ok_or_else(|| KernelError::Storage("process interaction owner unavailable".into()))
+                                        .and_then(|client| client.access(binding.clone(), p.operation_id.clone()))
+                                } else {
+                                    resources.source_query(json!({"kind":"process_access", "binding":binding, "processId":p.operation_id}),
+                                        &varin_runtime::execution::CancellationToken::default()).map_err(|error| KernelError::Operation(error.to_string()))
+                                }.map(|process|json!({"operationId":p.operation_id,"runId":binding.run_id,"threadId":p.thread_id,"branchId":p.branch_id,"workspaceId":binding.workspace_id,"rootId":binding.root_id,"process":process}));
                                 let response = match result {
                                     Ok(value) => response_ok(&id, value),
                                     Err(error) => response_error(&id, &error),

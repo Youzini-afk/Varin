@@ -60,7 +60,7 @@ interface PtyProvider {
 }
 
 type TerminalEvent =
-  | { data: string; process: PtyProcess; type: 'output'; writerState: WriterState }
+  | { data: string; replay: boolean; process: PtyProcess; type: 'output'; writerState: WriterState }
   | { error: Error; process: PtyProcess; type: 'unavailable'; writerState: WriterState }
   | { exitCode: number | null; process: PtyProcess; signal: number; type: 'exit'; writerState: WriterState };
 
@@ -446,7 +446,7 @@ export function createTerminalRuntime({
         if (!event) break;
         if (event.process !== session.process) continue;
         if (event.type === 'output') {
-          const theme = consumeTerminalThemeQueries(session.pendingThemeControlSequence, event.data, {
+          const theme = consumeTerminalThemeQueries(session.pendingThemeControlSequence, event.replay ? '' : event.data, {
             themeMode: session.themeMode,
             background: session.terminalBackground,
             foreground: session.terminalForeground,
@@ -459,8 +459,9 @@ export function createTerminalRuntime({
           session.pendingHistoryControlSequence = sanitized.pending;
           session.history = trimHistory(session.history + sanitized.visible);
           session.lastActivity = Date.now();
-          publish(session, { t: 'output', d: event.data, ...(sanitized.visible !== event.data ? { r: sanitized.visible } : {}) });
-          for (const listener of session.dataListeners) listener(event.data);
+          const visible = event.replay ? sanitized.visible : event.data;
+          publish(session, { t: 'output', d: visible, ...(sanitized.visible !== visible ? { r: sanitized.visible } : {}) });
+          for (const listener of session.dataListeners) listener(visible);
           if (session.owner === 'user') {
             for (const observation of session.integrationParser.consume(event.data)) {
               const record: TerminalCommandRecord = { ...observation, owner: session.owner };
@@ -494,7 +495,7 @@ export function createTerminalRuntime({
   };
 
   const wire = (session: TerminalSession, ptyProcess: PtyProcess, writerState: WriterState): void => {
-    ptyProcess.onData((data) => { session.eventQueue.push({ type: 'output', process: ptyProcess, writerState, data }); drainEvents(session); });
+    ptyProcess.onData((data, delivery) => { session.eventQueue.push({ type: 'output', process: ptyProcess, writerState, data, replay: delivery?.replay === true }); drainEvents(session); });
     ptyProcess.onExit(({ exitCode, signal }) => { session.eventQueue.push({ type: 'exit', process: ptyProcess, writerState, exitCode, signal }); drainEvents(session); });
     void ptyProcess.completion?.catch((cause: unknown) => {
       const error = new Error('Native terminal state is unavailable; command outcome and process exit are unconfirmed', { cause });

@@ -265,7 +265,10 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     const generation = identityGeneration.current;
     const terminal = await api.processes!.openTerminal({ ...identity, operationId });
     if (generation === identityGeneration.current && host === getRuntimeEndpointGeneration()) {
-      attachProcessTerminal(terminal.cwd, terminal.sessionId, 'Agent process');
+      if (terminal.operationId !== operationId) throw new Error('PROCESS_IDENTITY_MISMATCH');
+      attachProcessTerminal(terminal.cwd, terminal.sessionId, 'Agent process', terminal.resourceOwner, {
+        identity: { ...identity }, operationId, processId: terminal.processId, endpointGeneration: host,
+      });
     }
   };
   const addImages = async (files: File[]) => {

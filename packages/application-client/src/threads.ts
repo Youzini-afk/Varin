@@ -237,6 +237,7 @@ export interface ThreadPolicyInspection extends PolicySelections {
   preparation: ThreadPolicyPreparation | null;
 }
 export interface ThreadProcessTerminal {
+  resourceOwner: SourceResourceOwner;
   sessionId: string;
   cwd: string;
   operationId: string;

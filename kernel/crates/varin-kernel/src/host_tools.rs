@@ -43,6 +43,7 @@ impl State {
 pub(crate) struct ToolBridge {
     state: Arc<Mutex<State>>,
     events: Arc<Mutex<Option<mpsc::Sender<Value>>>>,
+    source_cleanup: Arc<Mutex<Option<crate::tools::KernelResourceClient>>>,
 }
 impl ToolBridge {
     pub(crate) fn new(output: crate::transport::Sender) -> Self {
@@ -67,7 +68,11 @@ impl ToolBridge {
         Self {
             state,
             events: Arc::new(Mutex::new(Some(tx))),
+            source_cleanup: Arc::new(Mutex::new(None)),
         }
+    }
+    pub(crate) fn set_source_cleanup(&self, resources: crate::tools::KernelResourceClient) {
+        if let Ok(mut owner) = self.source_cleanup.lock() { *owner = Some(resources); }
     }
     pub(crate) fn initialize(&self, epoch: &str) {
         if let Ok(mut state) = self.state.lock() {
@@ -76,6 +81,7 @@ impl ToolBridge {
         }
     }
     pub(crate) fn close(&self) {
+        if let Ok(mut owner) = self.source_cleanup.lock() { owner.take(); }
         if let Ok(mut state) = self.state.lock() {
             state.epoch = None;
             state.close_waiters();
@@ -678,6 +684,15 @@ impl HostTools {
     }
 }
 impl ToolExecutor for HostTools {
+    fn receipt_persisted(&self, context: &ToolExecutionContext, call: &ToolCall) {
+        if self.generation.binding.extension().is_none() || call.name != "extension_package" {
+            return;
+        }
+        let resources = self.generation.bridge.source_cleanup.lock().ok().and_then(|owner| owner.clone());
+        if let Some(resources) = resources {
+            resources.schedule_package_source_release(context.operation_id.clone());
+        }
+    }
     fn plan(
         &self,
         call: &ToolCall,
