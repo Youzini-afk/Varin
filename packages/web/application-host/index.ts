@@ -1581,7 +1581,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // A reconnected target re-attaches to its durable jobs — the attempt
     // records already carry the backend job identity, so the experiment
     // reconcile inspects and re-polls rather than resubmitting.
-    onSourceReachable: () => {
+    onSourceReachable: (owner) => {
+      void scriptRuntimeOwner.current?.recoverSource(owner).catch(() => console.error("[Script] Original target stop remains pending"));
       void agentRuntime.reconcileSourceCleanup().catch((error: unknown) => {
         console.error("[VarinManagedTarget] Original source cleanup remains pending:", errorMessage(error));
       });

@@ -660,7 +660,7 @@ the active cell ancestry. Cleanup starts those controllers before waiting for th
 Desktop Stop selects only matching active cells. Proven same-environment or same-desktop ancestor wait
 cycles produce actionable errors; unrelated environments and desktops remain usable. Restart loses
 the heap explicitly and never replays source. See the shared evaluator README for the known Node 24
-`await Promise.reject(null)` limitation and the absence of typed image output in this slice.
+`await Promise.reject(null)` limitation and its typed media output contract.
 
 Cancellation detaches the observer without fabricating a stopped callback or no-effect result.
 The existing bridge call retains its actual callback and unacknowledged receipt across a kernel-channel
@@ -1291,10 +1291,22 @@ offline changes. Target-side revocation releases its original pin/watch resource
 successful definition retains its last accepted fact; without a new observation/control request its
 remote-revocation diagnosis can be delayed. Listing that snapshot does not certify current B access.
 
-Current managed-source exclusions are actionable admission errors: cross-Host combined file recovery,
-interactive PTY attachment, persistent script environments, Experiment
-input capture, package staging from that source, and project-bound MCP/scheduled tasks. Their existing
-local paths remain separate. Computer assignments, Agent/Bot identity, global settings and model
+Managed PTY views, Experiment input capture and package staging use their original source owners.
+Persistent script environments resolve the target Host's exact installed Node/worker binding and
+spawn a pipe evaluator with that Host's transient environment. The coordinator retains the original
+ScriptEnvironment/Cell, nested invocation scopes and callback drain; the target owns only its Source
+permit, Storage process and guardian. Losing either channel never replays a heap, cell or old output.
+
+Script stop revokes only the original environment's grants before observing its guardian tree receipt.
+Original receipts remain readable after revocation/reopen without reacquiring project trust. The
+coordinator follows that physical evidence independently of the revoked pipe subscription and combines
+it with actual callback completion; missing acceptance or lost callbacks remain Unknown. Run-end stop
+attempts are independently dispatched per original environment, so a slow target does not block durable
+notifications for unrelated Runs. Current-Host lost-open callbacks, Host-ready recovery and actual source
+reconnection reuse original pending Operations; no replacement task or evaluator is created.
+
+Project-bound managed MCP, explicit managed cold calendar starts and broader combined cross-Host file
+recovery still have separate implementation work. Computer assignments, Agent/Bot identity, global settings and model
 credentials remain with their original owners; selecting a file Host does not silently redirect them.
 
 ## Managed extension package cleanup
@@ -1334,3 +1346,10 @@ responses to historical terminal queries while fresh output keeps normal termina
 creation epoch and current subscription epoch remain distinct after B reopens: retained output can be
 observed, but Storage still denies old-epoch control. A failed projection is rebound through original
 `openTerminal` before UI reattaches; it is never replaced with a new shell job.
+
+Managed-script focused evidence (2026-10-13): the exact installed-binding helper's filesystem/spawn-input
+checks pass (3), private bridge/receipt and delayed tree-stop checks pass (18), and the original Storage
+source/guardian test passes (1) for revoked late spawn, principal isolation, unrelated-grant preservation
+and original receipt recall after Storage reopen. This is controlled in-process/stdio evidence, not
+physical dual-Host or installed-product validation. The wider Host type graph remains blocked by absent
+dependencies; no full build/test suite was used as evidence.

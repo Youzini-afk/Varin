@@ -108,8 +108,8 @@ export function registerManagedRemoteRoutes(
     response.json(await service.identity());
   }));
 
-  const sourceMethods = ['processAccess', 'processControl', 'processWrite', 'processResize', 'capabilities', 'handoff', 'integrationReceipt', 'resolve', 'prepare', 'bind', 'authorize', 'execute', 'service', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation'] as const;
-  const receiptMethods: ReadonlySet<string> = new Set(['processControl', 'handoff', 'integrationReceipt', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation']);
+  const sourceMethods = ['scriptBinding', 'scriptSpawn', 'scriptControl', 'processAccess', 'processControl', 'processWrite', 'processResize', 'capabilities', 'handoff', 'integrationReceipt', 'resolve', 'prepare', 'bind', 'authorize', 'execute', 'service', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation'] as const;
+  const receiptMethods: ReadonlySet<string> = new Set(['scriptControl', 'processControl', 'handoff', 'integrationReceipt', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation']);
   for (const method of sourceMethods) {
     app.post(`${base}/sources/${method}`, requireAuth, receiptMethods.has(method) ? requireReceiptAuth : requireSourceAuth, route(async (request, response) => {
       const body = value(request.body);
@@ -123,7 +123,7 @@ export function registerManagedRemoteRoutes(
       ) => Promise<unknown>)(principal, body as unknown as Parameters<ManagedSourceService[typeof method]>[1], signal);
       // A disconnected observer is not a cancelled or drained accepted effect.
       // Cancellation and retirement have their own original-owner receipts.
-      const result = method === 'processWrite' || method === 'processResize' || method === 'processControl' || method === 'execute' || method === 'service' || method === 'cancelService' || method === 'cancel' || method === 'releaseReceipt' || method === 'release' || method === 'releaseScope'
+      const result = method === 'scriptSpawn' || method === 'scriptControl' || method === 'processWrite' || method === 'processResize' || method === 'processControl' || method === 'execute' || method === 'service' || method === 'cancelService' || method === 'cancel' || method === 'releaseReceipt' || method === 'release' || method === 'releaseScope'
         ? await invoke() : await whileResponseOpen(response, invoke);
       if (!response.destroyed) {
         response.setHeader('Cache-Control', 'no-store');

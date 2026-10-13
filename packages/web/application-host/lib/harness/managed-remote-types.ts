@@ -32,7 +32,7 @@ export interface ManagedSourceBindRequest {
   coordinatorHostId: string;
   scope: SourceAuthorityScope;
   source: ThreadSource;
-  purpose: 'source' | 'read' | 'integration' | 'result' | 'process_view';
+  purpose: 'source' | 'read' | 'integration' | 'result' | 'process_view' | 'script_environment';
   operationId?: string;
   retention: 'run' | 'caller';
   handoff?: ChildSourceHandoff;
@@ -53,6 +53,10 @@ export interface ManagedSourceAddress {
   resourceEpoch: string;
 }
 export interface ManagedSourceProcessAddress extends ManagedSourceAddress { processId: string }
+export interface ManagedScriptBindingRequest { coordinatorHostId: string; source: LaunchSource }
+export type ManagedScriptControlRequest = Omit<import('../kernel/protocol.generated.js').SourceScriptControlParams, 'principalId'>;
+export interface ManagedScriptControlReceipt { processId: string; source: LaunchSource; runId: string; threadId: string; accepted: boolean; executorStopped: boolean; process: (import('../kernel/protocol.generated.js').KernelProcessSnapshot & { treeConfirmed?: boolean }) | null }
+export interface ManagedScriptSpawnRequest extends ManagedSourceProcessAddress { node: import('../kernel/protocol.generated.js').NodeBinding; cwd: string }
 export interface ManagedSourceProcessSubscription extends ManagedSourceProcessAddress { subscriptionId: string; cursor: number }
 export type ManagedSourceProcessControl = ManagedSourceProcessAddress & { subscriptionId: string } & (
   { kind: 'close' } | { kind: 'ack'; stream: 'data' | 'control'; sequence: number }
@@ -79,7 +83,7 @@ export interface ManagedSourceScopeRequest { coordinatorHostId: string; threadId
 export interface ManagedSourceScopeReleaseRequest extends ManagedSourceScopeRequest { mode: 'retire' | 'revoke' }
 export interface ManagedSourceReadScopeRequest { coordinatorHostId:string;scope:Extract<SourceAuthorityScope,{kind:'source_read'}>;source:LaunchSource }
 export interface ManagedFileObservationRequest extends ManagedSourceAddress { requestId:string;action:import('../kernel/protocol.generated.js').SourceFileObservationAction }
-export interface ManagedSourceInspection { scope: SourceAuthorityScope; phase: 'preparing' | 'ready' | 'retired' | 'revoked'; purpose: 'source' | 'read' | 'integration' | 'result' | 'process_view'; operationId: string | null; binding: ManagedSourceBinding }
+export interface ManagedSourceInspection { scope: SourceAuthorityScope; phase: 'preparing' | 'ready' | 'retired' | 'revoked'; purpose: 'source' | 'read' | 'integration' | 'result' | 'process_view' | 'script_environment'; operationId: string | null; binding: ManagedSourceBinding }
 
 /** Closed, non-model source services. A command cannot name an arbitrary kernel method,
  * mint a grant, change a source, or select a different physical root. */
@@ -144,6 +148,9 @@ export type ManagedSourceServiceHandler = (scope: ManagedSourceLocalScope, opera
 /** The target Host composes its existing Documents, WorkingState and native resource owners.
  * Network routes only supply authenticated principal and the closed request. */
 export interface ManagedSourceService {
+  scriptControl(principal: ManagedSourcePrincipal, input: ManagedScriptControlRequest, signal?: AbortSignal): Promise<ManagedScriptControlReceipt>;
+  scriptBinding(principal: ManagedSourcePrincipal, input: ManagedScriptBindingRequest, signal?: AbortSignal): Promise<import('../kernel/protocol.generated.js').NodeBinding>;
+  scriptSpawn(principal: ManagedSourcePrincipal, input: ManagedScriptSpawnRequest, signal?: AbortSignal): Promise<import('../kernel/protocol.generated.js').KernelProcessSnapshot>;
   processAccess(principal: ManagedSourcePrincipal, input: ManagedSourceProcessAddress, signal?: AbortSignal): Promise<import('../kernel/protocol.generated.js').KernelProcessSnapshot>;
   processSubscribe(principal: ManagedSourcePrincipal, input: ManagedSourceProcessSubscription,
     observer: import('../kernel/kernel-client.js').KernelProcessObserver, signal?: AbortSignal): Promise<import('../kernel/kernel-client.js').KernelProcessSubscription>;

@@ -391,6 +391,9 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
       return result;
     };
     return {
+      scriptControl: (input, signal) => request('scriptControl', input, signal),
+      scriptBinding: (input, signal) => request('scriptBinding', input, signal),
+      scriptSpawn: (input, signal) => request('scriptSpawn', input, signal),
       processAccess: (input, signal) => request('processAccess', input, signal),
       processControl: input => request('processControl', input),
       processWrite: input => request('processWrite', input),
