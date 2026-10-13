@@ -978,25 +978,29 @@ describe("computer service (BC6 remote hosts)", () => {
   });
 
   it("rediscovers a just-prepared remote desktop despite the catalog refresh interval", async () => {
-    let prepared = false;
+    let prepared = false, discovered = false;
     const service = createComputerService({
       client: fakeKernel().client as never, hostId: "h", platform: "windows", dataDir: newDataDir(),
       createDriver: () => makeDriver(async () => okResponse()), remoteHosts: async () => [remoteHost],
       fetch: remoteFetch((url) => {
-        if (url.endsWith("/api/computers/desktops/prepare")) {
+        if (url.endsWith('/api/computers/desktops/prepare-target')) {
+          discovered = true;
+          return jsonResponse({ desktop: { id: 'managed-linux', managed: 'linux-xvnc' }, hostId: 'remote-h' });
+        }
+        if (url.endsWith('/api/computers/desktops/managed-linux/prepare')) {
           prepared = true;
-          return jsonResponse({ desktop: { id: "managed-linux" } });
+          return jsonResponse({ desktop: { id: 'managed-linux', status: 'available' }, inputWriterStopped: true, receipt: { effect: 'verified' } });
         }
         if (url.endsWith("/api/computers?local=1")) return jsonResponse({ ...remoteCatalog,
-          desktops: prepared ? [...remoteCatalog.desktops, { id: "managed-linux", machineId: "local", label: "Persistent Linux desktop",
-            kind: "virtual-display", status: "available", managed: "linux-xvnc", media: { kind: "vnc", width: 1280, height: 800 } }] : remoteCatalog.desktops });
+          desktops: discovered ? [...remoteCatalog.desktops, { id: "managed-linux", machineId: "local", label: "Persistent Linux desktop",
+            kind: "virtual-display", status: prepared ? "available" : "unavailable", managed: "linux-xvnc", ...(prepared ? { media: { kind: "vnc", width: 1280, height: 800 } } : {}) }] : remoteCatalog.desktops });
         return jsonResponse({});
       }),
     });
     await service.list();
     const desktop = await service.prepareDesktop({ connectionId: "r1" });
-    expect(desktop.remote?.desktopId).toBe("managed-linux");
-    expect(desktop.media).toEqual({ kind: "vnc", width: 1280, height: 800 });
+    expect(desktop.desktop.remote?.desktopId).toBe("managed-linux");
+    expect(desktop.desktop.media).toEqual({ kind: "vnc", width: 1280, height: 800 });
     await service.dispose();
   });
 
@@ -1022,7 +1026,7 @@ describe("computer service (BC6 remote hosts)", () => {
       }),
     });
     await service.list();
-    const artifact = await service.registerArtifact("s1", "remote:r1:remote-h:managed-linux", "Downloads/report.pdf");
+    const artifact = await service.registerArtifact({ runtime: 'pi', sessionId: 's1' }, "remote:r1:remote-h:managed-linux", "Downloads/report.pdf");
     expect(artifact).toMatchObject({ sourceHostId: "remote-h", scopeId: "bot:b", threadId: "t1", sha256 });
     expect(await service.listArtifacts("bot:b")).toEqual([artifact]);
     const opened = await service.openArtifact(artifact.id);

@@ -1669,8 +1669,8 @@ export interface HarnessServiceMap {
   "memory.search": { params: MemorySearchParams; result: MemorySearchResult };
   "computer.list": { params: ComputerListParams; result: ComputerListResult };
   "computer.access": { params: import('./harness-computer.js').ComputerAccessParams & { op: "status" | "request" | "grant" | "deny" | "release" }; result: { state: import('./harness-computer.js').ComputerAutomationState; request?: import('./harness-computer.js').ComputerAccessRequest } };
-  "computer.prepare": { params: import('./harness-computer.js').ComputerDesktopPrepareParams; result: { desktop: import('./harness-computer.js').ComputerDesktop } };
-  "computer.desktopLifecycle": { params: { desktopId: string; action: "start" | "stop" }; result: { desktop: import('./harness-computer.js').ComputerDesktop } };
+  "computer.prepare": { params: import('./harness-computer.js').ComputerDesktopPrepareParams; result: import('./harness-computer.js').ComputerDesktopChangeResult };
+  "computer.desktopLifecycle": { params: { desktopId: string; action: "start" | "stop" }; result: import('./harness-computer.js').ComputerDesktopChangeResult };
   "computer.artifact": { params: { desktopId?: string; relativePath: string }; result: { artifact: import('./harness-computer.js').ComputerArtifact } };
   "computer.control": { params: ComputerControlParams; result: ComputerControlResult };
   "computer.apps": { params: ComputerAppsParams; result: ComputerAppsResult };

@@ -10,7 +10,7 @@
 
 脚本内 tools.invoke 的取消直接中断该原调用的 dispatch signal，不等待 Catalog RPC 才开始物理排空。Tool 取消、效果未知和输入 writer 真正结束仍分列。手动接管后的 fresh-scene 要求只能由当前 controller 自己的观察满足，其他 observer 不能代为解除。
 
-environment 只展示已接受 Run 的来源、默认桌面和分配。原 Pi session 的环境改绑与 forward 尚未接原生 placement/Job owner，本片返回明确不可用信息；不伪造 Pi 身份、不制造后台监听器。默认运行时和用户资产保持原状。
+environment 只展示已接受 Run 的来源、默认桌面和分配。原 Pi session 的环境改绑与 forward 尚未接原生 placement/Job owner，返回明确不可用信息；不伪造 Pi 身份、不制造后台监听器。默认运行时和用户资产保持原状。
 
 ## 实际修复与有限证据
 
@@ -23,7 +23,21 @@ environment 只展示已接受 Run 的来源、默认桌面和分配。原 Pi se
 
 独立审查以这些功能为入口追到原脚本取消、peer assignment、共享 input lane、旧 observe、typed media 与 Linux helper，已复验上述实际失败路径。外部小探针用于独立确认，相关回归已并入下面原仓库入口。
 
-最终 Node 组首跑 43 条中 41 条通过；两条新 control 断言把原 capabilities probe 误算作应用输入，修正为真实应用 dispatch 后精确复跑 2/2 通过，未机械重跑其余 41 条。独立反例另外复验了原目标实际收到的输入。当前协议与 builtin 包构建、完整 Host production/tests 的 `tsc --noEmit` 通过；较早一次并发类型命令被系统以 exit 137 结束且没有诊断，未计通过。上述类型检查不是完整 Web browser/CLI 构建或实际桌面验收。
+应用接入阶段的 Node 组首跑 43 条中 41 条通过；两条新 control 断言把原 capabilities probe 误算作应用输入，修正为真实应用 dispatch 后精确复跑 2/2 通过，未机械重跑其余 41 条。独立反例另外复验了原目标实际收到的输入。该阶段协议与 builtin 包构建、完整 Host production/tests 的 `tsc --noEmit` 通过；较早一次并发类型命令被系统以 exit 137 结束且没有诊断，未计通过。上述类型检查不是完整 Web browser/CLI 构建或实际桌面验收。
+
+## 桌面生命周期与原产物消费者
+
+以 `416a535c8acaeb29942fd14d6ceb97cabd7dad39` 为基线的后续增量沿同一 builtin/broker 接入 `computer_prepare`、`computer_desktop_lifecycle` 和 `computer_artifact`。prepare 先取得真实未准备目标的控制分配再执行原 Linux helper；start/stop 核原 epoch，旧排队输入和观察不跨生命周期世代。原产品人工入口和 Pi harness 仍使用同一服务。child 未获控制不能借新入口绕过分配。
+
+setup/apt 原 helper 没有合作式中断协议。取消保持 pending，原 lane 等该 helper 真正退出后才报告 stopped；独立物理输入 stop 仍可及时释放输入。此限制没有通过杀观察者或猜测孙进程已经结束掩盖。
+
+artifact 使用真实 `ComputerWorkRef` 解析原 Thread/branch 及 Bot/Thread scope，保原 Storage artifact record、Host identity 与文件 revision。原 Bot work 和下载消费者直接消费，不创建 Pi Registry 记录。原下载客户端还会核收到的字节长度和 SHA-256；文件在流出期间改变会使交付拒绝，不能声称 helper 的可变文件流本身就是不可变对象。
+
+本增量还修正资源 Host 把 peer 的外来 Thread 错登记为本地工作、导致自身 Bot work 查询失败的路径。工作关联只留在真实协调 Host 的原 mirror；目标 Host 的 peer assignment、控制投影和证据继续保留。明确的 Catalog not-found 使用结构化错误码，缺失 owner 与存储故障分别处理。
+
+远端 stop 由目标原 reset 返回它实际终结的 assignment IDs，只回调用 peer 的原身份。来源端逐确切 ID 走原 release；release ACK 失败单列，不抹掉已确认的桌面停止。独立交错反例已确认：stop 前及 helper 在途时加入的 child observer 都结束；reset 后、响应抵达前的新 observer 仍保留，随后 fresh control → start 可继续。没有依赖控制 SSE 碰巧及时抵达或完成时一把清空全部分配。
+
+本增量新增或增强的 13 个不同 Node 用例均已有有效通过证据，覆盖原 broker、local/remote owner、认证 Router、child 权限、helper 取消排空、人工/Pi 入口与 Bot artifact 消费者。独立 peer/stop 反例已闭合；新 builtin 产包、最终 protocol 构建和完整 Host production/tests `tsc --noEmit` 通过。中途 fixture 的调用身份、fresh observation、错误字段与必填上下文修正分别只复跑受影响项；两次类型诊断按真实合同修复，未放宽编译器，也未将失败首跑计入通过。原 Rust NotFound 错误投影已随当前 kernel 编译核对。
 
 ## 复跑入口与边界
 

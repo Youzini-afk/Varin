@@ -343,6 +343,19 @@ export interface ComputerDesktopPrepareParams {
   connectionId?: string;
   width?: number;
   height?: number;
+  automationEpoch?: string;
+}
+
+/** Original desktop lifecycle result; helper completion is distinct from desktop readiness. */
+export interface ComputerDesktopChangeResult {
+  desktop: ComputerDesktop;
+  inputWriterStopped: boolean;
+  receipt: ComputerActionReceipt;
+  cancelled?: boolean;
+  /** Original assignment cleanup is distinct from a confirmed backend transition. */
+  assignmentReleases?: Array<{ assignmentId: string; confirmed: boolean; detail?: string }>;
+  /** Target-owned exact assignments ended by this stop, restricted to the calling peer origin. */
+  endedAssignments?: { origin: string; assignmentIds: string[] };
 }
 
 /** What the resident platform driver can actually do right now. */

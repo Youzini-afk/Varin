@@ -236,7 +236,7 @@ pub(crate) fn domain(error: varin_runtime::RuntimeError) -> KernelError {
             KernelError::Operation(format!("conflict: {message}"))
         }
         varin_runtime::RuntimeError::NotFound(message) => {
-            KernelError::Operation(format!("not found: {message}"))
+            KernelError::NotFound(message)
         }
         varin_runtime::RuntimeError::Invalid(message) => KernelError::Protocol(message),
         other => KernelError::Storage(other.to_string()),

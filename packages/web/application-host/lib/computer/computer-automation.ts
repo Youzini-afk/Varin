@@ -490,14 +490,20 @@ export function createComputerAutomation(options: {
         if (await isCurrent(recipient)) await options.notify(recipient, text, false, `${id}:${computerExecutionKey(recipient.execution)}`);
       }
     },
+    /** The original managed session has actually stopped, ending its desktop assignments. */
     resetDesktop(desktopId: string) {
-      for (const lease of leases.values()) if (lease.desktopId === desktopId) {
-        leases.delete(lease.id); foreign.delete(lease.id);
-        for (const request of requests.values()) if (request.desktopId === desktopId && request.status === 'granted') { request.status = 'released'; request.revision += 1; wake(request.id); }
+      const matching = new Map([...leases, ...failedReleases].filter(([, lease]) => lease.desktopId === desktopId));
+      for (const lease of matching.values()) {
+        leases.delete(lease.id); foreign.delete(lease.id); failedReleases.delete(lease.id);
+        ready.delete(lease.id); pendingAssignments.delete(lease.id); reservationAborts.delete(lease.id);
+        releasedAssignments.add(lease.id);
+        for (const request of requests.values()) if (request.desktopId === desktopId && request.status === 'granted' && sameComputerExecution(request.actor.execution, lease.actor.execution)) {
+          request.status = 'released'; request.revision += 1; wake(request.id);
+        }
         publish(lease.actor);
       }
       unconfirmed.delete(desktopId);
-      for (const [id, lease] of failedReleases) if (lease.desktopId === desktopId) failedReleases.delete(id);
+      return [...matching.values()];
     },
     /** Authenticated Host delegation shares the same physical desktop ownership as local Threads. */
     async claim(origin: string, assignmentId: string, actor: ComputerActor, desktopId: string, access: ComputerAccess) {

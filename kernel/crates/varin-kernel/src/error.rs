@@ -47,6 +47,8 @@ pub(crate) enum KernelError {
     Authorization(String),
     #[error("operation error: {0}")]
     Operation(String),
+    #[error("not found: {0}")]
+    NotFound(String),
     #[error("file observation source failed: {0}")]
     FileObservationSource(FileObservationSourceCode),
     #[error("file observation is busy under an existing writer or capture lease")]
@@ -83,6 +85,7 @@ pub(crate) fn error_code(error: &KernelError) -> &'static str {
         KernelError::Protocol(_) => "protocol-error",
         KernelError::Storage(_) => "storage-error",
         KernelError::Authorization(_) => "unauthorized",
+        KernelError::NotFound(_) => "not-found",
         KernelError::Operation(_)
         | KernelError::FileObservationSource(_)
         | KernelError::FileObservationBusy

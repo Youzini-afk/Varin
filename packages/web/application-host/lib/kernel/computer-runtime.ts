@@ -1,5 +1,5 @@
 import type { OutputPart, IncomingMedia } from './protocol.generated.js';
-import type { ComputerObservation, ComputerBrowserParams, ComputerOfficeParams, ComputerOpenParams, ComputerFileWriteParams, ComputerInstallSoftwareParams } from '@varin/protocol';
+import type { ComputerDesktopPrepareParams, ComputerObservation, ComputerBrowserParams, ComputerOfficeParams, ComputerOpenParams, ComputerFileWriteParams, ComputerInstallSoftwareParams } from '@varin/protocol';
 /** Native callers use the original Computer owner. Catalog owns identity and ToolCall settlement. */
 import { randomUUID } from 'node:crypto';
 import { COMPUTER_CAPABILITY, COMPUTER_TOOL_DECLARATIONS } from '@varin/extension-builtins';
@@ -56,7 +56,7 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
     try { return await kernel.agentRuntimeRequest<ComputerScope, 'runtime.computer.scope'>('runtime.computer.scope', {
       threadId: work.threadId, branchId: work.branchId, ...(runId ? { runId } : {}), ...(operationId ? { operationId } : {}),
     }, signal); } catch (error) {
-      if (error instanceof KernelClientError && error.code === 'operation-error' && error.message.includes('not found:')) throw new ComputerError('computer-work-not-found', 'The original Computer Thread, branch or execution no longer exists');
+      if (error instanceof KernelClientError && error.code === 'not-found') throw new ComputerError('computer-work-not-found', 'The original Computer Thread, branch or execution no longer exists');
       if (error instanceof KernelClientError && error.code === 'operation-error' && error.message.includes('conflict:')) throw new ComputerError('computer-execution-stale', 'The original Computer execution changed; refresh before retrying');
       throw new ComputerError('computer-owner-unavailable', 'The Agent identity owner is unavailable; existing input cleanup remains reserved');
     }
@@ -236,7 +236,9 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
           await runtime.reconcileObservations();
           return result({ request: decision }, decision.status === 'indeterminate' ? 'unknown' : 'confirmed', true, decision.status === 'indeterminate' ? 'indeterminate' : 'succeeded');
         }
-        const desktopId = await computers.resolveDesktop(typeof params.desktopId === 'string' ? params.desktopId : computers.automation.desktopFor(execution) ?? undefined, configured.defaultDesktopId);
+        const desktopId = method === 'prepare'
+          ? (await computers.preparationTarget(typeof params.connectionId === 'string' ? params.connectionId : undefined)).id
+          : await computers.resolveDesktop(typeof params.desktopId === 'string' ? params.desktopId : computers.automation.desktopFor(execution) ?? undefined, configured.defaultDesktopId);
         if (method === 'request') return computers.automation.manage(work, execution, async stopSignal => {
           inputCallStarted = true;
           const accepted = await rpc<ComputerRequestRecord, 'runtime.computer.request.create'>('runtime.computer.request.create', { operationId: original.operationId, desktopId, access: params.access as 'observe' | 'control', reason: String(params.reason) });
@@ -268,6 +270,17 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
           const releaseScriptDispatch = noteInvocationComputerUse(context, desktopId, reason => dispatch.abort(reason));
           try { switch (method) {
             case 'apps': return result({ apps: await computers.listApps(desktopId) });
+            case 'prepare': {
+              const changed = await computers.prepareDesktop(params as ComputerDesktopPrepareParams, { automated: true, desktopId, signal });
+              return applicationResult(changed, changed, changed.desktop.status === 'available', changed.cancelled);
+            }
+            case 'desktop_lifecycle': {
+              const changed = await computers.desktopLifecycle(desktopId, params.action as 'start' | 'stop', {
+                automated: true, ...(typeof params.automationEpoch === 'string' ? { automationEpoch: params.automationEpoch } : {}), signal });
+              return applicationResult(changed, changed, changed.desktop.status === (params.action === 'stop' ? 'stopped' : 'available'), changed.cancelled);
+            }
+            case 'artifact': return result({ artifact: await computers.registerArtifact(work, desktopId, String(params.relativePath)) }, 'confirmed');
+
             case 'control': {
               // authorize(control) has already awaited this exact local/peer reservation.
               // Reading the projection cannot undo the accepted assignment if it fails.

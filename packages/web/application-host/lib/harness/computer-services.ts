@@ -142,7 +142,8 @@ export function registerComputerServices(
         || method === 'computer.office' && (['status', 'docs'].includes(bridge.op ?? '') || bridge.op === 'act' && bridge.act?.kind === 'read');
       const access: ComputerAccess = bridgeRead || ['computer.apps', 'computer.observe', 'computer.list', 'computer.control', 'computer.evidence'].includes(method) ? 'observe' : 'control';
       const requested = params as { desktopId?: string };
-      const desktopId = metadata || method === 'computer.prepare' ? undefined
+      const desktopId = metadata ? undefined : method === 'computer.prepare'
+        ? (await computers.preparationTarget((params as { connectionId?: string }).connectionId)).id
         : await computers.resolveDesktop(await desktopIdFor(host, ctx, requested));
       return computers.automation.authorize({ runtime: 'pi', sessionId: ctx.sessionId }, access, desktopId, () => service.handle(
         desktopId ? { ...params, desktopId } : params, ctx,
@@ -151,9 +152,12 @@ export function registerComputerServices(
     },
   });
   register("computer.list", createComputerListService(host));
-  register("computer.prepare", { handle: async (params) => ({ desktop: await requireService(host).prepareDesktop(params, true) }) });
-  register("computer.desktopLifecycle", { handle: async (params) => ({ desktop: await requireService(host).desktopLifecycle(params.desktopId, params.action, true) }) });
-  register("computer.artifact", { handle: async (params, ctx) => ({ artifact: await requireService(host).registerArtifact(ctx.sessionId, await desktopIdFor(host, ctx, params), params.relativePath) }) });
+  register("computer.prepare", { handle: async (params, ctx) => {
+    const desktopId = (params as { desktopId?: string }).desktopId;
+    return requireService(host).prepareDesktop(params, { automated: true, ...(desktopId ? { desktopId } : {}), signal: ctx.signal });
+  } });
+  register("computer.desktopLifecycle", { handle: async (params, ctx) => requireService(host).desktopLifecycle(params.desktopId, params.action, { automated: true, signal: ctx.signal }) });
+  register("computer.artifact", { handle: async (params, ctx) => ({ artifact: await requireService(host).registerArtifact({ runtime: 'pi', sessionId: ctx.sessionId }, await desktopIdFor(host, ctx, params), params.relativePath) }) });
   register("computer.control", { handle: async (params, ctx) => ({ control: await requireService(host).control(await desktopIdFor(host, ctx, params)) }) });
   register("computer.apps", createComputerAppsService(host));
   register("computer.observe", createComputerObserveService(host));

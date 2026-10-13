@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
@@ -10,13 +10,18 @@ import express, { type Express, type Request, type Response as ExpressResponse }
 import { parseVarinToolJson } from '@varin/extension-contract';
 import { COMPUTER_CAPABILITY, COMPUTER_TOOL_DECLARATIONS, VARIN_BUILTIN_COMPUTER_EXTENSION_ID } from '@varin/extension-builtins';
 import { createComputerService, type ComputerServiceOptions } from '../computer/computer-service.js';
+import { registerBotRoutes } from '../bots/bot-routes.js';
+import type { BotService } from '../bots/bot-service.js';
+import { registerComputerServices } from '../harness/computer-services.js';
+import type { HarnessServiceContext } from '../harness/router.js';
+import type { HarnessServiceHost } from '../harness/service-host.js';
 import { registerComputerRoutes } from '../computer/computer-routes.js';
 import type { ComputerDriverSession, DriverResponse, DriverRequest } from '../computer/driver-host.js';
 import { parseComputerAutomationInvalidation, type ComputerWorkRef, type ComputerAutomationInvalidation } from '@varin/protocol';
 import { createComputerRuntime } from './computer-runtime.js';
 import { withScriptCell, withToolInvocation } from './tool-invocation.js';
 import { retainExtensionTool, type ExtensionToolLease } from './extension-tool-owner.js';
-import type { KernelClient } from './kernel-client.js';
+import { KernelClientError, type KernelClient } from './kernel-client.js';
 import { toolOperationId, type HostToolCall } from './protocol.generated.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
 import type { KernelRecordResult, ToolOrigin, ComputerRequestRecord, ComputerEventCommand, ComputerEventCancellation } from './protocol.generated.js';
@@ -25,7 +30,7 @@ const work = (threadId = 'root'): ComputerWorkRef => ({ runtime: 'agent', thread
 const owner = { extensionId: 'varin.builtin.computer', extensionVersion: '1.0.0', entrypointId: 'host', instanceKey: 'computer-runtime-fixture', generation: 1 };
 const response = (extra: Partial<DriverResponse> = {}): DriverResponse => ({ id: 'controlled', ok: true, ...extra });
 const deferred = <T>() => { let resolve!: (value: T) => void, reject!: (reason: Error) => void; const promise = new Promise<T>((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
-async function fixture(records = new Map<string, KernelRecordResult>(), remote: Partial<Pick<ComputerServiceOptions, 'hostId' | 'remoteHosts' | 'fetch' | 'platform' | 'vmExec'>> = {}) {
+async function fixture(records = new Map<string, KernelRecordResult>(), remote: Partial<Pick<ComputerServiceOptions, 'hostId' | 'remoteHosts' | 'fetch' | 'platform' | 'vmExec' | 'resolveWork'>> = {}) {
   const dataDir = await mkdtemp(join(tmpdir(), 'varin-computer-domain-'));
   let enabled = true, releases = 0, failClear = false, blockInput = false, idle = false, deliveries = 0, terminal = false, releaseSucceeds = true, failList = false;
   const failedRuns = new Set<string>();
@@ -106,6 +111,8 @@ async function fixture(records = new Map<string, KernelRecordResult>(), remote: 
     resolveActor: async ref => ref.runtime === 'agent' ? (await computer.resolve(ref)).actor : {
       execution: { work: ref, runId: 'pi-run' }, rootWork: ref, rootExecution: { work: ref, runId: 'pi-run' }, registry: { scopeId: 'scope', threadId: 'pi' }, label: 'Pi', roleAccess: { kind: 'pi-role', readOnly: false } },
     resolveScope: async ref => ref.runtime === 'agent' ? (await computer.resolve(ref)).scope : null,
+    resolveWork: remote.resolveWork ?? (async ref => ref.runtime === 'agent' ? ref.branchId === `${ref.threadId}-branch` ? { scopeId: 'bot:bot', threadId: ref.threadId } : null
+      : { scopeId: 'scope', threadId: 'pi' }),
   });
   const computer = createComputerRuntime({ kernel: kernel as never, runtime: runtime as never, computers, enabled: async () => enabled });
   async function invoke(method: string, args: Record<string, unknown>, threadId = 'root', policy = false, signal = new AbortController().signal, parentOperationId?: string) {
@@ -676,11 +683,16 @@ test('application handback invalidates an old epoch and requires a fresh scene b
 });
 
 /** Original authenticated Router, driven directly; never opens a listener or a network socket. */
-function computerRouter(computers: ReturnType<typeof createComputerService>) {
+function computerRouter(computers: ReturnType<typeof createComputerService>, bot = false) {
   const router = express.Router();
   registerComputerRoutes(router as unknown as Express, { computers, hostId: 'host', requireAuth: (request, response, next) => {
     if (request.get('authorization') !== 'Bearer controlled-peer') { response.status(401).json({ error: 'unauthorized' }); return; }
     next();
+  } });
+  if (bot) registerBotRoutes(router as unknown as Express, { computers, bots: {
+    get: async () => ({ id: 'bot' }), listWork: async () => [{ runtime: 'agent', identity: work(), purpose: 'work' }],
+  } as unknown as BotService, requireAuth: (request, response, next) => {
+    if (request.get('authorization') !== 'Bearer controlled-peer') { response.status(401).json({ error: 'unauthorized' }); return; } next();
   } });
   return (operation: string, body: unknown, token?: string, authenticated = true, method = 'POST'): Promise<{ status: number; body: unknown; headers: Record<string, string> }> => new Promise((resolve, reject) => {
     const headers: Record<string, string> = {};
@@ -721,8 +733,8 @@ test('authenticated peer Router uses the same observer assignment for nested rea
   } finally { await f.cleanup(); }
 });
 
-test('shipped Computer broker binds application declarations, keeps frozen defaults and enforces original permissions for nested calls', async () => {
-  const f = await fixture();
+test('shipped Computer broker binds lifecycle and application declarations, keeps frozen defaults and enforces original permissions for nested calls', async () => {
+  const f = await managedFixture();
   let extensions: ApplicationExtensionRuntime | undefined;
   const retained: ExtensionToolLease[] = [];
   let invocation: HostToolCall;
@@ -742,7 +754,7 @@ test('shipped Computer broker binds application declarations, keeps frozen defau
       if (method === 'runtime.launch.inspect') return { run_id: invocation.runId, selection: { source: null } };
       return f.kernel.agentRuntimeRequest(method, params);
     } } as unknown as KernelClient;
-    for (const method of ['control', 'browser_read', 'browser', 'office_read', 'office', 'open', 'evidence', 'environment']) {
+    for (const method of ['prepare', 'desktop_lifecycle', 'artifact', 'control', 'browser_read', 'browser', 'office_read', 'office', 'open', 'evidence', 'environment']) {
       const selected = await extensions.prepareService({ serviceId: `varin.computer.${method}`, version: 1, method: 'execute', args: [], routing: { sessionId: 'root' } });
       retained.push(await retainExtensionTool({ runtime: extensions, kernel, configurationIdentity: captured,
         currentPolicy: async () => ({ mode: 'normal', rules: [{ tool: `computer_${method}`, decision: permission }] }) }, selected));
@@ -759,6 +771,12 @@ test('shipped Computer broker binds application declarations, keeps frozen defau
       await selected.lease.authorize(invocation, new AbortController().signal);
       return selected.lease.execute(invocation, new AbortController().signal, executionOwner);
     };
+    const prepared = await execute('prepare', {}, true);
+    if (prepared.completion.kind === 'result') assert.equal(prepared.completion.effect, 'confirmed');
+    const stopped = await execute('desktop_lifecycle', { desktopId: 'managed-linux', action: 'stop' }, true);
+    if (stopped.completion.kind === 'result') assert.equal(stopped.completion.effect, 'confirmed');
+    const artifact = await execute('artifact', { relativePath: 'not-managed.txt' }, true);
+    if (artifact.completion.kind === 'result') assert.equal(artifact.completion.effect, 'none');
     const control = await execute('control', {}, true);
     if (control.completion.kind === 'result') assert.equal(control.completion.effect, 'confirmed');
     const read = await execute('browser_read', { op: 'snapshot' }, true);
@@ -989,5 +1007,351 @@ test('managed Linux helper rejection retains known exit while unavailable file h
     if (written.receipt.completion.kind === 'result') assert.equal(written.receipt.completion.effect, 'none');
     assert.match(JSON.stringify(written.content), /file access is unavailable/);
     assert.equal(commands.length, 1);
+  } finally { await f.cleanup(); }
+});
+
+/** Real lifecycle owner with its platform helper replaced; never starts a desktop or installer. */
+async function managedFixture(options: Pick<ComputerServiceOptions, 'resolveWork'> = {}) {
+  let state: 'unprepared' | 'running' | 'stopped' = 'unprepared';
+  let changed: ((action: string) => Promise<{ code: number; stdout: string; stderr: string } | void>) | undefined;
+  const changes: string[] = [];
+  const payload = () => state === 'running' ? { state, socket: '/controlled/desktop.sock', driver: '/controlled/driver.py',
+    user: 'controlled', uid: 1001, environment: {}, width: 1280, height: 800 } : { state };
+  const f = await fixture(undefined, { ...options, platform: 'linux', vmExec: async (command, args) => {
+    const action = command === 'sh' ? 'prepare' : args[1]!;
+    assert.ok(['prepare', 'start', 'stop', 'status'].includes(action));
+    if (action !== 'status') {
+      changes.push(action);
+      const result = await changed?.(action);
+      if (result) return result;
+      state = action === 'stop' ? 'stopped' : 'running';
+      const data = args[args.indexOf('--data-dir') + 1]!;
+      await mkdir(data, { recursive: true }); await writeFile(join(data, 'config.json'), '{}');
+    }
+    return { code: 0, stdout: JSON.stringify(payload()), stderr: '' };
+  } });
+  return { ...f, changes, changeReply: (fn: NonNullable<typeof changed>) => { changed = fn; } };
+}
+const assertEffect = (value: { receipt: ToolExecutionReceipt }, effect: string, stopped = true) => {
+  assert.equal(value.receipt.executor_stopped, stopped);
+  assert.equal(value.receipt.completion.kind, 'result');
+  if (value.receipt.completion.kind === 'result') assert.equal(value.receipt.completion.effect, effect, JSON.stringify(value.receipt.completion.content));
+};
+
+test('desktop lifecycle tools prepare and transition the original managed owner with real child assignments and epochs', async () => {
+  const f = await managedFixture();
+  try {
+    assertEffect(await f.invoke('prepare', {}, 'child'), 'none');
+    assert.equal(f.changes.length, 0);
+    assert.equal((await f.computers.preparationTarget()).status, 'unavailable');
+    assertEffect(await f.invoke('prepare', { width: 1280, height: 800 }), 'confirmed');
+    assert.deepEqual(f.changes, ['prepare']);
+    const owned = await f.computers.workDesktops('bot:bot');
+    assert.ok(owned.some(desktop => desktop.id === 'managed-linux' && desktop.work?.some(association => association.work.runtime === 'agent' && association.registry === null)));
+    const control = await f.invoke('control', { desktopId: 'managed-linux' });
+    const epoch = (control.content as { control: { automationEpoch: string } }).control.automationEpoch;
+    assertEffect(await f.invoke('desktop_lifecycle', { desktopId: 'managed-linux', action: 'stop', automationEpoch: 'obsolete' }), 'none');
+    assert.deepEqual(f.changes, ['prepare']);
+    const stopped = await f.invoke('desktop_lifecycle', { desktopId: 'managed-linux', action: 'stop', automationEpoch: epoch });
+    assertEffect(stopped, 'confirmed');
+    assert.equal((stopped.content as { desktop: { status: string } }).desktop.status, 'stopped');
+    assert.equal(f.computers.automation.controller('managed-linux'), null);
+    assertEffect(await f.invoke('desktop_lifecycle', { desktopId: 'managed-linux', action: 'start', automationEpoch: epoch }), 'none');
+    assert.deepEqual(f.changes, ['prepare', 'stop']);
+    await f.invoke('release', { desktopId: 'managed-linux' });
+    await f.computers.automation.grantRequest({ work: work('child'), runId: 'child-run' }, work(), { work: work(), runId: 'root-run' }, 'managed-linux', 'control', 'child-lifecycle');
+    f.computers.automation.confirmRequest('child-lifecycle');
+    assertEffect(await f.invoke('desktop_lifecycle', { desktopId: 'managed-linux', action: 'start' }, 'child', true), 'confirmed');
+    assert.deepEqual(f.changes, ['prepare', 'stop', 'start']);
+  } finally { await f.cleanup(); }
+});
+
+test('desktop lifecycle replacement drains original input and cancels queued old-generation actions', { timeout: 15_000 }, async () => {
+  const f = await managedFixture();
+  try {
+    assertEffect(await f.invoke('prepare', {}), 'confirmed');
+    await f.invoke('observe', { desktopId: 'managed-linux', app: 'editor' });
+    f.block();
+    const first = f.invoke('act', { desktopId: 'managed-linux', action: { kind: 'type', app: 'editor', text: 'first' } });
+    await f.started.promise;
+    const queued = f.invoke('act', { desktopId: 'managed-linux', action: { kind: 'key', app: 'editor', key: 'enter' } }, 'root', true);
+    const stop = f.invoke('desktop_lifecycle', { desktopId: 'managed-linux', action: 'stop' });
+    assertEffect(await stop, 'confirmed');
+    const old = await first; assertEffect(old, 'unknown');
+    assertEffect(await queued, 'none');
+    assert.equal(f.requests.filter(request => request.tool === 'press_key').length, 0);
+    assert.deepEqual(f.changes, ['prepare', 'stop']);
+  } finally { await f.cleanup(); }
+});
+
+test('desktop lifecycle cancellation waits for the original helper callback before confirming release', { timeout: 15_000 }, async () => {
+  const f = await managedFixture();
+  const entered = deferred<void>(), gate = deferred<void>();
+  try {
+    assertEffect(await f.invoke('prepare', {}), 'confirmed');
+    f.changeReply(async action => { if (action === 'start') { entered.resolve(); await gate.promise; } });
+    const running = f.invoke('desktop_lifecycle', { desktopId: 'managed-linux', action: 'start' });
+    await entered.promise;
+    let released = false;
+    const stop = f.computer.user.stop(work() as never, { runId: 'root-run', desktopId: 'managed-linux' }).then(value => { released = true; return value; });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(released, false);
+    assert.equal((await f.computers.automation.snapshot(work())).status, 'cancelling');
+    gate.resolve();
+    const completed = await running; assertEffect(completed, 'confirmed');
+    assert.equal((completed.content as { cancelled: boolean }).cancelled, true);
+    assert.equal((await stop).state.status, 'enabled');
+    const journal = await f.computers.evidence({ desktopId: 'managed-linux' });
+    assert.ok(journal.entries.some(entry => entry.tool === 'control' && entry.op === 'start' && entry.outcome === 'cancelled' && entry.execution?.runId === 'root-run'));
+  } finally { gate.resolve(); await f.cleanup(); }
+});
+
+test('desktop lifecycle helper failures preserve original dispatch and helper-exit facts', async () => {
+  for (const phase of ['exited', 'lost'] as const) {
+    const f = await managedFixture();
+    try {
+      f.changeReply(async () => {
+        if (phase === 'lost') throw new Error('Original lifecycle helper acknowledgement lost');
+        return { code: 2, stdout: 'invalid response', stderr: 'Original helper exited without usable state' };
+      });
+      const failed = await f.invoke('prepare', {});
+      assertEffect(failed, 'unknown', phase === 'exited');
+      assert.deepEqual(f.changes, ['prepare']);
+      if (phase === 'lost') {
+        assertEffect(await f.invoke('prepare', {}), 'none');
+        assert.deepEqual(f.changes, ['prepare']);
+      }
+    } finally { await f.cleanup(); }
+  }
+  const unsupported = await fixture();
+  try { assertEffect(await unsupported.invoke('prepare', {}), 'none'); assert.equal(unsupported.records.has('computer.desktop:managed-linux'), false); }
+  finally { await unsupported.cleanup(); }
+});
+
+test('remote desktop lifecycle tools reserve the original target and retain stale-epoch or revoked-token no-input proof', async () => {
+  const target = await managedFixture();
+  let source: Awaited<ReturnType<typeof fixture>> | undefined;
+  let claim: Record<string, unknown> | undefined;
+  try {
+    source = await remoteFixture(target, async (url, body, send) => {
+      if (url.pathname.endsWith('/assignment') && body.op === 'claim' && body.access === 'control') claim = body;
+      return send();
+    });
+    assertEffect(await source.invoke('prepare', { connectionId: 'peer' }), 'confirmed');
+    assert.deepEqual(target.changes, ['prepare']);
+    assert.ok(claim);
+    const desktopId = 'remote:peer:host:managed-linux';
+    const controller = target.computers.automation.controller('managed-linux');
+    assert.equal(controller?.execution.work.runtime, 'agent');
+    assertEffect(await source.invoke('desktop_lifecycle', { desktopId, action: 'stop', automationEpoch: 'obsolete' }), 'none');
+    const control = await source.invoke('control', { desktopId });
+    const epoch = (control.content as { control: { automationEpoch: string } }).control.automationEpoch;
+    assertEffect(await source.invoke('desktop_lifecycle', { desktopId, action: 'start', automationEpoch: epoch }), 'confirmed');
+    await computerRouter(target.computers)('/api/computers/desktops/managed-linux/assignment', { ...claim, op: 'drop' });
+    assertEffect(await source.invoke('desktop_lifecycle', { desktopId, action: 'stop' }), 'none');
+    assert.deepEqual(target.changes, ['prepare', 'start']);
+    const raw = await computerRouter(target.computers)('/api/computers/desktops/managed-linux/lifecycle', { action: 'stop', automation: true });
+    assert.equal(raw.status, 409);
+    assert.deepEqual(target.changes, ['prepare', 'start']);
+  } finally { await source?.cleanup(); await target.cleanup(); }
+});
+
+test('remote desktop lifecycle ACK loss remains unknown even when the target finished its actual change', async () => {
+  const target = await managedFixture();
+  let source: Awaited<ReturnType<typeof fixture>> | undefined;
+  try {
+    source = await remoteFixture(target, async (url, _body, send) => {
+      const response = await send();
+      if (url.pathname.endsWith('/managed-linux/prepare')) throw new Error('Original prepare acknowledgement lost');
+      return response;
+    });
+    assertEffect(await source.invoke('prepare', { connectionId: 'peer' }), 'unknown', false);
+    assert.deepEqual(target.changes, ['prepare']);
+    assert.equal((await target.computers.preparationTarget()).status, 'available');
+  } finally { await source?.cleanup(); await target.cleanup(); }
+});
+
+test('Computer artifacts use the native Thread scope and original Bot catalog with pinned revisions and Host identity', async () => {
+  const target = await managedFixture({ resolveWork: async () => { throw new Error('Source Thread is absent from the target Catalog'); } });
+  let source: Awaited<ReturnType<typeof fixture>> | undefined;
+  let revision = 'a'.repeat(64), metadataReads = 0;
+  try {
+    source = await remoteFixture(target, async (url, _body, send) => {
+      if (url.pathname.endsWith('/artifacts/inspect')) {
+        metadataReads++;
+        return new Response(JSON.stringify({ version: { sha256: revision, byteLength: 3, modifiedAt: '1790712000000000000' } }),
+          { headers: { 'x-varin-computer-host': 'host', 'content-type': 'application/json' } });
+      }
+      if (url.pathname.endsWith('/artifacts/read')) return new Response('pdf', { headers: { 'x-varin-computer-host': 'host', 'x-varin-artifact-sha256': revision } });
+      return send();
+    });
+    const desktopId = 'remote:peer:host:managed-linux';
+    assertEffect(await source.invoke('prepare', { connectionId: 'peer' }), 'confirmed');
+    const targetBot = await computerRouter(target.computers, true)('/api/harness/bots/bot/work', {}, undefined, true, 'GET');
+    assert.equal(targetBot.status, 200, 'peer work is not looked up as a target-local Thread');
+    assert.deepEqual((targetBot.body as { threads: Array<{ desktops: unknown[] }> }).threads[0]?.desktops, []);
+    assertEffect(await source.invoke('artifact', { desktopId, relativePath: 'Downloads/report.pdf' }, 'child'), 'none');
+    assert.equal(metadataReads, 0);
+    const registered = await source.invoke('artifact', { desktopId, relativePath: 'Downloads/report.pdf' });
+    assertEffect(registered, 'confirmed');
+    const artifact = (registered.content as { artifact: { id: string; scopeId: string; threadId: string; sourceHostId: string; sha256: string } }).artifact;
+    assert.equal(artifact.scopeId, 'bot:bot'); assert.equal(artifact.threadId, 'root');
+    assert.equal(artifact.sourceHostId, 'host'); assert.equal(artifact.sha256, revision);
+    const bot = await computerRouter(source.computers, true)('/api/harness/bots/bot/work', {}, undefined, true, 'GET');
+    assert.equal(bot.status, 200);
+    const entry = (bot.body as { threads: Array<{ artifacts: unknown[]; desktops: Array<{ id: string; work: Array<{ registry: unknown }> }> }> }).threads[0]!;
+    assert.deepEqual(entry.artifacts, [artifact]);
+    assert.equal(entry.desktops[0]?.id, desktopId); assert.equal(entry.desktops[0]?.work[0]?.registry, null);
+    const opened = await source.computers.openArtifact(artifact.id);
+    const chunks: Buffer[] = []; for await (const chunk of opened.stream) chunks.push(Buffer.from(chunk));
+    assert.equal(Buffer.concat(chunks).toString(), 'pdf');
+    await assert.rejects(source.computers.automation.authorize(work(), 'control', desktopId,
+      () => source!.computers.registerArtifact(work('other'), desktopId, 'Downloads/report.pdf')), /owner must match/);
+    assert.equal((await source.computers.listArtifacts('bot:bot')).length, 1);
+    revision = 'b'.repeat(64);
+    await assert.rejects(source.computers.openArtifact(artifact.id), /version changed/);
+    revision = artifact.sha256;
+    const record = source.records.get(`computer.desktop:${desktopId}`)!;
+    const raw = JSON.parse(record.payloadJson); raw.remote.hostId = 'replacement-host';
+    source.records.set(record.recordId, { ...record, payloadJson: JSON.stringify(raw) });
+    await assert.rejects(source.computers.openArtifact(artifact.id), /Host identity changed/);
+    raw.remote.hostId = 'host'; source.records.set(record.recordId, { ...record, payloadJson: JSON.stringify(raw) });
+    const storage = source.kernel.scoped();
+    const put = storage.putRecord;
+    storage.putRecord = async params => { const stored = await put(params); if (params.recordType === 'computer.artifact') throw new Error('Original artifact Catalog ACK lost'); return stored; };
+    const unknown = await source.invoke('artifact', { desktopId, relativePath: 'Downloads/second.pdf' });
+    assertEffect(unknown, 'unknown');
+    storage.putRecord = put;
+    assert.equal((await source.computers.listArtifacts('bot:bot')).length, 2, 'the original catalog can reconcile an uncertain registration without a second registry');
+  } finally { await source?.cleanup(); await target.cleanup(); }
+});
+
+test('human desktop preparation and lifecycle keep their authenticated product authority while Agent control stays fenced', async () => {
+  const f = await managedFixture();
+  try {
+    const call = computerRouter(f.computers);
+    const prepared = await call('/api/computers/desktops/prepare', { width: 1280, height: 800 });
+    assert.equal(prepared.status, 200);
+    assert.equal(f.computers.automation.controller('managed-linux'), null);
+    await f.computers.takeover({ desktopId: 'managed-linux', holderId: 'viewer' });
+    assertEffect(await f.invoke('prepare', {}), 'none');
+    assert.deepEqual(f.changes, ['prepare']);
+    const stopped = await call('/api/computers/desktops/managed-linux/lifecycle', { action: 'stop' });
+    assert.equal(stopped.status, 200);
+    assert.equal((stopped.body as { desktop: { status: string } }).desktop.status, 'stopped');
+    assert.equal((await f.computers.control('managed-linux')).owner, 'human');
+    assert.equal(f.computers.automation.controller('managed-linux'), null);
+    assert.deepEqual(f.changes, ['prepare', 'stop']);
+  } finally { await f.cleanup(); }
+});
+
+test('existing Pi harness consumers use the same lifecycle assignment and current typed artifact owner', async () => {
+  const target = await managedFixture();
+  let source: Awaited<ReturnType<typeof fixture>> | undefined;
+  try {
+    source = await remoteFixture(target, async (url, _body, send) => url.pathname.endsWith('/artifacts/inspect')
+      ? new Response(JSON.stringify({ version: { sha256: 'c'.repeat(64), byteLength: 3, modifiedAt: '1790712000000000000' } }), { headers: { 'x-varin-computer-host': 'host' } }) : send());
+    const services = new Map<string, { handle(params: never, ctx: HarnessServiceContext): Promise<unknown> }>();
+    registerComputerServices({ register(method, service) { services.set(method, service); } }, { computerService: source.computers } as HarnessServiceHost);
+    const ctx: HarnessServiceContext = {
+      sessionId: 'existing-pi-session', workspaceId: null, authorizedPaths: [], signal: new AbortController().signal,
+      actor: { authorityInstanceId: 'pi-authority', sessionId: 'existing-pi-session', runId: 'pi-run', workerId: 'pi-worker', workerGeneration: 1,
+        workspaceId: null, grantedCapabilities: ['control.computer'] },
+    };
+    const invoke = (method: string, params: Record<string, unknown>) => services.get(method)!.handle(params as never, ctx);
+    const prepared = await invoke('computer.prepare', { connectionId: 'peer' });
+    assert.equal((prepared as { desktop: { status: string } }).desktop.status, 'available');
+    const desktopId = 'remote:peer:host:managed-linux';
+    const artifact = (await invoke('computer.artifact', { desktopId, relativePath: 'Downloads/pi.pdf' }) as { artifact: { scopeId: string; threadId: string } }).artifact;
+    assert.equal(artifact.scopeId, 'scope'); assert.equal(artifact.threadId, 'pi');
+    assert.deepEqual(await source.computers.listArtifacts('scope'), [artifact]);
+    const stopped = await invoke('computer.desktopLifecycle', { desktopId, action: 'stop' });
+    assert.equal((stopped as { desktop: { status: string } }).desktop.status, 'stopped');
+    assert.deepEqual(target.changes, ['prepare', 'stop']);
+  } finally { await source?.cleanup(); await target.cleanup(); }
+});
+
+test('confirmed remote desktop stop reconciles its exact assignment without SSE and separates a lost drop ACK', async () => {
+  for (const failDrop of [false, true]) {
+    const target = await managedFixture();
+    let source: Awaited<ReturnType<typeof fixture>> | undefined;
+    let dropFailure = false;
+    try {
+      source = await remoteFixture(target, async (url, body, send) => {
+        if (dropFailure && url.pathname.endsWith('/assignment') && body.op === 'drop') throw new Error('Original assignment drop acknowledgement lost');
+        return send();
+      });
+      const desktopId = 'remote:peer:host:managed-linux';
+      assertEffect(await source.invoke('prepare', { connectionId: 'peer' }), 'confirmed');
+      const original = (await source.computers.automation.snapshot(work())).leases.find(lease => lease.desktopId === desktopId && lease.access === 'control')!.id;
+      dropFailure = failDrop;
+      const stopped = await source.invoke('desktop_lifecycle', { desktopId, action: 'stop' });
+      assertEffect(stopped, 'confirmed');
+      const releases = (stopped.content as { assignmentReleases: Array<{ assignmentId: string; confirmed: boolean }> }).assignmentReleases;
+      assert.equal(releases.find(release => release.assignmentId === original)?.confirmed, !failDrop);
+      assert.equal((await source.computers.automation.snapshot(work())).leases.some(lease => lease.id === original), false);
+      if (failDrop) {
+        assert.ok((await source.computers.automation.snapshot(work())).cleanups.some(cleanup => cleanup.desktopId === desktopId));
+        dropFailure = false;
+        assertEffect(await source.invoke('release', { desktopId }), 'confirmed');
+      }
+      const ready = await source.invoke('control', { desktopId });
+      assertEffect(ready, 'confirmed');
+      assert.notEqual((ready.content as { assignment: { id: string } }).assignment.id, original);
+      const automationEpoch = (ready.content as { control: { automationEpoch: string } }).control.automationEpoch;
+      assertEffect(await source.invoke('desktop_lifecycle', { desktopId, action: 'start', automationEpoch }), 'confirmed');
+      assert.deepEqual(target.changes, ['prepare', 'stop', 'start']);
+    } finally { dropFailure = false; await source?.cleanup(); await target.cleanup(); }
+  }
+});
+
+test('remote desktop stop ends the exact target observer assignments and preserves a grant after the actual stop', async () => {
+  const target = await managedFixture();
+  let source: Awaited<ReturnType<typeof fixture>> | undefined;
+  const gate = deferred<void>(), entered = deferred<void>();
+  const tokens = new Map<string, string>();
+  const desktopId = 'remote:peer:host:managed-linux';
+  const grant = async (id: string) => {
+    await source!.computers.automation.grantRequest({ work: work(id), runId: `${id}-run` }, work(), { work: work(), runId: 'root-run' }, desktopId, 'observe', `${id}-assignment`);
+    source!.computers.automation.confirmRequest(`${id}-assignment`);
+  };
+  try {
+    source = await remoteFixture(target, async (url, body, send) => {
+      const response = await send();
+      if (url.pathname.endsWith('/assignment') && body.op === 'claim') tokens.set(String(body.assignmentId), (await response.clone().json() as { token: string }).token);
+      if (url.pathname.endsWith('/managed-linux/lifecycle') && body.action === 'stop') await grant('after-stop');
+      return response;
+    });
+    assertEffect(await source.invoke('prepare', { connectionId: 'peer' }), 'confirmed');
+    await grant('before-stop');
+    target.changeReply(async action => { if (action === 'stop') { entered.resolve(); await gate.promise; } });
+    const pendingStop = source.invoke('desktop_lifecycle', { desktopId, action: 'stop' });
+    await entered.promise;
+    await grant('during-stop');
+    gate.resolve();
+    const stopped = await pendingStop;
+    assertEffect(stopped, 'confirmed');
+    const states = ['before-stop', 'during-stop', 'after-stop'].map(id => [
+      source!.computers.automation.assignmentState(`${id}-assignment`), target.computers.automation.assignmentState(tokens.get(`${id}-assignment`)!),
+    ]);
+    assert.deepEqual(states, [['released', 'released'], ['released', 'released'], ['active', 'active']]);
+    const releases = (stopped.content as { assignmentReleases: Array<{ assignmentId: string; confirmed: boolean }> }).assignmentReleases;
+    assert.equal(releases.length, 3, 'the original controller and two ended observers are reconciled');
+    assert.ok(releases.every(release => release.confirmed && release.assignmentId !== 'after-stop-assignment'));
+    const control = await source.invoke('control', { desktopId });
+    assertEffect(control, 'confirmed');
+    const automationEpoch = (control.content as { control: { automationEpoch: string } }).control.automationEpoch;
+    assertEffect(await source.invoke('desktop_lifecycle', { desktopId, action: 'start', automationEpoch }), 'confirmed');
+    assert.deepEqual(target.changes, ['prepare', 'stop', 'start']);
+  } finally { gate.resolve(); await source?.cleanup(); await target.cleanup(); }
+});
+
+test('Computer identity maps original typed absence separately from Catalog failure', async () => {
+  const f = await fixture();
+  try {
+    for (const [code, expected] of [['not-found', 'computer-work-not-found'], ['operation-error', 'computer-owner-unavailable']] as const) {
+      f.kernel.agentRuntimeRequest = async () => { throw new KernelClientError({ code, message: 'Original Catalog lookup failed' }); };
+      await assert.rejects(f.computer.resolve(work()), { computerCode: expected });
+    }
   } finally { await f.cleanup(); }
 });
