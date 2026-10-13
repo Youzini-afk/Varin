@@ -97,7 +97,7 @@ export class DocumentsFileObservationOwner implements FileObservationOwner {
     }
     const selected = owner;
     selected.listeners.add(listener);
-    return { ready: Promise.resolve(true), get position() { return selected.controller.position; },
+    return { ready: selected.controller.ready.then(() => true), get position() { return selected.controller.position; },
       settle: () => selected.controller.settle(), close: () => {
         selected.listeners.delete(listener);
         if (!selected.listeners.size) { selected.controller.close(); if (this.roots.get(root) === selected) this.roots.delete(root); }

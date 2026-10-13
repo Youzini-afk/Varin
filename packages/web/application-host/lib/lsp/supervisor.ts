@@ -1675,6 +1675,7 @@ export const createLanguageSupervisor = ({
           }
         } });
     } else if (!source.watch.connected) source.watch.reconnect();
+    await waitWithSignal(source.watch.ready, signal);
     return environment;
   };
 

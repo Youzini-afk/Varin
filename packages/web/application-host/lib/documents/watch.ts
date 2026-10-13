@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import type { WatchOptions } from 'node:fs';
+import fs, { type WatchOptions } from 'node:fs';
 import type path from 'node:path';
+import { watchWindowsDirectory } from './windows-watch.js';
 
 interface DocumentResource {
   workspaceId: string;
@@ -23,6 +24,7 @@ export interface WatchPosition {
 }
 
 export interface WorkspaceWatcher {
+  readonly ready: Promise<void>;
   /** Whether the original native watch handle is currently attached. */
   readonly connected: boolean;
   readonly sourceId: string;
@@ -36,6 +38,9 @@ export interface WorkspaceWatcher {
 }
 
 export interface NativeWatcher {
+  readonly ready?: Promise<void>;
+  readonly connected?: boolean;
+  settle?(): Promise<void>;
   close(): void;
   on(event: 'error', listener: (error: Error) => void): unknown;
 }
@@ -69,7 +74,8 @@ const toResource = (workspaceId: string, relativePath: string): DocumentResource
 });
 
 const mergeEventType = (previous: string, next: string): string => (
-  previous === 'rename' || next === 'rename' ? 'rename' : 'change'
+  previous === 'rename' || next === 'rename' ? 'rename'
+    : previous === 'change' || next === 'change' ? 'change' : 'content'
 );
 
 /**
@@ -96,6 +102,7 @@ export const createWorkspaceWatcher = ({
   let batch = new Map<string, string>();
   let batchTimer: ReturnType<typeof setTimeout> | null = null;
   let flushChain: Promise<unknown> = Promise.resolve();
+  let ready = Promise.resolve();
 
   const nextSequence = (): number => {
     sequence += 1;
@@ -104,7 +111,7 @@ export const createWorkspaceWatcher = ({
 
   const relativeFrom = (absolutePath: string): string | null => {
     const relative = pathModule.relative(rootPath, absolutePath).replace(/\\/g, '/');
-    if (!relative || relative === '.' || relative.startsWith('..') || pathModule.isAbsolute(relative)) {
+    if (!relative || relative === '.' || relative === '..' || relative.startsWith('../') || pathModule.isAbsolute(relative)) {
       return null;
     }
     return relative;
@@ -148,12 +155,15 @@ export const createWorkspaceWatcher = ({
           sequence: nextSequence(),
           resource,
         });
-      } else {
+      } else if (eventType !== 'content') {
         // A directory can arrive atomically with descendants. Preserve the entry
         // invalidation so exact-path observers can recheck descendants through
         // their resource owner; this is not a claim about any file's content.
         emit({ kind: 'invalidated', sequence: nextSequence(), resource, reason: 'entry-changed' });
       }
+      // Windows emits directory LAST_WRITE notifications on read-only enumeration.
+      // Its separate name/attribute/security subscription covers directory state;
+      // directory timestamps are not file content or part of a captured FileState.
     }
   };
 
@@ -172,6 +182,10 @@ export const createWorkspaceWatcher = ({
 
   const settle = async (): Promise<void> => {
     if (closed) return;
+    await ready;
+    const original = watcher;
+    await original?.settle?.();
+    if (!original || original !== watcher) throw new Error('Workspace watch changed during capture');
     if (batchTimer) clearTimeout(batchTimer);
     batchTimer = null;
     flushChain = flushChain.then(flushBatch, flushBatch).catch(reportBatchFailure);
@@ -195,32 +209,47 @@ export const createWorkspaceWatcher = ({
   };
 
   const start = (): void => {
-    watcher = fsModule.watch(rootPath, { recursive: true, persistent: false } as WatchOptions, (eventType, filename) => {
-      queuePath(eventType === 'rename' ? 'rename' : 'change', typeof filename === 'string' ? filename : '');
+    const changed = (eventType: string, filename: string | Buffer | null) => {
+      queuePath(eventType === 'rename' || eventType === 'content' ? eventType : 'change', typeof filename === 'string' ? filename : '');
+    };
+    const current = process.platform === 'win32' && fsModule === fs
+      ? watchWindowsDirectory(rootPath, changed)
+      : fsModule.watch(rootPath, { recursive: true, persistent: false } as WatchOptions, changed);
+    watcher = current;
+    ready = (current.ready ?? Promise.resolve()).catch(error => {
+      if (watcher === current) { current.close(); watcher = null; }
+      throw error;
     });
-    watcher.on('error', () => {
-      if (closed || reconnectScheduled) return;
+    void ready.catch(() => undefined);
+    current.on('error', () => {
+      if (closed || reconnectScheduled || watcher !== current) return;
       reconnectScheduled = true;
-      watcher?.close();
+      current.close();
       watcher = null;
-      setTimeout(() => {
-        reconnectScheduled = false;
-        if (closed) return;
-        try {
-          start();
-          reset('reconnected');
-        } catch {
-          reset('authority-changed');
-        }
-      }, 0);
+      reset('authority-changed');
+      ready = new Promise<void>((resolve, reject) => {
+        setTimeout(() => {
+          reconnectScheduled = false;
+          if (closed) { reject(new Error('Workspace watch is closed')); return; }
+          try {
+            start();
+            void ready.then(() => { reset('reconnected'); resolve(); }, error => { reset('authority-changed'); reject(error); });
+          } catch (error) {
+            reset('authority-changed');
+            reject(error);
+          }
+        }, 0);
+      });
+      void ready.catch(() => undefined);
     });
   };
 
   start();
 
   return {
+    get ready() { return ready; },
     get connected() {
-      return !closed && watcher !== null;
+      return !closed && watcher !== null && (watcher.connected ?? true);
     },
     get sourceId() {
       return sourceId;
