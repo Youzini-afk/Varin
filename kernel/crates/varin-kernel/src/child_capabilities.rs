@@ -130,13 +130,19 @@ impl varin_runtime::execution::ContextPreparation for BindingPreparation {
                 .map_err(|e| error(e.to_string()))?;
             (run, launch)
         };
+        if run.epoch != epoch {
+            return Err(error("Run owner changed".into()));
+        }
+        if run.cancel_requested {
+            // Tree cancellation commits before the worker notification. Carry that
+            // original durable intent to Engine's cancellation boundary as well.
+            cancel.cancel();
+            return Err(error("Run cancelled".into()));
+        }
         let Some(launch) = launch else {
             binding.child_dispatch = None;
             return Ok(context);
         };
-        if run.epoch != epoch {
-            return Err(error("Run owner changed".into()));
-        }
         let has_child_catalog = launch.selection.child_dispatch_ref.is_some();
         let model = varin_runtime::catalog::dispatch::ChildModelBinding {
             configuration: serde_json::from_value(run.configuration)
@@ -161,12 +167,17 @@ impl varin_runtime::execution::ContextPreparation for BindingPreparation {
         if cancel.is_cancelled() {
             return Err(error("Run cancelled".into()));
         }
-        binding.child_dispatch = self
-            .catalog
-            .lock()
-            .map_err(|e| error(e.to_string()))?
-            .bind_child_dispatch(run_id, prepared)
-            .map_err(|e| error(e.to_string()))?;
+        binding.child_dispatch = {
+            let mut owner = self.catalog.lock().map_err(|e| error(e.to_string()))?;
+            owner.bind_child_dispatch(run_id, prepared).map_err(|e| {
+                // Close the race with a cancellation committed while the frozen
+                // bodies were loaded. A stale epoch or unrelated error is not a stop.
+                if owner.run(run_id).is_ok_and(|run| run.epoch == epoch && run.cancel_requested) {
+                    cancel.cancel();
+                }
+                error(e.to_string())
+            })?
+        };
         if binding.tools.iter().any(|tool| tool.name == "dispatch") {
             let text = if let Some(reference) = binding
                 .child_dispatch

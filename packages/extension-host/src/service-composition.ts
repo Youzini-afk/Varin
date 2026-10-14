@@ -71,10 +71,11 @@ export function createHostCompositionPlan(catalog: VarinExtensionCatalogSnapshot
     if (stack.includes(id)) throw new Error(`Host service dependency cycle: ${[...stack, id].join(' -> ')}`);
     const known = memo.get(id); if (known) return known;
     const entry = catalog.extensions.find(entry => entry.manifest.id === id);
-    if (!entry?.desired.enabled || !entry.manifest.entrypoints?.host) throw new HostServiceBindingError('selected_unavailable', `Host extension is unavailable: ${id}`);
+    if (!entry?.desired.enabled) throw new HostServiceBindingError('selected_unavailable', `Host extension is unavailable: ${id}`);
     const candidate = id === candidateSelection?.extensionId ? entry.candidate : undefined;
     if (id === candidateSelection?.extensionId && candidate?.integrity !== candidateSelection.integrity) throw new Error(`Host candidate is stale: ${id}`);
     const manifest = candidate?.manifest ?? entry.manifest;
+    if (!manifest.entrypoints?.host) throw new HostServiceBindingError('selected_unavailable', `Host extension is unavailable: ${id}`);
     const integrity = candidate?.integrity ?? entry.integrity;
     if (!integrity) throw new HostCompositionPreparationRequiredError(id);
     stack.push(id);

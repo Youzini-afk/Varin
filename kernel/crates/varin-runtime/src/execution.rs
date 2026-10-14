@@ -2286,6 +2286,10 @@ impl<
                         &mut input.binding,
                         &cancel,
                     ) {
+                        if cancel.is_cancelled() {
+                            policy_state = previous_policy_state;
+                            continue 'agent;
+                        }
                         finish!('agent,RunState::Failed,None,Some(error));
                     }
                     let retained = match selected {
@@ -2397,6 +2401,10 @@ impl<
                         &cancel,
                     ) {
                         Ok(context) => context,
+                        Err(_) if cancel.is_cancelled() => {
+                            policy_state = previous_policy_state;
+                            continue 'agent;
+                        }
                         Err(error) => finish!('agent,RunState::Failed,None,Some(error)),
                     };
                     if self

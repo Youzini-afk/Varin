@@ -452,3 +452,38 @@ fn absent_source_defaults_derive_from_frozen_declarations_but_explicit_tools_rem
     drop(f);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn durable_tree_cancel_reaches_original_binding_token_before_physical_notification() {
+    let directory = schemas();
+    let read = directory.iter().find(|tool| tool.name == "file_read").unwrap().clone();
+    let dispatch = directory.iter().find(|tool| tool.name == "dispatch").unwrap().clone();
+    let mut fixture = fixture::Fixture::new_with_schemas(0, read, dispatch);
+    let snapshot: RequestSnapshot = serde_json::from_value(
+        fixture.db.capture_model_step_read("parent-request").unwrap().load_request().unwrap(),
+    ).unwrap();
+    let mut binding = snapshot.view.binding;
+    let run = fixture.context.run_id.clone();
+    let epoch = fixture.db.epoch();
+    let thread = fixture.db.run(&run).unwrap().thread_id;
+    // This is ControlCommands' real durable-first interval: the tree command is
+    // committed, but cancel_control has not notified the original worker yet.
+    fixture.db.cancel_tree(varin_runtime::catalog::dispatch::TreeCancelTarget::Thread {
+        thread_id: thread,
+    }).unwrap();
+    let cancel = CancellationToken::default();
+    assert!(!cancel.is_cancelled());
+    let root = fixture.root.clone();
+    let catalog = std::sync::Arc::new(std::sync::Mutex::new(fixture.db));
+    let hook = BindingPreparation {
+        inner: std::sync::Arc::new(NoopContextPreparation),
+        catalog: catalog.clone(),
+    };
+    let result = hook.prepare_binding(&run, epoch, &mut binding, &cancel);
+    assert!(result.is_err(), "cancelled Run cannot publish a new binding");
+    assert!(catalog.lock().unwrap().run(&run).unwrap().cancel_requested);
+    assert!(cancel.is_cancelled(), "binding rejection must propagate the original durable cancellation before Engine handles its error");
+    drop(hook);
+    drop(catalog);
+    std::fs::remove_dir_all(root).unwrap();
+}

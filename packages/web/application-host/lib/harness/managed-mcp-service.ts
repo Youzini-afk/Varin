@@ -191,13 +191,16 @@ export function createManagedMcpService(options: {
     const views = [...owner.views.values()]; owner.views.clear();
     owner.closing = (async () => {
       const interactionClosing = interactions?.close(scope);
-      await Promise.all([tasks?.close(scope), resources?.close(scope), children?.close(scope), derivations?.close(scope)]);
-      await Promise.allSettled(views.map(async view => (await view.work).release()));
+      const holdersClosing = Promise.all([tasks?.close(scope), resources?.close(scope), children?.close(scope), derivations?.close(scope)]);
+      const viewsClosing = Promise.allSettled(views.map(async view => (await view.work).release()));
       // Native processes carry their own Storage tree receipts even if SDK close swallows an error.
+      // Explicit Source close starts that exact stop before joining an outstanding
+      // subscribe ACK or callback. Ordinary retirement above still retains holders.
       const results = await Promise.allSettled([owner.composition?.then(composition => composition.releaseAndDrain(), error => {
         // Failed acquisition already drained its candidate. Preserve actual close failures.
         if ((error as { code?: unknown })?.code === 'mcp-close-failed') throw error;
-      }), owner.subscription?.then(unsubscribe => unsubscribe(), () => undefined), owner.transports?.drain(), interactionClosing]);
+      }), owner.subscription?.then(unsubscribe => unsubscribe(), () => undefined), owner.transports?.drain(), interactionClosing,
+      holdersClosing, viewsClosing]);
       const failed = results.find(result => result.status === 'rejected');
       if (failed?.status === 'rejected') throw failed.reason;
       // Retain a failed close as unresolved; a second cleanup cannot turn it into success.
