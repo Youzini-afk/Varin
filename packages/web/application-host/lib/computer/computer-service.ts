@@ -282,12 +282,13 @@ const observationOf = (
     elements: Array.isArray(snapshot.elements)
       ? snapshot.elements.map(elementOf).filter((e): e is ComputerElement => e !== null)
       : [],
-    capturedAt: new Date().toISOString(),
+    capturedAt: asString(snapshot.capturedAt) ?? new Date().toISOString(),
   };
   if (asString(snapshot.windowTitle)) observation.windowTitle = snapshot.windowTitle as string;
   const handle = asNumber(snapshot.windowHandle);
   // Linux AT-SPI uses a zero-based child index as the window handle.
   if (handle !== undefined && handle >= 0) observation.windowHandle = handle;
+  if (asString(snapshot.nativeTarget)) observation.nativeTarget = snapshot.nativeTarget as string;
   const dpi = asNumber(snapshot.dpiScale);
   if (dpi !== undefined && dpi > 0) observation.dpiScale = dpi;
   if (Array.isArray(snapshot.windows)) {
@@ -2018,6 +2019,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         : action.window !== undefined ? { window: action.window } : {}),
       ...(element ? { element } : {}),
       ...(windowBounds ? { windowBounds } : {}),
+      ...(latest?.nativeTarget ? { platform_target: latest.nativeTarget } : {}),
       ...(rasterCoordinates ? { expected_bounds: windowBounds, expected_dpi: latest?.dpiScale, capture_source: screenshot?.source } : {}),
     };
     switch (action.kind) {

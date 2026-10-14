@@ -13,6 +13,8 @@ export interface ImageModelInfo extends ImageModelSelection {
   supportsEditing: boolean;
   supportsMask: boolean;
   parameters: readonly string[];
+  /** Explicit model constraints, intersected with the protocol input contract. */
+  parameterSchemas?: Record<string, JsonValue>;
 }
 export interface ImageParameters {
   count?: number;
@@ -52,12 +54,13 @@ const objectSchema = (properties: JsonObject, required: string[] = []): JsonObje
 const sourceSchema = { oneOf: [objectSchema({ resourceId: text }, ['resourceId']), objectSchema({ path: text }, ['path'])] };
 const parameterSchemas: JsonObject = { count: { type: 'integer', minimum: 1 }, size: text, quality: text,
   outputFormat: { enum: ['png', 'jpeg', 'webp'] }, background: { enum: ['auto', 'opaque', 'transparent'] }, aspectRatio: text, imageSize: text };
-export function imageToolContract(purpose: ImageToolPurpose, model?: Pick<ImageModelInfo, 'parameters' | 'supportsMask'>) {
+export function imageToolContract(purpose: ImageToolPurpose, model?: Pick<ImageModelInfo, 'parameters' | 'supportsMask' | 'parameterSchemas'>) {
   return { name: purpose === 'generation' ? 'image_generate' : 'image_edit',
     description: purpose === 'generation'
       ? 'Generate images from a prompt using the configured generation model. Returns image previews and resource IDs for later editing. Parameters belong to the selected image model.'
       : 'Edit original images using the configured editing model. Images and an optional mask reference a returned resourceId or a readable source path. Returns new image previews and resource IDs; originals are retained.',
-    inputSchema: objectSchema({ prompt: text, parameters: objectSchema(model ? Object.fromEntries(model.parameters.map(key => [key, parameterSchemas[key]!])) : parameterSchemas),
+    inputSchema: objectSchema({ prompt: text, parameters: objectSchema(model ? Object.fromEntries(model.parameters.map(key => [key, model.parameterSchemas?.[key] === undefined ? parameterSchemas[key]!
+      : { allOf: [parameterSchemas[key]!, model.parameterSchemas[key]!] }])) : parameterSchemas),
       ...(purpose === 'editing' ? { images: { type: 'array', minItems: 1, items: sourceSchema }, ...(model?.supportsMask === false ? {} : { mask: sourceSchema }) } : {}) },
       purpose === 'editing' ? ['prompt', 'images'] : ['prompt']) };
 }

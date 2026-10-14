@@ -138,11 +138,19 @@ export function createMemoryInference(options: {
     return work;
   }
   async function bind(selection: ModelSelection, maxOutputTokens?: number): Promise<MemoryInferenceBinding> {
+    if (closed) throw new Error('Memory inference is closed');
     const model = await options.models.resolveModel(selection);
-    const configuration = { ...model.configuration, ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }) };
-    const credentialScope = await model.credentialOwner.scope();
-    retained.set(JSON.stringify([configuration, credentialScope]), model);
-    return { configuration, credentialScope };
+    let transferred = false;
+    try {
+      const configuration = { ...model.configuration, ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }) };
+      const credentialScope = await model.credentialOwner.scope();
+      if (closed) throw new Error('Memory inference is closed');
+      const key = JSON.stringify([configuration, credentialScope]);
+      retained.get(key)?.credentialOwner.release();
+      retained.set(key, model);
+      transferred = true;
+      return { configuration, credentialScope };
+    } finally { if (!transferred) model.credentialOwner.release(); }
   }
   async function admit<R extends {
     binding: MemoryInferenceBinding;
@@ -329,18 +337,22 @@ export function createMemoryInference(options: {
     combined.addEventListener('abort', cancel);
     try {
       let model = retained.get(JSON.stringify([binding.configuration, binding.credentialScope]));
-      if (!model) {
-        const credentialOwner = await options.models.rebindModel(binding.configuration, binding.credentialScope);
-        model = { configuration: binding.configuration, credentialOwner, acceptsImages: false };
-      }
-      await options.kernel.registerCredentialOwner(work.runId, model.credentialOwner, combined, operationId, {
-        kind: 'operation', operationId, assertLive: async () => {
-          await guard(work, combined);
-          await assertSource?.();
-          combined.throwIfAborted();
-        }
-      });
-      registered = true;
+      let releaseModel: (() => void) | undefined;
+      try {
+        if (!model) {
+          const credentialOwner = await options.models.rebindModel(binding.configuration, binding.credentialScope);
+          model = { configuration: binding.configuration, credentialOwner, acceptsImages: false };
+          releaseModel = () => credentialOwner.release();
+        } else releaseModel = model.credentialOwner.retain();
+        await options.kernel.registerCredentialOwner(work.runId, model.credentialOwner, combined, operationId, {
+          kind: 'operation', operationId, assertLive: async () => {
+            await guard(work, combined);
+            await assertSource?.();
+            combined.throwIfAborted();
+          }
+        });
+        registered = true;
+      } finally { releaseModel?.(); }
       await guard(work, combined);
       await assertSource?.();
       try {
@@ -477,6 +489,7 @@ export function createMemoryInference(options: {
       const results = await Promise.allSettled(scopes.map(suspendScope));
       for (const lease of decisions.values())
         lease.release();
+      for (const model of retained.values()) model.credentialOwner.release();
       retained.clear();
       for (const remove of removers)
         remove();

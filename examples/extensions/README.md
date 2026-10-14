@@ -48,3 +48,9 @@ same tool declarations used by model/policy admission and inspection.
 ## Context algorithm examples
 
 - [Independent Source Compaction](context-compaction/README.md): a pure `varin.context.compaction@1` Provider producing independent source summaries and a merge tree, or a small direct extractive candidate. Core executes and commits the frozen plan.
+
+## Model protocol example
+
+- [Custom text/SSE model protocol](model-protocol/README.md): contributes a channel and model candidates,
+  implements a distinct wire codec, and leaves HTTP, credentials, cancellation and usage with their
+  original owners. It uses the ordinary extension service/composition path.

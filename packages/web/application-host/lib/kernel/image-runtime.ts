@@ -42,6 +42,9 @@ export function createImageRuntime(options: {
   const retained = new Map<string, { provider: HostInferenceProviderBinding; references: number }>();
   const prepareConfiguration = async (run: ExtensionToolRun, required: readonly ExtensionToolBinding[], previous?: ExtensionToolConfiguration): Promise<ExtensionToolConfiguration> => {
     const captured = new Map<ImageToolPurpose, { identity: string; provider: HostInferenceProviderBinding } | { error: unknown }>();
+    const owned = new Set<HostInferenceProviderBinding>();
+    let references = 1, released = false;
+    const releaseOwned = () => { if (!--references) { for (const provider of owned) provider.release?.(); previous?.release?.(); } };
     let configured: Set<ImageToolPurpose>;
     try {
       if (required.length) {
@@ -51,8 +54,10 @@ export function createImageRuntime(options: {
           if (!purpose) continue;
           configured.add(purpose);
           const original = restore(binding.configurationIdentity);
-          const provider = retained.get(binding.configurationIdentity!)?.provider
-            ?? await options.authority.resolveImageBinding(original.model.providerId, original.model.modelId, purpose);
+          const existing = retained.get(binding.configurationIdentity!)?.provider;
+          const provider = existing ?? await options.authority.resolveImageBinding(original.model.providerId, original.model.modelId, purpose);
+          if (existing) { const release = existing.retain?.(); if (release) owned.add({ ...existing, release }); }
+          else owned.add(provider);
           if (identityOf(purpose, provider) !== binding.configurationIdentity) throw new Error('The original image model binding is unavailable');
           captured.set(purpose, { identity: binding.configurationIdentity!, provider });
         }
@@ -70,6 +75,7 @@ export function createImageRuntime(options: {
           configured.add(purpose);
           try {
             const provider = await options.authority.resolveImageBinding(selection.providerId, selection.modelId, purpose);
+            owned.add(provider);
             if (purpose === 'editing' && !provider.imageModel?.supportsEditing) throw new Error('The selected image model does not accept original images');
             captured.set(purpose, { identity: identityOf(purpose, provider), provider });
           } catch (error) { captured.set(purpose, { error }); }
@@ -94,14 +100,21 @@ export function createImageRuntime(options: {
     };
     configuration.declaration = (descriptor, identity) => purposeOf(descriptor)
       ? imageToolDeclaration(descriptor, restore(identity).model) : previous?.declaration?.(descriptor, identity) ?? descriptor;
+    configuration.retainPreparation = () => {
+      if (!references) throw new Error('Image preparation was released');
+      references += 1; let done = false; return () => { if (done) return; done = true; releaseOwned(); };
+    };
+    configuration.release = () => { if (released) return; released = true; releaseOwned(); };
     configuration.retain = (descriptor, identity) => {
       const purpose = purposeOf(descriptor);
       if (!purpose) return previous?.retain?.(descriptor, identity) ?? (() => {});
       const capturedProvider = captured.get(purpose);
       if (!identity || !capturedProvider || 'error' in capturedProvider || capturedProvider.identity !== identity) throw new Error('The prepared image model binding is unavailable');
       const entry = retained.get(identity) ?? { provider: capturedProvider.provider, references: 0 };
+      const releaseProvider = entry.provider.retain?.();
       retained.set(identity, entry); entry.references++;
-      return () => { if (--entry.references === 0 && retained.get(identity) === entry) retained.delete(identity); };
+      let released = false;
+      return () => { if (released) return; released = true; releaseProvider?.(); if (--entry.references === 0 && retained.get(identity) === entry) retained.delete(identity); };
     };
     return configuration;
   };
@@ -132,17 +145,19 @@ export function createImageRuntime(options: {
         const images = await Promise.all((request.images ?? []).map(readImage));
         const mask = request.mask ? await readImage(request.mask) : undefined;
         const wire = imageRequest({ ...config.model, modelId: provider.requestModelId ?? config.model.modelId, baseUrl: config.baseUrl }, config.purpose, request, images, mask);
+        wire.url = provider.requestUrl;
         if (!provider.routes.some(route => route.requestUrl === wire.url)) throw new Error('The original image route changed');
         await options.requests.run(invocation, call.signal, async inference => {
           await inference.assertFresh();
           await provider.assertAvailable();
           const auth = await provider.getAuth();
-          const headers = new Headers(wire.init.headers);
+          const headers = new Headers(provider.headers);
+          new Headers(wire.init.headers).forEach((value, key) => headers.set(key, value));
           for (const [key, value] of Object.entries(auth?.auth.headers ?? {})) if (value !== null) headers.set(key, value);
           if (auth?.auth.apiKey && !headers.has('authorization')) headers.set('authorization', `Bearer ${auth.auth.apiKey}`);
           const response = await inference.request({ binding: { requestKind: 'model_compute', purpose: `image-${config.purpose}`, providerId: config.model.providerId,
             modelId: config.model.modelId, configurationId: config.configurationId, executor: { kind: 'http', api: provider.api, endpoint: wire.url, credentialScope: provider.credentialScope } },
-            request: wire.input, destination: wire.url, init: { ...wire.init, headers, signal: call.signal }, connection: await options.egress.prepare(wire.url),
+            request: wire.input, destination: wire.url, init: { ...wire.init, headers, signal: call.signal }, connection: await options.egress.prepare(wire.url, provider.egressOverride),
             check: async signal => { signal.throwIfAborted(); await provider.assertAvailable(); },
             onReceipt: receipt => { started ||= receipt.requestStarted === true; completed ||= receipt.providerCompleted; },
             observe: raw => {
@@ -157,11 +172,13 @@ export function createImageRuntime(options: {
           if (observed.text) result.text = observed.text;
           for (const image of observed.images) {
             try {
-              const bytes = await resolveImageBytes(image, async url => (await options.egress.prepare(url)).fetch(url, { redirect: 'manual', signal: call.signal }));
-              parts.push({ kind: 'media', media: { media_type: bytes.mimeType, data_base64: Buffer.from(bytes.bytes).toString('base64') } });
+              const bytes = await resolveImageBytes(image, async url => (await options.egress.prepare(url, provider.egressOverride)).fetch(url, { redirect: 'manual' }));
               const resource = await options.media.put(owner, bytes, { operationId: invocation.operationId, responseId: observed.responseId,
-                providerId: config.model.providerId, modelId: config.model.modelId, inputs: request.images ?? [], usage: observed.usage });
+                providerId: config.model.providerId, modelId: config.model.modelId, purpose: config.purpose, configurationId: config.configurationId, inputs: request.images ?? [], ...(request.mask ? { mask: request.mask } : {}), usage: observed.usage });
+              // Once returned, image retention belongs to the original executor even if
+              // its caller cancels. Publish only media whose stable resource is retained.
               result.images.push(resource);
+              parts.push({ kind: 'media', media: { media_type: bytes.mimeType, data_base64: Buffer.from(bytes.bytes).toString('base64') } });
             } catch { result.message = 'Some generated images could not be retained'; }
           }
           result.status = parts.length ? result.images.length === observed.images.length ? 'ok' : 'partial' : 'failed';

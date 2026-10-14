@@ -6,6 +6,9 @@ import {
   parseVarinExtensionServiceProvision,
   parseVarinToolJson,
   parseVarinExtensionStorageOpenRequest,
+  type VarinExtensionRestartHandoff,
+  type VarinExtensionRestartHandoffRequest,
+  type VarinExtensionRestartRecoveryRequest,
   type JsonObject,
   type JsonValue,
   type VarinExtensionActualState,
@@ -45,6 +48,9 @@ import { ServiceRoutingStore } from './service-routing-store.js';
 import { resolveDeclaredServiceRouting } from './runtime-contracts.js';
 import { compositionHash, compositionForNode, createHostCompositionPlan, restoreHostCompositionPlan, resolveHostRequirement,
   type HostCompositionNode, type HostCompositionPlan } from './service-composition.js';
+
+// One identity per actual process, never per recreated Runtime object.
+const HOST_PROCESS_ID = randomUUID();
 
 interface BrokerRequestMessage {
   id: string;
@@ -379,7 +385,7 @@ export class ChildBrokeredHostTransport implements BrokeredHostTransport {
 }
 
 export class ExtensionUpdateReadinessError extends Error {
-  constructor(readonly code: "required_surface_readiness" | "stale_surface_readiness" | "surface_readiness_not_declared", message: string) {
+  constructor(readonly code: "trusted_native_group_update_requires_restart_handoff" | "restart_handoff_pending" | "required_surface_readiness" | "stale_surface_readiness" | "surface_readiness_not_declared", message: string) {
     super(message);
   }
 }
@@ -442,6 +448,7 @@ export class BrokeredHostSupervisor {
     desiredRevision: number; slot: 'candidate' | 'selected'; broker: BrokeredHostTransport; native: boolean;
   }>();
   readonly #epochs = new Map<string, number>();
+  readonly #restartWork = new Map<string, Promise<void>>();
   #stopping = false;
   #shutdown: Promise<void> | undefined;
 
@@ -462,6 +469,115 @@ export class BrokeredHostSupervisor {
       requestFromChild: (method, params, signal) => this.#handleChildRequest(transportOptions.owner, transportOptions.grants, method, params, signal),
     }));
   }
+  async requestRestartHandoff(request: VarinExtensionRestartHandoffRequest): Promise<VarinExtensionCatalogSnapshot> {
+    this.#assertRunning();
+    const snapshot = await this.#catalog.snapshot();
+    const entry = snapshot.extensions.find(value => value.manifest.id === request.extensionId);
+    const previous = entry?.restartHandoffs?.find(value => value.id === request.handoffId);
+    if (previous) {
+      if (previous.candidateIntegrity !== request.candidateIntegrity) throw new Error('Restart handoff identity was reused for another artifact');
+      return snapshot;
+    }
+    if (!entry?.integrity || !entry.candidate?.capabilitiesReviewed || entry.candidate.integrity !== request.candidateIntegrity) throw new Error('Restart candidate is unavailable or unreviewed');
+    // Resolve and verify immutable artifacts without evaluating either generation.
+    const plan = await this.#plan(request.extensionId, {}, { extensionId: request.extensionId, integrity: request.candidateIntegrity }, true);
+    for (const node of plan.composition.nodes) await this.#packages.resolveBrokeredHostEntrypoint(node.extensionId,
+      node.extensionId === request.extensionId ? 'candidate' : 'selected', node.artifactIntegrity);
+    const now = new Date().toISOString();
+    await this.#catalog.store.requestRestartHandoff(request.extensionId, {
+      id: request.handoffId, candidateIntegrity: request.candidateIntegrity, selectedIntegrity: entry.integrity,
+      selectedVersion: entry.selectedVersion, desiredRevision: entry.desired.revision, capabilityGrants: structuredClone(entry.candidate.capabilityGrants),
+      composition: plan.composition, surfaceEntrypoints: [...(entry.candidate.manifest.updateReadiness?.surfaceEntrypoints ?? [])],
+      requestedProcessId: HOST_PROCESS_ID, status: 'pending-restart', requestedAt: now, updatedAt: now,
+    }, request.expectedRevision);
+    this.#onStateChange();
+    return this.#catalog.snapshot();
+  }
+
+  async recoverRestartHandoff(request: VarinExtensionRestartRecoveryRequest): Promise<VarinExtensionCatalogSnapshot> {
+    this.#assertRunning();
+    const snapshot = await this.#catalog.snapshot();
+    const entry = snapshot.extensions.find(value => value.manifest.id === request.extensionId);
+    const handoff = entry?.restartHandoffs?.find(value => value.id === request.handoffId);
+    if (!handoff || entry?.restartHandoffs?.at(-1)?.id !== request.handoffId) throw new Error('A newer or missing restart handoff prevents this recovery');
+    if (['restore-pending-restart', 'restored'].includes(handoff.status)) return snapshot;
+    if (handoff.status !== 'failed') throw new Error('Only a failed restart handoff can restore the previous version');
+    await this.#catalog.store.transitionRestartHandoff(request.extensionId, request.handoffId, ['failed'],
+      { status: 'restore-pending-restart', restoreRequestedProcessId: HOST_PROCESS_ID }, request.expectedRevision);
+    this.#onStateChange();
+    return this.#catalog.snapshot();
+  }
+
+  /** Fence selected startup first, then prepare independently of Host startup and window arrival. */
+  async resumeRestartHandoffs(): Promise<void> {
+    const snapshot = await this.#catalog.snapshot();
+    if (!snapshot.authoritative) return;
+    await Promise.all(snapshot.extensions.map(async entry => {
+      const handoff = entry.restartHandoffs?.at(-1);
+      if (!handoff) return;
+      if (handoff.status === 'restore-pending-restart' && handoff.restoreRequestedProcessId !== HOST_PROCESS_ID) {
+        await this.#catalog.store.transitionRestartHandoff(entry.manifest.id, handoff.id, ['restore-pending-restart'], { status: 'restored' });
+      } else if (['preparing', 'waiting-surface'].includes(handoff.status) && handoff.executionProcessId !== HOST_PROCESS_ID) {
+        await this.#failRestartHandoff(entry.manifest.id, handoff.id, 'host_interrupted', new Error('The original Host stopped before this handoff committed'));
+      } else if (handoff.status === 'pending-restart' && handoff.requestedProcessId !== HOST_PROCESS_ID) {
+        try {
+          await this.#catalog.store.transitionRestartHandoff(entry.manifest.id, handoff.id, ['pending-restart'],
+            { status: 'preparing', executionProcessId: HOST_PROCESS_ID });
+          const work = this.#resumeRestartHandoff(entry.manifest.id, handoff);
+          this.#restartWork.set(handoff.id, work);
+          void work.finally(() => this.#restartWork.delete(handoff.id)).catch(() => undefined);
+        } catch (error) { await this.#failRestartHandoff(entry.manifest.id, handoff.id, 'restart_preflight_failed', error); }
+      }
+    }));
+    this.#onStateChange();
+  }
+
+  async #resumeRestartHandoff(extensionId: string, handoff: VarinExtensionRestartHandoff): Promise<void> {
+    try {
+      await this.prepareCandidate(extensionId, handoff.candidateIntegrity);
+      if (handoff.surfaceEntrypoints.length) {
+        await this.#catalog.store.transitionRestartHandoff(extensionId, handoff.id, ['preparing'], { status: 'waiting-surface' });
+      } else {
+        await this.selectCandidate(extensionId, handoff.candidateIntegrity, (await this.#catalog.snapshot()).revision);
+      }
+    } catch (error) {
+      await this.#failRestartHandoff(extensionId, handoff.id, 'restart_preparation_failed', error);
+      const group = this.#staged.get(extensionId);
+      if (group?.integrity === handoff.candidateIntegrity) await this.#releaseCandidateGroup(group);
+    }
+    this.#onStateChange();
+  }
+
+  async reportRestartFailure(extensionId: string, id: string, error: unknown): Promise<void> {
+    const handoff = (await this.#catalog.snapshot()).extensions.find(value => value.manifest.id === extensionId)?.restartHandoffs?.find(value => value.id === id);
+    if (handoff?.status === 'pending-restart' && handoff.requestedProcessId === HOST_PROCESS_ID
+      || handoff?.status === 'restore-pending-restart' && handoff.restoreRequestedProcessId === HOST_PROCESS_ID) {
+      await this.#failRestartHandoff(extensionId, id, 'host_restart_failed', error);
+    }
+  }
+
+  async #failRestartHandoff(extensionId: string, id: string, code: string, error: unknown): Promise<void> {
+    const handoff = (await this.#catalog.snapshot()).extensions.find(value => value.manifest.id === extensionId)?.restartHandoffs?.find(value => value.id === id);
+    if (handoff?.executionProcessId === HOST_PROCESS_ID && !['applied', 'restored'].includes(handoff.status)) this.#nativeRestartRequired.add(extensionId);
+    await this.#catalog.store.transitionRestartHandoff(extensionId, id, ['pending-restart', 'preparing', 'waiting-surface', 'restore-pending-restart'],
+      { status: 'failed', failure: { code, message: error instanceof Error ? error.message : String(error) } });
+    this.#onStateChange();
+  }
+
+  #restartAdmission(entry: VarinExtensionCatalogEntry, slot: 'candidate' | 'selected'): void {
+    const handoff = entry.restartHandoffs?.at(-1);
+    if (!handoff || ['applied', 'restored'].includes(handoff.status)) {
+      if (slot === 'candidate' && (entry.candidate?.manifest.entrypoints?.host?.mode === 'native' || entry.manifest.entrypoints?.host?.mode === 'native'))
+        throw new ExtensionUpdateReadinessError('trusted_native_group_update_requires_restart_handoff', 'Trusted-native Host update requires an explicit clean Application Host restart handoff');
+      return;
+    }
+    if (slot === 'selected' && handoff.requestedProcessId === HOST_PROCESS_ID
+      && (handoff.status === 'pending-restart' || handoff.status === 'failed' && !handoff.executionProcessId)) return;
+    if (slot === 'candidate' && ['preparing', 'waiting-surface'].includes(handoff.status) && handoff.executionProcessId === HOST_PROCESS_ID
+      && entry.candidate?.integrity === handoff.candidateIntegrity) return;
+    throw new ExtensionUpdateReadinessError('restart_handoff_pending', 'This extension requires its pending clean Application Host restart or explicit recovery');
+  }
+
   getActiveArtifactIdentity(owner: HostServiceOwnerIdentity): string | undefined {
     const instance = this.#active.get(owner.instanceKey);
     return instance && !instance.retiring && instance.owner.generation === owner.generation ? instance.artifactIntegrity : undefined;
@@ -492,10 +608,16 @@ export class BrokeredHostSupervisor {
   }
 
   async #plan(extensionId: string, scope: VarinExtensionServiceRoutingContext,
-    candidate?: { extensionId: string; integrity: string }): Promise<HostCompositionPlan> {
+    candidate?: { extensionId: string; integrity: string }, preflight = false): Promise<HostCompositionPlan> {
     let catalog = await this.#catalog.snapshot();
     const routing = await this.#routing.read();
     if (!catalog.authoritative || !routing.authoritative) throw new Error('Cannot prepare a Host service from stale selection state');
+    const handoff = candidate && catalog.extensions.find(value => value.manifest.id === candidate.extensionId)?.restartHandoffs?.at(-1);
+    if (!preflight && handoff && candidate.integrity === handoff.candidateIntegrity
+      && ['preparing', 'waiting-surface'].includes(handoff.status) && handoff.executionProcessId === HOST_PROCESS_ID) {
+      const plan = restoreHostCompositionPlan(handoff.composition, catalog, candidate);
+      return { ...plan, routingRevision: routing.document.revision, scope: structuredClone(scope) };
+    }
     const visited = new Set<string>();
     const materialize = async (id: string, stack: string[]): Promise<void> => {
       if (stack.includes(id)) throw new Error(`Host service dependency cycle: ${[...stack, id].join(' -> ')}`);
@@ -560,6 +682,7 @@ export class BrokeredHostSupervisor {
 
   async #acquireNode(node: HostCompositionNode, signal?: AbortSignal): Promise<HostNodeLease> {
     signal?.throwIfAborted(); this.#assertRunning();
+    this.#restartAdmission(node.entry, node.slot);
     const identity = `${node.node.id}:${this.#epochs.get(node.node.extensionId) ?? 0}`;
     let pending = this.#pending.get(identity);
     if (!pending) {
@@ -689,6 +812,7 @@ export class BrokeredHostSupervisor {
     this.#assertRunning(); instance.preparation.signal.throwIfAborted();
     if ((this.#epochs.get(instance.owner.extensionId) ?? 0) !== instance.epoch) throw new Error('Host activation was superseded');
     const entry = (await this.#catalog.snapshot()).extensions.find(entry => entry.manifest.id === instance.owner.extensionId);
+    if (entry) this.#restartAdmission(entry, instance.slot);
     const selected = instance.slot === 'candidate' ? entry?.candidate : entry;
     if (!entry?.desired.enabled || entry.desired.revision !== instance.desiredRevision || selected?.integrity !== instance.artifactIntegrity
       || grantIdentity(selected.capabilityGrants, instance.owner.extensionVersion) !== instance.grantIdentity) throw new Error(`Host activation is stale: ${instance.owner.extensionId}`);
@@ -809,7 +933,9 @@ export class BrokeredHostSupervisor {
     this.#revokeOwners(deniedOwners);
     await this.reconcileCandidatePreparations();
     await Promise.all(snapshot.extensions.filter(entry => entry.desired.enabled).map(async entry => {
-      if (entry.candidate?.applyRequested && !entry.candidate.manifest.updateReadiness) {
+      const handoff = entry.restartHandoffs?.at(-1);
+      if (handoff && !['applied', 'restored'].includes(handoff.status) && !(handoff.status === 'pending-restart' && handoff.requestedProcessId === HOST_PROCESS_ID)) return;
+      if (entry.candidate?.applyRequested && (!handoff || ['applied', 'restored'].includes(handoff.status)) && !entry.candidate.manifest.updateReadiness) {
         try { await this.selectCandidate(entry.manifest.id, entry.candidate.integrity, (await this.#catalog.snapshot()).revision); }
         catch (error) { await this.#reportOwner(entry.manifest.id, 'requested_candidate_activation_failed', error); }
       }
@@ -839,6 +965,18 @@ export class BrokeredHostSupervisor {
   async reconcileCandidatePreparations(): Promise<void> {
     const snapshot = await this.#catalog.snapshot(); if (!snapshot.authoritative) return;
     this.#cancelWithdrawnCandidatePreparations(snapshot);
+    for (const entry of snapshot.extensions) {
+      const handoff = entry.restartHandoffs?.at(-1);
+      if (!handoff || !['pending-restart', 'preparing', 'waiting-surface'].includes(handoff.status)) continue;
+      if (!entry.desired.enabled || entry.desired.revision !== handoff.desiredRevision
+        || entry.integrity !== handoff.selectedIntegrity || entry.candidate?.integrity !== handoff.candidateIntegrity
+        || canonicalServiceComposition(entry.candidate.capabilityGrants.map(({ updatedAt: _at, ...grant }) => grant))
+          !== canonicalServiceComposition(handoff.capabilityGrants.map(({ updatedAt: _at, ...grant }) => grant))) {
+        await this.#failRestartHandoff(entry.manifest.id, handoff.id, 'restart_intent_changed', new Error('The original candidate, desired state, or capability review changed'));
+        const group = this.#staged.get(entry.manifest.id);
+        if (group?.integrity === handoff.candidateIntegrity) await this.#releaseCandidateGroup(group);
+      }
+    }
     for (const group of [...this.#staged.values()]) {
       const entry = snapshot.extensions.find(entry => entry.manifest.id === group.extensionId);
       if (entry?.desired.enabled && entry.desired.revision === group.desiredRevision
@@ -872,10 +1010,11 @@ export class BrokeredHostSupervisor {
     if (!entry?.candidate || entry.candidate.integrity !== integrity) throw new Error(`Host candidate is stale: ${extensionId}`);
     if (!entry.candidate.capabilitiesReviewed) throw new Error(`Host candidate capabilities require review: ${extensionId}`);
     if (!entry.desired.enabled || !entry.candidate.manifest.entrypoints?.host) return { extensionId, integrity, providers: [] };
-    if (entry.candidate.manifest.entrypoints.host.mode === 'native') {
-      if (this.#ownerGrants.size && [...this.#ownerGrants.values()].some(owner => owner.owner.extensionId === extensionId)) throw new Error('Trusted-native Host candidate requires an application-host restart');
-      if (entry.candidate.manifest.updateReadiness) throw new ExtensionUpdateReadinessError('required_surface_readiness', 'Trusted-native grouped update requires disable, apply and restart');
-      return { extensionId, integrity, providers: [] };
+    this.#restartAdmission(entry, 'candidate');
+    const handoff = entry.restartHandoffs?.at(-1);
+    const restarting = handoff && ['preparing', 'waiting-surface'].includes(handoff.status) && handoff.executionProcessId === HOST_PROCESS_ID;
+    if ((entry.candidate.manifest.entrypoints.host.mode === 'native' || entry.manifest.entrypoints?.host?.mode === 'native') && !restarting) {
+      throw new ExtensionUpdateReadinessError('trusted_native_group_update_requires_restart_handoff', 'Trusted-native Host update requires an explicit clean Application Host restart handoff');
     }
     const existing = this.#staged.get(extensionId);
     const consumers = [...this.#roots].filter(root => root.plan.composition.nodes.some(node => node.extensionId === extensionId));
@@ -891,7 +1030,7 @@ export class BrokeredHostSupervisor {
       await this.#releaseCandidateGroup(existing);
     }
     const activation = entry.candidate.manifest.entrypoints.host.activation ?? [];
-    if (!consumers.length && !entry.candidate.manifest.updateReadiness && activation.length
+    if (!restarting && !consumers.length && !entry.candidate.manifest.updateReadiness && activation.length
       && !activation.includes('application-startup') && !activation.includes('background')) {
       // A lazy declaration without a live selection owner has no scope to compose yet.
       // An old exact exchange pin is deliberately not a replacement selection owner.
@@ -967,7 +1106,10 @@ export class BrokeredHostSupervisor {
             if (routingRevision !== undefined && routingRevision !== fresh.routingRevision) throw new Error('Host service routing changed during candidate preparation');
             routingRevision = fresh.routingRevision;
           }
-          const selected = await this.#packages.selectCandidate({ extensionId, candidateIntegrity: integrity, expectedRevision }, validate);
+          const handoff = current?.restartHandoffs?.at(-1);
+          const restartCommit = handoff && ['preparing', 'waiting-surface'].includes(handoff.status)
+            ? { id: handoff.id, processId: HOST_PROCESS_ID, ...(surfaceReadiness ? { surfaceReadiness } : {}) } : undefined;
+          const selected = await this.#packages.selectCandidate({ extensionId, candidateIntegrity: integrity, expectedRevision }, validate, restartCommit);
           catalogCommitted = true;
           validate(false);
           for (const instance of group.instances) {
@@ -984,11 +1126,18 @@ export class BrokeredHostSupervisor {
             }
           }
           this.#staged.delete(extensionId);
-          for (const root of group.roots) root.lease.release();
+          for (const root of group.roots) {
+            if (restartCommit && !root.consumer && root.plan.root.node.extensionId === extensionId) this.#anchors.set(extensionId, root.lease);
+            else root.lease.release();
+          }
           await this.#reportOwner(extensionId);
           return selected;
         } catch (error) {
-          if (!catalogCommitted) for (const instance of committed.reverse()) await this.#rollbackInstanceStorage(instance);
+          if (!catalogCommitted) {
+            for (const instance of committed.reverse()) await this.#rollbackInstanceStorage(instance);
+            const handoff = current?.restartHandoffs?.at(-1);
+            if (handoff && ['preparing', 'waiting-surface'].includes(handoff.status)) await this.#failRestartHandoff(extensionId, handoff.id, 'restart_publication_failed', error);
+          }
           else {
             for (const root of group.roots) if (root.consumer && this.#roots.has(root.consumer)) this.#retire(root.consumer.instance);
             this.#staged.delete(extensionId);
@@ -1012,6 +1161,13 @@ export class BrokeredHostSupervisor {
     }
     const group = this.#staged.get(extensionId);
     if (!group || group.integrity !== integrity || this.#candidateSelections.has(extensionId)) return;
+    const handoff = entry?.restartHandoffs?.at(-1);
+    if (handoff && handoff.candidateIntegrity === integrity && ['preparing', 'waiting-surface'].includes(handoff.status)
+      && ![...this.#roots].some(root => root.plan.composition.nodes.some(node => node.extensionId === extensionId && node.artifactIntegrity === integrity))) {
+      await this.#failRestartHandoff(extensionId, handoff.id, 'surface_preparation_failed', new Error('No participating Surface retained its prepared update after preparation failed or closed'));
+      await this.#releaseCandidateGroup(group);
+      return;
+    }
     // A failed Surface releases its own preparation. The accepted grouped update
     // still owns the shared Host candidate until it is replaced or withdrawn.
     if (entry?.desired.enabled && entry.desired.revision === group.desiredRevision
@@ -1042,6 +1198,7 @@ export class BrokeredHostSupervisor {
     for (const id of new Set([...this.#ownerGrants.values()].map(owner => owner.owner.extensionId))) this.#revoke(id);
     this.#shutdown = (async () => {
       await Promise.allSettled([...this.#pending.values()].map(pending => pending.promise));
+      await Promise.allSettled([...this.#restartWork.values()]);
       const results = await Promise.allSettled([...this.#retirements.values()].map(retirement => retirement.promise));
       const errors = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
       if (errors.length) throw new AggregateError(errors.map(result => result.reason), 'Extension Host shutdown reported failures');
@@ -1071,6 +1228,7 @@ export class BrokeredHostSupervisor {
     if (composition.signal.aborted) abort();
     try {
       const current = (await this.#catalog.snapshot()).extensions.find((value) => value.manifest.id === entry.manifest.id);
+      if (current) this.#restartAdmission(current, selection.slot);
       const currentSelection = selection.slot === "candidate" ? current?.candidate : current;
       if (!current?.desired.enabled || current.desired.revision !== entry.desired.revision
         || currentSelection?.integrity !== selection.integrity

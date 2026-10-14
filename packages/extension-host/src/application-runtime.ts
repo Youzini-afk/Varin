@@ -2,6 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
   assertVarinApplicationVersion,
+  parseVarinExtensionRestartHandoffRequest,
+  parseVarinExtensionRestartRecoveryRequest,
+  type VarinExtensionRestartHandoffRequest,
+  type VarinExtensionRestartRecoveryRequest,
   parseVarinExtensionActualState,
   parseVarinExtensionCandidateCapabilityReviewRequest,
   parseVarinExtensionCandidateSelectionRequest,
@@ -170,11 +174,12 @@ export class ApplicationExtensionRuntime {
 
   async start(): Promise<VarinExtensionHostStateSnapshot> {
     await this.#mutate(async () => {
-      const snapshot = await this.catalog.reconcileBuiltins(
+      await this.catalog.reconcileBuiltins(
         VARIN_BUILTIN_EXTENSION_DEFINITIONS,
         VARIN_BUILTIN_EXTENSION_PREFIX,
       );
-      await this.supervisor.reconcile(snapshot);
+      await this.supervisor.resumeRestartHandoffs();
+      await this.supervisor.reconcile(await this.catalog.snapshot());
       await this.workbench.read();
       await this.routing.read();
       this.#publish();
@@ -490,6 +495,20 @@ export class ApplicationExtensionRuntime {
       await this.supervisor.reconcile(selected);
       return this.catalog.snapshot();
     });
+  }
+
+  reportRestartFailure(extensionId: string, handoffId: string, error: unknown): Promise<void> {
+    return this.supervisor.reportRestartFailure(extensionId, handoffId, error);
+  }
+
+  requestRestartHandoff(requestValue: VarinExtensionRestartHandoffRequest | unknown): Promise<VarinExtensionCatalogSnapshot> {
+    const request = parseVarinExtensionRestartHandoffRequest(requestValue);
+    return this.#mutateCatalog(() => this.supervisor.requestRestartHandoff(request));
+  }
+
+  recoverRestartHandoff(requestValue: VarinExtensionRestartRecoveryRequest | unknown): Promise<VarinExtensionCatalogSnapshot> {
+    const request = parseVarinExtensionRestartRecoveryRequest(requestValue);
+    return this.#mutateCatalog(() => this.supervisor.recoverRestartHandoff(request));
   }
 
   requestCandidateApplication(

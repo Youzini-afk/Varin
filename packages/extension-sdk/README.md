@@ -205,3 +205,25 @@ this Provider's own frozen algorithm configuration. The cut binds those source/b
 A model plan's full model configuration and credential scope are frozen separately by native
 create/Launch. Direct text does not resolve model credentials or model-configuration routing, including
 its first admission; compaction service selection remains on the original scoped service router.
+
+`provideModels(context, { description, protocol?, authenticate? })` registers `varin.models@1` using
+`VARIN_MODELS_SERVICE`. The description contributes typed channels, read-only model candidates,
+OAuth methods and actual protocol implementations. Model candidates do not silently become saved
+channels or enabled selections. One selected provider is unambiguous; multiple providers use the
+existing explicit ordered service routing.
+
+A protocol callback receives generated `ModelProtocolCall` values and returns `ModelProtocolResult`.
+These types come from the private Rust protocol schema, including original request/run identity,
+semantic history, complete items and usage. The SDK freezes detached inputs. Rust owns HTTP, SSE
+framing, original Operations, durable request bytes, cancellation and recovery. No codec callback may
+start a second model request or retry an uncertain dispatch. The current brokered protocol contract
+supports chat over SSE; other operations require their actual existing native implementations.
+Custom API keys require an explicit channel `credentialHeader`; credentials never enter codec input.
+
+OAuth callbacks require the reviewed `varin.models.authentication` capability before the Host sends
+any account token. `begin` returns an authorization URL plus transient state; `complete` consumes the
+workbench reply; `refresh` preserves the same account. Its call-scoped client can POST form/JSON fields
+only to the provider's declared exact HTTPS token endpoints. The existing credential store owns
+persistence and single-flight refresh. Ordinary replacement preserves captured refresh implementations;
+canceling a waiter does not release their real callback. See the [custom text/SSE codec
+example](../../examples/extensions/model-protocol/README.md).

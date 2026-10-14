@@ -65,6 +65,7 @@ import type { MonacoRuntime } from './runtime';
 import { createMonacoNavigationViewState } from './view-state';
 
 type LanguageEntry = {
+  documentOpen: boolean;
   identity: DocumentIdentity;
   languageId: string;
   monacoLanguageId: string;
@@ -229,6 +230,7 @@ export class MonacoLanguageBridge {
       );
       const record = this.modelRegistry.getRecordForModel(model);
       const created: LanguageEntry = {
+        documentOpen: languageId !== 'plaintext' && record?.status !== 'deleted',
         identity,
         languageId,
         monacoLanguageId,
@@ -241,19 +243,39 @@ export class MonacoLanguageBridge {
         unsubscribeDocument: () => undefined,
       };
       created.unsubscribeDocument = this.subscribeDocument(identity, (next) => {
+        if (identityKey(next.identity) !== identityKey(created.identity)) {
+          this.clearInvocations(created.model);
+          this.clearMarkers(created);
+          if (created.documentOpen) this.releaseDocument(created.identity);
+          created.documentOpen = false;
+          if (created.languageId !== 'plaintext') this.releaseProviders(created.monacoLanguageId);
+          const ids = languageIdsFromResourceId(next.identity.resourceId, this.monaco.languages.getLanguages());
+          created.identity = next.identity;
+          created.languageId = ids.hostLanguageId;
+          created.monacoLanguageId = ids.monacoLanguageId;
+          if (created.languageId !== 'plaintext') {
+            this.monaco.editor.setModelLanguage(created.model, created.monacoLanguageId);
+            this.ensureProviders(created.monacoLanguageId);
+          }
+        }
+        if (created.documentOpen && next.status === 'deleted') {
+          this.releaseDocument(created.identity); created.documentOpen = false;
+        } else if (!created.documentOpen && created.languageId !== 'plaintext' && next.status !== 'deleted') {
+          this.acquireDocument(created.identity, created.languageId); created.documentOpen = true;
+        }
         const documentChanged = next.localEditRevision !== created.lastDocumentVersion;
         const documentSaved = created.wasSaving && !next.saving && next.baseRevision !== created.lastBaseRevision;
         created.lastDocumentVersion = next.localEditRevision;
         created.lastBaseRevision = next.baseRevision;
         created.wasSaving = next.saving;
-        if (documentChanged) this.notifyDocumentChange(next.identity);
+        if (documentChanged && created.documentOpen) this.notifyDocumentChange(next.identity);
         if (documentSaved) this.notifyDocumentSave(next.identity);
       });
       entry = created;
       this.entriesByModel.set(model, entry);
       if (languageId !== 'plaintext') {
         this.monaco.editor.setModelLanguage(model, monacoLanguageId);
-        this.acquireDocument(identity, languageId);
+        if (created.documentOpen) this.acquireDocument(identity, languageId);
         this.ensureProviders(monacoLanguageId);
       }
       this.refreshMarkers(entry);
@@ -273,7 +295,7 @@ export class MonacoLanguageBridge {
     entry.unsubscribeDocument();
     this.clearMarkers(entry);
     if (entry.languageId !== 'plaintext') {
-      this.releaseDocument(entry.identity);
+      if (entry.documentOpen) this.releaseDocument(entry.identity);
       this.releaseProviders(entry.monacoLanguageId);
     }
   }
@@ -827,8 +849,12 @@ export class MonacoLanguageBridge {
       toast.error(t('filesView.workspaceEdit.unavailable'));
       return;
     }
+    let editApplied = false;
+    let releaseCommandDocument: (() => void) | undefined;
     try {
       const language = this.getLanguage();
+      const original = this.modelRegistry.getRecordForModel(invocation.model);
+      if (!original) throw new Error(t('filesView.workspaceEdit.stale'));
       if (!language) throw new Error(t('filesView.workspaceEdit.unavailable'));
       let command = invocation.kind === 'command' ? invocation.command : invocation.action.command;
       if (invocation.kind === 'code-action') {
@@ -849,6 +875,12 @@ export class MonacoLanguageBridge {
           command = action.command;
         }
         if (action.edit) {
+          if (command) {
+            // Keep the original provider alive while the edit closes/moves its
+            // last tab. The existing language-document owner count is the lease.
+            this.acquireDocument(original.identity, invocation.context.languageId);
+            releaseCommandDocument = () => this.releaseDocument(original.identity);
+          }
           const registry = this.documentRegistry();
           const applied = await applyLanguageWorkspaceEdit({
             edit: action.edit,
@@ -860,17 +892,25 @@ export class MonacoLanguageBridge {
           });
           if (applied.status === 'cancelled') return;
           if (applied.status === 'rejected') throw new Error(applied.message);
+          editApplied = true;
           this.reportWorkspaceEditApplied(registry, applied.groupId, applied.changedFiles);
         }
       }
       if (!command) return;
-      await flushLanguageDocumentSync(invocation.context.resource);
-      const record = this.documentRegistry().get(invocation.context.resource);
-      if (!record) throw new Error(t('filesView.workspaceEdit.stale'));
+      const registry = this.documentRegistry();
+      let record = registry.getByDocumentInstance(original.documentInstanceId);
+      if (!record && !editApplied) throw new Error(t('filesView.workspaceEdit.stale'));
+      const commandResource = record?.identity ?? invocation.context.resource;
+      await flushLanguageDocumentSync(commandResource);
+      record = registry.getByDocumentInstance(original.documentInstanceId);
+      // A workspace command is authorized by the original provider generation.
+      // Its edit may have renamed, deleted, or overwritten the originating file.
       const result = await language.executeCommand({
-        resource: invocation.context.resource,
+        resource: commandResource,
         languageId: invocation.context.languageId,
-        documentVersion: record.localEditRevision,
+        ...(record && record.status !== 'deleted'
+          && languageIdsFromResourceId(record.identity.resourceId, this.monaco.languages.getLanguages()).hostLanguageId === invocation.context.languageId
+          ? { documentVersion: record.localEditRevision } : {}),
         providerId: invocation.context.providerId,
         generation: invocation.context.generation,
         command: command.command,
@@ -880,9 +920,11 @@ export class MonacoLanguageBridge {
         throw new Error(result.status === 'failed' ? result.message : t('filesView.workspaceEdit.stale'));
       }
     } catch (error) {
-      toast.error(t('filesView.workspaceEdit.failed'), {
+      toast.error(t(editApplied ? 'filesView.workspaceEdit.commandFailed' : 'filesView.workspaceEdit.failed'), {
         description: error instanceof Error ? error.message : String(error),
       });
+    } finally {
+      releaseCommandDocument?.();
     }
   }
 
@@ -897,9 +939,9 @@ export class MonacoLanguageBridge {
       : t('filesView.workspaceEdit.appliedMany', { count: changedFiles }), {
       action: {
         label: t('filesView.workspaceEdit.undo'),
-        onClick: () => {
+        onClick: async () => {
           try {
-            const result = registry.undoWorkspaceEdit(groupId);
+            const result = await registry.undoWorkspaceEdit(groupId);
             if (result.status === 'undone') toast.success(t('filesView.workspaceEdit.undone'));
             else toast.error(t('filesView.workspaceEdit.undoUnavailable'));
           } catch {

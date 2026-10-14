@@ -40,6 +40,16 @@ module.exports = (context) => {
     || kernelManifest.kernelVersion !== '0.1.0') {
     throw new Error(`Packaged Rust kernel manifest does not match ${packagedKernelPath}`);
   }
+  if (context.electronPlatformName === 'darwin') {
+    const helper = path.join(unpackedNodeModulesPath, '@varin', 'web', 'server', 'computer-driver', 'macos',
+      'Varin Computer.app', 'Contents', 'MacOS', 'VarinComputer');
+    if (!fs.existsSync(helper)) throw new Error('Missing native macOS Computer helper: ' + helper);
+    execFileSync('lipo', ['-verify_arch', targetArchitecture === 'x64' ? 'x86_64' : 'arm64', helper], { stdio: 'inherit' });
+    execFileSync('codesign', ['--verify', '--strict', path.dirname(path.dirname(path.dirname(helper)))], { stdio: 'inherit' });
+    // The normal electron-builder signing phase runs after this hook and signs
+    // nested app bundles with the enclosing app's identity. Unsigned packaging
+    // retains the explicit ad-hoc development signature.
+  }
   const trivium = path.join(unpackedNodeModulesPath, 'triviumdb');
   const suffix = context.electronPlatformName === 'win32' ? '-msvc' : context.electronPlatformName === 'linux' ? '-gnu' : '';
   const triviumBinary = 'triviumdb.' + context.electronPlatformName + '-' + targetArchitecture + suffix + '.node';

@@ -1,3 +1,4 @@
+import { unconfiguredWorkspaceEdits } from './workspace-edit.test-helper';
 import { describe, expect, test } from 'vitest';
 import { vi } from 'vitest';
 import type {
@@ -86,6 +87,7 @@ const createMemoryDocuments = () => {
   }
 
   const api: DocumentsAPI = {
+    ...unconfiguredWorkspaceEdits,
     ackDirtyStateBarrier: async (request) => {
       barrierAcknowledgements.push(request);
       resolveBarrierAcknowledgement();
@@ -349,6 +351,7 @@ describe('DocumentRegistry', () => {
       encoding: 'utf-8', bom: false, baseRevision: 'd1_disk', expectedRevision: null,
     });
     const documents: DocumentsAPI = {
+    ...unconfiguredWorkspaceEdits,
       ...memory.api,
       resolveWorkspace: async (input) => {
         if (input.workspaceId === secondary.workspaceId) throw new Error('secondary root disconnected');
@@ -384,6 +387,7 @@ describe('DocumentRegistry', () => {
     });
     let secondaryOnline = false;
     const documents: DocumentsAPI = {
+    ...unconfiguredWorkspaceEdits,
       ...memory.api,
       resolveResourceIdentity: async (resource) => {
         const result = await memory.api.resolveResourceIdentity(resource);
@@ -426,6 +430,7 @@ describe('DocumentRegistry', () => {
     let secondaryOnline = true;
     const captures: Array<Parameters<NonNullable<DocumentsAPI['captureAgentInputSnapshot']>>[0]> = [];
     const documents: DocumentsAPI = {
+    ...unconfiguredWorkspaceEdits,
       ...memory.api,
       resolveResourceIdentity: async (resource) => {
         if (!secondaryOnline && resource.workspaceId === secondary.workspaceId) throw new Error('secondary root offline');
@@ -499,6 +504,7 @@ describe('DocumentRegistry', () => {
     memory.files.set(`${second.workspaceId}\0${second.resourceId}`, { content: 'B disk\n', revision: 'd1_b' });
     const captures: Array<Parameters<NonNullable<DocumentsAPI['captureAgentInputSnapshot']>>[0]> = [];
     const documents: DocumentsAPI = {
+    ...unconfiguredWorkspaceEdits,
       ...memory.api,
       captureAgentInputSnapshot: async (request) => {
         captures.push(request);
@@ -618,6 +624,7 @@ describe('DocumentRegistry', () => {
     let delayIdentity = false;
     const releaseIdentity: Array<() => void> = [];
     const documents: DocumentsAPI = {
+    ...unconfiguredWorkspaceEdits,
       ...memory.api,
       resolveResourceIdentity: async (reference) => {
         if (delayIdentity) await new Promise<void>((resolve) => { releaseIdentity.push(resolve); });
@@ -658,6 +665,7 @@ describe('DocumentRegistry', () => {
     const captures: Array<Parameters<NonNullable<DocumentsAPI['captureAgentInputSnapshot']>>[0]> = [];
     const scopedWatches = new Map<string, Set<(event: VarinDocumentWatchEvent) => void>>();
     const surface: DocumentsAPI = {
+    ...unconfiguredWorkspaceEdits,
       ...api,
       watch: (workspaceId, listener) => {
         const listeners = scopedWatches.get(workspaceId) ?? new Set();
@@ -775,6 +783,7 @@ describe('DocumentRegistry', () => {
     const identity = resource('crlf-bom.txt');
     const captures: VarinAgentInputSnapshotCaptureRequest[] = [];
     const surface: DocumentsAPI = {
+    ...unconfiguredWorkspaceEdits,
       ...api,
       read: async (ref) => ({
         status: 'ready' as const,
@@ -833,6 +842,7 @@ describe('DocumentRegistry', () => {
     await api.write({ token: mutationToken(), resource: identity, content: 'base', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
     let reads = 0;
     const counted: DocumentsAPI = {
+    ...unconfiguredWorkspaceEdits,
       ...api,
       read: async (ref) => {
         reads += 1;
@@ -990,6 +1000,7 @@ describe('DocumentRegistry', () => {
       releaseWrite = () => resolve();
     });
     const slow: DocumentsAPI = {
+    ...unconfiguredWorkspaceEdits,
       ...api,
       write: async (request) => {
         await hold;
@@ -1014,6 +1025,7 @@ describe('DocumentRegistry', () => {
     await api.write({ token: mutationToken(), resource: identity, content: 'ok', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
     let failRead = false;
     const gated: DocumentsAPI = {
+    ...unconfiguredWorkspaceEdits,
       ...api,
       read: async (ref) => {
         if (failRead) throw new Error('disk exploded');
@@ -1151,6 +1163,7 @@ describe('DocumentRegistry', () => {
     let notifyReadStarted!: () => void;
     const readStarted = new Promise<void>((resolve) => { notifyReadStarted = resolve; });
     const gated: DocumentsAPI = {
+    ...unconfiguredWorkspaceEdits,
       ...api,
       read: () => new Promise((resolve) => {
         finishRead = resolve;
@@ -1242,6 +1255,7 @@ describe('DocumentRegistry', () => {
       signalReadStarted = resolve;
     });
     const delayed: DocumentsAPI = {
+    ...unconfiguredWorkspaceEdits,
       ...api,
       readRecoveryJournal: async (journalId) => {
         signalReadStarted();
@@ -1290,6 +1304,7 @@ describe('DocumentRegistry', () => {
       signalReadStarted = resolve;
     });
     const delayed: DocumentsAPI = {
+    ...unconfiguredWorkspaceEdits,
       ...api,
       readRecoveryJournal: async (journalId) => {
         signalReadStarted();
@@ -1336,6 +1351,7 @@ describe('DocumentRegistry', () => {
       signalReadStarted = resolve;
     });
     const delayed: DocumentsAPI = {
+    ...unconfiguredWorkspaceEdits,
       ...api,
       readRecoveryJournal: async (journalId) => {
         signalReadStarted();
@@ -1423,7 +1439,7 @@ describe('DocumentRegistry', () => {
     expect(files.get(documentKey(first))?.content).toBe('const first = 1;\n');
     expect(files.get(documentKey(second))?.content).toBe('const second = first;\n');
 
-    const undone = registry.undoWorkspaceEdit(preview.groupId);
+    const undone = await registry.undoWorkspaceEdit(preview.groupId);
     expect(undone.status).toBe('undone');
     expect(registry.get(first)?.buffer).toBe('const first = 1;\n');
     expect(registry.get(second)?.buffer).toBe('const second = first;\n');
@@ -1497,24 +1513,6 @@ describe('DocumentRegistry', () => {
     registry.dispose();
   });
 
-  test('returns explicit unsupported for resource operations before changing documents', async () => {
-    const { api } = createMemoryDocuments();
-    const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
-    const result = await registry.prepareWorkspaceEdit({
-      workspaceId: resource().workspaceId,
-      origin: 'language:code-action',
-      changes: [{ kind: 'create', identity: resource('created.ts') }],
-    });
-    expect(result).toEqual({
-      status: 'rejected',
-      failures: [{
-        reason: 'resource-operation-unsupported',
-        message: 'Workspace resource changes require the Host batch mutation contract',
-      }],
-    });
-    registry.dispose();
-  });
-
   test('keeps a caller-supplied workspace edit group id', async () => {
     const { api } = createMemoryDocuments();
     const identity = resource('named.txt');
@@ -1544,7 +1542,7 @@ describe('DocumentRegistry', () => {
     if (preview.status !== 'ready') throw new Error('expected named group');
     expect(preview.groupId).toBe('integration-op-named');
     expect((await registry.applyWorkspaceEdit('integration-op-named')).status).toBe('applied');
-    expect(registry.undoWorkspaceEdit('integration-op-named').status).toBe('undone');
+    expect((await registry.undoWorkspaceEdit('integration-op-named')).status).toBe('undone');
     registry.dispose();
   });
 

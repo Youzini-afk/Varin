@@ -7,13 +7,16 @@ import { createThreadsHttpAPI } from '@varin/application-client';
 import type { ThreadIdentity } from '@varin/application-client';
 import type { ContextPreparer } from './thread-context.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
-import type { ExistingHostCredentialOwner } from './credential-owner.js';
+import { ExistingHostCredentialOwner } from './credential-owner.js';
+import { CredentialBridge } from './credential-bridge.js';
+import { modelCredentialBindingIdentity } from './model-binding-lifetime.js';
 import type { AgentRuntimeStreamEvent, LaunchIntent, Run, RuntimeEvent } from './protocol.generated.js';
 import { waitWithSignal } from '../cancellation.js';
 import { ThreadAdapter } from './thread-adapter.js';
 import { ThreadCollaboration } from './thread-collaboration.js';
 import { registerThreadRoutes } from './thread-routes.js';
 
+const credentialOwner = () => ({ release: vi.fn(), retain: vi.fn(() => vi.fn()) }) as unknown as ExistingHostCredentialOwner;
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:pause', branchId: 'branch:pause' };
 function fixture(prepareContext?: ContextPreparer) {
   const run: Run = { id: 'run:pause', thread_id: identity.threadId, branch_id: identity.branchId, state: 'waiting',
@@ -44,9 +47,11 @@ function fixture(prepareContext?: ContextPreparer) {
     enqueue: vi.fn(async () => ({ input_id: 'queued', run_id: run.id, mode: 'boundary' as const, cursor: 6 })),
     rebindLaunch: vi.fn<AgentRuntimeClient['rebindLaunch']>(async () => { launch.startable = false; return { runId: run.id, epoch: 1 }; }),
     context: vi.fn<AgentRuntimeClient['context']>(async () => null), refreshContext: vi.fn<AgentRuntimeClient['refreshContext']>(),
+    retainQueuedModel: vi.fn<AgentRuntimeClient['retainQueuedModel']>(async () => {}), releaseQueuedModel: vi.fn(),
+    retainedModelOwner: vi.fn<AgentRuntimeClient['retainedModelOwner']>(() => undefined),
     releaseMainModelCredentials: vi.fn(), failLaunch: vi.fn(async () => launch),
   };
-  const models = { resolveModel: vi.fn(), rebindModel: vi.fn(async () => ({}) as ExistingHostCredentialOwner) };
+  const models = { resolveModel: vi.fn(), rebindModel: vi.fn(async () => credentialOwner()) };
   const errors: unknown[] = [];
   const adapter = new ThreadAdapter(runtime as unknown as AgentRuntimeClient, models, async () => {}, (_runId, error) => { errors.push(error); }, undefined, prepareContext);
   return { run, launch, receipt, runtime, models, adapter, errors, cancelPreparation: () => { preparation.abort(); preparation = new AbortController(); } };
@@ -238,7 +243,7 @@ it('Run or epoch cancellation detaches cold credential preparation before it can
   await vi.waitFor(() => expect(f.models.rebindModel).toHaveBeenCalledOnce());
   f.cancelPreparation(); await rejected;
   await f.adapter.continueLaunch(f.run.id);
-  resolve({} as ExistingHostCredentialOwner); await tick();
+  resolve(credentialOwner()); await tick();
   expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce();
   expect(f.runtime.releaseMainModelCredentials).toHaveBeenCalledOnce();
   expect(f.runtime.failLaunch).not.toHaveBeenCalled();
@@ -272,7 +277,7 @@ it('resume during a delayed previous start acknowledgement schedules one fresh c
   let releaseSecond!: () => void; const secondAck = new Promise<void>(resolve => { releaseSecond = resolve; });
   let starts = 0;
   let releaseCancelledOwner!: (owner: ExistingHostCredentialOwner) => void;
-  f.models.rebindModel.mockImplementationOnce(async () => ({}) as ExistingHostCredentialOwner)
+  f.models.rebindModel.mockImplementationOnce(async () => credentialOwner())
     .mockImplementationOnce(() => new Promise(resolve => { releaseCancelledOwner = resolve; }));
   f.runtime.rebindLaunch.mockImplementation(async () => {
     if (++starts === 1) await firstAck;
@@ -294,7 +299,7 @@ it('resume during a delayed previous start acknowledgement schedules one fresh c
   // The newest coalesced wake cancels while preparing; the earlier durable resume remains live.
   cancelled.abort(); await cancelledWake;
   await vi.waitFor(() => expect(starts).toBe(2));
-  releaseCancelledOwner({} as ExistingHostCredentialOwner);
+  releaseCancelledOwner(credentialOwner());
   expect(f.models.rebindModel).toHaveBeenCalledTimes(3);
   expect(notificationSettled).toBe(false);
   expect(f.runtime.releaseMainModelCredentials).toHaveBeenCalledTimes(2);
@@ -307,8 +312,8 @@ it('resume during a delayed previous start acknowledgement schedules one fresh c
 it('a new epoch wake keeps its exact credential owner when the previous launch is cancelled and late old wakes arrive', async () => {
   const f = fixture(); f.launch.startable = true; f.launch.pause = null; f.run.state = 'runnable';
   const oldEpoch = new AbortController(); const newEpoch = new AbortController();
-  const oldOwner = { identity: 'old-owner' } as unknown as ExistingHostCredentialOwner;
-  const newOwner = { identity: 'new-owner' } as unknown as ExistingHostCredentialOwner;
+  const oldOwner = { ...credentialOwner(), identity: 'old-owner' } as unknown as ExistingHostCredentialOwner;
+  const newOwner = { ...credentialOwner(), identity: 'new-owner' } as unknown as ExistingHostCredentialOwner;
   let releaseOld!: () => void; const oldAck = new Promise<void>(resolve => { releaseOld = resolve; });
   let releaseNew!: () => void; const newAck = new Promise<void>(resolve => { releaseNew = resolve; });
   f.runtime.rebindLaunch.mockImplementationOnce(async () => { await oldAck; return { runId: f.run.id, epoch: 1 }; })
@@ -518,4 +523,148 @@ it('public source failure projection accepts typed owners and rejects forged res
     message: 'The source is not registered on this Host. Restore its original registration or select a new source.' });
   prepare.mockRejectedValueOnce(Object.assign(new Error('Private upstream detail'), { code: 'source_registration_missing' }));
   await expect(api.prepareSource(request)).rejects.toMatchObject({ code: 'thread-request-failed', message: 'Thread request failed (400)' });
+});
+
+it('launch cancellation keeps its transferred capture until the actual preparation settles', async () => {
+  const f = fixture(); f.launch.startable = true; f.launch.pause = null;
+  const released = vi.fn(), cancelled = new AbortController();
+  const owner = new ExistingHostCredentialOwner({ providerId: 'fixture', providerFamily: 'openai-completions', endpoint: 'https://fixture.invalid/v1/chat/completions',
+    currentScope: async () => f.launch.selection.credential_scope!, runtime: { getAuth: async () => ({ auth: { apiKey: 'fixture-only' } }) }, release: released });
+  let settle!: () => void;
+  const actual = new Promise<void>(resolve => { settle = resolve; });
+  f.runtime.rebindLaunch.mockImplementationOnce(async () => { await actual; return { runId: f.run.id, epoch: 1 }; });
+  const pending = f.adapter.continueLaunch(f.run.id, { credentialOwner: owner, signal: cancelled.signal });
+  const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  owner.release(); // The submitter has already returned its durable input receipt.
+  await vi.waitFor(() => expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce());
+  cancelled.abort(); await rejected;
+  expect(released).not.toHaveBeenCalled();
+  settle(); await vi.waitFor(() => expect(released).toHaveBeenCalledOnce());
+});
+
+it('a replaced coalesced launch releases its unused capture and keeps the newest one', async () => {
+  const f = fixture(); f.launch.startable = true; f.launch.pause = null;
+  let settle!: () => void;
+  const actual = new Promise<void>(resolve => { settle = resolve; });
+  f.runtime.rebindLaunch.mockImplementationOnce(async () => { await actual; return { runId: f.run.id, epoch: 1 }; });
+  const first = f.adapter.continueLaunch(f.run.id);
+  await vi.waitFor(() => expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce());
+  const captured = () => {
+    const released = vi.fn();
+    const owner = new ExistingHostCredentialOwner({ providerId: 'fixture', providerFamily: 'openai-completions', endpoint: 'https://fixture.invalid/v1/chat/completions',
+      currentScope: async () => f.launch.selection.credential_scope!, runtime: { getAuth: async () => undefined }, release: released });
+    return { owner, released };
+  };
+  const obsolete = captured(), current = captured();
+  const second = f.adapter.continueLaunch(f.run.id, { credentialOwner: obsolete.owner }); obsolete.owner.release();
+  const third = f.adapter.continueLaunch(f.run.id, { credentialOwner: current.owner }); current.owner.release();
+  expect(obsolete.released).toHaveBeenCalledOnce(); expect(current.released).not.toHaveBeenCalled();
+  settle(); await Promise.all([first, second, third]);
+  expect(f.runtime.rebindLaunch.mock.calls[1]![1]?.credentialOwner).toBe(current.owner);
+  expect(current.released).toHaveBeenCalledOnce();
+});
+
+it('continuation reacquires the retained fixed model before considering current model configuration', async () => {
+  const f = fixture(); f.launch.startable = true; f.launch.pause = null;
+  const released = vi.fn();
+  const owner = new ExistingHostCredentialOwner({ providerId: 'fixture', providerFamily: 'openai-completions', endpoint: 'https://fixture.invalid/v1/chat/completions',
+    currentScope: async () => f.launch.selection.credential_scope!, runtime: { getAuth: async () => undefined }, release: released });
+  f.runtime.retainedModelOwner.mockReturnValueOnce(owner);
+  await f.adapter.continueLaunch(f.run.id);
+  expect(f.runtime.retainedModelOwner).toHaveBeenCalledWith(f.run.configuration, f.launch.selection.credential_scope);
+  expect(f.models.rebindModel).not.toHaveBeenCalled();
+  expect(f.runtime.rebindLaunch.mock.calls[0]![1]?.credentialOwner).toBe(owner);
+  expect(released).toHaveBeenCalledOnce();
+});
+
+it('enqueue captures the predecessor before terminal cleanup and holds it through successor preparation', async () => {
+  const f = fixture(); f.launch.startable = true; f.launch.pause = null;
+  const released = vi.fn();
+  const owner = new ExistingHostCredentialOwner({ providerId: 'fixture', providerFamily: 'openai-completions', endpoint: 'https://fixture.invalid/v1/chat/completions',
+    currentScope: async () => f.launch.selection.credential_scope!, runtime: { getAuth: async () => undefined }, release: released });
+  f.runtime.retainedModelOwner.mockReturnValueOnce(owner);
+  let settle!: () => void;
+  const actual = new Promise<void>(resolve => { settle = resolve; });
+  f.runtime.rebindLaunch.mockImplementationOnce(async () => { await actual; return { runId: f.run.id, epoch: 1 }; });
+  const receipt = await f.adapter.enqueue({ ...identity, key: 'queued', text: 'Original follow-up', mode: 'boundary' });
+  expect(receipt.run_id).toBe(f.run.id);
+  expect(f.runtime.retainedModelOwner.mock.invocationCallOrder[0]!).toBeLessThan(f.runtime.run.mock.invocationCallOrder[0]!);
+  await vi.waitFor(() => expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce());
+  expect(released).not.toHaveBeenCalled(); expect(f.models.rebindModel).not.toHaveBeenCalled();
+  settle(); await vi.waitFor(() => expect(released).toHaveBeenCalledOnce());
+});
+
+it('a retained fork preserves original child implementations across credential re-registration', async () => {
+  const f = fixture(); f.launch.startable = true; f.launch.pause = null;
+  const mainReleased = vi.fn(), childReleased = vi.fn();
+  const options = { providerId: 'fixture', providerFamily: 'openai-completions', endpoint: 'https://fixture.invalid/v1/chat/completions',
+    currentScope: async () => f.launch.selection.credential_scope!, runtime: { getAuth: async () => undefined } };
+  const main = new ExistingHostCredentialOwner({ ...options, bindingIdentity: modelCredentialBindingIdentity(f.run.configuration as never), release: mainReleased });
+  const child = new ExistingHostCredentialOwner({ ...options, release: childReleased });
+  main.retainDependency(child); child.release();
+  const bridge = new CredentialBridge(() => 'epoch', async () => {}, () => {});
+  await bridge.register(f.run.id, main); main.release();
+  f.runtime.retainedModelOwner.mockImplementation((configuration, scope) => bridge.findOwner(modelCredentialBindingIdentity(configuration), scope));
+  f.runtime.retainQueuedModel.mockImplementation((runId, owner) => bridge.retainQueuedModel(runId, owner));
+  f.runtime.releaseQueuedModel.mockImplementation((runId, owner) => bridge.releaseQueuedModel(runId, owner));
+  f.runtime.releaseMainModelCredentials.mockImplementation(() => bridge.unregister(f.run.id, null));
+  f.runtime.rebindLaunch.mockImplementation(async (_runId, input) => {
+    expect(mainReleased).not.toHaveBeenCalled(); expect(childReleased).not.toHaveBeenCalled();
+    await bridge.register(f.run.id, input!.credentialOwner!);
+    return { runId: f.run.id, epoch: 1 };
+  });
+  try {
+    f.runtime.rebindLaunch.mockRejectedValueOnce(new Error('Original source still preparing'));
+    await expect(f.adapter.continueLaunch(f.run.id)).rejects.toThrow('Original source still preparing');
+    expect(mainReleased).not.toHaveBeenCalled(); expect(childReleased).not.toHaveBeenCalled();
+    await f.adapter.continueLaunch(f.run.id);
+    expect(f.models.rebindModel).not.toHaveBeenCalled();
+    expect(mainReleased).not.toHaveBeenCalled(); expect(childReleased).not.toHaveBeenCalled();
+  } finally { bridge.close(); }
+  expect(mainReleased).toHaveBeenCalledOnce(); expect(childReleased).toHaveBeenCalledOnce();
+});
+
+it('an unstartable queued successor retains its original child implementation until promotion and terminal cleanup', async () => {
+  const f = fixture();
+  const next = { ...f.run, id: 'run:queued', state: 'accepted' as const };
+  const nextLaunch = { ...f.launch, run_id: next.id, startable: false, pause: null };
+  const mainReleased = vi.fn(), childReleased = vi.fn();
+  const options = { providerId: 'fixture', providerFamily: 'openai-completions', endpoint: 'https://fixture.invalid/v1/chat/completions',
+    currentScope: async () => f.launch.selection.credential_scope!, runtime: { getAuth: async () => undefined } };
+  const main = new ExistingHostCredentialOwner({ ...options, bindingIdentity: modelCredentialBindingIdentity(f.run.configuration as never), release: mainReleased });
+  const child = new ExistingHostCredentialOwner({ ...options, release: childReleased });
+  main.retainDependency(child); child.release();
+  const bridge = new CredentialBridge(() => 'epoch', async () => {}, () => {});
+  await bridge.register(f.run.id, main); main.release();
+  f.runtime.retainedModelOwner.mockImplementation((configuration, scope) => bridge.findOwner(modelCredentialBindingIdentity(configuration), scope));
+  f.runtime.retainQueuedModel.mockImplementation(async (runId, owner) => {
+    // Concurrent observation of the same original receipt must not leak a second retain.
+    await Promise.all([bridge.retainQueuedModel(runId, owner), bridge.retainQueuedModel(runId, owner)]);
+  });
+  f.runtime.releaseQueuedModel.mockImplementation((runId: string, owner: ExistingHostCredentialOwner) => bridge.releaseQueuedModel(runId, owner));
+  f.runtime.run.mockImplementationOnce(async () => { bridge.unregister(f.run.id); return structuredClone(f.run); })
+    .mockImplementation(async () => structuredClone(next));
+  f.runtime.launch.mockImplementationOnce(async () => structuredClone(f.launch)).mockImplementation(async () => structuredClone(nextLaunch));
+  f.runtime.enqueue.mockResolvedValue({ input_id: 'queued-input', run_id: next.id, mode: 'boundary', cursor: 6 });
+  f.runtime.releaseMainModelCredentials.mockImplementation(() => bridge.unregister(next.id, null));
+  f.runtime.rebindLaunch.mockImplementation(async (_runId, input) => {
+    await bridge.register(next.id, input!.credentialOwner!); nextLaunch.startable = false;
+    return { runId: next.id, epoch: 1 };
+  });
+  try {
+    await f.adapter.enqueue({ ...identity, key: 'next', text: 'Next accepted work', mode: 'next_run' });
+    await tick();
+    expect(f.runtime.rebindLaunch).not.toHaveBeenCalled();
+    expect(mainReleased).not.toHaveBeenCalled(); expect(childReleased).not.toHaveBeenCalled();
+    nextLaunch.startable = true;
+    f.runtime.rebindLaunch.mockRejectedValueOnce(new Error('Source preparation failed'));
+    await expect(f.adapter.continueLaunch(next.id)).rejects.toThrow('Source preparation failed');
+    expect(f.runtime.releaseQueuedModel).not.toHaveBeenCalled();
+    expect(mainReleased).not.toHaveBeenCalled(); expect(childReleased).not.toHaveBeenCalled();
+    await f.adapter.continueLaunch(next.id);
+    expect(f.models.rebindModel).not.toHaveBeenCalled();
+    expect(f.runtime.releaseQueuedModel).toHaveBeenCalledOnce();
+    expect(mainReleased).not.toHaveBeenCalled(); expect(childReleased).not.toHaveBeenCalled();
+  } finally { bridge.close(); }
+  expect(mainReleased).toHaveBeenCalledOnce(); expect(childReleased).toHaveBeenCalledOnce();
 });

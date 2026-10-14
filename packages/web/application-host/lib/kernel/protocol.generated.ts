@@ -3,7 +3,7 @@
  * Do not hand-edit the wire shapes; run `node scripts/generate-kernel-protocol.mjs`.
  */
 
-export const KERNEL_PROTOCOL_VERSION = 40 as const;
+export const KERNEL_PROTOCOL_VERSION = 41 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
 export const KERNEL_CONTROL_METHODS = ["source.authority.seal","source.mcp.holder","source.mcp.delivery","source.script.control","source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status","runtime.mcp.interaction.inspect","runtime.mcp.interaction.delivery.released","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.source.tools","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
@@ -11,9 +11,13 @@ export const KERNEL_CONTROL_RESPONSE_METHODS = ["source.authority.seal","source.
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["process.write","process.resize","runtime.tools.invoke","file.lease.wait"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.branch.navigate":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.memory_work.admit","runtime.memory_work.read","runtime.memory_work.status","runtime.memory_work.list","runtime.memory_work.update","runtime.inference.generate","runtime.inference.admit","runtime.inference.settle","runtime.mcp.sampling.review_output","runtime.mcp.sampling.review_request","runtime.mcp.sampling.generate","runtime.mcp.interaction.open","runtime.mcp.interaction.error.open","runtime.mcp.interaction.list","runtime.mcp.interaction.read","runtime.mcp.interaction.respond","runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
-export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v40" as const;
+export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v41" as const;
 
 export type KernelMethod =
+  | "model.adapters.retain"
+  | "model.adapters.release"
+  | "model.adapters.publish"
+  | "model.adapters.revoke"
   | "runtime.mcp.interaction.context"
   | "runtime.mcp.interaction.delivery.released"
   | "runtime.followup.registration.prepare"
@@ -372,6 +376,63 @@ export type KernelMethod =
   | "source.authority.claim_handoff"
   | "source.integration.receipt"
   | "source.resource.release";
+
+export interface ModelHttpConfiguration { headers?:Record<string,string>; proxy?:{mode:"direct"}|{mode:"proxy";url:string} }
+
+export interface ModelAdaptersRetainParams {
+  bindingId: string;
+  leaseId: string;
+}
+
+export interface ModelAdaptersReleaseParams {
+  leaseId: string;
+}
+
+export interface HistoryRange { branch_id:string; ancestor_id:string|null; leaf_id:string|null }
+
+export interface ModelOpaqueItem { connection_identity:string; family:string; adapter_version:string; value:unknown }
+
+export interface ModelToolCall { call_id:string; name:string; schema_version:string; arguments:unknown }
+
+export type ModelToolCompletion = {kind:'not_dispatched';reason:string} | {kind:'result';outcome:Outcome;effect:Effect;content:OutputBody<ResolvedMedia>} | {kind:'job_accepted';operation_id:string;phase:string;effect:Effect;lifetime:Lifetime;content?:OutputBody<ResolvedMedia>};
+
+export type ModelContent = {kind:'text'|'reasoning_summary';text:string} | {kind:'media';media:ResolvedMedia} | {kind:'output';output:OutputBody<ResolvedMedia>} | {kind:'tool_call';call:ModelToolCall} | {kind:'tool_result';result:{request_id:string;call_id:string;completion:ModelToolCompletion}} | {kind:'provider_only'};
+
+export interface ModelConversationItem { resource_activation?:ResourceActivation; id:string; provenance:ContentProvenance; content:ModelContent; opaque:ModelOpaqueItem|null }
+
+export interface RequestBinding { child_dispatch:unknown|null; goal:{id:string;generation:number}|null; resource_activations:ResourceActivation[]; resource_checkpoint_id:string|null; connection_identity:string; provider_family:string; model:string; credential_ref:string|null; configuration_generation:number; tool_schema_generation:number; tools:LaunchTool[]; instruction_sources:string[]; memory_checkpoint:string|null; attachment_refs:string[]; environment_cursor:number; history_range:HistoryRange }
+
+export type RequestOrigin = {kind:'auxiliary_inference';operation_id:string;parent_operation_id:string;purpose:string} | {kind:'mcp_sampling';interaction_id:string;operation_id:string;parent_operation_id:string} | {kind:'conversation';compaction:{planHash:string;nodeId:string}|null;step:number;history_range:HistoryRange} | {kind:'policy_model_job';action_id:string;purpose:string;boundary_id:string};
+
+export interface RequestView { request_id:string; run_id:string; origin:RequestOrigin; binding:RequestBinding; history:ModelConversationItem[] }
+
+export interface ModelUsageReceipt { measurement:'missing'|'estimated'|'actual'; input_tokens:number|null; output_tokens:number|null; cached_input_tokens:number|null; cache_write_tokens:number|null; reasoning_tokens:number|null; raw:unknown|null; pricing_version:string|null }
+
+export type ProviderEvent = {kind:'text_delta';item_id:string;text:string} | {kind:'tool_arguments_delta';call_id:string;delta:string} | {kind:'item_completed';item:{id:string;content:ModelContent;opaque:ModelOpaqueItem|null}} | {kind:'usage';receipt:ModelUsageReceipt};
+
+export type FinishReason = 'stop'|'tool_calls'|'length'|'content_filter';
+
+export type ModelProtocolCall = {kind:'serialize';configuration:ModelSessionConfiguration;request:RequestView} | {kind:'parse';request_id:string;run_id:string;connection_identity:string;frame:string|null;state:unknown};
+
+export type ModelProtocolResult = {kind:'body';body:unknown} | {kind:'parsed';events:ProviderEvent[];state:unknown;finish:FinishReason|null};
+
+export interface ModelAdapterContribution {
+  identity: string;
+  id: string;
+  version: string;
+  protocolFamily: string;
+  bindingId: string;
+  headers: Record<string, string>;
+}
+
+export interface ModelAdaptersPublishParams {
+  expectedRevision: number;
+  adapters: ModelAdapterContribution[];
+}
+
+export interface ModelAdaptersRevokeParams {
+  bindingId: string;
+}
 
 export interface FileObservationAuthority {coordinatorHostId:string;authorityId:string;resourceEpoch:string;}
 
@@ -2165,7 +2226,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 40; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 41; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -2802,6 +2863,10 @@ export interface ModelSessionConfiguration {
   anthropicOauth?: boolean;
   adapterId?: string;
   adapterVersion?: string;
+  awsRegion?: string;
+  adapterIdentity?: string;
+  adapterBindingId?: string;
+  connection?: ModelHttpConfiguration;
   contextWindowTokens?: number;
   thinkingLevel?: string;
   modelOptions?: unknown;
@@ -3577,6 +3642,7 @@ export interface KernelFileScanParams {
   workspaceId: string;
   rootId: string;
   path: string;
+  includeInternalEntries?: boolean;
   scopes?: string[];
   cursor?: number;
   pageSize?: number;
@@ -5579,6 +5645,10 @@ export const MCP_CAPABILITIES: readonly (LaunchTool & { route: McpRoute; operati
 ];
 
 export type KernelMethodParams = {
+  "model.adapters.retain": ModelAdaptersRetainParams;
+  "model.adapters.release": ModelAdaptersReleaseParams;
+  "model.adapters.publish": ModelAdaptersPublishParams;
+  "model.adapters.revoke": ModelAdaptersRevokeParams;
   "runtime.followup.registration.prepare": FollowupFilePrepareParams;
   "source.authority.inspect_read_scope": SourceReadScopeParams;
   "source.authority.close_read_scope": SourceReadScopeParams;
@@ -5940,6 +6010,42 @@ export type KernelMethodParams = {
 };
 
 export type KernelRequest =
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "model.adapters.retain";
+      params: ModelAdaptersRetainParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "model.adapters.release";
+      params: ModelAdaptersReleaseParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "model.adapters.publish";
+      params: ModelAdaptersPublishParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "model.adapters.revoke";
+      params: ModelAdaptersRevokeParams;
+      epoch?: string;
+      grantId?: string;
+    }
   | {
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";

@@ -21,6 +21,7 @@ export interface CredentialOwnerOptions {
   runtime: ExistingModelAuthRuntime;
   providerId: string;
   providerFamily: string;
+  bindingIdentity?: string;
   /** The credential owner supplies this metadata and advances it on relink/revocation. */
   currentScope(): Promise<CredentialScope>;
   /** Verified external provider account metadata, distinct from the local binding handle. */
@@ -28,6 +29,8 @@ export interface CredentialOwnerOptions {
   /** Complete trusted model endpoint; resolution may not silently redirect a frozen request. */
   endpoint: string;
   allowAnonymous?: boolean;
+  /** Release the captured authentication implementation after every retained consumer and real refresh drains. */
+  release?(): void;
 }
 export interface PrivateCredentialResolution {
   scope: CredentialScope;
@@ -77,21 +80,68 @@ function registeredEndpoint(value: string): URL {
 export class ExistingHostCredentialOwner {
   readonly #options: CredentialOwnerOptions;
   readonly #endpoint: URL;
+  #references = 1;
+  #baseReleased = false;
+  #active = 0;
+  #disposed = false;
+  readonly #dependencies = new Map<() => void, ExistingHostCredentialOwner>();
+  #bindingScope: CredentialScope | undefined;
+  #parent: ExistingHostCredentialOwner | undefined;
   constructor(options: CredentialOwnerOptions) {
     if (!options.providerId || !options.providerFamily) fail('invalid-credential-owner');
     this.#options = Object.freeze({ ...options });
     this.#endpoint = registeredEndpoint(options.endpoint);
   }
+  get bindingIdentity(): string | undefined { return this.#options.bindingIdentity; }
+  /** An independently releasable handle to the same captured implementation and dependencies. */
+  fork(): ExistingHostCredentialOwner {
+    const fork = new ExistingHostCredentialOwner({ ...this.#options, release: this.retain() });
+    fork.#bindingScope = this.#bindingScope; fork.#parent = this; return fork;
+  }
+  /** Search only this retained dependency graph, never the current model catalog. */
+  findRetained(identity: string, scope: CredentialScope, seen = new Set<ExistingHostCredentialOwner>()): ExistingHostCredentialOwner | undefined {
+    if (this.#disposed || seen.has(this)) return undefined; seen.add(this);
+    if (this.bindingIdentity === identity && this.#bindingScope && sameScope(this.#bindingScope, scope)) return this.fork();
+    for (const owner of this.#dependencies.values()) { const found = owner.findRetained(identity, scope, seen); if (found) return found; }
+    return this.#parent?.findRetained(identity, scope, seen);
+  }
+  retain(): () => void {
+    if (!this.#options.release && !this.#dependencies.size) return () => {};
+    if (this.#disposed || this.#references === 0) return fail('credential-owner-released');
+    this.#references += 1;
+    let released = false;
+    return () => { if (released) return; released = true; this.#references -= 1; this.#dispose(); };
+  }
+  retainDependency(owner: ExistingHostCredentialOwner): () => void {
+    if (owner === this) return () => {};
+    if (this.#disposed || this.#references === 0) return fail('credential-owner-released');
+    const release = owner.retain(); let released = false;
+    const dispose = () => { if (released) return; released = true; this.#dependencies.delete(dispose); release(); };
+    this.#dependencies.set(dispose, owner); return dispose;
+  }
+  release(): void {
+    if ((!this.#options.release && !this.#dependencies.size) || this.#baseReleased) return;
+    this.#baseReleased = true; this.#references -= 1; this.#dispose();
+  }
+  #dispose(): void {
+    if (!this.#disposed && this.#references === 0 && this.#active === 0) { this.#disposed = true; this.#options.release?.(); for (const release of [...this.#dependencies.keys()]) release(); }
+  }
   async scope(): Promise<CredentialScope> {
-    try { return validateScope(await this.#options.currentScope()); }
+    if (this.#disposed) return fail('credential-owner-released');
+    this.#active += 1;
+    try { const scope = validateScope(await this.#options.currentScope()); this.#bindingScope ??= scope; return scope; }
     catch { return fail('credential-scope-unavailable'); }
+    finally { this.#active -= 1; this.#dispose(); }
   }
   resolve(expectedScope: CredentialScope, signal?: AbortSignal, dispatch?: CredentialDispatch): Promise<PrivateCredentialResolution> {
+    if (this.#disposed) return Promise.reject(new CredentialOwnerError('credential-owner-released'));
     const expected = validateScope(expectedScope);
     if (signal?.aborted) return Promise.reject(new CredentialOwnerError('credential-cancelled'));
     // No caller cancellation is passed to getAuth. The existing owner's bounded refresh must
     // finish and persist a rotated token even if the request no longer needs the answer.
-    return waitWithoutCancellingOwner(this.#resolve(expected, dispatch), signal);
+    this.#active += 1;
+    const work = this.#resolve(expected, dispatch).finally(() => { this.#active -= 1; this.#dispose(); });
+    return waitWithoutCancellingOwner(work, signal);
   }
   async #resolve(expected: CredentialScope, dispatch?: CredentialDispatch): Promise<PrivateCredentialResolution> {
     try {

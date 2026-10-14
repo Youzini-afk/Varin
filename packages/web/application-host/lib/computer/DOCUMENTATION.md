@@ -313,3 +313,20 @@ and unknown effects independently of stopped input.
 The Windows targeting fixture invokes production functions with fake controls/input and checks visual
 events without desktop access. Those results do not establish real Windows overlay placement or
 Linux/macOS desktop input, VM installation, or an installed release's visual acceptance.
+
+## Native capture session ownership
+
+macOS and Wayland drivers advertise `sharedDesktopSession` to the existing driver
+pool. Controller observations and input retain one ordered request lane, while
+viewer `capture_frame` requests have a separate correlated read-only lane on that
+same process. The pool coalesces startup and capture without inventing a second
+physical input owner. Job cancellation signals only the current input request;
+its actual response and `release_input` still drain through the original lane.
+Closing a viewer never closes the shared platform authorization. Desktop reset
+or Host disposal closes the helper only after the existing owner cleanup path.
+
+Platform receipts preserve `session-closed`, geometry/focus changes, cancellation
+and uncertain effects separately. Native capture timestamps survive observation
+projection. macOS permission checks and Wayland authorization/transport facts are
+reported separately from current input/capture capability flags. Platform source,
+signing and native-verification boundaries are in the driver README.

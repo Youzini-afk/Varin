@@ -93,7 +93,7 @@ const parseWorkspaceFileEvent = (value: unknown): VarinWorkspaceFileEvent => {
   if (!isResource(event.resource)) {
     throw new DocumentsError('Document watch returned an invalid resource event', { reason: 'failed' });
   }
-  if (event.revision !== undefined && typeof event.revision !== 'string') {
+  if ((event.operationId !== undefined && (typeof event.operationId !== 'string' || !event.operationId)) || (event.revision !== undefined && typeof event.revision !== 'string')) {
     throw new DocumentsError('Document watch returned an invalid revision', { reason: 'failed' });
   }
   if (event.kind === 'moved') {
@@ -112,7 +112,7 @@ export const parseDocumentWatchEvent = (value: unknown): VarinDocumentWatchEvent
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     const event = value as Record<string, unknown>;
     if (event.kind === 'surface-operation') {
-      if (!['capture', 'apply', 'undo', 'restore'].includes(String(event.action))
+      if (!['capture', 'apply', 'undo', 'restore', 'workspace-edit'].includes(String(event.action))
         || typeof event.requestId !== 'string' || !event.requestId
         || typeof event.operationId !== 'string' || !event.operationId
         || typeof event.workspaceId !== 'string' || !event.workspaceId
@@ -176,6 +176,13 @@ const readSseEvents = async (
  * Application Host. This module never uses a Capacitor filesystem plugin.
  */
 export const createWebDocumentsAPI = (): DocumentsAPI => ({
+  discardWorkspaceEdit: request => postJson('/api/documents/workspace-edit/discard', request) as ReturnType<DocumentsAPI['discardWorkspaceEdit']>,
+  readWorkspaceEditRecovery: request => postJson('/api/documents/workspace-edit/recovery', request) as ReturnType<DocumentsAPI['readWorkspaceEditRecovery']>,
+  prepareWorkspaceEdit: request => postJson('/api/documents/workspace-edit/prepare', request) as ReturnType<DocumentsAPI['prepareWorkspaceEdit']>,
+  applyWorkspaceEdit: request => postJson('/api/documents/workspace-edit/apply', request) as ReturnType<DocumentsAPI['applyWorkspaceEdit']>,
+  readWorkspaceEdit: request => postJson('/api/documents/workspace-edit/read', request) as ReturnType<DocumentsAPI['readWorkspaceEdit']>,
+  undoWorkspaceEdit: request => postJson('/api/documents/workspace-edit/undo', request) as ReturnType<DocumentsAPI['undoWorkspaceEdit']>,
+  listWorkspaceEdits: request => postJson('/api/documents/workspace-edit/list', request) as ReturnType<DocumentsAPI['listWorkspaceEdits']>,
   ackDirtyStateBarrier: (request) => postJson('/api/documents/dirty/barrier/ack', request) as Promise<{ acknowledged: boolean }>,
   clearDirtyBuffers: (request) => postJson('/api/documents/dirty/clear', request) as Promise<{ cleared: boolean }>,
   captureAgentInputSnapshot: (request) => postJson('/api/documents/agent-input/capture', request) as Promise<AgentInputContext>,

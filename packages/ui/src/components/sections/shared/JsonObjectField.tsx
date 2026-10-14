@@ -3,12 +3,13 @@ import type { JsonValue } from '@varin/protocol';
 import { Textarea } from '@/components/ui/textarea';
 
 /** Keeps an unfinished JSON edit local while the parent retains the last valid object. */
-export function JsonObjectField({ value, label, disabled, onChange, onValidityChange }: {
+export function JsonObjectField({ value, label, disabled, onChange, onValidityChange, validate }: {
   value?: Record<string, JsonValue>;
   label: string;
   disabled?: boolean;
   onChange(value: Record<string, JsonValue> | undefined): void;
   onValidityChange?(valid: boolean): void;
+  validate?(value: Record<string, JsonValue>): boolean;
 }) {
   const encoded = value === undefined ? '' : JSON.stringify(value);
   const [draft, setDraft] = React.useState(() => value === undefined ? '' : JSON.stringify(value, null, 2));
@@ -23,6 +24,7 @@ export function JsonObjectField({ value, label, disabled, onChange, onValidityCh
     try {
       const next: unknown = content.trim() ? JSON.parse(content) : undefined;
       if (next !== undefined && (!next || typeof next !== 'object' || Array.isArray(next))) throw new Error('Expected an object');
+      if (next !== undefined && validate && !validate(next as Record<string, JsonValue>)) throw new Error('Invalid object fields');
       published.current = next === undefined ? '' : JSON.stringify(next); setError(false); onValidityChange?.(true);
       onChange(next as Record<string, JsonValue> | undefined);
     } catch { setError(true); onValidityChange?.(false); }

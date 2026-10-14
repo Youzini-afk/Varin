@@ -104,10 +104,17 @@ Record 保留 base content/revision、当前 buffer、local edit revision、save
 - 增量编辑先校验捕获 revision 和互不重叠的 offset，再一次性更新状态。
 - Shell、Profile、Settings 重挂载保留 record；endpoint 更换则隔离旧操作。
 
-`prepareWorkspaceEdit` 加载并验证全部目标而不提交；`applyWorkspaceEdit` 再次校验，先发布全部新 buffer，
-再通知监听器，并形成一个随生命周期管理的 undo group。结果是 dirty editor state，不是隐式跨文件保存。
-一个目标过期就拒绝整个 buffer 提交。LSP resource create/rename/delete 在这个批量 API 中仍明确 unsupported，
-须有 Host-owned batch-mutation 合同后才能支持。
+`prepareWorkspaceEdit` 保留文本、创建、重命名和删除的原始顺序，在内存中推演路径、覆盖选项、
+中间文档版本与 change annotations；准备不写文件、不保存草稿。纯文本批次重新验证所有目标后，
+先发布全部新 buffer 再通知监听器。含资源操作的批次由 Host Documents 在原租约、受影响缓冲 barrier
+和 mutation writer 下执行，首次修改前将计划、磁盘原态与各实际窗口草稿写入 Rust Recovery。
+创建后的文本仍未保存；重命名迁移 document instance、订阅、标签页与语言服务身份；删除草稿先审阅，
+并保留恢复内容。多个窗口可以各自持有受影响文档，只有同一路径正文/版本分歧的文本修改需要解决冲突。
+
+每批只有一个异步撤销入口，条件恢复避免覆盖后续输入或外部修改；无法确定的结果按文件进入恢复界面。
+LSP 使用 `undo` failureHandling，不承诺文件系统与编辑器的绝对原子事务。丢失响应只查询原操作，
+不会重新执行。code action 在编辑及后续 command 之间保留原语言 provider 身份；改名使用原实例的新路径，
+删除后 workspace command 不伪造仍存在的文档版本。普通重构无需 Agent Run。
 
 恢复 journal 位于 Host 的 document-recovery namespace，绑定 workspace、用户/recovery session 和资源。
 它是带 revision 的未保存数据，不进入普通日志或 Pi JSONL。Restore 产生待审阅草稿，不覆盖项目文件；

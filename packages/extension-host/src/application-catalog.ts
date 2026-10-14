@@ -1,3 +1,4 @@
+import type { VarinExtensionRestartCommit } from "@varin/extension-contract";
 import {
   VARIN_EXTENSION_CATALOG_SCHEMA_VERSION,
   type VarinExtensionActualState,
@@ -140,10 +141,11 @@ export class ApplicationExtensionCatalog {
     candidateIntegrity: string,
     expectedRevision: number,
     validateBeforeCommit?: () => void,
+    restartCommit?: VarinExtensionRestartCommit,
   ): Promise<VarinExtensionCatalogSnapshot> {
     const [identity, read] = await Promise.all([
       this.store.getHostIdentity(),
-      this.store.selectCandidate(extensionId, candidateIntegrity, expectedRevision, validateBeforeCommit),
+      this.store.selectCandidate(extensionId, candidateIntegrity, expectedRevision, validateBeforeCommit, restartCommit),
     ]);
     return this.#publicSnapshot(identity.hostId, read);
   }
@@ -218,6 +220,7 @@ export class ApplicationExtensionCatalog {
           .map((value) => structuredClone(value.state))
           .sort((left, right) => left.realmId.localeCompare(right.realmId) || left.entrypointId.localeCompare(right.entrypointId));
         return {
+          ...(record.restartHandoffs ? { restartHandoffs: structuredClone(record.restartHandoffs) } : {}),
           actual,
           ...(record.candidate ? {
             candidate: {

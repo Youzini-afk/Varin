@@ -15,6 +15,7 @@ import type { KernelClient } from './kernel-client.js';
 import type { RetrievalSourceOwner } from './retrieval-source.js';
 import type { RetrievalQuery } from './protocol.generated.js';
 import type { InferenceCall } from '../knowledge/semantic/inference-requests.js';
+import { waitForModelBinding } from './model-binding-lifetime.js';
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const identity = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export function createRetrievalModelStage(options: {
@@ -73,12 +74,14 @@ export function createRetrievalModelStage(options: {
     if (exploreSelection) {
       try {
         if (!options.models) throw new Error('Explore model owner unavailable');
-        explore = await options.models.resolveModel(exploreSelection);
+        explore = await waitForModelBinding(options.models.resolveModel(exploreSelection), model => model.credentialOwner.release(), signal);
         exploreScope = await explore.credentialOwner.scope();
-      } catch { explore = undefined; exploreScope = undefined; }
+      } catch { explore?.credentialOwner.release(); explore = undefined; exploreScope = undefined; signal.throwIfAborted(); }
     } else if (mode === 'llm') return unavailable('llm', exploreDisabled ? 'disabled' : 'unavailable', [mode, exploreDisabled ? 'disabled' : 'unconfigured']);
     let decision: DecisionInferenceCapture = { status: 'unconfigured' };
-    if (mode === 'auto' || mode === 'fast-decision') decision = await options.inference.captureDecision('explore');
+    try {
+      if (mode === 'auto' || mode === 'fast-decision') decision = await options.inference.captureDecision('explore');
+    } catch (error) { explore?.credentialOwner.release(); throw error; }
     if (exploreSelection && !explore && decision.status !== 'ready') return unavailable(exploreSelection.providerId, 'unavailable', [mode, exploreSelection]);
     if (explore || decision.status === 'ready') {
       const lease = decision.status === 'ready' ? decision.lease : undefined;
@@ -183,9 +186,9 @@ export function createRetrievalModelStage(options: {
             } },
           },
           assertAvailable, validateAvailable: validate,
-          release() { if (released) return; released = true; lease?.release(); },
+          release() { if (released) return; released = true; llm?.credentialOwner.release(); lease?.release(); },
         };
-      } catch (error) { lease?.release(); throw error; }
+      } catch (error) { llm?.credentialOwner.release(); lease?.release(); throw error; }
     }
     if (mode === 'fast-decision' || !['disabled', 'unconfigured'].includes(decision.status)) {
       return unavailable('fast-decision', decision.status === 'disabled' ? 'disabled' : 'unavailable', [mode, decision.status]);

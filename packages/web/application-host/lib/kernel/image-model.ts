@@ -97,7 +97,7 @@ export async function resolveImageBytes(image: { data?: string; url?: string; mi
   if (data !== undefined) {
     const bytes = Buffer.from(data, 'base64');
     if (!bytes.length || bytes.toString('base64').replace(/=+$/, '') !== data.replace(/\s/g, '').replace(/=+$/, '') || !mimeType?.startsWith('image/')) throw new Error('Image API returned invalid image bytes');
-    return { bytes, mimeType };
+    return { bytes, mimeType: imageMimeType(bytes) };
   }
   if (!image.url) throw new Error('Image API returned no image');
   const response = await fetchImage(image.url);
@@ -106,5 +106,5 @@ export async function resolveImageBytes(image: { data?: string; url?: string; mi
   if (!mimeType?.startsWith('image/')) throw new Error('Generated image response is not an image');
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (!bytes.length) throw new Error('Generated image is empty');
-  return { bytes, mimeType };
+  return { bytes, mimeType: imageMimeType(bytes) };
 }

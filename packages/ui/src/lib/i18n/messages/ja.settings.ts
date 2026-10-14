@@ -2,6 +2,17 @@ import { settingsDict as englishSettingsDict } from './en.settings';
 
 export const settingsDict = {
   ...englishSettingsDict,
+  "settings.models.network": "ネットワークとプロトコル",
+  "settings.models.proxy": "プロキシ",
+  "settings.models.proxyHost": "Host の設定を使用",
+  "settings.models.proxyDirect": "直接接続",
+  "settings.models.proxyCustom": "カスタムプロキシ",
+  "settings.models.proxyUrl": "プロキシ URL",
+  "settings.models.proxyHint": "HTTP(S) プロキシのオリジンのみ。認証情報を含めないでください。",
+  "settings.models.headers": "機密情報を含まないヘッダー",
+  "settings.models.headersHint": "JSON の文字列値のみ。API キー、トークン、Cookie は認証設定で管理してください。",
+  "settings.models.path": "プロトコルパス",
+  "settings.models.pathsHint": "任意のパスは / で始まり、エンドポイントの既存パスに追加されます。空欄では既定値を使用します。",
   "settings.agents.configured": "設定済み",
   "settings.page.harness.index.cpu.title": "ローカル CPU 使用量",
   "settings.page.harness.index.cpu.description": "負荷に合わせてバッチとバックグラウンド処理を調整し、検索を優先します。変更は Host の再起動後に適用されます。",
@@ -3527,4 +3538,5 @@ export const settingsDict = {
   "settings.varin.recovery.storage.historyDescription": "復元履歴が残っているワークスペースのみ表示します。参照されているチェックポイントとバージョンは保持されます。",
   "settings.varin.recovery.storage.cleanupShared": "未参照のコンテンツを削除",
   "settings.varin.recovery.storage.cleanupNothing": "解放するコンテンツはありません。参照されているチェックポイントとバージョンは保持されます。",
+  "settings.models.image": "画像機能（マスク、パラメータースキーマ）",
 } as const;

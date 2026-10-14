@@ -3,7 +3,7 @@
 use crate::execution::*;
 use crate::providers::auth::CredentialScope;
 use crate::providers::{
-    registry, shared_transport, Connection, CredentialResolver, EnvironmentCredentialResolver,
+    registry, Connection, CredentialResolver, EnvironmentCredentialResolver,
     EnvironmentHeader,
 };
 use crate::supervisor::RunStart;
@@ -144,7 +144,7 @@ pub fn build_provider(
     let mut connection = Connection::new(
         configuration.endpoint.clone(),
         credentials,
-        shared_transport(),
+        crate::providers::connection_options::transport(configuration.connection.as_ref())?,
     );
     connection.accepts_images = configuration.accepts_images;
     let provider = selected.bind(&configuration, connection)?;
@@ -277,7 +277,7 @@ fn hash_identity(
             "selected model adapter identity/version changed",
         ));
     }
-    let identity = json!({"adapter":adapter,"provider":configuration.provider_id,"family":configuration.provider_family,"endpoint":url.as_str(),"model":configuration.model,"credential_scope":credential_scope,"azure_deployment":configuration.azure_deployment,"azure_api_version":configuration.azure_api_version});
+    let identity = json!({"adapter":adapter,"adapter_identity":configuration.adapter_identity,"connection":configuration.connection,"provider":configuration.provider_id,"family":configuration.provider_family,"endpoint":url.as_str(),"model":configuration.model,"credential_scope":credential_scope,"azure_deployment":configuration.azure_deployment,"azure_api_version":configuration.azure_api_version});
     let bytes = serde_json::to_vec(&identity).map_err(|_| {
         ExecutionError::new(
             "connection_identity",

@@ -89,6 +89,8 @@ export interface ExtensionToolConfiguration {
   enabled?(descriptor: VarinExtensionServiceProvision): boolean;
   declaration?(descriptor: VarinExtensionServiceProvision, identity: string | null): VarinExtensionServiceProvision;
   retain?(descriptor: VarinExtensionServiceProvision, identity: string | null): () => void;
+  retainPreparation?(): () => void;
+  release?(): void;
 }
 class ExtensionToolConfigurationError extends Error {
   constructor(serviceId: string, cause: unknown) {
@@ -437,6 +439,7 @@ export function createExtensionTools(
 ): ExtensionToolPreparer {
   return async (run, required, signal) => {
     let preparedOptions = options.prepareConfiguration ? { ...options, configurationIdentity: await options.prepareConfiguration(run, required) } : options;
+    try {
     const runtime = options.runtime,
       initial: ExtensionToolLease[] = [],
       states = new Map<string, ThreadToolPreparation>(),
@@ -505,6 +508,8 @@ export function createExtensionTools(
       routingRevision: number,
     ) => {
       const candidateOptions = preparedOptions;
+      const releasePreparation = candidateOptions.configurationIdentity?.retainPreparation?.();
+      try {
       const selected = await runtime.prepareService(
         {
           serviceId: id,
@@ -519,6 +524,7 @@ export function createExtensionTools(
         signal.throwIfAborted(); requireToolSource(id, selected.descriptor.tool?.requirements, run.source);
         return await retainExtensionTool(candidateOptions, selected);
       } catch (error) { selected.release(); throw error; }
+      } finally { releasePreparation?.(); }
     };
     const snapshot = await runtime.state();
     signal.throwIfAborted();
@@ -616,7 +622,12 @@ export function createExtensionTools(
     let seenRevision = snapshot.revision;
     const refreshOnce = async () => {
       if (run.fixed) return;
-      if (options.prepareConfiguration) preparedOptions = { ...options, configurationIdentity: await options.prepareConfiguration(run, []) };
+      if (options.prepareConfiguration) {
+        const configurationIdentity = await options.prepareConfiguration(run, []);
+        if (closed || signal.aborted) { configurationIdentity.release?.(); return; }
+        const previous = preparedOptions.configurationIdentity;
+        preparedOptions = { ...options, configurationIdentity }; previous?.release?.();
+      }
       const current = await runtime.state();
       if (
         closed ||
@@ -702,6 +713,7 @@ export function createExtensionTools(
     const close = () => {
       if (closed) return;
       closed = true;
+      preparedOptions.configurationIdentity?.release?.();
       unsubscribe();
       unsubscribeConfiguration();
       for (const unwatch of watches.values()) unwatch();
@@ -726,5 +738,6 @@ export function createExtensionTools(
       inspect: () => [...states.values()].map((v) => structuredClone(v)),
       close,
     };
+    } catch (error) { preparedOptions.configurationIdentity?.release?.(); throw error; }
   };
 }

@@ -159,7 +159,8 @@ impl InventoryTask {
             let name = entry.file_name().into_string().map_err(|_| {
                 KernelError::Operation("filesystem inventory contains a non-UTF-8 path".to_string())
             })?;
-            if name == ".git" || name == ".varin" {
+            let include_internal = matches!(&self.query, Query::Scan(params) if params.include_internal_entries == Some(true));
+            if !include_internal && (name == ".git" || name == ".varin") {
                 continue;
             }
             let relative = if prefix.is_empty() {

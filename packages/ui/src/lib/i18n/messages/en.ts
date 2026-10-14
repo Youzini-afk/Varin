@@ -1,6 +1,13 @@
 import { settingsDict } from './en.settings';
 
 export const dict = {
+  "filesView.workspaceEdit.operation.create": "Create",
+  "filesView.workspaceEdit.operation.rename": "Rename",
+  "filesView.workspaceEdit.operation.delete": "Delete",
+  "filesView.workspaceEdit.draftAffected": "Unsaved draft affected; a recovery copy will be retained",
+  "filesView.workspaceEdit.recoveryTitle": "Workspace edit recovery",
+  "filesView.workspaceEdit.recoveryDrafts": "Show original drafts",
+  "filesView.workspaceEdit.recoveryNoDrafts": "This operation has no original unsaved drafts.",
   ...settingsDict,
   "computer.feedback.title": "Agent desktop actions",
   "computer.feedback.type": "Typing",
@@ -1871,6 +1878,7 @@ export const dict = {
   'filesView.workspaceEdit.unavailable': 'No rename or action is available at this location.',
   'filesView.workspaceEdit.stale': 'The document or language provider changed. Try again.',
   'filesView.workspaceEdit.cancelled': 'Changes were not applied.',
+  'filesView.workspaceEdit.commandFailed': 'Changes were applied, but the accompanying command failed',
   'filesView.workspaceEdit.failed': 'Could not apply language changes',
   'filesView.workspaceEdit.appliedSingle': 'Changed {count} file',
   'filesView.workspaceEdit.appliedMany': 'Changed {count} files',

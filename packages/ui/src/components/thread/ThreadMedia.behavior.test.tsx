@@ -96,3 +96,27 @@ it('does not reinterpret obsolete inline attachments or malformed declared media
   expect(container.textContent).toContain('Input media is unavailable');
   expect(container.querySelector('img')).toBeNull(); expect(api.mediaRead).not.toHaveBeenCalled();
 });
+
+it('saves retained image bytes through the workspace file owner, gates repeated clicks and preserves the image after save failure', async () => {
+  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+  let rejectSave!: (reason: Error) => void;
+  const upload = vi.fn().mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectSave = reject; }))
+    .mockResolvedValueOnce({ success: true, entries: [{ type: 'file', path: '/workspace/image-1.png' }] });
+  const api = { mediaRead: vi.fn<ThreadsAPI['mediaRead']>(async input => response(input)) };
+  await act(async () => root.render(<RuntimeAPIContext.Provider value={{ workspace: { upload } } as unknown as import('@varin/application-client').RuntimeAPIs}>
+    <ThreadMedia api={api} identity={identity} holder={{ kind: 'history', itemId: 'item' }} media={media} partIndex={1} />
+  </RuntimeAPIContext.Provider>));
+  await click('View image');
+  const button = [...container.querySelectorAll('button')].find(value => value.textContent === 'Save image')!;
+  await act(async () => { button.click(); button.click(); });
+  expect(upload).toHaveBeenCalledTimes(1);
+  const file = upload.mock.calls[0]![1][0] as File;
+  expect(file.name).toBe('image-1.png');
+  expect(new Uint8Array(await file.arrayBuffer())).toEqual(Uint8Array.of(1, 2, 3, 4, 5));
+  await act(async () => rejectSave(new Error('File write rejected')));
+  expect(container.querySelector('img')?.getAttribute('src')).toBe('blob:media-1');
+  expect(container.textContent).toContain('original image is still available');
+  await click('Save image');
+  expect(container.textContent).toContain('Image saved to /workspace/image-1.png');
+  expect(api.mediaRead).toHaveBeenCalledTimes(2);
+});

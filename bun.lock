@@ -192,6 +192,7 @@
         "@earendil-works/pi-mcp": "1.0.4",
         "@varin/protocol": "0.1.0",
         "@varin/script-runtime": "0.1.0",
+        "@varin/settings-store": "workspace:*",
         "ajv": "^8.20.0",
         "ajv-formats": "^3.0.1",
         "jsonc-parser": "^3.3.1",

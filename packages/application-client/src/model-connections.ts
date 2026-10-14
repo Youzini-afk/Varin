@@ -5,6 +5,13 @@ import { getRuntimeEndpointGeneration } from './transport/runtime-switch.js';
 import type { AuthorizationState } from './mcp-connections.js';
 
 export type ModelOperation = 'chat' | 'embedding' | 'rerank' | 'decision' | 'image-generation' | 'image-editing';
+/** Non-secret connection settings. Omitted proxy inherits the executing Host's policy. */
+export interface ModelConnectionOptions {
+  headers?: Record<string, string>;
+  /** Paths append to baseUrl's existing path; they cannot change origin or query. */
+  paths?: Partial<Record<ModelOperation, string>>;
+  proxy?: { mode: 'direct' } | { mode: 'proxy'; url: string };
+}
 export type ConnectionAuthentication =
   | { kind: 'none' }
   | { kind: 'credential'; reference: string }
@@ -24,6 +31,7 @@ export interface ChannelModel {
   thinkingLevelMap?: Partial<Record<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max', string | null>>;
   parameters?: Record<string, JsonValue>;
   compat?: Record<string, JsonValue>;
+  image?: { mask?: boolean; parameters?: Record<string, JsonValue> };
 }
 export interface ModelChannel {
   id: string;
@@ -31,6 +39,7 @@ export interface ModelChannel {
   type: string;
   enabled: boolean;
   baseUrl: string;
+  connection?: ModelConnectionOptions;
   authentication: ConnectionAuthentication;
   parameters: Record<string, JsonValue>;
   models: ChannelModel[];
@@ -45,6 +54,8 @@ export interface ChannelTypeInfo {
   discovery: boolean;
   parametersSchema: Record<string, JsonValue>;
   oauthProviders?: { id: string; name: string }[];
+  /** Read-only contributed candidates; saved channel models remain user-owned. */
+  catalog?: ChannelModel[];
 }
 export interface ModelConnectionsSnapshot { revision: string; channels: ModelChannel[]; types: ChannelTypeInfo[]; issues?: { channelId?: string; code: string; message: string }[] }
 export interface DiscoveredModel { id: string; name: string; operations?: ModelOperation[] }

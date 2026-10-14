@@ -55,7 +55,7 @@ function fixture(child = false) {
   };
   const prepareModels = vi.fn<PolicyModelPreparer>(async ({ generation }) => [{ capability: { capability_id: 'agentPlanning', purpose: 'planning', status: 'available', supported_operation: 'tool_free_text',
     binding_id: `policy:${generation}:agentPlanning:configuration`, configuration_identity: 'configuration', binding: null, configuration: {} as ModelSessionConfiguration,
-    credential_scope: { reference: 'credential', authority: 'owner', account: 'account', generation: 1 } }, credentialOwner: {} as ExistingHostCredentialOwner }]);
+    credential_scope: { reference: 'credential', authority: 'owner', account: 'account', generation: 1 } }, credentialOwner: { release: vi.fn() } as unknown as ExistingHostCredentialOwner }]);
   const kernel = {
     get kernelEpoch() { return epoch; },
     subscribeExit: () => () => {}, onToolReleased: () => () => {}, beginRunPreparation: () => {

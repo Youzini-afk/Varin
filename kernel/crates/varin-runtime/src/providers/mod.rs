@@ -8,7 +8,9 @@ pub mod bedrock;
 mod builtins;
 pub mod chat;
 pub mod codex;
+pub mod connection_options;
 pub mod google;
+pub mod extensions;
 pub(crate) mod groups;
 pub mod host_auth;
 pub mod mistral;
@@ -131,8 +133,11 @@ pub struct ReqwestTransport {
 }
 struct TransportState {
     client: reqwest::Client,
-    runtime: tokio::runtime::Runtime,
+    runtime: TransportRuntime,
 }
+struct TransportRuntime(Option<tokio::runtime::Runtime>);
+impl std::ops::Deref for TransportRuntime { type Target = tokio::runtime::Runtime; fn deref(&self) -> &Self::Target { self.0.as_ref().expect("live model transport") } }
+impl Drop for TransportRuntime { fn drop(&mut self) { if let Some(runtime) = self.0.take() { runtime.shutdown_background(); } } }
 impl Default for ReqwestTransport {
     fn default() -> Self {
         Self::new(reqwest::Client::builder)
@@ -231,7 +236,7 @@ impl ReqwestTransport {
                             )
                         })?
                 };
-                Ok(TransportState { client, runtime })
+                Ok(TransportState { client, runtime: TransportRuntime(Some(runtime)) })
             })
             .as_ref()
             .map_err(Clone::clone)?;

@@ -15,6 +15,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { LiveSourceResolver } from './live-source.js';
 import type { PolicyModelPreparer } from './policy-models.js';
 import { waitWithSignal } from '../cancellation.js';
+import { waitForModelBinding } from './model-binding-lifetime.js';
 import type { AgentPolicyLease, AgentPolicyBinding, AgentPolicyArtifactBinding } from './agent-policy.js';
 import type {
   McpToolLease,
@@ -1461,8 +1462,11 @@ export class AgentRuntimeClient {
     signal: AbortSignal, savedCapabilities?: readonly PolicyModelCapability[]): Promise<{ lease: AgentPolicyLease; models: PolicyModelCapability[] }> {
     const roles = lease.binding.artifact.modelRoles;
     if (roles.length && !this.preparePolicyModels) throw new Error('Planning model preparation is unavailable');
-    const prepared = this.preparePolicyModels ? await waitWithSignal(this.preparePolicyModels({ threadId, generation,
-      requestedModelRoles: roles, ...(savedCapabilities === undefined ? {} : { savedCapabilities }) }, signal), signal) : [];
+    const releasePrepared = (models: Awaited<ReturnType<PolicyModelPreparer>>) => {
+      for (const entry of models) entry.credentialOwner?.release();
+    };
+    const prepared = this.preparePolicyModels ? await waitForModelBinding(this.preparePolicyModels({ threadId, generation,
+      requestedModelRoles: roles, ...(savedCapabilities === undefined ? {} : { savedCapabilities }) }, signal), releasePrepared, signal) : [];
     const registered: Array<{ bindingId: string; epoch: string | null }> = [];
     const releaseCredentials = () => {
       for (const entry of registered) if (this.kernel.kernelEpoch === entry.epoch) this.kernel.unregisterCredentialOwner(runId, entry.bindingId);
@@ -1487,7 +1491,7 @@ export class AgentRuntimeClient {
     } catch (error) {
       releaseCredentials();
       throw error;
-    }
+    } finally { releasePrepared(prepared); }
   }
   /** Routing updates prepare independently. Only Catalog's closed-boundary commit activates them. */
   async refreshPolicy(runId: string, initialObservation = false): Promise<PolicySelections> {
@@ -1778,6 +1782,12 @@ export class AgentRuntimeClient {
       }
     });
   }
+  /** Borrow a fresh base lease from the exact live model binding, including its child dependencies. */
+  retainedModelOwner(configuration: ModelSessionConfiguration, scope: import('./protocol.generated.js').CredentialScope): ExistingHostCredentialOwner | undefined {
+    return this.kernel.findModelCredentialOwner(configuration, scope);
+  }
+  retainQueuedModel(runId: string, owner: ExistingHostCredentialOwner): Promise<void> { return this.kernel.retainQueuedModelCredentialOwner(runId, owner); }
+  releaseQueuedModel(runId: string, owner: ExistingHostCredentialOwner): void { this.kernel.releaseQueuedModelCredentialOwner(runId, owner); }
   releaseMainModelCredentials(runId: string, selected: RunModelSelections): void {
     // Main model rebind must not discard a retired-but-pinned policy or its planning credentials.
     this.kernel.unregisterCredentialOwner(runId, null);

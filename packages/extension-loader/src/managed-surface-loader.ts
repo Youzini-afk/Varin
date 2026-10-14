@@ -441,6 +441,10 @@ const requestedGroupSelection = (entry: VarinExtensionCatalogEntry, surface: Var
   const candidate = entry.candidate;
   const group = candidate?.manifest.updateReadiness;
   if (!candidate?.applyRequested || !candidate.capabilitiesReviewed || !group) return null;
+  if (candidate.manifest.entrypoints?.host?.mode === "native" || entry.manifest.entrypoints?.host?.mode === "native") {
+    const handoff = entry.restartHandoffs?.at(-1);
+    if (!handoff || handoff.candidateIntegrity !== candidate.integrity || !["preparing", "waiting-surface"].includes(handoff.status)) return null;
+  }
   if (!group.surfaceEntrypoints.every((id) => candidate.manifest.entrypoints?.surfaces
     ?.some((entrypoint) => entrypoint.id === id && entrypoint.supports.includes(surface)))) return null;
   return explicitCandidateSelection(entry, candidate.integrity);
@@ -1406,7 +1410,7 @@ export class SurfaceExtensionLoader {
       }
 
       let committedSnapshot: VarinExtensionCatalogSnapshot | null = null;
-      await this.#surfaceRuntime.activateBatchWithCommit(requests, async (publicationSignal) => {
+      await this.#surfaceRuntime.activateBatchWithCommit(requests, async (publicationSignal, localPreparation) => {
         if (this.#stopped || lifecycleEpoch !== this.#lifecycleEpoch || snapshot.hostId !== this.#hostId) {
           throw new Error("Surface activation was superseded by loader close or Host change");
         }
@@ -1444,6 +1448,7 @@ export class SurfaceExtensionLoader {
               extensionId: entry.manifest.id,
               ...(group ? { surfaceReadiness: {
                 hostPreparation: prepared!.hostPreparation!,
+                preparedConsumerCount: localPreparation.preparedConsumerCount,
                 realmId: this.#realmId,
                 surface: this.#surface,
                 members: group.surfaceEntrypoints.map((entrypointId) => {

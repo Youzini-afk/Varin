@@ -513,6 +513,13 @@ export const callWorkspaceRecoveryPrimitives = (
 ): Promise<JsonValue> => capabilities.call(VARIN_WORKSPACE_RECOVERY_PRIMITIVES_CAPABILITY, method, params);
 
 export interface VarinWorkspaceDocumentsClient {
+  discardWorkspaceEdit(request: JsonObject): Promise<JsonValue>;
+  prepareWorkspaceEdit(request: JsonObject): Promise<JsonValue>;
+  applyWorkspaceEdit(request: JsonObject): Promise<JsonValue>;
+  readWorkspaceEdit(request: JsonObject): Promise<JsonValue>;
+  readWorkspaceEditRecovery(request: JsonObject): Promise<JsonValue>;
+  undoWorkspaceEdit(request: JsonObject): Promise<JsonValue>;
+  listWorkspaceEdits(request: JsonObject): Promise<JsonValue>;
   delete(request: JsonObject): Promise<JsonValue>;
   move(request: JsonObject): Promise<JsonValue>;
   read(resource: JsonObject): Promise<JsonValue>;
@@ -523,6 +530,13 @@ export interface VarinWorkspaceDocumentsClient {
 export const createWorkspaceDocumentsClient = (
   capabilities: VarinIsolatedCapabilityClient | VarinHostCapabilityClient,
 ): VarinWorkspaceDocumentsClient => ({
+  discardWorkspaceEdit: request => callWorkspaceDocuments(capabilities, "discardWorkspaceEdit", request),
+  prepareWorkspaceEdit: request => callWorkspaceDocuments(capabilities, "prepareWorkspaceEdit", request),
+  applyWorkspaceEdit: request => callWorkspaceDocuments(capabilities, "applyWorkspaceEdit", request),
+  readWorkspaceEdit: request => callWorkspaceDocuments(capabilities, "readWorkspaceEdit", request),
+  readWorkspaceEditRecovery: request => callWorkspaceDocuments(capabilities, "readWorkspaceEditRecovery", request),
+  undoWorkspaceEdit: request => callWorkspaceDocuments(capabilities, "undoWorkspaceEdit", request),
+  listWorkspaceEdits: request => callWorkspaceDocuments(capabilities, "listWorkspaceEdits", request),
   resolveWorkspace: (input) => callWorkspaceDocuments(capabilities, "resolveWorkspace", input),
   read: (resource) => callWorkspaceDocuments(capabilities, "read", resource),
   write: (request) => callWorkspaceDocuments(capabilities, "write", request),
@@ -709,3 +723,5 @@ export * from "./run-activity.js";
 export * from "./retrieval-plan.js";
 
 export * from "./tools.js";
+
+export * from "./models.js";

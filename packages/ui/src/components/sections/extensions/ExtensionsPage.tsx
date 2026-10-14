@@ -28,6 +28,8 @@ import {
 } from '@/components/sections/shared/SettingsSection';
 import {
   refreshVarinExtensionCatalog,
+  restartVarinExtensionCandidate,
+  recoverVarinExtensionRestart,
   discardVarinExtensionCandidate,
   installVarinExtension,
   reloadVarinExtensionLocalSource,
@@ -698,6 +700,10 @@ const ExtensionCard: React.FC<{
   const [deleteData, setDeleteData] = React.useState(false);
   const status = actualStatus(entry);
   const candidate = entry.candidate;
+  const handoff = entry.restartHandoffs?.at(-1);
+  const nativeUpdate = entry.desired.enabled && candidate?.manifest.entrypoints?.host && (candidate?.manifest.entrypoints?.host?.mode === 'native' || entry.manifest.entrypoints?.host?.mode === 'native');
+  const handoffPending = handoff && !['applied', 'failed', 'restored'].includes(handoff.status);
+  const [restartConfirmation, setRestartConfirmation] = React.useState<'update' | 'recover' | null>(null);
   const selectedCapabilities: VarinExtensionCapabilityReference[] = (["host", "surface"] as const).flatMap((realm) => (
     (entry.manifest.capabilities?.[realm] ?? []).map((capability) => ({ capability, realm }))
   ));
@@ -806,6 +812,25 @@ const ExtensionCard: React.FC<{
         />
       </div>
 
+      {handoff ? <div className="mt-3 space-y-1 typography-meta" role="status">
+        <p>{t(`settings.varin.extensions.restart.${handoff.status}`)}</p>
+        {handoff.status === 'waiting-surface' ? <p>{handoff.surfaceEntrypoints.join(', ')}</p> : null}
+        {handoff.status === 'failed' && handoff.failure ? <p className="text-[var(--status-error)]">{handoff.failure.message}</p> : null}
+        {handoff.status === 'failed' ? <Button size="xs" variant="outline" disabled={busy}
+          onClick={() => setRestartConfirmation('recover')}>{t('settings.varin.extensions.restart.recover')}</Button> : null}
+      </div> : null}
+      <Dialog open={restartConfirmation !== null} onOpenChange={open => { if (!open) setRestartConfirmation(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{t('settings.varin.extensions.restart.confirmTitle')}</DialogTitle>
+            <DialogDescription>{t('settings.varin.extensions.restart.confirmDescription')}</DialogDescription></DialogHeader>
+          <DialogFooter><Button disabled={busy} onClick={() => {
+            const action = restartConfirmation;
+            setRestartConfirmation(null);
+            if (action === 'update' && candidate) void restartVarinExtensionCandidate(entry.manifest.id, candidate.integrity).catch(() => undefined);
+            else if (action === 'recover' && handoff) void recoverVarinExtensionRestart(entry.manifest.id, handoff.id).catch(() => undefined);
+          }}>{t('settings.varin.extensions.restart.confirm')}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
       {entry.source.kind !== 'builtin' && !entry.desired.enabled && selectedCapabilities.length > 0 ? (
         <div className="mt-3 border-t border-border/50 pt-3">
           <div className="mb-2 typography-ui-label text-foreground">
@@ -902,10 +927,14 @@ const ExtensionCard: React.FC<{
             >
               {t('settings.varin.extensions.candidate.discard')}
             </Button>
+            {nativeUpdate ? <Button type="button" size="xs" disabled={busy || !candidate.capabilitiesReviewed || Boolean(handoffPending)}
+              onClick={() => setRestartConfirmation('update')}>
+              {t(handoff?.status === 'failed' ? 'settings.varin.extensions.restart.retry' : 'settings.varin.extensions.restart.apply')}
+            </Button> : null}
             <Button
               type="button"
               size="xs"
-              disabled={busy || !candidate.capabilitiesReviewed || candidate.applyRequested}
+              disabled={busy || !candidate.capabilitiesReviewed || candidate.applyRequested || Boolean(handoffPending)}
               onClick={() => {
                 void selectVarinExtensionCandidate(entry.manifest.id, candidate.integrity).catch(() => undefined);
               }}

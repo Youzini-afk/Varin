@@ -2,13 +2,16 @@
 
 Application-host authority for revisioned workspace documents, file watches, and crash-recovery journals.
 
-This module is the application-host authority for revisioned workspace documents, file watches, and crash-recovery journals.
-
 Text editors and workspace text helpers consume DocumentsAPI. `FilesAPI` remains browse/binary/CRUD, and `WorkspaceAPI` remains project/tree/git/upload. Neither exposes a duplicate text read/write shape.
 
 ## Entrypoints
 
 - `authority.ts`: `createDocumentAuthority(options)` — workspace identity, revisioned read/write/move/delete, watch, recovery journals, immutable agent-input snapshots, and `applyAgentSurfaceWrite` (the shared root-session plan that edits a live Registry buffer or applies disk targets through the bound durable file backend). Production binds the Rust file-resource backend: write/move/delete and mixed surface/disk mutations use its exact/subtree gate and conditional filesystem operations. `inspectWorkspace(workspaceId)` returns `{ workspaceId, hostId, root }` after physical-root admission. `admitWorkspaceRegistration(workspaceId, signal?)` checks the original Host registration and current deployment trust without reopening that directory; its `canonicalPath` identifies a configuration namespace, not a physical capability. Both methods are Host-only collaborators, not renderer DocumentsAPI methods.
+- `workspace-edit.ts` — ordered ordinary workspace edits. Preparation captures disk identities without
+  retaining blobs or writing files, obtains affected Registry snapshots through the authenticated
+  surface body channel, and simulates text versions, create/rename/delete options and annotations.
+  Apply validates the whole plan before the first effect, then records disk and buffer dispatches in
+  the existing Rust recovery store under one `workspace-edit` operation. No Agent Run is required.
 - `surface-mutation.ts` — classifies snapshot-owned vs disk paths, matches every edit against the original content and rejects overlapping matches before writing, writes editor-canonical text through `requestSurfaceOperation`, and compensates a mixed batch with one undo that reuses the apply `operationId`. UI `bufferHash` is compared only to the normalized editor identity, never to serialized snapshot bytes.
 - `line-ending.ts` — detect / normalize / serialize editor line endings so Registry buffers stay LF while snapshots keep the file's original endings.
 - `agent-mutation-operation.ts` — durable `agent-mutation` kind on the Rust typed recovery store. It records intent before the first write, per-path before/target identity, external dispatch/compensation/observation phases, and monotonic needs-attention. Disk capture/apply/compensation uses the Rust file-resource backend; Registry receipts remain Host-coordinated. The durable store is the sole operation authority; there is no bounded in-memory mirror. This is not an Integration operation.
@@ -73,6 +76,7 @@ individual capture's temporary listener, which is what makes cross-capture reuse
 - `POST /api/documents/dirty/publish|clear|barrier/ack`
 - `POST /api/documents/agent-input/capture|release`
 - `POST /api/documents/surface-operation/read|complete`
+- `POST /api/documents/workspace-edit/prepare|apply|read|undo|list|recovery|discard`
 - `GET /api/documents/watch?workspaceId=` (SSE; credentials stay in headers, not the URL)
 - `POST /api/documents/recovery/list|read|write|delete`
 
@@ -101,6 +105,34 @@ parent/nested/file registrations still resolve actual physical identity and alia
 failures remain errors. The Registry does not infer paths from opaque coordination IDs.
 
 Root-session mixed surface/disk mutations preflight every disk member under the same Rust file-resource lease before sending any surface request. Explicit failure is recorded as not applied; a missing authenticated Registry receipt remains uncertain. Conditional compensation continues across paths and never overwrites a later user edit. Rust file operations persist intent before the side effect and reconcile started operations after kernel restart; an observed mismatch remains conflict/needs-attention rather than being guessed complete. Recovery status and the Recovery panel expose durable `agent-mutation` needs-attention rows.
+
+## Ordered workspace edits
+
+Host/extension callers may omit surface identity for resource-only edits. Existing affected drafts
+are captured from their actual registered owners; a text edit needs a live Registry to retain its
+unsaved result. A headless resource-only batch uses the same mutation and recovery operation.
+
+Registry owns every text buffer. A new file is created on disk, but subsequent text edits remain
+unsaved; a rename migrates each actual open instance, and delete retains affected drafts for recovery.
+Directory operations include all real children, including internal entries and empty directories,
+rather than borrowing the filtered project inventory. Parent-directory creation belongs to the same
+operation and undo. Overwrite takes precedence over ignore-if-exists; ignored operations do not alter
+later path/version interpretation.
+
+Preparation fixes Host/root/epoch, canonical resource identities, original file states and live
+surface registrations. Before writing, the affected-path barrier drains saves and journals, then the
+original resource lease and mutation writer revalidate that baseline. Undo and restart recovery use
+the same writer admission, so maintenance and stale epochs cannot be bypassed. Recovery retains
+original disk bytes and draft states before dispatch. Steps record intent and actual receipts;
+conditional reverse execution preserves newer external/user changes and continues disjoint paths.
+An uncertain Registry dispatch remains uncertain after restart. No filesystem/editor atomicity is
+claimed: LSP advertises `undo` failure handling. Pure Registry text commits remain atomic.
+
+Controlled resource notifications carry the original operation identity and actual rename metadata.
+Participating Registries apply their exact surface receipts; observer windows consume the confirmed
+move without replaying it into the initiating buffers. Response loss reads the original durable row;
+retrying a read cannot dispatch the batch again. Recovery settings show unresolved resource states
+and the original drafts, independently of conversation recovery.
 
 ## Persistence
 

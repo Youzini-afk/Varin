@@ -9,6 +9,7 @@ mod compute;
 mod context;
 mod continuation_wake;
 mod credential_bridge;
+mod model_protocol;
 #[cfg(windows)]
 mod directory_watch;
 #[cfg(target_os = "linux")]

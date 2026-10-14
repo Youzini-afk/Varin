@@ -1,3 +1,4 @@
+import { unconfiguredWorkspaceEdits } from './documents/workspace-edit.test-helper';
 import { describe, expect, test } from 'vitest';
 
 import type { DocumentsAPI, VarinDocumentReadResult, VarinResourceReference } from '@varin/application-client';
@@ -9,6 +10,7 @@ const resource = (resourceId: string): VarinResourceReference => ({
 });
 
 const documentsApi = (content: string | null): DocumentsAPI => ({
+    ...unconfiguredWorkspaceEdits,
   clearDirtyBuffers: async () => ({ cleared: true }),
   publishDirtyBuffers: async (request) => ({ ...request, updatedAt: '2026-08-28T00:00:00.000Z' }),
   resolveWorkspace: async () => ({ workspaceId: resource('').workspaceId, hostId: 'host-1', epoch: 1 }),

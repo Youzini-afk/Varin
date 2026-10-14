@@ -1,3 +1,5 @@
+import type { VarinExtensionRestartHandoffRequest, VarinExtensionRestartRecoveryRequest } from "@varin/extension-contract";
+import type { DocumentsWorkspaceEditAPI, VarinWorkspaceEditSurfaceChange, VarinWorkspaceEditSurfaceReceipt } from './documents-workspace-edit.js';
 import type { AgentInputContext, AgentInputSnapshotConsumer, PiRuntimeSnapshot, WorkFocusId } from '@varin/protocol';
 import type { WorktreeMetadata, DraftStarterRef, FileEditorSettingsPatch } from './ui-dto.js';
 import type {
@@ -1539,6 +1541,8 @@ export interface ExtensionsAPI {
   watchServiceLease(request: VarinSurfaceServiceLeaseRequest, onEvent: (event: VarinSurfaceServiceLeaseEvent) => void, signal: AbortSignal): Promise<void>;
   prepareCandidate(extensionId: string, candidateIntegrity: string, signal?: AbortSignal): Promise<VarinExtensionCandidatePreparationResult>;
   requestCandidateApplication(request: VarinExtensionCandidateSelectionRequest): Promise<VarinExtensionCatalogSnapshot>;
+  requestRestartHandoff(request: VarinExtensionRestartHandoffRequest): Promise<VarinExtensionCatalogSnapshot>;
+  recoverRestartHandoff(request: VarinExtensionRestartRecoveryRequest): Promise<VarinExtensionCatalogSnapshot>;
   readAsset(request: VarinExtensionAssetRequest): Promise<VarinExtensionAssetPayload>;
   readManagedEntrypoint(request: VarinExtensionManagedEntrypointRequest): Promise<VarinExtensionManagedEntrypointPayload>;
   reloadLocalSource(request: VarinExtensionLocalSourceReloadRequest): Promise<VarinExtensionLocalSourceReloadResult>;
@@ -1684,6 +1688,8 @@ export type VarinDocumentDeleteResult =
   | { status: 'stale-epoch'; currentEpoch: number };
 
 type VarinWorkspaceFileEventPosition = {
+  /** Present for an observed Documents operation, never inferred from an OS notification. */
+  operationId?: string;
   sourceId: string;
   generation: number;
   sequence: number;
@@ -1706,7 +1712,7 @@ export type VarinDirtyStateBarrierEvent = {
 };
 
 export type VarinDocumentSurfaceOperationEvent = {
-  action: 'capture' | 'apply' | 'undo' | 'restore';
+  action: 'capture' | 'apply' | 'undo' | 'restore' | 'workspace-edit';
   kind: 'surface-operation';
   operationId: string;
   requestId: string;
@@ -1765,7 +1771,8 @@ export interface VarinDocumentSurfaceOperationTarget extends VarinDocumentSurfac
 }
 
 export interface VarinDocumentSurfaceOperationPayload {
-  action: 'capture' | 'apply' | 'undo' | 'restore';
+  workspaceEdit?: VarinWorkspaceEditSurfaceChange;
+  action: 'capture' | 'apply' | 'undo' | 'restore' | 'workspace-edit';
   barrierId?: string;
   operationId: string;
   requestId: string;
@@ -1787,6 +1794,7 @@ export interface VarinDocumentSurfaceOperationResourceResult {
 }
 
 export interface VarinDocumentSurfaceOperationCompletion {
+  workspaceEdit?: VarinWorkspaceEditSurfaceReceipt;
   generation: number;
   ownerId: string;
   operationId: string;
@@ -1845,7 +1853,7 @@ export type VarinDocumentRecoveryWriteResult =
   | { status: 'missing'; journalId: string }
   | { status: 'stale-epoch'; currentEpoch: number };
 
-export interface DocumentsAPI {
+export interface DocumentsAPI extends DocumentsWorkspaceEditAPI {
   ackDirtyStateBarrier?(request: {
     barrierId: string;
     generation: number;
@@ -2162,7 +2170,8 @@ export type VarinLanguageFeatureResult<T> =
 export interface VarinLanguageCommandRequest {
   resource: VarinResourceReference;
   languageId: string;
-  documentVersion: number;
+  /** Omit after a code action removed its document; workspace commands still bind provider/generation. */
+  documentVersion?: number;
   providerId: string;
   generation: number;
   command: string;

@@ -1,12 +1,14 @@
 import { join } from 'node:path';
-import type { ModelChannel, ChannelModel, ModelConnectionsSnapshot, ModelOperation, ConnectionAuthentication } from '@varin/application-client';
-import { imageModelInfo, type ImageModelInfo, type ImageToolPurpose } from '@varin/protocol';
+import type { ModelChannel, ModelConnectionOptions, ChannelModel, ModelConnectionsSnapshot, ModelOperation, ConnectionAuthentication } from '@varin/application-client';
+import { imageModelInfo, imageToolContract, type ImageModelInfo, type ImageToolPurpose } from '@varin/protocol';
 import { embeddingRequestUrl } from '@varin/protocol/node/embeddings';
-import { ChannelTypes } from './channel-types.js';
+import { ChannelTypes, type ChannelType } from './channel-types.js';
 import { ConfigurationFile, ModelConfigurationError, object, revisionOf } from './configuration.js';
 import { CredentialService, fileSecretStore, type ResolvedCredential } from './credentials.js';
 import { AgentSettingsService } from './settings.js';
 import { compileToolJsonSchema } from './schema.js';
+import { appendModelPath, modelEgressOverride, validateModelConnection } from './connection.js';
+import type { EgressFetch, EgressOverride } from '../harness/egress.js';
 import { AwsCredentialOwner } from './aws-auth.js';
 import { GoogleCredentialOwner } from './google-auth.js';
 import { rerankRequestUrl } from './rerank.js';
@@ -14,7 +16,7 @@ import { modelOAuthProviders, type ModelOAuthProvider } from './oauth.js';
 import { AuthorizationFlows } from '../authorization-flows.js';
 import { ConfigWatchManager } from '../configuration-watch.js';
 import type { CredentialScope, CredentialDispatch } from '../kernel/credential-owner.js';
-import type { SelectedModel } from '../kernel/model-authority.js';
+import type { SelectedModel, ModelExecutionAuthority } from '../kernel/model-authority.js';
 
 export interface InferenceProviderBinding {
   providerId: string; modelId: string; baseUrl: string; endpoint?: string; requestUrl: string; api: string;
@@ -22,9 +24,15 @@ export interface InferenceProviderBinding {
   routes: readonly { requestUrl: string; requestKind: 'model_compute' | 'preparation' }[];
   imageModel?: ImageModelInfo;
   requestModelId?: string;
+  connection?: ModelConnectionOptions;
+  headers?: Record<string, string>;
+  egressOverride?: EgressOverride;
   assertAvailable(): Promise<void>;
   currentScope(): Promise<CredentialScope>;
   getAuth(): Promise<ResolvedCredential | undefined>;
+  /** Captured authentication implementation, retained by the original purpose lease. */
+  retain?(): () => void;
+  release?(): void;
 }
 interface ModelsDocument extends Record<string, unknown> { channels: ModelChannel[] }
 const fail = (code: string, message: string): never => { throw new ModelConfigurationError(code, message); };
@@ -51,6 +59,8 @@ export class ModelsService {
   readonly #parameterValidators = new Map<string, ReturnType<typeof compileToolJsonSchema>>();
   readonly #acceptedChannels = new Map<string, ModelChannel>();
   readonly #oauth = new Map<string, ModelOAuthProvider>();
+  readonly #extensionOAuthIds = new Set<string>();
+  #contributionIssue: string | undefined;
   readonly #credentialWatch = new ConfigWatchManager(() => this.#changed('credentials'));
   #stopWatching: (() => void) | undefined;
   readonly authorizations = new AuthorizationFlows(() => this.#changed('authorization'));
@@ -64,12 +74,33 @@ export class ModelsService {
       return { ...document, channels: (document.channels ?? []) as ModelChannel[] };
     });
   }
+  prepareContributions(types: readonly ChannelType[], providers: readonly ModelOAuthProvider[]): () => void {
+    for (const type of types) compileToolJsonSchema(type.parametersSchema);
+    const commitTypes = this.types.prepareReplacement('extensions', types);
+    const ids = new Set<string>();
+    for (const provider of providers) {
+      if (ids.has(provider.id) || this.#oauth.has(provider.id) && !this.#extensionOAuthIds.has(provider.id)) throw new Error(`Authentication provider already registered: ${provider.id}`);
+      ids.add(provider.id);
+    }
+    const commitCredentials = this.credentials.prepareOAuthReplacement('extensions', providers.map(provider => ({ id: provider.id, provider })));
+    return () => {
+      commitTypes(); commitCredentials();
+      for (const id of this.#extensionOAuthIds) this.#oauth.delete(id);
+      this.#extensionOAuthIds.clear();
+      for (const provider of providers) { this.#oauth.set(provider.id, provider); this.#extensionOAuthIds.add(provider.id); }
+      this.#parameterValidators.clear(); this.#contributionIssue = undefined; this.#changed('channels');
+    };
+  }
+  contributionIssue(message: string) { this.#contributionIssue = message; this.#changed('channels'); }
   validate(value: unknown): asserts value is ModelChannel {
     if (!object(value) || !nonempty(value.id) || !nonempty(value.name) || !nonempty(value.type) || typeof value.enabled !== 'boolean'
       || typeof value.baseUrl !== 'string' || !object(value.authentication) || !object(value.parameters) || !Array.isArray(value.models)) return fail('channel-invalid', 'Complete the channel name, type, endpoint, authentication and models');
     endpoint(value.baseUrl);
     const type = this.types.get(value.type);
     if (!type) return fail('channel-type-unavailable', `Channel type is unavailable: ${value.type}`);
+    validateModelConnection(value.connection, type.operations, type.credentialHeader?.name);
+    for (const path of Object.values(value.connection?.paths ?? {})) appendModelPath(value.baseUrl, path);
+    if (type.protocol === 'llama-cpp-classify' && value.connection?.paths?.decision !== undefined) return fail('model-connection-invalid', 'llama.cpp classification requires its tokenize, apply-template and completion routes; configure the server base URL instead');
     const auth = value.authentication;
     if (!type.authentication.includes(auth.kind as ConnectionAuthentication['kind'])
       || auth.kind === 'credential' && !nonempty(auth.reference)
@@ -92,6 +123,15 @@ export class ModelsService {
         || model.thinkingLevelMap !== undefined && (!object(model.thinkingLevelMap) || Object.entries(model.thinkingLevelMap).some(([level, value]) =>
           !['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(level) || value !== null && typeof value !== 'string'))
         || model.parameters !== undefined && !object(model.parameters) || model.compat !== undefined && !object(model.compat)) return fail('channel-model-invalid', 'Model fields or operations are invalid');
+      if (model.image !== undefined) {
+        if (!object(model.image) || Object.keys(model.image).some(key => key !== 'mask' && key !== 'parameters')
+          || model.image.mask !== undefined && typeof model.image.mask !== 'boolean'
+          || model.image.parameters !== undefined && !object(model.image.parameters)
+          || !model.operations.some(operation => operation === 'image-generation' || operation === 'image-editing')) return fail('image-capabilities-invalid', 'Image capabilities must describe an image model');
+        const info = this.#imageInfo(value as unknown as ModelChannel, model as unknown as ChannelModel);
+        try { compileToolJsonSchema(imageToolContract(info.supportsEditing ? 'editing' : 'generation', info).inputSchema); }
+        catch { return fail('image-capabilities-invalid', 'Image parameter constraints are invalid'); }
+      }
       if (ids.has(model.id)) return fail('channel-model-invalid', 'Model IDs must be unique within a channel');
       ids.add(model.id);
     }
@@ -99,6 +139,7 @@ export class ModelsService {
   async read(): Promise<ModelConnectionsSnapshot> {
     const snapshot = await this.file.read();
     const { channels, issues } = this.#resolved(snapshot.document);
+    if (this.#contributionIssue) issues.push({ code: 'model-contributions-unavailable', message: this.#contributionIssue });
     return { revision: snapshot.revision, channels, types: this.types.list(), ...(issues.length ? { issues } : {}) };
   }
   #resolved(document: ModelsDocument, accepted = false) {
@@ -149,12 +190,17 @@ export class ModelsService {
   signIn(providerId: string, reference: string) {
     const provider = this.#oauth.get(providerId);
     if (!provider || !reference) return fail('oauth-provider-unavailable', 'Select a supported account provider');
-    return this.authorizations.start(async prompt => {
-      const expected = await this.credentials.identity(reference);
-      const value = await provider.login(prompt); prompt.signal.throwIfAborted();
-      await this.credentials.acceptOAuth(value, reference, expected);
-      this.#changed('credentials');
-    });
+    const captured = provider.captureLogin?.();
+    try {
+      return this.authorizations.start(async prompt => {
+        try {
+          const expected = await this.credentials.identity(reference); prompt.signal.throwIfAborted();
+          const value = await (captured ?? provider).login(prompt); prompt.signal.throwIfAborted();
+          await this.credentials.acceptOAuth(value, reference, expected);
+          this.#changed('credentials');
+        } finally { captured?.release(); }
+      });
+    } catch (error) { captured?.release(); throw error; }
   }
   async #channel(id: string, accepted = false): Promise<ModelChannel> {
     const current = await (accepted ? this.file.current() : this.file.read());
@@ -174,10 +220,18 @@ export class ModelsService {
       return { reference: channel.id, authority: this.credentials.authorityId, account: source.identity, generation: 0 };
     }
     if (auth.kind === 'aws-chain') {
-      const source = await this.#aws.source(channel.id, { ...(auth.profile ? { AWS_PROFILE: auth.profile } : {}), ...(typeof channel.parameters.region === 'string' ? { AWS_REGION: channel.parameters.region } : {}) });
+      const source = await this.#aws.source(channel.id, { ...(auth.profile ? { AWS_PROFILE: auth.profile } : {}) });
       return { reference: channel.id, authority: this.credentials.authorityId, account: source.identity, generation: 0 };
     }
     return this.credentials.scope(auth, channel.id);
+  }
+  #credentialHeaders(type: ChannelType, resolved: ResolvedCredential): ResolvedCredential {
+    if (!type.adapter) return resolved;
+    if (resolved.auth.apiKey) {
+      if (!type.credentialHeader) return fail('model-credential-header-missing', 'This protocol requires an explicit credential header');
+      return { auth: { headers: { ...resolved.auth.headers, [type.credentialHeader.name]: `${type.credentialHeader.prefix}${resolved.auth.apiKey}` } }, source: 'configured headers' };
+    }
+    return resolved.auth.headers ? { ...resolved, source: 'configured headers' } : resolved;
   }
   async #auth(channel: ModelChannel, dispatch?: CredentialDispatch): Promise<ResolvedCredential> {
     const auth = channel.authentication;
@@ -187,18 +241,27 @@ export class ModelsService {
     }
     if (auth.kind === 'aws-chain') {
       if (!dispatch) return fail('aws-dispatch-required', 'AWS authentication requires the original serialized request');
-      const source = await this.#aws.source(channel.id, { ...(auth.profile ? { AWS_PROFILE: auth.profile } : {}), ...(typeof channel.parameters.region === 'string' ? { AWS_REGION: channel.parameters.region } : {}) });
-      return { auth: { headers: await this.#aws.sign(source, dispatch, {}) }, source: 'aws-chain' };
+      const source = await this.#aws.source(channel.id, { ...(auth.profile ? { AWS_PROFILE: auth.profile } : {}) });
+      return { auth: { headers: await this.#aws.sign(source, dispatch, channel.connection?.headers ?? {}, typeof channel.parameters.region === 'string' ? channel.parameters.region : undefined) }, source: 'aws-chain' };
     }
-    return this.credentials.resolve(auth, channel.id, undefined, dispatch);
+    return this.#credentialHeaders(this.types.get(channel.type)!, await this.credentials.resolve(auth, channel.id, undefined, dispatch));
   }
   currentScope(providerId: string) { return this.#channel(providerId, true).then(channel => this.#scope(channel)); }
   async currentProviderAccount(providerId: string): Promise<string | undefined> { const auth = (await this.#channel(providerId, true)).authentication; return auth.kind === 'credential' ? this.credentials.providerAccount(auth.reference) : undefined; }
   getAuth(providerId: string, _modelId?: string, dispatch?: CredentialDispatch) { return this.#channel(providerId, true).then(channel => this.#auth(channel, dispatch)); }
+  async mcpBearerToken(providerId: string): Promise<string | undefined> {
+    const resolved = await this.getAuth(providerId);
+    if (resolved.auth.apiKey) return resolved.auth.apiKey;
+    const authorization = new Headers(Object.fromEntries(Object.entries(resolved.auth.headers ?? {}).filter((entry): entry is [string, string] => entry[1] !== null))).get('authorization');
+    if (!authorization) return undefined;
+    const bearer = /^Bearer (.+)$/i.exec(authorization);
+    if (!bearer) return fail('mcp-authentication-unsupported', 'The selected account does not provide bearer authentication');
+    return bearer[1];
+  }
   async anthropicAuthentication(providerId: string): Promise<'oauth' | 'api-key'> { return (await this.getAuth(providerId)).source === 'oauth' ? 'oauth' : 'api-key'; }
   async vertexAuthentication(providerId: string): Promise<'api-key' | 'adc'> { return (await this.#channel(providerId)).authentication.kind === 'google-adc' ? 'adc' : 'api-key'; }
-  async routingEnvironment(providerId: string): Promise<Record<string, string>> {
-    const channel = await this.#channel(providerId);
+  async routingEnvironment(providerId: string): Promise<Record<string, string>> { return this.#routingEnvironment(await this.#channel(providerId)); }
+  #routingEnvironment(channel: ModelChannel): Record<string, string> {
     const p = channel.parameters;
     return { ...(typeof p.region === 'string' ? { AWS_REGION: p.region } : {}),
       ...(typeof p.project === 'string' ? { GOOGLE_CLOUD_PROJECT: p.project } : {}), ...(typeof p.location === 'string' ? { GOOGLE_CLOUD_LOCATION: p.location } : {}),
@@ -206,8 +269,11 @@ export class ModelsService {
       ...(typeof p.deployment === 'string' ? { AZURE_OPENAI_DEPLOYMENT_NAME_MAP: channel.models.map(model => `${model.id}=${p.deployment}`).join(',') } : {}) };
   }
   #selected(channel: ModelChannel, model: ChannelModel): SelectedModel {
+    const adapter = this.types.get(channel.type)!.adapter;
     return { providerId: channel.id, modelId: model.id, requestModelId: model.requestModelId ?? model.id, name: model.name,
+      ...(adapter ? { adapterId: adapter.id, adapterVersion: adapter.version, adapterIdentity: adapter.identity, adapterBindingId: adapter.bindingId, endpointPath: adapter.endpointPath } : {}),
       api: this.types.get(channel.type)!.protocol, baseUrl: channel.baseUrl, maxTokens: model.maxOutputTokens ?? 0,
+      ...(channel.connection === undefined ? {} : { connection: structuredClone(channel.connection) }),
       ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }), input: model.input ?? ['text'],
       ...(model.reasoning === undefined ? {} : { reasoning: model.reasoning }),
       ...(model.thinkingLevelMap === undefined ? {} : { thinkingLevelMap: model.thinkingLevelMap }),
@@ -218,6 +284,43 @@ export class ModelsService {
     return (await this.read()).channels.filter(channel => channel.enabled)
       .flatMap(channel => channel.models.filter(model => model.enabled && model.operations.includes('chat')).map(model => this.#selected(channel, model)));
   }
+  async captureModel(providerId: string, modelId: string, original?: import('../kernel/protocol.generated.js').ModelSessionConfiguration): Promise<{ model: SelectedModel; authority: ModelExecutionAuthority; release(): void }> {
+    const channel = await this.#channel(providerId);
+    const model = this.#model(channel, modelId, 'chat');
+    const selected = this.#selected(channel, model);
+    const type = this.types.get(channel.type)!;
+    const scope = await this.#scope(channel);
+    const captured = channel.authentication.kind === 'credential' || channel.authentication.kind === 'environment' || channel.authentication.kind === 'none'
+      ? await this.credentials.captureResolver(channel.authentication, channel.id) : undefined;
+    let releaseAdapter: (() => void) | undefined;
+    try { releaseAdapter = await type.adapter?.capture(); } catch (error) { captured?.release(); throw error; }
+    const assertAvailable = async () => {
+      const current = await this.#channel(providerId, true);
+      this.#model(current, modelId, 'chat');
+      if (revisionOf(current.authentication) !== revisionOf(channel.authentication)
+        || !sameScope(await this.#scope(current), scope)) return fail('credential-scope-changed', 'The selected account changed');
+    };
+    const requestChannel: ModelChannel = original ? { ...channel, connection: original.connection ?? {},
+      parameters: { ...channel.parameters, ...(original.awsRegion ? { region: original.awsRegion } : {}) } } : channel;
+    const getAuth = async (_provider: string, _model?: string, dispatch?: CredentialDispatch) => {
+      await assertAvailable();
+      const result = captured ? this.#credentialHeaders(type, await captured.resolve(undefined, dispatch)) : await this.#auth(requestChannel, dispatch);
+      await assertAvailable();
+      return result;
+    };
+    try { await assertAvailable(); } catch (error) { captured?.release(); releaseAdapter?.(); throw error; }
+    return { model: selected, release: () => { captured?.release(); releaseAdapter?.(); }, authority: {
+      getAuth,
+      currentScope: async () => { await assertAvailable(); return scope; },
+      currentProviderAccount: async () => {
+        await assertAvailable();
+        return channel.authentication.kind === 'credential' ? this.credentials.providerAccount(channel.authentication.reference) : undefined;
+      },
+      routingEnvironment: async () => this.#routingEnvironment(channel),
+      anthropicAuthentication: async () => (await getAuth(providerId)).source === 'oauth' ? 'oauth' : 'api-key',
+      vertexAuthentication: async () => channel.authentication.kind === 'google-adc' ? 'adc' : 'api-key',
+    } };
+  }
   async selectedModel(providerId: string, modelId: string) { const channel = await this.#channel(providerId); return this.#selected(channel, this.#model(channel, modelId, 'chat')); }
   readGlobalInferenceSettings() { return this.settings.read().then(snapshot => snapshot.document); }
   async listImageModels() {
@@ -227,7 +330,11 @@ export class ModelsService {
     const api = typeof channel.parameters.imageApi === 'string' ? channel.parameters.imageApi : channel.type === 'openrouter' ? 'openrouter-images' : 'openai-images';
     const info = imageModelInfo({ provider: channel.id, id: model.id, name: model.name, api, input: model.operations.includes('image-editing') ? ['text', 'image'] : ['text'] });
     if (!info) return fail('image-api-unavailable', 'The selected image protocol is unavailable');
-    return { ...info, supportsGeneration: model.operations.includes('image-generation') };
+    const parameters = model.image?.parameters === undefined ? [] : Object.keys(model.image.parameters);
+    if (parameters.some(name => !info.parameters.includes(name))) return fail('image-capabilities-invalid', 'The image protocol does not support a configured parameter');
+    if (model.image?.mask && !info.supportsMask) return fail('image-capabilities-invalid', 'The image protocol does not support masks');
+    return { ...info, supportsGeneration: model.operations.includes('image-generation'), supportsMask: info.supportsMask && model.image?.mask === true,
+      parameters, ...(model.image?.parameters ? { parameterSchemas: structuredClone(model.image.parameters) } : {}) };
   }
   resolveEmbeddingBinding(providerId: string, modelId: string) { return this.#binding(providerId, modelId, 'embedding'); }
   resolveRerankBinding(providerId: string, modelId: string, endpoint?: string) { return this.#binding(providerId, modelId, 'rerank', endpoint); }
@@ -240,7 +347,9 @@ export class ModelsService {
     const image = operation === 'image-generation' || operation === 'image-editing';
     const api = image ? this.#imageInfo(channel, model).api : type.protocol;
     const baseUrl = channel.baseUrl;
-    const routes = image ? (api === 'openrouter-images' ? ['chat/completions'] : [operation === 'image-editing' ? 'images/edits' : 'images/generations']).map(path => ({ requestUrl: `${baseUrl.replace(/\/+$/, '')}/${path}`, requestKind: 'model_compute' as const }))
+    const configuredPath = override ?? channel.connection?.paths?.[operation];
+    const routes = configuredPath !== undefined ? [{ requestUrl: appendModelPath(baseUrl, configuredPath), requestKind: 'model_compute' as const }]
+      : image ? (api === 'openrouter-images' ? ['chat/completions'] : [operation === 'image-editing' ? 'images/edits' : 'images/generations']).map(path => ({ requestUrl: `${baseUrl.replace(/\/+$/, '')}/${path}`, requestKind: 'model_compute' as const }))
       : operation === 'embedding' ? [{ requestUrl: embeddingRequestUrl(baseUrl), requestKind: 'model_compute' as const }]
         : operation === 'rerank' ? [{ requestUrl: rerankRequestUrl(baseUrl, override), requestKind: 'model_compute' as const }]
           : api === 'llama-cpp-classify' ? ['tokenize', 'apply-template', 'completion'].map(path => ({ requestUrl: `${baseUrl.replace(/\/v1\/?$/, '').replace(/\/+$/, '')}/${path}`, requestKind: path === 'completion' ? 'model_compute' as const : 'preparation' as const }))
@@ -252,28 +361,55 @@ export class ModelsService {
       this.#model(current, modelId, operation);
       if (revisionOf(current.authentication) !== revisionOf(channel.authentication) || !sameScope(await this.#scope(current), credentialScope)) return fail('credential-scope-changed', 'The selected account changed');
     };
+    const captured = channel.authentication.kind === 'credential' || channel.authentication.kind === 'environment' || channel.authentication.kind === 'none'
+      ? await this.credentials.captureResolver(channel.authentication, channel.id) : undefined;
+    let references = 1, active = 0, baseReleased = false, disposed = false;
+    const dispose = () => { if (!references && !active && !disposed) { disposed = true; captured?.release(); } };
+    const retain = () => {
+      if (!references) throw new Error('The original model binding was released');
+      references += 1; let released = false;
+      return () => { if (released) return; released = true; references -= 1; dispose(); };
+    };
+    const release = () => { if (baseReleased) return; baseReleased = true; references -= 1; dispose(); };
+    const getAuth = async () => {
+      if (!references) throw new Error('The original model binding was released');
+      active += 1;
+      try {
+        await assertAvailable();
+        const auth = captured ? this.#credentialHeaders(type, await captured.resolve()) : await this.#auth(channel);
+        await assertAvailable(); return auth;
+      } finally { active -= 1; dispose(); }
+    };
     const { name: _channelName, models: _models, enabled: _channelEnabled, ...connection } = channel;
     const { name: _modelName, enabled: _modelEnabled, ...selection } = model;
     const configurationId = revisionOf({ channel: connection, model: selection, routes });
-    return { providerId, modelId, requestModelId: model.requestModelId ?? model.id, baseUrl, api, routes, requestUrl: routes[0]!.requestUrl, ...(override === undefined ? {} : { endpoint: override }), configurationId,
+    const egressOverride = modelEgressOverride(channel.connection);
+    return { providerId, modelId, requestModelId: model.requestModelId ?? model.id, baseUrl, api, routes, requestUrl: routes[0]!.requestUrl, ...(configuredPath === undefined ? {} : { endpoint: configuredPath }), configurationId,
+      ...(channel.connection === undefined ? {} : { connection: structuredClone(channel.connection) }),
+      ...(channel.connection?.headers === undefined ? {} : { headers: structuredClone(channel.connection.headers) }),
+      ...(egressOverride === undefined ? {} : { egressOverride }),
       credentialRef: providerId, credentialScope, allowAnonymous: channel.authentication.kind === 'none',
       ...(image ? { imageModel: this.#imageInfo(channel, model) } : {}),
       assertAvailable, currentScope: async () => { await assertAvailable(); return credentialScope; },
-      getAuth: async () => { await assertAvailable(); const auth = await this.#auth(channel); await assertAvailable(); return auth; } };
+      getAuth, retain, release };
   }
-  async discover(id: string, fetchImpl: typeof fetch, signal?: AbortSignal) {
+  async discover(id: string, fetchImpl: EgressFetch, signal?: AbortSignal) {
     const channel = await this.#channel(id);
     const type = this.types.get(channel.type)!;
-    if (!type.discovery || !type.discoveryRequest || !type.parseDiscovery) return fail('model-discovery-unavailable', 'Add models manually for this channel type');
+    if (!type.discovery || !type.discoveryRequest || !type.parseDiscovery) {
+      if (type.catalog) return { models: structuredClone(type.catalog) };
+      return fail('model-discovery-unavailable', 'Add models manually for this channel type');
+    }
     const request = type.discoveryRequest(channel);
     endpoint(request.url);
     const expected = await this.#scope(channel);
     const auth = await this.#auth(channel);
     if (!sameScope(expected, await this.currentScope(id))) return fail('credential-scope-changed', 'The account changed during model discovery');
     const headers = new Headers(request.headers);
+    for (const [key, value] of Object.entries(channel.connection?.headers ?? {})) headers.set(key, value);
     for (const [key, value] of Object.entries(auth.auth.headers ?? {})) if (value !== null) headers.set(key, value);
     if (auth.auth.apiKey) headers.set(type.protocol === 'anthropic-messages' ? 'x-api-key' : type.protocol.startsWith('google-') ? 'x-goog-api-key' : 'authorization', type.protocol === 'anthropic-messages' || type.protocol.startsWith('google-') ? auth.auth.apiKey : `Bearer ${auth.auth.apiKey}`);
-    const response = await fetchImpl(request.url, { headers, ...(signal ? { signal } : {}), redirect: 'manual' });
+    const response = await fetchImpl(request.url, { headers, ...(signal ? { signal } : {}), redirect: 'manual' }, modelEgressOverride(channel.connection));
     if (!response.ok) return fail('model-discovery-failed', `Model discovery failed (${response.status})`);
     const models = type.parseDiscovery(await response.json());
     if (!sameScope(expected, await this.currentScope(id))) return fail('credential-scope-changed', 'The account changed during model discovery');

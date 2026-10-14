@@ -5,8 +5,10 @@ semantic history, execute one request, parse protocol events and preserve contin
 They do not own a conversation loop, tool authorization or a credential store. The default product
 runtime still uses Pi; see [runtime ownership](../../../../../docs/runtime.md).
 
-The authoritative installed families are declared in [builtins.rs](builtins.rs), validated by its
-family-specific options, and selected from the trusted Host [model catalog](../../../../../packages/web/application-host/lib/kernel/model-authority.ts).
+The native base catalog is declared in [builtins.rs](builtins.rs) and validated by its family-specific
+options. Reviewed Host model contributions register [brokered codecs](extensions.rs) into the same
+[ModelAdapterRegistry](registry.rs). The trusted Host [model catalog](../../../../../packages/web/application-host/lib/kernel/model-authority.ts)
+prepares the selected implementation and endpoint.
 The renderer chooses registered model IDs, not arbitrary endpoints or auth headers.
 
 ## Current protocol families
@@ -25,6 +27,24 @@ The renderer chooses registered model IDs, not arbitrary endpoints or auth heade
 
 These are concrete adapters, not aliases for one generic OpenAI-compatible body. Protocol fixtures
 and loopback tests do not establish parity with every service option or live account.
+
+## Brokered protocol implementations
+
+`BrokeredModelAdapter` invokes a fixed Host service pin for typed serialization and parsing while
+`Connection`/`HttpTransport` retain HTTP dispatch, SSE framing and cancellation. The original
+`RequestView` IDs, `ProviderEvent` values, usage receipts and request ledger remain authoritative.
+The callback receives no credentials. A missing terminal protocol fact is an incomplete stream,
+not a retry instruction. The current cross-process contract is chat over SSE, not a claim of binary
+protocol or auxiliary-operation support.
+
+A runtime binding ID selects the actual pinned worker. A separate content identity covers the
+verified artifact/composition and adapter metadata, so an identical implementation can be rebound
+after process restart without accepting changed code. Captured selections retain the original Rust
+composition before admission. Replacing an unrelated provider reuses unchanged adapter registrations.
+Explicit revocation forwards cancellation through the original token. The callback bridge must await
+actual response or worker exit before claiming drain; a cancelled observer cannot release the original
+request or turn unknown usage into zero. The Host also drains pins when a kernel epoch disconnects,
+without depending on static Rust destructors during process exit.
 
 ## Immutable request boundary
 

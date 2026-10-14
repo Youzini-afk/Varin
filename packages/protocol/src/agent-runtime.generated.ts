@@ -1,5 +1,7 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
 
+export interface ModelHttpConfiguration { headers?:Record<string,string>; proxy?:{mode:"direct"}|{mode:"proxy";url:string} }
+
 export interface FileObservationAuthority {coordinatorHostId:string;authorityId:string;resourceEpoch:string;}
 
 export interface InferenceReceiptPendingParams {
@@ -1395,7 +1397,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 40; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 41; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -1973,6 +1975,10 @@ export interface ModelSessionConfiguration {
   anthropicOauth?: boolean;
   adapterId?: string;
   adapterVersion?: string;
+  awsRegion?: string;
+  adapterIdentity?: string;
+  adapterBindingId?: string;
+  connection?: ModelHttpConfiguration;
   contextWindowTokens?: number;
   thinkingLevel?: string;
   modelOptions?: unknown;

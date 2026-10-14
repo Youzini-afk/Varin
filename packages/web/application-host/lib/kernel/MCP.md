@@ -1,9 +1,10 @@
 # MCP capabilities
 
-MCP configuration, OAuth storage, connections and their tool catalogs are owned by the shared
-Application Host `McpAuthority` exported from `@varin/pi-host/mcp-authority`. Existing Pi MCP
-presentation delegates through `mcp.owner`; execution leases the same owner. Execution
-never starts a Pi AgentSession, and the adapter creates no MCP client, installer or secret store.
+Agent MCP configuration, OAuth storage, connections and their tool catalogs are owned by the shared
+Application Host [`McpAuthority`](../mcp/DOCUMENTATION.md) in `lib/mcp`. This adapter leases that
+owner; it creates no MCP client, installer or secret store and never starts a Pi AgentSession.
+Pi remains the default runtime and retains a separate `@varin/pi-host/mcp-authority` instance,
+configuration and accounts. Sharing runtime interaction adapters does not merge those owners.
 
 ## Preparation and frozen identity
 
@@ -33,10 +34,11 @@ or prove independent/read-only effects.
 
 ## Execution and permission
 
-Pi scopes read the existing session's effective project trust through the internal, out-of-band
-`settings.context` cut. This preserves one-session trust without persisting it or waiting behind the
-MCP manager's own request. Unlike `settings.get`, this cut does not reload or mutate settings. The
-returned cwd must match the already admitted actor; callers cannot provide a different directory.
+Agent scopes read trusted project settings through the native Host settings owner and the common
+read-only project-trust reader. The original configuration cwd, execution cwd and Source owner are
+admitted before preparation; callers cannot substitute another directory. Pi's separate scope keeps
+its existing out-of-band `settings.context` cut for effective session trust, without turning a
+native settings read into a Pi worker request.
 
 A private framed Host/kernel rendezvous supports only MCP authorize, execute and cancellation messages.
 It is not a generic Host-service forwarding endpoint. Requests are bound to kernel epoch, Run,
@@ -170,10 +172,10 @@ interaction owner below. Basic sampling uses the separate two-review model execu
 
 ## Reviewed server-initiated form and URL requests
 
-The original authority's installed receiver supplies form/URL capability before initialize. Pi-first
-and Native-later users of that same authority share its client; a Pi-only authority without a receiver
-does not advertise unsupported interaction. Each real native call supplies its Operation/executor
-identity, not a second enabled-tools or grant list. Known related-task identity wins over the HTTP
+The original authority's installed receiver supplies form/URL capability during protocol connection.
+Each authority advertises only the interaction capabilities its own receiver supports; the separate
+Pi authority can use the same interaction adapter without sharing the native client. Each real native
+call supplies its Operation/executor identity, not a second enabled-tools or grant list. Known related-task identity wins over the HTTP
 response stream even if another call owns that stream. Unknown Task or unassociated ordinary stdio
 requests receive an explicit unavailable-association error rather than an inferred current Thread.
 

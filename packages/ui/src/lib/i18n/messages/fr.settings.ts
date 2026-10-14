@@ -2,6 +2,17 @@ import { settingsDict as englishSettingsDict } from './en.settings';
 
 export const settingsDict = {
   ...englishSettingsDict,
+  "settings.models.network": "Réseau et protocole",
+  "settings.models.proxy": "Proxy",
+  "settings.models.proxyHost": "Utiliser les réglages du Host",
+  "settings.models.proxyDirect": "Connexion directe",
+  "settings.models.proxyCustom": "Proxy personnalisé",
+  "settings.models.proxyUrl": "URL du proxy",
+  "settings.models.proxyHint": "Origine HTTP(S) du proxy uniquement. Ne pas inclure de données de connexion.",
+  "settings.models.headers": "En-têtes non sensibles",
+  "settings.models.headersHint": "Valeurs JSON de type chaîne uniquement. Gérez les clés API, jetons et cookies dans les réglages d’authentification.",
+  "settings.models.path": "Chemin du protocole",
+  "settings.models.pathsHint": "Les chemins facultatifs commencent par / et s’ajoutent au chemin du point de terminaison. Laissez vide pour utiliser la valeur par défaut.",
   "settings.agents.configured": "Configuré",
   "settings.page.harness.index.cpu.title": "Utilisation du CPU local",
   "settings.page.harness.index.cpu.description": "Adapte les lots et les tâches de fond à la charge, en donnant priorité aux recherches. Les modifications prennent effet après redémarrage du Host.",
@@ -3735,4 +3746,5 @@ export const settingsDict = {
   "settings.varin.recovery.storage.historyDescription": "Seuls les espaces de travail conservant un historique de restauration sont affichés. Le nettoyage préserve les points de contrôle et les versions encore référencés.",
   "settings.varin.recovery.storage.cleanupShared": "Nettoyer le contenu non référencé",
   "settings.varin.recovery.storage.cleanupNothing": "Aucun contenu à récupérer. Les points de contrôle et les versions référencés sont conservés.",
+  "settings.models.image": "Capacités d’image (masque, schémas de paramètres)",
 } as const;

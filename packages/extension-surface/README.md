@@ -61,3 +61,7 @@ the actual resources until completion. Ordinary replacement withdraws presentati
 external lifetime through `onRetire`, then releases resources after retained calls drain. Explicit
 disable cancels the owner signal. Retiring a Surface does not own or stop independent Host backend
 work; Host leases and their admitted-call pins govern those resources.
+
+The external publication callback also receives `preparedConsumerCount`, taken from the connected
+consumers' actual validated preparation leases. The loader carries this receipt through grouped Host
+publication. It counts prepared consumers, not frames, windows or pixels; zero does not establish a mount.

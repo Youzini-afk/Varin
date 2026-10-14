@@ -1,4 +1,15 @@
 export const settingsDict = {
+  "settings.models.network": "Sieć i protokół",
+  "settings.models.proxy": "Serwer proxy",
+  "settings.models.proxyHost": "Użyj ustawień Host",
+  "settings.models.proxyDirect": "Połączenie bezpośrednie",
+  "settings.models.proxyCustom": "Własny serwer proxy",
+  "settings.models.proxyUrl": "Adres URL proxy",
+  "settings.models.proxyHint": "Tylko adres źródłowy proxy HTTP(S), bez danych logowania.",
+  "settings.models.headers": "Nagłówki bez danych poufnych",
+  "settings.models.headersHint": "Tylko ciągi znaków JSON. Klucze API, tokeny i pliki cookie przechowuj w ustawieniach uwierzytelniania.",
+  "settings.models.path": "Ścieżka protokołu",
+  "settings.models.pathsHint": "Opcjonalne ścieżki zaczynają się od / i są dodawane do ścieżki punktu końcowego. Puste pole oznacza wartość domyślną.",
   "settings.agents.configured": "Skonfigurowano",
   // New profile controls use the English fallback until localized.
   "settings.agents.editRuntime": "Edit tools for runtime",
@@ -3971,4 +3982,5 @@ export const settingsDict = {
   "settings.varin.recovery.storage.historyDescription": "Pokazane są tylko przestrzenie z zachowaną historią odzyskiwania. Czyszczenie zachowuje używane punkty kontrolne i wersje.",
   "settings.varin.recovery.storage.cleanupShared": "Usuń nieużywaną treść",
   "settings.varin.recovery.storage.cleanupNothing": "Nie ma treści do usunięcia. Używane punkty kontrolne i wersje pozostają zachowane.",
+  "settings.models.image": "Możliwości obrazów (maska, schematy parametrów)",
 };

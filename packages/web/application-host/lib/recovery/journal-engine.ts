@@ -92,6 +92,7 @@ interface DirtyBufferPublication {
 interface DirtyBarrierHandle { barrierId?: string; release(): Promise<void>; settle(): Promise<void> }
 interface TargetBarrierHandle extends DirtyBarrierHandle { barrierFor(workspaceId: string): string }
 interface RecoveryDocumentsAuthority {
+  reconcileWorkspaceEdits?(workspaceId: string): Promise<Array<{ status: string; operationId: string }>>;
   beginDirtyStateBarrier?: (workspaceId: string, paths: string[], options: { caseSensitive: boolean }) => Promise<DirtyBarrierHandle>;
   inspectDirtyBuffers(workspaceId: string): Promise<DirtyBufferPublication[]>;
   inspectWorkspace(workspaceId: string): Promise<{ root: string; workspaceId: string }>;
@@ -1394,6 +1395,12 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
           ...(resolveDirectoryApplyContext ? { resolveDirectoryApplyContext } : {}),
         };
         await reconcileInterruptedIntegrationOperations(context);
+        const workspaceEdits = await documents.reconcileWorkspaceEdits?.(registration.workspaceId) ?? [];
+        for (const edit of workspaceEdits.filter(value => value.status === 'needs-attention')) {
+          const failures = startupFailures.get(registration.workspaceId) ?? [];
+          failures.push(recoveryFailure(new RecoveryPrimitiveError('needs-attention', `Workspace edit ${edit.operationId} requires attention`, { operationId: edit.operationId, origin: 'storage' }), 'needs-attention'));
+          startupFailures.set(registration.workspaceId, failures);
+        }
         const { reconcileInterruptedAgentMutations } = await import("../documents/agent-mutation-operation.js");
         const mutations = await reconcileInterruptedAgentMutations(context);
         if (mutations.needsAttention.length > 0) {
@@ -1610,7 +1617,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
     setRetentionPolicy: async () => unavailable("Recovery retention policy is owned by the Rust kernel and is not configurable"),
     setStorageLocation: async () => unavailable("Rust recovery storage cannot be moved independently of kernel storage"),
     status: (workspaceId) => safe(async () => {
-      const attention = (await durable.listOperations(workspaceId, "agent-mutation")).filter((value) => value.state === "needs-attention");
+      const attention = (await durable.listOperations(workspaceId)).filter((value) => ["agent-mutation", "workspace-edit"].includes(String(value.kind)) && value.state === "needs-attention");
       return {
         capabilities: {
           bindings: true,
@@ -1629,7 +1636,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
           ...(startupFailures.get(workspaceId) ?? []),
           ...attention.map((value) => ({
             code: "needs-attention" as const,
-            message: `Agent surface mutation ${String(value.operationId)} requires attention`,
+            message: `${value.kind === "workspace-edit" ? "Workspace edit" : "Agent surface mutation"} ${String(value.operationId)} requires attention`,
             operationId: String(value.operationId),
             origin: "storage" as const,
             retryable: false,

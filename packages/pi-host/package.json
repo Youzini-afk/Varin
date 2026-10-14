@@ -86,7 +86,8 @@
     "typebox": "1.3.36",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
-    "@varin/script-runtime": "0.1.0"
+    "@varin/script-runtime": "0.1.0",
+    "@varin/settings-store": "workspace:*"
   },
   "devDependencies": {
     "@types/proper-lockfile": "4.1.4"

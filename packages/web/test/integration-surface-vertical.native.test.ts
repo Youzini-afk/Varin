@@ -25,6 +25,13 @@ async function publicEpoch<T extends { status: string }>(work: Promise<T>): Prom
 }
 
 const documentsClient = (authority: DocumentAuthority): DocumentsAPI => ({
+  prepareWorkspaceEdit: request => authority.prepareWorkspaceEdit(request),
+  discardWorkspaceEdit: request => authority.discardWorkspaceEdit(request),
+  applyWorkspaceEdit: request => authority.applyWorkspaceEdit(request),
+  readWorkspaceEdit: request => authority.readWorkspaceEdit(request),
+  readWorkspaceEditRecovery: request => authority.readWorkspaceEditRecovery(request),
+  undoWorkspaceEdit: request => authority.undoWorkspaceEdit(request),
+  listWorkspaceEdits: request => authority.listWorkspaceEdits(request.workspaceId),
   resolveWorkspace: authority.resolveWorkspace,
   resolveResourceIdentity: authority.resolveResourceIdentity,
   read: authority.read,

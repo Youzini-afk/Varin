@@ -65,7 +65,7 @@ function adapterFixture(saved: ContextCheckpoint, prepare: ContextPreparer, chil
   };
   const configuration: ModelSessionConfiguration = { providerFamily: 'fixture', model: 'fixture', endpoint: 'https://fixture.invalid', credentialEnvironment: null,
     allowAnonymous: false, configurationGeneration: 1, maxOutputTokens: 64 };
-  const credentialOwner = { scope: async () => ({ reference: 'fixture', authority: 'fixture', account: 'fixture', generation: 1 }) } as ExistingHostCredentialOwner;
+  const credentialOwner = { scope: async () => ({ reference: 'fixture', authority: 'fixture', account: 'fixture', generation: 1 }), release() {}, retain: () => () => {} } as unknown as ExistingHostCredentialOwner;
   const admit = vi.fn(async () => {}); const errors: unknown[] = [];
   const adapter = new ThreadAdapter(runtime as unknown as AgentRuntimeClient,
     { resolveModel: async () => ({ configuration, credentialOwner }), rebindModel: async () => credentialOwner },
@@ -221,7 +221,7 @@ it('ThreadAdapter submits an explicit source with real forSource preparation and
   const changed = submitted.initialContext!;
   expect(submitted.expectedContextCheckpoint).toBe(saved.id);
   expect(submitted.launch).toMatchObject({ inheritSource: false, source: { workspaceId: 'new-workspace', branchId: 'new-source', revision: 2 }, childDispatch: frozenProfiles });
-  expect(childProfiles).toHaveBeenCalledExactlyOnceWith({ parent: { configuration: submitted.configuration, credential_scope: submitted.launch!.credentialScope } });
+  expect(childProfiles).toHaveBeenCalledExactlyOnceWith({ modelOwner: expect.objectContaining({ retain: expect.any(Function) }), parent: { configuration: submitted.configuration, credential_scope: submitted.launch!.credentialScope } });
 
   expect(changed.resources?.source).toMatchObject({ workspace_id: 'new-workspace', branch_id: 'new-source', revision: 2 });
   expect(changed.resources?.snapshot.scope).toMatchObject({ mode: 'agent', threadRole: 'worker', projectId: 'admitted-project' });

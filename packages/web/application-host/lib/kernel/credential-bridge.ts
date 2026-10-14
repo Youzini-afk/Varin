@@ -8,7 +8,7 @@ export interface PrivateCredentialResponse {
 }
 interface Request { v: 1; kind: 'credential-request'; id: string; kernelEpoch: string; runId: string; bindingId?: string | null; scope: CredentialScope; dispatch?: CredentialDispatch | null }
 export type CredentialLifetime = { kind: 'run' } | { kind: 'operation'; operationId: string; assertLive?: () => Promise<void> };
-interface OwnerEntry { lifetime: CredentialLifetime; runId: string; owner: ExistingHostCredentialOwner; scope: CredentialScope; epoch: string; abort: AbortController; active: Set<string> }
+interface OwnerEntry { lifetime: CredentialLifetime; runId: string; owner: ExistingHostCredentialOwner; scope: CredentialScope; epoch: string; release: () => void; abort: AbortController; active: Set<string> }
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 const scopeValid = (value: unknown): value is CredentialScope => record(value)
   && ['reference', 'authority', 'account'].every(key => typeof value[key] === 'string' && Boolean(value[key]))
@@ -25,20 +25,52 @@ export class CredentialBridge {
     const key = ownerKey(runId, bindingId);
     const epoch = this.currentEpoch();
     if (!epoch || !runId || bindingId === '' || (lifetime.kind === 'operation' && (!lifetime.operationId || !bindingId)) || this.#owners.has(key)) throw new CredentialOwnerError('credential-owner-registration-invalid');
-    const scope = await waitWithSignal(owner.scope(), signal);
-    signal?.throwIfAborted();
-    if (this.currentEpoch() !== epoch || this.#owners.has(key)) throw new CredentialOwnerError('credential-owner-registration-stale');
-    this.#owners.set(key, { lifetime, runId, owner, scope, epoch, abort: new AbortController(), active: new Set() });
-    return { ...scope };
+    const release = owner.retain();
+    try {
+      const scope = await waitWithSignal(owner.scope(), signal);
+      signal?.throwIfAborted();
+      if (this.currentEpoch() !== epoch || this.#owners.has(key)) throw new CredentialOwnerError('credential-owner-registration-stale');
+      this.#owners.set(key, { lifetime, runId, owner, scope, epoch, release, abort: new AbortController(), active: new Set() });
+      return { ...scope };
+    } catch (error) { release(); throw error; }
+  }
+  findOwner(identity: string, scope: CredentialScope): ExistingHostCredentialOwner | undefined {
+    for (const entry of this.#owners.values()) {
+      if (entry.epoch !== this.currentEpoch()) continue;
+      if (entry.owner.bindingIdentity === identity && same(entry.scope, scope)) return entry.owner.fork();
+      const dependency = entry.owner.findRetained(identity, scope); if (dependency) return dependency;
+    }
+    return undefined;
+  }
+  async retainQueuedModel(runId: string, owner: ExistingHostCredentialOwner): Promise<void> {
+    const identity = owner.bindingIdentity;
+    if (!identity) throw new CredentialOwnerError('credential-model-identity-unavailable');
+    const bindingId = `admission:model:${identity}`;
+    const key = ownerKey(runId, bindingId);
+    const scope = await owner.scope();
+    const retained = () => {
+      const entry = this.#owners.get(key);
+      return entry && entry.epoch === this.currentEpoch() && entry.owner.bindingIdentity === identity && same(entry.scope, scope);
+    };
+    if (retained()) return;
+    try { await this.register(runId, owner, undefined, bindingId); }
+    catch (error) {
+      // Concurrent observers can register the same admitted binding. register() releases
+      // its losing retain before rejecting; only the exact original binding is idempotent.
+      if (!retained()) throw error;
+    }
+  }
+  releaseQueuedModel(runId: string, owner: ExistingHostCredentialOwner): void {
+    if (owner.bindingIdentity) this.unregister(runId, `admission:model:${owner.bindingIdentity}`);
   }
   unregister(runId: string, bindingId?: string | null): void {
     for (const [key, entry] of this.#owners) {
       if (entry.runId === runId && (bindingId === undefined ? entry.lifetime.kind === 'run' : key === ownerKey(runId, bindingId))) {
-        this.#owners.delete(key); entry.abort.abort();
+        this.#owners.delete(key); entry.abort.abort(); entry.release();
       }
     }
   }
-  close(): void { for (const entry of this.#owners.values()) entry.abort.abort(); this.#owners.clear(); }
+  close(): void { for (const entry of this.#owners.values()) { entry.abort.abort(); entry.release(); } this.#owners.clear(); }
   /** True for this private kind, even if invalid: never pass it to public protocol consumers. */
   consume(value: unknown): boolean {
     if (!record(value) || value.kind !== 'credential-request') return false;

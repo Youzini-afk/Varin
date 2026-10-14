@@ -31,6 +31,7 @@ function requireCandidateScores(scores: HttpRerankScore[], candidateCount: numbe
 export function createRerankInference(authority: RerankInferenceAuthority, settings: () => Promise<unknown>,
   options: InferenceRequestsOptions, requests: InferenceRequests) {
   let closed = false;
+  const leases = new Set<() => void>();
   let disabled = false;
   let revocationGeneration = 0;
   const readSelection = async () => {
@@ -50,62 +51,70 @@ export function createRerankInference(authority: RerankInferenceAuthority, setti
       let provider: HostInferenceProviderBinding;
       try { provider = await authority.resolveRerankBinding(selected.providerId, selected.modelId, selected.endpoint); }
       catch { return { status: 'unavailable', message: 'The selected rerank connection is unavailable.' }; }
-      try { if (!isDeepStrictEqual(await readSelection(), selected)) return { status: 'unavailable', message: 'Rerank settings changed during preparation.' }; }
-      catch { return { status: 'invalid', message: 'Rerank settings changed during preparation.' }; }
-      const generation = revocationGeneration;
-      const binding: HarnessResolvedRerankBinding = Object.freeze({ ...selected,
-        ...(provider.endpoint ? { endpoint: provider.endpoint } : {}), configurationId: provider.configurationId });
-      let released = false;
-      const assertAvailable = async (signal?: AbortSignal) => {
-        signal?.throwIfAborted();
-        if (closed || released) throw new Error('Original rerank binding was released');
-        try { await readSelection(); } catch { /* A malformed new candidate cannot retire this accepted binding. */ }
-        if (disabled || generation !== revocationGeneration) throw new Error('Rerank was explicitly disabled');
-        await provider.assertAvailable();
-        signal?.throwIfAborted();
-      };
-      const consume: RerankInferenceLease['consume'] = async (call, input, guard) => {
-            await assertAvailable(call.signal);
-            const auth = await provider.getAuth();
-            await assertAvailable(call.signal);
-            const connection = await options.egress.prepare(provider.requestUrl);
-            const scores = requireCandidateScores(await requestHttpRerank({ baseUrl: provider.baseUrl, ...(provider.endpoint ? { endpoint: provider.endpoint } : {}),
-              ...(auth?.auth.apiKey ? { apiKey: auth.auth.apiKey } : {}),
-              ...(auth?.auth.headers ? { headers: Object.fromEntries(Object.entries(auth.auth.headers).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) } : {}),
-              model: provider.requestModelId ?? binding.modelId, query: input.query, documents: input.documents, signal: call.signal,
-              fetchImpl: async (url, init) => {
-                const destination = new URL(String(url)).toString();
-                if (destination !== provider.requestUrl || init?.method !== 'POST' || typeof init.body !== 'string') throw new Error('Rerank request binding changed');
-                return call.request({ binding: { requestKind: 'model_compute', purpose: 'code-retrieval-rerank',
-                  providerId: binding.providerId, modelId: binding.modelId, configurationId: binding.configurationId,
-                  executor: { kind: 'http', api: 'http-rerank', endpoint: destination, credentialScope: provider.credentialScope } },
-                  request: { input, wire: JSON.parse(init.body) }, destination, init, connection,
-                  check: async active => { await assertAvailable(active); await guard?.(); active.throwIfAborted(); },
-                  observe: raw => {
-                    let valid = false;
-                    try { requireCandidateScores(parseHttpRerankScores(raw, input.documents), input.documents.length); valid = true; } catch { /* Receipt precedes projection. */ }
-                    // The common rerank protocol has no defined token dimensions. Preserve raw
-                    // evidence without inferring input from total or inventing a zero output.
-                    return { valid, rawUsage: object(raw) ? { usage: raw.usage ?? null, meta: raw.meta ?? null } : null };
-                  },
-                });
-              },
-            }), input.documents.length);
-            await assertAvailable(call.signal);
-            await guard?.();
-            call.signal.throwIfAborted();
-            return { batchId: randomUUID(), providerId: binding.providerId, modelId: binding.modelId, scores };
-      };
-      return { status: 'ready', lease: { binding, assertAvailable, consume, release() { released = true; },
-        execute(invocation, input, signal, guard) {
-          return requests.run(invocation, signal, async call => {
-            await assertAvailable(call.signal);
-            await call.assertFresh();
-            return consume(call, input, guard);
-          });
-        },
-      } };
+      let transferred = false;
+      try {
+        try { if (!isDeepStrictEqual(await readSelection(), selected)) return { status: 'unavailable', message: 'Rerank settings changed during preparation.' }; }
+        catch { return { status: 'invalid', message: 'Rerank settings changed during preparation.' }; }
+        const generation = revocationGeneration;
+        const binding: HarnessResolvedRerankBinding = Object.freeze({ ...selected,
+          ...(provider.endpoint ? { endpoint: provider.endpoint } : {}), configurationId: provider.configurationId });
+        let released = false;
+        const release = () => { if (released) return; released = true; leases.delete(release); provider.release?.(); };
+        const assertAvailable = async (signal?: AbortSignal) => {
+          signal?.throwIfAborted();
+          if (closed || released) throw new Error('Original rerank binding was released');
+          try { await readSelection(); } catch { /* A malformed new candidate cannot retire this accepted binding. */ }
+          if (disabled || generation !== revocationGeneration) throw new Error('Rerank was explicitly disabled');
+          await provider.assertAvailable();
+          signal?.throwIfAborted();
+        };
+        const consume: RerankInferenceLease['consume'] = async (call, input, guard) => {
+              await assertAvailable(call.signal);
+              const auth = await provider.getAuth();
+              const headers = new Headers(provider.headers);
+              for (const [name, value] of Object.entries(auth?.auth.headers ?? {})) if (value !== null) headers.set(name, value);
+              await assertAvailable(call.signal);
+              const connection = await options.egress.prepare(provider.requestUrl, provider.egressOverride);
+              const scores = requireCandidateScores(await requestHttpRerank({ baseUrl: provider.baseUrl, ...(provider.endpoint ? { endpoint: provider.endpoint } : {}),
+                ...(auth?.auth.apiKey ? { apiKey: auth.auth.apiKey } : {}),
+                headers: Object.fromEntries(headers),
+                model: provider.requestModelId ?? binding.modelId, query: input.query, documents: input.documents, signal: call.signal,
+                fetchImpl: async (url, init) => {
+                  const destination = new URL(String(url)).toString();
+                  if (destination !== provider.requestUrl || init?.method !== 'POST' || typeof init.body !== 'string') throw new Error('Rerank request binding changed');
+                  return call.request({ binding: { requestKind: 'model_compute', purpose: 'code-retrieval-rerank',
+                    providerId: binding.providerId, modelId: binding.modelId, configurationId: binding.configurationId,
+                    executor: { kind: 'http', api: 'http-rerank', endpoint: destination, credentialScope: provider.credentialScope } },
+                    request: { input, wire: JSON.parse(init.body) }, destination, init, connection,
+                    check: async active => { await assertAvailable(active); await guard?.(); active.throwIfAborted(); },
+                    observe: raw => {
+                      let valid = false;
+                      try { requireCandidateScores(parseHttpRerankScores(raw, input.documents), input.documents.length); valid = true; } catch { /* Receipt precedes projection. */ }
+                      // The common rerank protocol has no defined token dimensions. Preserve raw
+                      // evidence without inferring input from total or inventing a zero output.
+                      return { valid, rawUsage: object(raw) ? { usage: raw.usage ?? null, meta: raw.meta ?? null } : null };
+                    },
+                  });
+                },
+              }), input.documents.length);
+              await assertAvailable(call.signal);
+              await guard?.();
+              call.signal.throwIfAborted();
+              return { batchId: randomUUID(), providerId: binding.providerId, modelId: binding.modelId, scores };
+        };
+        if (closed) return { status: 'unavailable', message: 'Rerank inference is closed.' };
+        leases.add(release); transferred = true;
+        return { status: 'ready', lease: { binding, assertAvailable, consume, release,
+          execute(invocation, input, signal, guard) {
+            return requests.run(invocation, signal, async call => {
+              await assertAvailable(call.signal);
+              await call.assertFresh();
+              return consume(call, input, guard);
+            });
+          },
+        } };
+      } finally { if (!transferred) provider.release?.(); }
     },
-    close() { closed = true; },
+    close() { closed = true; for (const release of [...leases]) release(); },
   };
 }

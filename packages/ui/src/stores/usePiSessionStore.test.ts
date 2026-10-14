@@ -3,6 +3,7 @@ import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import type { RuntimeAPIs } from '@varin/application-client';
 import type { DocumentsAPI, VarinAgentInputSnapshotCaptureRequest } from '@varin/application-client';
 import { bindDocumentRegistry, getDocumentRegistry, resetDocumentRegistry } from '@/lib/documents/session';
+import { unconfiguredWorkspaceEdits } from '@/lib/documents/workspace-edit.test-helper';
 import { subscribePiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
 import { usePiDraftStore, readPiDraft } from './usePiDraftStore';
 import {
@@ -2538,7 +2539,8 @@ describe('Pi session store', () => {
     const workspaceId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     const captures: VarinAgentInputSnapshotCaptureRequest[] = [];
     const releases: Array<Parameters<NonNullable<DocumentsAPI['releaseAgentInputSnapshot']>>[0]> = [];
-    const documents = {
+    const documents: DocumentsAPI = {
+      ...unconfiguredWorkspaceEdits,
       resolveResourceIdentity: async (resource: { workspaceId: string; resourceId: string }) => ({ coordinationId: `host-1\0${resource.workspaceId}\0${resource.resourceId}`, aliases: [resource] }),
       captureAgentInputSnapshot: async (request: VarinAgentInputSnapshotCaptureRequest) => {
         captures.push(request);
@@ -2578,7 +2580,7 @@ describe('Pi session store', () => {
       watch: () => ({ close() {} }),
       write: async () => ({ status: 'written' as const, revision: 'next', byteLength: 0 }),
       writeRecoveryJournal: async () => ({ status: 'missing' as const, journalId: 'none' }),
-    } as DocumentsAPI;
+    };
     bindDocumentRegistry(documents);
     const identity = { workspaceId, resourceId: 'draft.ts' };
     await getDocumentRegistry().open(identity);
