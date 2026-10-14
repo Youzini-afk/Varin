@@ -28,7 +28,7 @@ import { ResourceScopeError } from './thread-resource-scope.js';
 export interface ThreadModelAuthority {
   listModels?(): Promise<ThreadModelInfo[]>;
   describeModel?(selection: ThreadModel): Promise<{ providerId: string; model: string; contextWindowTokens: number | null; maxOutputTokens: number | null; thinkingLevel?: string; modelOptions?: unknown }>;
-  resolveModel(selection: ThreadModel): Promise<{ configuration: ModelSessionConfiguration; credentialOwner: ExistingHostCredentialOwner }>;
+  resolveModel(selection: ThreadModel, inherited?: { configuration: ModelSessionConfiguration; credentialScope: CredentialScope }): Promise<{ configuration: ModelSessionConfiguration; credentialOwner: ExistingHostCredentialOwner }>;
   rebindModel(configuration: ModelSessionConfiguration, expectedScope: CredentialScope): Promise<ExistingHostCredentialOwner>;
 }
 
@@ -332,6 +332,22 @@ export class ThreadAdapter {
   async listModels() {
     if (!this.models.listModels) throw new Error('Model catalog is unavailable');
     return this.models.listModels();
+  }
+
+  list(options: import('@varin/application-client').ThreadListOptions = {}, signal?: AbortSignal) {
+    return this.runtime.threadCatalog(options, signal);
+  }
+  update(input: import('@varin/application-client').ThreadUpdate) {
+    const { runtime: _runtime, ...command } = input;
+    return this.runtime.updateThread(command);
+  }
+  delete(input: import('@varin/application-client').ThreadDelete) {
+    const { runtime: _runtime, ...command } = input;
+    return this.runtime.deleteThread(command);
+  }
+  markRead(input: import('@varin/application-client').ThreadRead) {
+    const { runtime: _runtime, ...command } = input;
+    return this.runtime.markThreadRead(command);
   }
 
   async create(key: string): Promise<ThreadIdentity> {

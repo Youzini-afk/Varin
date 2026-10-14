@@ -265,6 +265,13 @@ export interface ThreadMaterialsAPI {
   read(identity: ThreadIdentity, request: ThreadMaterialReadRequest, signal?: AbortSignal): Promise<FetchResult>;
   readArtifact(selection: import('./research.js').ThreadResearchSelection, request: ThreadMaterialArtifactReadRequest, signal?: AbortSignal): Promise<FetchResult>;
 }
+export type { ThreadSummary } from '@varin/protocol';
+export interface ThreadCatalogIdentity { runtime: 'agent'; threadId: string; }
+export type ThreadListOptions = import('@varin/protocol').ThreadCatalogQuery;
+export type ThreadUpdate = ThreadCatalogIdentity & import('@varin/protocol').ThreadMetadataUpdateParams;
+export type ThreadDelete = ThreadCatalogIdentity & import('@varin/protocol').ThreadDeleteParams;
+export type ThreadRead = ThreadCatalogIdentity & import('@varin/protocol').ThreadReadPositionParams;
+
 export interface ThreadsAPI {
   materials: ThreadMaterialsAPI;
   computer: ThreadComputerAPI;
@@ -279,7 +286,14 @@ export interface ThreadsAPI {
   resources: ThreadResourcesAPI;
   listModels(): Promise<ThreadModelInfo[]>;
   selectModel(input: ThreadIdentity & { runId: string; key: string; model: ThreadModel }): Promise<RunModelSelection>;
-  list(): Promise<ThreadSummary[]>;
+  /** Search title/identity. Default excludes archived and deleted Threads. */
+  list(options?: ThreadListOptions, signal?: AbortSignal): Promise<ThreadSummary[]>;
+  /** One Catalog command; an uncertain retry retains its key, patch and original revision. */
+  update(input: ThreadUpdate): Promise<ThreadSummary>;
+  /** Hide this Thread and close fresh user admission. Existing work and its resources continue. */
+  delete(input: ThreadDelete): Promise<ThreadSummary>;
+  /** Acknowledge only the event cursor actually presented; concurrent activity remains unread. */
+  markRead(input: ThreadRead): Promise<ThreadSummary>;
   create(key: string): Promise<ThreadIdentity>;
   sources: ThreadSourcesAPI;
   prepareSource(input: ThreadPrepareSource, signal?: AbortSignal): Promise<ThreadPreparedSource>;

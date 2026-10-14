@@ -2566,6 +2566,22 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
         let p: ThreadParams = serde_json::from_value(params)?;
         return catalog.inspect_thread(&p.thread_id).map_err(domain);
     }
+    if method == "runtime.thread.catalog.list" {
+        let query: ThreadCatalogQuery = serde_json::from_value(params)?;
+        return Ok(serde_json::to_value(catalog.list_thread_catalog(&query).map_err(domain)?)?);
+    }
+    if method == "runtime.thread.update" {
+        let command: ThreadMetadataUpdateParams = serde_json::from_value(params)?;
+        return catalog.update_thread(&command).map_err(domain);
+    }
+    if method == "runtime.thread.delete" {
+        let command: ThreadDeleteParams = serde_json::from_value(params)?;
+        return catalog.delete_thread(&command).map_err(domain);
+    }
+    if method == "runtime.thread.read" {
+        let command: ThreadReadPositionParams = serde_json::from_value(params)?;
+        return catalog.mark_thread_read(&command).map_err(domain);
+    }
     if method == "runtime.thread.list" {
         return Ok(serde_json::to_value(
             catalog.list_threads().map_err(domain)?,

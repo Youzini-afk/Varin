@@ -42,7 +42,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 74;
+pub(crate) const FORMAT: i64 = 75;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -96,7 +96,9 @@ fn event(
         "INSERT INTO events(subject,revision,kind,data) VALUES(?1,?2,?3,?4)",
         params![subject, sql_number(revision)?, kind, encode(&data)?],
     )?;
-    Ok(tx.last_insert_rowid() as u64)
+    let cursor = tx.last_insert_rowid() as u64;
+    threads::record_activity(tx, subject, kind, cursor)?;
+    Ok(cursor)
 }
 fn fence(run: &Run, epoch: u64) -> Result<()> {
     if run.epoch != epoch || run.state.terminal() {
@@ -123,6 +125,7 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
         return Err(RuntimeError::Format(0));
     }
     if version == FORMAT {
+        threads::check_format(db)?;
         db.prepare("SELECT id,thread_id,parent,run_id,body FROM history")?;
         db.prepare("SELECT id,run_id,node_id,state,body FROM model_steps")?;
         inputs::check_format(db)?;
@@ -389,6 +392,11 @@ impl Catalog {
                 ));
             }
             return Ok(serde_json::from_str(&receipt)?);
+        }
+        // A tombstone closes new user admission, never accepted ingress or child duty.
+        if matches!(origin, submissions::SubmissionOrigin::User { .. }) {
+            threads::require_available(tx, &command.thread_id)?;
+            threads::initialize_title(tx, &command.thread_id, prepared.title.as_deref())?;
         }
         let source_thread = if let Some(job) = context_job {
             Some(tx.query_row("SELECT thread_id FROM branches WHERE id=?1", [&job.branch_id], |r| r.get::<_, String>(0))?)
@@ -1637,7 +1645,7 @@ fn read_all<T: DeserializeOwned>(db: &Connection, table: &str) -> Result<Vec<T>>
 const SCHEMA: &str = r#"
 CREATE TABLE runtime_meta(id INTEGER PRIMARY KEY CHECK(id=1),epoch INTEGER NOT NULL);
 INSERT INTO runtime_meta VALUES(1,0);
-CREATE TABLE threads(id TEXT PRIMARY KEY);
+CREATE TABLE threads(id TEXT PRIMARY KEY,title TEXT NOT NULL DEFAULT 'New thread',title_initialized INTEGER NOT NULL DEFAULT 0 CHECK(title_initialized IN (0,1)),revision INTEGER NOT NULL DEFAULT 1 CHECK(revision>0),created_at_ms INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)*1000),updated_at_ms INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)*1000),pinned INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN (0,1)),archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1)),deleted_at_ms INTEGER,activity_cursor INTEGER NOT NULL DEFAULT 0 CHECK(activity_cursor>=0),read_cursor INTEGER NOT NULL DEFAULT 0 CHECK(read_cursor>=0));
 CREATE TABLE branches(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL REFERENCES threads(id),head TEXT,active_run TEXT);
 CREATE INDEX branches_thread ON branches(thread_id);
 CREATE TABLE history(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL REFERENCES threads(id),parent TEXT REFERENCES history(id),run_id TEXT NOT NULL REFERENCES runs(id) DEFERRABLE INITIALLY DEFERRED,body TEXT NOT NULL);
@@ -1722,6 +1730,8 @@ pub mod recovery;
 
 #[path = "catalog_observe.rs"]
 mod observe;
+#[path = "catalog_threads.rs"]
+pub mod threads;
 
 #[path = "catalog_context.rs"]
 pub mod context;

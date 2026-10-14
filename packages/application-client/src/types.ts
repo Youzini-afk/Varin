@@ -808,6 +808,8 @@ export interface PushUnsubscribePayload {
 
 export interface ApnsTokenPayload {
   token: string;
+  /** Client-side Host target bound to this authenticated registration, echoed only to this token. */
+  hostKey?: string;
   /** 'ios' (APNs) or 'android' (FCM) — lets the relay route the token to the right service. */
   platform?: string;
   /**

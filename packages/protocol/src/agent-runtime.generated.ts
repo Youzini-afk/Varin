@@ -1390,14 +1390,33 @@ export interface ThreadBranch {
   latest_run: Run | null;
 }
 
+export interface ThreadCatalogQuery { query?: string; archived?: 'exclude' | 'include' | 'only'; }
+
+export interface ThreadMetadataUpdateParams { threadId: string; key: string; expectedRevision: number; title?: string; pinned?: boolean; archived?: boolean; }
+
+export interface ThreadDeleteParams { threadId: string; key: string; expectedRevision: number; }
+
+export interface ThreadReadPositionParams { threadId: string; key: string; throughCursor: number; }
+
 export interface ThreadSummary {
+  main_branch_id: string;
+  title: string;
+  revision: number;
+  created_at_ms: number;
+  updated_at_ms: number;
+  pinned: boolean;
+  archived: boolean;
+  deleted_at_ms: number | null;
+  activity_cursor: number;
+  read_cursor: number;
+  unread: boolean;
   bot_id: string | null;
   thread_id: string;
   branches: ThreadBranch[];
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 41; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 42; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
