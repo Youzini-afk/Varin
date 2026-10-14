@@ -336,6 +336,31 @@ fn stored_capture_reuses_verified_bytes_with_two_complete_source_passes_and_no_s
 }
 
 #[test]
+fn verification_reads_once_against_original_capture_and_rejects_content_drift() {
+    let mut f = Fixture::new();
+    let body = vec![19; 3 * 128 * 1024 + 17];
+    fs::write(f.work().join("body"), &body).unwrap();
+    let original = f.capture("body", true, "original");
+    let state: Value = serde_json::from_str(original["stateJson"].as_str().unwrap()).unwrap();
+    f.short("file.lease.acquire", f.lease("body", "verify-lease"), Some("writer"));
+    for changed in [false, true] {
+        if changed { fs::write(f.work().join("body"), vec![20; body.len()]).unwrap(); }
+        f.begin("file.captureBatch", json!({"workspaceId":"workspace","rootId":f.root_id,
+            "operationId":format!("verify-{changed}"),"paths":["body"],"store":false,"leaseId":"verify-lease",
+            "expectedStatesJson":json!({"body":state}).to_string()}), "writer");
+        let (request, task, result) = f.receive_capture().unwrap();
+        assert_eq!(task.counts(), [1, body.len() as u64, 0, 0, 0]);
+        let result = f.kernel.complete_file_capture(&request, &task, result, &f.revoked);
+        if changed { assert!(matches!(result, Err(KernelError::SnapshotChanged(_)))); }
+        else {
+            let result = result.unwrap();
+            assert!(result["entries"][0]["ownerId"].is_null());
+            assert_eq!(serde_json::from_str::<Value>(result["entries"][0]["stateJson"].as_str().unwrap()).unwrap(), state);
+        }
+    }
+}
+
+#[test]
 fn capture_continuation_keeps_original_lease_and_rechecks_cancel_and_missing_objects() {
     for cancel in [false, true] {
         let mut f = Fixture::new();

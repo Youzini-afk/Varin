@@ -22,6 +22,7 @@ pub(crate) struct CaptureTask {
     storage_root: PathBuf,
     cancellation: Arc<AtomicBool>,
     retained_objects: BTreeMap<String, blob_reads::BlobReadRetention>,
+    expected: Option<BTreeMap<String, FileState>>,
     hooks: CaptureHooks,
 }
 pub(crate) struct HashedCapture {
@@ -228,7 +229,8 @@ impl CaptureTask {
         check(&self.cancellation)?;
         Ok(HashedCapture { entries })
     }
-    /// Non-storing observations keep their original one-worker, two-pass path.
+    /// A verification reads against the caller's captured state. A fresh observation
+    /// still establishes its own reference with the original two source passes.
     pub(crate) fn run(&self) -> Result<CapturedBatch, KernelError> {
         if self.store() {
             return Err(KernelError::Storage(
@@ -237,8 +239,22 @@ impl CaptureTask {
         }
         let mut entries = Vec::with_capacity(self.paths().len());
         for path in self.paths() {
-            let entry = capture_entry(|| self.resolve(path), &self.cancellation, &self.hooks)
-                .map_err(|error| self.capture_error(error))?;
+            let entry = if let Some(expected) = &self.expected {
+                let observed = read_entry(|| self.resolve(path), &self.cancellation, &self.hooks)?;
+                if expected.get(path) != Some(&observed.state) {
+                    return Err(KernelError::SnapshotChanged(format!(
+                        "captured content or metadata changed: {path}"
+                    )));
+                }
+                CapturedEntry {
+                    path: observed.path,
+                    state: observed.state,
+                    object: None,
+                }
+            } else {
+                capture_entry(|| self.resolve(path), &self.cancellation, &self.hooks)
+                    .map_err(|error| self.capture_error(error))?
+            };
             entries.push(entry);
         }
         self.prepare_publication(entries)
@@ -526,6 +542,22 @@ impl Storage {
             "file.captureBatch" => CaptureRequest::Batch(parse_file_params(value)?),
             _ => return Err(KernelError::Protocol("unknown capture method".into())),
         };
+        let expected = match &request {
+            CaptureRequest::Batch(params) if params.expected_states_json.is_some() => {
+                let states: BTreeMap<String, FileState> =
+                    serde_json::from_str(params.expected_states_json.as_ref().unwrap())?;
+                if params.store
+                    || states.len() != params.paths.len()
+                    || params.paths.iter().any(|path| !states.contains_key(path))
+                {
+                    return Err(KernelError::Operation(
+                        "verification requires one expected state per path and store:false".into(),
+                    ));
+                }
+                Some(states)
+            }
+            _ => None,
+        };
         let (root_id, workspace_id, paths, supplied_lease) = match &request {
             CaptureRequest::Single(params) => (
                 &params.root_id,
@@ -600,6 +632,7 @@ impl Storage {
             storage_root: self.root.clone(),
             cancellation,
             retained_objects: BTreeMap::new(),
+            expected,
             hooks: CaptureHooks::default(),
         })
     }
@@ -771,6 +804,7 @@ impl CaptureTask {
             storage_root,
             cancellation,
             retained_objects: BTreeMap::new(),
+            expected: None,
             hooks: CaptureHooks::default(),
         }
     }

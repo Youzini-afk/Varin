@@ -116,7 +116,20 @@ describe('shared stable source capture', () => {
     const result = await captureStableDirectoryBaseline({ ...f.input, captureScopes: ['ignored.txt'], inspectInventory: f.inspectInventory });
     expect(result.states['ignored.txt']).toEqual(f.disk['ignored.txt']);
     expect(result.consistency).toBe('git-base-with-overlay');
+    expect(f.store.captureDirectory).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(f.store.captureDirectory).mock.calls[1]?.[1]).toContain('ignored.txt');
     f.inspectInventory.mockResolvedValueOnce(git).mockResolvedValueOnce({ ...git, paths: ['file.txt', 'new.txt'] });
     await expect(captureStableDirectoryBaseline({ ...f.input, inspectInventory: f.inspectInventory })).rejects.toThrow('Git inventory');
+  });
+
+  it('includes explicit scopes outside the default directory inventory in the shared body pass', async () => {
+    const f = fixture({ 'file.txt': { kind: 'directory', mode: 0o755 }, '.config/settings': { kind: 'regular-file', objectHash: 'settings', byteLength: 8 } });
+    vi.mocked(f.store.listWorkspaceBaselinePaths).mockResolvedValue(['file.txt']);
+    const input = { ...f.input, captureScopes: ['.config'], inspectInventory: f.inspectInventory };
+    const result = await captureStableDirectoryBaseline(input);
+    expect(result.states['.config/settings']).toEqual(f.disk['.config/settings']);
+    expect(f.store.captureDirectory).toHaveBeenCalledTimes(2);
+    f.hooks.capture = pass => { if (pass === 2) f.disk['.config/settings'] = { kind: 'missing' }; };
+    await expect(captureStableDirectoryBaseline(input)).rejects.toThrow('content or metadata');
   });
 });

@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 39;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 40;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -1584,6 +1584,7 @@ pub(crate) struct KernelFileCaptureBatchParams {
     pub(crate) paths: Vec<String>,
     pub(crate) store: bool,
     pub(crate) lease_id: String,
+    pub(crate) expected_states_json: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

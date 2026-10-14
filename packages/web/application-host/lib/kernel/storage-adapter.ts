@@ -282,6 +282,8 @@ const parsePinTreeRead = (value: Record<string, unknown>): KernelPinTreeRead => 
 export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   private readonly ownerByHash = new Map<string, string>();
   private readonly captureOwners = new WeakMap<Record<string, RecoveryState>, Map<string, string>>();
+  /** Original physical modes, before the Windows Git-index projection. */
+  private readonly captureStates = new WeakMap<Record<string, RecoveryState>, Record<string, RecoveryState>>();
   private readonly sourceByHash = new Map<string, { branchId?: string; pinId?: string; path?: string; revision?: number; recordId?: string; slot?: string; ownerId?: string }>();
 
   constructor(private readonly context: KernelStorageContext) {}
@@ -1379,7 +1381,9 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     return this.kernelMaterialize(pin.root, directory, operationId, signal);
   }
 
-  async captureDirectory(directory: string, relativePaths?: string[], options?: { signal?: AbortSignal; onProgress?: (done: number, total: number) => void; store?: boolean; indexModes?: Map<string, string> | Record<string, string> }): Promise<Record<string, RecoveryState>> {
+  async captureDirectory(directory: string, relativePaths?: string[], options?: { signal?: AbortSignal; onProgress?: (done: number, total: number) => void; store?: boolean; indexModes?: Map<string, string> | Record<string, string>; verifyCaptured?: Record<string, RecoveryState> }): Promise<Record<string, RecoveryState>> {
+    const expected = options?.verifyCaptured ? this.captureStates.get(options.verifyCaptured) : undefined;
+    if (options?.verifyCaptured && (!expected || options.store !== false)) throw new Error("Verification requires this store's original capture and store:false");
     const files = relativePaths?.map(normalize) ?? await this.kernelScanPaths(directory, undefined, options?.signal);
     const root = await this.kernelFileRoot(directory);
     const result: Record<string, RecoveryState> = {};
@@ -1396,6 +1400,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
         options?.signal?.throwIfAborted();
         const batch = uniqueFiles.slice(offset, offset + batchSize);
         const paths = batch.map(file => root.basePath ? `${root.basePath}/${file}` : file);
+        if (expected && batch.some(file => !expected[file])) throw new Error("Verification path is absent from the original capture");
         const leaseId = `capture-lease:${randomUUID()}`;
         // Wait and cancellation share the native lease owner. An acquired receipt is
         // retained even when cancel races it; the capture's finally releases that lease.
@@ -1408,6 +1413,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
           operationId: `working-capture:${randomUUID()}`,
           workspaceId: this.context.identity.workspaceId,
           rootId: root.rootId, paths, leaseId, store: options?.store !== false,
+          ...(expected ? { expectedStatesJson: JSON.stringify(Object.fromEntries(batch.map((file, index) => [paths[index], expected[file]]))) } : {}),
         }, options?.signal).finally(() => this.context.client.fileLeaseRelease({
           workspaceId: this.context.identity.workspaceId, rootId: root.rootId, leaseId,
         }));
@@ -1436,6 +1442,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       }
       const states = applyIndexModes(result, options?.indexModes);
       this.captureOwners.set(states, acquired);
+      this.captureStates.set(states, result);
       return states;
     } catch (error) {
       await this.releaseCapturedStates(result);
@@ -1455,6 +1462,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       owners.delete(hash);
     }));
     this.captureOwners.delete(states);
+    this.captureStates.delete(states);
   }
 
   async listCaptureScopePaths(directory: string, scopes: readonly string[], signal?: AbortSignal): Promise<string[]> {
@@ -1505,7 +1513,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     const captured = await this.captureDirectory(source.directory, selectedPaths, options);
     try {
       const paths = Object.keys(captured).sort();
-      const observed = paths.length ? await this.captureDirectory(source.directory, paths, { ...options, store: false }) : {};
+      const observed = paths.length ? await this.captureDirectory(source.directory, paths, { ...options, store: false, verifyCaptured: captured }) : {};
       if (paths.some(file => stateIdentity(captured[file] ?? { kind: "missing" }) !== stateIdentity(observed[file] ?? { kind: "missing" }))) {
         throw new Error("Working-state directory changed while it was being captured");
       }

@@ -45,7 +45,10 @@ it('real captureDirectory batches files through capture and retains publishable 
   const bodies = { 'one.txt': 'first fixture', 'two.txt': 'second fixture', 'same.txt': 'first fixture' };
   for (const [file, body] of Object.entries(bodies)) await fs.writeFile(path.join(f.workspace, file), body);
   const progress: number[] = [];
-  const states = await f.store.captureDirectory(f.workspace, Object.keys(bodies), { onProgress: done => progress.push(done) });
+  const indexModes = { 'one.txt': '100755' };
+  const states = await f.store.captureDirectory(f.workspace, Object.keys(bodies), { indexModes, onProgress: done => progress.push(done) });
+  const observed = await f.store.captureDirectory(f.workspace, Object.keys(bodies), { store: false, indexModes, verifyCaptured: states });
+  expect(observed).toEqual(states);
   expect(f.requests.some(request => request.method === 'file.captureBatch')).toBe(true);
   expect(f.requests.filter(request => request.method === 'file.capture')).toHaveLength(0);
   for (const [file, body] of Object.entries(bodies)) expect(states[file]).toMatchObject({ kind: 'regular-file', objectHash: `sha256-${createHash('sha256').update(body).digest('hex')}`, byteLength: Buffer.byteLength(body) });
@@ -57,6 +60,8 @@ it('real captureDirectory batches files through capture and retains publishable 
     const content = await f.context.client.getBlob(state.objectHash, { branchId: 'captured-branch', path: file }, { offset: 0, length: 1024 });
     expect(Buffer.from(content.bytesBase64, 'base64').toString()).toBe(body);
   }
+  await fs.writeFile(path.join(f.workspace, 'one.txt'), 'changed bytes');
+  await expect(f.store.captureDirectory(f.workspace, ['one.txt'], { store: false, indexModes, verifyCaptured: states })).rejects.toThrow(/changed/);
 }, 30_000);
 
 it('captureDirectory copy/hash work allows the Storage health request to finish before capture receipt', async () => {
