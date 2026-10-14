@@ -650,6 +650,7 @@ impl Catalog {
         let tx = self.db.transaction()?;
         let op: Operation = record(&tx, "operations", operation_id)?;
         super::execution_persistence::record_kernel_executor_stopped(&tx, &op, epoch)?;
+        super::inference::kernel_executor_stopped(&tx,&op,epoch)?;
         tx.commit()?;
         Ok(())
     }

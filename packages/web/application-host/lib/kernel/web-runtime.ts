@@ -1,3 +1,4 @@
+import type { AgentSettingsSnapshot } from '@varin/application-client';
 /** Native invocation and public-reader adapters into the existing Web/material owners. */
 import { isDeepStrictEqual } from 'node:util';
 import type { ThreadIdentity, ThreadMaterialsAPI, ThreadMaterialArtifactReadRequest, ThreadResearchSelection } from '@varin/application-client';
@@ -8,11 +9,11 @@ import { compileToolJsonSchema } from '../models/schema.js';
 import {
   resolveHarnessDocumentReadingSettings,
   type DocumentReadRequest, type FetchResult, type HarnessDocumentReadingSettings, type HarnessWebDomainPolicy,
-  type PiSettingsSnapshot, type WebFetchRequest, type WebSearchRequest, type WebSearchResult,
+  type WebFetchRequest, type WebSearchRequest, type WebSearchResult,
   type MaterialsCollectionParams,
 } from '@varin/protocol';
 import type { DocumentReader, DocumentReaderContext } from '../harness/document-reading.js';
-import { readDocumentMaterial } from '../harness/material-read-service.js';
+import { readDocumentMaterial } from '../harness/document-material.js';
 import { resolveHarnessWebBinding, resolveHarnessMaterialWebPolicy, type HarnessWebBinding } from '../harness/harness-web-settings.js';
 import { HarnessServiceError } from '../harness/service-error.js';
 import type { createWebFetch } from '../harness/web-fetch.js';
@@ -39,7 +40,7 @@ interface WebConfiguration {
   documentReading: HarnessDocumentReadingSettings;
   disabledTools: string[];
 }
-function capture(snapshot: PiSettingsSnapshot): WebConfiguration {
+function capture(snapshot: AgentSettingsSnapshot): WebConfiguration {
   const global = object(snapshot.global.harness) ? snapshot.global.harness : {};
   const project = snapshot.projectTrusted && object(snapshot.project.harness) ? snapshot.project.harness : {};
   const tools = { ...(object(global.tools) ? global.tools : {}), ...(object(project.tools) ? project.tools : {}) };
@@ -118,7 +119,7 @@ export interface WebRuntimeOptions {
   fetch: typeof globalThis.fetch;
   readAuth(): unknown | Promise<unknown>;
   /** Read current user/trusted-project assets, without opening a Pi AgentSession. */
-  settings(source: LaunchSource | null): Promise<PiSettingsSnapshot>;
+  settings(source: LaunchSource | null): Promise<AgentSettingsSnapshot>;
 }
 export function createWebRuntime(options: WebRuntimeOptions) {
   const scope = async (identity: ThreadIdentity, signal?: AbortSignal) => {
@@ -161,6 +162,17 @@ export function createWebRuntime(options: WebRuntimeOptions) {
       const config = capture(await options.settings(launch?.selection.source ?? null));
       signal.throwIfAborted();
       return options.documentReader.read(request, context(owner, config, signal));
+    },
+    async readSource(selection, request, signal = new AbortController().signal) {
+      decode('read', request);
+      if (!request.path || 'artifact' in request || 'snapshotId' in request) throw new HarnessServiceError('invalid-params', 'Select a document in the original Run source');
+      const owner = await scope(selection, signal);
+      if (!options.documentSources) throw new HarnessServiceError('unavailable', 'Source document reading is unavailable');
+      const original = await options.documentSources.path(selection, request.path, signal);
+      const launch = await options.runtime.launch(selection.sourceRunId, signal);
+      const config = capture(await options.settings(launch?.selection.source ?? null));
+      signal.throwIfAborted();
+      return readDocumentMaterial(options.documentReader, request, context(owner, config, signal), { readPath: async () => original });
     },
     async readArtifact(selection: ThreadResearchSelection, request: ThreadMaterialArtifactReadRequest, signal = new AbortController().signal) {
       decode('read', request);

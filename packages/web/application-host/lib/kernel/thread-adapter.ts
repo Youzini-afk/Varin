@@ -57,6 +57,10 @@ export class ThreadAdapter {
   bindCompaction(owner: ContextCompactionOwner): void { this.compaction = owner; }
   private sourceDirectory?: SourceDirectory;
   bindSourceDirectory(directory: SourceDirectory): void { this.sourceDirectory = directory; }
+  async usage(identity: ThreadIdentity, signal?: AbortSignal) {
+    await this.requireIdentity(identity, signal);
+    return this.runtime.threadUsage(identity.threadId, identity.branchId, signal);
+  }
   async listSourceTargets(identity: ThreadIdentity, signal?: AbortSignal) {
     await this.requireIdentity(identity);
     if (!this.sourceDirectory) throw new Error('Source directory is unavailable');

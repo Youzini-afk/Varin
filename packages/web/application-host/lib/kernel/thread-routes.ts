@@ -8,7 +8,7 @@ import type { FamilyRunsParams, FamilyReadParams, FamilyItemParams, FollowupRegi
 import { PlanConflict } from './plan-service.js';
 import { parseThreadImages } from './thread-images.js';
 import type { Express, RequestHandler } from 'express';
-import type { ThreadIdentity, ThreadModel, ThreadSubmit, ThreadThinkingLevel, ThreadResearchAPI, ThreadResearchSelection, ThreadComputerAPI, ThreadMaterialsAPI, ThreadMaterialReadRequest, ThreadMaterialArtifactReadRequest } from '@varin/application-client';
+import type { ThreadIdentity, ThreadModel, ThreadSubmit, ThreadThinkingLevel, ThreadResearchAPI, ThreadResearchSelection, ThreadComputerAPI, ThreadMaterialsAPI, ThreadMaterialReadRequest, ThreadMaterialSourceReadRequest, ThreadMaterialArtifactReadRequest } from '@varin/application-client';
 import { ComputerError } from '../computer/computer-error.js';
 import { HarnessServiceError } from '../harness/service-error.js';
 import { KernelClientError } from './kernel-client.js';
@@ -71,6 +71,7 @@ const modelSelection = (value: unknown): ThreadModel => {
 export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requireAuth: RequestHandler, research?: ThreadResearchAPI, computer?: ThreadComputerAPI, materials?: ThreadMaterialsAPI): void {
   const fields: Record<string, readonly string[]> = {
     'materials/read': ['runtime', 'threadId', 'branchId', 'request'],
+    'materials/read-source': ['runtime', 'threadId', 'branchId', 'sourceRunId', 'request'],
     'materials/read-artifact': ['runtime', 'threadId', 'branchId', 'sourceRunId', 'request'],
     'media/read': ['runtime', 'threadId', 'branchId', 'holder', 'partIndex', 'chunkIndex', 'expectedContentRef'],
     'computer/decide': ['runtime', 'threadId', 'branchId', 'requestId', 'expectedRevision', 'decision', 'key', 'reason'],
@@ -142,6 +143,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     delete: ['runtime', 'threadId', 'key', 'expectedRevision'],
     read: ['runtime', 'threadId', 'key', 'throughCursor'],
     create: ['key'], list: ['query', 'archived'], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'expectedHead', 'model', 'source'],
+    usage: ['runtime', 'threadId', 'branchId'],
     snapshot: ['runtime', 'threadId', 'branchId'], 'history/page': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'mode'],
     'input/edit': ['inputId', 'expectedRevision', 'text', 'images'], 'input/cancel': ['inputId', 'expectedRevision'],
     run: ['runId'], 'run/cancel': ['runId'], 'run/resume': ['runId', 'waitId'], 'run/retry-preparation': ['runId'], operation: ['operationId'], 'operation/cancel': ['operationId'], events: ['cursor'],
@@ -192,6 +194,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   if (materials) {
     // The material owner validates the request and derives its domain from the real Thread.
     post('materials/read', (body, signal) => materials.read(identity(body), object(body.request) as ThreadMaterialReadRequest, signal));
+    post('materials/read-source', (body, signal) => materials.readSource(selection(body), object(body.request) as ThreadMaterialSourceReadRequest, signal));
     post('materials/read-artifact', (body, signal) => materials.readArtifact(selection(body), object(body.request) as ThreadMaterialArtifactReadRequest, signal));
   }
   if (computer) {
@@ -417,6 +420,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   });
   post('history/page', body => adapter.historyPage(identity(body), { headId: text(body.headId), beforeId: text(body.beforeId) }));
   post('snapshot', body => adapter.snapshot(identity(body)));
+  post('usage', (body, signal) => adapter.usage(identity(body), signal));
   post('enqueue', async body => {
     const selected = identity(body); await adapter.requireIdentity(selected);
     if (!['boundary', 'interrupt', 'next_run'].includes(String(body.mode))) throw new Error('Invalid input mode');

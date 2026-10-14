@@ -937,7 +937,7 @@ impl Catalog {
             .filter(|child| threads.contains(&child.child_thread_id))
             .collect::<Vec<_>>();
         let runs = {
-            let mut statement = tx.prepare("SELECT body FROM runs ORDER BY id")?;
+            let mut statement = tx.prepare("SELECT body FROM runs WHERE branch_id IS NOT NULL ORDER BY id")?;
             let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
             rows.map(|row| Ok(serde_json::from_str::<Run>(&row?)?))
                 .collect::<Result<Vec<_>>>()?

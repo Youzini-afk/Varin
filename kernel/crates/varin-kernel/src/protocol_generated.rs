@@ -5,10 +5,16 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 42;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 43;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
+    "runtime.thread.usage",
+    "runtime.knowledge_inference.finish",
+    "runtime.knowledge_inference.cancel",
+    "runtime.knowledge_inference.status",
+    "runtime.model_text.cancel",
+    "runtime.model_text.status",
     "source.authority.seal",
     "source.mcp.holder",
     "source.mcp.delivery",
@@ -80,6 +86,7 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.calendar.calculation.retry",
 ];
 pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
+    "runtime.thread.usage",
     "source.authority.seal",
     "source.mcp.holder",
     "source.mcp.delivery",
@@ -93,6 +100,15 @@ pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "runtime.bot.scope.status",
     "runtime.bot.scope.resume",
     "runtime.inference.session",
+    "runtime.knowledge_inference.admit",
+    "runtime.knowledge_inference.read",
+    "runtime.knowledge_inference.status",
+    "runtime.knowledge_inference.cancel",
+    "runtime.knowledge_inference.finish",
+    "runtime.model_text.admit",
+    "runtime.model_text.read",
+    "runtime.model_text.status",
+    "runtime.model_text.cancel",
     "runtime.inference.generate",
     "runtime.inference.receipt_pending",
     "runtime.inference.admit",
@@ -161,6 +177,10 @@ pub(crate) const KERNEL_INPUT_ORDER_PARAMS: &[(&str, &str)] = &[
     ("runtime.input.edit", "inputId"),
 ];
 pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
+    "runtime.knowledge_inference.admit",
+    "runtime.knowledge_inference.read",
+    "runtime.model_text.admit",
+    "runtime.model_text.read",
     "runtime.memory_work.admit",
     "runtime.memory_work.read",
     "runtime.memory_work.status",
@@ -317,6 +337,47 @@ pub(crate) struct InferenceAdmitParams {
     pub(crate) ordinal: i64,
     pub(crate) binding: varin_runtime::catalog::inference::InferenceBinding,
     pub(crate) request: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KnowledgeInferenceAdmit {
+    pub(crate) key: String,
+    pub(crate) scope_id: String,
+    pub(crate) purpose: String,
+    pub(crate) execution_owner: varin_runtime::ExecutorOwner,
+    pub(crate) recipe: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KnowledgeInferenceReadParams {
+    pub(crate) operation_id: String,
+    pub(crate) allow_missing: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KnowledgeInferenceFinish {
+    pub(crate) operation_id: String,
+    pub(crate) execution_owner: varin_runtime::ExecutorOwner,
+    pub(crate) succeeded: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ModelTextAdmit {
+    pub(crate) key: String,
+    pub(crate) request_fingerprint: String,
+    pub(crate) retry_of: RequiredNullable<String>,
+    pub(crate) generation: varin_runtime::catalog::inference::generation::InferenceGenerateParams,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ModelTextReadParams {
+    pub(crate) request_id: String,
+    pub(crate) allow_missing: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1060,6 +1121,13 @@ pub(crate) struct RunReconcileParams {
 pub(crate) struct LaunchFailedParams {
     pub(crate) run_id: String,
     pub(crate) code: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ThreadUsageParams {
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
 }
 
 pub(crate) type ThreadCatalogQuery = varin_runtime::catalog::threads::ThreadListQuery;
@@ -3287,6 +3355,47 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.inference.admit" => serde_json::from_value::<InferenceAdmitParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.knowledge_inference.admit" => {
+            serde_json::from_value::<KnowledgeInferenceAdmit>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.knowledge_inference.read" => {
+            serde_json::from_value::<KnowledgeInferenceReadParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.knowledge_inference.status" => {
+            serde_json::from_value::<KnowledgeInferenceReadParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.knowledge_inference.cancel" => {
+            serde_json::from_value::<KnowledgeInferenceReadParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.knowledge_inference.finish" => {
+            serde_json::from_value::<KnowledgeInferenceFinish>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.model_text.admit" => serde_json::from_value::<ModelTextAdmit>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.model_text.read" => serde_json::from_value::<ModelTextReadParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.model_text.status" => {
+            serde_json::from_value::<ModelTextReadParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.model_text.cancel" => {
+            serde_json::from_value::<ModelTextReadParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.inference.generate" => {
             serde_json::from_value::<InferenceGenerateParams>(params.clone())
                 .map(|_| ())
@@ -3753,6 +3862,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.thread.list" => serde_json::from_value::<KernelEmptyParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.thread.usage" => serde_json::from_value::<ThreadUsageParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.thread.catalog.list" => {
