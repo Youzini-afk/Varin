@@ -45,24 +45,21 @@ async function handle(frame:Record<string,unknown>) {
     const nativeLifecycle = (frame.nativeWake || frame.nativeMemory) ? createBotLifecycleRuntime({ hostId: 'web-domain-host',
       agent: { runtime, kernel, gate: id => bots.executionGate(id),
         continueLaunch: async id => { continuations.push(id); await threads.continueLaunch(id); }, drainScripts: async () => {}, drainForwards: async () => {}, drainCollaborations: async () => {} },
-      registry: {} as never, runtime: {} as never, broker: {} as never,
       computers: { list: async () => ({ desktops: [] }), listVms: async () => [], finishExecution: async () => {} } as never,
-      stopSessionProcesses: unexpected, stopRemoteScope: async () => {}, resumeRemoteScope: async () => {},
-      remoteMachineOwners: async () => [], stopRoot: unexpected, stopMemory: async () => {}, resumeMemory: () => {}, wakeFollowUps: async () => {},
+      stopRemoteScope: async () => {}, resumeRemoteScope: async () => {},
+      remoteMachineOwners: async () => [], stopMemory: async () => {}, resumeMemory: () => {},
     }) : null;
     bots=createBotService({client:kernel,hostId:'web-domain-host',dataDir:String(frame.root),
-      registry:{listRuns:async()=>[],listWorkspaceThreadSnapshots:async()=>[],listWorkspaceRunSessionIds:async()=>[]},
-      ...((frame.nativeWake || frame.nativeMemory) ? { agent: { ensureEntry: async (bot: BotSummary) => {
+      agent: { ensureEntry: async (bot: BotSummary) => {
         assert.equal(bot.entry.runtime, 'agent');
         if (bot.entry.runtime !== 'agent') throw new Error('Agent Bot entry required');
         await runtime.createBotThread(bot.id, bot.entry.threadId, bot.entry.branchId);
         return bot.entry;
-      }, model: async () => null, listWork: async () => [] } } : {}),
-      createSession:async()=>{throw new Error('Entry session not requested');},openSession:async()=>{throw new Error('Entry session not requested');},
+      }, model: async () => null, listWork: async () => [] },
       publishExecutionGate:gate=>kernel.agentRuntimeRequest<void,'runtime.bot.gate.publish'>('runtime.bot.gate.publish',gate),
       lifecycle:()=>nativeLifecycle ?? ({planWork:async()=>[],planMachines:async()=>[],stop:async()=>{},stopScope:async()=>new Promise<void>(resolve=>{releaseStop=resolve;send({kind:'fixture-stop-entered'});}),machine:async(_bot,machine)=>machine,prepareWake:async()=>{},resume:async()=>{},awakened:async()=>{}}),
     });
-    const bot=await bots.create({name:'Original Bot', ...((frame.nativeWake || frame.nativeMemory) ? { runtime: 'agent' as const } : {})});botId=bot.id;
+    const bot=await bots.create({name:'Original Bot'});botId=bot.id;
     await bots.publishExecutionGates();
     if (frame.nativeMemory) {
       const owners = await installProductMemory(String(frame.root), kernel, runtime, bots);

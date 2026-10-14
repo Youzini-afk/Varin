@@ -1,3 +1,4 @@
+import { AgentSettingsService } from '../models/settings.js';
 /** Public Thread source lifecycle with original owners; only HTTP/IPC delivery and model bytes are controlled. */
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -97,7 +98,7 @@ async function initialize(frame: Record<string, unknown>) {
     getWorktreeBootstrapStatus: async () => { throw new Error('Source capture must not bootstrap a worktree'); },
   });
   const withSourceRead = storage.withResourceRead.bind(storage);
-  const resources = createThreadResourceScope({ agentDir, homeDir: join(root, 'home'), documents, workingStates,
+  const resources = createThreadResourceScope({ dataDirectory: agentDir, homeDir: join(root, 'home'), documents, workingStates,
     validateLiveSource: liveSources.validate, projectTrusted: async () => trusted, configuration: async () => ({ packages: [] }), withSourceRead });
   const personalization = createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'source-project' }) });
   const prepareContext = createThreadContext({ resources, personalization, projectForWorkspace: async id => {
@@ -126,8 +127,7 @@ async function initialize(frame: Record<string, unknown>) {
   kernel.setContextOwner(new ContextService(runtime, prepareContext, async (run, launch, signal) => {
     const selected = launch?.selection.source;
     const registration = selected ? await documents.admitWorkspaceRegistration(selected.workspace_id) : undefined;
-    const policy=await readContextPolicy({ agentDir, ...(registration ? { projectRoot: registration.canonicalPath } : {}),
-      projectTrusted: trusted, modelId: model.modelId, providerId: model.providerId });
+    const policy=await readContextPolicy({ settings: await new AgentSettingsService(agentDir, () => trusted).snapshot(registration?.canonicalPath), ...(registration ? { projectRoot: registration.canonicalPath } : {}), modelId: model.modelId, providerId: model.providerId });
     const admitted=await runtime.contextScope(run.id,signal);
     return {policy,scope:{sessionId:run.thread_id,...(admitted?.projectId?{projectId:admitted.projectId}:{}),
       ...(registration?{workspaceId:registration.canonicalPath}:{})}};

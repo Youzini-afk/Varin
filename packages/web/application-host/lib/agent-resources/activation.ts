@@ -8,7 +8,7 @@ export interface ExplicitSkillCommand {
   arguments: string;
 }
 
-/** Match the locked SDK's single leading command and first ASCII-space delimiter.
+/** Match one leading command and first ASCII-space delimiter.
  * This is selection metadata, never a replacement for the original user text.
  * Name-format diagnostics remain warnings, as in the resource selection owner.
  */

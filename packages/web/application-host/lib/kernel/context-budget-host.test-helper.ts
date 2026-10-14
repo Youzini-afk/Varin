@@ -1,3 +1,4 @@
+import { AgentSettingsService } from '../models/settings.js';
 /** Real Context budget/summary owners over the existing test-only stdio rendezvous. */
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -33,7 +34,7 @@ function request(method: string, params: unknown, options: { grant?: { grantId: 
   return result;
 }
 async function settings(reserveTokens: number) {
-  await writeFile(join(root, 'agent/settings.json'), JSON.stringify({ compaction: {
+  await writeFile(join(root, 'agent/agent-settings.json'), JSON.stringify({ compaction: {
     enabled: true, reserveTokens, keepRecentTokens: 32,
   }, harness: { context: { backgroundPreparation: false, preparationWaterline: 0.5 } } }));
 }
@@ -67,7 +68,7 @@ async function initialize(frame: Record<string, unknown>) {
     } };
   service = new ContextService(runtime, context, async (run) => {
     const model = run.configuration as { model: string; providerId?: string };
-    const policy = await readContextPolicy({ agentDir: join(root, 'agent'), projectTrusted: false, modelId: model.model,
+    const policy = await readContextPolicy({ settings: await new AgentSettingsService(join(root, 'agent'), () => false).snapshot(), modelId: model.model,
       ...(model.providerId ? { providerId: model.providerId } : {}) });
     const scope = await runtime.contextScope(run.id);
     return { policy, scope: { sessionId: run.thread_id, ...(scope?.projectId ? { projectId: scope.projectId } : {}) } };

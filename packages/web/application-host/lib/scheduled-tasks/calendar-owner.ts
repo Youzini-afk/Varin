@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ScheduledTask } from '@varin/application-client';
-import type { CalendarOnceAcceptance, CalendarDefinitionInput, CalendarOccurrence, CalendarPreparation, CalendarRule } from '@varin/protocol';
+import type { CalendarDefinitionInput, CalendarOccurrence, CalendarPreparation, CalendarRule } from '@varin/protocol';
 import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 import { KernelClientError } from '../kernel/kernel-error.js';
 import { calculateCalendarSlots } from './recurrence.js';
@@ -8,7 +8,6 @@ import { calculateCalendarSlots } from './recurrence.js';
 interface CalendarOwners {
   runtime: AgentRuntimeClient;
   projects(): Promise<Array<{ id: string; path: string }>>;
-  hasPiWork(projectId: string, taskId: string): boolean;
   prepare(work: CalendarPreparation, projectPath: string, signal: AbortSignal): Promise<CalendarOccurrence>;
   onChanged(): void;
   onError(error: unknown): void;
@@ -75,19 +74,19 @@ export class CalendarOwner {
   async sync(projectId: string, tasks: ScheduledTask[]): Promise<ScheduledTask[]> {
     const signal = this.epoch.signal; signal.throwIfAborted();
     const previous = await this.owners.runtime.calendar({ projectId }, signal);
-    const definitions: CalendarDefinitionInput[] = tasks.filter(task => task.runtime === 'agent' && !task.loopShadowed).map(task => {
+    if (tasks.some(task => task.runtime !== 'agent')) throw new Error('Scheduled task format is unsupported; its assets have been preserved');
+    const definitions: CalendarDefinitionInput[] = tasks.filter(task => !task.loopShadowed).map(task => {
       if (!task.target) throw new Error('Calendar target is unavailable');
       const asset = { id: task.id, runtime: task.runtime, name: task.name, enabled: task.enabled, schedule: task.schedule,
         execution: task.execution, target: task.target, missedPolicy: task.missedPolicy, loopRevision: task.loopRevision };
       return { taskId: task.id, assetRevision: createHash('sha256').update(canonical(asset)).digest('hex'),
-        assetKind: task.loopFile ? 'loop' : 'gui', name: task.name, enabled: task.enabled, onceAcceptance: task.onceAcceptance ?? null,
-        activationHold: task.loopError ? 'asset_invalid' : this.owners.hasPiWork(projectId, task.id) ? 'previous_runtime_active' : null,
+        assetKind: task.loopFile ? 'loop' : 'gui', name: task.name, enabled: task.enabled, onceAcceptance: null,
+        activationHold: task.loopError ? 'asset_invalid' : null,
         timezone: task.schedule.timezone, rule: ruleFor(task), missedPolicy: task.missedPolicy ?? (task.schedule.kind === 'once' ? 'coalesce_once' : 'skip'),
         target: task.target, instruction: task.execution.prompt };
     });
     const project = await this.owners.runtime.syncCalendar({ projectId, expectedRevision: previous.revision || null, definitions }, signal);
     return Promise.all(tasks.map(async task => {
-      if (task.runtime !== 'agent') return task;
       const definition = project.definitions.find(entry => entry.task_id === task.id && !entry.deleted);
       if (!definition) { if (task.loopShadowed) return task; throw new Error('Calendar definition projection is unavailable'); }
       return { ...task, calendar: { definition, occurrences: await this.owners.runtime.calendarOccurrences({ definitionId: definition.id }, signal) } };
@@ -97,26 +96,6 @@ export class CalendarOwner {
     for (const projectId of await this.owners.runtime.calendarProjects()) {
       if (!projectIds.has(projectId)) await this.sync(projectId, []);
     }
-  }
-  async captureOnceHandoff(projectId: string, task: ScheduledTask): Promise<NonNullable<ScheduledTask['pendingCalendarHandoff']>> {
-    const definition = (await this.owners.runtime.calendar({ projectId })).definitions.find(value => value.task_id === task.id && !value.deleted);
-    if (!definition || definition.rule.kind !== 'once' || task.schedule.kind !== 'once'
-      || definition.rule.date !== task.schedule.date || definition.rule.time !== task.schedule.time || definition.timezone !== task.schedule.timezone) throw new Error('Calendar owner changed before handoff');
-    return { definitionId: definition.id, generation: definition.generation };
-  }
-  async settleOnceHandoff(projectId: string, handoff: NonNullable<ScheduledTask['pendingCalendarHandoff']>): Promise<CalendarOnceAcceptance | null> {
-    const definition = (await this.owners.runtime.calendar({ projectId })).definitions.find(value => value.id === handoff.definitionId);
-    if (!definition?.deleted) throw new Error('Calendar owner must stop new acceptance before handoff');
-    const original = (await this.owners.runtime.calendarOccurrences({ definitionId: definition.id })).find(value => value.generation === handoff.generation && value.reason.kind === 'scheduled');
-    if (original?.reason.kind === 'scheduled') return { owner: 'agent', acceptanceId: original.id, scheduledAtMs: original.reason.at_ms, acceptedAtMs: original.observed_at_ms };
-    return definition.once_acceptance;
-  }
-  async hasActiveWork(projectId: string, taskId: string): Promise<boolean> {
-    const project = await this.owners.runtime.calendar({ projectId });
-    for (const definition of project.definitions.filter(value => value.task_id === taskId)) {
-      if ((await this.owners.runtime.calendarOccurrences({ definitionId: definition.id })).some(active)) return true;
-    }
-    return false;
   }
   async status(projectId?: string): Promise<{ enabled: number; running: number }> {
     let enabled = 0, running = 0;

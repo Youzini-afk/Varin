@@ -1,10 +1,10 @@
-/** Read the existing project-trust asset without constructing a Pi SDK or writing on read. */
+/** Native project trust. Reads never create, import or repair assets. */
 import { readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-function assetPath(value: string): string {
+export function canonicalProjectTrustPath(value: string): string {
   let path = value.startsWith('file://') ? fileURLToPath(value) : value;
   if (process.platform === 'win32' && /^\/(?:mnt\/|cygdrive\/)?[a-z](?:\/|$)/i.test(path)) {
     path = path.replace(/^\/(?:mnt\/|cygdrive\/)?([a-z])(?:\/(.*))?$/i, (_match, drive: string, rest = '') => `${drive.toUpperCase()}:\\${rest.replaceAll('/', '\\')}`);
@@ -13,24 +13,26 @@ function assetPath(value: string): string {
   else if (path.startsWith('~/') || process.platform === 'win32' && path.startsWith('~\\')) path = join(homedir(), path.slice(2));
   return resolve(path);
 }
-/** This is an existing external asset location, never the new models/MCP configuration directory. */
-export function resolvePiAgentDirectory(directory?: string): string {
-  return assetPath(directory ?? process.env.PI_CODING_AGENT_DIR ?? join(homedir(), '.pi', 'agent'));
-}
-export function readProjectTrust(directory: string, cwd: string): boolean | null {
-  let raw: string;
-  try { raw = readFileSync(join(assetPath(directory), 'trust.json'), 'utf8'); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
-  const data: unknown = JSON.parse(raw.replace(/^\uFEFF/, ''));
+export function projectTrustFile(directory: string): string { return join(canonicalProjectTrustPath(directory), 'project-trust.json'); }
+export function validateProjectTrust(data: unknown): Record<string, boolean> {
   if (!data || typeof data !== 'object' || Array.isArray(data)
-    || Object.values(data).some(value => value !== true && value !== false && value !== null)) throw new Error('Project trust store is malformed');
-  let current = assetPath(cwd);
-  try { current = realpathSync(current); } catch { /* Existing trust paths can precede a directory's creation. */ }
+    || Object.entries(data).some(([key, value]) => !key || ![true, false].includes(value as boolean))) throw new Error('Project trust store is malformed');
+  return data as Record<string, boolean>;
+}
+export function projectTrustDecision(data: Record<string, boolean>, cwd: string): boolean | null {
+  let current = canonicalProjectTrustPath(cwd);
+  try { current = realpathSync(current); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   for (;;) {
-    const decision = Object.hasOwn(data, current) ? (data as Record<string, unknown>)[current] : undefined;
+    const decision = Object.hasOwn(data, current) ? data[current] : undefined;
     if (typeof decision === 'boolean') return decision;
     const parent = dirname(current);
     if (parent === current) return null;
     current = parent;
   }
+}
+export function readProjectTrust(directory: string, cwd: string): boolean | null {
+  let raw: string;
+  try { raw = readFileSync(projectTrustFile(directory), 'utf8'); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
+  return projectTrustDecision(validateProjectTrust(JSON.parse(raw)), cwd);
 }

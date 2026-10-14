@@ -7,19 +7,18 @@ import { CronExpressionParser } from 'cron-parser';
 import { IANAZone } from 'luxon';
 import { resolveWorktreeTopLevel } from '../git/service.js';
 import { normalizeCalendarTarget, type ScheduledTaskExecution } from '../projects/project-config.js';
-import type { CalendarTarget, CalendarMissedPolicy, ThinkingLevel } from '@varin/protocol';
+import type { CalendarTarget, CalendarMissedPolicy } from '@varin/protocol';
 
 const LOOP_DIRECTORY = 'loops';
-const THINKING_LEVELS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 
 export interface LoopDefinition {
-  runtime?: 'pi' | 'agent';
-  target?: CalendarTarget;
+  runtime: 'agent';
+  target: CalendarTarget;
   missedPolicy?: CalendarMissedPolicy;
   enabled: boolean;
   execution: ScheduledTaskExecution;
   name: string;
-  schedule: { cron: string; kind: 'cron'; timezone?: string };
+  schedule: { cron: string; kind: 'cron'; timezone: string };
 }
 
 export interface ParsedLoopContent {
@@ -77,15 +76,6 @@ const asNonEmptyString = (value: unknown): string | null => {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
-};
-
-const splitProviderModel = (value: unknown): { modelID: string; providerID: string } | null => {
-  const raw = asNonEmptyString(value);
-  const separator = raw?.indexOf('/') ?? -1;
-  if (!raw || separator <= 0 || separator === raw.length - 1) return null;
-  const providerID = raw.slice(0, separator).trim();
-  const modelID = raw.slice(separator + 1).trim();
-  return providerID && modelID ? { providerID, modelID } : null;
 };
 
 const bestEffortFrontmatterName = (raw: unknown): string | null => {
@@ -164,93 +154,24 @@ export const parseLoopContent = (content: unknown): ParsedLoopContent => {
   const prompt = asNonEmptyString(parts.bodyRaw);
   if (!prompt) return { definition: null, error: 'The markdown body is required', name };
 
-  if (frontmatter.runtime !== undefined && frontmatter.runtime !== 'pi' && frontmatter.runtime !== 'agent') return { definition: null, error: 'Frontmatter runtime is invalid', name };
-  if (frontmatter.runtime === 'agent') {
-    try {
-      if (['model', 'thinking', 'agent', 'run_as_goal', 'goal_token_budget'].some(key => frontmatter[key] !== undefined)) throw new Error('Agent loops select model, source and Goal in target');
-      if (frontmatter.enabled !== undefined && typeof frontmatter.enabled !== 'boolean') throw new Error('Frontmatter enabled must be a boolean');
-      const timezone = asNonEmptyString(frontmatter.timezone);
-      if (!timezone || !IANAZone.isValidZone(timezone)) throw new Error('Agent loops require an explicit IANA timezone');
-      CronExpressionParser.parse(cron, { tz: timezone, currentDate: new Date() }).next();
-      if (frontmatter.missed_policy !== undefined && frontmatter.missed_policy !== 'skip' && frontmatter.missed_policy !== 'coalesce_once') throw new Error('Frontmatter missed_policy is invalid');
-      return { definition: { runtime: 'agent', target: normalizeCalendarTarget(frontmatter.target), name,
-        enabled: frontmatter.enabled === true, execution: { prompt: parts.bodyRaw }, schedule: { kind: 'cron', cron, timezone },
-        missedPolicy: frontmatter.missed_policy === 'coalesce_once' ? 'coalesce_once' : 'skip' }, error: null, name };
-    } catch (error) { return { definition: null, error: error instanceof Error ? error.message : 'Invalid Agent loop', name }; }
-  }
-
-  const model = splitProviderModel(frontmatter.model);
-  if (!model) {
-    return { definition: null, error: 'Frontmatter "model" must be "provider/model"', name };
-  }
-
-  if (frontmatter.enabled !== undefined && typeof frontmatter.enabled !== 'boolean') {
-    return { definition: null, error: 'Frontmatter "enabled" must be a boolean', name };
-  }
-
-  const timezone = frontmatter.timezone === undefined ? null : asNonEmptyString(frontmatter.timezone);
-  if (frontmatter.timezone !== undefined && !timezone) {
-    return { definition: null, error: 'Frontmatter "timezone" must be a non-empty string', name };
-  }
-  if (timezone && !IANAZone.isValidZone(timezone)) {
-    return { definition: null, error: 'Frontmatter "timezone" must be a valid IANA timezone', name };
+  if (frontmatter.runtime !== 'agent') {
+    return { definition: null, error: 'Unsupported loop runtime; expected explicit runtime "agent"', name };
   }
   try {
-    CronExpressionParser.parse(cron, { ...(timezone ? { tz: timezone } : {}), currentDate: new Date() }).next();
-  } catch {
-    return { definition: null, error: 'Frontmatter "schedule" must be a valid cron expression', name };
-  }
-
-  const agent = frontmatter.agent === undefined ? null : asNonEmptyString(frontmatter.agent);
-  if (frontmatter.agent !== undefined && !agent) {
-    return { definition: null, error: 'Frontmatter "agent" must be a non-empty string', name };
-  }
-
-  const thinking = frontmatter.thinking === undefined ? null : asNonEmptyString(frontmatter.thinking);
-  if (thinking && !THINKING_LEVELS.has(thinking)) {
-    return { definition: null, error: 'Frontmatter "thinking" is not supported by Pi', name };
-  }
-  if (frontmatter.thinking !== undefined && !thinking) {
-    return { definition: null, error: 'Frontmatter "thinking" must be a non-empty string', name };
-  }
-
-  const runAsGoal = frontmatter.run_as_goal === true;
-  if (frontmatter.run_as_goal !== undefined && typeof frontmatter.run_as_goal !== 'boolean') {
-    return { definition: null, error: 'Frontmatter "run_as_goal" must be a boolean', name };
-  }
-
-  const goalTokenBudget = frontmatter.goal_token_budget;
-  if (goalTokenBudget !== undefined) {
-    if (!runAsGoal) {
-      return { definition: null, error: 'Frontmatter "goal_token_budget" requires "run_as_goal: true"', name };
+    if (['model', 'thinking', 'agent', 'run_as_goal', 'goal_token_budget'].some(key => frontmatter[key] !== undefined)) {
+      throw new Error('Unsupported execution fields; select model, source and Goal in target');
     }
-    if (typeof goalTokenBudget !== 'number' || !Number.isSafeInteger(goalTokenBudget) || goalTokenBudget <= 0) {
-      return { definition: null, error: 'Frontmatter "goal_token_budget" must be a positive integer', name };
-    }
+    if (frontmatter.enabled !== undefined && typeof frontmatter.enabled !== 'boolean') throw new Error('Frontmatter enabled must be a boolean');
+    const timezone = asNonEmptyString(frontmatter.timezone);
+    if (!timezone || !IANAZone.isValidZone(timezone)) throw new Error('Loops require an explicit IANA timezone');
+    CronExpressionParser.parse(cron, { tz: timezone, currentDate: new Date() }).next();
+    if (frontmatter.missed_policy !== undefined && frontmatter.missed_policy !== 'skip' && frontmatter.missed_policy !== 'coalesce_once') throw new Error('Frontmatter missed_policy is invalid');
+    return { definition: { runtime: 'agent', target: normalizeCalendarTarget(frontmatter.target), name,
+      enabled: frontmatter.enabled === true, execution: { prompt: parts.bodyRaw }, schedule: { kind: 'cron', cron, timezone },
+      missedPolicy: frontmatter.missed_policy === 'coalesce_once' ? 'coalesce_once' : 'skip' }, error: null, name };
+  } catch (error) {
+    return { definition: null, error: error instanceof Error ? error.message : 'Invalid loop', name };
   }
-
-  return {
-    definition: {
-      enabled: frontmatter.enabled === true,
-      execution: {
-        modelID: model.modelID,
-        prompt,
-        providerID: model.providerID,
-        ...(agent ? { agent } : {}),
-        ...(goalTokenBudget !== undefined ? { goalTokenBudget } : {}),
-        ...(runAsGoal ? { runAsGoal: true } : {}),
-        ...(thinking ? { thinkingLevel: thinking as ThinkingLevel } : {}),
-      },
-      name,
-      schedule: {
-        cron,
-        kind: 'cron',
-        ...(timezone ? { timezone } : {}),
-      },
-    },
-    error: null,
-    name,
-  };
 };
 
 export const loopContentRevision = (content: unknown): string => (

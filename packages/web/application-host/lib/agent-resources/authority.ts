@@ -31,6 +31,8 @@ export interface AdmittedAgentResourceScope {
   projectTrusted: boolean;
   project?: ResourceDomain & { cwd: string; skillAncestorBoundary?: string };
   user?: ResourceDomain;
+  /** Native global settings source, distinct from the resource files root. */
+  userSettings?: ResourceDomain;
   /** Exact HOME/.agents domain, not HOME or an arbitrary filesystem reader. */
   userAgents?: ResourceDomain;
   /** Outer-to-inner capsules captured with the admitted source receipt. */
@@ -134,28 +136,28 @@ class Preparation {
   }
 }
 
-async function settings(preparation: Preparation, domain?: ResourceDomain): Promise<ResourceSettings> {
+async function settings(preparation: Preparation, domain?: ResourceDomain, filename = 'settings.json'): Promise<ResourceSettings> {
   if (!domain) return { skills: [], packages: [] };
-  const target = join(domainDirectory(domain), 'settings.json');
+  const target = join(domainDirectory(domain), filename);
   const result = await preparation.read(domain.reader, target);
   if (result.status === 'missing') return { skills: [], packages: [] };
   const file = requireFile(result);
   try { return parseResourceSettings(file.content); }
   catch { throw new PreparationFailure(resourceFailure(domain.reader, target, 'invalid', 'Resource settings are malformed')); }
 }
-async function systemSelection(preparation: Preparation, name: string, user: ResourceDomain | undefined, project: ResourceDomain | undefined): Promise<InstructionEntry | null> {
+async function systemSelection(preparation: Preparation, name: string, user: ResourceDomain | undefined, project: ResourceDomain | undefined, projectCwd: string): Promise<InstructionEntry | null> {
   for (const [origin, domain] of [['project', project], ['user', user]] as const) {
     if (!domain) continue;
     const result = await preparation.read(domain.reader, join(domainDirectory(domain), name));
     if (result.status === 'missing') continue;
     const file = requireFile(result);
-    return { origin, kind: 'user-config', appliesTo: origin === 'project' ? relativeResourcePath(path.posix.dirname(domainDirectory(domain))) : null, reference: file.reference };
+    return { origin, kind: 'user-config', appliesTo: origin === 'project' ? relativeResourcePath(projectCwd) : null, reference: file.reference };
   }
   return null;
 }
 
-/** Only a resource root is walked. SKILL.md stops descent; .agents mode preserves the SDK entry rules. */
-async function discover(preparation: Preparation, domain: ResourceDomain, target: string, mode: 'pi' | 'agents' = 'pi'): Promise<CapturedResource[]> {
+/** Only a resource root is walked. SKILL.md stops descent; .agents mode preserves its entry rules. */
+async function discover(preparation: Preparation, domain: ResourceDomain, target: string, mode: 'native' | 'agents' = 'native'): Promise<CapturedResource[]> {
   const result: CapturedResource[] = [];
   const visited = new Set<string>();
   const matcher = ignore();
@@ -186,7 +188,7 @@ async function discover(preparation: Preparation, domain: ResourceDomain, target
       const relative = path.posix.relative(root || '.', target);
       if (matcher.ignores(entry.kind === 'directory' ? `${relative}/` : relative)) continue;
       if (entry.kind === 'directory') await walk(target);
-      else if (entry.kind === 'file' && entry.name.endsWith('.md') && (mode === 'pi' ? directory === root : directory !== root)) {
+      else if (entry.kind === 'file' && entry.name.endsWith('.md') && (mode === 'native' ? directory === root : directory !== root)) {
         const file = await preparation.read(domain.reader, target);
         if (file.status === 'ready') result.push({ reference: file.reference, content: file.content });
         else preparation.diagnostic(file);
@@ -245,7 +247,7 @@ async function expandManifestGlob(preparation: Preparation, domain: ResourceDoma
 interface SkillCandidate { file: CapturedResource; domain: ResourceDomain; priority: number; origin: SkillDescriptor['origin']; requiresProjectTrust: boolean; enabled: boolean; packageIdentity?: string }
 async function collectSkills(preparation: Preparation, scope: AdmittedAgentResourceScope, userSettings: ResourceSettings, projectSettings: ResourceSettings, projectConfig?: ResourceDomain): Promise<SkillDescriptor[]> {
   const candidates: SkillCandidate[] = [];
-  const add = async (domain: ResourceDomain, target: string, origin: 'user' | 'project', priority: number, patterns: string[], filterBase: string, mode: 'pi' | 'agents' = 'pi', overridesOnly = true) => {
+  const add = async (domain: ResourceDomain, target: string, origin: 'user' | 'project', priority: number, patterns: string[], filterBase: string, mode: 'native' | 'agents' = 'native', overridesOnly = true) => {
     for (const file of await discover(preparation, domain, target, mode)) {
       const absolute = absoluteDisplay(domain, file.reference.path);
       candidates.push({ file, domain, origin, requiresProjectTrust: origin === 'project', priority, enabled: resourceEnabled({ path: file.reference.path, base: filterBase, ...(absolute ? { absolute } : {}) }, patterns, { overridesOnly }) });
@@ -258,7 +260,7 @@ async function collectSkills(preparation: Preparation, scope: AdmittedAgentResou
     for (const configuredPath of config.skills.filter(entry => !isLocalPattern(entry))) {
       const target = configuredTarget(scope, domain, origin, configuredPath);
       if ('status' in target) { preparation.diagnostic(target); continue; }
-      await add(target, domainDirectory(target), origin, priority, config.skills.filter(isLocalPattern), target.reader === domain.reader ? domainDirectory(domain) : domainDirectory(target), 'pi', false);
+      await add(target, domainDirectory(target), origin, priority, config.skills.filter(isLocalPattern), target.reader === domain.reader ? domainDirectory(domain) : domainDirectory(target), 'native', false);
     }
   }
   if (projectConfig && scope.project) {
@@ -310,7 +312,7 @@ async function collectSkills(preparation: Preparation, scope: AdmittedAgentResou
       catch { preparation.diagnostic(resourceFailure(installed.reader, join(base, 'package.json'), 'invalid', 'Installed package manifest is malformed')); continue; }
     } else if (manifestFile.status !== 'missing') { preparation.diagnostic(manifestFile); continue; }
     const filtered = entry.structured === true;
-    // Pi's unfiltered manifest owns all defaults; a manifest without skills opts out of convention discovery.
+    // An unfiltered native manifest owns all defaults; a manifest without skills opts out of convention discovery.
     const manifestEntries = manifest.skills;
     const roots = manifestEntries && manifestEntries.length > 0 ? manifestEntries.filter(value => !isOverridePattern(value))
       : filtered || !manifest.hasManifest || (manifestEntries !== undefined && manifestEntries.length > 0) ? ['skills'] : [];
@@ -427,11 +429,11 @@ export function createAgentResourceAuthority() {
       try {
         signal?.throwIfAborted();
         const cwd = scope.project ? relativeResourcePath(scope.project.cwd) : '';
-        const projectConfig = scope.project && scope.projectTrusted ? { ...scope.project, directory: join(cwd, '.pi') } : undefined;
-        const userSettings = await settings(preparation, scope.user);
-        const projectSettings = await settings(preparation, projectConfig);
-        const system = await systemSelection(preparation, 'SYSTEM.md', scope.user, projectConfig);
-        const appendSystem = await systemSelection(preparation, 'APPEND_SYSTEM.md', scope.user, projectConfig);
+        const projectConfig = scope.project && scope.projectTrusted ? { ...scope.project, directory: join(cwd, '.varin', 'resources') } : undefined;
+        const userSettings = await settings(preparation, scope.userSettings, 'agent-settings.json');
+        const projectSettings = await settings(preparation, scope.project && scope.projectTrusted ? { ...scope.project, directory: join(cwd, '.varin') } : undefined);
+        const system = await systemSelection(preparation, 'SYSTEM.md', scope.user, projectConfig, cwd);
+        const appendSystem = await systemSelection(preparation, 'APPEND_SYSTEM.md', scope.user, projectConfig, cwd);
         const baseInstructions: InstructionEntry[] = [];
         if (scope.user) {
           const entry = await preparation.context(scope.user, 'user', null);
@@ -464,7 +466,7 @@ export function createAgentResourceAuthority() {
         const observations = [...preparation.observations.values()];
         const configurationDigest = contentVersion(JSON.stringify({ userSettings, projectSettings, projectTrusted: scope.projectTrusted,
           installed: scope.installedPackages?.map(pkg => [pkg.identity, pkg.source, pkg.scope, pkg.reader.domainId, pkg.reader.viewId]) ?? [],
-          configurationSources: observations.filter(entry => /(?:^|\/)(settings|package)\.json$/.test(entry.path)),
+          configurationSources: observations.filter(entry => /(?:^|\/)(agent-settings|settings|package)\.json$/.test(entry.path)),
           skillsEnabled: scope.skillsEnabled !== false }));
         const data: Omit<PreparedAgentResources, 'id'> = {
           scope: { threadId: scope.threadId, branchId: scope.branchId, mode: scope.mode, threadRole: scope.threadRole,

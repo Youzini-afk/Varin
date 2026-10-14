@@ -1,9 +1,9 @@
 # Model connections, settings and credentials
 
 `ModelsService` owns the Agent runtime's channel catalog, model selections and purpose bindings in
-the Application Host. It can serve settings, discovery and authorization without a Pi worker or
-an active conversation. Pi remains the default conversation runtime and retains its own model,
-credential and configuration assets; neither service imports or rewrites the other's store.
+the Application Host. It serves settings, discovery and authorization without an active conversation.
+Native settings, credentials, resources and context policy share their explicit owners. Old Pi assets
+are neither read nor imported.
 
 The Host prepares product configuration and authentication. Rust owns native chat protocol execution,
 HTTP/SSE, cancellation and durable request/usage facts. Auxiliary inference uses the existing
@@ -34,9 +34,20 @@ external edits. A malformed document is an error, not an empty replacement; an a
 binding can retain the last valid configuration. Invalid channel entries report their own issues
 without removing independent valid channels. A first invalid load has no invented valid fallback.
 
-The existing project `trust.json` remains an external asset. Its read-only owner is now
-`@varin/settings-store` (`src/project-trust.ts`), also used by Pi; reading trust does not construct the Pi SDK.
-This shared trust decision does not merge the two runtimes' settings or accounts.
+`ProjectTrustService` owns native `VARIN_DATA_DIR/project-trust.json` through the same locked revision-CAS
+file transaction. Missing decisions are untrusted. Explicit true/false decisions inherit along canonical
+ancestors; deleting a direct decision exposes the ancestor decision, if any. The authenticated
+`/api/project-trust/read` and `/update` routes accept an existing workspace ID, resolve it through
+Documents admission, and never grant trust to a raw request path. Bad trust files are errors and remain
+untouched. `~/.pi/agent/trust.json`, Pi environment variables and legacy files have no native authority.
+Every new project resource/model/MCP access consults current trust; revocation does not rewrite accepted
+immutable input history.
+
+`agent-settings.json` and trusted `.varin/settings.json` also own the typed `compaction` and `resources`
+fields. Context policy is derived from a settings snapshot with its revisions and trusted project
+selection. Token counts require non-negative safe integers, including every model override; explicit
+zero remains distinct from the default. Resource file roots are `VARIN_DATA_DIR/resources` and
+`.varin/resources`; see [resource admission](../agent-resources/DOCUMENTATION.md).
 
 ## Channels and model selection
 

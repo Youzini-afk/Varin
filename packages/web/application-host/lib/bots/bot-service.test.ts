@@ -30,10 +30,9 @@ const setup = async () => {
     listRecords: async () => ({ records: [...records.values()], nextCursor: null }),
     releaseRecord: vi.fn(async (_operation: string, _workspace: string, id: string) => { records.delete(id); }),
   };
-  const createSession = vi.fn(async () => ({ sessionId: "session-1" }));
-  const openSession = vi.fn(async ({ sessionId }: { sessionId: string }) => ({ sessionId }));
-  const applyModel = vi.fn(async () => {});
-  const applyInstructions = vi.fn(async () => {});
+  const ensureEntry = vi.fn<BotServiceOptions['agent']['ensureEntry']>(async bot => bot.entry);
+  const applyProfile = vi.fn(async () => {});
+  const listWork = vi.fn<BotServiceOptions['agent']['listWork']>(async () => []);
   const removeData = vi.fn<NonNullable<BotServiceOptions['removeData']>>(async () => {});
   const onDeleted = vi.fn();
   const lifecycle = {
@@ -46,13 +45,13 @@ const setup = async () => {
   };
   const options: BotServiceOptions = {
     client: { subscribeExit: () => () => {}, issueGrant: async () => ({}), scoped: () => catalog } as unknown as BotServiceOptions["client"],
-    dataDir, hostId: "test", registry: {
-      listWorkspaceThreadSnapshots: async () => [], listRuns: async () => [], listWorkspaceRunSessionIds: async () => [],
-    }, createSession, openSession, applyModel, applyInstructions, removeData, onDeleted, lifecycle: () => lifecycle,
+    dataDir, hostId: "test", agent: { ensureEntry, model: async bot => bot.model, listWork, applyProfile },
+    removeData, onDeleted, lifecycle: () => lifecycle,
+
   };
   const recreate = () => { const service = createBotService(options); services.push(service); return service; };
   const service = recreate();
-  return { service, recreate, lifecycle, records, catalog, removeData, onDeleted, createSession, openSession, applyModel, applyInstructions, failWrite: () => { failWrite = true; } };
+  return { service, recreate, lifecycle, records, catalog, removeData, onDeleted, ensureEntry, applyProfile, listWork, failWrite: () => { failWrite = true; } };
 };
 
 it('closes admission and retains the profile until stopped work and data cleanup both finish', async () => {
@@ -73,9 +72,7 @@ it('closes admission and retains the profile until stopped work and data cleanup
   await expect(service.ensureEntry(bot.id)).rejects.toThrow(/being deleted/);
   await expect(service.update(bot.id, { name: 'Changed' })).rejects.toThrow(/being deleted/);
   await vi.waitFor(() => expect(removeData).toHaveBeenCalledTimes(1));
-  await service.releaseEntry('session-1');
-  expect((await service.get(bot.id))?.entry).toEqual({ runtime: 'pi', sessionId: 'session-1' });
-  expect(await service.listSessionIds()).toContain('session-1');
+  expect((await service.get(bot.id))?.entry).toEqual(bot.entry);
   expect(catalog.releaseRecord).not.toHaveBeenCalled();
   await service.remove(bot.id);
   finish();
@@ -120,19 +117,21 @@ it('recovers archived Bot deletion after restart', async () => {
   expect(removeData).toHaveBeenCalledTimes(2);
 });
 
-it("concurrent entry opens share one durably bound session", async () => {
-  const { service, createSession } = await setup();
+it('allocates a stable native entry before materialization and uses it for every open', async () => {
+  const { service, ensureEntry, listWork } = await setup();
   const bot = await service.create();
+  expect(bot.entry).toEqual({ runtime: 'agent', threadId: `thread:bot:${bot.id}`, branchId: `branch:bot:${bot.id}` });
   const entries = await Promise.all([service.ensureEntry(bot.id), service.ensureEntry(bot.id)]);
-  expect(createSession).toHaveBeenCalledTimes(1);
-  expect(entries.map((entry) => entry.entry.runtime === 'pi' ? entry.entry.sessionId : null)).toEqual(["session-1", "session-1"]);
-  expect((await service.botForSession("session-1"))?.id).toBe(bot.id);
+  expect(entries.map(result => result.entry)).toEqual([bot.entry, bot.entry]);
+  expect(ensureEntry.mock.calls.every(([value]) => value.entry.threadId === bot.entry.threadId)).toBe(true);
+  await service.listWork(bot.id, true);
+  expect(listWork).toHaveBeenCalledWith(bot, true);
 });
 
 it('closes admission before stopping work, retains failures, and retries only unfinished stops', async () => {
   const { service, lifecycle } = await setup();
   const bot = await service.create();
-  lifecycle.planWork.mockResolvedValue(['a', 'b'].map((threadId) => ({ runtime: 'pi' as const, threadId, sessionId: threadId,
+  lifecycle.planWork.mockResolvedValue(['a', 'b'].map((threadId) => ({ runtime: 'agent' as const, threadId, branchId: `branch-${threadId}`,
     runId: `run-${threadId}`, resume: true, stopped: false, resumed: false })));
   lifecycle.stop.mockImplementation(async (_bot, work) => {
     expect(await service.canExecute(bot.id)).toBe(false);
@@ -157,7 +156,7 @@ it('closes admission before stopping work, retains failures, and retries only un
 it('recovers an unfinished VM shutdown after restart and only wakes work after the VM is ready', async () => {
   const { service, lifecycle, recreate } = await setup();
   const bot = await service.create();
-  lifecycle.planWork.mockResolvedValue([{ runtime: 'pi' as const, threadId: 'a', sessionId: 'a', runId: 'r', resume: true, stopped: false, resumed: false }]);
+  lifecycle.planWork.mockResolvedValue([{ runtime: 'agent' as const, threadId: 'a', branchId: 'branch-a', runId: 'r', resume: true, stopped: false, resumed: false }]);
   lifecycle.planMachines.mockResolvedValue([{ machineId: 'vm', label: 'VM', state: 'pending' }]);
   lifecycle.machine.mockImplementation(async (_bot, machine) => ({ ...machine, state: 'stopping' }));
   await service.archive(bot.id);
@@ -179,24 +178,21 @@ it('recovers an unfinished VM shutdown after restart and only wakes work after t
   expect(lifecycle.resume).toHaveBeenCalledTimes(1);
 });
 
-it('reading a sleeping entry does not open or configure a worker and does not wake it', async () => {
-  const { service, openSession, applyInstructions } = await setup();
+it('resolves a sleeping native entry without opening admission and applies profile through the native owner', async () => {
+  const { service, applyProfile } = await setup();
   const bot = await service.create();
-  await service.ensureEntry(bot.id);
   await service.sleep(bot.id);
   await vi.waitFor(async () => expect((await service.get(bot.id))?.activity?.state).toBe('asleep'));
-  openSession.mockClear(); applyInstructions.mockClear();
-  expect(((await service.ensureEntry(bot.id)).entry as { runtime: 'pi'; sessionId: string }).sessionId).toBe('session-1');
+  expect((await service.ensureEntry(bot.id)).entry).toEqual(bot.entry);
   await service.update(bot.id, { instructions: 'New instructions', pinned: true });
-  expect(openSession).not.toHaveBeenCalled();
-  expect(applyInstructions).not.toHaveBeenCalled();
+  expect(applyProfile).toHaveBeenCalledWith(expect.objectContaining({ instructions: 'New instructions', entry: bot.entry }));
   expect(await service.canExecute(bot.id)).toBe(false);
 });
 
 it('stops work even when the VM inventory is unavailable, and retains that progress on retry', async () => {
   const { service, lifecycle } = await setup();
   const bot = await service.create();
-  lifecycle.planWork.mockResolvedValue([{ runtime: 'pi' as const, threadId: 'a', sessionId: 'a', runId: 'r', resume: true, stopped: false, resumed: false }]);
+  lifecycle.planWork.mockResolvedValue([{ runtime: 'agent' as const, threadId: 'a', branchId: 'branch-a', runId: 'r', resume: true, stopped: false, resumed: false }]);
   lifecycle.planMachines.mockRejectedValueOnce(new Error('VM inventory offline'));
   await service.sleep(bot.id);
   await vi.waitFor(async () => expect((await service.get(bot.id))?.activity?.state).toBe('sleep-failed'));
@@ -207,119 +203,39 @@ it('stops work even when the VM inventory is unavailable, and retains that progr
   expect(lifecycle.stop).toHaveBeenCalledTimes(1);
 });
 
-it('does not replace malformed durable Bot identity with an empty profile', async () => {
-  const { service, records, createSession } = await setup();
+it.each(['{broken', JSON.stringify({ id: 'legacy', name: 'Old Bot', coordinatorHostId: 'host', entry: { runtime: 'pi', sessionId: 'original' } })])(
+  'rejects malformed or unsupported durable identity without rewriting it', async payload => {
+    const { service, records, ensureEntry } = await setup();
+    const bot = await service.create();
+    const row = records.get(`bot.profile:${bot.id}`)!;
+    row.payloadJson = payload;
+    ensureEntry.mockClear();
+    await expect(service.list()).rejects.toThrow(/unsupported or malformed/);
+    await expect(service.ensureEntry(bot.id)).rejects.toThrow(/unsupported or malformed/);
+    await expect(service.update(bot.id, { name: 'replacement' })).rejects.toThrow(/unsupported or malformed/);
+    expect(row.payloadJson).toBe(payload);
+    expect(ensureEntry).not.toHaveBeenCalled();
+  },
+);
+
+it('preserves the allocated entry when materialization fails, and never invokes it before profile persistence', async () => {
+  const { service, ensureEntry, failWrite } = await setup();
   const bot = await service.create();
-  const row = records.get(`bot.profile:${bot.id}`)!;
-  row.payloadJson = '{broken';
-  await expect(service.list()).rejects.toThrow(/malformed/);
-  await expect(service.ensureEntry(bot.id)).rejects.toThrow(/malformed/);
-  await expect(service.update(bot.id, { name: 'replacement' })).rejects.toThrow(/malformed/);
-  expect(row.payloadJson).toBe('{broken');
-  expect(createSession).not.toHaveBeenCalled();
+  ensureEntry.mockRejectedValueOnce(new Error('runtime disconnected'));
+  await expect(service.ensureEntry(bot.id)).rejects.toThrow('runtime disconnected');
+  expect((await service.get(bot.id))?.entry).toEqual(bot.entry);
+  ensureEntry.mockClear(); failWrite();
+  await expect(service.create()).rejects.toThrow('storage disconnected');
+  expect(ensureEntry).not.toHaveBeenCalled();
 });
 
-it("does not replace an entry on transport failure or return an unbound entry on storage failure", async () => {
-  const { service, createSession, openSession, failWrite } = await setup();
-  const bot = await service.create();
-  await service.ensureEntry(bot.id);
-  openSession.mockRejectedValueOnce(new Error("worker disconnected"));
-  await expect(service.ensureEntry(bot.id)).rejects.toThrow("worker disconnected");
-  expect(createSession).toHaveBeenCalledTimes(1);
-  expect((await service.get(bot.id))?.entry).toEqual({ runtime: 'pi', sessionId: 'session-1' });
-  await service.releaseEntry("session-1");
-  failWrite();
-  await expect(service.ensureEntry(bot.id)).rejects.toThrow("storage disconnected");
-});
-
-it("keeps an archived Bot archived when entry creation races with archive", async () => {
-  const { service, createSession } = await setup();
-  const bot = await service.create();
-  let resume!: () => void;
-  const started = new Promise<void>((resolve) => {
-    createSession.mockImplementationOnce(async () => {
-      resolve();
-      await new Promise<void>((done) => { resume = done; });
-      return { sessionId: "session-1" };
-    });
-  });
-  const entry = service.ensureEntry(bot.id);
-  await started;
-  const archived = service.archive(bot.id);
-  resume();
-  await entry;
-  await archived;
-  await vi.waitFor(async () => expect((await service.get(bot.id))?.archived).toBe(true));
-  expect((await service.botForSession("session-1"))?.archived).toBe(true);
-  expect(await service.canExecute(bot.id)).toBe(false);
-});
-
-it("persists instructions and applies a stored model to reopened and live entry sessions", async () => {
-  const { service, openSession, applyModel, applyInstructions } = await setup();
-  const bot = await service.create({ instructions: "Be terse." });
-  expect((await service.get(bot.id))?.instructions).toBe("Be terse.");
-  await service.update(bot.id, { model: { providerId: "acme", modelId: "m-2" } });
-  // No live entry yet — a model update must not fabricate one.
-  expect(applyModel).not.toHaveBeenCalled();
-  await service.ensureEntry(bot.id);
-  expect(applyInstructions).toHaveBeenCalledWith({ sessionId: "session-1", instructions: "Be terse." });
-  // Reopen: the open path carries the stored model.
-  await service.ensureEntry(bot.id);
-  expect(openSession).toHaveBeenLastCalledWith(expect.objectContaining({
-    sessionId: "session-1",
-    model: { providerId: "acme", modelId: "m-2" },
-  }));
-  // A live broker worker ignores the open model argument; the service must
-  // actually select the stored preference before returning the entry.
-  expect(applyModel).toHaveBeenCalledWith({ sessionId: "session-1", model: { providerId: "acme", modelId: "m-2" } });
-  // Live update: the running worker is told immediately.
-  await service.update(bot.id, { model: { providerId: "acme", modelId: "m-3" } });
-  expect(applyModel).toHaveBeenCalledWith({ sessionId: "session-1", model: { providerId: "acme", modelId: "m-3" } });
-  await service.update(bot.id, { model: null });
-  expect(applyModel).toHaveBeenLastCalledWith({ sessionId: "session-1", model: null });
-  await service.update(bot.id, { instructions: null });
-  expect(applyInstructions).toHaveBeenLastCalledWith({ sessionId: "session-1", instructions: null });
-});
-
-it("reports the latest run session as a work item's navigation target", async () => {
-  const dataDir = await mkdtemp(join(tmpdir(), "varin-bot-work-"));
-  dirs.push(dataDir);
-  const records = new Map<string, KernelRecordResult>();
-  const catalog = {
-    getRecord: async (_workspace: string, id: string) => records.get(id) ?? null,
-    putRecord: async (input: Record<string, unknown>) => {
-      const row = {
-        ...input,
-        recordRevision: (records.get(String(input.recordId))?.recordRevision ?? 0) + 1,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      } as unknown as KernelRecordResult;
-      records.set(row.recordId, row);
-      return row;
-    },
-    listRecords: async () => ({ records: [...records.values()], nextCursor: null }),
-  };
-  const workThread = { id: "thread-1", purpose: "task", brief: "child work", parent: { kind: "thread", id: "root" } };
-  const rootThread = { id: "root", purpose: "bot-root", brief: "root", hidden: true };
-  const service = createBotService({
-    client: { subscribeExit: () => () => {}, issueGrant: async () => ({}), scoped: () => catalog } as unknown as BotServiceOptions["client"],
-    dataDir, hostId: "test",
-    registry: {
-      listWorkspaceThreadSnapshots: async () => [
-        { thread: rootThread, activeRun: null },
-        { thread: workThread, activeRun: null },
-      ] as never,
-      listRuns: async () => [{ sessionId: "older" }, { sessionId: "worker-9" }] as never,
-      listWorkspaceRunSessionIds: async () => ["older", "worker-9"],
-    },
-    createSession: async () => ({ sessionId: "session-1" }),
-    openSession: async ({ sessionId }: { sessionId: string }) => ({ sessionId }),
-  });
-  const bot = await service.create();
-  const work = await service.listWork(bot.id);
-  expect(work.map((item) => item.runtime === 'pi' ? item.thread.id : item.thread.thread_id)).toEqual(["thread-1"]);
-  expect(work[0]?.runtime === 'pi' ? work[0].sessionId : null).toBe("worker-9");
-  await service.ensureEntry(bot.id);
-  await service.archive(bot.id);
-  expect(new Set(await service.listSessionIds())).toEqual(new Set(["session-1", "older", "worker-9"]));
+it('persists profile changes before applying native personalization and exposes an apply failure', async () => {
+  const { service, applyProfile } = await setup();
+  const bot = await service.create({ instructions: 'Be terse.' });
+  applyProfile.mockRejectedValueOnce(new Error('runtime unavailable'));
+  const model = { providerId: 'acme', modelId: 'm-2' };
+  await expect(service.update(bot.id, { model })).rejects.toThrow('runtime unavailable');
+  expect((await service.get(bot.id))?.model).toEqual(model);
+  await service.update(bot.id, { instructions: null, model: null });
+  expect(applyProfile).toHaveBeenLastCalledWith(expect.objectContaining({ instructions: null, model: null, entry: bot.entry }));
 });

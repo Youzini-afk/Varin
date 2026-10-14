@@ -5,9 +5,13 @@ import {
   type HarnessSettingsInput, type JsonValue,
 } from '@varin/protocol';
 import type { AgentSettingsSnapshot } from '@varin/application-client';
+import { parseCompactionSettings } from './compaction-settings.js';
+import { readResourceSettings } from '../agent-resources/configuration.js';
 import { ConfigurationFile, ModelConfigurationError, object } from './configuration.js';
 
 export function validateAgentSettings(document: Record<string, unknown>): Record<string, JsonValue> {
+  parseCompactionSettings(document.compaction);
+  try { readResourceSettings(document); } catch (error) { throw new ModelConfigurationError('invalid_settings', (error as Error).message); }
   if (document.harness !== undefined && !object(document.harness)) throw new ModelConfigurationError('invalid_settings', 'harness must be an object');
   const harness = (document.harness ?? {}) as HarnessSettingsInput;
   mergeHarnessSettings(harness, {});
@@ -38,6 +42,7 @@ export class AgentSettingsService {
   async snapshot(cwd?: string): Promise<AgentSettingsSnapshot> {
     const trusted = cwd !== undefined && this.projectTrusted(cwd);
     const [global, project] = await Promise.all([this.global.read(), trusted ? this.#project(cwd!).read() : { document: {}, revision: 'unselected' }]);
+    if (trusted && !this.projectTrusted(cwd!)) throw new ModelConfigurationError('project_trust_revoked', 'Project trust changed while reading settings', 403);
     return { global: global.document, globalRevision: global.revision, project: project.document, projectRevision: project.revision, projectTrusted: trusted };
   }
   async harness(cwd?: string) {
@@ -50,6 +55,7 @@ export class AgentSettingsService {
     if (input.scope === 'project' && (!input.cwd || !this.projectTrusted(input.cwd))) throw new ModelConfigurationError('project_not_trusted', 'Project configuration requires a trusted workspace', 403);
     const file = input.scope === 'global' ? this.global : this.#project(input.cwd!);
     await file.update(input.expectedRevision, document => {
+      if (input.scope === 'project' && !this.projectTrusted(input.cwd!)) throw new ModelConfigurationError('project_trust_revoked', 'Project trust changed while saving settings', 403);
       for (const key of input.remove) delete document[key];
       Object.assign(document, input.set);
       return document;
@@ -58,10 +64,10 @@ export class AgentSettingsService {
   }
   read() { return this.global.read(); }
   async updateHarness(expectedRevision: string, update: (harness: Record<string, JsonValue>) => Record<string, JsonValue>) {
-    const current = await this.global.read();
-    const harness = update(structuredClone((current.document.harness ?? {}) as Record<string, JsonValue>));
-    await this.update({ scope: 'global', expectedRevision, set: { harness }, remove: [] });
-    return this.global.read();
+    return this.global.update(expectedRevision, document => {
+      document.harness = update(structuredClone((document.harness ?? {}) as Record<string, JsonValue>));
+      return document;
+    });
   }
   subscribe(listener: (scope: 'global' | 'project', cwd: string | undefined, revision: string) => void) {
     this.#listeners.add(listener);

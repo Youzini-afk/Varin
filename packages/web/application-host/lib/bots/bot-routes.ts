@@ -59,20 +59,10 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, requi
     }
   });
 
-  app.get("/api/harness/bots/session-ids", requireAuth, async (_request: Request, response: Response) => {
-    response.setHeader("Cache-Control", "no-store");
-    try {
-      response.json({ sessionIds: await bots.listSessionIds() });
-    } catch (error) {
-      sendError(response, error, "Unable to list Bot conversations");
-    }
-  });
-
   app.post("/api/harness/bots", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
     try {
-      const runtime = request.body?.runtime;
-      if (runtime !== undefined && runtime !== "pi" && runtime !== "agent") throw new HarnessServiceError("invalid-params", "runtime must be pi or agent");
+      if (request.body?.runtime !== undefined) throw new HarnessServiceError("invalid-params", "Bot runtime selection is unsupported");
       const name = request.body?.name;
       if (name !== undefined && typeof name !== "string") {
         throw new HarnessServiceError("invalid-params", "name must be a string");
@@ -83,7 +73,6 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, requi
       }
       const model = parseModel(request.body?.model);
       response.status(201).json({ bot: await bots.create({
-        ...(runtime === undefined ? {} : { runtime }),
         ...(typeof name === "string" ? { name } : {}),
         ...(typeof instructions === "string" ? { instructions } : {}),
         ...(model !== undefined && model !== null ? { model } : {}),
@@ -232,24 +221,13 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, requi
         computers.workDesktops(scopeId), computers.listArtifacts(scopeId),
       ]) : [[], []];
       response.json({ threads: work.map((item) => ({ ...item,
-        desktops: desktops.filter((desktop) => desktop.work?.some((association) => item.runtime === 'agent'
-          ? association.work.runtime === 'agent' && association.work.threadId === item.identity.threadId
-          : association.work.runtime === 'pi' && association.registry?.scopeId === scopeId && association.registry.threadId === item.thread.id)),
-        artifacts: artifacts.filter((artifact) => artifact.threadId === (item.runtime === 'agent' ? item.identity.threadId : item.thread.id)) }))
-        .filter((item) => (item.runtime === 'agent' ? item.purpose : item.thread.purpose) !== 'bot-root' || item.desktops.length > 0 || item.artifacts.length > 0) });
+        desktops: desktops.filter((desktop) => desktop.work?.some((association) =>
+          association.work.runtime === 'agent' && association.work.threadId === item.identity.threadId)),
+        artifacts: artifacts.filter((artifact) => artifact.threadId === item.identity.threadId) }))
+        .filter((item) => item.purpose !== 'bot-root' || item.desktops.length > 0 || item.artifacts.length > 0) });
     } catch (error) {
       sendError(response, error, "Unable to list bot work");
     }
   });
 
-  /** Which Bot (if any) owns this session as its entry conversation. */
-  app.get("/api/harness/sessions/:sessionId/bot", requireAuth, async (request: Request, response: Response) => {
-    response.setHeader("Cache-Control", "no-store");
-    try {
-      const bot = await bots.botForSession(String(request.params.sessionId ?? ""));
-      response.json({ bot });
-    } catch (error) {
-      sendError(response, error, "Unable to resolve session bot");
-    }
-  });
 }

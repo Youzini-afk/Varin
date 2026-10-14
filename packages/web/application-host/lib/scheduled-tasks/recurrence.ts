@@ -2,10 +2,6 @@ import { DateTime, type Zone } from 'luxon';
 import { CronExpressionParser } from 'cron-parser';
 import type { ScheduledTaskSchedule } from '../projects/project-config.js';
 
-// Existing Pi scheduling preserves its five-second admission slack. Native calendar
-// calculations choose exact instants; neither pure function owns a timer or a queue.
-const TASK_DUE_SLACK_MS = 5_000;
-
 const parseTimeParts = (time: unknown): { hour: number; minute: number } | null => {
   const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(typeof time === 'string' ? time : '');
   if (!match) {
@@ -30,21 +26,6 @@ const applyTimeToDate = (baseDateTime: DateTime, time: unknown): DateTime | null
   });
 };
 
-const resolveScheduleTimes = (schedule: ScheduledTaskSchedule): string[] => {
-  const times: string[] = [];
-  if (Array.isArray(schedule?.times)) {
-    for (const candidate of schedule.times) {
-      if (typeof candidate === 'string' && /^([01]\d|2[0-3]):([0-5]\d)$/.test(candidate)) {
-        times.push(candidate);
-      }
-    }
-  }
-  if (times.length === 0 && typeof schedule?.time === 'string' && /^([01]\d|2[0-3]):([0-5]\d)$/.test(schedule.time)) {
-    times.push(schedule.time);
-  }
-  return Array.from(new Set(times)).sort((a, b) => a.localeCompare(b));
-};
-
 export const computeOnceDueAt = (
   schedule: Partial<ScheduledTaskSchedule> | undefined,
   zone: string | Zone,
@@ -59,127 +40,6 @@ export const computeOnceDueAt = (
   );
   return parsed.isValid ? parsed.toMillis() : null;
 };
-
-const weekdayAsZeroBased = (dateTime: DateTime): number | null => {
-  if (!dateTime || typeof dateTime.weekday !== 'number') {
-    return null;
-  }
-  return dateTime.weekday % 7;
-};
-
-export const computeNextRunAt = (task: {
-  enabled?: boolean;
-  schedule?: Partial<ScheduledTaskSchedule>;
-} | null | undefined, nowMs = Date.now()): number | null => {
-  if (!task?.enabled) {
-    return null;
-  }
-
-  const schedule = task.schedule;
-  if (!schedule || typeof schedule !== 'object') {
-    return null;
-  }
-
-  const zone = typeof schedule.timezone === 'string' && schedule.timezone.trim().length > 0
-    ? schedule.timezone.trim()
-    : DateTime.local().zoneName;
-
-  const now = DateTime.fromMillis(nowMs, { zone });
-  if (!now.isValid) {
-    return null;
-  }
-
-  if (schedule.kind === 'daily') {
-    const times = resolveScheduleTimes(schedule as ScheduledTaskSchedule);
-    if (times.length === 0) {
-      return null;
-    }
-    const minAllowed = now.plus({ milliseconds: TASK_DUE_SLACK_MS });
-
-    for (const time of times) {
-      const candidateToday = applyTimeToDate(now, time);
-      if (!candidateToday || !candidateToday.isValid) {
-        continue;
-      }
-      if (candidateToday > minAllowed) {
-        return candidateToday.toMillis();
-      }
-    }
-
-    const tomorrow = now.plus({ days: 1 });
-    const firstTomorrow = applyTimeToDate(tomorrow, times[0]);
-    return firstTomorrow?.isValid ? firstTomorrow.toMillis() : null;
-  }
-
-  if (schedule.kind === 'weekly') {
-    if (!Array.isArray(schedule.weekdays) || schedule.weekdays.length === 0) {
-      return null;
-    }
-    const times = resolveScheduleTimes(schedule as ScheduledTaskSchedule);
-    if (times.length === 0) {
-      return null;
-    }
-    const weekdaysSet = new Set(schedule.weekdays);
-    const minAllowed = now.plus({ milliseconds: TASK_DUE_SLACK_MS });
-
-    for (let dayOffset = 0; dayOffset <= 14; dayOffset += 1) {
-      const dayCandidate = now.plus({ days: dayOffset });
-      const zeroBasedWeekday = weekdayAsZeroBased(dayCandidate);
-      if (zeroBasedWeekday === null || !weekdaysSet.has(zeroBasedWeekday)) {
-        continue;
-      }
-      for (const time of times) {
-        const withTime = applyTimeToDate(dayCandidate, time);
-        if (!withTime || !withTime.isValid) {
-          continue;
-        }
-        if (withTime > minAllowed) {
-          return withTime.toMillis();
-        }
-      }
-    }
-    return null;
-  }
-
-  if (schedule.kind === 'once') {
-    const dueAt = computeOnceDueAt(schedule as ScheduledTaskSchedule, zone);
-    if (dueAt === null) {
-      return null;
-    }
-    const minAllowed = now.plus({ milliseconds: TASK_DUE_SLACK_MS });
-    return dueAt > minAllowed.toMillis() ? dueAt : null;
-  }
-
-  if (schedule.kind === 'cron') {
-    if (typeof schedule.cron !== 'string' || !schedule.cron) return null;
-    try {
-      const iterator = CronExpressionParser.parse(schedule.cron, {
-        tz: zone,
-        currentDate: new Date(nowMs),
-      });
-      return iterator.next().getTime();
-    } catch {
-      // Missing project metadata makes the task temporarily unrunnable.
-      return null;
-    }
-  }
-
-  return null;
-};
-
-export const isMissedRecurringSlot = (
-  task: { schedule: ScheduledTaskSchedule },
-  scheduledFor: number,
-  wokeAt: number,
-): boolean => {
-  if (task.schedule.kind === 'once') return false;
-  const followingOccurrence = computeNextRunAt({
-    enabled: true,
-    schedule: task.schedule,
-  }, scheduledFor);
-  return followingOccurrence !== null && wokeAt > followingOccurrence;
-};
-
 
 /** Calendar arithmetic is pure. Catalog chooses missed-slot policy, advances its cursor and
  * owns the deadline. An unavailable/invalid rule is an error, never a successful empty schedule. */

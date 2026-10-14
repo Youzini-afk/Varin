@@ -14,7 +14,7 @@ function fixture(sourceService?: Pick<ScheduledTaskService, 'listSources' | 'res
   const occurrence = { id: 'occurrence', revision: 3, state: 'preparing', thread_id: 'thread', branch_id: 'branch', run_id: null };
   const service = { listSources: vi.fn(sourceService?.listSources ?? (async () => ({ targets: [], unavailable: [] }))),
     resolveSource: vi.fn(sourceService?.resolveSource ?? (async () => ({ resourceOwner: { kind: 'local' as const }, workspaceId: 'registered:local', path: '/local' }))),
-    run: vi.fn(async () => ({ runtime: 'agent', occurrence, task: { id: 'task' } })),
+    run: vi.fn(async () => ({ runtime: 'agent', occurrence, task: { id: 'task', name: 'Calendar', runtime: 'agent', enabled: true, target: { kind: 'existing_work', threadId: 'thread', branchId: 'branch' }, schedule: { kind: 'daily', times: ['09:00'], timezone: 'UTC' }, execution: { prompt: 'Work' }, state: { createdAt: 0, updatedAt: 0 } } })),
     list: vi.fn(async (): Promise<unknown> => []), controlOccurrence: vi.fn(async () => ({ ...occurrence, revision: 4, state: 'cancelled' })), retryCalculation: vi.fn(async () => ({ revision: 7 })) };
   const routes: Array<{ method: string; pattern: string; chain: RequestHandler[] }> = [];
   const app = Object.fromEntries(['get', 'post', 'put', 'patch', 'delete'].map(method => [method, (pattern: string, ...chain: RequestHandler[]) => routes.push({ method, pattern, chain })])) as unknown as Express;
@@ -46,7 +46,7 @@ function fixture(sourceService?: Pick<ScheduledTaskService, 'listSources' | 'res
   return { api: createScheduledTasksHttpAPI(), service, occurrence, unauthenticate() { authenticated = false; } };
 }
 afterEach(() => vi.unstubAllGlobals());
-it('the public client keeps manual keys and occurrence CAS, distinguishes acceptance from Pi sessions and enforces route authentication', async () => {
+it('the public client keeps manual keys and occurrence CAS, returns actual native occurrence identities and enforces route authentication', async () => {
   const f = fixture();
   const accepted = await f.api.run('project', 'task', 'original-click');
   expect(accepted).toMatchObject({ runtime: 'agent', task: { id: 'task' }, occurrence: f.occurrence });
@@ -63,6 +63,8 @@ it('the public client keeps manual keys and occurrence CAS, distinguishes accept
 it('malformed lists and old endpoint responses do not become a successful empty/current calendar', async () => {
   const f = fixture(); f.service.list.mockResolvedValueOnce(null);
   await expect(f.api.list('project')).rejects.toThrow('Invalid scheduled task list');
+  f.service.list.mockResolvedValueOnce([{ runtime: 'pi', id: 'old' }]);
+  await expect(f.api.list('project')).rejects.toThrow('Invalid native scheduled task');
   let release!: (value: unknown[]) => void;
   f.service.list.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
   const pending = f.api.list('project');

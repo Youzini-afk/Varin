@@ -2,8 +2,8 @@
 
 This directory owns the Agent runtime's MCP configuration, credentials, discovery, connections and
 protocol client. `McpAuthority` is shared within an Application Host across compatible consumers.
-It does not create a Pi session or depend on Pi's MCP client/configuration loader. The default Pi
-runtime retains its separate MCP authority and assets.
+It uses native settings, trust and model-account owners without a conversation worker. Legacy Pi
+configuration and credentials are not read or imported.
 
 `application-host/index.ts` composes this owner with model-account resolution, trusted project
 configuration, Rust process services and the existing interaction/Task/resource adapters. Rust
@@ -35,7 +35,8 @@ Settings show actual source and state, save the selected original file and check
 Malformed sources keep their last valid snapshot and report an error; invalid individual entries
 do not disable independent valid servers. Actual source removal and explicit disablement have their
 own withdrawal semantics. Reads never clear or rewrite a bad file. The common project-trust reader
-in `@varin/settings-store` preserves the existing trust asset without loading the Pi SDK.
+in `@varin/settings-store` reads only native `VARIN_DATA_DIR/project-trust.json`. The admitted-workspace
+`ProjectTrustService` owns authenticated, revision-checked trust changes; missing decisions are untrusted.
 
 Server definition, cached directory and live instance are different objects. Binding identity includes
 the real resource Host, configuration origin/version, admitted execution environment and account.

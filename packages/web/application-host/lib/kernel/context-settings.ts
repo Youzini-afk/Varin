@@ -1,8 +1,8 @@
-/** Read the existing user/project configuration assets without opening an AgentSession. */
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
+/** Context policy derives from the same native settings snapshot used by model and resource configuration. */
 import { createHash } from 'node:crypto';
 import { mergeHarnessSettings, type HarnessSettingsInput } from '@varin/protocol';
+import type { AgentSettingsSnapshot } from '@varin/application-client';
+import { parseCompactionSettings } from '../models/compaction-settings.js';
 
 export interface ContextPolicySnapshot {
   configurationIdentity: string;
@@ -13,43 +13,27 @@ export interface ContextPolicySnapshot {
   backgroundPreparation: boolean;
   preparationWaterline: number;
 }
-const object = (value: unknown): Record<string, unknown> => {
-  if (value === undefined || value === null) return {};
-  if (typeof value !== 'object' || Array.isArray(value)) throw new Error('Context configuration must be an object');
-  return value as Record<string, unknown>;
-};
-async function read(file: string): Promise<{ value: Record<string, unknown>; revision: string }> {
-  try {
-    const bytes = await readFile(file,'utf8');
-    return {value:object(JSON.parse(bytes)),revision:createHash('sha256').update(bytes).digest('hex')};
-  } catch(error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {value:{},revision:'absent'};
-    throw error;
-  }
-}
-const tokens = (value: unknown, fallback: number): number => {
-  if (value === undefined || value === null) return fallback;
-  if (!Number.isSafeInteger(value) || Number(value) < 0) throw new Error('Compaction token settings must be non-negative integers');
-  return Number(value);
-};
-export async function readContextPolicy(input: {agentDir: string; projectRoot?: string; projectTrusted: boolean; providerId?: string; modelId: string}): Promise<ContextPolicySnapshot> {
-  const [global,project] = await Promise.all([
-    read(path.join(input.agentDir,'settings.json')),
-    input.projectTrusted && input.projectRoot ? read(path.join(input.projectRoot,'.pi','settings.json')) : Promise.resolve({value:{} as Record<string,unknown>,revision:'not-selected'}),
-  ]);
-  const user = object(global.value.compaction); const local = object(project.value.compaction);
+export function readContextPolicy(input: { settings: AgentSettingsSnapshot; projectRoot?: string; providerId?: string; modelId: string }): ContextPolicySnapshot {
+  const { settings } = input;
+  const global = settings.global;
+  const project = settings.projectTrusted ? settings.project : {};
+  const user = parseCompactionSettings(global.compaction);
+  const local = parseCompactionSettings(project.compaction);
   const modelKey = input.providerId ? `${input.providerId}/${input.modelId}` : undefined;
-  const selected = (layer: Record<string,unknown>) => modelKey ? object(object(layer.modelOverrides)[modelKey]) : {};
-  const ordinary = {...user,...local}; const override = {...selected(user),...selected(local)};
-  // Validate the ordinary values even when a model override is present, matching the existing
-  // configuration contract. Per-model overrides precede ordinary trusted project/user values.
-  const reserve = tokens(ordinary.reserveTokens,16384); const keep = tokens(ordinary.keepRecentTokens,20000);
-  const enabled = ordinary.enabled ?? true;
-  if (typeof enabled !== 'boolean') throw new Error('Compaction enabled setting must be boolean');
-  const harness = mergeHarnessSettings(global.value.harness as HarnessSettingsInput ?? {},project.value.harness as HarnessSettingsInput ?? {});
+  const ordinary = { ...user, ...local };
+  const override = modelKey ? { ...user.modelOverrides?.[modelKey], ...local.modelOverrides?.[modelKey] } : {};
+  const harness = mergeHarnessSettings((global.harness ?? {}) as HarnessSettingsInput, (project.harness ?? {}) as HarnessSettingsInput);
   const explicitKeep = override.keepRecentTokens ?? ordinary.keepRecentTokens;
-  const policy = {enabled,reserveTokens:tokens(override.reserveTokens,reserve),keepRecentTokens:tokens(override.keepRecentTokens,keep),
-    explicitKeepRecentTokens:explicitKeep === undefined || explicitKeep === null ? null : tokens(explicitKeep,keep),
-    backgroundPreparation:harness.context.backgroundPreparation,preparationWaterline:harness.context.preparationWaterline};
-  return {...policy,configurationIdentity:createHash('sha256').update(JSON.stringify([global.revision,project.revision,input.projectRoot ?? null,modelKey ?? null,policy])).digest('hex')};
+  const policy = {
+    enabled: ordinary.enabled ?? true,
+    reserveTokens: override.reserveTokens ?? ordinary.reserveTokens ?? 16384,
+    keepRecentTokens: explicitKeep ?? 20000,
+    explicitKeepRecentTokens: explicitKeep ?? null,
+    backgroundPreparation: harness.context.backgroundPreparation,
+    preparationWaterline: harness.context.preparationWaterline,
+  };
+  return { ...policy, configurationIdentity: createHash('sha256').update(JSON.stringify([
+    settings.globalRevision, settings.projectTrusted ? settings.projectRevision : 'unselected',
+    settings.projectTrusted ? input.projectRoot ?? null : null, modelKey ?? null, policy,
+  ])).digest('hex') };
 }

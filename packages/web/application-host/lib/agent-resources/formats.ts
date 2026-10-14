@@ -12,7 +12,7 @@ export interface ParsedSkill {
   body: string;
   diagnostics: string[];
 }
-/** The locked Pi frontmatter semantics: BOM/newlines, first closing delimiter and YAML data.
+/** Skill frontmatter semantics: BOM/newlines, first closing delimiter and YAML data.
  * Unknown frontmatter is not an execution policy and is deliberately absent from model metadata.
  */
 export function parseSkill(content: string, filePath: string): ParsedSkill {
@@ -53,7 +53,7 @@ export function ancestorDirectories(directory: string): string[] {
   }
   return result.reverse();
 }
-/** Match the SDK's ignore-prefix handling, including escaped !/# and per-directory patterns. */
+/** Apply ignore-prefix handling, including escaped !/# and per-directory patterns. */
 export function prefixIgnorePattern(line: string, prefix: string): string | null {
   if (!line.trim() || (line.trim().startsWith('#') && !line.trim().startsWith('\\#'))) return null;
   let pattern = line; let negated = false;

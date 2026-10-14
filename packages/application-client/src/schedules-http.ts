@@ -1,10 +1,21 @@
-import type { ScheduledTasksAPI } from './schedules.js';
+import type { ScheduledTask, ScheduledTasksAPI } from './schedules.js';
 import { runtimeFetch } from './transport/runtime-fetch.js';
 import { getRuntimeEndpointGeneration } from './transport/runtime-switch.js';
 
 export class ScheduleRequestError extends Error {
   constructor(readonly status: number, message: string) { super(message); this.name = 'ScheduleRequestError'; }
 }
+const record = (value: unknown): Record<string, unknown> | null => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+const decodeTask = (value: unknown): ScheduledTask => {
+  const task = record(value), target = record(task?.target), schedule = record(task?.schedule), execution = record(task?.execution), state = record(task?.state);
+  if (!task || task.runtime !== 'agent' || typeof task.id !== 'string' || !task.id || typeof task.name !== 'string' || typeof task.enabled !== 'boolean'
+    || !target || !['new_work', 'existing_work'].includes(String(target.kind))
+    || !schedule || !['once', 'daily', 'weekly', 'cron'].includes(String(schedule.kind)) || typeof schedule.timezone !== 'string' || !schedule.timezone
+    || !execution || typeof execution.prompt !== 'string' || Object.keys(execution).some(key => key !== 'prompt')
+    || !state || !Number.isSafeInteger(state.createdAt) || !Number.isSafeInteger(state.updatedAt)
+    || Object.keys(state).some(key => key !== 'createdAt' && key !== 'updatedAt')) throw new Error('Invalid native scheduled task');
+  return task as unknown as ScheduledTask;
+};
 /** The ordinary authenticated Host transport. No browser timer or calendar state authority. */
 export function createScheduledTasksHttpAPI(): ScheduledTasksAPI {
   const segment = (value: string) => { if (!value.trim()) throw new Error('Schedule identity is required'); return encodeURIComponent(value); };
@@ -22,7 +33,7 @@ export function createScheduledTasksHttpAPI(): ScheduledTasksAPI {
   const tasks = async (promise: Promise<{ tasks: unknown }>) => {
     const value = (await promise).tasks;
     if (!Array.isArray(value)) throw new Error('Invalid scheduled task list');
-    return value as Awaited<ReturnType<ScheduledTasksAPI['list']>>;
+    return value.map(decodeTask);
   };
   return {
     async listSources(project, signal) {
@@ -41,8 +52,7 @@ export function createScheduledTasksHttpAPI(): ScheduledTasksAPI {
     async run(project, task, key) {
       if (!key.trim()) throw new Error('A stable run-now key is required');
       const value = await request<Awaited<ReturnType<ScheduledTasksAPI['run']>>>(`${base(project, task)}/run`, 'POST', { key });
-      if (value.runtime === 'pi' && typeof value.sessionId === 'string' && value.sessionId) return value;
-      if (value.runtime === 'agent' && value.occurrence && typeof value.occurrence.id === 'string') return value;
+      if (value.runtime === 'agent' && value.occurrence && typeof value.occurrence.id === 'string') return { ...value, task: decodeTask(value.task) };
       throw new Error('Invalid scheduled task run receipt');
     },
     async readLoop(project, task) { return (await request<{ document: Awaited<ReturnType<ScheduledTasksAPI['readLoop']>> }>(`${base(project, task)}/loop-file`, 'GET')).document; },

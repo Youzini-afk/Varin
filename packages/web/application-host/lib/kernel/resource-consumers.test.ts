@@ -26,7 +26,7 @@ const checkpoint = (context: InitialContext): ContextCheckpoint => ({ id: 'check
     effective_system_prompt: context.effectiveSystemPrompt, instruction_sources: context.instructionSources, memory_checkpoint: context.memoryCheckpoint } });
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-resource-consumers-')); cleanup.push(root);
-  const agentDir = path.join(root, 'resource-agent');
+  const agentDir = path.join(root, 'resource-agent', 'resources');
   await fs.mkdir(path.join(agentDir, 'skills', 'example'), { recursive: true });
   await fs.writeFile(path.join(agentDir, 'SYSTEM.md'), 'SELECTED USER SYSTEM');
   await fs.writeFile(path.join(agentDir, 'APPEND_SYSTEM.md'), 'SELECTED APPEND');
@@ -133,7 +133,7 @@ it('resource refresh creates a separate candidate, preserves saved notes and mem
   expect(next.effectiveSystemPrompt).toContain('FROZEN NOTE');
   expect(next.resources?.snapshot.capturedFiles.some(file => file.content === 'EXPLICIT SUPPORT')).toBe(true);
   expect(JSON.stringify(saved)).toBe(original);
-  await fs.writeFile(path.join(f.agentDir, 'settings.json'), '{malformed');
+  await fs.writeFile(path.join(f.root, 'resource-agent', 'agent-settings.json'), '{malformed');
   await expect(f.prepare.refreshResources!(saved)).rejects.toMatchObject({ failure: { status: 'invalid' } });
   expect(JSON.stringify(saved)).toBe(original);
   const controller = new AbortController(); controller.abort();
@@ -148,11 +148,11 @@ it('ThreadAdapter resource refresh rejects stale revisions before preparation an
   await expect(fAdapter.adapter.refreshResources({ ...identity, expectedRevision: 0 })).rejects.toMatchObject({ code: 'thread-conflict' });
   expect(prepare).not.toHaveBeenCalled();
   expect(fAdapter.runtime.refreshResources).not.toHaveBeenCalled();
-  await fs.writeFile(path.join(f.agentDir, 'settings.json'), '{malformed');
+  await fs.writeFile(path.join(f.root, 'resource-agent', 'agent-settings.json'), '{malformed');
   await expect(fAdapter.adapter.refreshResources({ ...identity, expectedRevision: 1 })).rejects.toMatchObject({ failure: { status: 'invalid' } });
   expect(fAdapter.runtime.refreshResources).not.toHaveBeenCalled();
   expect(JSON.stringify(fAdapter.active())).toBe(original);
-  await fs.rm(path.join(f.agentDir, 'settings.json'));
+  await fs.rm(path.join(f.root, 'resource-agent', 'agent-settings.json'));
   const entered = deferred<void>(); const release = deferred<void>();
   // The candidate is already ready when cancellation arrives. Even a consumer that finishes late
   // cannot make the adapter cross the publication boundary after caller cancellation.
@@ -255,7 +255,7 @@ it('ThreadAdapter reuses an accepted input receipt after settings break, and onl
   const receipt = await fAdapter.adapter.submit(input);
   expect(fAdapter.runtime.submit).toHaveBeenCalledOnce();
   expect(fAdapter.runtime.submit.mock.calls[0]![0].expectedContextCheckpoint).toBe(saved.id);
-  await fs.writeFile(path.join(f.agentDir, 'settings.json'), '{malformed');
+  await fs.writeFile(path.join(f.root, 'resource-agent', 'agent-settings.json'), '{malformed');
   fAdapter.runtime.inputReceipt.mockResolvedValue(receipt);
   childProfiles.mockRejectedValue(new Error('New profile settings unavailable'));
   expect(await fAdapter.adapter.submit(input)).toEqual(receipt);
@@ -267,7 +267,7 @@ it('ThreadAdapter reuses an accepted input receipt after settings break, and onl
     launch: expect.objectContaining({ inheritSource: false, source: expect.objectContaining({ branchId: source.branchId }) }) }));
 
   fAdapter.runtime.inputReceipt.mockReset().mockResolvedValue(null);
-  await expect(fAdapter.adapter.submit({ ...input, key: 'unaccepted-key' })).rejects.toMatchObject({ failure: { status: 'invalid', path: 'settings.json' } });
+  await expect(fAdapter.adapter.submit({ ...input, key: 'unaccepted-key' })).rejects.toMatchObject({ failure: { status: 'invalid', path: 'agent-settings.json' } });
   expect(fAdapter.runtime.inputReceipt).toHaveBeenCalledTimes(2);
   expect(fAdapter.runtime.submit).toHaveBeenCalledOnce();
   expect(fAdapter.active()).toEqual(saved);

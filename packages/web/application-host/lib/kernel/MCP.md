@@ -35,10 +35,9 @@ or prove independent/read-only effects.
 ## Execution and permission
 
 Agent scopes read trusted project settings through the native Host settings owner and the common
-read-only project-trust reader. The original configuration cwd, execution cwd and Source owner are
-admitted before preparation; callers cannot substitute another directory. Pi's separate scope keeps
-its existing out-of-band `settings.context` cut for effective session trust, without turning a
-native settings read into a Pi worker request.
+read-only native project-trust reader. The original configuration cwd, execution cwd and Source owner
+are admitted before preparation; callers cannot substitute another directory. Trust changes use the
+admitted-workspace settings API and the native `project-trust.json` revision transaction.
 
 A private framed Host/kernel rendezvous supports only MCP authorize, execute and cancellation messages.
 It is not a generic Host-service forwarding endpoint. Requests are bound to kernel epoch, Run,

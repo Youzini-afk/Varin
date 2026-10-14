@@ -14,12 +14,12 @@ test('shared project trust reads preserve inherited decisions, symlink identity,
     await mkdir(agent); await mkdir(join(project, 'blocked'), { recursive: true });
     await symlink(project, join(root, 'alias'), 'dir');
     const raw = JSON.stringify({ [project]: true, [join(project, 'blocked')]: false });
-    await writeFile(join(agent, 'trust.json'), '\uFEFF' + raw);
+    await writeFile(join(agent, 'project-trust.json'), raw);
     assert.equal(readProjectTrust(agent, join(project, 'future')), true);
     assert.equal(readProjectTrust(agent, join(root, 'alias', 'blocked')), false);
-    assert.equal(await readFile(join(agent, 'trust.json'), 'utf8'), '\uFEFF' + raw);
-    await writeFile(join(agent, 'trust.json'), '{broken');
+    assert.equal(await readFile(join(agent, 'project-trust.json'), 'utf8'), raw);
+    await writeFile(join(agent, 'project-trust.json'), '{broken');
     assert.throws(() => readProjectTrust(agent, project));
-    assert.equal(await readFile(join(agent, 'trust.json'), 'utf8'), '{broken');
+    assert.equal(await readFile(join(agent, 'project-trust.json'), 'utf8'), '{broken');
   } finally { await rm(root, { recursive: true, force: true }); }
 });

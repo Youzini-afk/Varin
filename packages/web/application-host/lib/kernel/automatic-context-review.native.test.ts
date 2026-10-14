@@ -1,3 +1,4 @@
+import { AgentSettingsService } from '../models/settings.js';
 import { createServer, type ServerResponse } from 'node:http';
 import { once } from 'node:events';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -35,10 +36,10 @@ it.each([
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'varin-automatic-context-'));
   cleanups.push(()=>fs.rm(root,{recursive:true,force:true}));
   const agentDir=path.join(root,'agent');await fs.mkdir(agentDir);
-  await fs.writeFile(path.join(agentDir,'settings.json'),JSON.stringify({compaction:{enabled:true,reserveTokens:4096,keepRecentTokens:1000,
+  await fs.writeFile(path.join(agentDir,'agent-settings.json'),JSON.stringify({compaction:{enabled:true,reserveTokens:4096,keepRecentTokens:1000,
     modelOverrides:{'fixture/fixture-model':{reserveTokens:128,keepRecentTokens:96}}},harness:{context:{backgroundPreparation:true,preparationWaterline:0.5}}}));
-  const projectRoot=path.join(root,'untrusted-project');await fs.mkdir(path.join(projectRoot,'.pi'),{recursive:true});
-  await fs.writeFile(path.join(projectRoot,'.pi','settings.json'),'untrusted invalid configuration must not be read');
+  const projectRoot=path.join(root,'untrusted-project');await fs.mkdir(path.join(projectRoot,'.varin'),{recursive:true});
+  await fs.writeFile(path.join(projectRoot,'.varin','settings.json'),'untrusted invalid configuration must not be read');
   const main:Array<{body:Record<string,unknown>;response:ServerResponse}>=[];
   const summaries:Array<ServerResponse>=[];
   const summaryBodies:Array<Record<string,unknown>>=[];
@@ -64,7 +65,7 @@ it.each([
   const policies:ContextPolicySnapshot[]=[];
   const installOwner=()=>{
     const service=new ContextService(runtime,prepare,async(run)=>{
-    const policy=await readContextPolicy({agentDir,projectRoot,projectTrusted:false,modelId:'fixture-model',providerId:'fixture'});
+    const policy=await readContextPolicy({settings: await new AgentSettingsService(agentDir, () => false).snapshot(projectRoot),projectRoot,modelId:'fixture-model',providerId:'fixture'});
     policies.push(policy);return {policy,scope:{sessionId:run.thread_id}};
     },async runId=>{await runtime.startRun(runId);},null);
     kernel.setContextOwner(service);return service;
