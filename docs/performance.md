@@ -18,7 +18,8 @@
   Windows/unknown coverage 全量检查，见[Documents](../packages/web/application-host/lib/documents/DOCUMENTATION.md#filesystem-observation)。
 - Agent 请求按实际协议复用不可变 item 或完整消息组、工具 schema 和精确选定 wire bytes；
   工具结果复用同时核对原调用依赖，末组变化只重编该组。编译复用、provider 前缀缓存、真实计费应分别测量。
-- Agent 压缩持久化 DAG，但当前 ready node 串行执行；存在依赖图不意味着并行延迟收益。
+- Agent 压缩按 DAG 的就绪队列并发执行模型节点，归并节点在自身依赖完成后立即启动；
+  原始材料一次加载，节点只读取自身依赖回执。模型响应时间与实际并行收益仍取决于服务端。
 
 长 read/compute/materialization 在短 Catalog/Storage owner 段之外执行，但保留原取消和资源寿命。
 提前返还 transport credit 不得提前释放物理 reader/writer；真实回执和背压优先于表面上的即时取消。

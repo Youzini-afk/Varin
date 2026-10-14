@@ -17,7 +17,8 @@
 | 性能 | 同源码/构建下冷、热、并发和更新场景；编译复用与 provider 缓存、价格、延迟分别测量 |
 
 Managed 文件恢复与 Source Host 项目排程已有实现，物理双机仍需独立验证。固定来源执行 cwd、
-多来源组合和压缩 DAG 串行等当前边界见[运行时](runtime.md)与[资源](resources.md)。
+多来源组合等当前边界见[运行时](runtime.md)与[资源](resources.md)。压缩 DAG 已按依赖并发调度，
+真实 provider 的并发容量、延迟和计费仍需相应环境验证。
 
 ## 后续切换
 

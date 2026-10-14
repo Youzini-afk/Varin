@@ -1,5 +1,6 @@
 //! Atomic bridge from the executor to its sole durable authority.
 use super::result_content::{ToolCompletionMetadata, ToolReceiptMetadata};
+use super::context_jobs::require_ancestor;
 use super::tool_content::{ToolCallMetadata, ToolIntent};
 use super::*;
 use crate::execution::*;
@@ -1328,9 +1329,13 @@ impl Catalog {
                     |r| r.get(0),
                 )?;
                 if head != snapshot.view.binding.history_range.leaf_id {
-                    return Err(RuntimeError::Conflict(
-                        "request history head changed".into(),
-                    ));
+                    let summary: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM context_jobs WHERE run_id=?1)", [run_id], |row| row.get(0))?;
+                    if !summary {
+                        return Err(RuntimeError::Conflict("request history head changed".into()));
+                    }
+                    let anchor = snapshot.view.binding.history_range.leaf_id.as_deref()
+                        .ok_or_else(|| RuntimeError::Conflict("summary request has no admitted history anchor".into()))?;
+                    require_ancestor(&tx, &run.branch_id, anchor)?;
                 }
                 let step = ModelStep {
                     goal: None,
@@ -1346,8 +1351,11 @@ impl Catalog {
                     usage: None,
                 };
                 tx.execute(
-                    "INSERT INTO model_steps(id,run_id,state,body) VALUES(?1,?2,'prepared',?3)",
-                    params![step.id, run_id, encode(&step)?],
+                    "INSERT INTO model_steps(id,run_id,state,body,node_id) VALUES(?1,?2,'prepared',?3,?4)",
+                    params![step.id, run_id, encode(&step)?, match &snapshot.view.origin {
+                        RequestOrigin::Conversation { compaction: Some(node), .. } => Some(&node.node_id),
+                        _ => None,
+                    }],
                 )?;
                 super::context_jobs::record_step(&tx, run_id, snapshot)?;
             }
@@ -1415,9 +1423,15 @@ impl Catalog {
                     |r| r.get(0),
                 )?;
                 if *outcome == ModelOutcome::Completed && head != history_range.leaf_id {
-                    return Err(RuntimeError::Conflict(
-                        "model output history head changed".into(),
-                    ));
+                    // Independent summary nodes quote their frozen inputs. Their audit outputs may
+                    // arrive in either order; only the declared DAG edges constrain consumption.
+                    let summary: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM context_job_steps WHERE run_id=?1 AND request_id=?2)", params![run_id, request_id], |row| row.get(0))?;
+                    if !summary {
+                        return Err(RuntimeError::Conflict("model output history head changed".into()));
+                    }
+                    let anchor = history_range.leaf_id.as_deref()
+                        .ok_or_else(|| RuntimeError::Conflict("summary request has no admitted history anchor".into()))?;
+                    require_ancestor(&tx, &run.branch_id, anchor)?;
                 }
                 step.state = match outcome {
                     ModelOutcome::Completed => ModelStepState::Completed,

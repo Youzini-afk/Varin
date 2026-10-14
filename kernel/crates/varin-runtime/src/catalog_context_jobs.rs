@@ -14,7 +14,27 @@ pub(crate) struct ContextJobAdmission {
     owner_run_id: Option<String>,
     recipe: Value,
     plan_hash: String,
-    nodes: Vec<String>,
+    nodes: Vec<ContextNodeAdmission>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, serde::Deserialize)]
+struct ContextNodeAdmission {
+    id: String,
+    dependencies: Vec<String>,
+}
+impl From<&ContextCompactionNode> for ContextNodeAdmission {
+    fn from(node: &ContextCompactionNode) -> Self {
+        Self {
+            id: node.id.clone(),
+            dependencies: node
+                .inputs
+                .iter()
+                .filter_map(|input| match input {
+                    ContextCompactionInput::NodeOutput { node_id } => Some(node_id.clone()),
+                    _ => None,
+                })
+                .collect(),
+        }
+    }
 }
 impl ContextJobAdmission {
     pub(super) fn publish(&self, tx: &Transaction<'_>, run_id: &str) -> Result<()> {
@@ -24,8 +44,8 @@ impl ContextJobAdmission {
         }
         for (index, node) in self.nodes.iter().enumerate() {
             tx.execute(
-                "INSERT INTO context_job_nodes(run_id,node_id,node_index) VALUES(?1,?2,?3)",
-                params![run_id, node, sql_number(index as u64)?],
+                "INSERT INTO context_job_nodes(run_id,node_id,node_index,dependencies) VALUES(?1,?2,?3,?4)",
+                params![run_id, node.id, sql_number(index as u64)?, encode(&node.dependencies)?],
             )?;
         }
         Ok(())
@@ -44,17 +64,82 @@ struct ContextJobRecipe {
     model_budget: ContextCompactionModelBudget,
 }
 pub(super) fn initialize_new(db: &Connection) -> Result<()> {
-    db.execute_batch("CREATE TABLE context_jobs(run_id TEXT PRIMARY KEY REFERENCES runs(id),job_key TEXT NOT NULL UNIQUE,branch_id TEXT NOT NULL REFERENCES branches(id),through_id TEXT NOT NULL REFERENCES history(id),expected_revision INTEGER NOT NULL,owner_run_id TEXT REFERENCES runs(id),recipe TEXT NOT NULL,plan_hash TEXT NOT NULL); CREATE INDEX context_jobs_branch ON context_jobs(branch_id); CREATE INDEX context_jobs_owner ON context_jobs(owner_run_id,expected_revision); CREATE TABLE context_job_nodes(run_id TEXT NOT NULL REFERENCES context_jobs(run_id),node_id TEXT NOT NULL,node_index INTEGER NOT NULL,PRIMARY KEY(run_id,node_id),UNIQUE(run_id,node_index)); CREATE TABLE context_job_steps(request_id TEXT PRIMARY KEY REFERENCES model_steps(id),run_id TEXT NOT NULL,node_id TEXT NOT NULL,plan_hash TEXT NOT NULL,FOREIGN KEY(run_id,node_id) REFERENCES context_job_nodes(run_id,node_id));")?;
+    db.execute_batch("CREATE TABLE context_jobs(run_id TEXT PRIMARY KEY REFERENCES runs(id),job_key TEXT NOT NULL UNIQUE,branch_id TEXT NOT NULL REFERENCES branches(id),through_id TEXT NOT NULL REFERENCES history(id),expected_revision INTEGER NOT NULL,owner_run_id TEXT REFERENCES runs(id),recipe TEXT NOT NULL,plan_hash TEXT NOT NULL); CREATE INDEX context_jobs_branch ON context_jobs(branch_id); CREATE INDEX context_jobs_owner ON context_jobs(owner_run_id,expected_revision); CREATE TABLE context_job_nodes(run_id TEXT NOT NULL REFERENCES context_jobs(run_id),node_id TEXT NOT NULL,node_index INTEGER NOT NULL,dependencies TEXT NOT NULL,PRIMARY KEY(run_id,node_id),UNIQUE(run_id,node_index)); CREATE TABLE context_job_steps(request_id TEXT PRIMARY KEY REFERENCES model_steps(id),run_id TEXT NOT NULL,node_id TEXT NOT NULL,plan_hash TEXT NOT NULL,FOREIGN KEY(run_id,node_id) REFERENCES context_job_nodes(run_id,node_id));")?;
     Ok(())
 }
 pub(super) fn check_format(db: &Connection) -> Result<()> {
     db.prepare("SELECT run_id,job_key,branch_id,through_id,expected_revision,owner_run_id,recipe,plan_hash FROM context_jobs")?;
-    db.prepare("SELECT run_id,node_id,node_index FROM context_job_nodes")?;
+    db.prepare("SELECT run_id,node_id,node_index,dependencies FROM context_job_nodes")?;
     db.prepare("SELECT request_id,run_id,node_id,plan_hash FROM context_job_steps")?;
     Ok(())
 }
 
 impl Catalog {
+    /// The summary worker resumes the original plan, rather than the last conversation step.
+    /// Only requests proven not dispatched may be prepared again after reopening.
+    pub(crate) fn capture_context_execution(
+        &mut self,
+        run_id: &str,
+        binding: crate::execution::RequestBinding,
+    ) -> Result<ContextExecutionRead> {
+        let job = self.capture_context_job(run_id)?;
+        let mut run = self.run(run_id)?;
+        fence(&run, self.epoch)?;
+        if !self.run_startable(run_id)? {
+            return Err(RuntimeError::Conflict(
+                "summary Run is not eligible for execution".into(),
+            ));
+        }
+        let mut statement = self
+            .db
+            .prepare("SELECT id,state FROM model_steps WHERE run_id=?1")?;
+        let steps = statement
+            .query_map([run_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        drop(statement);
+        if steps.iter().any(|(_, state)| {
+            !matches!(state.as_str(), "completed" | "not_dispatched" | "prepared")
+        }) {
+            return Err(RuntimeError::Conflict(
+                "summary contains an unsuccessful or unknown original model request".into(),
+            ));
+        }
+        let tx = self.db.transaction()?;
+        for (id, state) in &steps {
+            if state == "prepared" {
+                super::execution_persistence::close_prepared_request(
+                    &tx,
+                    &run,
+                    id,
+                    crate::execution::NonDispatchReason::Recovery,
+                )?;
+            }
+        }
+        if run.state == RunState::Waiting {
+            if let Some(id) = run.waiting_on.take() {
+                let mut wait: Wait = record(&tx, "waits", &id)?;
+                wait.cancelled = true;
+                put(&tx, "waits", &id, &wait)?;
+            }
+            run.state = RunState::Runnable;
+            run.revision += 1;
+            put(&tx, "runs", run_id, &run)?;
+        }
+        tx.commit()?;
+        let execution = self.capture_execution_preparation(
+            run_id,
+            binding,
+            policy_identity(),
+            Value::Null,
+            false,
+            false,
+            true,
+            None,
+        )?;
+        Ok(ContextExecutionRead { execution, job })
+    }
     /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn create_context_job(
         &mut self,
@@ -252,10 +337,36 @@ impl Catalog {
     pub fn context_job_parent(&self, run_id: &str) -> Result<Option<String>> {
         context_job_parent(&self.db, run_id)
     }
-    pub(super) fn context_job_outputs(&self, run_id: &str) -> Result<Vec<ContextNodeOutput>> {
-        let mut statement = self.db.prepare("SELECT c.node_id,c.plan_hash,s.id,s.state,o.body FROM context_job_steps c JOIN model_steps s ON s.id=c.request_id LEFT JOIN model_outputs o ON o.request_id=s.id WHERE c.run_id=?1 ORDER BY s.rowid")?;
+    pub(crate) fn context_job_history(&self, run_id: &str) -> Result<Vec<HistoryItem>> {
+        let run = self.run(run_id)?;
+        match self.head(&run.branch_id)? {
+            Some(head) => self.context_source_metadata(&run.branch_id, &head),
+            None => Ok(Vec::new()),
+        }
+    }
+    pub(crate) fn context_job_outputs(&self, run_id: &str) -> Result<Vec<ContextNodeOutput>> {
+        self.context_outputs(run_id, None)
+    }
+    pub(crate) fn context_job_output(
+        &self,
+        run_id: &str,
+        request_id: &str,
+    ) -> Result<ContextNodeOutput> {
+        self.context_outputs(run_id, Some(request_id))?
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+                RuntimeError::Invalid("original summary request has no node receipt".into())
+            })
+    }
+    fn context_outputs(
+        &self,
+        run_id: &str,
+        request_id: Option<&str>,
+    ) -> Result<Vec<ContextNodeOutput>> {
+        let mut statement = self.db.prepare("SELECT c.node_id,c.plan_hash,s.id,s.state,o.body FROM context_job_steps c JOIN model_steps s ON s.id=c.request_id LEFT JOIN model_outputs o ON o.request_id=s.id WHERE c.run_id=?1 AND (?2 IS NULL OR c.request_id=?2) ORDER BY s.rowid")?;
         let rows = statement
-            .query_map([run_id], |row| {
+            .query_map(params![run_id, request_id], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -418,11 +529,13 @@ impl Catalog {
         row.map(
             |(key, branch_id, through_id, expected_revision, owner_run_id, recipe, plan_hash)| {
                 let mut statement = self.db.prepare(
-                    "SELECT node_id FROM context_job_nodes WHERE run_id=?1 ORDER BY node_index",
+                    "SELECT node_id,dependencies FROM context_job_nodes WHERE run_id=?1 ORDER BY node_index",
                 )?;
                 let nodes = statement
-                    .query_map([run_id], |row| row.get(0))?
-                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                    .query_map([run_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+                    .collect::<std::result::Result<Vec<_>, _>>()?
+                    .into_iter().map(|(id, dependencies)| Ok(ContextNodeAdmission { id, dependencies: serde_json::from_str(&dependencies)? }))
+                    .collect::<Result<Vec<_>>>()?;
                 Ok(ContextJobAdmission {
                     key,
                     branch_id,
@@ -650,7 +763,7 @@ impl ContextJobRead {
                 .plan
                 .nodes()
                 .iter()
-                .map(|node| node.id.clone())
+                .map(ContextNodeAdmission::from)
                 .collect::<Vec<_>>()
                 != self.metadata.nodes
         {
@@ -675,13 +788,40 @@ impl ContextJobRead {
             model_budget: recipe.model_budget,
         })
     }
+    pub(crate) fn compiler(self) -> Result<ContextJobCompiler> {
+        let recipe = self.recipe()?;
+        let sources = if recipe.compaction.plan.nodes().is_empty() {
+            Default::default()
+        } else {
+            self.content
+                .load_items(&recipe.sources, &|| false)?
+                .into_iter()
+                .map(|item| {
+                    (
+                        item.id.clone(),
+                        ContextCompactionSource {
+                            source_id: item.id.clone(),
+                            item: std::sync::Arc::unwrap_or_clone(item),
+                        },
+                    )
+                })
+                .collect()
+        };
+        Ok(ContextJobCompiler {
+            recipe,
+            sources,
+            content: self.content,
+            _publication: self._publication,
+        })
+    }
     pub(super) fn compile(
         self,
         outputs: Vec<ContextNodeOutput>,
     ) -> Result<crate::execution::ContextProjection> {
-        let recipe = self.recipe()?;
-        let completed = completed_outputs(&recipe, &outputs)?;
-        let node = recipe
+        let compiler = self.compiler()?;
+        let completed = completed_outputs(&compiler.recipe, &outputs)?;
+        let node = compiler
+            .recipe
             .compaction
             .plan
             .nodes()
@@ -690,25 +830,57 @@ impl ContextJobRead {
             .ok_or_else(|| {
                 RuntimeError::Conflict("summary plan has no pending model node".into())
             })?;
-        let sources: std::collections::BTreeMap<_, _> = self
-            .content
-            .load_items(&recipe.sources, &|| false)?
+        compiler.compile_node(&node.id, &outputs)
+    }
+}
+
+pub(crate) struct ContextJobCompiler {
+    recipe: ContextJobRecipe,
+    sources: std::collections::BTreeMap<String, ContextCompactionSource>,
+    content: crate::content::ContentStore,
+    _publication: crate::content::ContentPublication,
+}
+impl ContextJobCompiler {
+    pub(crate) fn completed(
+        &self,
+        outputs: &[ContextNodeOutput],
+    ) -> Result<std::collections::BTreeMap<String, ContextNodeOutput>> {
+        Ok(completed_outputs(&self.recipe, outputs)?
             .into_iter()
-            .map(|item| {
-                (
-                    item.id.clone(),
-                    ContextCompactionSource {
-                        source_id: item.id.clone(),
-                        item: std::sync::Arc::unwrap_or_clone(item),
-                    },
-                )
-            })
-            .collect();
+            .map(|(id, output)| (id, output.clone()))
+            .collect())
+    }
+    pub(crate) fn history(
+        &self,
+        metadata: Vec<HistoryItem>,
+    ) -> Result<crate::execution::ConversationHistory> {
+        hydrate_source(&self.content, metadata)
+    }
+    pub(crate) fn plan(&self) -> &ContextCompactionPlan {
+        &self.recipe.compaction.plan
+    }
+    pub(crate) fn compile_node(
+        &self,
+        id: &str,
+        outputs: &[ContextNodeOutput],
+    ) -> Result<crate::execution::ContextProjection> {
+        let recipe = &self.recipe;
+        let completed = completed_outputs(recipe, outputs)?;
+        let node = recipe
+            .compaction
+            .plan
+            .nodes()
+            .iter()
+            .find(|node| node.id == id)
+            .ok_or_else(|| {
+                RuntimeError::Invalid("node is outside the original summary plan".into())
+            })?;
+        let sources = &self.sources;
         let mut history = vec![ConversationItem {
             resource_activation: None,
             id: format!("context-job:{}:system", recipe.request.key),
             provenance: Provenance::SystemInstruction {
-                source: "context_compaction:v3".into(),
+                source: "context_compaction:v4".into(),
             },
             content: Content::Text {
                 text: SUMMARIZER_SYSTEM.into(),
@@ -755,30 +927,43 @@ impl ContextJobRead {
             );
             instructions.push_str(guidance);
         }
-        history.push(ConversationItem {
-            resource_activation: None,
-            id: format!("context-job:{}:request:{}", recipe.request.key, node.id),
-            provenance: Provenance::UserInstruction {
-                input_id: recipe.request.key.clone(),
-            },
-            content: Content::Text { text: instructions },
-            opaque: None,
-        }.into());
+        history.push(
+            ConversationItem {
+                resource_activation: None,
+                id: format!("context-job:{}:request:{}", recipe.request.key, node.id),
+                provenance: Provenance::UserInstruction {
+                    input_id: recipe.request.key.clone(),
+                },
+                content: Content::Text { text: instructions },
+                opaque: None,
+            }
+            .into(),
+        );
         Ok(crate::execution::ContextProjection {
             compaction: Some(ContextCompactionStep {
-                plan_hash: recipe.plan_hash,
+                plan_hash: recipe.plan_hash.clone(),
                 node_id: node.id.clone(),
             }),
             resource_checkpoint_id: None,
             checkpoint_id: format!("context-job:{}", recipe.request.key),
             history: history.into_iter().map(Into::into).collect(),
-            instruction_sources: vec!["context_compaction:v3".into()],
+            instruction_sources: vec!["context_compaction:v4".into()],
             memory_checkpoint: None,
         })
     }
 }
 
 /// Owns the immutable input and content lifetime while a worker checks the fixed ancestor.
+pub(crate) struct ContextExecutionRead {
+    execution: super::recovery::ExecutionPreparation,
+    job: ContextJobRead,
+}
+impl ContextExecutionRead {
+    pub(crate) fn load(self) -> Result<(crate::execution::ExecutionInput, ContextJobCompiler)> {
+        Ok((self.execution.load()?, self.job.compiler()?))
+    }
+}
+
 pub struct ContextJobPreparation {
     memory_reference: Option<Value>,
     epoch: u64,
@@ -1051,18 +1236,14 @@ impl ContextJobPreparation {
             .plan
             .nodes()
             .iter()
-            .map(|node| node.id.clone())
+            .map(ContextNodeAdmission::from)
             .collect();
-        let mut dependencies = vec![
-            recipe
-                .sources
-                .get("content_object")
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    RuntimeError::Invalid("summary source reference is malformed".into())
-                })?
-                .to_owned(),
-        ];
+        let mut dependencies = vec![recipe
+            .sources
+            .get("content_object")
+            .and_then(Value::as_str)
+            .ok_or_else(|| RuntimeError::Invalid("summary source reference is malformed".into()))?
+            .to_owned()];
         if let Some(snapshot) = &recipe.bot_memory_snapshot {
             dependencies.push(snapshot.dependency()?);
         }
@@ -1300,11 +1481,12 @@ pub(super) fn source_metadata_since(
     })
 }
 
-pub(super) struct ContextNodeOutput {
-    node_id: String,
+#[derive(Clone)]
+pub(crate) struct ContextNodeOutput {
+    pub(crate) node_id: String,
     plan_hash: String,
     request_id: String,
-    state: String,
+    pub(crate) state: String,
     body: Option<Value>,
 }
 fn completed_outputs<'a>(
@@ -1380,12 +1562,12 @@ pub(super) fn record_step(
             |row| read_number(row, 0),
         )
         .optional()?;
-    let Some(index) = index.filter(|_| step.plan_hash == plan_hash) else {
+    let Some(_) = index.filter(|_| step.plan_hash == plan_hash) else {
         return Err(RuntimeError::Invalid(
             "summary request changed its plan or node".into(),
         ));
     };
-    let invalid:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM context_job_nodes n WHERE n.run_id=?1 AND n.node_index<?3 AND NOT EXISTS(SELECT 1 FROM context_job_steps c JOIN model_steps s ON s.id=c.request_id WHERE c.run_id=n.run_id AND c.node_id=n.node_id AND s.state='completed')) OR EXISTS(SELECT 1 FROM context_job_steps c JOIN model_steps s ON s.id=c.request_id WHERE c.run_id=?1 AND c.node_id=?2 AND s.state!='not_dispatched')",params![run_id,step.node_id,sql_number(index)?],|row|row.get(0))?;
+    let invalid:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM context_job_nodes n, json_each(n.dependencies) dependency WHERE n.run_id=?1 AND n.node_id=?2 AND NOT EXISTS(SELECT 1 FROM context_job_steps c JOIN model_steps s ON s.id=c.request_id WHERE c.run_id=n.run_id AND c.node_id=dependency.value AND s.state='completed')) OR EXISTS(SELECT 1 FROM context_job_steps c JOIN model_steps s ON s.id=c.request_id WHERE c.run_id=?1 AND c.node_id=?2 AND s.state!='not_dispatched')",params![run_id,step.node_id],|row|row.get(0))?;
     if invalid {
         return Err(RuntimeError::Conflict(
             "summary node is already dispatched or dependencies are incomplete".into(),

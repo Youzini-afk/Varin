@@ -374,7 +374,7 @@ pub const SUMMARY_REQUEST: &str = "Update the continuation summary using the ear
 pub fn policy_identity() -> PolicyIdentity {
     PolicyIdentity {
         name: "context_compaction".into(),
-        version: "3".into(),
+        version: "4".into(),
     }
 }
 
@@ -398,9 +398,7 @@ pub fn configure_compaction_start(
         Arc::new(SummaryProvider(start.provider))
     };
     start.tools = Arc::new(NoTools);
-    start.policy = Arc::new(SummaryPolicy {
-        nodes: plan.nodes().iter().map(|node| node.id.clone()).collect(),
-    });
+    start.policy = Arc::new(SummaryPolicy);
     start.policy_state = Value::Null;
     start
 }
@@ -486,58 +484,11 @@ impl ModelProvider for SummaryProvider {
         Ok(reason)
     }
 }
-struct SummaryPolicy {
-    nodes: Vec<String>,
-}
+struct SummaryPolicy;
 impl AgentPolicy for SummaryPolicy {
-    fn identity(&self) -> PolicyIdentity {
-        policy_identity()
-    }
-    fn decide(
-        &self,
-        _: &PolicyView<'_>,
-        event: &PolicyEvent,
-        state: &Value,
-        _: &CancellationToken,
-    ) -> Result<PolicyDecision, ExecutionError> {
-        let next = match event {
-            PolicyEvent::Started if state.is_null() => self.nodes.first(),
-            PolicyEvent::ModelCompleted {
-                reason: FinishReason::Stop,
-                tool_calls: 0,
-            } => {
-                let id = state.as_str().ok_or_else(|| {
-                    ExecutionError::new("compaction_progress", "summary node identity is missing")
-                })?;
-                let position = self
-                    .nodes
-                    .iter()
-                    .position(|node| node == id)
-                    .ok_or_else(|| {
-                        ExecutionError::new(
-                            "compaction_progress",
-                            "summary node is not in the frozen plan",
-                        )
-                    })?;
-                self.nodes.get(position + 1)
-            }
-            _ => {
-                return Ok(PolicyDecision {
-                    action: PolicyAction::Fail {
-                        reason: "summary generation or frozen plan progress is incomplete".into(),
-                    },
-                    state: state.clone(),
-                });
-            }
-        };
-        Ok(PolicyDecision {
-            action: if next.is_some() {
-                PolicyAction::RequestModel
-            } else {
-                PolicyAction::Complete
-            },
-            state: next.map_or(Value::Null, |id| Value::String(id.clone())),
-        })
+    fn identity(&self) -> PolicyIdentity { policy_identity() }
+    fn decide(&self, _: &PolicyView<'_>, _: &PolicyEvent, _: &Value, _: &CancellationToken) -> Result<PolicyDecision, ExecutionError> {
+        Err(ExecutionError::new("context_job_execution_required", "ContextJobs execute their frozen plan through the Run supervisor"))
     }
 }
 /// Text candidates never bind a model adapter, resolve credentials, serialize, or dispatch.
@@ -623,7 +574,7 @@ pub fn text_compaction_start(selection: &crate::catalog::launches::LaunchSelecti
         },
         provider: Arc::new(NoModelProvider),
         tools: Arc::new(NoTools),
-        policy: Arc::new(SummaryPolicy { nodes: Vec::new() }),
+        policy: Arc::new(SummaryPolicy),
         policy_state: Value::Null,
         progress: ProgressSink::default(),
     }

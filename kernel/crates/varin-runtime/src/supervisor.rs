@@ -349,6 +349,10 @@ impl RunSupervisor {
                                 .map_err(error)?;
                         }
                     }
+                    let summary = catalog.lock().map_err(error)?.is_context_job(&identity).map_err(error)?;
+                    if summary {
+                        return crate::context_execution::run(catalog.clone(), &identity, start, cancel.clone());
+                    }
                     let binding = start.binding;
                     let policy_state = start.policy_state;
                     let engine = ExecutionEngine {
