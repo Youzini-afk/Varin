@@ -12,25 +12,6 @@ pub struct PiMessagesProvider {
 fn empty_usage() -> Value {
     json!({"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}})
 }
-fn push(messages: &mut Vec<Value>, role: &str, block: Value, model: &str) {
-    if let Some(last) = messages
-        .last_mut()
-        .filter(|v| v["role"] == role && role != "toolResult")
-    {
-        last["content"]
-            .as_array_mut()
-            .expect("message content")
-            .push(block);
-    } else {
-        let mut message = if role == "assistant" {
-            json!({"role":role,"api":FAMILY,"provider":"varin","model":model,"usage":empty_usage(),"stopReason":"stop","timestamp":0})
-        } else {
-            json!({"role":role,"timestamp":0})
-        };
-        message["content"] = Value::Array(vec![block]);
-        messages.push(message);
-    }
-}
 fn pi_parts(parts: Vec<ProviderPart<'_>>) -> Result<Vec<Value>, ExecutionError> {
     let mut blocks = Vec::new();
     for part in parts {
@@ -64,11 +45,16 @@ impl ModelProvider for PiMessagesProvider {
         })
     }
 
-    fn serialize(&self, view: &RequestView, _reuse: Option<&mut RequestCompileReuse>) -> Result<RequestBody, ExecutionError> {
+    fn serialize(
+        &self,
+        view: &RequestView,
+        mut reuse: Option<&mut RequestCompileReuse>,
+    ) -> Result<RequestBody, ExecutionError> {
         validate_view(view, FAMILY)?;
         validate_images(view, &self.connection)?;
-        let mut messages = Vec::new();
+        let mut groups: Vec<groups::HistoryGroup<'_>> = Vec::new();
         let mut calls = BTreeMap::new();
+        let mut result_calls = BTreeMap::new();
         for projected in project_history(&view.history, FAMILY, &view.binding.connection_identity) {
             let item = projected.item;
             if let Some(original) = projected.opaque {
@@ -78,91 +64,117 @@ impl ModelProvider for PiMessagesProvider {
                         "unsupported pi-messages continuation version",
                     ));
                 }
-                if original.value["model"] == view.binding.model {
-                    if let Some(block) = original.value.get("block") {
-                        if let Content::ToolCall { call } = &item.content {
-                            calls.insert(call.call_id.clone(), call.name.clone());
-                        }
-                        push(
-                            &mut messages,
-                            "assistant",
-                            block.clone(),
-                            &view.binding.model,
-                        );
-                        continue;
-                    }
-                }
             }
-            let role = if item.provenance.is_assistant() {
+            let original_block = projected.opaque.is_some_and(|original| {
+                original.value["model"] == view.binding.model
+                    && original.value.get("block").is_some()
+            });
+            let role = if original_block {
+                if let Content::ToolCall { call } = &item.content {
+                    calls.insert(call.call_id.as_str(), projected);
+                }
                 "assistant"
             } else {
-                "user"
-            };
-            match &item.content {
-                Content::Text { text } | Content::ReasoningSummary { text } => {
-                    if item.provenance.is_system() {
-                        messages.push(json!({"role":"system","content":[{"type":"text","text":text}],"timestamp":0}));
-                    } else {
-                        push(
-                            &mut messages,
-                            role,
-                            json!({"type":"text","text":text}),
-                            &view.binding.model,
-                        );
+                match &item.content {
+                    Content::Text { .. } | Content::ReasoningSummary { .. }
+                        if item.provenance.is_system() =>
+                    {
+                        "system"
                     }
-                }
-                Content::ToolCall { call } => {
-                    calls.insert(call.call_id.clone(), call.name.clone());
-                    push(
-                        &mut messages,
-                        "assistant",
-                        json!({"type":"toolCall","id":call.call_id,"name":call.name,"arguments":call.arguments}),
-                        &view.binding.model,
-                    );
-                }
-                Content::ToolResult { result } => {
-                    let name = calls.get(&result.call_id).ok_or_else(|| {
-                        ExecutionError::new(
-                            "invalid_history_pairing",
-                            "pi-messages result lacks matching call",
+                    Content::Text { .. } | Content::ReasoningSummary { .. } => {
+                        if item.provenance.is_assistant() {
+                            "assistant"
+                        } else {
+                            "user"
+                        }
+                    }
+                    Content::ToolCall { call } => {
+                        calls.insert(call.call_id.as_str(), projected);
+                        "assistant"
+                    }
+                    Content::ToolResult { result } => {
+                        let call = calls.get(result.call_id.as_str()).ok_or_else(|| {
+                            ExecutionError::new(
+                                "invalid_history_pairing",
+                                "pi-messages result lacks matching call",
+                            )
+                        })?;
+                        result_calls.insert(Arc::as_ptr(item) as usize, *call);
+                        "toolResult"
+                    }
+                    Content::Media { .. } => "user",
+                    Content::Output { output } => {
+                        if output.parts.is_empty()
+                            && matches!(item.provenance, Provenance::Sampling { .. })
+                        {
+                            continue;
+                        }
+                        evidence_role(
+                            &item.provenance,
+                            if item.provenance.is_assistant() {
+                                "assistant"
+                            } else {
+                                "user"
+                            },
                         )
-                    })?;
-                    let error = !matches!(
-                        &result.completion,
-                        ToolCompletion::Result {
-                            outcome: crate::types::Outcome::Succeeded,
-                            ..
-                        } | ToolCompletion::JobAccepted { .. }
-                    );
-                    let mut message = json!({"role":"toolResult","toolCallId":result.call_id,"toolName":name,"isError":error,"timestamp":0});
-                    message["content"] =
-                        Value::Array(pi_parts(completion_parts(&result.completion))?);
-                    messages.push(message);
-                }
-                Content::Media { media } => {
-                    for block in pi_parts(vec![ProviderPart::Media { media }])? {
-                        push(&mut messages, "user", block, &view.binding.model);
                     }
+                    Content::ProviderOnly => continue,
                 }
-                Content::Output { output } => {
-                    let role = evidence_role(&item.provenance, role);
-                    for block in pi_parts(evidence_parts(output, &item.provenance))? {
-                        push(&mut messages, role, block, &view.binding.model);
-                    }
-                }
-                Content::ProviderOnly => {}
+            };
+            if let Some((_, items)) = groups
+                .last_mut()
+                .filter(|(last, _)| *last == role && role != "toolResult" && role != "system")
+            {
+                items.push(projected);
+            } else {
+                groups.push((role, vec![projected]));
             }
         }
-        let tools: Vec<_> = view
-            .binding
-            .tools
-            .iter()
-            .map(|t| json!({"name":t.name,"description":t.description,"parameters":t.schema}))
-            .collect();
-        if !tools.is_empty() {
-            let mut message = json!({"role":"system","content":"","timestamp":0});
-            message["toolsAdded"] = Value::Array(tools);
-            messages.insert(0, message);
+        let mut compiler = groups::GroupCompiler::new(reuse.as_deref_mut());
+        let mut messages = Vec::new();
+        if !view.binding.tools.is_empty() {
+            messages.push(compiler.field("tools-message", || json!({"role":"system","content":"","timestamp":0,
+                "toolsAdded":view.binding.tools.iter().map(|t|json!({"name":t.name,"description":t.description,"parameters":t.schema})).collect::<Vec<_>>()
+            })));
+        }
+        for (role, items) in groups {
+            let mut sources = items.clone();
+            for item in &items {
+                if let Some(call) = result_calls.get(&(Arc::as_ptr(item.item) as usize)) {
+                    sources.push(*call);
+                }
+            }
+            messages.push(compiler.group(role, &sources, || {
+                let mut message = if role == "assistant" {
+                    json!({"role":role,"api":FAMILY,"provider":"varin","model":view.binding.model,"usage":empty_usage(),"stopReason":"stop","timestamp":0})
+                } else { json!({"role":role,"timestamp":0}) };
+                let mut blocks = Vec::new();
+                for projected in &items {
+                    let item = projected.item;
+                    if let Some(block) = projected.opaque.filter(|original| original.value["model"] == view.binding.model).and_then(|original| original.value.get("block")) {
+                        blocks.push(block.clone());
+                        continue;
+                    }
+                    match &item.content {
+                        Content::Text { text } | Content::ReasoningSummary { text } => blocks.push(json!({"type":"text","text":text})),
+                        Content::ToolCall { call } => blocks.push(json!({"type":"toolCall","id":call.call_id,"name":call.name,"arguments":call.arguments})),
+                        Content::ToolResult { result } => {
+                            let call = result_calls[&(Arc::as_ptr(item) as usize)];
+                            let Content::ToolCall { call } = &call.item.content else { unreachable!() };
+                            let error = !matches!(&result.completion, ToolCompletion::Result { outcome: crate::types::Outcome::Succeeded, .. } | ToolCompletion::JobAccepted { .. });
+                            message["toolCallId"] = json!(result.call_id);
+                            message["toolName"] = json!(call.name);
+                            message["isError"] = json!(error);
+                            blocks.extend(pi_parts(completion_parts(&result.completion))?);
+                        }
+                        Content::Media { media } => blocks.extend(pi_parts(vec![ProviderPart::Media { media }])?),
+                        Content::Output { output } => blocks.extend(pi_parts(evidence_parts(output,&item.provenance))?),
+                        Content::ProviderOnly => {}
+                    }
+                }
+                message["content"] = Value::Array(blocks);
+                Ok(message)
+            })?);
         }
         let session_id = match &view.origin {
             RequestOrigin::McpSampling { operation_id, .. }
@@ -179,10 +191,12 @@ impl ModelProvider for PiMessagesProvider {
         if let Some(retention) = &self.cache_retention {
             options["cacheRetention"] = json!(retention);
         }
-        let mut body = json!({"model":view.binding.model,"context":{}});
-        body["context"]["messages"] = Value::Array(messages);
-        body["options"] = options;
-        Ok(body.into())
+        let mut context = RequestBody::from(json!({}));
+        context.insert_fragments("messages", messages);
+        let mut body = RequestBody::from(json!({"model":view.binding.model,"options":options}));
+        body.insert_object("context", context);
+        compiler.finish(reuse);
+        Ok(body)
     }
     fn generate(
         &self,

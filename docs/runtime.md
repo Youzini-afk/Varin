@@ -235,7 +235,9 @@ AgentPolicy 返回动作和状态，核心负责合法执行与提交。Provider
 
 Run worker 只保留最近的不可变历史前缀，按 epoch/Run/branch/checkpoint/祖先身份复用；
 新记忆、Goal 和策略证据仍逐边界投影，导航、checkpoint 变化和 worker 退出会丢弃缓存。
-Responses/Azure/Codex 可复用独立 item/schema 片段，其他分组协议仍完整编译。
+Responses/Azure/Codex 复用独立 item/schema 片段；Chat、Anthropic、Google/Vertex、Mistral、Bedrock、
+Pi 按各自协议复用完整消息组。分组还包含工具调用名称、签名和 wire ID 映射等真实依赖；
+末组追加或依赖变化只重编受影响的组，当前请求不再使用的组随本次编译释放。
 每次调用仍核 lease 和认证；最终组装、序列化存储、hash 和媒体处理仍有成本。
 这不表示远端增量发送、普遍降低峰值内存，或已经测得端到端加速。
 

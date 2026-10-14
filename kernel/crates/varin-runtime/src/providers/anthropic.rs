@@ -79,18 +79,6 @@ fn registered_tool_name<'a>(name: &'a str, view: &'a RequestView, oauth: bool) -
         name
     }
 }
-fn push_block(messages: &mut Vec<Value>, role: &str, block: Value) {
-    if let Some(last) = messages.last_mut().filter(|m| m["role"] == role) {
-        last["content"]
-            .as_array_mut()
-            .expect("constructed array")
-            .push(block);
-    } else {
-        let mut message = json!({"role":role});
-        message["content"] = Value::Array(vec![block]);
-        messages.push(message);
-    }
-}
 fn anthropic_parts(parts: Vec<ProviderPart<'_>>) -> Result<Vec<Value>, ExecutionError> {
     let mut blocks = Vec::new();
     for part in parts {
@@ -129,6 +117,38 @@ fn anthropic_parts(parts: Vec<ProviderPart<'_>>) -> Result<Vec<Value>, Execution
     }
     Ok(blocks)
 }
+fn anthropic_blocks(
+    items: &[ProjectedHistoryItem<'_>],
+    oauth: bool,
+) -> Result<Vec<Value>, ExecutionError> {
+    let mut blocks = Vec::new();
+    for projected in items {
+        let item = projected.item;
+        if let Some(original) = projected.opaque {
+            if original.adapter_version != "1" {
+                return Err(ExecutionError::new(
+                    "opaque_version",
+                    "unsupported Anthropic continuation version",
+                ));
+            }
+            blocks.push(original.value.clone());
+            continue;
+        }
+        match &item.content {
+            Content::Text { text } | Content::ReasoningSummary { text } => blocks.push(json!({"type":"text","text":text})),
+            Content::ToolCall { call } => blocks.push(json!({"type":"tool_use","id":call.call_id,"name":if oauth { oauth_tool_name(&call.name) } else { &call.name },"input":call.arguments})),
+            Content::ToolResult { result } => {
+                let mut block = json!({"type":"tool_result","tool_use_id":result.call_id,"is_error":matches!(result.completion,ToolCompletion::Result{outcome:crate::types::Outcome::Failed|crate::types::Outcome::Cancelled|crate::types::Outcome::Indeterminate,..})});
+                block["content"] = Value::Array(anthropic_parts(completion_parts(&result.completion))?);
+                blocks.push(block);
+            }
+            Content::Media { media } => blocks.extend(anthropic_parts(vec![ProviderPart::Media { media }])?),
+            Content::Output { output } => blocks.extend(anthropic_parts(evidence_parts(output, &item.provenance))?),
+            Content::ProviderOnly => return Err(ExecutionError::new("missing_opaque", "provider-only item has no original")),
+        }
+    }
+    Ok(blocks)
+}
 impl ModelProvider for AnthropicProvider {
     fn request_budget_protocol(&self) -> Option<crate::context_capacity::RequestBudgetProtocol> {
         Some(crate::context_capacity::RequestBudgetProtocol {
@@ -138,7 +158,11 @@ impl ModelProvider for AnthropicProvider {
         })
     }
 
-    fn serialize(&self, view: &RequestView, _reuse: Option<&mut RequestCompileReuse>) -> Result<RequestBody, ExecutionError> {
+    fn serialize(
+        &self,
+        view: &RequestView,
+        mut reuse: Option<&mut RequestCompileReuse>,
+    ) -> Result<RequestBody, ExecutionError> {
         validate_view(view, FAMILY)?;
         validate_images(view, &self.connection)?;
         if self.max_tokens == 0 {
@@ -148,83 +172,66 @@ impl ModelProvider for AnthropicProvider {
             ));
         }
         validate_thinking_capacity(view, self.thinking.as_ref(), Some(self.max_tokens))?;
+        let (system, groups) = groups::group_history(
+            project_history(&view.history, FAMILY, &view.binding.connection_identity),
+            |projected| {
+                let item = projected.item;
+                if projected.opaque.is_none()
+                    && matches!(&item.content, Content::Output { output }
+                    if output.parts.is_empty() && matches!(item.provenance, Provenance::Sampling { .. }))
+                {
+                    return Ok(None);
+                }
+                let role = if item.provenance.is_assistant() {
+                    "assistant"
+                } else {
+                    "user"
+                };
+                Ok(Some(if projected.opaque.is_some() {
+                    "assistant"
+                } else {
+                    match &item.content {
+                        Content::Text { .. } | Content::ReasoningSummary { .. }
+                            if item.provenance.is_system() =>
+                        {
+                            "system"
+                        }
+                        Content::Media { .. } => "user",
+                        Content::Output { .. } => evidence_role(&item.provenance, role),
+                        _ => role,
+                    }
+                }))
+            },
+        )?;
+        let mut compiler = groups::GroupCompiler::new(reuse.as_deref_mut());
         let mut messages = Vec::new();
-        let mut system = Vec::new();
-        if self.oauth {
-            system.push(json!({"type":"text","text":"You are Claude Code, Anthropic's official CLI for Claude."}));
+        for (role, items) in groups {
+            messages.push(compiler.group(role, &items, || {
+                Ok(json!({"role":role,"content":anthropic_blocks(&items, self.oauth)?}))
+            })?);
         }
-        for projected in project_history(&view.history, FAMILY, &view.binding.connection_identity) {
-            let item = projected.item;
-            if let Some(original) = projected.opaque {
-                if original.adapter_version != "1" {
-                    return Err(ExecutionError::new(
-                        "opaque_version",
-                        "unsupported Anthropic continuation version",
-                    ));
-                }
-                push_block(&mut messages, "assistant", original.value.clone());
-                continue;
+        let system = compiler.group("system", &system, || {
+            let mut blocks = Vec::new();
+            if self.oauth {
+                blocks.push(json!({"type":"text","text":"You are Claude Code, Anthropic's official CLI for Claude."}));
             }
-            let role = if item.provenance.is_assistant() {
-                "assistant"
-            } else {
-                "user"
-            };
-            let block = match &item.content {
-                Content::Text { text } | Content::ReasoningSummary { text } => {
-                    let block = json!({"type":"text","text":text});
-                    if item.provenance.is_system() {
-                        system.push(block);
-                        continue;
-                    }
-                    block
-                }
-                Content::ToolCall { call } => {
-                    json!({"type":"tool_use","id":call.call_id,"name":if self.oauth { oauth_tool_name(&call.name) } else { &call.name },"input":call.arguments})
-                }
-                Content::ToolResult { result } => {
-                    let mut block = json!({"type":"tool_result","tool_use_id":result.call_id,"is_error":matches!(result.completion,ToolCompletion::Result{outcome:crate::types::Outcome::Failed|crate::types::Outcome::Cancelled|crate::types::Outcome::Indeterminate,..})});
-                    block["content"] =
-                        Value::Array(anthropic_parts(completion_parts(&result.completion))?);
-                    block
-                }
-                Content::Media { media } => {
-                    for block in anthropic_parts(vec![ProviderPart::Media { media }])? {
-                        push_block(&mut messages, "user", block);
-                    }
-                    continue;
-                }
-                Content::Output { output } => {
-                    let role = evidence_role(&item.provenance, role);
-                    for block in anthropic_parts(evidence_parts(output, &item.provenance))? {
-                        push_block(&mut messages, role, block);
-                    }
-                    continue;
-                }
-                Content::ProviderOnly => {
-                    return Err(ExecutionError::new(
-                        "missing_opaque",
-                        "provider-only item has no original",
-                    ));
-                }
-            };
-            push_block(&mut messages, role, block);
-        }
-        let tools: Vec<_> = view
-            .binding
-            .tools
-            .iter()
-            .map(|t| json!({"name":if self.oauth { oauth_tool_name(&t.name) } else { &t.name },"description":t.description,"input_schema":t.schema}))
-            .collect();
-        let mut result =
-            json!({"model":view.binding.model,"max_tokens":self.max_tokens,"stream":true});
-        result["messages"] = Value::Array(messages);
-        result["system"] = Value::Array(system);
-        result["tools"] = Value::Array(tools);
+            blocks.extend(anthropic_blocks(&system, self.oauth)?);
+            Ok(Value::Array(blocks))
+        })?;
+        let tools = compiler.field("tools", || Value::Array(view.binding.tools.iter().map(|t| {
+            json!({"name":if self.oauth { oauth_tool_name(&t.name) } else { &t.name },"description":t.description,"input_schema":t.schema})
+        }).collect()));
+        let mut result = RequestBody::from(
+            json!({"model":view.binding.model,"max_tokens":self.max_tokens,"stream":true}),
+        );
+        result.insert_fragments("messages", messages);
+        result.insert_frozen("system", system);
+        result.insert_frozen("tools", tools);
         if let Some(thinking) = &self.thinking {
-            result["thinking"] = thinking.clone();
+            result.insert("thinking", thinking.clone());
         }
-        Ok(result.into())
+        compiler.finish(reuse);
+        Ok(result)
     }
     fn generate(
         &self,

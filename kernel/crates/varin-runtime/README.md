@@ -64,7 +64,8 @@ Navigation, changed checkpoints and worker exit discard the derived cache.
 
 `RequestBody` is the only provider-body representation. Responses/Azure/Codex can retain independent
 item fragments and tool schemas; Codex also retains the exact ordered system-text join. Grouped
-protocols keep their complete compiler. Lease validation and credential dispatch checks still run on
+protocols reuse complete messages under their actual source sequence and tool-call dependencies;
+changing a trailing group rebuilds that group. Lease validation and credential dispatch checks still run on
 every call. The final contiguous bytes are shared with HTTP/signing and retained in snapshots without
 JSON rewriting. Vector validation, full-body assembly, persistence/hashing and media processing remain
 real costs; fragment reuse does not establish lower peak memory or provider cache savings.
