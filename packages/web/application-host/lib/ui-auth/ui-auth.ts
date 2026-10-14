@@ -382,7 +382,7 @@ const isWebSocketUpgrade = (req: UiAuthRequest): boolean => {
 
 const isUrlAuthReadableHttpPath = (pathname: string): boolean => {
   return pathname === '/api/varin/events'
-    || pathname === '/api/varin/runtime-manager/events'
+    || pathname === '/api/threads/observe'
     || pathname === '/api/varin/extensions/v1/catalog'
     || pathname === '/api/varin/extensions/v1/host-state'
     || pathname === '/api/varin/realtime-proxy/sse'
@@ -395,8 +395,7 @@ const isUrlAuthReadableHttpPath = (pathname: string): boolean => {
 };
 
 const isUrlAuthWebSocketPath = (pathname: string): boolean => {
-  return pathname === '/api/varin/runtime/ws'
-    || pathname === '/api/varin/realtime-proxy/ws'
+  return pathname === '/api/varin/realtime-proxy/ws'
     || pathname === '/api/terminal/ws'
     || pathname === '/api/dictation/ws'
     || pathname.startsWith('/api/preview/proxy/');

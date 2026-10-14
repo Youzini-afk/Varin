@@ -331,10 +331,7 @@ describe('ui auth client credential seam', () => {
       url: `/api/varin/runtime/ws?varin_url_token=${encodeURIComponent(urlToken)}`,
       headers: { upgrade: 'websocket' },
     };
-    expect(await auth.resolveWebSocketAuthContext(piRuntimeWsReq)).toMatchObject({
-      type: 'client',
-      token: 'client:device-1',
-    });
+    expect(await auth.resolveWebSocketAuthContext(piRuntimeWsReq)).toBeNull();
 
     const dictationHttpReq = {
       method: 'GET',
@@ -350,18 +347,29 @@ describe('ui auth client credential seam', () => {
     expect(dictationHttpCalled).toBe(false);
     expect(dictationHttpRes.statusCode).toBe(401);
 
-    const runtimeManagerSseReq = {
+    const threadObserveSseReq = {
       method: 'GET',
-      path: '/api/varin/runtime-manager/events',
+      path: '/api/threads/observe',
+      url: `/api/threads/observe?varin_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { accept: 'text/event-stream' },
+    };
+    const threadObserveSseRes = createResponse();
+    let threadObserveSseCalled = false;
+    await auth.requireAuth(threadObserveSseReq, threadObserveSseRes, () => {
+      threadObserveSseCalled = true;
+    });
+    expect(threadObserveSseCalled).toBe(true);
+
+    const retiredRuntimeSseReq = {
+      method: 'GET', path: '/api/varin/runtime-manager/events',
       url: `/api/varin/runtime-manager/events?varin_url_token=${encodeURIComponent(urlToken)}`,
       headers: { accept: 'text/event-stream' },
     };
-    const runtimeManagerSseRes = createResponse();
-    let runtimeManagerSseCalled = false;
-    await auth.requireAuth(runtimeManagerSseReq, runtimeManagerSseRes, () => {
-      runtimeManagerSseCalled = true;
-    });
-    expect(runtimeManagerSseCalled).toBe(true);
+    const retiredRuntimeSseRes = createResponse();
+    let retiredRuntimeSseCalled = false;
+    await auth.requireAuth(retiredRuntimeSseReq, retiredRuntimeSseRes, () => { retiredRuntimeSseCalled = true; });
+    expect(retiredRuntimeSseCalled).toBe(false);
+    expect(retiredRuntimeSseRes.statusCode).toBe(401);
 
     const arbitraryGetReq = { method: 'GET', path: '/api/config/settings', url: `/api/config/settings?varin_url_token=${encodeURIComponent(urlToken)}`, headers: { accept: 'application/json' } };
     const arbitraryGetRes = createResponse();
