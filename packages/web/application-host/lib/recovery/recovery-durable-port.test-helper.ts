@@ -113,6 +113,7 @@ export const createInMemoryRecoveryDurablePort = (
     userEntryId: turn.userEntryId ?? "",
     workerId: turn.workerId ?? "",
     workspaceId: turn.workspaceId,
+    ...(turn.fileTarget ? { fileTarget: clone(turn.fileTarget) } : {}),
     ...(turn.assistantEntryId ? { assistantEntryId: turn.assistantEntryId } : {}),
     ...(turn.failure ? { failure: clone(turn.failure) } : {}),
     ...(turn.settledAt ? { settledAt: turn.settledAt } : {}),
@@ -293,7 +294,7 @@ export const createInMemoryRecoveryDurablePort = (
     },
     async recordMutationBefore(input) {
       const turn = turnFor(input.workspaceId, input.executionId);
-      if (!turn || !turn.sessionId) return false;
+      if (!turn) return false;
       const relative = await relativize(input.workspaceId, input.path);
       const state = await capture(input.workspaceId, input.path);
       const id = `${input.workspaceId}\0${turn.checkpointId}\0${relative}`;
@@ -305,7 +306,8 @@ export const createInMemoryRecoveryDurablePort = (
           mutationId: input.mutationId,
           path: relative,
           sequence: changes.size + 1,
-          sessionId: turn.sessionId,
+          ...(turn.sessionId ? { sessionId: turn.sessionId } : {}),
+          ...(turn.fileTarget ? { fileTarget: clone(turn.fileTarget) } : {}),
           toolName: input.toolName,
           before: clone(state),
           after: clone(state),
@@ -315,7 +317,7 @@ export const createInMemoryRecoveryDurablePort = (
     },
     async recordMutationAfter(input) {
       const turn = turnFor(input.workspaceId, input.executionId);
-      if (!turn || !turn.sessionId) return false;
+      if (!turn) return false;
       const relative = await relativize(input.workspaceId, input.path);
       const id = `${input.workspaceId}\0${turn.checkpointId}\0${relative}`;
       const prior = changes.get(id);
@@ -389,6 +391,7 @@ export const createInMemoryRecoveryDurablePort = (
         checkpointId: `turn-${input.executionId}`,
         sequence: ++turnSequence,
         conversation: input.conversation,
+        ...(input.fileTarget ? { fileTarget: clone(input.fileTarget) } : {}),
         ...(input.conversation.kind === "pi" ? { sessionId: input.conversation.sessionId } : {}),
         userEntryId: input.userEntryId,
         workerId: input.workerId,

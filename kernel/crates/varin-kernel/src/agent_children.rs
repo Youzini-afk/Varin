@@ -19,13 +19,15 @@ pub(super) fn execute(
     }
     if method == "runtime.host_tool.reconcile" {
         let p: HostToolReconcileParams = serde_json::from_value(params)?;
-        let confirmed = crate::integration_reconciliation::reconcile(
-            &runtime,
-            &resources,
-            None,
-            &p.operation_id,
-            Some(&p.execution_owner),
-        )?;
+        let executor = owner.lock().map_err(|_| KernelError::Storage("Catalog unavailable".into()))?
+            .operation(&p.operation_id).map_err(domain)?.executor;
+        let confirmed = match executor.as_deref() {
+            Some("integrate_child") => crate::integration_reconciliation::reconcile(
+                &runtime, &resources, None, &p.operation_id, Some(&p.execution_owner))?,
+            Some("scheduled_task") => crate::schedule_reconciliation::reconcile(
+                &runtime, &resources, None, &p.operation_id, Some(&p.execution_owner))?,
+            _ => return Err(KernelError::Authorization("Host Tool has no original domain receipt recovery".into())),
+        };
         return Ok(
             json!({"reconciled":if confirmed{vec![p.operation_id.clone()]}else{vec![]},"unresolved":if confirmed{vec![]}else{vec![p.operation_id]}}),
         );

@@ -168,3 +168,15 @@ Native follow-ups are implemented under [Stage W / D-307](../../../../../docs/de
 the `follow_up` tool, the durable follow-up service, and session-level waiting UI reuse the existing
 Thread/Run lifecycle, kernel records, and broker admission. Calendar/Markdown tasks retain their external definition owner. Pi loops create new sessions; Agent
 calendars explicitly select new or existing work. The same asset ID never grants both execution owners.
+
+## Managed Source callers
+
+The `scheduled_task` Host tool follows its frozen Source owner for project assets. A managed Source
+uses that Host's existing project configuration, Markdown CAS and calendar service; it does not look
+up a same-named path or project on the conversation Host. The authenticated caller must retain the
+current action-specific file/configuration/execution permissions. The original invocation and
+occurrence key stay fixed across a lost reply. An unresolved dispatch is observed through its original
+Storage receipt rather than replayed. This differs from a calendar `new_work` task selecting a remote
+resource Source: in that case the original calendar coordinator still owns its occurrence and context.
+See [kernel schedule receipts](../kernel/DOCUMENTATION.md#managed-project-schedule-receipts) for durable
+completion and cleanup ownership.

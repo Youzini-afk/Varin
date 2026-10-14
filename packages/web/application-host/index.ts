@@ -1,5 +1,8 @@
 import { createContextCompaction } from './lib/kernel/context-compaction.js';
 import { createThreadRecoveryNavigation, createThreadRecoveryFileResolver } from './lib/recovery/thread-navigation.js';
+import { createManagedRecoveryCoordinator, type ManagedRecoveryPort } from './lib/recovery/managed-recovery-coordinator.js';
+import { createManagedRecoveryService } from './lib/kernel/managed-recovery-service.js';
+import { createManagedScheduleService, createManagedScheduleOwner, createKernelManagedScheduleReceipts, createManagedScheduleReconciler } from './lib/kernel/managed-schedule-service.js';
 import { createBotMemoryOwner } from './lib/kernel/bot-memory-owner.js';
 import { createBotHistory } from './lib/memory/bot-history.js';
 import { createThreadMemory } from './lib/memory/thread-memory.js';
@@ -1227,10 +1230,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   };
   const scopeDocumentWorkspace = async (scopeId: string): Promise<string> => isSessionScopeId(scopeId) || isBotScopeId(scopeId)
       ? (await documentsAuthority.resolveWorkspace({ path: await scopeDirectory(scopeId) })).workspaceId : scopeId;
+  const recoveryCoordinatorWorkspace = `recovery-coordinator:${extensionRuntime.services.hostId}`;
   const kernelStorageAdapter = new KernelStorageAdapter({
     client: kernelClient,
     hostId: extensionRuntime.services.hostId,
     storageRoot: path.join(VARIN_DATA_DIR, 'kernel', extensionRuntime.services.hostId),
+    recoveryCoordinatorWorkspace,
     resolveWorkspaceRoot: async (workspaceId) => workspaceId === SOURCE_VIEW_STORAGE_SCOPE
       ? sourceViewStorageRoot
       : isSessionScopeId(workspaceId) || isBotScopeId(workspaceId) ? scopeDirectory(workspaceId)
@@ -1364,6 +1369,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }
   };
   let threadRecoveryReady = false;
+  let managedRecoveryCoordinator: ManagedRecoveryPort | undefined;
   const recoverySessionNavigation: RecoverySessionNavigation = {
     ready: conversation => conversation.kind === 'pi' || threadRecoveryReady,
     async commit(input) {
@@ -1443,6 +1449,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         sessionNavigation: recoverySessionNavigation,
         resolveDirectoryApplyContext,
         fileStore: kernelRecoveryContentStore,
+        coordinatorWorkspaceId: recoveryCoordinatorWorkspace,
+        resolveCoordinatorIdentity: async workspaceId => workspaceId === recoveryCoordinatorWorkspace
+          ? { authorityId: extensionRuntime.services.hostId, workspaceId, canonicalRoot: '', filesystemProfile: 'metadata' } : null,
+        listCoordinatorWorkspaces: async () => [{ workspaceId: recoveryCoordinatorWorkspace }],
+        get managedRecovery() { return managedRecoveryCoordinator; },
       });
       engine = createKernelRecoveryDirectFacade(engine, kernelRecoveryStore, {
         authorityId: extensionRuntime.services.hostId,
@@ -1593,6 +1604,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       managedMcpInteractionsOwner.current?.wake();
       mcpTaskRuntimeOwner.current?.sourceReached();
       mcpResourceRuntimeOwner.current?.sourceReached();
+      collaborationOwner.current?.sourceReached();
       void scriptRuntimeOwner.current?.recoverSource(owner).catch(() => console.error("[Script] Original target stop remains pending"));
       void agentRuntime.reconcileSourceCleanup().catch((error: unknown) => {
         console.error("[VarinManagedTarget] Original source cleanup remains pending:", errorMessage(error));
@@ -2031,6 +2043,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const mcpTaskRuntimeOwner: { current?: ReturnType<typeof createMcpTaskRuntime> } = {};
   const mcpResourceRuntimeOwner: { current?: ReturnType<typeof createMcpResourceRuntime> } = {};
   const scriptRuntimeOwner: { current?: ReturnType<typeof createScriptRuntime> } = {};
+  const collaborationOwner: { current?: ThreadCollaboration } = {};
   const computerRuntimeOwner: { current?: ReturnType<typeof createComputerRuntime> } = {};
   const researchDecisionOwner: { current?: ReturnType<typeof createResearchDecisionRuntime> } = {};
   const researchDiscoveryOwner: { current?: ReturnType<typeof createResearchDiscoveryRuntime> } = {};
@@ -3223,6 +3236,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return readMcpHostPermissionPolicy(mcpAgentDir,cwd,Boolean(workspace)&&mcpHostProjectTrusted(mcpAgentDir,cwd));
   }}), documentsAuthority.admitWorkspaceRegistration);
   agentRuntime.bindManagedSources(managedRemoteTargets);
+  managedRecoveryCoordinator = createManagedRecoveryCoordinator({ coordinatorHostId: agentRuntime.coordinatorHostId,
+    registry: managedRemoteTargets });
   kernelClient.setManagedSourceOwner(owner => agentRuntime.managedSource(owner), () => agentRuntime.coordinatorHostId);
   const managedSourceConsumers = createManagedSourceConsumers({ coordinatorHostId: () => agentRuntime.coordinatorHostId,
     registry: managedRemoteTargets, withRunAuthority: (runId, source, consume, signal) =>
@@ -3352,6 +3367,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const targetIntegrations = createManagedIntegrationService({ kernel: kernelClient, storage: kernelStorageAdapter,
     documents: documentsAuthority, recovery: foundationalRecoveryEngine, metadataReader: kernelRecoveryStore,
     coordinator: threadIntegrationCoordinator });
+  const targetRecovery = createManagedRecoveryService({ kernel: kernelClient, hostId, documents: documentsAuthority,
+    storage: kernelStorageAdapter, store: kernelRecoveryStore, recovery: foundationalRecoveryEngine,
+    validateLiveSource: liveSources.validate });
+  const targetScheduleReceipts = createKernelManagedScheduleReceipts(kernelClient,
+    operationId => console.error('[Schedules] Original target receipt publication requires attention:', operationId));
+  const targetSchedules = createManagedScheduleService({ hostId, service: scheduledTaskService,
+    workspaceRoot: async workspaceId => (await documentsAuthority.admitWorkspaceRegistration(workspaceId)).canonicalPath,
+    receipts: targetScheduleReceipts,
+    onReceiptError: operationId => console.error('[Schedules] Original target receipt publication is pending:', operationId) });
   const targetMcpService = createManagedMcpService({ kernel: kernelClient, authority: mcpAuthority, compositions: mcpCompositions, agentDir: mcpAgentDir, hostId,
     admitSource: async (scope, signal) => {
       await kernelClient.sourceRequest('source.service.call', { principalId: scope.principal.principalId,
@@ -3366,6 +3390,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   kernelClient.subscribeExit(() => { void targetMcpService.close(); });
   managedRemoteExecution.setSourceOwner(createManagedSourceService({ kernel: kernelClient, hostId,
     documents: documentsAuthority, validateLiveSource: liveSources.validate, prepareSource: prepareThreadSource,
+    recovery: targetRecovery.handle,
     releaseMcpView: (scope, action) => targetMcpService.releaseView(scope, action),
     mcpTaskContinuation: (scope, action, signal) => targetMcpService.taskContinuation(scope, action, signal),
     mcpResourceContinuation: (scope, action, signal) => targetMcpService.resourceContinuation(scope, action, signal),
@@ -3373,40 +3398,43 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     mcpDerivationContinuation: (scope, action, signal) => targetMcpService.derivationContinuation(scope, action, signal),
     mcpChildContinuation: (scope, action, signal) => targetMcpService.childContinuation(scope, action, signal),
     languageAvailable: true, releaseSource: async (scope, retention) => {
-      const [, mcp] = await Promise.all([targetSourceQuery.release(scope), targetMcpService.release(scope, retention)]);
+      const [, mcp] = await Promise.all([targetSourceQuery.release(scope), targetMcpService.release(scope, retention), targetScheduleReceipts.flush(scope)]);
       return { mcpExecutorStopped: mcp.executorStopped, mcpTaskControlsDrained: mcp.taskControlsDrained };
-    }, cleanupSource: targetSourceQuery.cleanup,
+    }, cleanupSource: async scope => { await targetScheduleReceipts.flush(scope); await targetSourceQuery.cleanup(scope); },
     serviceOperation: (scope, operation, signal) => {
       switch (operation.kind) {
         case 'mcp': return targetMcpService.request(scope, operation.action, signal);
         case 'child_prepare': case 'child_result_prepare': case 'child_result_publish': case 'child_result_read': case 'child_release': case 'child_unaccepted_release':
           return targetChildSources(scope, operation, signal);
         case 'integration': return targetIntegrations(scope, operation, signal);
+        case 'schedule': return targetSchedules(scope, operation, signal);
         default: return targetSourceQuery(scope, operation, signal);
       }
     },
   }));
   const threadRecoveryOwners = { threads, runtime: agentRuntime, store: kernelRecoveryStore, storage: kernelStorageAdapter, kernel: kernelClient, liveSources };
   const threadRecoveryNavigation = createThreadRecoveryNavigation(threadRecoveryOwners);
-  kernelRecoveryContentStore.bindTargetResources(createThreadRecoveryFileResolver(threadRecoveryOwners));
+  const localRecoveryFileResolver = createThreadRecoveryFileResolver(threadRecoveryOwners);
+  kernelRecoveryContentStore.bindTargetResources(async identity =>
+    await targetRecovery.resolveFileResources(identity) ?? localRecoveryFileResolver(identity));
   threads.bindRecoveryReader(async identity => {
     try {
     const sources = await agentRuntime.recoveryWorkspaces(identity);
     const receipt = await agentRuntime.navigationReceipt(identity);
-    const combinedUnavailable = sources.some(source => source.resource_owner.kind === 'managed_host')
-      ? 'Combined file recovery for managed sources is unavailable. Conversation history and recovery on the coordinating Host remain available.' : undefined;
-    const workspaces = [...new Set(sources.filter(source => source.resource_owner.kind === 'local').map(source => source.workspace_id))];
+    const workspaces = [...new Set([recoveryCoordinatorWorkspace,
+      ...sources.filter(source => source.resource_owner.kind === 'local').map(source => source.workspace_id)])];
     const operations = (await Promise.all(workspaces.map(async workspaceId => {
       const result = await foundationalRecoveryEngine.listCombinedOperations(workspaceId);
       if (result.status !== 'ready') throw new Error('Recovery status unavailable');
       return result.operations.map(({editorText: _text,editorImages: _images,...operation}) => operation).filter(operation => operation.conversation.kind === 'thread' && operation.conversation.threadId === identity.threadId && operation.conversation.branchId === identity.branchId);
     }))).flat();
-    return { navigation: receipt && !operations.some(operation => operation.id === receipt.key) ? receipt : null, operations,
-      ...(combinedUnavailable ? { combinedUnavailable } : {}) };
+    return { navigation: receipt && !operations.some(operation => operation.id === receipt.key) ? receipt : null, operations };
     } catch { return {navigation:null,operations:[],unavailable:"Recovery status is unavailable; conversation history remains readable"}; }
   });
   threadRecoveryReady = true;
   await foundationalRecoveryEngine.resumeCombinedOperations();
+  const reconcileScheduleReceipts = createManagedScheduleReconciler({ runtime: agentRuntime,
+    onError: (_operationId, _error) => console.error('[Schedule] Original effect receipt requires attention') });
   const reconcileIntegrationReceipts = createIntegrationReceiptReconciler({ runtime: agentRuntime,
     onError: (_operationId, _error) => console.error('[Integration] Original effect receipt requires attention') });
   const reconcileMaterialReceipts = createMaterialReceiptReconciler({ runtime: agentRuntime, kernel: kernelClient, collections: materialCollectionsService,
@@ -3418,12 +3446,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     kernel: kernelClient, storageAdapter: kernelStorageAdapter, resolveLiveSource: liveSources.validate,
     sourceCaptureOwners: { documents: documentsAuthority, prepareResources: threadResources.prepareSourceCapture, inspectInventory: (directory, signal) => threadWorktreeRuntime.inspectGitBaselineInventory(directory, signal) },
-    reconcileDomainReceipts: async signal => { await Promise.all([reconcileIntegrationReceipts(signal), reconcileMaterialReceipts(signal)]); },
+    reconcileDomainReceipts: async signal => { await Promise.all([reconcileIntegrationReceipts(signal), reconcileMaterialReceipts(signal), reconcileScheduleReceipts(signal)]); },
     continueRun: (runId, signal) => threads.continueLaunch(runId, { signal }), recoverLaunches: signal => threads.recover(signal),
     prepareContext: threadContext,
     prepareSkillInput: createThreadSkillInputPreparer(threadResources),
     onError: (operationId, _error) => console.error('[Collaboration] Preparation or delivery requires attention:', operationId ?? 'discovery'),
   });
+  collaborationOwner.current = collaboration;
   void collaboration.recover();
   const refreshThreadPersonalization = () => threads.refreshPersonalization();
   void refreshThreadPersonalization().catch(() => console.error('[Thread] Personalization refresh requires attention'));
@@ -4667,7 +4696,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   mcpTaskRuntime.start();
   mcpResourceRuntime.start();
   const unregisterScheduleCapability = extensionRuntime.capabilities.register(SCHEDULE_CAPABILITY,
-    createScheduleToolOwner({ service: scheduledTaskService, workspaceRoot: async workspaceId => (await documentsAuthority.admitWorkspaceRegistration(workspaceId)).canonicalPath }));
+    createScheduleToolOwner({ service: scheduledTaskService,
+      workspaceRoot: async workspaceId => (await documentsAuthority.admitWorkspaceRegistration(workspaceId)).canonicalPath,
+      manageManaged: createManagedScheduleOwner({ coordinatorHostId: () => agentRuntime.coordinatorHostId,
+        withRunAuthority: (runId, source, consume, signal) => agentRuntime.withManagedSourceAuthority(runId, source, consume, signal) }) }));
   const unregisterChildIntegrationCapability = extensionRuntime.capabilities.register(CHILD_INTEGRATION_CAPABILITY,
     createIntegrationToolOwner({ runtime: agentRuntime, coordinator: threadIntegrationCoordinator,
       onCleanupError: (_operationId, _error) => console.error('[Integration] Source grant cleanup requires attention'),
@@ -5199,6 +5231,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // dependencies begin shutting down.
       managedMcpOwner.current?.close();
       await targetMcpService.close();
+      await targetScheduleReceipts.dispose();
       await scriptRuntimeOwner.current?.dispose();
       await environmentForwardJobs.dispose();
       computerRuntimeOwner.current?.stop();

@@ -19,6 +19,7 @@ import type { ManagedSourceAddress, ManagedSourceBindRequest, ManagedSourceBindi
   ManagedSourcePrincipal, ManagedSourceService, ManagedSourceServiceHandler, ManagedSourceLocalScope,
   ManagedSourceServiceRequest, ManagedSourceServiceCancelReceipt } from './managed-remote-types.js';
 import type { ManagedSourceCleanupScope } from './managed-remote-types.js';
+import type { ManagedRecoveryReply, ManagedRecoveryRequest } from './managed-recovery-contract.js';
 
 export interface ManagedSourceServiceOptions {
   kernel: KernelClient;
@@ -28,6 +29,7 @@ export interface ManagedSourceServiceOptions {
   /** The target's local original preparer, never the coordinator's remote dispatcher. */
   prepareSource(input: ThreadPrepareSource, signal?: AbortSignal): Promise<ThreadPreparedSource>;
   serviceOperation?: ManagedSourceServiceHandler;
+  recovery?(principal: ManagedSourcePrincipal, input: ManagedRecoveryRequest, signal?: AbortSignal): Promise<ManagedRecoveryReply>;
   releaseMcpView?(scope: ManagedSourceCleanupScope,
     action: Extract<import('./managed-mcp-contract.js').ManagedMcpAction, { kind: 'release' }>): Promise<import('./managed-mcp-contract.js').ManagedMcpReply>;
   mcpDerivationContinuation?(scope: ManagedSourceCleanupScope,
@@ -402,6 +404,14 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         if (opened && opened.grantId !== grant.grantId) await kernel.retireGrant(grant.grantId);
       }
     },
+    async recovery(principal, input, signal) {
+      requireReadPrincipal(principal, input.coordinatorHostId);
+      if (!principal.capabilities.includes('filesystem:write')) throw new SourceAdmissionError('source_authority_denied');
+      if (!options.recovery) throw new SourceAdmissionError('source_unavailable');
+      // Recovery is a new user-authorized operation over original journal facts.
+      // It must not re-admit or resurrect the retired execution Source grant.
+      return options.recovery(principal, input, signal);
+    },
     async authorize(principal, input, signal) {
       await admit(principal, input, signal, [input.call.name]);
       return kernel.sourceRequest('source.resource.authorize', { ...address(principal, input), call: input.call,
@@ -534,6 +544,12 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
               && prior.address.resourceEpoch === input.resourceEpoch && isDeepStrictEqual(prior.taskControl, operation.action.binding))
               prior.drain = Promise.resolve('drained');
           }
+        }
+        if (operation.kind === 'schedule') {
+          // Schedule uses the original ToolExecutionReceipt contract. A camel-
+          // case field or a missing stop acknowledgement cannot prove drainage.
+          return result && typeof result === 'object' && (result as { executor_stopped?: unknown }).executor_stopped === true
+            ? 'drained' as const : 'unknown' as const;
         }
         if (result && typeof result === 'object') {
           const receipt = result as { executorStopped?: boolean; effect?: string };

@@ -91,7 +91,7 @@ it('the ordinary scheduled task example edits its admitted project and returns n
     expect((await config.listScheduledTasks('project'))[0]?.name).toBe('Persisted despite lost response');
     const localReads = workspaceRoot.mock.calls.length;
     sourceBinding.resource_owner = { kind: 'managed_host', hostId: 'other-host', connectionId: 'original-connection', endpointIdentity: 'original-endpoint' };
-    expect(await execute({ action: 'list' })).toMatchObject({ completion: { outcome: 'failed', effect: 'none', content: { data: { status: 'rejected', error: expect.stringContaining('owning Host') } } }, executor_stopped: true });
+    expect(await execute({ action: 'list' })).toMatchObject({ completion: { outcome: 'failed', effect: 'none', content: { data: { status: 'rejected', error: expect.stringContaining('managed project schedule owner is unavailable') } } }, executor_stopped: true });
     expect(workspaceRoot).toHaveBeenCalledTimes(localReads);
   } finally { retained?.lease.release(); await extensions?.stop(); scheduler.stop(); await fs.rm(root, { recursive: true, force: true }); }
 }, 30_000);

@@ -1463,6 +1463,7 @@
 "source.mcp.child": "SourceMcpChildParams",
 "source.mcp.derivation": "SourceMcpDerivationParams",
 "source.mcp.creation_receipt": "SourceMcpCreationReceiptParams",
+"source.schedule.receipt": "SourceScheduleReceiptParams",
 "source.mcp.delivery": "SourceMcpDeliveryParams",
 "source.authority.bind": "SourceAuthorityBindParams",
 "source.authority.inspect": "SourceAuthorityAddress",
@@ -2800,6 +2801,10 @@
 "SourceMcpCreationOutcome": {"raw":"export type SourceMcpCreationOutcome = {kind:'accepted';response:SourceMcpTaskCreationResponse}|{kind:'subscribed';listenerId:string;acknowledgement:Record<string,unknown>}|{kind:'failed';error:SourceMcpCreationError};","rustType":"crate::source_resources::SourceMcpCreationOutcome"},
 "SourceMcpCreationReceipt": {"raw":"export interface SourceMcpCreationReceipt { requestHash:string;outcomeRef:SourceMcpCreationReceiptBodyRef|null; }","rustType":"crate::source_resources::SourceMcpCreationReceipt"},
 "SourceMcpCreationReceiptBodyRef": {"raw":"export interface SourceMcpCreationReceiptBodyRef { objectHash:string;byteLength:number; }","rustType":"crate::source_resources::SourceMcpCreationReceiptBodyRef"},
+"SourceScheduleInvocation": {"raw":"export interface SourceScheduleInvocation { invocationId:string;runId:string;threadId:string;operationId:string;callId:string;executorOwner:ExecutorOwner;origin:ToolOrigin;source:LaunchSource|null;toolName:string;operation:'read'|'effect';completion:'result'|'job';configurationIdentity?:string|null;arguments:unknown; }","rustType":"crate::storage::source_schedule_receipts::SourceScheduleInvocation"},
+"SourceScheduleToolReceipt": {"raw":"export interface SourceScheduleToolReceipt { executor_stopped:boolean;completion:{kind:'result';outcome:'succeeded'|'failed'|'indeterminate';effect:'none'|'confirmed'|'unknown';content:OutputBody}; }","rustType":"crate::storage::source_schedule_receipts::SourceScheduleToolReceipt"},
+"SourceScheduleReceiptParams": {"raw":"export type SourceScheduleReceiptParams = SourceAuthorityAddress & ({action:'begin';invocation:SourceScheduleInvocation}|{action:'finish';operationId:string;receipt:SourceScheduleToolReceipt});","rustType":"crate::storage::source_schedule_receipts::SourceScheduleReceiptParams"},
+"SourceScheduleReceiptBeginResult": {"raw":"export interface SourceScheduleReceiptBeginResult { fresh:boolean;receipt:SourceScheduleToolReceipt|null; }"},
 "SourceMcpCreationReceiptParams": {"raw":"export type SourceMcpCreationReceiptParams = SourceAuthorityAddress & {binding:SourceMcpHolderBinding} & ({action:'inspect';requestHash?:string}|{action:'begin';requestHash:string}|{action:'settle';requestHash:string;outcome:SourceMcpCreationOutcome});","rustType":"crate::source_resources::SourceMcpCreationReceiptParams"},
 "SourceMcpCreationReceiptResult": {"raw":"export interface SourceMcpCreationReceiptResult { dispatch:boolean;holder:SourceMcpHolder;authority:SourceAuthorityResult;outcome:SourceMcpCreationOutcome|null; }"},
 "SourceMcpDeliveryKind": {"raw":"export type SourceMcpDeliveryKind = 'elicitation'|'sampling'|'error';","rustType":"crate::source_resources::SourceMcpDeliveryKind"},
@@ -3172,6 +3177,7 @@
 "source.mcp.holder": "Retain, inspect or release one original MCP owner reference for an admitted coordinator Operation",
 "source.mcp.child": "Retain, recall and release exact original dispatch definitions on their existing Source authority",
 "source.mcp.derivation": "Prove and recall original child MCP Source derivation through existing Storage receipts",
+"source.schedule.receipt": "Fence one original Host schedule invocation and persist its immutable result without re-execution",
 "source.mcp.creation_receipt": "Begin, inspect or settle one immutable MCP Task or resource subscription creation receipt on its original Source holder",
 "source.mcp.delivery": "Observe and settle one original MCP reverse interaction transport receipt without persisting or replaying its SDK responder",
 "source.authority.open": "Fence new dispatch to the original coordinator scope and register its actual resource grant",
@@ -3179,6 +3185,6 @@
 "source.authority.handoff": "Authenticated original source handoff permission and receipt.",
 "source.authority.claim_handoff": "Authenticated original source handoff permission and receipt.",
 "source.integration.receipt": "Recall the original Integration journal after verifying its original authenticated source authority.",
-"source.resource.release": "Release the delivered original read body while preserving its operation identity"
+"source.resource.release": "Release the delivered original read or schedule body while preserving its operation identity"
   }
 }

@@ -363,6 +363,7 @@ export type KernelMethod =
   | "source.mcp.holder"
   | "source.mcp.child"
   | "source.mcp.derivation"
+  | "source.schedule.receipt"
   | "source.mcp.creation_receipt"
   | "source.mcp.delivery"
   | "source.authority.open"
@@ -5103,6 +5104,14 @@ export interface SourceMcpCreationReceipt { requestHash:string;outcomeRef:Source
 
 export interface SourceMcpCreationReceiptBodyRef { objectHash:string;byteLength:number; }
 
+export interface SourceScheduleInvocation { invocationId:string;runId:string;threadId:string;operationId:string;callId:string;executorOwner:ExecutorOwner;origin:ToolOrigin;source:LaunchSource|null;toolName:string;operation:'read'|'effect';completion:'result'|'job';configurationIdentity?:string|null;arguments:unknown; }
+
+export interface SourceScheduleToolReceipt { executor_stopped:boolean;completion:{kind:'result';outcome:'succeeded'|'failed'|'indeterminate';effect:'none'|'confirmed'|'unknown';content:OutputBody}; }
+
+export type SourceScheduleReceiptParams = SourceAuthorityAddress & ({action:'begin';invocation:SourceScheduleInvocation}|{action:'finish';operationId:string;receipt:SourceScheduleToolReceipt});
+
+export interface SourceScheduleReceiptBeginResult { fresh:boolean;receipt:SourceScheduleToolReceipt|null; }
+
 export type SourceMcpCreationReceiptParams = SourceAuthorityAddress & {binding:SourceMcpHolderBinding} & ({action:'inspect';requestHash?:string}|{action:'begin';requestHash:string}|{action:'settle';requestHash:string;outcome:SourceMcpCreationOutcome});
 
 export interface SourceMcpCreationReceiptResult { dispatch:boolean;holder:SourceMcpHolder;authority:SourceAuthorityResult;outcome:SourceMcpCreationOutcome|null; }
@@ -5909,6 +5918,7 @@ export type KernelMethodParams = {
   "source.mcp.child": SourceMcpChildParams;
   "source.mcp.derivation": SourceMcpDerivationParams;
   "source.mcp.creation_receipt": SourceMcpCreationReceiptParams;
+  "source.schedule.receipt": SourceScheduleReceiptParams;
   "source.mcp.delivery": SourceMcpDeliveryParams;
   "source.authority.bind": SourceAuthorityBindParams;
   "source.authority.inspect": SourceAuthorityAddress;
@@ -8986,6 +8996,15 @@ export type KernelRequest =
       id: string;
       method: "source.mcp.creation_receipt";
       params: SourceMcpCreationReceiptParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "source.schedule.receipt";
+      params: SourceScheduleReceiptParams;
       epoch?: string;
       grantId?: string;
     }

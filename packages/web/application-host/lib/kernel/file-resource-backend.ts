@@ -27,6 +27,8 @@ export interface KernelFileResourceBackendOptions {
   resolveExecutionRoot?: (canonicalRoot: string, owningWorkspaceId: string) => Promise<KernelExecutionRoot>;
   authorityPurpose?: string;
   authorityCapabilities?: string[];
+  /** A narrower current caller permission, in addition to the native resource grant. */
+  authorizeApplyState?(identity: RecoveryIdentity, relativePath: string, state: RecoveryState): Promise<void> | void;
 }
 
 interface BoundFileContext extends KernelFileAuthorityContext {
@@ -264,6 +266,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     state: RecoveryState,
     options: { expected?: RecoveryState; ownerId?: string; operationId?: string; reservationOperationId?: string } = {},
   ): Promise<{ status: "applied" | "conflict"; state: RecoveryState }> {
+    await this.assertApplyState(identity, relativePath, state);
     const resolved = await this.relativePathFor(identity, relativePath);
     const context = await this.bind(identity);
     const pathId = this.translated(context, resolved.relative);
@@ -286,6 +289,10 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     const observed = parseRecoveryState(JSON.parse(value.stateJson));
     lease?.observed.set(pathId, observed);
     return { status: value.status, state: observed };
+  }
+
+  async assertApplyState(identity: RecoveryIdentity, relativePath: string, state: RecoveryState): Promise<void> {
+    await this.options.authorizeApplyState?.(identity, relativePath, state);
   }
 
   async writeBytes(

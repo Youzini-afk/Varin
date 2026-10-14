@@ -2629,6 +2629,9 @@ pub(crate) type SourceMcpDerivationParams = crate::source_resources::SourceMcpDe
 pub(crate) type SourceMcpCreationReceiptParams =
     crate::source_resources::SourceMcpCreationReceiptParams;
 
+pub(crate) type SourceScheduleReceiptParams =
+    crate::storage::source_schedule_receipts::SourceScheduleReceiptParams;
+
 pub(crate) type SourceMcpDeliveryParams = crate::source_resources::SourceMcpDeliveryParams;
 
 pub(crate) type SourceAuthorityBindParams = crate::source_resources::SourceAuthorityBindParams;
@@ -4524,6 +4527,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         }
         "source.mcp.creation_receipt" => {
             serde_json::from_value::<SourceMcpCreationReceiptParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "source.schedule.receipt" => {
+            serde_json::from_value::<SourceScheduleReceiptParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

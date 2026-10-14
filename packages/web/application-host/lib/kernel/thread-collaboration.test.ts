@@ -71,9 +71,10 @@ function fixture(owner: 'local' | 'managed' = 'managed') {
     claimChildSource: vi.fn(async () => ({ grantId: 'original-cleanup-grant' })), scoped: () => scoped,
     revokeGrant: vi.fn(async () => { trace.push('cleanup-authority-retired'); }) };
   const continueRun = vi.fn(async () => {});
-  const open = () => new ThreadCollaboration({ kernel: kernel as never, runtime: runtime as unknown as AgentRuntimeClient,
+  const open = (reconcileDomainReceipts?: (signal: AbortSignal) => Promise<void>) => new ThreadCollaboration({ kernel: kernel as never, runtime: runtime as unknown as AgentRuntimeClient,
     storageAdapter: {} as never, sourceCaptureOwners: {} as never, prepareContext: vi.fn() as never,
     resolveLiveSource: async () => { throw new Error('Must not reacquire a live source'); }, continueRun,
+    ...(reconcileDomainReceipts ? { reconcileDomainReceipts } : {}),
     recoverLaunches: async () => {}, onError: (_id, error) => errors.push(error) });
   const complete = () => {
     child.state = 'completed'; child.revision += 1;
@@ -225,5 +226,19 @@ it('keeps parent definitions and Host handoff after pre-MCP continueLaunch failu
     expect(f.kernel.releaseChildToolHandoff).not.toHaveBeenCalled();
     expect(f.runtime.releaseMcpResourceSource).not.toHaveBeenCalled();
     expect(f.child.resources_released).toBe(false);
+  } finally { collaboration.stop(); }
+});
+
+it('retries original domain receipts on Source recovery and retains a wake arriving during the prior pass', async () => {
+  const f = fixture(); f.runtime.childExecutions = async () => [];
+  let finish!: () => void;
+  const reconcile = vi.fn().mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; })).mockResolvedValue(undefined);
+  const collaboration = f.open(reconcile);
+  try {
+    await collaboration.recover(); expect(reconcile).toHaveBeenCalledTimes(1);
+    collaboration.sourceReached(); await tick(); expect(reconcile).toHaveBeenCalledTimes(1);
+    finish(); await tick(); await tick(); expect(reconcile).toHaveBeenCalledTimes(2);
+    collaboration.sourceReached(); await tick(); expect(reconcile).toHaveBeenCalledTimes(3);
+    collaboration.stop(); collaboration.sourceReached(); await tick(); expect(reconcile).toHaveBeenCalledTimes(3);
   } finally { collaboration.stop(); }
 });

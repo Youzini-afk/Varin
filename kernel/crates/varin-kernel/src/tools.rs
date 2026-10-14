@@ -1234,6 +1234,41 @@ impl KernelResourceClient {
             }
         });
     }
+    /// Drop only B's original schedule body after A durably owns its known, stopped
+    /// result. The original invocation remains the sole dispatch/cleanup identity.
+    pub(crate) fn release_delivered_schedule_receipt(&self, id: &str) -> Result<(), KernelError> {
+        let Some(catalog) = &self.journal_catalog else { return Ok(()); };
+        let original = {
+            let db = catalog.lock().map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?;
+            let operation = db.operation(id).map_err(|e| KernelError::Operation(e.to_string()))?;
+            if operation.executor.as_deref() != Some("scheduled_task")
+                || !db.external_delivery_persisted(id).map_err(|e| KernelError::Operation(e.to_string()))? {
+                return Ok(());
+            }
+            let Some(source) = db.launch_metadata(&operation.run_id).map_err(|e| KernelError::Operation(e.to_string()))?
+                .and_then(|launch| launch.selection.source) else { return Ok(()); };
+            if source.resource_owner.is_local() { return Ok(()); }
+            let run = db.run(&operation.run_id).map_err(|e| KernelError::Operation(e.to_string()))?;
+            (db.capture_operation_read(operation), source, run.thread_id)
+        };
+        let operation = original.0.load().map_err(|e| KernelError::Operation(e.to_string()))?;
+        crate::schedule_reconciliation::invocation(&operation)?;
+        let receipt = self.source_query(json!({"kind":"schedule_receipt","phase":"release","operationId":id,
+            "runId":operation.run_id,"threadId":original.2,"source":original.1}), &CancellationToken::default())
+            .map_err(|e| KernelError::Operation(e.to_string()))?;
+        if receipt["operationId"] != id || receipt["released"] != true {
+            return Err(KernelError::Authorization("Original schedule cleanup receipt changed".into()));
+        }
+        Ok(())
+    }
+    pub(crate) fn schedule_project_receipt_release(&self, id: String) {
+        let resources = self.clone();
+        let _ = std::thread::Builder::new().name("schedule-receipt-delivery".into()).spawn(move || {
+            if let Err(error) = resources.release_delivered_schedule_receipt(&id) {
+                eprintln!("Original schedule receipt cleanup remains pending: {error}");
+            }
+        });
+    }
     pub(crate) fn release_delivered_read_receipt(&self, id: &str) -> Result<(), KernelError> {
         let Some(catalog) = &self.journal_catalog else {
             return Ok(());
@@ -1288,6 +1323,10 @@ impl KernelResourceClient {
                     if operation.executor.as_deref() == Some("extension_package") {
                         if let Err(error) = resources.release_delivered_package_source(&operation.id) {
                             eprintln!("Original package source cleanup remains pending: {error}");
+                        }
+                    } else if operation.executor.as_deref() == Some("scheduled_task") {
+                        if let Err(error) = resources.release_delivered_schedule_receipt(&operation.id) {
+                            eprintln!("Original schedule receipt cleanup remains pending: {error}");
                         }
                     } else if crate::reconcile::is_managed_read(&operation) {
                         if let Err(error) = resources.release_delivered_read_receipt(&operation.id)

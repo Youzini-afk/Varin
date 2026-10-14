@@ -61,6 +61,7 @@ mod source_mcp_deliveries;
 pub(crate) mod source_mcp_children;
 pub(crate) mod source_mcp_derivation;
 pub(crate) mod source_read_receipts;
+pub(crate) mod source_schedule_receipts;
 pub(crate) mod source_mcp_receipts;
 
 pub(crate) fn sync_directory(path: &Path) -> io::Result<()> {

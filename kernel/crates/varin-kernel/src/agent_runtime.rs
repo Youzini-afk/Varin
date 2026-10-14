@@ -347,10 +347,12 @@ pub(crate) fn spawn(
                     let _=content_tasks.send(Box::new(move||{
                         let id=receipt.id.clone();let epoch=receipt.kernel_epoch.clone();
                         let package_operation = (receipt.call.name == "extension_package").then(|| receipt.call.operation_id.clone());
+                        let schedule_operation = (receipt.call.name == "scheduled_task").then(|| receipt.call.operation_id.clone());
                         let result=receipt.apply(&catalog);
                         // Only a committed receipt or a definitive identity/shape rejection ends retries.
                         let accepted=match result {
-                            Ok(())=>{ if let Some(id) = package_operation { cleanup.schedule_package_source_release(id); } true },
+                            Ok(())=>{ if let Some(id) = package_operation { cleanup.schedule_package_source_release(id); }
+                                if let Some(id) = schedule_operation { cleanup.schedule_project_receipt_release(id); } true },
                             Err(KernelError::Authorization(_)|KernelError::Protocol(_)|KernelError::Operation(_))=>false,
                             Err(_)=>return,
                         };
@@ -2378,7 +2380,8 @@ pub(crate) fn spawn(
                                                     | "process_write"
                                                     | "process_resize"
                                             )
-                                        ) || crate::reconcile::is_managed_read(operation)
+                                        ) || (operation.executor.as_deref() == Some("scheduled_task") && !binding.resource_owner.is_local())
+                                            || crate::reconcile::is_managed_read(operation)
                                     })
                                     .collect::<Vec<_>>()
                             };

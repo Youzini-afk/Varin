@@ -5,6 +5,7 @@ import {
   VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION,
   WorkspaceRecoveryContractError,
   createWorkspaceRecoveryAPI,
+  parseRecoveryFileTarget,
   parseRecoveryStorageLocation,
   parseRecoveryRetentionPolicy,
   parseRecoveryStorageStatus,
@@ -33,7 +34,7 @@ const checkpoint = () => ({
 
 test("owns the affected-file journal service version", () => {
   assert.equal(VARIN_WORKSPACE_RECOVERY_SERVICE_ID, "varin.workspace-recovery");
-  assert.equal(VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION, 6);
+  assert.equal(VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION, 7);
   assert.equal(parseWorkspaceRecoveryCheckpointSummary(checkpoint()).changedPathCount, 1);
 });
 
@@ -144,8 +145,12 @@ test("keeps mutation boundaries, turn binding coverage, and entry binding explic
 });
 
 test("plans only affected paths and keeps conflict handling explicit", () => {
+  const physical = { kind: 'physical' as const, workspaceId: 'resource-workspace', threadId: 'thread', runId: 'run',
+    rootId: 'original-root', canonicalRoot: '/same-name', executionWorkspaceId: 'execution-workspace', sourceMode: 'materialized' as const };
+  const managed = { kind: 'managed' as const, hostId: 'resource-host', target: physical };
   const plan = parseWorkspaceCombinedRecoveryPlan({
     affectedPaths: ["src/a.ts"],
+    fileTargets: { 'src/a.ts': { path: 'src/a.ts', target: managed } },
     changedBytes: 12,
     conflicts: [{ fingerprint: `sha256-${"b".repeat(64)}`, kind: "content-changed", message: "changed", path: "src/a.ts" }],
     coverage: "ready",
@@ -162,6 +167,9 @@ test("plans only affected paths and keeps conflict handling explicit", () => {
     workspaceId: "workspace-1",
   });
   assert.deepEqual(plan.affectedPaths, ["src/a.ts"]);
+  assert.deepEqual(plan.fileTargets?.['src/a.ts']?.target, managed);
+  assert.throws(() => parseRecoveryFileTarget({ ...managed, target: managed }), WorkspaceRecoveryContractError);
+  assert.throws(() => parseRecoveryFileTarget({ ...managed, target: { kind: 'workspace' } }), WorkspaceRecoveryContractError);
   assert.equal(plan.conflicts[0]?.kind, "content-changed");
   assert.deepEqual(plan.uncoveredPaths, []);
   assert.deepEqual(plan.uncoveredReasons, []);
@@ -185,7 +193,7 @@ test("plans only affected paths and keeps conflict handling explicit", () => {
   }), WorkspaceRecoveryContractError);
 });
 
-test("browser-safe API invokes the v6 checkpoint method", async () => {
+test("browser-safe API invokes the current checkpoint method", async () => {
   const requests: unknown[] = [];
   const api = createWorkspaceRecoveryAPI(async (request) => {
     requests.push(request);
@@ -197,6 +205,6 @@ test("browser-safe API invokes the v6 checkpoint method", async () => {
     args: [{ workspaceId: "workspace-1" }],
     method: "listCheckpoints",
     serviceId: "varin.workspace-recovery",
-    version: 6,
+    version: 7,
   }]);
 });

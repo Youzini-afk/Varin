@@ -689,12 +689,14 @@ impl HostTools {
 }
 impl ToolExecutor for HostTools {
     fn receipt_persisted(&self, context: &ToolExecutionContext, call: &ToolCall) {
-        if self.generation.binding.extension().is_none() || call.name != "extension_package" {
+        if self.generation.binding.extension().is_none() || !matches!(call.name.as_str(), "extension_package" | "scheduled_task") {
             return;
         }
         let resources = self.generation.bridge.source_cleanup.lock().ok().and_then(|owner| owner.clone());
         if let Some(resources) = resources {
-            resources.schedule_package_source_release(context.operation_id.clone());
+            if call.name == "scheduled_task" {
+                resources.schedule_project_receipt_release(context.operation_id.clone());
+            } else { resources.schedule_package_source_release(context.operation_id.clone()); }
         }
     }
     fn plan(

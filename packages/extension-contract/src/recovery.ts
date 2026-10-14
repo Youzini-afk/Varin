@@ -4,7 +4,7 @@ import {
 } from "./services.js";
 import type { JsonObject, JsonValue, VarinExtensionServiceInvocationRequest } from "./types.js";
 
-export const VARIN_WORKSPACE_RECOVERY_CONTRACT_VERSION = 6 as const;
+export const VARIN_WORKSPACE_RECOVERY_CONTRACT_VERSION = 7 as const;
 
 export type WorkspaceRecoveryFailureCode =
   | "invalid-request" | "workspace-not-found" | "workspace-untrusted"
@@ -28,7 +28,9 @@ export interface WorkspaceRecoveryFailure {
 }
 
 export type RecoveryConversation = { kind: "pi"; sessionId: string } | { kind: "thread"; threadId: string; branchId: string };
-export type RecoveryFileTarget = { kind: "workspace" } | { kind: "physical"; workspaceId: string; threadId: string; runId: string; rootId: string; canonicalRoot: string; executionWorkspaceId: string; sourceMode: "live_root" | "materialized" } | { kind: "fixed"; branchId: string; revision: number };
+type LocalRecoveryFileTarget = { kind: "workspace" } | { kind: "physical"; workspaceId: string; threadId: string; runId: string; rootId: string; canonicalRoot: string; executionWorkspaceId: string; sourceMode: "live_root" | "materialized" } | { kind: "fixed"; branchId: string; revision: number };
+export type RecoveryFileTarget = LocalRecoveryFileTarget
+  | { kind: "managed"; hostId: string; target: Extract<LocalRecoveryFileTarget, { kind: "physical" }> };
 
 export interface WorkspaceRecoveryIdentity {
   authorityId: string;
@@ -426,6 +428,11 @@ export const parseRecoveryConversation = (value: unknown): RecoveryConversation 
 };
 export const parseRecoveryFileTarget = (value: unknown): RecoveryFileTarget => {
   const raw = record(value, "Recovery file target");
+  if (raw.kind === "managed") {
+    const target = record(raw.target, "Managed recovery file target");
+    if (target.kind !== "physical") throw new WorkspaceRecoveryContractError("managed recovery requires an original physical target");
+    return { kind: "managed", hostId: text(raw.hostId, "target.hostId"), target: parseRecoveryFileTarget(target) as Extract<LocalRecoveryFileTarget, { kind: "physical" }> };
+  }
   if (raw.kind === "workspace") return { kind: "workspace" };
   if (raw.kind === "fixed") return { kind: "fixed", branchId: text(raw.branchId, "target.branchId"), revision: count(raw.revision, "target.revision") };
   if (raw.kind === "physical") return { kind: "physical", workspaceId: text(raw.workspaceId, "target.workspaceId"), threadId: text(raw.threadId, "target.threadId"), runId: text(raw.runId, "target.runId"), rootId: text(raw.rootId, "target.rootId"), canonicalRoot: text(raw.canonicalRoot, "target.canonicalRoot"), executionWorkspaceId: text(raw.executionWorkspaceId, "target.executionWorkspaceId"), sourceMode: oneOf(raw.sourceMode, ["live_root", "materialized"] as const, "target.sourceMode") };

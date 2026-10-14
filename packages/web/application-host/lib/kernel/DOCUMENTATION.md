@@ -1382,7 +1382,7 @@ original Source explicitly retires. Recovered finite subscribe ACKs and proven f
 settle the original execution barrier without replacing already-published Unknown conversation history.
 Focused evidence covers actual coordinator/target modules with controlled ports, native receipt fences
 and Catalog persistence; it does not assert a full two-Host SDK lifecycle. The current
-internal formats are Storage 22, Agent Catalog 72 and private wire 38; older formats are rejected by
+internal formats are Storage 22, Agent Catalog 73 and private wire 39; older formats are rejected by
 the existing read-only gate with data preserved, without automatic migration or cleanup.
 
 Managed finite reverse interactions now use the same trusted SDK scope and original Source address.
@@ -1398,9 +1398,31 @@ remain unavailable as responders; matching original bodies can still be publishe
 historical facts and acknowledged without restoring review/model authority. Evidence is limited to actual Host modules with controlled ports and focused native
 receipt/Catalog tests, not an end-to-end two-Host SDK or physical environment.
 
-Mixed-owner child preparation, explicit managed cold calendar starts and broader combined cross-Host
-file recovery still have separate implementation work. Computer assignments, Agent/Bot identity, global settings and model
+Mixed-owner child preparation derives retained definitions on their original owners before committing
+an independent child binding. Managed calendar `new_work` fixes the resource Source separately from the
+coordinating project's context. Combined cross-Host file recovery uses the original Recovery journal on
+each file Host and one conversation-Host coordinator; see [Recovery](../recovery/DOCUMENTATION.md).
+FixedBranch workspace-MCP executable mappings and merging several managed parent Source cuts into one
+child derivation remain unavailable. Computer assignments, Agent/Bot identity, global settings and model
 credentials remain with their original owners; selecting a file Host does not silently redirect them.
+
+## Managed project schedule receipts
+
+`scheduled_task` resolves project configuration, Markdown loop CAS and calendar controls on the
+admitted Source Host. This is separate from choosing a managed resource Source for a new calendar Run.
+The original Host Tool invocation authorizes the closed schedule service; current paired permissions,
+project registration and Source authority still gate new work. The target's existing scheduler is the
+only asset/occurrence owner. Cancellation joins a started mutation's actual callback rather than
+reporting its reader as stopped.
+
+Storage's original Operation provides `source.schedule.receipt`: a complete invocation fingerprint
+and begin fence before asset dispatch, followed by an immutable completion. Receipt bodies use existing
+Storage objects and the content lane. A lost begin/finish acknowledgement never permits replay of the
+asset action. Observation after cancellation, retirement or reopening reads the original source/operation;
+missing callback evidence remains Unknown. The coordinating Catalog retains its original Host Tool
+execution owner, independently of the target Source owner. Durable delivery releases only the receipt
+body; the fingerprint still rejects a late invocation. Startup and Source reconnection reuse the existing
+Catalog cleanup replay, without another schedule or retry ledger.
 
 ## Managed extension package cleanup
 

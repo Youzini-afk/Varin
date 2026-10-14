@@ -88,6 +88,7 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
   const fileLabel = (key: string) => {
     const file = plan.fileTargets?.[key];
     if (!file) return key;
+    if (file.target.kind === 'managed') return `${file.path} (${file.target.hostId}: ${file.target.target.canonicalRoot})`;
     return file.target.kind === 'physical' ? `${file.path} (${file.target.canonicalRoot})` : file.path;
   };
 

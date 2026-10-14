@@ -124,7 +124,6 @@ export function useThreadRecovery({ api, identity, host, disabled, snapshot, onR
       const source = await api.recoverySource({ ...identity, entryId });
       if (!current()) return;
       if (!source || source.mode === 'fixed_branch') { setNavigation(intent); await navigate(intent); return; }
-      if (source.resourceOwner.kind === 'managed_host') throw new Error('File recovery for this managed Host is not available yet. You can restore the conversation only; the remote files will stay unchanged.');
       const recovery = getWorkspaceRecoveryAPI();
       const { plan } = requireWorkspaceRecoveryResult(await recovery.prepareCombinedRecovery({
         workspaceId: source.workspaceId, conversation: { kind: 'thread', threadId: identity.threadId, branchId: identity.branchId }, entryId,

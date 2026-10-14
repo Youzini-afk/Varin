@@ -59,6 +59,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 mod integration_reconciliation;
+mod schedule_reconciliation;
 mod reconcile;
 
 #[cfg(test)]

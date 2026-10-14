@@ -88,6 +88,8 @@ export interface RecoveryFileStoreOptions {
 }
 
 export interface RecoveryFileStore {
+  /** The original file owner checks effect-specific permission before plan/apply. */
+  assertApplyState?(identity: RecoveryIdentity, relativePath: string, state: RecoveryState): Promise<void>;
   /** Editor safety content uses the same owned objects as disk recovery. */
   storeContent?(identity: RecoveryIdentity, bytes: Buffer): Promise<{ state: RegularFileState; release(): Promise<void> }>;
   readContent?(identity: RecoveryIdentity, state: RegularFileState): Promise<Buffer>;

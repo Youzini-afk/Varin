@@ -5,6 +5,7 @@ import type { ManagedHostSourceOwner, ManagedSourceReceipt, ManagedSourceToolReq
 import type { SourceToolBinding, SourceResourceAction, ToolOrigin, LaunchSource } from './protocol.generated.js';
 import { controlManagedScript } from './managed-script-source.js';
 import { releaseManagedPackageSource, type ManagedPackageCleanup } from './managed-package-source.js';
+import { recallManagedScheduleReceipt, type ManagedScheduleReceiptQuery } from './managed-schedule-receipt.js';
 
 export type ManagedSourceOwner = (owner: ManagedHostSourceOwner) => Promise<ManagedSourceClient>;
 export type PrivateManagedSourceFrame = { v: 1; kind: 'source-resource-response'; id: string; kernelEpoch: string; result: { ok: boolean; value?: unknown; message?: string } }
@@ -81,6 +82,13 @@ export class ManagedSourceBridge {
           const client = await this.owner(query.source.resource_owner as unknown as ManagedHostSourceOwner);
           result = { ok: true, value: await controlManagedScript(client, { coordinatorHostId: this.coordinator(),
             source: query.source as unknown as LaunchSource, processId: query.processId, runId: query.runId, threadId: query.threadId, stop: query.stop }) };
+        } else if (record(value.query) && value.query.kind === 'schedule_receipt') {
+          const query = value.query;
+          if (!record(query.source) || !record(query.source.resource_owner) || query.source.resource_owner.kind !== 'managed_host'
+            || !text(query.operationId) || !text(query.runId) || !text(query.threadId) || !['observe', 'release'].includes(String(query.phase)) || !this.owner || !this.coordinator)
+            throw new Error('Original managed schedule receipt owner unavailable');
+          const client = await this.owner(query.source.resource_owner as unknown as ManagedHostSourceOwner);
+          result = { ok: true, value: await recallManagedScheduleReceipt(client, this.coordinator(), query as unknown as ManagedScheduleReceiptQuery) };
         } else if (record(value.query) && value.query.kind === 'package_cleanup') {
           const query = value.query;
           if (!record(query.source) || !record(query.source.resource_owner) || query.source.resource_owner.kind !== 'managed_host'

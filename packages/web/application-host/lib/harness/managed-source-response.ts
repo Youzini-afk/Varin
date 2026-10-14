@@ -1,6 +1,7 @@
 import type { ManagedSourceReceiptRelease, ManagedSourceServiceCancelReceipt, SourceServiceOperation, SourceServiceResponse } from './managed-remote-types.js';
 import { parseExtensionSourceSnapshot } from '../kernel/extension-source.js';
 import { parseManagedExperimentInput } from './experiment-workspace.js';
+import { parseScheduleReceipt } from '../kernel/managed-schedule-service.js';
 
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown): value is string => typeof value === 'string';
@@ -31,6 +32,7 @@ export function decodeManagedSourceReceiptRelease(input: { operationId: string; 
 export function decodeManagedSourceResponse<Operation extends SourceServiceOperation>(operation: Operation, value: unknown): SourceServiceResponse<Operation> {
   let valid = false;
   switch (operation.kind) {
+    case 'schedule': return parseScheduleReceipt(value) as SourceServiceResponse<Operation>;
     case 'mcp': valid = record(value) && typeof value.executorStopped === 'boolean'
       && (value.ok === true && value.executorStopped === true && Object.hasOwn(value, 'value')
         || value.ok === false && record(value.error) && text(value.error.code) && typeof value.error.dispatched === 'boolean'
