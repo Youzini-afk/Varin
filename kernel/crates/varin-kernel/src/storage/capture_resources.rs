@@ -1,6 +1,6 @@
-//! Filesystem bodies are copied and verified outside the catalog actor. Only the
-//! actor admits leases and publishes object ownership; a cancelled worker retains
-//! its exclusion until it has really stopped using the admitted source.
+//! Source bodies and immutable-object verification stay outside the catalog actor.
+//! A stored capture returns once for exact-hash retention, then resumes under the
+//! original request and physical lease. Retention preserves bytes, never authority.
 use super::file_resource_leases::{canonical_lease_path, covers, RetainedFileLease};
 use super::file_resources::{
     file_mode, parse_file_params, resolve_admitted_resource, FileState, ResolvedFileResource,
@@ -21,15 +21,33 @@ pub(crate) struct CaptureTask {
     lease: FileLease,
     storage_root: PathBuf,
     cancellation: Arc<AtomicBool>,
+    retained_objects: BTreeMap<String, blob_reads::BlobReadRetention>,
     hooks: CaptureHooks,
+}
+pub(crate) struct HashedCapture {
+    entries: Vec<HashedEntry>,
+}
+struct HashedEntry {
+    path: String,
+    absolute: PathBuf,
+    state: FileState,
 }
 pub(crate) struct CapturedBatch {
     entries: Vec<CapturedEntry>,
+    publication: Option<CapturePublication>,
+}
+struct CapturePublication {
+    response: Value,
+    rows: Vec<(String, String, u64, String)>,
 }
 struct CapturedEntry {
     path: String,
     state: FileState,
-    staged: Option<StagedFile>,
+    object: Option<CapturedObject>,
+}
+enum CapturedObject {
+    Staged(StagedFile),
+    Retained,
 }
 struct StagedFile(PathBuf);
 impl Drop for StagedFile {
@@ -48,6 +66,8 @@ pub(crate) enum CapturePhase {
 struct CaptureHooks {
     #[cfg(test)]
     hold: std::sync::Mutex<Option<(CapturePhase, Box<dyn FnOnce() + Send>)>>,
+    #[cfg(test)]
+    counts: std::sync::Mutex<[u64; 5]>,
 }
 impl CaptureHooks {
     fn checkpoint(&self, phase: CapturePhase) {
@@ -66,6 +86,31 @@ impl CaptureHooks {
         #[cfg(not(test))]
         let _ = phase;
     }
+    fn source_read(&self, phase: CapturePhase, length: u64) {
+        #[cfg(test)]
+        {
+            let mut counts = self.counts.lock().unwrap();
+            match phase {
+                CapturePhase::Read => {
+                    counts[0] += 1;
+                    counts[1] += length;
+                }
+                CapturePhase::VerifySource => {
+                    counts[2] += 1;
+                    counts[3] += length;
+                }
+                _ => {}
+            }
+        }
+        #[cfg(not(test))]
+        let _ = (phase, length);
+    }
+    fn staged(&self) {
+        #[cfg(test)]
+        {
+            self.counts.lock().unwrap()[4] += 1;
+        }
+    }
 }
 fn check(cancel: &AtomicBool) -> Result<(), KernelError> {
     if cancel.load(Ordering::Acquire) {
@@ -80,8 +125,7 @@ fn open_regular(path: &Path) -> Result<File, KernelError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        // A concurrently replaced leaf must not follow a link or block opening
-        // a FIFO. File contents are read only after the actual handle is checked.
+        // Never follow a replaced leaf or block on a substituted FIFO.
         options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
     let file = options.open(path)?;
@@ -91,15 +135,6 @@ fn open_regular(path: &Path) -> Result<File, KernelError> {
         ));
     }
     Ok(file)
-}
-fn digest_file(
-    path: &Path,
-    cancel: &AtomicBool,
-    hooks: &CaptureHooks,
-    phase: CapturePhase,
-) -> Result<(String, u64), KernelError> {
-    let mut file = open_regular(path)?;
-    digest_reader(&mut file, None, cancel, hooks, phase)
 }
 fn digest_reader(
     source: &mut File,
@@ -127,11 +162,18 @@ fn digest_reader(
             .checked_add(count as u64)
             .ok_or_else(|| KernelError::Storage("capture length overflow".into()))?;
     }
+    hooks.source_read(phase, length);
     Ok((format!("sha256-{}", hex::encode(digest.finalize())), length))
 }
 impl CaptureTask {
     pub(crate) fn lease_id(&self) -> &str {
         &self.lease.lease_id
+    }
+    pub(crate) fn cancellation(&self) -> Arc<AtomicBool> {
+        self.cancellation.clone()
+    }
+    pub(crate) fn retain_worker_objects(&self) -> Vec<blob_reads::BlobReadRetention> {
+        self.retained_objects.values().cloned().collect()
     }
     fn paths(&self) -> &[String] {
         match &self.request {
@@ -140,7 +182,7 @@ impl CaptureTask {
             CaptureRequest::Observation { path } => std::slice::from_ref(path),
         }
     }
-    fn store(&self) -> bool {
+    pub(crate) fn store(&self) -> bool {
         match &self.request {
             CaptureRequest::Single(params) => params.store,
             CaptureRequest::Batch(params) => params.store,
@@ -166,53 +208,192 @@ impl CaptureTask {
         }
         Ok(resource)
     }
+    fn capture_error(&self, error: KernelError) -> KernelError {
+        match (&self.request, error) {
+            (CaptureRequest::Single(_), KernelError::SnapshotChanged(message)) => {
+                KernelError::Operation(message)
+            }
+            (_, error) => error,
+        }
+    }
+    pub(crate) fn hash_sources(&self) -> Result<HashedCapture, KernelError> {
+        let entries = self
+            .paths()
+            .iter()
+            .map(|path| {
+                read_entry(|| self.resolve(path), &self.cancellation, &self.hooks)
+                    .map_err(|error| self.capture_error(error))
+            })
+            .collect::<Result<_, _>>()?;
+        check(&self.cancellation)?;
+        Ok(HashedCapture { entries })
+    }
+    /// Non-storing observations keep their original one-worker, two-pass path.
     pub(crate) fn run(&self) -> Result<CapturedBatch, KernelError> {
+        if self.store() {
+            return Err(KernelError::Storage(
+                "stored capture requires exact-hash retention".into(),
+            ));
+        }
         let mut entries = Vec::with_capacity(self.paths().len());
         for path in self.paths() {
-            let captured = capture_entry(
-                || self.resolve(path),
-                self.store(),
-                &self.storage_root,
-                &self.cancellation,
-                &self.hooks,
-            );
-            // The original single-path API reports unstable captures as an operation failure.
-            let captured = if matches!(self.request, CaptureRequest::Single(_)) {
-                captured.map_err(|error| match error {
-                    KernelError::SnapshotChanged(message) => KernelError::Operation(message),
-                    other => other,
+            let entry = capture_entry(|| self.resolve(path), &self.cancellation, &self.hooks)
+                .map_err(|error| self.capture_error(error))?;
+            entries.push(entry);
+        }
+        self.prepare_publication(entries)
+    }
+    pub(crate) fn finish_sources(
+        &self,
+        hashed: HashedCapture,
+    ) -> Result<CapturedBatch, KernelError> {
+        let mut entries = Vec::with_capacity(hashed.entries.len());
+        for entry in hashed.entries {
+            let captured = (|| {
+                let object = if let FileState::RegularFile {
+                    object_hash,
+                    byte_length,
+                    ..
+                } = &entry.state
+                {
+                    if !self.retained_objects.contains_key(object_hash) {
+                        return Err(KernelError::Storage(
+                            "capture object is not retained".into(),
+                        ));
+                    }
+                    let path = object_path(&self.storage_root, object_hash)?;
+                    match fs::symlink_metadata(&path) {
+                        Ok(metadata) => {
+                            if !metadata.is_file() || metadata.file_type().is_symlink() {
+                                return Err(KernelError::Storage(format!(
+                                    "content object is corrupt: {object_hash}"
+                                )));
+                            }
+                            let mut file = open_regular(&path)?;
+                            let (hash, length) = digest_reader(
+                                &mut file,
+                                None,
+                                &self.cancellation,
+                                &self.hooks,
+                                CapturePhase::VerifyObject,
+                            )?;
+                            if hash != *object_hash || length != *byte_length {
+                                return Err(KernelError::Storage(format!(
+                                    "content object is corrupt: {object_hash}"
+                                )));
+                            }
+                            Some(CapturedObject::Retained)
+                        }
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                            let directory = self.storage_root.join("staging");
+                            fs::create_dir_all(&directory)?;
+                            Some(CapturedObject::Staged(StagedFile(
+                                directory.join(format!("file-capture-{}", Uuid::new_v4())),
+                            )))
+                        }
+                        Err(error) => return Err(error.into()),
+                    }
+                } else {
+                    None
+                };
+                let path = entry.path.clone();
+                verify_entry(
+                    entry,
+                    || self.resolve(&path),
+                    object,
+                    &self.cancellation,
+                    &self.hooks,
+                )
+            })()
+            .map_err(|error| self.capture_error(error))?;
+            entries.push(captured);
+        }
+        self.prepare_publication(entries)
+    }
+    fn prepare_publication(
+        &self,
+        entries: Vec<CapturedEntry>,
+    ) -> Result<CapturedBatch, KernelError> {
+        check(&self.cancellation)?;
+        let (operation_id, single) = match &self.request {
+            CaptureRequest::Single(params) => (&params.operation_id, true),
+            CaptureRequest::Batch(params) => (&params.operation_id, false),
+            CaptureRequest::Observation { .. } => {
+                return Ok(CapturedBatch {
+                    entries,
+                    publication: None,
                 })
+            }
+        };
+        if single && entries.len() != 1 {
+            return Err(KernelError::Storage(
+                "single capture changed cardinality".into(),
+            ));
+        }
+        let mut rows = Vec::new();
+        let mut result = Vec::with_capacity(entries.len());
+        for (index, entry) in entries.iter().enumerate() {
+            let owner = if let FileState::RegularFile {
+                object_hash,
+                byte_length,
+                ..
+            } = &entry.state
+            {
+                if self.store() {
+                    let operation = if single {
+                        operation_id.clone()
+                    } else {
+                        format!("{operation_id}:{index}")
+                    };
+                    let owner = blob_owner_id(&operation);
+                    rows.push((owner.clone(), object_hash.clone(), *byte_length, operation));
+                    Some(owner)
+                } else {
+                    None
+                }
             } else {
-                captured
+                None
             };
-            entries.push(captured?);
+            result.push(json!({"path":entry.path,"stateJson":serde_json::to_string(&entry.state)?,"ownerId":owner}));
+        }
+        let response = if single {
+            result.remove(0)
+        } else {
+            json!({"entries":result})
+        };
+        if serde_json::to_vec(&response)?.len() > crate::protocol::MAX_FRAME_BYTES / 2 {
+            return Err(KernelError::Operation(
+                "capture result exceeds the protocol frame; split the path batch".into(),
+            ));
         }
         check(&self.cancellation)?;
-        Ok(CapturedBatch { entries })
+        Ok(CapturedBatch {
+            entries,
+            publication: Some(CapturePublication { response, rows }),
+        })
     }
     #[cfg(test)]
     pub(crate) fn hold_at(&mut self, phase: CapturePhase, hold: Box<dyn FnOnce() + Send>) {
         *self.hooks.hold.get_mut().unwrap() = Some((phase, hold));
     }
+    #[cfg(test)]
+    pub(crate) fn counts(&self) -> [u64; 5] {
+        *self.hooks.counts.lock().unwrap()
+    }
 }
 
-/// The one body algorithm, also used synchronously by original mutation/recovery observations.
-fn capture_entry(
+fn read_entry(
     mut resolve: impl FnMut() -> Result<ResolvedFileResource, KernelError>,
-    store: bool,
-    storage_root: &Path,
     cancel: &AtomicBool,
     hooks: &CaptureHooks,
-) -> Result<CapturedEntry, KernelError> {
+) -> Result<HashedEntry, KernelError> {
     check(cancel)?;
     let resource = resolve()?;
-    let path = &resource.path;
     let metadata = match fs::symlink_metadata(&resource.absolute) {
         Ok(value) => Some(value),
         Err(error) if error.kind() == io::ErrorKind::NotFound => None,
         Err(error) => return Err(error.into()),
     };
-    let mut staged = None;
     let state = match metadata {
         None => FileState::Missing,
         Some(metadata) if metadata.file_type().is_symlink() => FileState::Symlink {
@@ -226,106 +407,110 @@ fn capture_entry(
             mode: Some(file_mode(&metadata)),
         },
         Some(metadata) if metadata.is_file() => {
-            let mode = file_mode(&metadata);
             let mut source = open_regular(&resource.absolute)?;
-            let (hash, length) = if store {
-                let directory = storage_root.join("staging");
-                fs::create_dir_all(&directory)?;
-                let holder = StagedFile(directory.join(format!("file-capture-{}", Uuid::new_v4())));
-                let mut file = OpenOptions::new()
-                    .create_new(true)
-                    .write(true)
-                    .open(&holder.0)?;
-                let identity = digest_reader(
-                    &mut source,
-                    Some(&mut file),
-                    cancel,
-                    hooks,
-                    CapturePhase::Read,
-                )?;
-                file.sync_all()?;
-                drop(file);
-                staged = Some(holder);
-                hooks.checkpoint(CapturePhase::Staged);
-                check(cancel)?;
-                identity
-            } else {
-                digest_reader(&mut source, None, cancel, hooks, CapturePhase::Read)?
-            };
-            // Re-resolve scope before the second pass. External filesystem writers
-            // are not governed by kernel leases; changed captures must fail.
-            let after_resource = resolve()?;
-            let after = fs::symlink_metadata(&after_resource.absolute)?;
-            if !after.is_file() || after.file_type().is_symlink() {
-                return Err(KernelError::SnapshotChanged(format!(
-                    "file changed while being captured: {path}"
-                )));
-            }
-            let (after_hash, after_length) = digest_file(
-                &after_resource.absolute,
-                cancel,
-                hooks,
-                CapturePhase::VerifySource,
-            )?;
-            if !after.is_file()
-                || after.file_type().is_symlink()
-                || file_mode(&after) != mode
-                || after_resource.absolute != resource.absolute
-                || after_hash != hash
-                || after_length != length
-            {
-                return Err(KernelError::SnapshotChanged(format!(
-                    "file changed while being captured: {path}"
-                )));
-            }
-            if store {
-                let object = object_path(storage_root, &hash)?;
-                match fs::symlink_metadata(&object) {
-                    Ok(metadata) => {
-                        if !metadata.is_file() || metadata.file_type().is_symlink() {
-                            return Err(KernelError::Storage(format!(
-                                "content object is corrupt: {hash}"
-                            )));
-                        }
-                        let observed =
-                            digest_file(&object, cancel, hooks, CapturePhase::VerifyObject);
-                        // GC may remove an unreferenced object during verification.
-                        match observed {
-                            Ok((existing, size)) if existing == hash && size == length => {}
-                            Err(KernelError::Storage(_)) if !object.exists() => {}
-                            Err(KernelError::Cancelled) => return Err(KernelError::Cancelled),
-                            _ => {
-                                return Err(KernelError::Storage(format!(
-                                    "content object is corrupt: {hash}"
-                                )))
-                            }
-                        }
-                    }
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error.into()),
-                }
-            }
+            let (hash, length) =
+                digest_reader(&mut source, None, cancel, hooks, CapturePhase::Read)?;
             FileState::RegularFile {
                 object_hash: hash,
                 byte_length: length,
-                mode: Some(mode),
+                mode: Some(file_mode(&metadata)),
             }
         }
         Some(_) => FileState::Unsupported,
     };
-
     check(cancel)?;
-    // Even a metadata-only state must still describe the admitted physical path.
     if resolve()?.absolute != resource.absolute {
         return Err(KernelError::SnapshotChanged(format!(
-            "file changed while being captured: {path}"
+            "file changed while being captured: {}",
+            resource.path
+        )));
+    }
+    Ok(HashedEntry {
+        path: resource.path,
+        absolute: resource.absolute,
+        state,
+    })
+}
+fn verify_entry(
+    entry: HashedEntry,
+    mut resolve: impl FnMut() -> Result<ResolvedFileResource, KernelError>,
+    object: Option<CapturedObject>,
+    cancel: &AtomicBool,
+    hooks: &CaptureHooks,
+) -> Result<CapturedEntry, KernelError> {
+    check(cancel)?;
+    if let FileState::RegularFile {
+        object_hash,
+        byte_length,
+        mode,
+    } = &entry.state
+    {
+        hooks.checkpoint(CapturePhase::VerifySource);
+        check(cancel)?;
+        let after_resource = resolve()?;
+        let after = fs::symlink_metadata(&after_resource.absolute)?;
+        if !after.is_file()
+            || after.file_type().is_symlink()
+            || Some(file_mode(&after)) != *mode
+            || after_resource.absolute != entry.absolute
+        {
+            return Err(KernelError::SnapshotChanged(format!(
+                "file changed while being captured: {}",
+                entry.path
+            )));
+        }
+        let mut source = open_regular(&after_resource.absolute)?;
+        let mut target = if let Some(CapturedObject::Staged(staged)) = &object {
+            let file = OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&staged.0)?;
+            hooks.staged();
+            Some(file)
+        } else {
+            None
+        };
+        let (hash, length) = digest_reader(
+            &mut source,
+            target.as_mut(),
+            cancel,
+            hooks,
+            CapturePhase::VerifySource,
+        )?;
+        if hash != *object_hash || length != *byte_length {
+            return Err(KernelError::SnapshotChanged(format!(
+                "file changed while being captured: {}",
+                entry.path
+            )));
+        }
+        if let Some(file) = target {
+            file.sync_all()?;
+            drop(file);
+            hooks.checkpoint(CapturePhase::Staged);
+        }
+    }
+    check(cancel)?;
+    // Metadata-only states still describe the admitted physical path.
+    if resolve()?.absolute != entry.absolute {
+        return Err(KernelError::SnapshotChanged(format!(
+            "file changed while being captured: {}",
+            entry.path
         )));
     }
     Ok(CapturedEntry {
-        path: resource.path,
-        state,
-        staged,
+        path: entry.path,
+        state: entry.state,
+        object,
     })
+}
+/// Original mutation/recovery observations share exactly the same source passes.
+fn capture_entry(
+    mut resolve: impl FnMut() -> Result<ResolvedFileResource, KernelError>,
+    cancel: &AtomicBool,
+    hooks: &CaptureHooks,
+) -> Result<CapturedEntry, KernelError> {
+    let entry = read_entry(&mut resolve, cancel, hooks)?;
+    verify_entry(entry, resolve, None, cancel, hooks)
 }
 impl Storage {
     pub(crate) fn prepare_capture(
@@ -414,6 +599,7 @@ impl Storage {
             lease,
             storage_root: self.root.clone(),
             cancellation,
+            retained_objects: BTreeMap::new(),
             hooks: CaptureHooks::default(),
         })
     }
@@ -428,25 +614,14 @@ impl Storage {
             .cancellation
             .clone()
             .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
-        capture_entry(
-            || Ok(resource.clone()),
-            false,
-            &self.root,
-            &cancel,
-            &CaptureHooks::default(),
-        )
-        .map(|entry| entry.state)
-        .map_err(|error| match error {
-            KernelError::SnapshotChanged(message) => KernelError::Operation(message),
-            other => other,
-        })
+        capture_entry(|| Ok(resource.clone()), &cancel, &CaptureHooks::default())
+            .map(|entry| entry.state)
+            .map_err(|error| match error {
+                KernelError::SnapshotChanged(message) => KernelError::Operation(message),
+                other => other,
+            })
     }
-    pub(crate) fn publish_capture(
-        &mut self,
-        task: &CaptureTask,
-        batch: CapturedBatch,
-        grant: &Grant,
-    ) -> Result<Value, KernelError> {
+    fn validate_capture(&self, task: &CaptureTask, grant: &Grant) -> Result<(), KernelError> {
         check(&task.cancellation)?;
         let root = self.registered_file_root(&task.root.root_id, grant)?;
         if root.canonical_root != task.root.canonical_root {
@@ -470,74 +645,77 @@ impl Storage {
                 "capture lease identity changed".into(),
             ));
         }
-        let (workspace_id, operation_id, single) = match &task.request {
-            CaptureRequest::Single(params) => (&params.workspace_id, &params.operation_id, true),
-            CaptureRequest::Batch(params) => (&params.workspace_id, &params.operation_id, false),
+        Ok(())
+    }
+    /// Retain every exact first-pass hash before a worker tests object existence.
+    /// This also protects pending-delete/orphan objects without a second index.
+    pub(crate) fn retain_capture_objects(
+        &mut self,
+        task: &mut CaptureTask,
+        hashed: &HashedCapture,
+        grant: &Grant,
+    ) -> Result<(), KernelError> {
+        self.validate_capture(task, grant)?;
+        if !task.store() || !task.retained_objects.is_empty() {
+            return Err(KernelError::Storage("invalid capture continuation".into()));
+        }
+        for entry in &hashed.entries {
+            check(&task.cancellation)?;
+            if let FileState::RegularFile { object_hash, .. } = &entry.state {
+                task.retained_objects
+                    .entry(object_hash.clone())
+                    .or_insert_with(|| self.blob_read_roots.retain(object_hash));
+            }
+        }
+        Ok(())
+    }
+    pub(crate) fn publish_capture(
+        &mut self,
+        task: &CaptureTask,
+        batch: CapturedBatch,
+        grant: &Grant,
+    ) -> Result<Value, KernelError> {
+        self.validate_capture(task, grant)?;
+        let workspace_id = match &task.request {
+            CaptureRequest::Single(params) => &params.workspace_id,
+            CaptureRequest::Batch(params) => &params.workspace_id,
             CaptureRequest::Observation { .. } => {
                 return Err(KernelError::Storage(
                     "observation cannot publish objects".into(),
                 ))
             }
         };
-        if single && batch.entries.len() != 1 {
-            return Err(KernelError::Storage(
-                "single capture changed cardinality".into(),
-            ));
-        }
-        let mut rows = Vec::new();
-        let mut result = Vec::new();
-        for (index, entry) in batch.entries.iter().enumerate() {
-            let owner = if let FileState::RegularFile {
-                object_hash,
-                byte_length,
-                ..
-            } = &entry.state
-            {
-                if task.store() {
-                    let operation = if single {
-                        operation_id.clone()
-                    } else {
-                        format!("{operation_id}:{index}")
-                    };
-                    let owner = blob_owner_id(&operation);
-                    rows.push((owner.clone(), object_hash.clone(), *byte_length, operation));
-                    Some(owner)
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-            result.push(json!({"path":entry.path,"stateJson":serde_json::to_string(&entry.state)?,"ownerId":owner}));
-        }
-        let response = if single {
-            result.remove(0)
-        } else {
-            json!({"entries":result})
-        };
-        if serde_json::to_vec(&response)?.len() > crate::protocol::MAX_FRAME_BYTES / 2 {
-            return Err(KernelError::Operation(
-                "capture result exceeds the protocol frame; split the path batch".into(),
-            ));
-        }
-        // Install only verified staging files. Always replacing with our staged
-        // bytes closes a GC delete/recreate race without trusting a stale check.
+        let CapturePublication { response, rows } = batch
+            .publication
+            .ok_or_else(|| KernelError::Storage("capture publication was not prepared".into()))?;
+        // Hits stay installed under exact-hash retention until the new owner commits.
+        // Misses install only the verified second source pass.
+        let mut installed = false;
         for entry in &batch.entries {
             check(&task.cancellation)?;
-            if let (Some(staged), FileState::RegularFile { object_hash, .. }) =
-                (&entry.staged, &entry.state)
-            {
-                let object = object_path(&self.root, object_hash)?;
-                let shard = object.parent().expect("object shard");
-                if !shard.exists() {
-                    fs::create_dir_all(shard)?;
-                    sync_directory(&self.root.join("objects"))?;
+            if let FileState::RegularFile { object_hash, .. } = &entry.state {
+                if !task.store() {
+                    continue;
                 }
-                durable_rename(&staged.0, &object)?;
-                sync_directory(shard)?;
+                if !task.retained_objects.contains_key(object_hash) || entry.object.is_none() {
+                    return Err(KernelError::Storage(
+                        "capture object is not retained".into(),
+                    ));
+                }
+                if let Some(CapturedObject::Staged(staged)) = &entry.object {
+                    let object = object_path(&self.root, object_hash)?;
+                    let shard = object.parent().expect("object shard");
+                    if !shard.exists() {
+                        fs::create_dir_all(shard)?;
+                        sync_directory(&self.root.join("objects"))?;
+                    }
+                    durable_rename(&staged.0, &object)?;
+                    sync_directory(shard)?;
+                    installed = true;
+                }
             }
         }
-        if !rows.is_empty() {
+        if installed {
             sync_directory(&self.root.join("staging"))?;
         }
         check(&task.cancellation)?;
@@ -592,6 +770,7 @@ impl CaptureTask {
             lease,
             storage_root,
             cancellation,
+            retained_objects: BTreeMap::new(),
             hooks: CaptureHooks::default(),
         }
     }

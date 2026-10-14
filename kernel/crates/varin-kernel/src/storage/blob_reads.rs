@@ -4,6 +4,7 @@ use super::*;
 
 #[derive(Default)]
 pub(super) struct BlobReadRoots(BTreeMap<String, Arc<()>>);
+#[derive(Clone)]
 pub(crate) struct BlobReadRetention {
     _lifetime: Arc<()>,
 }

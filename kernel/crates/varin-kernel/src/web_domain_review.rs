@@ -820,14 +820,23 @@ pub(super) fn storage_rpc(
                 };
             }
             if matches!(method, "file.capture" | "file.captureBatch") {
-                let task = storage.prepare_capture(
+                let mut task = storage.prepare_capture(
                     method,
                     &params,
                     &grant,
                     Arc::new(AtomicBool::new(false)),
                 )?;
                 drop(storage);
-                let body = task.run();
+                let body = (|| {
+                    if !task.store() { return task.run(); }
+                    let hashed = task.hash_sources()?;
+                    {
+                        let mut storage = owner.lock().unwrap();
+                        let (grant, _) = storage.authorize(grant_id, epoch, host, generation, method, &params)?;
+                        storage.retain_capture_objects(&mut task, &hashed, &grant)?;
+                    }
+                    task.finish_sources(hashed)
+                })();
                 let mut storage = owner.lock().unwrap();
                 let result = (|| {
                     let (grant, _) =

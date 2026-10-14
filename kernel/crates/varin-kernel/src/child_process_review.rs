@@ -55,11 +55,21 @@ impl Harness {
             .authorize(Some(actor), EPOCH, HOST, GENERATION, method, &params)
             .unwrap_or_else(|e| panic!("{method} authorization: {e}"));
         if matches!(method, "file.capture" | "file.captureBatch") {
-            let task = storage
+            let mut task = storage
                 .prepare_capture(method, &params, &grant, Arc::new(AtomicBool::new(false)))
                 .unwrap();
             drop(lock);
-            let captured = task.run();
+            let captured = (|| {
+                if !task.store() { return task.run(); }
+                let hashed = task.hash_sources()?;
+                {
+                    let mut lock = self.storage.lock().unwrap();
+                    let storage = lock.as_mut().unwrap();
+                    let (grant, _) = storage.authorize(Some(actor), EPOCH, HOST, GENERATION, method, &params)?;
+                    storage.retain_capture_objects(&mut task, &hashed, &grant)?;
+                }
+                task.finish_sources(hashed)
+            })();
             let mut lock = self.storage.lock().unwrap();
             let storage = lock.as_mut().unwrap();
             let result = (|| {
