@@ -17,7 +17,7 @@ This document is the local code map and maintenance boundary, not an implementat
 | Immutable bodies, media, publication and collection | [content.rs](src/content.rs), [output.rs](src/output.rs), [content_collection.rs](src/content_collection.rs) |
 | Scope-local bindings, tools and context transforms | [composition](src/composition.rs) |
 | Resource conflict/capacity admission and nested calls | [resource_admission.rs](src/resource_admission.rs), [execution_capacity.rs](src/execution_capacity.rs), [nested_tools.rs](src/nested_tools.rs) |
-| Context checkpoint/summary plans and capacity | [context_job.rs](src/context_job.rs), [catalog_context_jobs.rs](src/catalog_context_jobs.rs), [context_capacity.rs](src/context_capacity.rs) |
+| Context checkpoint/summary plans and capacity | [context_job.rs](src/context_job.rs), [context_execution.rs](src/context_execution.rs), [catalog_context_jobs.rs](src/catalog_context_jobs.rs), [context_capacity.rs](src/context_capacity.rs) |
 | Protocol adapters, frozen bodies and credential resolution | [providers](src/providers/README.md), [request_body.rs](src/request_body.rs) |
 | Child/family work, messages and continuation | [catalog_collaboration.rs](src/catalog_collaboration.rs), [catalog_messages.rs](src/catalog_messages.rs), [catalog_activation.rs](src/catalog_activation.rs) |
 | Durable conditions and deliveries | [catalog_observations.rs](src/catalog_observations.rs), [catalog_followups.rs](src/catalog_followups.rs), [catalog_process_wait.rs](src/catalog_process_wait.rs), [catalog_reply_wait.rs](src/catalog_reply_wait.rs) |
@@ -71,9 +71,13 @@ JSON rewriting. Vector validation, full-body assembly, persistence/hashing and m
 real costs; fragment reuse does not establish lower peak memory or provider cache savings.
 
 Compaction's Budget Decision and algorithm producer are separate contracts. Frozen text and model-node
-DAG plans use the same summary Run/publication path. The current executor is topological and serial.
-Pure text produces zero ModelSteps; model nodes retain actual request/usage identities and check the
-complete serialized capacity before dispatch. Accepted recipes are not recomputed on reopening.
+DAG plans use the same summary Run/publication path. Its supervised executor loads original material
+once and runs ready nodes concurrently, releasing successors as their own dependencies complete.
+Original ModelSteps persist each request, dispatch, output and usage; the active-request index remains
+exclusive for a conversation or one summary node. Audit history may reflect completion order, while
+node inputs follow only the frozen recipe. Pure text produces zero ModelSteps. Complete serialized
+capacity is checked before dispatch; reopening consumes completed nodes and never replays an unknown
+dispatch. A failed node cancels and joins its remaining workers before the Run settles.
 
 ## Composition with the kernel and Host
 

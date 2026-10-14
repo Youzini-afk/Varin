@@ -2854,7 +2854,7 @@ impl<
         Ok(())
     }
 
-    fn generate(
+    pub(crate) fn generate(
         &self,
         run_id: &str,
         snapshot: &RequestSnapshot,
@@ -3312,7 +3312,7 @@ fn guarded<T>(
     })
 }
 
-fn validate_model_items(
+pub(crate) fn validate_model_items(
     items: &[ProviderItem],
     snapshot: &RequestSnapshot,
 ) -> Result<Vec<ToolCall>, ExecutionError> {

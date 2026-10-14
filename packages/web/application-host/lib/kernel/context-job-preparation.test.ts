@@ -143,7 +143,7 @@ it('binds a model plan only after pure planning, retaining the same producer and
 
 it('the actual Host start owner keeps a frozen summary tool-free even when current extension preparation is unavailable', async () => {
   const preparation = new AbortController();
-  const launch = { startable: true, requires_rebind: true, selection: { policy: { name: 'context_compaction', version: '3' }, source: null, extension_bindings: [] } };
+  const launch = { startable: true, requires_rebind: true, selection: { policy: { name: 'context_compaction', version: '4' }, source: null, extension_bindings: [] } };
   const request = vi.fn(async (method: string) => {
     if (method === 'runtime.child.execution.for_run') return null;
     if (method === 'runtime.run.inspect') return { id: 'summary', thread_id: 'context-job-thread:original', state: 'runnable', cancel_requested: false };

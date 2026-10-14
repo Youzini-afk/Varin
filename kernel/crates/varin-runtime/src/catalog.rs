@@ -42,7 +42,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 73;
+pub(crate) const FORMAT: i64 = 74;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -124,6 +124,7 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
     }
     if version == FORMAT {
         db.prepare("SELECT id,thread_id,parent,run_id,body FROM history")?;
+        db.prepare("SELECT id,run_id,node_id,state,body FROM model_steps")?;
         inputs::check_format(db)?;
         followups::check_format(db)?;
         calendar::check_format(db)?;
@@ -1652,11 +1653,11 @@ CREATE INDEX operations_run ON operations(run_id);
 CREATE TABLE computer_requests(id TEXT PRIMARY KEY,requester_run_id TEXT NOT NULL REFERENCES runs(id),root_thread_id TEXT NOT NULL REFERENCES threads(id),root_branch_id TEXT NOT NULL REFERENCES branches(id),body TEXT NOT NULL);
 CREATE INDEX computer_requests_root ON computer_requests(root_thread_id,root_branch_id);
 CREATE INDEX computer_requests_run ON computer_requests(requester_run_id);
-CREATE TABLE model_steps(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs(id),state TEXT NOT NULL,body TEXT NOT NULL);
+CREATE TABLE model_steps(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs(id),node_id TEXT CHECK(node_id IS NULL OR length(node_id)>0),state TEXT NOT NULL,body TEXT NOT NULL,FOREIGN KEY(run_id,node_id) REFERENCES context_job_nodes(run_id,node_id));
 CREATE INDEX model_steps_run ON model_steps(run_id,state);
 CREATE TABLE model_selections(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs(id),revision INTEGER NOT NULL,status TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 0,body TEXT NOT NULL,UNIQUE(run_id,revision));
 CREATE UNIQUE INDEX model_selections_active ON model_selections(run_id) WHERE active=1;
-CREATE UNIQUE INDEX model_steps_active ON model_steps(run_id) WHERE state IN ('prepared','dispatched');
+CREATE UNIQUE INDEX model_steps_active ON model_steps(run_id,coalesce(node_id,'')) WHERE state IN ('prepared','dispatched');
 CREATE TABLE model_outputs(request_id TEXT PRIMARY KEY REFERENCES model_steps(id),body TEXT NOT NULL);
 CREATE TABLE tool_calls(request_id TEXT NOT NULL REFERENCES model_steps(id),call_id TEXT NOT NULL,body TEXT NOT NULL,receipt TEXT,committed INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(request_id,call_id));
 CREATE TABLE policy_checkpoints(run_id TEXT PRIMARY KEY REFERENCES runs(id),identity TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN ('decision','activation')),state_ref TEXT NOT NULL,pending_state_ref TEXT,action_ref TEXT,continuation_ref TEXT,activation_cursor INTEGER,pending INTEGER NOT NULL,wait_id TEXT,CHECK((pending=1 AND pending_state_ref IS NOT NULL) OR (pending=0 AND pending_state_ref IS NULL)),CHECK((kind='decision' AND action_ref IS NOT NULL) OR (kind='activation' AND action_ref IS NULL AND pending=0)));

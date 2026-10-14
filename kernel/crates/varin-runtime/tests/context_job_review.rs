@@ -1431,6 +1431,27 @@ impl ModelProvider for TreeProvider {
 }
 #[test]
 fn nonlinear_summary_tree_uses_explicit_original_model_steps_and_exact_final_output() {
+    struct ProgressiveTree {
+        inner: TreeProvider,
+        merged: mpsc::Sender<()>,
+        release: Mutex<mpsc::Receiver<()>>,
+    }
+    impl ModelProvider for ProgressiveTree {
+        fn serialize(&self, view: &RequestView, reuse: Option<&mut RequestCompileReuse>) -> Result<RequestBody, ExecutionError> {
+            self.inner.serialize(view, reuse)
+        }
+        fn generate(&self, request: &RequestSnapshot, cancel: &CancellationToken, emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>) -> Result<FinishReason, ModelFailure> {
+            if let RequestOrigin::Conversation { compaction: Some(node), .. } = &request.view.origin {
+                if node.node_id == "d" {
+                    self.release.lock().unwrap().recv_timeout(std::time::Duration::from_secs(10)).map_err(|_| ModelFailure {
+                        code: "branch_blocked".into(), message: "ready merge could not progress while an unrelated leaf was running".into(),
+                        retry_after_ms: None, provider_request_id: None,
+                    })?;
+                } else if node.node_id == "ab" { self.merged.send(()).unwrap(); }
+            }
+            self.inner.generate(request, cancel, emit)
+        }
+    }
     use varin_runtime::context_job::*;
     let (_fixture, mut db, _source, mut request, launch) = algorithm_fixture();
     let preview = db
@@ -1479,51 +1500,47 @@ fn nonlinear_summary_tree_uses_explicit_original_model_steps_and_exact_final_out
     let job = db.create_context_job(request, launch, json!({})).unwrap();
     let seen = Arc::new(Mutex::new(vec![]));
     let supervisor = RunSupervisor::new(db);
+    let (merged, release) = mpsc::channel();
     let start = configure_compaction_start(
         RunStart {
             context_preparation: Arc::new(NoopContextPreparation),
             binding: binding(),
             policy_state: Value::Null,
-            provider: Arc::new(TreeProvider(seen.clone())),
+            provider: Arc::new(ProgressiveTree { inner: TreeProvider(seen.clone()), merged, release: Mutex::new(release) }),
             tools: Arc::new(NoTools),
             policy: Arc::new(DefaultAgentPolicy),
             progress: ProgressSink::default(),
         },
         frozen_execution(&supervisor, &job.receipt.run_id),
     );
-    assert_eq!(
-        supervisor
-            .start(&job.receipt.run_id, start)
-            .unwrap()
-            .wait()
-            .unwrap()
-            .state,
-        RunState::Completed
-    );
+    let report = supervisor.start(&job.receipt.run_id, start).unwrap().wait().unwrap();
+    assert_eq!(report.state, RunState::Completed, "{:?}", report.failure);
     let views = seen.lock().unwrap();
     assert_eq!(views.len(), 7);
-    for (index, id) in ["a", "b", "c", "d", "ab", "cd", "root"].iter().enumerate() {
+    let mut by_node = std::collections::BTreeMap::new();
+    for view in views.iter() {
         let RequestOrigin::Conversation {
             compaction: Some(step),
             ..
-        } = &views[index].origin
+        } = &view.origin
         else {
             panic!("missing step")
         };
-        assert_eq!(step.node_id, *id);
+        assert!(by_node.insert(step.node_id.as_str(), view).is_none());
         assert_eq!(step.plan_hash, job.compaction.plan_hash);
-        let json = serde_json::to_string(&views[index].history).unwrap();
-        if index < 4 {
+        let json = serde_json::to_string(&view.history).unwrap();
+        if matches!(step.node_id.as_str(), "a" | "b" | "c" | "d") {
             assert!(
                 !json.contains("SUMMARY["),
                 "independent leaf must not accidentally fold the prior output"
             );
         }
     }
-    let ab = serde_json::to_string(&views[4].history).unwrap();
+    assert_eq!(by_node.keys().copied().collect::<Vec<_>>(), ["a", "ab", "b", "c", "cd", "d", "root"]);
+    let ab = serde_json::to_string(&by_node["ab"].history).unwrap();
     assert!(ab.contains("SUMMARY[a]") && ab.contains("SUMMARY[b]"));
     assert!(!ab.contains("SUMMARY[c]") && !ab.contains("SUMMARY[d]"));
-    let root = serde_json::to_string(&views[6].history).unwrap();
+    let root = serde_json::to_string(&by_node["root"].history).unwrap();
     assert!(root.contains("SUMMARY[ab]") && root.contains("SUMMARY[cd]"));
     let owner = supervisor.catalog();
     let mut db = owner.lock().unwrap();
@@ -1994,6 +2011,15 @@ impl Persistence for SummaryCrashBoundary {
 #[test]
 fn summary_plan_recovery_keeps_node_outputs_and_never_replays_dispatched_work() {
     use varin_runtime::context_job::*;
+    // Produce controlled prepared/dispatched/finished facts at the original Persistence seam.
+    // Reopening below exercises the production DAG scheduler over these same receipts.
+    struct RecordBoundaryPolicy;
+    impl AgentPolicy for RecordBoundaryPolicy {
+        fn identity(&self) -> PolicyIdentity { policy_identity() }
+        fn decide(&self, _: &PolicyView<'_>, _: &PolicyEvent, _: &Value, _: &CancellationToken) -> Result<PolicyDecision, ExecutionError> {
+            Ok(PolicyDecision { action: PolicyAction::RequestModel, state: Value::Null })
+        }
+    }
     for phase in ["prepared", "dispatched", "finished"] {
         let (fixture, mut db, _source, mut request, launch) = algorithm_fixture();
         let preview = db
@@ -2074,7 +2100,7 @@ fn summary_plan_recovery_keeps_node_outputs_and_never_replays_dispatched_work() 
             context_preparation: start.context_preparation.clone(),
             provider: start.provider.clone(),
             tools: start.tools.clone(),
-            policy: start.policy.clone(),
+            policy: Arc::new(RecordBoundaryPolicy),
             progress: ProgressSink::default(),
         };
         assert!(
