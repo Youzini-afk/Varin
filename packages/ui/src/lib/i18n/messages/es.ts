@@ -4,6 +4,12 @@ import { settingsDict } from './es.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  "chat.fileAttachment.actions.attachPdfs": "Adjuntar PDF",
+  "chat.fileAttachment.actions.choosePdfs": "Elegir archivos PDF",
+  "chat.fileAttachment.pdfAttachments": "Archivos PDF adjuntos",
+  "chat.fileAttachment.uploading": "Preparando archivos adjuntos…",
+  "chat.fileAttachment.unsupportedType": "Adjunta una imagen o un archivo PDF.",
+  "chat.fileAttachment.pdfNotRetained": "El PDF no se guardó. No se añadió ningún archivo adjunto.",
   "computer.feedback.title": "Acciones de escritorio del Agent",
   "computer.feedback.type": "Escribiendo",
   "computer.feedback.value": "Estableciendo valor",

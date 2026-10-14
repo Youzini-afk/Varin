@@ -1,6 +1,12 @@
 import { settingsDict } from './fr.settings';
 
 export const dict = {
+  "chat.fileAttachment.actions.attachPdfs": "Joindre des PDF",
+  "chat.fileAttachment.actions.choosePdfs": "Choisir des fichiers PDF",
+  "chat.fileAttachment.pdfAttachments": "Pièces jointes PDF",
+  "chat.fileAttachment.uploading": "Préparation des pièces jointes…",
+  "chat.fileAttachment.unsupportedType": "Joignez une image ou un fichier PDF.",
+  "chat.fileAttachment.pdfNotRetained": "Le PDF n’a pas été conservé. Aucune pièce jointe n’a été ajoutée.",
   ...settingsDict,
   "onboarding.native.chooseDescription": "Utilisez le runtime Varin local ou connectez-vous à un Host Varin distant.",
   "onboarding.native.description": "Varin inclut son runtime natif. Application Host gère les conversations et leur exécution.",

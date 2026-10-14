@@ -4,6 +4,12 @@ import { settingsDict } from './uk.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  "chat.fileAttachment.actions.attachPdfs": "Додати PDF",
+  "chat.fileAttachment.actions.choosePdfs": "Вибрати PDF для вкладення",
+  "chat.fileAttachment.pdfAttachments": "Вкладення PDF",
+  "chat.fileAttachment.uploading": "Підготовка вкладень…",
+  "chat.fileAttachment.unsupportedType": "Додайте зображення або файл PDF.",
+  "chat.fileAttachment.pdfNotRetained": "PDF не збережено. Вкладення не додано.",
   "computer.feedback.title": "Дії Agent на робочому столі",
   "computer.feedback.type": "Введення",
   "computer.feedback.value": "Задання значення",

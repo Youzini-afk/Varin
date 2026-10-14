@@ -1967,6 +1967,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }));
   const sourceDirectory = createThreadSourceDirectory({ documents: documentsAuthority, remote: managedSourceConsumers.threads });
   threads.bindSourceDirectory(sourceDirectory);
+  threads.bindMaterials(webRuntimeOwner.current.inputMaterials);
   threads.bindCompaction(contextCompaction);
   scheduledTaskService.bindSourceDirectory(sourceDirectory);
   const targetSourceQuery = createSourceQueryService({ kernel: kernelClient, documents: documentsAuthority,

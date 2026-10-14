@@ -4,6 +4,12 @@ import { settingsDict } from './zh-TW.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  "chat.fileAttachment.actions.attachPdfs": "加入 PDF",
+  "chat.fileAttachment.actions.choosePdfs": "選擇 PDF 附件",
+  "chat.fileAttachment.pdfAttachments": "PDF 附件",
+  "chat.fileAttachment.uploading": "正在準備附件…",
+  "chat.fileAttachment.unsupportedType": "請加入圖片或 PDF 檔案。",
+  "chat.fileAttachment.pdfNotRetained": "PDF 未儲存，未加入附件。",
   "computer.feedback.title": "Agent 桌面操作回饋",
   "computer.feedback.type": "正在輸入",
   "computer.feedback.value": "設定值",

@@ -3,6 +3,12 @@ import { settingsDict } from './pt-BR.settings';
 
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
+  "chat.fileAttachment.actions.attachPdfs": "Anexar PDFs",
+  "chat.fileAttachment.actions.choosePdfs": "Escolher arquivos PDF",
+  "chat.fileAttachment.pdfAttachments": "Anexos PDF",
+  "chat.fileAttachment.uploading": "Preparando anexos…",
+  "chat.fileAttachment.unsupportedType": "Anexe uma imagem ou um arquivo PDF.",
+  "chat.fileAttachment.pdfNotRetained": "O PDF não foi salvo. Nenhum anexo foi adicionado.",
   "onboarding.native.chooseDescription": "Use o runtime local do Varin ou conecte-se a um Host remoto do Varin.",
   "onboarding.native.description": "O Varin inclui seu runtime nativo. O Application Host gerencia conversas e execução.",
   "onboarding.native.checking": "Verificando o runtime nativo…",

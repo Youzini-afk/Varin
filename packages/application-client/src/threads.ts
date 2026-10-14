@@ -72,6 +72,7 @@ export interface ThreadSubmit extends ThreadIdentity {
   expectedHead: string | null;
   text: string;
   images?: ImageAttachment[];
+  materials?: ThreadMaterialAttachment[];
   model: ThreadModel;
   source?: ThreadSource;
 }
@@ -127,6 +128,7 @@ export interface ThreadChildContinuation extends ThreadIdentity {
   expectedHead: string | null;
   text: string;
   images?: ImageAttachment[];
+  materials?: ThreadMaterialAttachment[];
 }
 export interface ThreadCollaborationAPI {
   /** Explicit User input, retaining this child's exact previous execution configuration. */
@@ -262,7 +264,16 @@ export type ThreadMaterialReadRequest = Omit<DocumentReadRequest, 'path' | 'arti
 /** Original experiment artifact selected through a retained source Run; never a file-path grant. */
 export type ThreadMaterialArtifactReadRequest = Omit<DocumentReadRequest, 'path' | 'artifact' | 'snapshotId'> & { artifact: NonNullable<DocumentReadRequest['artifact']> };
 export type ThreadMaterialSourceReadRequest = Omit<DocumentReadRequest, 'artifact' | 'snapshotId' | 'path'> & { path: string };
+/** A retained PDF reference. The Host resolves provenance and authority at admission. */
+export interface ThreadMaterialAttachment { snapshotId: string }
+export interface ThreadMaterialUpload {
+  filename: string;
+  mimeType: 'application/pdf';
+  /** Original PDF bytes, encoded as canonical base64. No extracted browser text. */
+  data: string;
+}
 export interface ThreadMaterialsAPI {
+  upload(identity: ThreadIdentity, request: ThreadMaterialUpload, signal?: AbortSignal): Promise<FetchResult>;
   read(identity: ThreadIdentity, request: ThreadMaterialReadRequest, signal?: AbortSignal): Promise<FetchResult>;
   readSource(selection: import('./research.js').ThreadResearchSelection, request: ThreadMaterialSourceReadRequest, signal?: AbortSignal): Promise<FetchResult>;
   readArtifact(selection: import('./research.js').ThreadResearchSelection, request: ThreadMaterialArtifactReadRequest, signal?: AbortSignal): Promise<FetchResult>;
@@ -310,7 +321,7 @@ export interface ThreadsAPI {
   cancelContext(identity: ThreadIdentity, runId: string): Promise<RunCancellationReceipt>;
   resumeContext(identity: ThreadIdentity, runId: string): Promise<void>;
   submit(input: ThreadSubmit): Promise<InputSubmitReceipt>;
-  enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; mode: InputMode }): Promise<InputReceipt>;
+  enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; mode: InputMode }): Promise<InputReceipt>;
   editInput(inputId: string, expectedRevision: number, text: string, images?: ImageAttachment[]): Promise<QueuedInput>;
   cancelInput(inputId: string, expectedRevision: number): Promise<QueuedInput>;
   /** Read one original-holder media chunk; the expected reference is identity, never authority. */

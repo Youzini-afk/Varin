@@ -1,6 +1,8 @@
 import type { AgentSettingsSnapshot } from '@varin/application-client';
 /** Native invocation and public-reader adapters into the existing Web/material owners. */
 import { isDeepStrictEqual } from 'node:util';
+import { createHash } from 'node:crypto';
+import { parseThreadMaterials, type ThreadInputMaterials } from './thread-material-input.js';
 import type { ThreadIdentity, ThreadMaterialsAPI, ThreadMaterialArtifactReadRequest, ThreadResearchSelection } from '@varin/application-client';
 import { WEB_CAPABILITY, WEB_TOOL_DECLARATIONS } from '@varin/extension-builtins';
 import { parseVarinToolJson } from '@varin/extension-contract';
@@ -151,7 +153,46 @@ export function createWebRuntime(options: WebRuntimeOptions) {
     async ctx => domains(ctx.config),
     { fetchUrl: (url, ctx) => fetchPage({ url }, ctx.owner, ctx.config, ctx.signal) },
   );
+  const inputMaterials: ThreadInputMaterials = async (identity, references, signal) => {
+    const selected = parseThreadMaterials(references)!;
+    const owner = await scope(identity, signal);
+    const retained = [];
+    for (const selectedRef of selected) {
+      signal?.throwIfAborted();
+      // The same material ACL that document_read uses must authorize each retained source.
+      // A client-provided snapshot ID or a copied prompt never grants access.
+      const found = await options.materials.read(owner.workspaceId, selectedRef.snapshotId, owner.authority,
+        { byteRange: { offset: 0, length: 0 }, ...(signal ? { signal } : {}) });
+      if (!found || found.ref.document?.kind !== 'pdf' || !found.ref.document.source
+        || found.ref.document.source.contentType !== 'application/pdf') {
+        throw new HarnessServiceError('forbidden', 'The attached PDF is unavailable to this Thread');
+      }
+      retained.push(found.ref);
+    }
+    return retained;
+  };
   const user: ThreadMaterialsAPI = {
+    async upload(identity, request, signal = new AbortController().signal) {
+      if (!object(request) || Object.keys(request).some(key => !['filename', 'mimeType', 'data'].includes(key))
+        || typeof request.filename !== 'string' || !request.filename.trim() || /[\\/]/.test(request.filename)
+        || [...request.filename].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
+        || request.mimeType !== 'application/pdf' || typeof request.data !== 'string' || !request.data.length) {
+        throw new HarnessServiceError('invalid-params', 'Upload an original PDF with a filename, MIME type and base64 bytes');
+      }
+      const owner = await scope(identity, signal);
+      const source = Buffer.from(request.data, 'base64');
+      if (source.toString('base64') !== request.data || !source.subarray(0, 1024).includes(Buffer.from('%PDF-'))) {
+        throw new HarnessServiceError('invalid-params', 'The upload must contain original PDF bytes');
+      }
+      const runId = owner.branch.activeRunId ?? owner.branch.latestRun?.runId;
+      const launch = runId ? await options.runtime.launch(runId, signal) : null;
+      const config = capture(await options.settings(launch?.selection.source ?? null));
+      signal.throwIfAborted();
+      const sourceHash = createHash('sha256').update(source).digest('hex');
+      return options.documentReader.ingest({ source,
+        sourceUrl: `thread-upload:${encodeURIComponent(identity.threadId)}/${sourceHash}/${encodeURIComponent(request.filename)}`,
+        contentType: 'application/pdf', title: request.filename }, context(owner, config, signal), { view: 'overview' });
+    },
     async read(identity, request, signal = new AbortController().signal) {
       decode('read', request);
       if (!request.snapshotId || 'path' in request || 'artifact' in request) throw new HarnessServiceError('invalid-params', 'Select a retained Thread material snapshot');
@@ -282,5 +323,5 @@ export function createWebRuntime(options: WebRuntimeOptions) {
       },
     };
   };
-  return { user, capability, prepareConfiguration, snapshotCapability, decisionMaterials };
+  return { user, capability, prepareConfiguration, snapshotCapability, decisionMaterials, inputMaterials };
 }
