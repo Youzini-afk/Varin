@@ -233,9 +233,9 @@ fn run(
         .collect::<Vec<_>>()
         .join("\n");
     output.finish_reason = generated.as_ref().ok().cloned();
-    let memory = matches!(&snapshot.view.origin, RequestOrigin::AuxiliaryInference { purpose, .. } if purpose == "memory-organizer");
+    let complete_text = matches!(&snapshot.view.origin, RequestOrigin::AuxiliaryInference { purpose, .. } if purpose != "explore");
     let usable = matches!(generated, Ok(FinishReason::Stop | FinishReason::Length))
-        && (!memory || matches!(generated, Ok(FinishReason::Stop)))
+        && (!complete_text || matches!(generated, Ok(FinishReason::Stop)))
         && !forbidden
         && !cancel.is_cancelled()
         && !text.trim().is_empty();

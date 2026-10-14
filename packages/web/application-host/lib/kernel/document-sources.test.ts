@@ -152,3 +152,12 @@ it('transfers managed binary pages into coordinator ingestion with target proven
   expect(target.getBlob).toHaveBeenCalledTimes(3); expect(target.releaseBlob).toHaveBeenCalledOnce();
   expect(result).not.toHaveProperty('content_object'); expect(target.readBranch).not.toHaveBeenCalled();
 });
+
+it('reads a user-selected PDF through the original research source and never fabricates a tool operation', async () => {
+  const f = fixture('fixed_branch');
+  const result = await f.documents.path({ runtime: 'agent', threadId: 'thread', branchId: 'branch', sourceRunId: 'run' }, 'paper.pdf');
+  expect(result.contentType).toBe('application/pdf');
+  expect(f.frames.filter(value => value.frame.method === 'runtime.research.scopes').map(value => value.frame.params)).toEqual([{ threadId: 'thread', branchId: 'branch', sourceRunId: 'run' }]);
+  expect(f.frames.some(value => value.frame.method === 'runtime.operation.inspect')).toBe(false);
+  expect(f.frames.at(-1)!.frame.method).toBe('authority.grant.revoke');
+});

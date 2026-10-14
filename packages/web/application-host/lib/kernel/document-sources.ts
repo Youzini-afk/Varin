@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { ThreadResearchSelection } from '@varin/application-client';
 import type { DocumentReadRequest } from '@varin/protocol';
 import type { DocumentIngestInput } from '../harness/document-reading.js';
-import type { DocumentArtifactSource, DocumentMaterialSources } from '../harness/material-read-service.js';
+import type { DocumentArtifactSource, DocumentMaterialSources } from '../harness/document-material.js';
 import type { ExperimentService } from '../harness/experiments.js';
 import { HarnessServiceError } from '../harness/service-error.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
@@ -20,6 +20,7 @@ import type { ToolInvocationAuthority } from './tool-invocation.js';
 
 export interface DocumentSources {
   tool(authority: ToolInvocationAuthority): DocumentMaterialSources;
+  path(selection: ThreadResearchSelection, path: string, signal?: AbortSignal): Promise<DocumentIngestInput>;
   artifact(selection: ThreadResearchSelection, artifact: NonNullable<DocumentReadRequest['artifact']>, signal?: AbortSignal): Promise<DocumentArtifactSource>;
 }
 
@@ -91,7 +92,7 @@ export function createDocumentSources(options: {
   experiments: Pick<ExperimentService, 'readArtifact'>;
 }): DocumentSources {
   const research = createResearchAccess(options.kernel, options.runtime);
-  const readPath = async (authority: ToolInvocationAuthority, inputPath: string, signal?: AbortSignal): Promise<DocumentIngestInput> => {
+  const readPath = async (authority: Pick<ToolInvocationAuthority, 'source' | 'runId' | 'operationId'>, inputPath: string, signal?: AbortSignal): Promise<DocumentIngestInput> => {
     if (!authority.source) throw new HarnessServiceError('unavailable', 'Select a file source before reading a local document');
     const launch = await options.runtime.launch(authority.runId, signal);
     if (!launch || !isDeepStrictEqual(launch.selection.source, authority.source)) {
@@ -126,6 +127,10 @@ export function createDocumentSources(options: {
           const { scope, owner } = await research.toolScope(authority, signal);
           return options.experiments.readArtifact(researchCaller(scope, owner), artifact.attemptId, artifact.artifactId, signal);
         } };
+    },
+    async path(selection, path, signal) {
+      const scope = await research.selected(selection, signal);
+      return readPath({ runId: scope.sourceRunId, source: scope.source, operationId: `document-reader:${randomUUID()}` }, path, signal);
     },
     async artifact(selection, artifact, signal) {
       const scope = await research.selected(selection, signal);

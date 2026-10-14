@@ -27,6 +27,10 @@ use varin_runtime::{model_session, supervisor::RunSupervisor, Catalog, SubmitInp
 mod computer_commands;
 #[path = "agent_host_jobs.rs"]
 mod host_job_commands;
+#[path = "agent_knowledge_inference.rs"]
+mod knowledge_inference_commands;
+#[path = "agent_model_text.rs"]
+mod model_text_commands;
 #[path = "agent_memory_work.rs"]
 mod memory_work_commands;
 #[path = "agent_inference.rs"]
@@ -961,6 +965,7 @@ pub(crate) fn spawn(
                         if matches!(
                             method,
                             "runtime.events.read"
+                                | "runtime.thread.usage"
                                 | "runtime.operation.inspect"
                                 | "runtime.thread.operations.active"
                                 | "runtime.permission.open"
@@ -1009,7 +1014,7 @@ pub(crate) fn spawn(
                             deferred = true;
                             return Ok(Value::Null);
                         }
-                        if method.starts_with("runtime.memory_work.") || method.starts_with("runtime.inference.")
+                        if method.starts_with("runtime.knowledge_inference.") || method.starts_with("runtime.model_text.") || method.starts_with("runtime.memory_work.") || method.starts_with("runtime.inference.")
                             || method.starts_with("runtime.mcp.resource.")
                             || method.starts_with("runtime.mcp.interaction.")
                             || method.starts_with("runtime.mcp.sampling.")
@@ -1025,7 +1030,11 @@ pub(crate) fn spawn(
                             let done = finished.clone();
                             let cancelled = cancellation.clone();
                             thread::spawn(move || {
-                                let result = if method.starts_with("runtime.memory_work.") {
+                                let result = if method.starts_with("runtime.knowledge_inference.") {
+                                    knowledge_inference_commands::execute(runtime, &method, params, &cancelled)
+                                } else if method.starts_with("runtime.model_text.") {
+                                    model_text_commands::execute(runtime, &method, params, &cancelled)
+                                } else if method.starts_with("runtime.memory_work.") {
                                     memory_work_commands::execute(runtime, &method, params, &cancelled)
                                 } else if method == "runtime.inference.generate" {
                                     inference_generation_commands::generate(

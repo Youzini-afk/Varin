@@ -27,12 +27,18 @@ function fixture() {
     if ('path' in request || 'grant' in request || 'snapshotId' in request) throw Object.assign(new Error('Invalid artifact selector'), { code: 'material-request-invalid' });
     return result;
   });
+  const readSource = vi.fn<ThreadMaterialsAPI['readSource']>(async (work, request, signal) => {
+    beforeRead?.(signal); signal?.throwIfAborted();
+    if (work.threadId !== identity.threadId || work.branchId !== identity.branchId || work.sourceRunId !== selection.sourceRunId) throw Object.assign(new Error('Original source missing'), { code: 'not-found' });
+    if ('artifact' in request || 'snapshotId' in request || 'grant' in request) throw Object.assign(new Error('Invalid source selector'), { code: 'material-request-invalid' });
+    return result;
+  });
   const routes = new Map<string, RequestHandler[]>();
   const app = { post: (path: string, ...handlers: RequestHandler[]) => routes.set(path, handlers), get() {} } as unknown as Express;
   const requireAuth: RequestHandler = (request, response, next) => {
     if (request.headers.authorization !== 'fixture-session') { response.status(401).end(); return; } next();
   };
-  registerThreadRoutes(app, {} as ThreadAdapter, requireAuth, undefined, undefined, { read, readArtifact });
+  registerThreadRoutes(app, {} as ThreadAdapter, requireAuth, undefined, undefined, { read, readArtifact, readSource });
   const request = async (body: unknown, authenticated = true, onResponse?: (response: EventEmitter) => void, path = '/api/threads/materials/read') => {
     let status = 200; let output: unknown;
     const response = Object.assign(new EventEmitter(), { writableEnded: false,
@@ -53,10 +59,10 @@ function fixture() {
   };
   vi.stubGlobal('fetch', (url: string, init: RequestInit) => {
     const path = new URL(url, 'https://fixture.test').pathname;
-    expect(['/api/threads/materials/read', '/api/threads/materials/read-artifact']).toContain(path);
+    expect(['/api/threads/materials/read', '/api/threads/materials/read-artifact', '/api/threads/materials/read-source']).toContain(path);
     return request(JSON.parse(String(init.body)), true, undefined, path);
   });
-  return { api: createThreadsHttpAPI(), read, readArtifact, request, before: (hook: typeof beforeRead) => { beforeRead = hook; } };
+  return { api: createThreadsHttpAPI(), read, readArtifact, readSource, request, before: (hook: typeof beforeRead) => { beforeRead = hook; } };
 }
 afterEach(() => vi.unstubAllGlobals());
 
@@ -117,4 +123,13 @@ it('cancels only the artifact observation on close and refuses its late client r
   expect(observed?.aborted).toBe(true);
   const controller = new AbortController(); f.before(() => controller.abort());
   await expect(f.api.materials.readArtifact(selection, request, controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+});
+
+it('retains explicit source Run identity for local PDF reading across the authenticated HTTP boundary', async () => {
+  const f = fixture(), request = { path: 'papers/original.pdf', view: 'overview' as const, pages: [3] };
+  expect(await f.api.materials.readSource(selection, request)).toEqual(result);
+  expect(f.readSource).toHaveBeenCalledWith(selection, request, expect.any(AbortSignal));
+  await expect(f.api.materials.readSource({ ...selection, sourceRunId: 'foreign' }, request)).rejects.toMatchObject({ status: 404 });
+  expect((await f.request({ ...selection, request }, false, undefined, '/api/threads/materials/read-source')).status).toBe(401);
+  expect((await f.request({ ...selection, request, workspaceId: 'forged' }, true, undefined, '/api/threads/materials/read-source')).status).toBe(400);
 });

@@ -42,7 +42,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 75;
+pub(crate) const FORMAT: i64 = 76;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -1406,8 +1406,10 @@ impl Catalog {
         let tx = self.db.transaction()?;
         policy_switch::interrupt_candidates(&tx)?;
         tx.execute("UPDATE resumptions SET claimed=0 WHERE acknowledged=0", [])?;
-        let runs: Vec<Run> = read_all(&tx, "runs")?;
-        for mut run in runs {
+        let runs: Vec<Value> = read_all(&tx, "runs")?;
+        for value in runs {
+            if utility_run::recover(&tx, &value, self.epoch)? { continue; }
+            let mut run: Run = serde_json::from_value(value)?;
             if !run.state.terminal() {
                 run.epoch = self.epoch;
                 run.revision += 1;
@@ -1505,6 +1507,8 @@ impl Catalog {
             if mcp_interactions::sampling::recover(&tx, &mut op)? {
                 continue;
             }
+            if model_text::recover(&tx, &mut op, self.epoch)? { continue; }
+            if knowledge_inference::recover(&tx, &mut op, self.epoch)? { continue; }
             if memory_work::recover(&tx, &mut op, self.epoch)? { continue; }
             if inference::recover(&tx, &mut op)? {
                 continue;
@@ -1650,7 +1654,7 @@ CREATE TABLE branches(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL REFERENCES thr
 CREATE INDEX branches_thread ON branches(thread_id);
 CREATE TABLE history(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL REFERENCES threads(id),parent TEXT REFERENCES history(id),run_id TEXT NOT NULL REFERENCES runs(id) DEFERRABLE INITIALLY DEFERRED,body TEXT NOT NULL);
 CREATE INDEX history_run ON history(run_id);
-CREATE TABLE runs(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),body TEXT NOT NULL,context_checkpoint_id TEXT REFERENCES context_checkpoints(id));
+CREATE TABLE runs(id TEXT PRIMARY KEY,branch_id TEXT REFERENCES branches(id),body TEXT NOT NULL,context_checkpoint_id TEXT REFERENCES context_checkpoints(id));
 CREATE INDEX runs_branch ON runs(branch_id);
 CREATE INDEX runs_waiting ON runs(json_extract(body,'$.waiting_on')) WHERE json_extract(body,'$.state')='waiting';
 CREATE TABLE commands(id TEXT PRIMARY KEY,intent TEXT NOT NULL,receipt TEXT NOT NULL);
@@ -1730,6 +1734,8 @@ pub mod recovery;
 
 #[path = "catalog_observe.rs"]
 mod observe;
+#[path = "catalog_usage.rs"]
+pub mod usage;
 #[path = "catalog_threads.rs"]
 pub mod threads;
 
@@ -1936,3 +1942,12 @@ pub mod mcp_interactions;
 
 #[path = "catalog_inference.rs"]
 pub mod inference;
+
+#[path = "catalog_model_text.rs"]
+pub mod model_text;
+
+#[path = "catalog_utility_run.rs"]
+mod utility_run;
+#[path = "catalog_knowledge_inference.rs"]
+pub mod knowledge_inference;
+

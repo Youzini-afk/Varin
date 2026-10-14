@@ -35,6 +35,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
   return {
     materials: {
       read: (identity, request, signal) => post('materials/read', { ...identity, request }, signal),
+      readSource: (selection, request, signal) => post('materials/read-source', { ...selection, request }, signal),
       readArtifact: (selection, request, signal) => post('materials/read-artifact', { ...selection, request }, signal),
     },
     computer: {
@@ -121,6 +122,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     cancelInput: (inputId, expectedRevision) => post('input/cancel', { inputId, expectedRevision }),
     mediaRead: (input, signal) => post('media/read', input, signal),
     historyPage: (identity, cursor) => post('history/page', { ...identity, ...cursor }),
+    usage: (selected, signal) => post('usage', selected, signal),
     snapshot: selected => post('snapshot', selected), run: runId => post('run', { runId }),
     inspectTools: (identity, runId) => post('tools/inspect', { ...identity, runId }),
     inspectPolicy: (identity, runId) => post('policy/inspect', { ...identity, runId }),

@@ -261,8 +261,10 @@ export interface ThreadComputerAPI {
 export type ThreadMaterialReadRequest = Omit<DocumentReadRequest, 'path' | 'artifact' | 'snapshotId'> & { snapshotId: string };
 /** Original experiment artifact selected through a retained source Run; never a file-path grant. */
 export type ThreadMaterialArtifactReadRequest = Omit<DocumentReadRequest, 'path' | 'artifact' | 'snapshotId'> & { artifact: NonNullable<DocumentReadRequest['artifact']> };
+export type ThreadMaterialSourceReadRequest = Omit<DocumentReadRequest, 'artifact' | 'snapshotId' | 'path'> & { path: string };
 export interface ThreadMaterialsAPI {
   read(identity: ThreadIdentity, request: ThreadMaterialReadRequest, signal?: AbortSignal): Promise<FetchResult>;
+  readSource(selection: import('./research.js').ThreadResearchSelection, request: ThreadMaterialSourceReadRequest, signal?: AbortSignal): Promise<FetchResult>;
   readArtifact(selection: import('./research.js').ThreadResearchSelection, request: ThreadMaterialArtifactReadRequest, signal?: AbortSignal): Promise<FetchResult>;
 }
 export type { ThreadSummary } from '@varin/protocol';
@@ -315,6 +317,8 @@ export interface ThreadsAPI {
   mediaRead(input: ThreadIdentity & Omit<MediaReadParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<MediaReadChunk>;
   historyPage(identity: ThreadIdentity, cursor: { headId: string; beforeId: string }): Promise<ThreadHistoryPage>;
   snapshot(identity: ThreadIdentity): Promise<ThreadSnapshot>;
+  /** Original execution usage on this branch, excluding child Threads and standalone utility work. */
+  usage(identity: ThreadIdentity, signal?: AbortSignal): Promise<import('@varin/protocol').ThreadUsage>;
   inspectTools(identity: ThreadIdentity, runId: string): Promise<ThreadToolInspection>;
   inspectPolicy(identity: ThreadIdentity, runId: string): Promise<ThreadPolicyInspection>;
   /** Explicitly restart only the displayed candidate's private strategy state at a safe boundary. */

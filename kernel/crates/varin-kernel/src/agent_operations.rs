@@ -11,6 +11,12 @@ pub(super) fn execute(
         return Err(KernelError::Cancelled);
     }
     let owner = runtime.catalog();
+    if method == "runtime.thread.usage" {
+        let selection: varin_runtime::catalog::usage::ThreadUsageParams = serde_json::from_value(params)?;
+        let read = owner.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+            .capture_thread_usage(&selection).map_err(domain)?;
+        return Ok(serde_json::to_value(read.load(&|| cancelled.load(Ordering::Acquire)).map_err(domain)?)?);
+    }
     if method == "runtime.events.read" {
         let p: EventsParams = serde_json::from_value(params)?;
         let cursor = u64::try_from(p.cursor)

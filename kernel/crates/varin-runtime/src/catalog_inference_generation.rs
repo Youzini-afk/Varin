@@ -67,7 +67,7 @@ impl Catalog {
         p: &InferenceGenerateParams,
         body: InferenceBody,
     ) -> Result<InferenceStatus> {
-        if !matches!(p.purpose.as_str(), "explore" | "memory-organizer") || p.system_prompt.trim().is_empty() || p.user.trim().is_empty() {
+        if !matches!(p.purpose.as_str(), "explore" | "memory-organizer" | "git-commit" | "review" | "walkthrough" | "text") || p.system_prompt.trim().is_empty() || p.user.trim().is_empty() {
             return Err(RuntimeError::Invalid(
                 "invalid tool-free inference request".into(),
             ));
@@ -94,6 +94,10 @@ impl Catalog {
             },
             request: Value::Null,
         };
+        if matches!(p.purpose.as_str(), "git-commit" | "review" | "walkthrough" | "text") {
+            model_text::validate_generation(&self.db,p,&body.reference,self.epoch)?;
+            return self.admit_inference_for(&params,body,InferenceCaller::ModelText,true);
+        }
         if p.purpose == "memory-organizer" {
             memory_work::generation_parent(&self.db, &p.parent_operation_id, &p.caller_owner, self.epoch)?.ok_or_else(conflict)?;
             return self.admit_inference_for(&params,body,InferenceCaller::MemoryWork,true);
@@ -146,7 +150,7 @@ impl Catalog {
         let op = self.operation(id)?;
         kernel_owned(&op, self.epoch)?;
         let i = intent(&op)?;
-        if matches!(i.caller, InferenceCaller::MemoryWork) {
+        if matches!(i.caller, InferenceCaller::MemoryWork | InferenceCaller::ModelText) {
             return self.dispatch_inference_executor(&InferenceOwnerParams {operation_id:id.into(),execution_owner:i.caller_owner},true);
         }
         let InferenceCaller::Query { context } = i.caller else {

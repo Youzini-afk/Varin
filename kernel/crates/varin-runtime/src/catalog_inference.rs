@@ -151,6 +151,8 @@ pub struct InferenceSettleParams {
 enum InferenceCaller {
     Operation,
     MemoryWork,
+    ModelText,
+    Knowledge,
     Query {
         context: crate::execution::ToolExecutionContext,
     },
@@ -198,12 +200,14 @@ pub struct InferencePreparation {
 }
 pub struct InferenceBody {
     pub(super) reference: Value,
+    pub(super) input_fingerprint: Option<String>,
     _preparation: InferencePreparation,
 }
 impl InferencePreparation {
     pub fn write(self, body: &Value) -> Result<InferenceBody> {
         Ok(InferenceBody {
             reference: self.content.save(body)?,
+            input_fingerprint: knowledge_inference::input_fingerprint(body)?,
             _preparation: self,
         })
     }
@@ -240,11 +244,24 @@ fn caller_owned(op: &Operation, owner: &ExecutorOwner) -> Result<()> {
     Ok(())
 }
 fn parent_live(db: &Connection, op: &Operation, i: &Intent, epoch: u64) -> Result<()> {
+    if matches!(i.caller, InferenceCaller::Knowledge) {
+        let parent: Operation = record(db,"operations",&i.parent_operation_id)?;
+        if parent.run_id != op.run_id || i.goal.is_some() { return Err(conflict()); }
+        if op.epoch != epoch || op.cancel_requested { return Err(RuntimeError::DispatchCancelled); }
+        return knowledge_inference::parent_live(db,&parent,&i.caller_owner,epoch);
+    }
+    if matches!(i.caller, InferenceCaller::ModelText) {
+        let parent: Operation = record(db,"operations",&i.parent_operation_id)?;
+        if parent.run_id != op.run_id || i.goal.is_some() { return Err(conflict()); }
+        if op.epoch != epoch || op.cancel_requested { return Err(RuntimeError::DispatchCancelled); }
+        return model_text::parent_live(db,&parent,&i.caller_owner,epoch);
+    }
     let run: Run = record(db, "runs", &op.run_id)?;
     if op.epoch != epoch || run.cancel_requested || run.state.terminal() || op.cancel_requested || !super::bot::run_permitted(db, &run)? {
         return Err(RuntimeError::DispatchCancelled);
     }
     let context = match &i.caller {
+        InferenceCaller::ModelText | InferenceCaller::Knowledge => unreachable!("standalone caller handled above"),
         InferenceCaller::MemoryWork => {
             let parent: Operation = record(db, "operations", &i.parent_operation_id)?;
             if parent.run_id != op.run_id || i.goal.is_some() { return Err(conflict()); }
@@ -331,7 +348,7 @@ impl Catalog {
             })
         {
             { let parent=self.operation(&p.parent_operation_id)?;
-              let caller=if memory_work::is_stage(&parent) { InferenceCaller::MemoryWork } else { InferenceCaller::Operation };
+              let caller=if knowledge_inference::is_work(&parent) { InferenceCaller::Knowledge } else if memory_work::is_stage(&parent) { InferenceCaller::MemoryWork } else { InferenceCaller::Operation };
               self.admit_inference_for(p, body, caller, false) }
         } else {
             scopes.with_inference_context(&p.parent_operation_id, &p.execution_owner, |context| {
@@ -371,6 +388,17 @@ impl Catalog {
             return self.inference_status_unfenced(&id, &p.execution_owner);
         }
         let (run_id, goal) = match &caller {
+            InferenceCaller::Knowledge => {
+                let parent = self.operation(&p.parent_operation_id)?;
+                knowledge_inference::parent_live(&self.db,&parent,&p.execution_owner,self.epoch)?;
+                knowledge_inference::validate_request(&parent,p,&body,native)?;
+                (parent.run_id,None)
+            }
+            InferenceCaller::ModelText => {
+                let parent = self.operation(&p.parent_operation_id)?;
+                model_text::parent_live(&self.db,&parent,&p.execution_owner,self.epoch)?;
+                (parent.run_id,None)
+            }
             InferenceCaller::MemoryWork => {
                 let parent=self.operation(&p.parent_operation_id)?;
                 memory_work::stage_live(&self.db,&parent,&p.execution_owner,self.epoch)?;
@@ -509,7 +537,7 @@ impl Catalog {
         let caller = intent(&self.operation(&p.operation_id)?)?.caller;
         let scopes = self.nested_tools.clone();
         match caller {
-            InferenceCaller::Operation | InferenceCaller::MemoryWork => self.dispatch_inference_held(p),
+            InferenceCaller::Operation | InferenceCaller::MemoryWork | InferenceCaller::ModelText | InferenceCaller::Knowledge => self.dispatch_inference_held(p),
             InferenceCaller::Query { context } => {
                 scopes.with_inference_context(&context.operation_id, &p.execution_owner, |_| {
                     self.dispatch_inference_held(p)
@@ -539,7 +567,7 @@ impl Catalog {
         }
         let tx = self.db.transaction()?;
         parent_live(&tx, &op, &i, self.epoch)?;
-        goals::check_dispatch(&tx, &op.run_id, i.goal.as_ref())?;
+        if !matches!(i.caller, InferenceCaller::ModelText | InferenceCaller::Knowledge) { goals::check_dispatch(&tx, &op.run_id, i.goal.as_ref())?; }
         if i.binding.request_kind == InferenceRequestKind::ModelCompute {
             if let Some(goal) = &i.goal {
                 goals::dispatched(&tx, goal)?;
@@ -725,9 +753,29 @@ impl Catalog {
             Effect::Unknown
         };
         publish(&tx, &mut op, &s, "inference.settled")?;
+        model_text::settle_parent(&tx,&op)?;
         tx.commit()?;
         self.inference_status(&p.operation_id, &p.execution_owner)
     }
+}
+/// Physical native worker exit is original stop evidence even if its full receipt body
+/// could not be published. Preserve checkpoint evidence and unknown provider outcome.
+pub(super) fn kernel_executor_stopped(tx:&Transaction<'_>,operation:&Operation,epoch:u64)->Result<()> {
+    if !is_inference(operation) || operation.executor.as_deref()!=Some("inference.model.v1") || operation.phase==OperationPhase::Terminal { return Ok(()); }
+    generation::kernel_owned(operation,epoch)?;
+    let mut op=operation.clone();let i=intent(&op)?;let mut s=state(&op)?;
+    if s.dispatched && !s.accounted && i.binding.request_kind==InferenceRequestKind::ModelCompute {
+        goals::measured(tx,i.goal.as_ref(),&s.checkpoint_usage.receipt())?;s.accounted=true;
+    }
+    s.receipt_pending=true;
+    s.receipt=Some(InferenceReceipt{request_started:if s.dispatched {None}else{Some(false)},provider_completed:false,local_executor_stopped:true,
+        usage:s.checkpoint_usage.clone(),http_status:None,problem:Some(InferenceProblem::ReceiptPending)});
+    op.phase=OperationPhase::Terminal;
+    op.outcome=Some(if s.dispatched {Outcome::Indeterminate}else if op.cancel_requested{Outcome::Cancelled}else{Outcome::Failed});
+    op.effect=if s.dispatched{Effect::Unknown}else{Effect::None};
+    publish(tx,&mut op,&s,"inference.receipt_pending")?;
+    model_text::settle_parent(tx,&op)?;
+    Ok(())
 }
 pub(crate) fn recover(tx: &Transaction<'_>, op: &mut Operation) -> Result<bool> {
     if !is_inference(op) {
@@ -764,6 +812,7 @@ pub(crate) fn recover(tx: &Transaction<'_>, op: &mut Operation) -> Result<bool> 
         Effect::None
     };
     publish(tx, op, &s, "inference.recovered")?;
+    model_text::settle_parent(tx,op)?;
     Ok(true)
 }
 pub(super) fn cancel_children(

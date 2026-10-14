@@ -51,6 +51,17 @@ export interface InferenceSessionStatus {
   hasRequests: boolean;
 }
 
+export interface ThreadUsageParams {
+  threadId: string;
+  branchId: string;
+}
+
+export interface UsageTokenCount { known: string | null; missing: number; }
+
+export interface ThreadUsageRow { kind: 'conversation' | 'context' | 'planning' | 'mcp_sampling' | 'auxiliary'; providerId: string | null; providerFamily: string | null; modelId: string; measurement: 'missing' | 'estimated' | 'actual'; requests: number; pendingRequests: number; inputTokens: UsageTokenCount; outputTokens: UsageTokenCount; cachedInputTokens: UsageTokenCount; cacheWriteTokens: UsageTokenCount; reasoningTokens: UsageTokenCount; }
+
+export interface ThreadUsage { threadId: string; branchId: string; throughCursor: number; notDispatchedRequests: number; rows: ThreadUsageRow[]; }
+
 export interface InferenceGenerateParams {
   parentOperationId: string;
   callerOwner: ExecutorOwner;
@@ -1416,7 +1427,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 42; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 43; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 

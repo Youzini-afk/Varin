@@ -96,7 +96,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
             "runs",
             vec![
                 ("id", "TEXT", 0, 1),
-                ("branch_id", "TEXT", 1, 0),
+                ("branch_id", "TEXT", 0, 0),
                 ("body", "TEXT", 1, 0),
                 ("context_checkpoint_id", "TEXT", 0, 0),
             ],

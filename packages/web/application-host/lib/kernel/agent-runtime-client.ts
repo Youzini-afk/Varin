@@ -1145,6 +1145,9 @@ export class AgentRuntimeClient {
       signal,
     );
   }
+  threadUsage(threadId: string, branchId: string, signal?: AbortSignal): Promise<import('./protocol.generated.js').ThreadUsage> {
+    return this.kernel.agentRuntimeRequest('runtime.thread.usage', { threadId, branchId }, signal);
+  }
   sourceTools(mode: import('./protocol.generated.js').SourceMode, signal?: AbortSignal): Promise<string[]> {
     return this.kernel.agentRuntimeRequest('runtime.source.tools', { mode }, signal);
   }
