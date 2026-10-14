@@ -65,6 +65,8 @@ export interface HostToolLease {
 /** MCP configuration provenance is required only for MCP, never synthesized for a service. */
 export interface McpToolLease extends HostToolLease {
   readonly binding: import('./protocol.generated.js').McpBinding;
+  readonly derivations?: import('./protocol.generated.js').McpChildDerivationReceipt[];
+  releaseDerivations?(): Promise<void>;
 }
 interface Request {
   v: 1;

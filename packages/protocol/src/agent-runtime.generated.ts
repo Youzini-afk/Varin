@@ -1391,7 +1391,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 36; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 37; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -1691,6 +1691,7 @@ export interface LiveMcpBinding {
 export interface McpPrepareParams {
   runId: string;
   binding: McpBinding;
+  derivations?: McpChildDerivationReceipt[];
 }
 
 export interface ToolSelectParams {
@@ -2917,6 +2918,17 @@ export interface McpEndpoint {
   configurationVersion: string;
   credentialVersion: string;
 }
+
+export type McpChildDerivationOrigin = {kind:'dispatch';parent_source_authority:McpSourceAuthority;binding:SourceMcpChildBinding}|{kind:'continuation';previous_run_id:string};
+
+export interface McpChildDerivationProof { execution_id:string;child_run_id:string;child_thread_id:string;source_authority:McpSourceAuthority;source:LaunchSource;physical_root:LiveRoot;pin:ChildSourcePin;handoff:ChildSourceHandoff;materialization_operation_id:string;materialization_receipt_hash:string;origin:McpChildDerivationOrigin;selection:McpBinding; }
+
+export interface McpChildDerivationReceipt {
+  proof: McpChildDerivationProof;
+  provenance: McpProvenance;
+}
+
+export interface SourceMcpChildBinding { operationId:string;parentRunId:string;executionOwner:ExecutorOwner;executionEpoch:number; }
 
 export interface SourceMcpCreationError { code:string;dispatched:boolean;settlement:'unknown'|'session_expired'|'rpc_response';taskKind?:'protocol'|'transport'|'unsupported'|'owner';rpcCode?:number;protocolError?:Record<string,unknown>;interactionProblem?:string; }
 

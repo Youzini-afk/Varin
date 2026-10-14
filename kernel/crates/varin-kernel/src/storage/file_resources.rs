@@ -21,6 +21,12 @@ pub(super) struct ResolvedFileResource {
     pub(super) absolute: PathBuf,
 }
 
+/// Pure identity shared by registration and immutable Source receipt verification.
+pub(super) fn file_root_identity(workspace: &str, execution_workspace: &str, canonical: &Path) -> String {
+    let identity = format!("file-root-v2\0{workspace}\0{execution_workspace}\0{}", canonical.to_string_lossy());
+    format!("file-root-{}", hex::encode(Sha256::digest(identity.as_bytes())))
+}
+
 fn file_params_value(params_value: &Value) -> Value {
     let mut params = params_value.clone();
     if let Some(object) = params.as_object_mut() {
@@ -1197,16 +1203,7 @@ impl Storage {
                 "pendingOperations": pending_operations,
             }));
         }
-        let identity = format!(
-            "file-root-v2\0{}\0{}\0{}",
-            params.workspace_id,
-            params.execution_workspace_id,
-            canonical.to_string_lossy()
-        );
-        let root_id = format!(
-            "file-root-{}",
-            hex::encode(Sha256::digest(identity.as_bytes()))
-        );
+        let root_id = file_root_identity(&params.workspace_id, &params.execution_workspace_id, &canonical);
         let root = FileRoot {
             root_id: root_id.clone(),
             owning_workspace_id: params.workspace_id.clone(),

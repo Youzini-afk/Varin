@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 36;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 37;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -1069,6 +1069,8 @@ pub(crate) struct LaunchSelectParams {
 pub(crate) struct McpPrepareParams {
     pub(crate) run_id: String,
     pub(crate) binding: McpBinding,
+    pub(crate) derivations:
+        Option<Vec<varin_runtime::catalog::launches::McpChildDerivationReceipt>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2603,6 +2605,8 @@ pub(crate) type SourceAuthorityAddress = crate::source_resources::SourceAuthorit
 pub(crate) type SourceMcpHolderParams = crate::source_resources::SourceMcpHolderParams;
 
 pub(crate) type SourceMcpChildParams = crate::source_resources::SourceMcpChildParams;
+
+pub(crate) type SourceMcpDerivationParams = crate::source_resources::SourceMcpDerivationParams;
 
 pub(crate) type SourceMcpCreationReceiptParams =
     crate::source_resources::SourceMcpCreationReceiptParams;
@@ -4490,6 +4494,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "source.mcp.child" => serde_json::from_value::<SourceMcpChildParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "source.mcp.derivation" => {
+            serde_json::from_value::<SourceMcpDerivationParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "source.mcp.creation_receipt" => {
             serde_json::from_value::<SourceMcpCreationReceiptParams>(params.clone())
                 .map(|_| ())

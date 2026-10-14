@@ -101,21 +101,40 @@ pub(crate) struct SourceAuthorityAddress {
     pub authority_id: String,
     pub resource_epoch: String,
 }
-/// The original dispatch Operation owns this definition reference. It is not
-/// an external Task endpoint and never becomes the child's execution authority.
+pub(crate) use varin_runtime::catalog::launches::SourceMcpChildBinding;
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum SourceMcpDerivationOutcome {
+    Derived { provenance: varin_runtime::catalog::launches::McpProvenance },
+    Failed { code: String },
+}
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct SourceMcpChildBinding {
-    pub operation_id: String,
-    pub parent_run_id: String,
-    pub execution_owner: ExecutorOwner,
-    pub execution_epoch: u64,
+pub(crate) struct SourceMcpDerivationReference {
+    pub execution_id: String,
+    pub released: bool,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub request_hash: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub request_ref: Option<SourceMcpCreationReceiptBodyRef>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub outcome_ref: Option<SourceMcpCreationReceiptBodyRef>,
 }
-impl SourceMcpChildBinding {
-    pub fn validate(&self) -> bool {
-        !self.operation_id.is_empty() && !self.parent_run_id.is_empty()
-            && self.execution_owner.validate()
-    }
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SourceMcpDerivationAction { Begin, Settle, Inspect, Read, Release }
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceMcpDerivationParams {
+    pub principal_id: String,
+    pub coordinator_host_id: String,
+    pub authority_id: String,
+    pub resource_epoch: String,
+    pub execution_id: String,
+    pub action: SourceMcpDerivationAction,
+    pub origin: Option<varin_runtime::catalog::launches::McpChildDerivationOrigin>,
+    pub selection: Option<varin_runtime::catalog::launches::HostToolBinding>,
+    pub outcome: Option<SourceMcpDerivationOutcome>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -531,6 +550,8 @@ pub(crate) struct SourceAuthorityResult {
     pub mcp_holders: Vec<SourceMcpHolder>,
     pub mcp_deliveries: Vec<SourceMcpDeliveryReceipt>,
     pub mcp_children: Vec<SourceMcpChildReference>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub mcp_derivation: Option<SourceMcpDerivationReference>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -660,6 +681,8 @@ pub(crate) enum SourceDispatch {
     ReadObserve(crate::storage::source_read_receipts::ReadReceipt),
     McpCreationReceiptStage(crate::storage::source_mcp_receipts::McpReceiptPreparation),
     McpCreationReceiptObserve(crate::storage::source_mcp_receipts::McpReceiptBody),
+    McpDerivationStage(crate::storage::source_mcp_derivation::McpDerivationPreparation),
+    McpDerivationObserve(crate::storage::source_mcp_derivation::McpDerivationBody),
     McpChildSelectionStage(crate::storage::source_mcp_children::McpChildPreparation),
     McpChildSelectionObserve(crate::storage::source_mcp_children::McpChildBody),
     InteractionObserve {
@@ -696,6 +719,8 @@ impl SourceDispatch {
                 address.authority_id, request_id
             )),
             Self::ReadObserve(_) => Some(format!("source-read-observe:{}", uuid::Uuid::new_v4())),
+            Self::McpDerivationStage(_) | Self::McpDerivationObserve(_) =>
+                Some(format!("mcp-child-derivation:{}", uuid::Uuid::new_v4())),
             Self::McpChildSelectionStage(_) | Self::McpChildSelectionObserve(_) =>
                 Some(format!("mcp-child-selection:{}", uuid::Uuid::new_v4())),
             Self::McpCreationReceiptStage(_) | Self::McpCreationReceiptObserve(_) =>
@@ -724,10 +749,14 @@ impl SourceDispatch {
     ) -> Result<SourceWorkResult, KernelError> {
         if let Self::McpCreationReceiptStage(preparation) = self {
             let (value, staged) = preparation.stage()?;
-            return Ok(SourceWorkResult { value, read: None, mcp_receipt: Some(staged), mcp_child: None });
+            return Ok(SourceWorkResult { value, read: None, mcp_receipt: Some(staged), mcp_child: None, mcp_derivation: None });
         }
         if let Self::McpChildSelectionStage(preparation) = self {
-            return Ok(SourceWorkResult { value: Value::Null, read: None, mcp_receipt: None, mcp_child: Some(preparation.stage()?) });
+            return Ok(SourceWorkResult { value: Value::Null, read: None, mcp_receipt: None, mcp_child: Some(preparation.stage()?), mcp_derivation: None });
+        }
+        if let Self::McpDerivationStage(preparation) = self {
+            return Ok(SourceWorkResult { value: Value::Null, read: None, mcp_receipt: None,
+                mcp_child: None, mcp_derivation: Some(preparation.stage()?) });
         }
         let read = if let Self::Tool { read, .. } = &mut self {
             read.take()
@@ -747,6 +776,8 @@ impl SourceDispatch {
                 .ok_or_else(|| denied("Original file observation owner unavailable"))?
                 .execute_managed(address, action, &cancel),
             Self::ReadObserve(read) => read.load(),
+            Self::McpDerivationObserve(body) => body.load(),
+            Self::McpDerivationStage(_) => unreachable!("derivation staged above"),
             Self::McpChildSelectionObserve(body) => body.load(),
             Self::McpChildSelectionStage(_) => unreachable!("selection staged above"),
             Self::McpCreationReceiptObserve(receipt) => receipt.load(),
@@ -802,10 +833,10 @@ impl SourceDispatch {
                 value,
                 read: Some(staged),
                 mcp_receipt: None,
-                mcp_child: None,
+                mcp_child: None, mcp_derivation: None,
             })
         } else {
-            value.map(|value| SourceWorkResult { value, read: None, mcp_receipt: None, mcp_child: None })
+            value.map(|value| SourceWorkResult { value, read: None, mcp_receipt: None, mcp_child: None, mcp_derivation: None })
         }
     }
 }
@@ -814,6 +845,7 @@ pub(crate) struct SourceWorkResult {
     read: Option<crate::storage::source_read_receipts::StagedRead>,
     mcp_receipt: Option<crate::storage::source_mcp_receipts::StagedMcpReceipt>,
     mcp_child: Option<crate::storage::source_mcp_children::StagedMcpChild>,
+    mcp_derivation: Option<crate::storage::source_mcp_derivation::StagedMcpDerivation>,
 }
 impl SourceWorkResult {
     pub(crate) fn finish(
@@ -822,6 +854,9 @@ impl SourceWorkResult {
     ) -> Result<Value, KernelError> {
         if let Some(read) = self.read {
             storage.publish_source_read(read)?;
+        }
+        if let Some(derivation) = self.mcp_derivation {
+            return storage.publish_source_mcp_derivation(derivation);
         }
         if let Some(child) = self.mcp_child {
             return storage.publish_source_mcp_child(child);
@@ -945,6 +980,9 @@ pub(crate) fn prepare_request(
         }
         "source.mcp.holder" => {
             storage.source_mcp_holder(serde_json::from_value(params)?, epoch)?
+        }
+        "source.mcp.derivation" => {
+            return storage.source_mcp_derivation(serde_json::from_value(params)?, epoch);
         }
         "source.mcp.child" => {
             return storage.source_mcp_child(serde_json::from_value(params)?, epoch);

@@ -7,7 +7,7 @@ import { compileToolJsonSchema } from '@varin/pi-host/tool-schema';
 import type { ManagedSourceAccess } from './managed-source-consumers.js';
 import { createManagedMcpTaskLease } from './managed-mcp-task-lease.js';
 import { createManagedMcpResourceObserver, requestManagedMcpResource } from './managed-mcp-resource-observer.js';
-import type { McpBinding, McpEndpoint, SourceResourceOwner, SourceMcpChildBinding, SourceMcpChildResult } from './protocol.generated.js';
+import type { McpBinding, McpEndpoint, SourceResourceOwner, SourceMcpChildBinding, SourceMcpChildResult, McpChildDerivationOrigin, McpChildDerivationReceipt, SourceMcpDerivationResult } from './protocol.generated.js';
 import type { ManagedMcpAction, ManagedMcpSnapshot, ManagedMcpRevocations } from '../harness/managed-mcp-contract.js';
 import { isManagedMcpRevocations } from '../harness/managed-mcp-contract.js';
 import { releaseManagedChildReference } from './managed-mcp-child-retention.js';
@@ -16,6 +16,8 @@ const record = (value: unknown): value is Record<string, unknown> => !!value && 
 const fail = (code: string): never => { throw new McpAuthorityError(code); };
 export interface ManagedMcpLease extends McpAuthorityLease {
   retainChild(binding: SourceMcpChildBinding, selection: McpBinding): Promise<{ release(): Promise<void> }>;
+  /** Confirmation for candidate cleanup; releasing a proof is a separate Catalog duty. */
+  releaseAndDrain(): Promise<void>;
 }
 export async function createManagedMcpLease(input: {
   access: ManagedSourceAccess;
@@ -23,13 +25,17 @@ export async function createManagedMcpLease(input: {
   coordinatorHostId: string;
   owner: SourceResourceOwner;
   selection?: McpBinding;
+  derivation?: { executionId: string; origin: McpChildDerivationOrigin; selection?: McpBinding };
+  restoration?: { executionId: string };
   lifetime: AbortSignal;
   observeRevocations(handleId: string, receive: (facts: ManagedMcpRevocations) => void): () => void;
   signal?: AbortSignal;
-}): Promise<{ lease: ManagedMcpLease; snapshot: ManagedMcpSnapshot }> {
+}): Promise<{ lease: ManagedMcpLease; snapshot: ManagedMcpSnapshot; receipt?: McpChildDerivationReceipt }> {
   const { access } = input;
-  const handleId = `mcp-view:${randomUUID()}`;
-  const creationRequestId = `mcp-prepare:${randomUUID()}`;
+  // A retry addresses this exact child preparation, including after its reply was lost.
+  const identity = input.derivation?.executionId ?? input.restoration?.executionId;
+  const handleId = identity ? `mcp-child-view:${identity}` : `mcp-view:${randomUUID()}`;
+  const creationRequestId = identity ? `mcp-child-prepare:${identity}` : `mcp-prepare:${randomUUID()}`;
   let released = false;
   const localLifetime = new AbortController();
   const toolRevocations = new Map<string, AbortController>(), serviceRevocations = new Map<string, AbortController>();
@@ -49,15 +55,39 @@ export async function createManagedMcpLease(input: {
     }
     const reply = await access.client.service({ coordinatorHostId: input.coordinatorHostId,
       authorityId: access.binding.authorityId, resourceEpoch: access.binding.resourceEpoch,
-      requestId: action.kind === 'snapshot' ? creationRequestId : `mcp-request:${randomUUID()}`, operation: { kind: 'mcp', action } }, action.kind === 'release' ? signal : AbortSignal.any([input.lifetime, ...(signal ? [signal] : [])]));
+      requestId: action.kind === 'snapshot' || action.kind === 'derive' ? creationRequestId : `mcp-request:${randomUUID()}`, operation: { kind: 'mcp', action } }, action.kind === 'release' ? signal : AbortSignal.any([input.lifetime, ...(signal ? [signal] : [])]));
     if (!reply.ok) throw new McpAuthorityError(reply.error.code, reply.error.dispatched, reply.error.settlement,
       reply.error.protocolError, reply.error.interactionProblem);
     return reply.value as T;
   };
   let snapshot: ManagedMcpSnapshot;
+  let receipt: McpChildDerivationReceipt | undefined;
   try {
-    snapshot = await call<ManagedMcpSnapshot>({ kind: 'snapshot', handleId, creationRequestId,
-      ...(input.selection ? { selection: input.selection } : {}) }, input.signal);
+    type Prepared = { snapshot: ManagedMcpSnapshot; receipt: McpChildDerivationReceipt };
+    type Inspection = SourceMcpDerivationResult & { live: boolean; prepared?: Prepared };
+    if (input.derivation) {
+      const action = { kind: 'derive' as const, handleId, creationRequestId, ...input.derivation };
+      let prepared: Prepared;
+      try { prepared = await call(action, input.signal); }
+      catch (error) {
+        // The service request tombstone forbids replay even after a lost response.
+        // Inspect returns the same live view, not a new preparation or current snapshot.
+        const inspected = await call<Inspection>({ kind: 'derivation_inspect', executionId: input.derivation.executionId }, input.signal);
+        if (!inspected.live || !inspected.prepared || inspected.reference.released || !inspected.proof
+          || !isDeepStrictEqual(inspected.proof.origin, input.derivation.origin)) throw error;
+        prepared = inspected.prepared;
+      }
+      snapshot = prepared.snapshot; receipt = prepared.receipt;
+    } else if (input.restoration) {
+      const inspected = await call<Inspection>({ kind: 'derivation_inspect', executionId: input.restoration.executionId }, input.signal);
+      if (!inspected.live || !inspected.prepared) fail('mcp_child_original_view_unavailable');
+      // The Catalog already saved this child's binding. The proof may be released;
+      // restore only its original live view and never resubmit the old parent cut.
+      snapshot = inspected.prepared!.snapshot;
+    } else {
+      snapshot = await call<ManagedMcpSnapshot>({ kind: 'snapshot', handleId, creationRequestId,
+        ...(input.selection ? { selection: input.selection } : {}) }, input.signal);
+    }
     if (!record(snapshot) || typeof snapshot.incarnation !== 'string' || !snapshot.incarnation
       || !Number.isSafeInteger(snapshot.revision) || snapshot.revision < 0 || !record(snapshot.binding)
       || !record(snapshot.binding.provenance) || !record(snapshot.binding.provenance.servers)
@@ -76,7 +106,10 @@ export async function createManagedMcpLease(input: {
     input.signal?.throwIfAborted(); input.lifetime.throwIfAborted();
   } catch (error) {
     // A lost snapshot reply may still own a real target view. Exact release never re-prepares it.
-    void call({ kind: 'release', handleId, creationRequestId }).catch(() => undefined);
+    if (identity) {
+      try { await call({ kind: 'release', handleId, creationRequestId }); }
+      catch (cleanup) { throw new AggregateError([error, cleanup], 'Original MCP view cleanup failed'); }
+    } else void call({ kind: 'release', handleId, creationRequestId }).catch(() => undefined);
     throw error;
   }
   receiveRevocations(snapshot.revocations);
@@ -129,6 +162,16 @@ export async function createManagedMcpLease(input: {
     await input.interactions.ensure({ client: access.client, address: { coordinatorHostId: input.coordinatorHostId,
       authorityId: access.binding.authorityId, resourceEpoch: access.binding.resourceEpoch }, origin,
       server: { ...selected, server }, ...(endpoint ? { endpoint } : {}) });
+  };
+  let cleanup: Promise<void> | undefined;
+  const releaseAndDrain = (): Promise<void> => {
+    if (!released) { released = true; unobserve(); localLifetime.abort(); }
+    // An unconfirmed response does not make the cleanup complete; exact release is retryable.
+    if (!cleanup) {
+      cleanup = call<void>({ kind: 'release', handleId, creationRequestId });
+      void cleanup.catch(() => { cleanup = undefined; });
+    }
+    return cleanup;
   };
   const lease: ManagedMcpLease = {
     async retainChild(binding, selection) {
@@ -223,10 +266,8 @@ export async function createManagedMcpLease(input: {
       // its current revision after A has durably published an observation gap.
       return createManagedMcpResourceObserver({ client: access.client, address, binding, ...subscribed, revision: 0, onChange: options.onChange });
     },
-    release() {
-      if (released) return; released = true; unobserve(); localLifetime.abort();
-      void call({ kind: 'release', handleId, creationRequestId }).catch(() => undefined);
-    },
+    releaseAndDrain,
+    release() { void releaseAndDrain().catch(() => undefined); },
   };
-  return { lease, snapshot };
+  return { lease, snapshot, ...(receipt ? { receipt } : {}) };
 }

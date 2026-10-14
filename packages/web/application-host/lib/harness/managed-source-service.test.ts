@@ -36,7 +36,7 @@ function fixture() {
       const params = input as SourceAuthorityOpenParams;
       state.authority = { authorityId: 'authority', resourceEpoch: 'target-epoch', executionOwner: { kind: 'external', identity: 'source', epoch: 'target-epoch' },
         source: params.source, scope: params.scope, phase: 'preparing', purpose: params.purpose, operationId: params.operationId ?? null, grantId: params.grantId,
-        toolBinding: null, physicalRoot: null, firstPreparation: true, materializationOperationId: 'materialize', mcpHolders: [], mcpDeliveries: [], mcpChildren: [] };
+        toolBinding: null, physicalRoot: null, firstPreparation: true, materializationOperationId: 'materialize', mcpHolders: [], mcpDeliveries: [], mcpChildren: [], mcpDerivation: null };
       return state.authority;
     }
     if (method === 'source.authority.bind') {

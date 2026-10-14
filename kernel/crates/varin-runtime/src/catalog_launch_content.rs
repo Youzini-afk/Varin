@@ -4,6 +4,7 @@ use super::*;
 use crate::execution::{policy_model::PolicyModelCapability, PolicyIdentity, ToolSchema};
 use launches::{
     ExtensionToolBinding, HostToolBinding, LaunchIntent, LaunchSelection, SourceSelection,
+    McpChildDerivationOrigin, McpChildDerivationReceipt, McpSourceAuthority, SourceResourceOwner,
 };
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
@@ -272,6 +273,7 @@ pub struct LaunchChangePreparation {
     change: LaunchChange,
     epoch: u64,
     child_selection: Option<LaunchSelectionMetadata>,
+    child_mcp: Option<ChildMcpCapture>,
 }
 pub struct ChildLaunchPreparation {
     read: LaunchRead,
@@ -335,7 +337,7 @@ impl ChildLaunchPreparation {
     }
 }
 enum LaunchChange {
-    Mcp(HostToolBinding),
+    Mcp { binding: HostToolBinding, derivations: Vec<McpChildDerivationReceipt> },
     Extensions(Vec<ExtensionToolBinding>),
     Policy {
         baseline: PolicyIdentity,
@@ -350,8 +352,311 @@ pub struct PreparedLaunchChange {
     pub(super) policy_target: super::policy_switch::PolicyTargetMetadata,
     pub(super) epoch: u64,
     pub(super) kind: &'static str,
+    pub(super) child_mcp: Option<ChildMcpCapture>,
     _publication: crate::content::ContentPublication,
 }
+/// A small metadata cut captured under Catalog ownership. Immutable bodies are loaded only
+/// by LaunchChangePreparation::load; the transaction rechecks this cut before publication.
+pub(super) struct ChildMcpCapture {
+    execution: super::delegated::DelegatedExecution,
+    relation: super::delegated::ChildRelation,
+    operation: Option<Operation>,
+}
+impl ChildMcpCapture {
+    pub(super) fn recheck(&self, db: &Connection, run: &Run) -> Result<()> {
+        let execution = super::delegated::execution(db, &self.execution.execution_id)?;
+        let relation = super::delegated::relation(db, &execution.child_operation_id)?;
+        if execution != self.execution
+            || relation != self.relation
+            || execution.cancel_requested
+            || execution.report.is_some()
+            || execution.resources_released
+            || execution
+                .receipt
+                .as_ref()
+                .map(|receipt| receipt.run_id.as_str())
+                != Some(&run.id)
+            || relation.child_thread_id != run.thread_id
+            || relation.child_branch_id != run.branch_id
+            || run.cancel_requested
+            || run.state.terminal()
+        {
+            return Err(RuntimeError::Conflict(
+                "child MCP execution admission changed".into(),
+            ));
+        }
+        if let Some(expected) = &self.operation {
+            let actual: Operation = record(db, "operations", &expected.id)?;
+            if actual.id != expected.id
+                || actual.run_id != expected.run_id
+                || actual.epoch != expected.epoch
+                || actual.execution_owner != expected.execution_owner
+                || actual.cancel_requested
+            {
+                return Err(RuntimeError::Conflict(
+                    "original MCP dispatch owner changed".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// One source-owner cut, including each gateway and only that owner's direct tools/resources.
+/// Public aliases, descriptions, generation and reference remain the original frozen values.
+fn mcp_source_cut(
+    original: &HostToolBinding,
+    authority: &McpSourceAuthority,
+    owner: &SourceResourceOwner,
+) -> HostToolBinding {
+    let mut cut = original.clone();
+    cut.provenance.servers.retain(|_, server| {
+        server.owner.source_authority.as_ref() == Some(authority)
+            && &server.owner.resource_owner == owner
+    });
+    cut.resources.retain(|_, key| {
+        cut.provenance
+            .servers
+            .values()
+            .any(|s| &s.resource_key == key)
+    });
+    cut.tools.retain(|tool| {
+        !matches!(
+            original.routes.get(&tool.name),
+            Some(crate::McpRoute::Direct | crate::McpRoute::DirectTask)
+        ) || cut.resources.contains_key(&tool.name)
+    });
+    cut.routes
+        .retain(|name, _| cut.tools.iter().any(|tool| &tool.name == name));
+    cut
+}
+
+fn validate_child_mcp_derivation(
+    binding: &HostToolBinding,
+    original: &HostToolBinding,
+    derivations: &[McpChildDerivationReceipt],
+    captured: &ChildMcpCapture,
+    launch: &LaunchMetadata,
+    content: &crate::content::ContentStore,
+) -> Result<()> {
+    use super::collaboration::{ChildSource, ChildSourceRoot};
+    use super::delegated::DelegatedTrigger;
+    let changed = || {
+        RuntimeError::Conflict(
+            "child MCP execution binding differs from its exact frozen derivation".into(),
+        )
+    };
+    original.validate()?;
+    let execution = &captured.execution;
+    let relation = &captured.relation;
+    if execution.cancel_requested
+        || execution.report.is_some()
+        || execution.resources_released
+        || execution.receipt.as_ref().map(|receipt| &receipt.run_id) != Some(&launch.run_id)
+        || execution.child_operation_id != relation.operation_id
+        || binding.tools != original.tools
+        || binding.routes != original.routes
+        || binding.provenance.servers.len() != original.provenance.servers.len()
+        || binding.resources.len() != original.resources.len()
+    {
+        return Err(changed());
+    }
+    // Ordinary local derivation continues to use the original strict owner contract.
+    if original
+        .provenance
+        .servers
+        .values()
+        .all(|server| server.owner.resource_owner.is_local())
+    {
+        return if derivations.is_empty() && binding.derives_from(original) {
+            Ok(())
+        } else {
+            Err(changed())
+        };
+    }
+    let Some(ChildSource::Ready {
+        handoff,
+        pin,
+        selection: source,
+        provenance_ref,
+    }) = &execution.source
+    else {
+        return Err(changed());
+    };
+    if source.mode != crate::SourceMode::Materialized
+        || launch.selection.source.as_ref() != Some(source)
+    {
+        return Err(changed());
+    }
+    // The actual child Source has one target-owned immutable derivation outcome. Combining
+    // multiple origins for it would claim a receipt the native Source owner cannot produce.
+    if derivations.len() != 1 {
+        return Err(changed());
+    }
+    let mut covered = std::collections::BTreeSet::new();
+    for receipt in derivations {
+        let proof = &receipt.proof;
+        proof.source.validate()?;
+        proof.selection.validate()?;
+        let original_authority = proof
+            .selection
+            .provenance
+            .servers
+            .values()
+            .next()
+            .and_then(|server| server.owner.source_authority.as_ref())
+            .ok_or_else(changed)?;
+        let owner = &proof.source.resource_owner;
+        if owner.is_local()
+            || proof.selection.provenance.servers.is_empty()
+            || proof.execution_id != execution.execution_id
+            || proof.child_run_id != launch.run_id
+            || proof.child_thread_id != relation.child_thread_id
+            || &proof.source != source
+            || &proof.pin != pin
+            || proof.materialization_operation_id.trim().is_empty()
+            || !proof
+                .materialization_receipt_hash
+                .strip_prefix("sha256-")
+                .is_some_and(|hash| {
+                    hash.len() == 64
+                        && hash
+                            .bytes()
+                            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                })
+            || proof.physical_root.host_id.is_empty()
+            || proof.physical_root.root_id.is_empty()
+            || proof.physical_root.canonical_root.is_empty()
+            || owner.host_id() != Some(proof.physical_root.host_id.as_str())
+            || proof.source_authority.coordinator_host_id.is_empty()
+            || proof.source_authority.authority_id.is_empty()
+            || proof.source_authority.resource_epoch.is_empty()
+            || proof.source_authority == *original_authority
+            || proof.source_authority.coordinator_host_id != original_authority.coordinator_host_id
+            || proof.selection != mcp_source_cut(original, original_authority, owner)
+            || receipt.provenance.servers.len() != proof.selection.provenance.servers.len()
+        {
+            return Err(changed());
+        }
+        match (&execution.trigger, &proof.origin) {
+            (
+                DelegatedTrigger::Dispatch,
+                McpChildDerivationOrigin::Dispatch {
+                    parent_source_authority,
+                    binding,
+                },
+            ) => {
+                let operation = captured.operation.as_ref().ok_or_else(changed)?;
+                if execution.source_basis.is_some()
+                    || handoff.as_ref() != Some(&proof.handoff)
+                    || parent_source_authority != original_authority
+                    || !binding.validate()
+                    || binding.operation_id != relation.operation_id
+                    || binding.operation_id != operation.id
+                    || binding.parent_run_id != relation.parent_run_id
+                    || binding.parent_run_id != operation.run_id
+                    || Some(&binding.execution_owner) != operation.execution_owner.as_ref()
+                    || binding.execution_epoch != operation.epoch
+                    || operation.cancel_requested
+                {
+                    return Err(changed());
+                }
+            }
+            (
+                DelegatedTrigger::UserContinuation {
+                    previous_run_id, ..
+                }
+                | DelegatedTrigger::MessageRequest {
+                    previous_run_id, ..
+                }
+                | DelegatedTrigger::Followup {
+                    previous_run_id, ..
+                }
+                | DelegatedTrigger::Calendar {
+                    previous_run_id, ..
+                }
+                | DelegatedTrigger::ComputerEvent {
+                    previous_run_id, ..
+                },
+                McpChildDerivationOrigin::Continuation {
+                    previous_run_id: proved_previous,
+                },
+            ) => {
+                let basis = execution.source_basis.as_ref().ok_or_else(changed)?;
+                if previous_run_id != proved_previous
+                    || previous_run_id == &proof.child_run_id
+                    || handoff.is_some()
+                    || pin.root != basis.root()
+                    || proof.handoff.operation_id
+                        != format!("child-source-handoff:{}", execution.execution_id)
+                    || &proof.handoff.source != basis.source()
+                    || proof
+                        .handoff
+                        .resource_authority
+                        .as_ref()
+                        .is_none_or(|authority| {
+                            authority.authority_id != original_authority.authority_id
+                                || authority.resource_epoch != original_authority.resource_epoch
+                        })
+                    || !matches!(&proof.handoff.root, ChildSourceRoot::Fixed { pin: handoff_pin }
+                        if handoff_pin.pin_id == format!("child-pin:{}", execution.execution_id)
+                            && handoff_pin.root == basis.root() && &handoff_pin.source == basis.source())
+                    || source.resource_owner != basis.source().resource_owner
+                    || source.workspace_id != basis.source().workspace_id
+                    || source.execution_workspace_id != basis.source().execution_workspace_id
+                    || content.load(provenance_ref)? != content.load(basis.provenance_ref())?
+                {
+                    return Err(changed());
+                }
+            }
+            _ => return Err(changed()),
+        }
+        for (name, old) in &proof.selection.provenance.servers {
+            let next = receipt.provenance.servers.get(name).ok_or_else(changed)?;
+            if !covered.insert(name.clone())
+                || next.owner.source_authority.as_ref() != Some(&proof.source_authority)
+                || next.owner.resource_owner != old.owner.resource_owner
+                || next.owner.configuration != old.owner.configuration
+                || next.owner.execution_scope != old.owner.execution_scope
+                || next.definition_version != old.definition_version
+                || binding.provenance.servers.get(name) != Some(next)
+            {
+                return Err(changed());
+            }
+        }
+    }
+    for (name, old) in &original.provenance.servers {
+        let next = binding.provenance.servers.get(name).ok_or_else(changed)?;
+        if old.owner.resource_owner.is_local() {
+            if next.owner != old.owner || next.definition_version != old.definition_version {
+                return Err(changed());
+            }
+        } else if !covered.contains(name) {
+            return Err(changed());
+        }
+    }
+    // A resource alias must still select exactly its old server, even if two owners share a key.
+    for (alias, old_key) in &original.resources {
+        let next_key = binding.resources.get(alias).ok_or_else(changed)?;
+        if !original
+            .provenance
+            .servers
+            .iter()
+            .filter(|(_, server)| &server.resource_key == old_key)
+            .all(|(name, _)| {
+                binding
+                    .provenance
+                    .servers
+                    .get(name)
+                    .is_some_and(|next| &next.resource_key == next_key)
+            })
+        {
+            return Err(changed());
+        }
+    }
+    Ok(())
+}
+
 impl LaunchChangePreparation {
     pub fn load(self) -> Result<PreparedLaunchChange> {
         let LaunchRead {
@@ -363,29 +668,39 @@ impl LaunchChangePreparation {
         let mut selection = metadata.selection.clone();
         let mut policy_target = metadata.policy_target.clone();
         let kind = match self.change {
-            LaunchChange::Mcp(binding) => {
+            LaunchChange::Mcp { binding, derivations } => {
                 binding.validate()?;
                 let reference = content.save(&serde_json::to_value(&binding)?)?;
                 let delegated = if let Some(child) = &self.child_selection {
                     let original_ref = child.mcp_binding_ref.as_ref().ok_or_else(|| {
                         RuntimeError::Invalid("child has no delegated MCP capability".into())
                     })?;
-                    if selection.mcp_binding_ref.as_ref() == Some(original_ref) {
+                    let original_selection = selection.mcp_binding_ref.as_ref() == Some(original_ref);
+                    let receipt_replay = !derivations.is_empty()
+                        && selection.mcp_binding_ref.as_ref() == Some(&reference);
+                    if original_selection || receipt_replay {
                         let original: HostToolBinding =
                             serde_json::from_value(content.load(original_ref)?)?;
-                        if !binding.derives_from(&original) {
-                            return Err(RuntimeError::Conflict(
-                                "child MCP execution binding differs from its frozen delegation"
-                                    .into(),
-                            ));
-                        }
-                        true
+                        validate_child_mcp_derivation(
+                            &binding, &original, &derivations,
+                            self.child_mcp.as_ref().ok_or_else(|| RuntimeError::Conflict(
+                                "child MCP execution admission is missing".into()))?,
+                            &metadata, &content,
+                        )?;
+                        original_selection
                     } else {
                         false
                     }
                 } else {
                     false
                 };
+                if !delegated && !derivations.is_empty()
+                    && (self.child_selection.is_none() || selection.mcp_binding_ref.as_ref() != Some(&reference))
+                {
+                    return Err(RuntimeError::Conflict(
+                        "MCP derivation receipts require the original delegated selection".into(),
+                    ));
+                }
                 if selection
                     .mcp_binding_ref
                     .as_ref()
@@ -471,6 +786,7 @@ impl LaunchChangePreparation {
             policy_target,
             epoch: self.epoch,
             kind,
+            child_mcp: self.child_mcp,
             _publication,
         })
     }
@@ -529,12 +845,31 @@ impl Catalog {
         run_id: &str,
         binding: HostToolBinding,
     ) -> Result<LaunchChangePreparation> {
+        self.prepare_mcp_change_with_derivations(run_id, binding, Vec::new())
+    }
+    pub fn prepare_mcp_change_with_derivations(
+        &self,
+        run_id: &str,
+        binding: HostToolBinding,
+        derivations: Vec<McpChildDerivationReceipt>,
+    ) -> Result<LaunchChangePreparation> {
+        let child = self.require_child_launch(run_id)?;
+        let child_mcp = child.as_ref().map(|child| {
+            let execution = self.delegated_execution(&child.execution_id)?;
+            Ok::<_, RuntimeError>(ChildMcpCapture {
+                relation: super::delegated::relation(&self.db, &child.operation_id)?,
+                operation: matches!(execution.trigger, super::delegated::DelegatedTrigger::Dispatch)
+                    .then(|| self.operation(&child.operation_id)).transpose()?,
+                execution,
+            })
+        }).transpose()?;
         Ok(LaunchChangePreparation {
-            child_selection: self.require_child_launch(run_id)?.map(|child| child.launch),
+            child_selection: child.map(|child| child.launch),
+            child_mcp,
             read: self
                 .capture_launch(run_id)?
                 .ok_or_else(|| RuntimeError::NotFound(run_id.into()))?,
-            change: LaunchChange::Mcp(binding),
+            change: LaunchChange::Mcp { binding, derivations },
             epoch: self.epoch,
         })
     }
@@ -545,6 +880,7 @@ impl Catalog {
     ) -> Result<LaunchChangePreparation> {
         Ok(LaunchChangePreparation {
             child_selection: self.require_child_launch(run_id)?.map(|child| child.launch),
+            child_mcp: None,
             read: self
                 .capture_launch(run_id)?
                 .ok_or_else(|| RuntimeError::NotFound(run_id.into()))?,
@@ -562,6 +898,7 @@ impl Catalog {
     ) -> Result<LaunchChangePreparation> {
         Ok(LaunchChangePreparation {
             child_selection: self.require_child_launch(run_id)?.map(|child| child.launch),
+            child_mcp: None,
             read: self
                 .capture_launch(run_id)?
                 .ok_or_else(|| RuntimeError::NotFound(run_id.into()))?,

@@ -182,6 +182,57 @@ pub struct McpSourceAuthority {
     pub authority_id: String,
     pub resource_epoch: String,
 }
+/// Original dispatch identity. This reference retains definitions, never an execution grant.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SourceMcpChildBinding {
+    pub operation_id: String,
+    pub parent_run_id: String,
+    pub execution_owner: ExecutorOwner,
+    pub execution_epoch: u64,
+}
+impl SourceMcpChildBinding {
+    pub fn validate(&self) -> bool {
+        !self.operation_id.is_empty()
+            && !self.parent_run_id.is_empty()
+            && self.execution_owner.validate()
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum McpChildDerivationOrigin {
+    Dispatch {
+        parent_source_authority: McpSourceAuthority,
+        binding: SourceMcpChildBinding,
+    },
+    Continuation {
+        previous_run_id: String,
+    },
+}
+/// Target-owned evidence for the one-time transition from frozen definitions to a child Source.
+/// Complete bodies travel through the content lane and are checked outside the Catalog lock.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct McpChildDerivationProof {
+    pub execution_id: String,
+    pub child_run_id: String,
+    pub child_thread_id: String,
+    pub source_authority: McpSourceAuthority,
+    pub source: SourceSelection,
+    pub physical_root: LiveRoot,
+    pub pin: super::collaboration::ChildSourcePin,
+    pub handoff: super::collaboration::ChildSourceHandoff,
+    pub materialization_operation_id: String,
+    pub materialization_receipt_hash: String,
+    pub origin: McpChildDerivationOrigin,
+    pub selection: HostToolBinding,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct McpChildDerivationReceipt {
+    pub proof: McpChildDerivationProof,
+    pub provenance: McpProvenance,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct McpServerOwner {
@@ -714,6 +765,9 @@ impl Catalog {
         fence(&run, self.epoch)?;
         let mut launch: LaunchMetadata = record(&tx, "run_launches", run_id)?;
         launch.requires_rebind = launch.bound_epoch != Some(self.epoch);
+        if let Some(child) = &prepared.child_mcp {
+            child.recheck(&tx, &run)?;
+        }
         if launch.selection == prepared.selection && launch.policy_target == prepared.policy_target
         {
             drop(tx);
