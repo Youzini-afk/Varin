@@ -346,6 +346,7 @@ impl ToolExecutor for CollaborationTools {
                         &child_binding,
                         resolved.mcp_binding.as_ref(),
                         &resolved.extension_bindings,
+                        Some(&resolved.model),
                         cancel,
                     )?;
                     let launch = varin_runtime::catalog::launches::LaunchSelection {

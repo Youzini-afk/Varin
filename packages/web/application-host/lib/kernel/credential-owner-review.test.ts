@@ -1,3 +1,4 @@
+import { ToolBridge } from './tool-bridge.js';
 import { expect, it, vi } from 'vitest';
 import { createModelAuthority } from './model-authority.js';
 import { CredentialBridge, type PrivateCredentialResponse } from './credential-bridge.js';
@@ -292,4 +293,25 @@ it('finds the original separately scoped child binding through a retained parent
   bridge.close(); expect(childReleased).not.toHaveBeenCalled();
   expect((await dispatch.resolve(childScope)).headers.authorization).toBe('Bearer fake-test-key');
   dispatch.release(); expect(childReleased).toHaveBeenCalledOnce(); expect(mainReleased).toHaveBeenCalledOnce();
+});
+
+
+it('the original terminal release retires run admissions without an observer and preserves independent operations', async () => {
+  const released = vi.fn(), operationReleased = vi.fn();
+  const refresh = deferred<{ auth: { apiKey: string } }>(); const entered = deferred<void>();
+  const main = owner({ bindingIdentity: 'main', release: released, runtime: { getAuth: async () => { entered.resolve(); return refresh.promise; } } });
+  const operation = owner({ bindingIdentity: 'operation', release: operationReleased });
+  const credentials = new CredentialBridge(() => 'epoch', async () => {}, () => {});
+  await credentials.register('run', main); await credentials.retainQueuedModel('run', main); main.release();
+  await credentials.register('run', operation, undefined, 'operation-binding', { kind: 'operation', operationId: 'operation' }); operation.release();
+  const tools = new ToolBridge(() => 'epoch', async () => {}, () => {}, (runId, terminal) => { if (terminal) credentials.unregister(runId); });
+  tools.unregister('run'); // Failed preparation can retry from its original admission.
+  const retry = credentials.findOwner('main', scope)!; expect(retry).toBeInstanceOf(ExistingHostCredentialOwner); retry.release();
+  const resolution = main.resolve(scope); await entered.promise;
+  tools.consume({ v: 1, kind: 'host-tool-owner-release', kernelEpoch: 'epoch', runId: 'run' });
+  expect(credentials.findOwner('main', scope)).toBeUndefined(); expect(released).not.toHaveBeenCalled();
+  refresh.resolve({ auth: { apiKey: 'original-key' } }); await resolution; expect(released).toHaveBeenCalledOnce();
+  const surviving = credentials.findOwner('operation', scope)!; expect(surviving).toBeInstanceOf(ExistingHostCredentialOwner); surviving.release();
+  expect(operationReleased).not.toHaveBeenCalled(); credentials.unregister('run', 'operation-binding'); expect(operationReleased).toHaveBeenCalledOnce();
+  credentials.close();
 });

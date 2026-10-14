@@ -211,15 +211,23 @@ impl ToolBridge {
         }
         result
     }
+    pub(crate) fn release_owner(&self, run_id: &str) {
+        let epoch = self.state.lock().ok().and_then(|state| state.epoch.clone());
+        if let Some(epoch) = epoch {
+            let _ = self.send(json!({"v":1,"kind":"host-tool-owner-release","kernelEpoch":epoch,"runId":run_id}));
+        }
+    }
     /// Transfer only live retention from this request's original owners. No service is prepared here.
     pub(crate) fn retain_child(
         &self,
         binding: &crate::source_resources::SourceMcpChildBinding,
         mcp: Option<&McpBinding>,
         extensions: &[varin_runtime::catalog::launches::ExtensionToolBinding],
+        model: Option<&varin_runtime::catalog::dispatch::ChildModelBinding>,
         cancel: &CancellationToken,
     ) -> Result<Option<ChildHostRetention>, ExecutionError> {
-        if mcp.is_none() && extensions.is_empty() {
+        if mcp.is_none() && extensions.is_empty()
+            && model.is_none_or(|model| model.credential_scope.is_none()) {
             return Ok(None);
         }
         if !binding.validate() {
@@ -258,7 +266,7 @@ impl ToolBridge {
                 json!({"v":1,"kind":"host-tool-child-retain","id":id,"kernelEpoch":epoch,
                 "parentRunId":binding.parent_run_id,"childOperationId":binding.operation_id,
                 "executionOwner":binding.execution_owner,"executionEpoch":binding.execution_epoch,
-                "mcpBinding":mcp,"extensionBindings":extensions}),
+                "mcpBinding":mcp,"extensionBindings":extensions,"modelBinding":model}),
             )?;
             loop {
                 // This local owner acknowledgement must precede rollback: independent content
@@ -1053,6 +1061,43 @@ mod tests {
         }
     }
     #[test]
+    fn model_only_child_retention_requires_ack_and_releases_original_rollback_once() {
+        for accept in [false, true] {
+            let (bridge, frames) = fixture();
+            let model: varin_runtime::catalog::dispatch::ChildModelBinding = serde_json::from_value(json!({
+                "configuration":{"providerId":"original","providerFamily":"openai-completions","model":"child",
+                    "endpoint":"https://model.invalid/chat/completions","allowAnonymous":false,"configurationGeneration":1,
+                    "adapterBindingId":"original-instance"},
+                "credential_scope":{"reference":"original","authority":"extension","account":"account","generation":1}
+            })).unwrap();
+            let original_model = serde_json::to_value(&model).unwrap();
+            let worker = bridge.clone();
+            let (done, result) = mpsc::channel();
+            std::thread::spawn(move || {
+                let retained = worker.retain_child(&crate::source_resources::SourceMcpChildBinding {
+                    operation_id: "child-operation".into(), parent_run_id: "parent".into(),
+                    execution_owner: ExecutorOwner::Kernel, execution_epoch: 7,
+                }, None, &[], Some(&model), &CancellationToken::default()).unwrap().unwrap();
+                if accept { retained.handoff(); } else { drop(retained); }
+                done.send(()).unwrap();
+            });
+            let request = frames.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+            assert_eq!(request["kind"], "host-tool-child-retain");
+            assert_eq!(request["modelBinding"], original_model);
+            assert!(request["mcpBinding"].is_null());
+            assert_eq!(request["extensionBindings"], json!([]));
+            assert!(matches!(result.try_recv(), Err(mpsc::TryRecvError::Empty)));
+            bridge.receive(json!({"v":1,"kind":"host-tool-response","id":request["id"],"kernelEpoch":"epoch","ok":true}));
+            result.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+            if !accept {
+                assert_eq!(frames.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),
+                    json!({"v":1,"kind":"host-tool-child-release","kernelEpoch":"epoch","parentRunId":"parent","childOperationId":"child-operation"}));
+            }
+            assert!(matches!(frames.try_recv(), Err(mpsc::TryRecvError::Empty)));
+            bridge.close();
+        }
+    }
+    #[test]
     fn child_retention_requires_ack_and_rolls_back_failure_or_cancel_without_tool_execution() {
         for outcome in [
             "accepted",
@@ -1114,7 +1159,7 @@ mod tests {
                     execution_epoch: 37,
                 };
                 let retained =
-                    worker_bridge.retain_child(&binding, None, &[original], &worker_cancel);
+                    worker_bridge.retain_child(&binding, None, &[original], None, &worker_cancel);
                 let ok = retained.is_ok();
                 if outcome == "accepted" {
                     retained.unwrap().unwrap().handoff();
@@ -1185,6 +1230,7 @@ mod tests {
                     },
                     None,
                     &[],
+                    None,
                     &CancellationToken::default(),
                 )
                 .unwrap()

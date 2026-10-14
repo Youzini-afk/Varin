@@ -88,6 +88,14 @@ embedding, rerank, decisions, memory and retrieval retain their own stage/reques
 leaving releases its observation; the owner retains active resolution and callbacks until they really
 settle. Failed, replaced and late preparations release their exact captures.
 
+Before Catalog accepts a delegated child, the existing private child handoff acknowledges its exact
+model retention and the original dispatch catalog dependency graph, including model-only children.
+Nested children can still select another captured preset after their ancestor terminates. This
+child-operation hold survives parent completion
+and cold source/context preparation until the child adopts its own registration, or the original
+rollback/report releases it. Terminal Run notifications retire Run admissions without requiring a UI
+inspection; independent operation/child duties and real authentication drain remain owned.
+
 Dispatch rechecks the original scope and target before returning transient headers. Missing or
 failed selected credentials never fall through to another account. Secrets stay out of public DTOs,
 configuration identities, prompt snapshots, history and logs. The private wire and signing contract

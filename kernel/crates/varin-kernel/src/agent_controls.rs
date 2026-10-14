@@ -338,3 +338,47 @@ impl ControlCommands {
         }
     }
 }
+
+
+#[cfg(test)]
+mod terminal_retention_tests {
+    use super::*;
+    #[test]
+    fn tree_cancel_releases_unstarted_run_and_queued_successor_without_inspection() {
+        let root = std::env::temp_dir().join(format!("varin-tree-model-release-{}", uuid::Uuid::new_v4()));
+        {
+            let mut catalog = Catalog::open(&root).unwrap();
+            catalog.create_thread("thread", "main").unwrap();
+            let prepared = catalog.prepare_submission(varin_runtime::SubmitInput {
+                key: "original".into(), thread_id: "thread".into(), branch_id: "main".into(),
+                expected_head: None, input: json!("original"), configuration: json!({}),
+            }, None, None).unwrap().load(None, false).unwrap();
+            let first = catalog.admit_submission(prepared).unwrap();
+            let queued = catalog.prepare_enqueue(varin_runtime::catalog::inputs::EnqueueInput {
+                key: "queued".into(), thread_id: "thread".into(), branch_id: "main".into(),
+                mode: varin_runtime::InputMode::NextRun, input: json!("next"), configuration: None,
+            }).unwrap().load().unwrap();
+            let next = catalog.admit_queued_input(queued).unwrap().receipt;
+            assert_ne!(first.run_id, next.run_id);
+            let runtime = Arc::new(RunSupervisor::new(catalog));
+            let (output, frames) = mpsc::sync_channel(16);
+            let bridge = crate::host_tools::ToolBridge::new(output.clone().into()); bridge.initialize("original-epoch");
+            let controls = ControlCommands {
+                runtime: runtime.clone(),
+                resources: crate::tools::KernelResourceClient::new(|_| Err(KernelError::Operation("unexpected resource request".into())), |_| Ok(()), Default::default()),
+                models: crate::run_models::RunModels::new(runtime.catalog(), crate::credential_bridge::CredentialBridge::new(output)),
+                tools: crate::run_tools::RunTools::new(runtime.catalog(), bridge),
+            };
+            controls.admit_control("runtime.tree.cancel", &json!({"target":{"kind":"thread","thread_id":"thread"}})).unwrap();
+            let mut released = std::collections::BTreeSet::new();
+            for _ in 0..2 {
+                let frame = frames.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+                assert_eq!(frame["kind"], "host-tool-owner-release"); assert_eq!(frame["kernelEpoch"], "original-epoch");
+                released.insert(frame["runId"].as_str().unwrap().to_owned());
+            }
+            assert_eq!(released, std::collections::BTreeSet::from([first.run_id, next.run_id]));
+            for id in released { assert!(runtime.catalog().lock().unwrap().run(&id).unwrap().state.terminal()); }
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}

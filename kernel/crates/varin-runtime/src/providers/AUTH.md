@@ -39,6 +39,14 @@ than resolving today's adapter catalog. The private registration fixes kernel ep
 binding/Operation identity. Exact queued-model registrations are idempotent; another scope cannot
 replace them merely by reusing a display name.
 
+Child dispatch transfers the exact model through the existing ACK-before-Catalog-accept handoff.
+The Host searches only the original parent registration/dependency graph and records a child-operation
+hold, even when the child has no MCP or extension tools. It also retains the original dispatch catalog
+dependency graph for later nested selections. Parent termination cannot release that hold.
+Actual child adoption, original rollback or report retires it through the same handoff owner.
+Terminal Run release also covers unstarted queued Runs cancelled as a tree; it does not depend on
+a later inspector and does not retire independent operation/child registrations.
+
 Each registration retains its owner independently of the preparing caller. Failed preparation,
 replacement and unregister release their own holds. Active scope/auth resolution retains the actual
 owner until it settles. Cancelling a waiter or unregistering a Run closes that observation and

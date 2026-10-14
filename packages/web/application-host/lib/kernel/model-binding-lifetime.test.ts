@@ -151,3 +151,77 @@ it('an admitted parent selection retains the child implementation after metadata
   bridge.unregister('run:parent');
   expect(main.released).toHaveBeenCalledOnce(); expect(child.released).toHaveBeenCalledOnce();
 });
+
+it('model-only child handoff survives parent terminal until late child registration, with exact rollback and authority', async () => {
+  const { ToolBridge } = await import('./tool-bridge.js');
+  const frames: import('./tool-bridge.js').PrivateToolFrame[] = [];
+  const credentials = new CredentialBridge(() => 'epoch', async () => {}, () => {});
+  const bridge = new ToolBridge(() => 'epoch', async frame => { frames.push(frame); }, () => {},
+    (runId, terminal) => { if (terminal) credentials.unregister(runId); }, undefined,
+    { retain: (binding, model, selection) => credentials.retainChildModel(binding, model, selection),
+      release: (runId, operation) => credentials.releaseChildModel(runId, operation),
+      reconcile: children => credentials.reconcileChildModels(children) });
+  const parent = captured(), childReleased = vi.fn(), siblingReleased = vi.fn();
+  const childConfiguration = { ...configuration, model: 'frozen-child', adapterBindingId: 'original-child-instance' };
+  const childIdentity = modelCredentialBindingIdentity(childConfiguration);
+  const child = new ExistingHostCredentialOwner({ providerId: selection.providerId, providerFamily: configuration.providerFamily,
+    endpoint: configuration.endpoint, bindingIdentity: childIdentity, currentScope: async () => scope,
+    runtime: { getAuth: async () => ({ auth: { apiKey: 'fixture-only' } }) }, release: childReleased });
+  const siblingConfiguration = { ...childConfiguration, model: 'sibling-preset' };
+  const siblingIdentity = modelCredentialBindingIdentity(siblingConfiguration);
+  const sibling = new ExistingHostCredentialOwner({ providerId: selection.providerId, providerFamily: configuration.providerFamily,
+    endpoint: configuration.endpoint, bindingIdentity: siblingIdentity, currentScope: async () => scope,
+    runtime: { getAuth: async () => undefined }, release: siblingReleased });
+  await sibling.scope(); parent.owner.retainDependency(sibling); sibling.release();
+  await child.scope(); parent.owner.retainDependency(child); child.release();
+  await credentials.register('parent', parent.owner); parent.owner.release();
+  const model = { configuration: childConfiguration, credential_scope: scope };
+  const frame = (id: string, operation = 'child-operation', parentRunId = 'parent') => ({
+    v: 1, kind: 'host-tool-child-retain', kernelEpoch: 'epoch', id, parentRunId, childOperationId: operation,
+    executionOwner: { kind: 'kernel' }, executionEpoch: 7, mcpBinding: null, extensionBindings: [], modelBinding: model,
+  });
+  const response = async (id: string, ok: boolean) => {
+    await vi.waitFor(() => expect(frames.find(value => value.kind === 'host-tool-response' && value.id === id)).toMatchObject({ kind: 'host-tool-response', ok }));
+  };
+  try {
+    // Another Run with the same configuration cannot borrow this parent's credential graph.
+    bridge.consume(frame('unrelated', 'other-operation', 'unrelated-parent')); await response('unrelated', false);
+    bridge.consume({ ...frame('wrong-account'), modelBinding: { ...model, credential_scope: { ...scope, account: 'different' } } });
+    await response('wrong-account', false);
+    bridge.consume(frame('accepted')); await response('accepted', true);
+    bridge.consume(frame('duplicate')); await response('duplicate', true);
+    bridge.consume({ ...frame('changed-owner'), executionEpoch: 8 }); await response('changed-owner', false);
+    bridge.consume(frame('rollback-ack', 'rollback')); await response('rollback-ack', true);
+    bridge.consume(frame('report-ack', 'reported')); await response('report-ack', true);
+    bridge.consume({ v: 1, kind: 'host-tool-owner-release', kernelEpoch: 'epoch', runId: 'parent' });
+    expect(parent.released).not.toHaveBeenCalled(); expect(childReleased).not.toHaveBeenCalled();
+    expect(siblingReleased).not.toHaveBeenCalled();
+    const original = credentials.findOwner(childIdentity, scope)!;
+    expect(original).toBeDefined();
+    // Cold source/context preparation finishes only after the parent's terminal frame.
+    await credentials.register('child-run', original); original.release();
+    const inheritedSibling = credentials.findOwner(siblingIdentity, scope, 'child-run');
+    expect(inheritedSibling).toBeDefined(); inheritedSibling!.release();
+    bridge.consume({ ...frame('grandchild-accepted', 'grandchild-operation', 'child-run'),
+      modelBinding: { configuration: siblingConfiguration, credential_scope: scope } });
+    await response('grandchild-accepted', true);
+    await bridge.releaseChild('parent', 'child-operation');
+    await bridge.releaseChild('parent', 'child-operation');
+    bridge.reconcileChildren([{ operation_id: 'reported', report: { state: 'done' } }, { operation_id: 'rollback', report: null }]);
+    bridge.consume({ v: 1, kind: 'host-tool-child-release', kernelEpoch: 'epoch', parentRunId: 'parent', childOperationId: 'rollback' });
+    bridge.consume({ v: 1, kind: 'host-tool-child-release', kernelEpoch: 'epoch', parentRunId: 'parent', childOperationId: 'rollback' });
+    expect(childReleased).not.toHaveBeenCalled();
+    credentials.unregister('child-run');
+    expect(childReleased).not.toHaveBeenCalled(); expect(siblingReleased).not.toHaveBeenCalled();
+    const grandchild = credentials.findOwner(siblingIdentity, scope)!;
+    expect(grandchild).toBeDefined();
+    await credentials.register('grandchild-run', grandchild); grandchild.release();
+    await bridge.releaseChild('child-run', 'grandchild-operation');
+    expect(siblingReleased).not.toHaveBeenCalled();
+    credentials.unregister('grandchild-run');
+    expect(childReleased).toHaveBeenCalledOnce();
+    expect(parent.released).toHaveBeenCalledOnce(); expect(siblingReleased).toHaveBeenCalledOnce();
+    expect(credentials.findOwner(childIdentity, scope)).toBeUndefined();
+  } finally { bridge.close(); credentials.close(); }
+  expect(childReleased).toHaveBeenCalledOnce();
+});
